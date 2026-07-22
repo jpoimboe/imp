@@ -680,6 +680,7 @@ async def test_progress_goto_resets_counter_and_never_trips(tmp_path: Path) -> N
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> None:
     """`a` gotos forward over `b` to `c`; `b`'s counter (left at 1 by a prior
     backward goto) must be popped by the leap. Without the fix it stays 1."""
@@ -1893,6 +1894,7 @@ async def test_script_pause_emits_script_blocked_event(
 
 @pytest.mark.anyio
 @pytest.mark.timeout(300)
+@pytest.mark.bare_sandbox
 async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
     tmp_path: Path,
 ) -> None:
@@ -1971,6 +1973,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
 
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     tmp_path: Path, _bare_sandbox: None,
 ) -> None:
@@ -2062,6 +2065,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
 
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     tmp_path: Path, _bare_sandbox: None,
 ) -> None:
@@ -2134,6 +2138,7 @@ def test_quest_context_defaults_empty_facts() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_tolerated_forward_advance_resets_gate_loop_counter(
     tmp_path: Path,
 ) -> None:
@@ -2753,6 +2758,7 @@ async def test_sandbox_policy_rebuilt_after_project_root_flip(
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_continue_writes_target_step_label(tmp_path: Path) -> None:
     """A forward Continue persists the NEXT step's label-or-name into
     state.step_label, derived from the labeled step the cursor lands on."""
@@ -3011,6 +3017,7 @@ async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
     from imp.cli.quest_row import _status_segment
 
@@ -3395,6 +3402,7 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> None:
     """A gate whose `else` resumes an earlier step emits exactly one
     `step_transition` event naming source, target, the backward flag, and a
@@ -3536,6 +3544,7 @@ async def test_forward_only_run_emits_no_step_transition(
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
     """A gate that resumes itself (self-goto, target_idx == idx) emits no step_transition."""
     import subprocess
@@ -3588,6 +3597,7 @@ async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_continue_writes_target_phase_label(tmp_path: Path) -> None:
     """A forward Continue persists the NEXT step's phase label into
     state.phase_label."""
@@ -3992,6 +4002,7 @@ def test_warn_if_no_overlay_skips_probe_when_home_absent(monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.bare_sandbox
 async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
     """Each plan bounces verify once then leaps it via task-lead's forward goto.
     With the leap-over reset, verify's counter resets per plan and 12 plans

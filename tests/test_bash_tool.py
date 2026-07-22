@@ -54,16 +54,31 @@ class _RecLog:
         return [p for t, p in self.events if t == "runner_warning"]
 
 
-def test_bash_reports_overlay_setup_failure_distinctly(tmp_path: Path) -> None:
-    from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_CODE,
-        OVERLAY_SETUP_FAILED_MARKER,
-    )
-    cmd = f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; exit {OVERLAY_SETUP_FAILED_CODE}"
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": cmd}))
-    # A distinct sandbox-setup failure — NOT a plain command result with rc 122.
+def _active_policy(tmp_path: Path):
+    from imp.engine.sandbox import SandboxPolicy
+    return SandboxPolicy(
+        active=True, worktree=str(tmp_path),
+        git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
+        writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="")
+
+
+def test_bash_reports_sandbox_spawn_failure_distinctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.bash as bashmod
+    # Simulate a sandboxed spawn that failed to ENTER: an argv that exits nonzero
+    # and never emits the entry sentinel (no real bwrap). Every attempt fails, so
+    # the tool retries to exhaustion and returns the setup-failure result.
+    monkeypatch.setattr(bashmod, "build_sandbox_argv",
+                        lambda command, **kw: ["sh", "-c", "exit 3"])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
     assert out["status"] == "sandbox_setup_failed"
     assert "did NOT run" in out["error"]
+    assert out["returncode"] == 3
 
 
 def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
@@ -74,18 +89,97 @@ def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
     assert out["returncode"] == 122
 
 
-def test_bash_overlay_setup_failure_emits_event(tmp_path: Path) -> None:
-    from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_CODE,
-        OVERLAY_SETUP_FAILED_MARKER,
-    )
+def test_bash_sandbox_spawn_failure_emits_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.bash as bashmod
+    monkeypatch.setattr(bashmod, "build_sandbox_argv",
+                        lambda command, **kw: ["sh", "-c", "exit 3"])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
-    log = _RecLog()
-    ctx.event_log = log
-    cmd = f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; exit {OVERLAY_SETUP_FAILED_CODE}"
-    json.loads(_run_bash(ctx, {"command": cmd}))
-    [w] = log.warnings()
-    assert w["reason"] == "overlay-setup-failed"
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    ctx.event_log = _RecLog()
+    json.loads(_run_bash(ctx, {"command": "x"}))
+    warns = ctx.event_log.warnings()
+    # 4 retry breadcrumbs (attempts 2..5) then the terminal setup-failure warning.
+    assert [w["reason"] for w in warns] == ["sandbox-spawn-failed"] * 5
+    assert "retrying (2/5)" in warns[0]["message"]
+    assert "retrying (5/5)" in warns[3]["message"]
+
+
+def test_bash_retries_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `bash()` builds `argv` ONCE (above the retry region) and the
+    # loop re-spawns that same argv on each attempt — exactly as production absorbs
+    # a transient bwrap userns failure. So the retry variation must be driven
+    # through the seam the loop re-invokes (the spawn itself), NOT build_sandbox_argv
+    # (off the retry path — called once). A stateful counter-file argv makes the
+    # fixed command fail (no marker, exit 3) on the first two spawns and enter the
+    # sandbox (emit the marker) on the 3rd.
+    import shlex
+
+    import imp.agents.tools.bash as bashmod
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    counter = tmp_path / "spawn-count"
+    q = shlex.quote(str(counter))
+    script = (
+        f"n=$(cat {q} 2>/dev/null || echo 0); n=$((n+1)); "
+        f'echo "$n" > {q}; '
+        f'if [ "$n" -ge 3 ]; then '
+        f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo done; "
+        f"else exit 3; fi")
+    monkeypatch.setattr(bashmod, "build_sandbox_argv",
+                        lambda command, **kw: ["sh", "-c", script])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    ctx.event_log = _RecLog()
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
+    assert "status" not in out                           # healthy on the 3rd attempt
+    assert out["returncode"] == 0
+    assert "done" in out["stdout"]
+    assert counter.read_text().strip() == "3"            # 2 failed spawns + 1 success
+    warns = ctx.event_log.warnings()
+    assert [w["reason"] for w in warns] == ["sandbox-spawn-failed"] * 2
+    assert "retrying (2/5)" in warns[0]["message"]
+    assert "retrying (3/5)" in warns[1]["message"]
+
+
+def test_bash_healthy_sandboxed_command_strips_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.bash as bashmod
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_argv",
+        lambda command, **kw: ["sh", "-c",
+            f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo real >&2; echo out"])
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
+    assert "status" not in out                          # healthy result
+    assert SANDBOX_ENTERED_MARKER not in out["stderr"]  # marker stripped
+    assert "real" in out["stderr"]
+    assert out["returncode"] == 0
+
+
+def test_bash_bare_command_never_flagged_spawn_failure(tmp_path: Path) -> None:
+    # No policy -> bare -> sandbox_active False -> a nonzero exit is a plain result.
+    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "exit 3"}))
+    assert "status" not in out
+    assert out["returncode"] == 3
+
+
+def test_bash_inactive_policy_never_flagged_spawn_failure(tmp_path: Path) -> None:
+    # policy present but active=False -> guard is False -> nonzero exit is a plain result.
+    import dataclasses
+    pol = dataclasses.replace(_active_policy(tmp_path), active=False)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = pol
+    out = json.loads(_run_bash(ctx, {"command": "exit 3"}))
+    assert "status" not in out
+    assert out["returncode"] == 3
 
 
 def test_bash_default_cwd_is_project_root(tmp_path: Path) -> None:
@@ -337,7 +431,8 @@ def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.Monke
     with pytest.raises(RuntimeError):
         _run_bash(ctx, {"command": "echo hi"})
     assert captured["argv"][0] == "bwrap"
-    assert captured["argv"][-3:] == ["sh", "-c", "echo hi"]
+    assert captured["argv"][-3:-1] == ["sh", "-c"]
+    assert captured["argv"][-1].endswith("; echo hi")
 
 
 def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

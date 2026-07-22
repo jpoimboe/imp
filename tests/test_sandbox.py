@@ -44,17 +44,32 @@ def _policy(**over) -> SandboxPolicy:
 
 
 def test_inactive_policy_returns_bare_argv():
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
                               policy=_policy(active=False), engine_env={})
     assert argv == ["sh", "-c", "echo hi"]
+    assert SANDBOX_ENTERED_MARKER not in argv[-1]
 
 
 def test_active_policy_wraps_with_bwrap():
     argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[0] == "bwrap"
-    assert argv[-3:] == ["sh", "-c", "echo hi"]
+    assert argv[-3:-1] == ["sh", "-c"]
+    assert argv[-1].endswith("; echo hi")          # sentinel-prefixed inner command
     assert argv[1:4] == ["--ro-bind", "/", "/"]   # ro-floor first
+
+
+def test_active_policy_emits_entry_sentinel_in_tail():
+    import shlex
+
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
+                              policy=_policy(), engine_env={})
+    assert argv[-3:-1] == ["sh", "-c"]
+    expected_tail = (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; echo hi")
+    assert argv[-1] == expected_tail
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
@@ -947,11 +962,11 @@ def test_overlay_home_wraps_bwrap_with_unshare_mount():
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
             "/up/merged") in script
-    # Fail-loud: on mount failure the wrapper prints the sentinel + exits the
-    # reserved code WITHOUT running the command; on success it execs bwrap
-    # (exec, not a child bwrap, keeps pgid == pid so signals reach the tree).
+    # Fail-loud: on mount failure the wrapper exits nonzero BEFORE the exec,
+    # WITHOUT running the command (sentinel absence is the signal); on success it
+    # execs bwrap (exec, not a child bwrap, keeps pgid == pid so signals reach the tree).
     assert " && exec" not in script
-    assert "|| {" in script
+    assert "|| exit" in script
     assert "exec bwrap" in script
     # merged view bound onto the real home: source == merged, dest == home.
     assert "--bind /up/merged /home/u" in script
@@ -986,39 +1001,65 @@ def test_rw_fallback_home_layer_is_not_wrapped():
     assert argv[0] == "bwrap"
 
 
-def test_overlay_setup_failed_keys_on_marker():
+def test_sandbox_spawn_failed_marker_absence_guarded():
     from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_MARKER,
-        overlay_setup_failed,
+        SANDBOX_ENTERED_MARKER,
+        sandbox_spawn_failed,
     )
-    # True only when the controlled sentinel is present — NOT on the kernel's
-    # own mount-error text (which the wrapper also lets through to stderr).
-    assert overlay_setup_failed(f"noise\n{OVERLAY_SETUP_FAILED_MARKER}\nmore") is True
-    assert overlay_setup_failed(
-        "mount: wrong fs type, bad option, bad superblock on overlay") is False
-    assert overlay_setup_failed("") is False
+    present = f"noise\n{SANDBOX_ENTERED_MARKER}\nmore"
+    # marker present -> the inner command ran -> not a failure
+    assert sandbox_spawn_failed(present, sandbox_active=True) is False
+    # marker absent + sandbox active -> the sandbox never entered -> a failure
+    assert sandbox_spawn_failed("boom", sandbox_active=True) is True
+    assert sandbox_spawn_failed("", sandbox_active=True) is True
+    # bare (inactive) spawn: no marker is ever emitted, so absence is NORMAL
+    assert sandbox_spawn_failed("boom", sandbox_active=False) is False
+    assert sandbox_spawn_failed(present, sandbox_active=False) is False
 
 
-def test_overlay_wrapper_fails_loud_without_running_command():
+def test_strip_sandbox_marker_removes_single_line():
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER, strip_sandbox_marker
+    raw = f"{SANDBOX_ENTERED_MARKER}\nreal line\nsecond"
+    assert strip_sandbox_marker(raw) == "real line\nsecond"
+    # idempotent: a second strip (marker already gone) is a no-op
+    assert strip_sandbox_marker(strip_sandbox_marker(raw)) == "real line\nsecond"
+    # no marker present -> unchanged
+    assert strip_sandbox_marker("just output\n") == "just output\n"
+
+
+def test_sandbox_spawn_backoff_bounds_and_cap():
     from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_CODE,
-        OVERLAY_SETUP_FAILED_MARKER,
+        SANDBOX_SPAWN_MAX_ATTEMPTS,
+        sandbox_spawn_backoff_delay,
     )
+    assert SANDBOX_SPAWN_MAX_ATTEMPTS == 5
+    # Full-jitter exponential ceiling per retry: 50ms → 100 → 200 → 400ms.
+    ceilings = [0.05, 0.1, 0.2, 0.4]
+    for attempt, ceiling in enumerate(ceilings, start=1):
+        samples = [sandbox_spawn_backoff_delay(attempt) for _ in range(64)]
+        assert all(0.0 <= s <= ceiling for s in samples)      # never exceeds the ceiling
+        assert len({round(s, 6) for s in samples}) > 1        # jitter, not a constant
+    # The ceiling caps at 400ms — no further doubling is exposed past the 4th retry.
+    assert all(sandbox_spawn_backoff_delay(9) <= 0.4 for _ in range(32))
+    # Worst-case total added latency before a pause stays under ~1s (4 retries).
+    assert sum(ceilings) < 1.0
+
+
+def test_overlay_wrapper_omits_sentinel_on_mount_failure():
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     hl = HomeLayer(home="/home/u", merged="/up/merged",
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
     argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
+                        "sh", "-c"]
     script = argv[6]
-    # On mount FAILURE: print the sentinel marker to stderr, exit the reserved
-    # code, and do NOT run the command (no `&&`-guarded exec that could still
-    # fall through to bwrap over an empty $HOME).
     assert " && exec" not in script
-    assert script.count("|| {") == 1
-    assert OVERLAY_SETUP_FAILED_MARKER in script
-    assert f"exit {OVERLAY_SETUP_FAILED_CODE}" in script
-    assert ">&2" in script
-    # On mount SUCCESS the command still runs via exec (not a child bwrap).
+    assert "|| exit" in script
     assert "exec bwrap" in script
+    assert ">&2" in script
+    assert SANDBOX_ENTERED_MARKER in script
+    assert script.index("exec bwrap") < script.index(SANDBOX_ENTERED_MARKER)
 
 
 def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
@@ -1966,3 +2007,10 @@ def test_argv_binds_match_bind_plan_with_worktrees_mask():
     assert _parse_argv_binds(argv) == p.bind_plan()
     assert ("/ctl/.git/worktrees", "mask_dir") in p.bind_plan()
     assert ("/ctl/.git/worktrees/abc", "rw") in p.bind_plan()
+
+
+def test_retired_overlay_symbols_are_gone():
+    import imp.engine.sandbox as sb
+    for name in ("OVERLAY_SETUP_FAILED_MARKER", "OVERLAY_SETUP_FAILED_CODE",
+                 "OVERLAY_SETUP_FAILED_MESSAGE", "overlay_setup_failed"):
+        assert not hasattr(sb, name), f"{name} should be deleted"

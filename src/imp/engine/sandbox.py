@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import os
 import platform
+import random
 import shlex
 import shutil
 import subprocess
@@ -171,18 +172,36 @@ def _is_engine_passthrough(key: str) -> bool:
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
-# Loud-failure guard: prints this marker and exits the reserved code on mount failure.
-OVERLAY_SETUP_FAILED_MARKER = "__IMP_OVERLAY_MOUNT_SETUP_FAILED__"
-OVERLAY_SETUP_FAILED_CODE = 122   # reserved; distinct from ordinary command codes
-OVERLAY_SETUP_FAILED_MESSAGE = (
-    "sandbox home overlay could not be mounted; your command did NOT run "
-    "(this is a sandbox-setup failure, not your command's own exit)"
+SANDBOX_ENTERED_MARKER = "__IMP_SANDBOX_ENTERED__"
+SANDBOX_SPAWN_FAILED_MESSAGE = (
+    "the OS sandbox could not start your command; it did NOT run "
+    "(a transient sandbox-setup failure, not your command's own exit)"
 )
 
 
-def overlay_setup_failed(stderr: str) -> bool:
-    """True iff `stderr` carries the overlay wrapper's controlled failure marker."""
-    return OVERLAY_SETUP_FAILED_MARKER in stderr
+def sandbox_spawn_failed(stderr: str, *, sandbox_active: bool) -> bool:
+    """True iff sandbox was active but the entry sentinel is absent (command never ran)."""
+    return sandbox_active and SANDBOX_ENTERED_MARKER not in stderr
+
+
+def strip_sandbox_marker(stderr: str) -> str:
+    """Remove the single entry-sentinel line from captured stderr (display-only, idempotent)."""
+    return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
+
+
+SANDBOX_SPAWN_MAX_ATTEMPTS = 5   # 1 initial + 4 retries
+_SANDBOX_SPAWN_BACKOFF_BASE_S = 0.05
+_SANDBOX_SPAWN_BACKOFF_CAP_S = 0.4
+
+
+def sandbox_spawn_backoff_delay(attempt: int) -> float:
+    """Full-jitter exponential backoff (seconds) BEFORE retry `attempt` (1-based):
+    a uniform sample in [0, min(cap, base * 2**(attempt-1))]. base 50ms doubling
+    to a 400ms cap. Retry is provably safe (the inner command never ran), so full
+    jitter — not equal jitter — spreads a thundering herd of concurrent gates."""
+    ceiling = min(_SANDBOX_SPAWN_BACKOFF_CAP_S,
+                  _SANDBOX_SPAWN_BACKOFF_BASE_S * (2 ** (attempt - 1)))
+    return random.uniform(0.0, ceiling)
 
 
 def build_sandbox_argv(
@@ -257,18 +276,24 @@ def build_sandbox_argv(
     # 15. optional network isolation
     if not policy.network:
         argv += ["--unshare-net"]
-    # 16. the command
-    argv += ["sh", "-c", command]
+    # 16. the command, prefixed with the entry sentinel: the inner sh's first act
+    # emits the marker to stderr, so marker PRESENCE proves the inner command ran
+    # and ABSENCE proves the sandbox failed to enter it. printf runs in this outer
+    # sh, so it cannot trip a gate script's own set -e.
+    wrapped = (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; {command}")
+    argv += ["sh", "-c", wrapped]
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
-        # Fail loud on mount failure: print the marker, exit the reserved code, skip the cmd.
+        # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner
+        # command (and its sentinel) never runs — sentinel ABSENCE is the sole
+        # signal, so no bespoke marker/code is needed.
         mount = (
             f"mount -t overlay overlay -o "
             f"lowerdir={shlex.quote(hl.home)},"
             f"upperdir={shlex.quote(hl.upper)},"
             f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} "
-            f"|| {{ printf '%s\\n' {shlex.quote(OVERLAY_SETUP_FAILED_MARKER)} >&2; "
-            f"exit {OVERLAY_SETUP_FAILED_CODE}; }}; "
+            f"|| exit 1; "
             f"exec {shlex.join(argv)}"
         )
         return ["unshare", "--user", "--map-root-user", "--mount",

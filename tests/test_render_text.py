@@ -2458,6 +2458,18 @@ def test_reauth_needed_pause_renders_plain_speak_copy() -> None:
     assert "reauth_needed" not in out
 
 
+def test_sandbox_spawn_failed_pause_renders_plain_speak_copy() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "workflow_paused", reason="sandbox_spawn_failed"),
+    ]))
+    assert "the OS sandbox could not start the step" in out
+    assert "a transient setup failure, not a gate result" in out
+    assert "the quest is paused and resumable" in out
+    assert "resume to retry" in out
+    # The raw internal token never reaches the user.
+    assert "sandbox_spawn_failed" not in out
+
+
 def test_other_pause_reasons_still_render_verbatim() -> None:
     out = "\n".join(_lines([
         _ev("1", "workflow_paused", reason="retry_ceiling"),

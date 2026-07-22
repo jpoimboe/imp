@@ -65,6 +65,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
+    SANDBOX_SPAWN_MAX_ATTEMPTS,
     SandboxUnavailable,
     _force_rmtree,
     make_home_layer,
@@ -72,6 +73,9 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
     sandbox_config_from_raw,
+    sandbox_spawn_backoff_delay,
+    sandbox_spawn_failed,
+    strip_sandbox_marker,
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.seed import seed_workflow_start
@@ -1123,18 +1127,35 @@ async def _route_script(
                     functools.partial(_test_lane.acquire_blocking,
                                       quest.control_root, max_parallel_test_runs))
                 _emit(log, "test_lane_acquired", {"step": step.name})
-        out = await anyio.to_thread.run_sync(
-            functools.partial(
-                run_script, step, cwd=quest.workflow_dir,
-                env_extra=engine_env(project_root=quest.project_root,
-                                     quest_id=quest.id,
-                                     quest_title=quest.title,
-                                     quest_dir=quest.quest_dir,
-                                     output_path=output_path,
-                                     test_gates=test_gates,
-                                     pythonpath=pythonpath),
-                policy=sandbox_policy, command=command, abort=abort,
-                shim_dir=str(imp_shim_dir(quest.quest_dir))))
+        run_call = functools.partial(
+            run_script, step, cwd=quest.workflow_dir,
+            env_extra=engine_env(project_root=quest.project_root,
+                                 quest_id=quest.id,
+                                 quest_title=quest.title,
+                                 quest_dir=quest.quest_dir,
+                                 output_path=output_path,
+                                 test_gates=test_gates,
+                                 pythonpath=pythonpath),
+            policy=sandbox_policy, command=command, abort=abort,
+            shim_dir=str(imp_shim_dir(quest.quest_dir)))
+        sandbox_active = sandbox_policy is not None and sandbox_policy.active
+        for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
+            out = await anyio.to_thread.run_sync(run_call)
+            if not sandbox_spawn_failed(out["stderr"], sandbox_active=sandbox_active):
+                break
+            if attempt == SANDBOX_SPAWN_MAX_ATTEMPTS:
+                # Retries exhausted: bwrap never entered the command, so its exit is
+                # infrastructure, not a gate verdict. Pause with an honest reason and
+                # NEVER touch the step's rules (no evaluate_rules, no script_blocked).
+                return Pause(reason="sandbox_spawn_failed"), None, {}
+            _emit(log, "runner_warning", {
+                "message": ("sandbox could not start the step; retrying "
+                            f"({attempt + 1}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
+                "step": step.name, "reason": "sandbox-spawn-failed"})
+            await anyio.sleep(sandbox_spawn_backoff_delay(attempt))
+        # Loop exited cleanly — strip the sentinel line (if any) before any rule,
+        # feedback string, or script_blocked event sees it. No-op on a bare gate.
+        out = {**out, "stderr": strip_sandbox_marker(out["stderr"])}
         if output_path is not None:
             assert step.output_schema is not None
             try:
