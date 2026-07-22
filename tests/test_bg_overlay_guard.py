@@ -46,7 +46,7 @@ def test_background_spawn_failure_detected_and_reported(tmp_path: Path) -> None:
             bp = ctx.background_processes[out["id"]]
             assert bp.overlay_setup_failed is True
             [w] = log.warnings()
-            assert w["reason"] == "overlay-setup-failed"
+            assert w["reason"] == "sandbox-spawn-failed"
             assert w["id"] == out["id"]
             # a later sweep must NOT re-emit or re-read
             await _sweep_bg(ctx)

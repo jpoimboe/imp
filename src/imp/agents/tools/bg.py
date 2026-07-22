@@ -419,7 +419,7 @@ def _emit_overlay_setup_warning(ctx: ToolContext, bp: BgProc) -> None:
             payload={
                 "message": (f"background process {bp.id} ({cmd}) — the OS sandbox "
                             "could not start the command; it did not run"),
-                "id": bp.id, "command": cmd, "reason": "overlay-setup-failed",
+                "id": bp.id, "command": cmd, "reason": "sandbox-spawn-failed",
             })
 
 

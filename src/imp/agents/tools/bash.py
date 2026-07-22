@@ -60,7 +60,7 @@ def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
             payload={
                 "message": ("the OS sandbox could not start the command; it did "
                             "not run (sandbox-setup failure, not a command exit)"),
-                "command": command[:_EVENT_COMMAND_PREVIEW_LEN], "reason": "overlay-setup-failed",
+                "command": command[:_EVENT_COMMAND_PREVIEW_LEN], "reason": "sandbox-spawn-failed",
             })
 
 

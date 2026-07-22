@@ -102,8 +102,7 @@ def test_bash_sandbox_spawn_failure_emits_event(
     json.loads(_run_bash(ctx, {"command": "x"}))
     warns = ctx.event_log.warnings()
     # 4 retry breadcrumbs (attempts 2..5) then the terminal setup-failure warning.
-    assert [w["reason"] for w in warns] == (
-        ["sandbox-spawn-failed"] * 4 + ["overlay-setup-failed"])
+    assert [w["reason"] for w in warns] == ["sandbox-spawn-failed"] * 5
     assert "retrying (2/5)" in warns[0]["message"]
     assert "retrying (5/5)" in warns[3]["message"]
 
