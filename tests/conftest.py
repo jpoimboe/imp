@@ -71,18 +71,39 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+# The basetemp we rooted this run at, populated ONLY when we own it (never a
+# user-supplied --basetemp, never an xdist worker). pytest_unconfigure keys the
+# teardown reap on this being set, so the guard is structural, not re-derived.
+_OWNED_BASETEMP: str | None = None
+
+
 def pytest_configure(config: pytest.Config) -> None:
-    # Socket paths now live under control_root (pytest's tmp_path). The default
-    # basetemp (<gettempdir>/pytest-of-<user>/pytest-<N>/popen-gw<k>/...) is long
-    # enough that <tmp_path>/.imp/quests/<id>/session.sock exceeds the 108-byte
-    # AF_UNIX limit under -n auto. Point the whole run at one very short unique
-    # basetemp (`<gettempdir>/ip<6hex>`) so `<tmp_path>/.imp/quests/<id>/session.sock`
-    # stays well under 107 bytes even with a 30-char test name + a ~20-char quest id
-    # under `popen-gw<k>`. Skip when the user set --basetemp explicitly,
-    # and on xdist workers (they inherit the controller's basetemp via xdist).
+    # Session sockets live under control_root (pytest's tmp_path), so
+    # <tmp_path>/.imp/quests/<id>/session.sock must stay under the 107-byte
+    # AF_UNIX sun_path limit under -n auto. tmp_path descends from basetemp, so
+    # root the whole run at a short FIXED basetemp `/tmp/ip<6hex>`, independent of
+    # tempfile.gettempdir()/TMPDIR length: inside imp's bwrap sandbox TMPDIR is a
+    # long per-quest scratch (/tmp/imp-<uid>/<questid>) that would otherwise blow
+    # the socket path over the limit. `/tmp` is the shortest guaranteed-writable
+    # root (identity-bound rw in the sandbox, src/imp/engine/sandbox.py); the
+    # random 6-hex suffix keeps concurrent suite runs on the shared host /tmp
+    # unique. Skip when the user set --basetemp explicitly, and on xdist workers
+    # (they inherit the controller's basetemp via xdist). pytest_unconfigure reaps
+    # the dir we created on clean session end — it is no longer nested under the
+    # engine-reaped quest scratch, so nothing else cleans it.
+    global _OWNED_BASETEMP
     if not config.option.basetemp and "PYTEST_XDIST_WORKER" not in os.environ:
-        config.option.basetemp = os.path.join(
-            tempfile.gettempdir(), f"ip{uuid.uuid4().hex[:6]}")
+        basetemp = os.path.join("/tmp", f"ip{uuid.uuid4().hex[:6]}")
+        config.option.basetemp = basetemp
+        _OWNED_BASETEMP = basetemp
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    # Reap only the basetemp we created; a populated _OWNED_BASETEMP already
+    # excludes a user-supplied --basetemp and xdist workers (which never set it),
+    # so workers never race the controller's removal.
+    if _OWNED_BASETEMP is not None:
+        shutil.rmtree(_OWNED_BASETEMP, ignore_errors=True)
 
 
 def pytest_collection_modifyitems(
