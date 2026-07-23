@@ -9,7 +9,7 @@ from imp.remote.session.discover import session_socket_path
 
 def session_is_resident(control_root: Path, quest_id: str) -> bool:
     """True iff a session daemon is currently accepting on quest_id's socket."""
-    return socket_is_live(session_socket_path(control_root, quest_id))
+    return socket_is_live(session_socket_path(quest_id))
 
 
 def resident_session_ids(control_root: Path) -> set[str]:
@@ -18,7 +18,7 @@ def resident_session_ids(control_root: Path) -> set[str]:
     return {
         cid
         for cid in _list_quest_homes(control_root)
-        if socket_is_live(session_socket_path(control_root, cid))
+        if socket_is_live(session_socket_path(cid))
     }
 
 

@@ -73,7 +73,7 @@ async def test_supervisor_relays_a_resident_sessions_events(
     # curated events to the sink with the namespaced change context.
     cid = "live-one"
     _make_home(tmp_path, cid)
-    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    sock = SessionSocket(str(session_socket_path(cid)))
     await sock.open()
     sink: list[dict[str, Any]] = []
     sup = RelaySupervisor(
@@ -102,8 +102,8 @@ async def test_supervisor_multiplexes_two_resident_sessions(
     # changes' events reach the one sink, each carrying its OWN per-change title.
     _make_home(tmp_path, "a")
     _make_home(tmp_path, "b")
-    sock_a = SessionSocket(str(session_socket_path(tmp_path, "a")))
-    sock_b = SessionSocket(str(session_socket_path(tmp_path, "b")))
+    sock_a = SessionSocket(str(session_socket_path("a")))
+    sock_b = SessionSocket(str(session_socket_path("b")))
     await sock_a.open()
     await sock_b.open()
     sink: list[dict[str, Any]] = []
@@ -133,7 +133,7 @@ async def test_supervisor_reattaches_after_relay_exits(
     # running set and re-attach on the next poll — falsifies the discard() call.
     cid = "exiting-one"
     _make_home(tmp_path, cid)
-    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    sock = SessionSocket(str(session_socket_path(cid)))
     await sock.open()
     sink: list[dict[str, Any]] = []
     sup = RelaySupervisor(
@@ -161,7 +161,7 @@ async def test_supervisor_keeps_relaying_across_a_gate(tmp_path: Path) -> None:
     # session still reaches the sink because the relay never detached.
     cid = "gated-one"
     _make_home(tmp_path, cid)
-    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    sock = SessionSocket(str(session_socket_path(cid)))
     await sock.open()
     sink: list[dict[str, Any]] = []
     sup = RelaySupervisor(
@@ -193,7 +193,7 @@ async def test_supervisor_subscribed_session_drops_lease_at_gate(
     # relay stays attached for the session's residency.
     cid = "subbed-gate"
     _make_home(tmp_path, cid)
-    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    sock = SessionSocket(str(session_socket_path(cid)))
     await sock.open()
     subs = Subscriptions()
     subs.add(cid)
@@ -220,7 +220,7 @@ async def test_supervisor_leases_only_subscribed_changes(
 
     cid = "subbed"
     _make_home(tmp_path, cid)
-    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    sock = SessionSocket(str(session_socket_path(cid)))
     await sock.open()
     subs = Subscriptions()
     subs.add(cid)
@@ -245,7 +245,7 @@ async def test_supervisor_reflects_late_title_via_live_provider(
     # rename on a later event — the frozen-empty-title bug would keep "".
     cid = "renamed-mid"
     _make_home(tmp_path, cid)
-    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    sock = SessionSocket(str(session_socket_path(cid)))
     await sock.open()
     holder = {"title": ""}
     sink: list[dict[str, Any]] = []

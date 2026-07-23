@@ -17,7 +17,7 @@ def test_session_is_resident_tracks_a_live_session_socket(tmp_path: Path) -> Non
     # A stale file is not resident — the predicate probes liveness, not file existence.
     control_root = tmp_path
     quest_id = "directory-probe-change"
-    path = session_socket_path(control_root, quest_id)
+    path = session_socket_path(quest_id)
 
     assert session_is_resident(control_root, quest_id) is False  # nothing bound yet
 
@@ -47,7 +47,7 @@ def _make_home(control_root: Path, quest_id: str) -> Path:
 
 
 def _bind_live_socket(control_root: Path, quest_id: str) -> socket.socket:
-    path = session_socket_path(control_root, quest_id)
+    path = session_socket_path(quest_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -71,7 +71,7 @@ def test_resident_session_ids_returns_only_changes_with_a_live_session(
         assert resident_session_ids(control_root) == {"live-one"}
     finally:
         srv.close()
-        session_socket_path(control_root, "live-one").unlink(missing_ok=True)
+        session_socket_path("live-one").unlink(missing_ok=True)
 
 
 def test_resident_session_ids_never_enumerates_the_archive(
@@ -91,7 +91,7 @@ def test_resident_session_ids_never_enumerates_the_archive(
         assert resident_session_ids(control_root) == {"live-one"}
     finally:
         srv.close()
-        session_socket_path(control_root, "live-one").unlink(missing_ok=True)
+        session_socket_path("live-one").unlink(missing_ok=True)
 
 
 def test_quest_home_exists_true_for_a_home_with_no_live_socket(tmp_path: Path) -> None:

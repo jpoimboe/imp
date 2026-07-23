@@ -75,7 +75,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
 @pytest.mark.anyio
 async def test_attaches_to_resident_daemon_without_spawning(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-res")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     server = SessionSocket(sock)
     spawned: list[Quest] = []
     async with anyio.create_task_group() as tg:
@@ -93,7 +93,7 @@ async def test_attaches_to_resident_daemon_without_spawning(tmp_path: Path) -> N
 @pytest.mark.anyio
 async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-hib")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     received: list[dict[str, Any]] = []
     holder: dict[str, SessionSocket] = {}
 
@@ -194,7 +194,7 @@ async def test_attach_waits_for_alive_daemon_until_socket_appears(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-slow")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     holder: dict[str, SessionSocket] = {}
 
     class _LiveProc:
@@ -255,7 +255,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
     from imp.remote.session import attach as attach_mod
 
     quest = _make_quest(tmp_path, "2026-06-15-warm")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     spawned: list[Quest] = []
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
@@ -290,7 +290,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
     from imp.remote.session import attach as attach_mod
 
     quest = _make_quest(tmp_path, "2026-06-15-rsm")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     captured: dict[str, Any] = {}
     holder: dict[str, SessionSocket] = {}
 
@@ -347,7 +347,7 @@ def test_spawn_session_daemon_omits_autonomous_when_false(
 @pytest.mark.anyio
 async def test_build_session_attach_leases_when_requested(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-lz")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     seen: list[Any] = []
     server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
     async with anyio.create_task_group() as tg:
@@ -368,7 +368,7 @@ async def test_deliver_session_reply_attaches_lease_less(tmp_path: Path) -> None
     # lease=). It must NOT hold a keep-alive lease, or a reply that rehydrates a
     # hibernated change would pause the run the instant it detaches.
     quest = _make_quest(tmp_path, "2026-06-15-rep")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     seen: list[Any] = []
     server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
     async with anyio.create_task_group() as tg:

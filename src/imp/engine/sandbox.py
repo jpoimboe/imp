@@ -563,7 +563,7 @@ def resolve_policy(
     if quest_dir is not None and (quest_dir / "workflow").is_dir():
         readonly_overlays = (str(quest_dir / "workflow"),)
 
-    session_sock = session_socket_path(control_root, quest_id)
+    session_sock = session_socket_path(quest_id)
     # TMPDIR: per-quest scratch dir, derived EXACTLY like Quest.tmp_dir
     # (Path(tempfile.gettempdir()) / imp-<uid> / <id>) so it tracks the conftest
     # temp-redirect fixture and points at the dir the executor creates/wipes.

@@ -92,7 +92,7 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-abc")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
 
     async def fake_run(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
@@ -154,7 +154,7 @@ async def test_client_attached_at_completion_receives_final_agent_output(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-flush")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     client_ready = anyio.Event()
 
     async def fake_run(
@@ -265,7 +265,7 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-jkl")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
 
     run_returned = anyio.Event()
 
@@ -334,7 +334,7 @@ def test_main_loads_named_change_and_serves_it(
 @pytest.mark.anyio
 async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-aba")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     torn: list[Quest] = []
 
     async def fake_run(
@@ -368,7 +368,7 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-dup")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     calls = {"n": 0}
 
     async def fake_run(
@@ -425,7 +425,7 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-rzm")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     calls = {"n": 0}
 
     async def fake_run(
@@ -694,7 +694,7 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
             return RunResult.PAUSED
         return RunResult.COMPLETED
 
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     async with anyio.create_task_group() as tg:
         result: dict[str, Any] = {}
 
@@ -841,7 +841,7 @@ async def test_resident_abandon_of_unmaterialized_draft_tears_down(
     quest = Quest.create_draft(
         tmp_path, title="x", quest_id="draft1", base_branch="main")
     assert quest.materialized is False
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     torn: list[Quest] = []
     archived: list[Quest] = []
 
@@ -939,7 +939,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
 @pytest.mark.anyio
 async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-sav")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     saved: list[Quest] = []
     torn: list[Quest] = []
 
@@ -1068,7 +1068,7 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
 @pytest.mark.anyio
 async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-arc")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     archived: list[Quest] = []
     discarded: list[Quest] = []
 
@@ -1101,7 +1101,7 @@ async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) 
 @pytest.mark.anyio
 async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-dis")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     archived: list[Quest] = []
     discarded: list[Quest] = []
 
@@ -1277,7 +1277,7 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-nirl")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     received_flags: list[bool] = []
 
     async def fake_run(
@@ -1319,7 +1319,7 @@ async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
     tmp_path: Path,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-arl")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     received_flags: list[bool] = []
 
     async def fake_run(
@@ -1509,7 +1509,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
     st = State.load(quest.state_dir)
     st.resume_target = target
     st.save(quest.state_dir)
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
 
     calls: dict[str, Any] = {"n": 0, "interject": None}
     run_done = anyio.Event()
@@ -1862,7 +1862,7 @@ def test_main_forwards_model_to_serve(
 @pytest.mark.anyio
 async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-svr")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     saved: list[tuple[Quest, str | None]] = []
 
     async def fake_run(
@@ -1898,7 +1898,7 @@ async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
     # workflow (parse_default_workflow -> "imp"), where "verify" is a script step.
     quest = _make_quest(tmp_path, "2026-06-15-scr")
     _seed_step(quest, "verify")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     calls = {"n": 0}
     drained: dict[str, Any] = {}
 
@@ -1965,7 +1965,7 @@ async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
     # "task-lead" is an agent step in the bundled `imp` workflow.
     quest = _make_quest(tmp_path, "2026-06-15-agt")
     _seed_step(quest, "task-lead")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     calls = {"n": 0}
     drained: dict[str, Any] = {}
 
@@ -2052,7 +2052,7 @@ async def test_sandbox_control_no_pause_single_dispatch(tmp_path: Path) -> None:
     from imp.remote.session.protocol import CONTROL_SET_SANDBOX
 
     quest = _make_quest(tmp_path, "2026-06-15-sbx")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     run_ready = anyio.Event()
     seen: dict[str, Any] = {}
 
@@ -2368,7 +2368,7 @@ async def test_agent_step_hold_empty_reply_continues_without_interject(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-agt-empty")
     _seed_step(quest, "task-lead")
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     calls = {"n": 0}
     drained: dict[str, Any] = {}
 

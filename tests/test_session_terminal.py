@@ -1114,7 +1114,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     quest.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
 
     archive_started = threading.Event()
     release_archive = threading.Event()

@@ -120,7 +120,7 @@ async def serve_quest_session(
     from imp.cli.signals import InterruptCoordinator
 
     coordinator = InterruptCoordinator()
-    socket_path = str(session_socket_path(quest.control_root, quest.id))
+    socket_path = str(session_socket_path(quest.id))
     attach_log = quest.event_log()
     coordinator.set_event_log(attach_log)
 
