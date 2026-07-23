@@ -16,10 +16,12 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_codex_failure_floor_attaches_stderr_tail(tmp_path: Path) -> None:
+async def test_codex_failure_floor_attaches_stderr_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runner = CodexAgentRunner(model_name="gpt-5.5")
 
-    async def _boom(_invocation: Any):  # async generator that publishes a sink, then dies
+    async def _boom(invocation: Any, session: Any):  # publishes a sink, then dies
         sink = StderrSink(tmp_path / "stderr.log")
         runner._stderr_sink = sink
         token = current_stderr_sink.set(sink)
@@ -31,7 +33,8 @@ async def test_codex_failure_floor_attaches_stderr_tail(tmp_path: Path) -> None:
         finally:
             current_stderr_sink.reset(token)
 
-    runner._run_loop = _boom  # type: ignore[assignment]
+    monkeypatch.setattr("imp.providers.codex_runner.run_agent_loop",
+                        lambda invocation, session: _boom(invocation, session))
     runner._cancel = False
 
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
@@ -44,7 +47,7 @@ async def test_codex_failure_floor_attaches_stderr_tail(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_codex_floor_prefers_live_capture_without_duplicating(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When the streaming tee already captured the CLI's stderr, the floor must
     NOT re-feed str(exc): the CodexExecError message re-embeds that same stderr
@@ -52,7 +55,7 @@ async def test_codex_floor_prefers_live_capture_without_duplicating(
     capture, unduplicated."""
     runner = CodexAgentRunner(model_name="gpt-5.5")
 
-    async def _boom(_invocation: Any):
+    async def _boom(invocation: Any, session: Any):
         sink = StderrSink(tmp_path / "stderr.log")
         sink.feed("live: codex stderr line\n")  # the tee already captured this
         runner._stderr_sink = sink
@@ -65,7 +68,8 @@ async def test_codex_floor_prefers_live_capture_without_duplicating(
         finally:
             current_stderr_sink.reset(token)
 
-    runner._run_loop = _boom  # type: ignore[assignment]
+    monkeypatch.setattr("imp.providers.codex_runner.run_agent_loop",
+                        lambda invocation, session: _boom(invocation, session))
     runner._cancel = False
 
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]

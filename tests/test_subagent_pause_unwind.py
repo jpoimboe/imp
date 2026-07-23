@@ -24,6 +24,7 @@ def anyio_backend():
     ("imp.providers.anthropic", "AnthropicAgentRunner"),
     ("imp.providers.openai", "OpenAIAgentRunner"),
     ("imp.providers.claude_code", "ClaudeCodeAgentRunner"),
+    ("imp.providers.codex_runner", "CodexAgentRunner"),
 ])
 @pytest.mark.anyio
 async def test_provider_run_reraises_subagent_suspended(

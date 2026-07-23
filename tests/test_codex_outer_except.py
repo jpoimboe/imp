@@ -11,21 +11,25 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _runner_with_failing_loop(exc: BaseException) -> CodexAgentRunner:
+def _runner_with_failing_loop(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException,
+) -> CodexAgentRunner:
     runner = CodexAgentRunner(model_name="gpt-5.5")
 
-    async def _boom(_invocation):  # shadows the bound method; not a coroutine-method
-        if False:  # make this an async generator
+    async def _boom(invocation, session):  # matches run_agent_loop(invocation, session)
+        if False:
             yield {}
         raise exc
 
-    runner._run_loop = _boom  # type: ignore[assignment]
+    monkeypatch.setattr("imp.providers.codex_runner.run_agent_loop", _boom)
     return runner
 
 
 @pytest.mark.anyio
-async def test_outer_except_reclassifies_to_interrupted_when_cancel_set() -> None:
-    runner = _runner_with_failing_loop(RuntimeError("transport torn down"))
+async def test_outer_except_reclassifies_to_interrupted_when_cancel_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner_with_failing_loop(monkeypatch, RuntimeError("transport torn down"))
     runner._cancel = True
 
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
@@ -37,8 +41,10 @@ async def test_outer_except_reclassifies_to_interrupted_when_cancel_set() -> Non
 
 
 @pytest.mark.anyio
-async def test_outer_except_unknown_when_cancel_unset() -> None:
-    runner = _runner_with_failing_loop(RuntimeError("genuine bug"))
+async def test_outer_except_unknown_when_cancel_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner_with_failing_loop(monkeypatch, RuntimeError("genuine bug"))
     runner._cancel = False
 
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
@@ -49,8 +55,10 @@ async def test_outer_except_unknown_when_cancel_unset() -> None:
 
 
 @pytest.mark.anyio
-async def test_outer_except_reraises_subagent_suspended() -> None:
-    runner = _runner_with_failing_loop(SubagentSuspended("paused"))
+async def test_outer_except_reraises_subagent_suspended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner_with_failing_loop(monkeypatch, SubagentSuspended("paused"))
     runner._cancel = False
 
     with pytest.raises(SubagentSuspended):
@@ -59,10 +67,12 @@ async def test_outer_except_reraises_subagent_suspended() -> None:
 
 
 @pytest.mark.anyio
-async def test_outer_except_reraises_awaiting_user_input() -> None:
+async def test_outer_except_reraises_awaiting_user_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
-    runner = _runner_with_failing_loop(AwaitingUserInput("the question"))
+    runner = _runner_with_failing_loop(monkeypatch, AwaitingUserInput("the question"))
     runner._cancel = False
 
     with pytest.raises(AwaitingUserInput):

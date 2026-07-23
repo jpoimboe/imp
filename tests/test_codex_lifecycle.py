@@ -84,12 +84,12 @@ async def test_teardown_runs_on_no_complete_step_error_exit(
 ) -> None:
     """The `finally:` in run() must tear down on EVERY exit path, not just
     interrupt(). Here a degenerate top-level agent (no continuation_fn) ends its
-    turn without calling complete_step: run() returns silently — drive_invocation
-    surfaces the errored (no agent_result) result downstream — but the finally
+    turn without calling complete_step: the shared driver surfaces the
+    no_complete_step error (the unified observe/push behavior) and the finally
     must still tear the codex_home down."""
     _seed_git_and_auth(tmp_path)
     # A turn that completes WITHOUT calling complete_step. With no continuation_fn
-    # wired, the degenerate top-level path returns without yielding any event.
+    # wired, the shared driver yields the no_complete_step terminal error.
     scripted = [[thread_started(), turn_completed()]]
     runner = CodexAgentRunner(
         model_name="gpt-5.5",
@@ -100,9 +100,10 @@ async def test_teardown_runs_on_no_complete_step_error_exit(
     with patch("imp.providers.codex_runner.teardown_codex_home") as td:
         inv = _inv(tmp_path)
         events = [ev async for ev in runner.run(inv)]
-        # Sanity: the degenerate no-complete-step exit yields nothing from run();
-        # the error is surfaced downstream by drive_invocation, not here.
-        assert events == [], events
+        # The degenerate no-complete-step exit is driver-owned: it surfaces the
+        # no_complete_step error directly (matching the other providers).
+        assert events[-1]["type"] == "error", events
+        assert events[-1]["payload"]["kind"] == "no_complete_step"
         assert td.called
         kwargs = td.call_args.kwargs
         # Each codex_home is unique per run.
