@@ -37,14 +37,17 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import raise_if_suspended
+from imp.agents.subagents import make_task_tool, raise_if_suspended
+from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
+from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
     quest_home_path,
     request_bracketed,
     terminate_running_processes,
 )
+from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import deliver_continuation_reply
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.awaiting_user_input import AwaitingUserInput
@@ -72,6 +75,8 @@ from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
 )
+from imp.providers.observe_classify import _classify_agent_text
+from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
 
 _logger = logging.getLogger(__name__)
 
@@ -188,6 +193,45 @@ def restore_to_snapshot(cwd: Path, snap: EntrySnapshot) -> None:
 # ── CodexAgentRunner ──────────────────────────────────────────────────────────
 
 
+def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
+    """Same filtering as anthropic._build_tools, including the bash ->
+    bash_output/bash_kill injection."""
+    reg = get_registry()
+    out: dict[str, Tool] = {}
+    check_web_capability(invocation.provider_name, invocation.agent_def)
+    for name in invocation.agent_def.tools:
+        if name == "complete_step":
+            continue
+        if name == "sub_agent":
+            continue
+        if name in WEB_TOOL_NAMES:
+            # Reserved native-capability names (§4): never registry-looked-up;
+            # routed to the native-injection path in _run_loop.
+            continue
+        if name == "load_skill":
+            # Auto-injected below; tolerate a redundant explicit declaration.
+            continue
+        if name not in reg:
+            raise KeyError(f"agent declares unknown tool {name!r}")
+        out[name] = reg[name]
+    if "sub_agent" in invocation.agent_def.tools:
+        out["sub_agent"] = make_task_tool(invocation.tiers)
+    if invocation.subagent_depth == 0:
+        out["complete_step"] = make_complete_step_tool(
+            invocation.agent_def.output_schema)
+    out["load_skill"] = make_load_skill_tool()
+    if "bash" in invocation.agent_def.tools:
+        # Auto-granted with bash (same block as anthropic/openai
+        # _build_tools): run_in_background is a bash PARAMETER, so an agent
+        # with bash but no read/kill tool is a trap — a backgrounded process
+        # it can never see or stop. The capability set must be atomic.
+        # allowed_tools picks these up automatically (mcp__imp__ prefix is
+        # derived from this dict in _build_options).
+        out["bash_output"] = reg["bash_output"]
+        out["bash_kill"] = reg["bash_kill"]
+    return out
+
+
 def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
     """Refresh the canonical codex token before seed_auth; raise AuthError on a dead token."""
     outcome = refresh_canonical_token(int(time.time() * 1000))
@@ -287,7 +331,6 @@ class CodexAgentRunner:
         )
 
         # 2. Build tools + ToolContext (mirror the claude_code runner exactly).
-        from imp.providers.claude_code import _build_tools
         from imp.providers.resolve import spawn_subagent_via_registry
         tools = _build_tools(invocation)
         ctx = ToolContext(
@@ -851,7 +894,6 @@ class CodexAgentRunner:
                         # must short-circuit nudge attempts (a nudge to a quota'd
                         # account just burns more).
                         last_text = proc_state.get("last_agent_text", "") or ""
-                        from imp.providers.claude_code import _classify_agent_text
                         classified = _classify_agent_text(last_text)
                         if classified is not None:
                             yield perr.make_error_event(
