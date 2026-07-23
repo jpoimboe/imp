@@ -2,9 +2,10 @@
 
 `PushSession` owns the discrete-turn mechanics extracted from the anthropic
 runner's old `_run_loop`: transcript load, fresh/resume entry, the per-turn
-item stream, and the driver push-back surface. Provider specifics (the API
-call, response parsing, web/handoff extras) are the abstract/inert hooks a
-subclass overrides — see `AnthropicSession` in `imp.providers.anthropic`.
+item stream, the driver push-back surface, and the provider-agnostic Tier-A
+proactive-handoff state machine (both push providers inherit it). Provider
+specifics (the API call, response parsing, web extras) are the abstract/inert
+hooks a subclass overrides — see `AnthropicSession` in `imp.providers.anthropic`.
 """
 
 from __future__ import annotations
@@ -40,8 +41,14 @@ from imp.engine.agent_run import (
     deliver_interject,
     drain_all_interjects_at_resume,
     last_assistant_text,
+    most_recent_assistant_text,
 )
-from imp.providers.catalog import context_tokens_from_usage
+from imp.engine.reincarnation import (
+    handoff_instruction,
+    handoff_path_for,
+    write_handoff_note,
+)
+from imp.providers.catalog import context_threshold_crossed, context_tokens_from_usage
 from imp.providers.resolve import spawn_subagent_via_registry
 
 
@@ -61,6 +68,9 @@ class PushSession:
         self.messages: list[Message] = []
         self.transcript: Any = None
         self._pending_terminal: Item | None = None
+        self._handoff_phase: str | None = None
+        self._handoff_path: Any = None
+        self._crossed_now: bool = False
 
     # --- lifecycle -------------------------------------------------------
     async def open(self) -> None:
@@ -241,6 +251,12 @@ class PushSession:
         self.ceiling = invocation.max_tool_calls  # may be None (no cap)
         self.guard = LoopGuard(interactive=invocation.interactive)
         self.subagent_depth = invocation.subagent_depth
+        # Tier A proactive-handoff watch state (Mechanism 3). _handoff_phase is
+        # None until the threshold crosses, then "instruction_sent" for the one
+        # handoff-writing turn that follows.
+        self._handoff_phase = None
+        self._handoff_path = handoff_path_for(invocation.transcript_dir)
+        self._crossed_now = False
 
     def cancelled(self) -> bool:
         return bool(self.runner._cancel)
@@ -308,12 +324,43 @@ class PushSession:
         return None
 
     def _note_turn(self, raw: dict[str, Any]) -> None:
-        return None
+        # Tier A watch: compare this turn's occupancy to the checkpoint
+        # threshold (only before a handoff is already in flight).
+        self._crossed_now = (
+            self._handoff_phase is None
+            and self.invocation.checkpoint_threshold is not None
+            and context_threshold_crossed(
+                raw.get("usage"), self.runner.model,
+                self.invocation.checkpoint_threshold))
 
     def handoff_before_nudge(self, last_text: str) -> str | None:
+        if self._handoff_phase == "instruction_sent":
+            # The handoff-writing turn ended without a tool: signal the captured
+            # handoff and stop (the engine reincarnates).
+            write_handoff_note(
+                self._handoff_path, most_recent_assistant_text(self.messages))
+            return str(self._handoff_path)
         return None
 
     def handoff_after_tools(self) -> tuple[str, str | None]:
+        if self._handoff_phase == "instruction_sent":
+            # Provider persists the agent's final reply text to the note, then
+            # signals the handoff; the engine reincarnates seeded from it.
+            write_handoff_note(
+                self._handoff_path, most_recent_assistant_text(self.messages))
+            return ("handoff", str(self._handoff_path))
+        if self._crossed_now:
+            # Approaching the window: inject the agent-authored handoff
+            # instruction as the next user turn (the same user-message append
+            # interjects use), then capture the note on the following turn.
+            instr = handoff_instruction(self._handoff_path)
+            hmsg = Message(role="user", content=(TextBlock(text=instr),))
+            self.messages.append(hmsg)
+            self.transcript.append(hmsg)
+            self.elog.append_engine_message(
+                agent_id=self.aid, message=hmsg, subtype="continuation")
+            self._handoff_phase = "instruction_sent"
+            return ("injected", None)
         return ("none", None)
 
     def captured_complete_step(self) -> dict[str, Any] | None:

@@ -46,18 +46,10 @@ from imp.agents.tools.context import (
     request_bracketed,
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.engine.agent_run import (
-    most_recent_assistant_text,
-)
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.reincarnation import (
-    handoff_instruction,
-    handoff_path_for,
-    write_handoff_note,
-)
 from imp.providers import errors as perr
 from imp.providers.base import Provider
-from imp.providers.catalog import ANTHROPIC, context_threshold_crossed, model_info
+from imp.providers.catalog import ANTHROPIC, model_info
 from imp.providers.push_session import PushSession
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
@@ -528,12 +520,6 @@ class AnthropicSession(PushSession):
             joined = ",".join(minfo.betas)
             self._web_headers["anthropic-beta"] = (
                 f"{prior},{joined}" if prior else joined)
-        # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
-        # None until the threshold crosses, then "instruction_sent" for the one
-        # handoff-writing turn that follows.
-        self._handoff_phase: str | None = None
-        self._handoff_path = handoff_path_for(self.invocation.transcript_dir)
-        self._crossed_now = False
         await super().open()
 
     def _build_tools(self) -> dict[str, Any]:
@@ -636,46 +622,6 @@ class AnthropicSession(PushSession):
                     f"retry — raise max_tokens if this recurs."
                 ),
             })
-
-    def _note_turn(self, raw: dict[str, Any]) -> None:
-        # Tier A watch: compare this turn's occupancy to the checkpoint
-        # threshold (only before a handoff is already in flight).
-        self._crossed_now = (
-            self._handoff_phase is None
-            and self.invocation.checkpoint_threshold is not None
-            and context_threshold_crossed(
-                raw.get("usage"), self.runner.model,
-                self.invocation.checkpoint_threshold))
-
-    def handoff_before_nudge(self, last_text: str) -> str | None:
-        if self._handoff_phase == "instruction_sent":
-            # The handoff-writing turn ended without a tool: signal the captured
-            # handoff and stop (the engine reincarnates).
-            write_handoff_note(
-                self._handoff_path, most_recent_assistant_text(self.messages))
-            return str(self._handoff_path)
-        return None
-
-    def handoff_after_tools(self) -> tuple[str, str | None]:
-        if self._handoff_phase == "instruction_sent":
-            # Provider persists the agent's final reply text to the note, then
-            # signals the handoff; the engine reincarnates seeded from it.
-            write_handoff_note(
-                self._handoff_path, most_recent_assistant_text(self.messages))
-            return ("handoff", str(self._handoff_path))
-        if self._crossed_now:
-            # Approaching the window: inject the agent-authored handoff
-            # instruction as the next user turn (the same user-message append
-            # interjects use), then capture the note on the following turn.
-            instr = handoff_instruction(self._handoff_path)
-            hmsg = Message(role="user", content=(TextBlock(text=instr),))
-            self.messages.append(hmsg)
-            self.transcript.append(hmsg)
-            self.elog.append_engine_message(
-                agent_id=self.aid, message=hmsg, subtype="continuation")
-            self._handoff_phase = "instruction_sent"
-            return ("injected", None)
-        return ("none", None)
 
 
 class AnthropicProvider:
