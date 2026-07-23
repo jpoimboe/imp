@@ -90,9 +90,9 @@ def _prompt_pty() -> Iterator[TerminalSession]:
 def test_toolbar_hugs_input_one_blank_line_below_in_real_terminal() -> None:
     """AC1/AC2: driving the REAL rendering path (a CPR-answering pty), a
     single-row input places the toolbar one blank line below the input line
-    (input, blank, toolbar) — not on the terminal's last row. The gated filler
-    must actively absorb the renderer's full-height fill for this hug to appear;
-    without it the toolbar sinks to the terminal's last row (row 39)."""
+    (input, blank, toolbar) — not on the terminal's last row. The unconditional
+    filler absorbs the renderer's full-height fill so this hug appears; without
+    it the toolbar sinks to the terminal's last row (row 39)."""
     with _prompt_pty() as session:
         lines, rows = session.lines(limit=40), session.rows
     input_row = next(i for i, ln in enumerate(lines) if ln.strip().startswith(">"))
@@ -103,26 +103,21 @@ def test_toolbar_hugs_input_one_blank_line_below_in_real_terminal() -> None:
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
-def test_gated_filler_deactivates_when_input_wraps_in_real_terminal() -> None:
-    """AC3/AC6: once the input wraps to two+ visual rows the gated filler goes
-    inactive, so the app stops claiming full terminal height (the condition that
-    lagged every keystroke) and the toolbar sinks back to the terminal's bottom
-    rows. The filler's filter reads the PREVIOUS frame's render_info (a one-frame
-    lag), so a single wrapped burst can render once on the stale single-row info;
-    nudge additional settled renders until the wrapped info takes effect."""
+def test_toolbar_hugs_wrapped_multiline_input_in_real_terminal() -> None:
+    """AC1: with the unconditional filler, an input that wraps to two+ visual
+    rows keeps the toolbar one blank line below the input's LAST row — it no
+    longer sinks to the terminal's bottom rows when the input grows. `> ` + 100
+    'x's on an 80-col terminal wraps to exactly two rows (rows 0 and 1), so the
+    blank line lands on row 2 and the toolbar on row 3, well above the bottom."""
     with _prompt_pty() as session:
         session.send("x" * 100)
         session.wait_idle(idle=0.5, hard=6.0)
         rows = session.rows
         lines = session.lines(limit=40)
-        toolbar_row = next(i for i, ln in enumerate(lines) if "status" in ln)
-        for _ in range(12):
-            if toolbar_row >= rows - 2:
-                break
-            session.send("x")
-            session.wait_idle(idle=0.3, hard=3.0)
-            lines = session.lines(limit=40)
-            toolbar_row = next(i for i, ln in enumerate(lines) if "status" in ln)
+    toolbar_row = next(i for i, ln in enumerate(lines) if "status" in ln)
+    last_input_row = 1
     assert lines[0].startswith("> x")
     assert lines[1].lstrip().startswith("x")
-    assert toolbar_row >= rows - 2
+    assert lines[last_input_row + 1].strip() == ""
+    assert toolbar_row == last_input_row + 2
+    assert toolbar_row < rows - 2

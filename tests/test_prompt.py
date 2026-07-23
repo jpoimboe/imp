@@ -91,27 +91,27 @@ def test_build_session_forces_24bit_depth_on_truecolor_theme() -> None:
         pal.set_theme("ansi")
 
 
-def test_build_session_gated_filler_after_toolbar() -> None:
-    """The layout's last child is a ConditionalContainer wrapping a filler
-    Window, appended AFTER the bottom-toolbar container. The renderer's
-    forced full-height fill lands in the filler so the toolbar hugs the input
-    instead of sinking to the screen bottom. The filler is gated (a
-    ConditionalContainer, not a bare Window) so it is active only while the input
-    is a single unwrapped visual row — a wrapped input never claims full terminal
-    height (the condition that lagged every keystroke)."""
+def test_build_session_unconditional_filler_after_toolbar() -> None:
+    """The layout's last child is a bare filler Window appended AFTER the
+    bottom-toolbar container. The renderer's forced full-height fill lands in
+    the filler so the toolbar hugs the input instead of sinking to the screen
+    bottom. The filler is unconditional (a bare Window, NOT a
+    ConditionalContainer), so it absorbs the forced-height surplus in every
+    prompt scenario, including a wrapped multiline input."""
     from prompt_toolkit.layout.containers import ConditionalContainer, Window
 
     from imp.cli.prompt import _build_session
 
     children = _build_session(None).layout.container.children
 
-    # LAST child: the gated filler — a ConditionalContainer wrapping a Window
-    # whose height weight dominates the input window's weight of 1 while staying
-    # modest enough not to make take_using_weights slow (see test_prompt_paste_render).
+    # LAST child: the unconditional filler — a bare Window (not wrapped in a
+    # ConditionalContainer) whose height weight dominates the input window's
+    # weight of 1 while staying modest enough not to make take_using_weights
+    # slow (see test_prompt_paste_render).
     filler = children[-1]
-    assert isinstance(filler, ConditionalContainer)
-    assert isinstance(filler.content, Window)
-    assert 10 <= filler.content.height.weight <= 1000
+    assert isinstance(filler, Window)
+    assert not isinstance(filler, ConditionalContainer)
+    assert 10 <= filler.height.weight <= 1000
 
     # Child BEFORE the filler: the bottom-toolbar container, whose Window keeps
     # its own content height (dont_extend_height=True).

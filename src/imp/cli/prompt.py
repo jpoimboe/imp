@@ -99,41 +99,26 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
     completer = (
         SlashCompleter(skills_dir, roster_models) if skills_dir is not None else None)
-    from prompt_toolkit.application import get_app
-    from prompt_toolkit.filters import Condition
-    from prompt_toolkit.layout.containers import ConditionalContainer, Window
+    from prompt_toolkit.layout.containers import Window
     from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.output import ColorDepth
 
     from imp.cli import palette as pal
 
-    @Condition
-    def _input_is_single_visual_row() -> bool:
-        # False once input wraps to 2+ rows so the filler never claims full height
-        # (per-keystroke repaint). Previous-frame render_info; None = first frame.
-        info = get_app().layout.current_window.render_info
-        if info is None:
-            return True
-        content = info.ui_content
-        return sum(info.get_height_for_line(i)
-                   for i in range(content.line_count)) <= 1
-
     class _FloatingToolbarSession(PromptSession[str]):
-        """Ends the layout with a gated filler after the toolbar, so the
+        """Ends the layout with an unconditional filler after the toolbar, so the
         renderer's forced full-height fill lands there and the toolbar hugs the input."""
 
         def _create_layout(self) -> Any:
             layout = super()._create_layout()
             layout.container.children.append(  # type: ignore[attr-defined]
-                ConditionalContainer(
-                    # take_using_weights costs ~weight x visual rows per render, so
-                    # the weight must stay modest while still dominating the input
-                    # window's weight of 1 (a huge value made a multi-line paste
-                    # render take ~20s). At 100 the input gets zero extra rows on
-                    # any terminal up to ~100 rows tall (appearance identical);
-                    # above that a single-line input may gain one cosmetic blank row.
-                    Window(height=Dimension(weight=100)),
-                    filter=_input_is_single_visual_row))
+                # take_using_weights costs ~weight x visual rows per render, so
+                # the weight must stay modest while still dominating the input
+                # window's weight of 1 (a huge value made a multi-line paste
+                # render take ~20s). At 100 the input gets zero extra rows on
+                # any terminal up to ~100 rows tall (appearance identical);
+                # above that a single-line input may gain one cosmetic blank row.
+                Window(height=Dimension(weight=100)))
             return layout
 
     # prompt_toolkit defaults to 8-bit and ignores COLORTERM; force 24-bit on truecolor themes.
