@@ -1,0 +1,69 @@
+description: |
+  front-door -> implement -> review
+
+  A light, in-place workflow. It scopes a small change in an open conversation
+  (reusing the shared front-door), then builds it DIRECTLY on the current branch —
+  no worktree is forked, no plan is written, no merge happens. A read-only reviewer
+  bounces the implementer until the change is approved, then the run completes leaving
+  the commits on the branch. Review independence is by MODEL TIER (a high-tier reviewer
+  judging the implementer's work), not by vendor.
+
+vars:
+  # Current-branch HEAD captured at build start (after go-live, before the first
+  # implement commit); the reviewer's stable diff base. NOT orig_base_head/cur_base_head
+  # — this quest never materializes a worktree, so it has neither.
+  base_head: {type: string, default: ""}
+
+defaults:
+  max_retries: 3
+  max_loops: 10
+  max_tool_calls: 10000
+
+phases:
+  # ── front-door: a bare conversation (show_label:false) that scopes the change and,
+  # on go-live, writes the FINAL spec and routes into the in-place build. It never
+  # forks a worktree (the agent denies create_and_enter_worktree); capture-base then
+  # records the pre-build branch HEAD for the reviewer's diff base.
+  - name: front-door
+    show_label: false
+    steps:
+      - name: front-door
+        file: agents/front-door.md
+        tier: high
+        interactive: true
+        rules:
+          - {if: {status: Error}, pause: true}
+          - {else: true, continue: true}
+
+      - name: capture-base
+        command: ./scripts/capture-base-head.sh
+        rules:
+          - {if: {exit: 0}, set: {base_head: output.stdout}, continue: true}
+          - {else: true, pause: true}
+
+  - name: implement
+    label: "implementation phase"
+    steps:
+      - name: implement
+        file: agents/implementer.md
+        tier: high
+        label: "building the change"
+        rules:
+          - {if: {status: Error}, pause: true}
+          - {else: true, continue: true}
+
+  - name: review
+    label: "review phase"
+    steps:
+      # Read-only reviewer. approve -> runs off the end of the phase list into the
+      # engine's no-merge _complete (the run finishes with commits on the branch).
+      # rework -> resume implement with the reviewer's findings.
+      - name: review
+        file: agents/reviewer.md
+        tier: high
+        label: "reviewing the change"
+        read_only: ["."]
+        rules:
+          - {if: {verdict: rework}, resume: implement, label: "addressing review feedback", feedback: "Here's review feedback to address:"}
+          - {if: {status: Error}, pause: true}
+          - {else: true, continue: true}
