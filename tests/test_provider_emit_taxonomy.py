@@ -278,7 +278,7 @@ def _codex_drive(
         quest_context=QuestContext(
             title="T", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
-        agent_id="step:p/s", event_log=log)
+        agent_id="step:p/s", event_log=log, max_tool_calls=7)
     return runner, inv
 
 
