@@ -192,7 +192,11 @@ class LiveStatus:
             # _erase() resets _visible / _prev_width / _drawn_widths itself.
             self._erase()
         if self._visible and self._rows == len(rows):
-            self._hide_cursor()
+            # The footer owns the cursor while drawn: reassert the hide every frame
+            # (deliberately not the once-and-trust-the-flag economy) so an external
+            # cursor-show cannot persist onto the footer beyond one tick.
+            self._stream.write(_HIDE)
+            self._cursor_hidden = True
             self._stream.write("\r")
             if self._rows > 1:
                 self._stream.write(f"\x1b[{self._rows - 1}A")
@@ -200,7 +204,8 @@ class LiveStatus:
         else:
             if self._visible:
                 self._erase()
-            self._hide_cursor()
+            self._stream.write(_HIDE)
+            self._cursor_hidden = True
             skip = self._skip_lead_once
             self._skip_lead_once = False
             self._owns_lead_blank = not skip
