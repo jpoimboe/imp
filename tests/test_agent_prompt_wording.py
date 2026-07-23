@@ -36,8 +36,9 @@ def test_spec_finalizer_writes_to_artifacts_no_commit_script() -> None:
 def test_no_agent_or_partial_names_the_old_spec_writer() -> None:
     import pathlib
     base = pathlib.Path("src/imp/assets/workflows/imp")
-    for sub in ("agents", "partials"):
-        for p in sorted((base / sub).glob("*.md")):
+    dirs = [base / "agents", base / "partials", pathlib.Path("src/imp/assets/partials")]
+    for d in dirs:
+        for p in sorted(d.glob("*.md")):
             assert "spec-writer" not in p.read_text(), \
                 f"{p.name} still names spec-writer"
 
@@ -123,7 +124,7 @@ def test_code_reviewer_flags_defensive_sprawl() -> None:
 
 def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
     text = pathlib.Path(
-        "src/imp/assets/workflows/imp/partials/coding-stance.md"
+        "src/imp/assets/partials/coding-stance.md"
     ).read_text()
     assert "Design so bad states can't arise; then add no error handling, fallbacks," in text
     # The remainder of the rule stays intact.

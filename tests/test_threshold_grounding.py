@@ -10,7 +10,7 @@ from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
 
-PARTIALS = Path("src/imp/assets/workflows/imp/partials")
+PARTIALS = Path("src/imp/assets/partials")
 
 
 def _threshold() -> str:

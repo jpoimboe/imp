@@ -14,7 +14,7 @@ from imp.engine.agent_run import (
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
-_CODING_STANCE = Path("src/imp/assets/workflows/imp/partials/coding-stance.md")
+_CODING_STANCE = Path("src/imp/assets/partials/coding-stance.md")
 
 
 def _agent(name: str = "rev", tools=frozenset({"complete_step"})) -> AgentDef:

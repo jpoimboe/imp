@@ -16,7 +16,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from imp.assets import bundled_skills_dir
+from imp.assets import bundled_partials_dir, bundled_skills_dir
 
 
 class SkillError(Exception):
@@ -122,6 +122,20 @@ def overlay_global_skills(dest_skills_dir: Path) -> None:
     dest_skills_dir.mkdir(parents=True, exist_ok=True)
     for md in sorted(src.glob("*.md")):
         target = dest_skills_dir / md.name
+        if md.is_file() and not target.exists():
+            shutil.copy2(md, target)
+
+
+def overlay_shared_partials(dest_partials_dir: Path) -> None:
+    """Overlay the bundled shared-partials pool (src/imp/assets/partials/*.md) into
+    `dest_partials_dir` (a snapshot's workflow/partials/ root). On a name collision
+    the file already present wins — the workflow's own partial, landed by the prior
+    copy — so the overlay never clobbers a workflow-provided partial. The dest dir is
+    created if absent."""
+    src = bundled_partials_dir()
+    dest_partials_dir.mkdir(parents=True, exist_ok=True)
+    for md in sorted(src.glob("*.md")):
+        target = dest_partials_dir / md.name
         if md.is_file() and not target.exists():
             shutil.copy2(md, target)
 

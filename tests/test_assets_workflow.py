@@ -878,10 +878,11 @@ def test_finalize_leads_with_summary_artifact() -> None:
 
 def test_no_wait_for_user_in_workflow_prompts() -> None:
     # AC2: the deleted tool must not survive in any prompt or partial. A grep of
-    # the workflow assets for `wait_for_user` returns nothing.
-    root = Path("src/imp/assets/workflows")
+    # the workflow assets AND the shared-partials pool for `wait_for_user` returns nothing.
+    roots = [Path("src/imp/assets/workflows"), Path("src/imp/assets/partials")]
     offenders = sorted(
-        str(p) for p in root.rglob("*.md") if "wait_for_user" in p.read_text()
+        str(p) for root in roots for p in root.rglob("*.md")
+        if "wait_for_user" in p.read_text()
     )
     assert offenders == []
 

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from imp.agents.prompts import build_context, render_prompt
-from imp.assets import bundled_workflow_dir
+from imp.assets import bundled_partials_dir, bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import InMemoryEventLog
 
 # Derive the partial path from the bundled workflow dir (the same
 # FileSystemLoader root the include resolves against), so the test does not
 # depend on pytest's cwd.
-PARTIAL_PATH = bundled_workflow_dir("imp") / "partials" / "memory-authoring.md"
+PARTIAL_PATH = bundled_partials_dir() / "memory-authoring.md"
 
 
 def test_memory_authoring_partial_has_pinned_prose() -> None:

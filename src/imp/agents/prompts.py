@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import jinja2
 
-from imp.assets import bundled_docs_dir
+from imp.assets import bundled_docs_dir, bundled_partials_dir
 from imp.engine.state import EventLog, State
 
 if TYPE_CHECKING:
@@ -219,7 +219,11 @@ def _env_for(workflow_dir: Path | None) -> jinja2.Environment:
     if workflow_dir is None:
         return _env
     return jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(workflow_dir)), **_ENV_KWARGS)
+        loader=jinja2.ChoiceLoader([
+            jinja2.FileSystemLoader(str(workflow_dir)),
+            jinja2.FileSystemLoader(str(bundled_partials_dir().parent)),
+        ]),
+        **_ENV_KWARGS)
 
 
 def render_prompt(

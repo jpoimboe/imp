@@ -82,6 +82,7 @@ def test_no_workflow_template_references_project_guidance() -> None:
     roots = [
         Path("src/imp/assets/workflows/imp"),
         Path("src/imp/assets/workflows/patent"),
+        Path("src/imp/assets/partials"),
     ]
     offenders = [
         str(p) for root in roots for p in root.rglob("*.md")

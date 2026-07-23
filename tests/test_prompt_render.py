@@ -268,7 +268,7 @@ def test_render_without_workflow_dir_cannot_resolve_include(tmp_path: Path) -> N
 
 def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     src = Path(
-        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+        "src/imp/assets/partials/brainstorm-dialogue.md"
     ).read_text()
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
@@ -321,7 +321,7 @@ def test_quest_namespace_exposes_orig_base_head(tmp_path) -> None:
 
 def test_build_or_save_attended_build_default_yields(tmp_path: Path) -> None:
     src = Path(
-        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+        "src/imp/assets/partials/brainstorm-dialogue.md"
     ).read_text()
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
@@ -399,7 +399,7 @@ def test_step_namespace_lap_tracks_recorded_lap_not_list_length(tmp_path: Path) 
 
 def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
     src = Path(
-        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+        "src/imp/assets/partials/brainstorm-dialogue.md"
     ).read_text()
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(

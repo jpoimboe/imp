@@ -728,7 +728,7 @@ def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
 
 
 def test_no_prompt_references_transport_non_interactive() -> None:
-    roots = [Path("src/imp/assets/workflows/imp")]
+    roots = [Path("src/imp/assets/workflows/imp"), Path("src/imp/assets/partials")]
     offenders = [str(p) for root in roots for p in root.rglob("*.md")
                  if "run.non_interactive" in p.read_text()]
     assert offenders == [], offenders

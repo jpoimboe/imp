@@ -34,7 +34,7 @@ from imp.agents.runner import (
     QuestContext,
     TextBlock,
 )
-from imp.agents.skills import overlay_global_skills, overlay_project_skills
+from imp.agents.skills import overlay_global_skills, overlay_project_skills, overlay_shared_partials
 from imp.engine import quest_refs
 from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
@@ -311,6 +311,7 @@ def _refresh_workflow_snapshot(quest: Quest) -> bool:
     _capture_workflow_tree(quest.control_root, live, tmp)
     overlay_global_skills(tmp / "skills")
     overlay_project_skills(quest.project_root, tmp / "skills" / "user")
+    overlay_shared_partials(tmp / "partials")
 
     # 4. No-op when the candidate matches the current snapshot.
     if had_snapshot and _trees_identical(snapshot, tmp):
