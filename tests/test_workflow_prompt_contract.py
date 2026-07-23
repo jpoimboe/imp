@@ -552,9 +552,6 @@ def test_spec_writer_recognizes_threshold_handoff() -> None:
     # The scope-code-check gate forwards the adopt preamble again on the clean exit-0 route.
     assert "Adopt the spec drafted with the user and finalize it:" in body
     assert "Threshold handoff" in body
-    # head_changed is re-derived from the two persisted heads, not the tool return.
-    assert "quest.cur_base_head" in body
-    assert "quest.orig_base_head" in body
 
 
 NO_FIXUP_RULE_AGENTS = ["task-lead.md", "deferred-sweep.md", "reconciler.md"]
@@ -569,44 +566,6 @@ def test_committing_agents_carry_no_fixup_outside_change_rule(name: str) -> None
     low = _read(name).lower()
     assert "does not own" in low
     assert "forward" in low
-
-
-def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> None:
-    body = _read("spec-finalizer.md")
-    log = JsonlEventLog(tmp_path / "events.jsonl")
-    moved = render_prompt(body, build_context(
-        quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc",
-        cur_base_head="NEW", orig_base_head="OLD",
-        project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp")).lower()
-    # Key on a phrase unique to the handoff true-branch.
-    assert "the base branch advanced since the draft started" in moved   # head_changed=true
-    # Drift reconciles silently in-turn; the branch carries no yield encouragement —
-    # only a genuine intent-fork parks, via the Surfacing-a-decision machinery below.
-    assert "reconcile it yourself and proceed; do not yield for it" in moved
-    assert "yield — by ending your turn with the question" not in moved
-    assert "adopt near-silently" not in moved
-
-    same = render_prompt(body, build_context(
-        quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc",
-        cur_base_head="SAME", orig_base_head="SAME",
-        project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert "adopt near-silently" in same           # head_changed=false branch
-    assert "the base branch advanced since the draft started" not in same
-
-    # Autonomy no longer changes this branch — the drift-reconcile prompt is identical
-    # whether or not the run is autonomous (the conditional was removed).
-    autonomous_moved = render_prompt(body, build_context(
-        quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc",
-        cur_base_head="NEW", orig_base_head="OLD",
-        autonomous=True,
-        project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert autonomous_moved == moved
 
 
 HUMAN_DECISION_PARTIAL = Path(

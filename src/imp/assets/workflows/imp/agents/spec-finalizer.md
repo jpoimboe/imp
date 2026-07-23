@@ -1,7 +1,7 @@
 ---
 name: spec-finalizer
 label: spec · finalizing
-description: Adopt the threshold draft spec, re-ground it against the current base, commit the final spec, and service the review loop.
+description: Adopt the threshold draft spec — already grounded against the current base at go-live — commit the final spec, and service the review loop.
 subagents: [explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -23,10 +23,10 @@ written with the user; the quest is **already set up** (the worktree exists). Go
 
 ## Your Role
 
-Finalize the draft spec: adopt it, re-ground it against a possibly-moved base,
-normalize it to imp's four-part structure, commit the final spec, then own the
-review (rework / minors) loop. You do **not** re-brainstorm — the design dialogue
-already happened at the threshold.
+Finalize the draft spec: adopt the already-grounded draft as-is, normalize it to
+imp's four-part structure, commit the final spec, then own the review (rework /
+minors) loop. You do **not** re-brainstorm — the design dialogue already happened
+at the threshold.
 
 {% include "partials/spec-design-principles.md" %}
 
@@ -39,20 +39,12 @@ and the quest is materialized — **adopt and finalize** it, do not re-author. S
 the opening question, do not call `create_and_enter_worktree`, and do not run the
 build-or-save gate (the threshold handled all of that).
 
-Re-derive whether the base branch moved by comparing the two persisted heads — do
-**not** trust any earlier tool return; it did not survive the boundary into this
-step:
-
-{% if quest.cur_base_head and quest.cur_base_head != quest.orig_base_head %}
-The base branch advanced since the draft started. Re-read the files the draft
-assumed and **reconcile the drift** this same turn; leave the rest as drafted.
-This is recommendation-bearing (below the "Ask vs. decide" bar) —
-reconcile it yourself and proceed; do not yield for it. Only a genuine intent-fork
-at the high bar parks, via the **Surfacing a decision you cannot resolve** below.
-{% else %}
-The base has not moved. **Adopt near-silently**: light edits only, usually no
-questions.
-{% endif %}
+The draft was already grounded against the current base tip at go-live — the
+threshold reconciled it there, and nothing between that point and this step moves
+the base. **Adopt the draft as-is**: light editorial edits only, usually no
+questions. Do **not** re-derive whether the base moved and do **not** re-read the
+drafted files to reconcile drift. Only a genuine intent-fork at the high bar parks,
+via the **Surfacing a decision you cannot resolve** below.
 
 Then normalize the draft to imp's structure (ensure a **Goal** and **Acceptance
 criteria** are present), run the "Writing the Spec" pre-commit self-review,
