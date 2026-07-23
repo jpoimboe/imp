@@ -17,7 +17,9 @@ from tests.anthropic_fakes import tool_use as a_tool_use
 from tests.cc_fakes import assistant as cc_assistant
 from tests.cc_fakes import result as cc_result
 from tests.cc_fakes import text as cc_text
+from tests.cc_fakes import tool_result as cc_tool_result
 from tests.cc_fakes import tool_use as cc_tool_use
+from tests.cc_fakes import user as cc_user
 from tests.codex_fakes import (
     agent_message as cx_msg,
 )
@@ -94,6 +96,7 @@ def _multiround_script(pair: str):
         # Both tool calls are in one SDK session (one receive_response() call):
         # read_file observed first, then complete_step terminates the session.
         return [cc_assistant(cc_tool_use("u1", "read_file", {"path": "/project/data.txt"})),
+                cc_user(cc_tool_result("u1", "payload")),
                 cc_assistant(cc_tool_use("c1", "complete_step", _OK)),
                 cc_result()]
     # codex: both MCP calls in one run_streamed() turn; no continuation_fn needed.
