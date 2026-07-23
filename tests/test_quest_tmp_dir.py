@@ -21,8 +21,8 @@ def test_tmp_dir_is_per_quest_subdir_of_imp_uid(tmp_path: Path) -> None:
 
 def test_quest_tmp_root_is_isolated_per_test() -> None:
     # The autouse fixture redirects the tmp root (Quest.tmp_dir) to a short unique
-    # per-test dir. The session socket now lives under the quest home, independent
-    # of the tmp root.
+    # per-test dir. The session socket now lives as a sibling under that same tmp
+    # root (<tmpdir>/imp-<uid>/<id>.sock).
     tmpdir = tempfile.gettempdir()
     assert "imp-t-" in tmpdir
     assert Path(tmpdir).is_dir()
