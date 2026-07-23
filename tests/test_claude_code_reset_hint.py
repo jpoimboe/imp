@@ -6,8 +6,9 @@ import zoneinfo
 from datetime import datetime
 
 import imp.providers.claude_code as cc
+import imp.providers.observe_classify as ocls
 from imp.providers import errors as perr
-from imp.providers.claude_code import _reset_hint_seconds
+from imp.providers.observe_classify import _reset_hint_seconds
 from tests.cc_fakes import result
 
 _LA = zoneinfo.ZoneInfo("America/Los_Angeles")
@@ -103,30 +104,30 @@ def test_minute_out_of_range_returns_none() -> None:
 
 
 def test_session_limit_branch_attaches_hint(monkeypatch) -> None:
-    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 7200.0)
-    exc = cc._classify_agent_text(
+    monkeypatch.setattr(ocls, "_reset_hint_seconds", lambda text, now: 7200.0)
+    exc = ocls._classify_agent_text(
         "You've hit your session limit · resets 4am (America/Los_Angeles)")
     assert isinstance(exc, perr.RateLimitError)
     assert exc.detail["retry_after_seconds"] == 7200.0
 
 
 def test_429_branch_attaches_hint(monkeypatch) -> None:
-    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 5400.0)
-    exc = cc._classify_agent_text("API Error: 429 rate limited")
+    monkeypatch.setattr(ocls, "_reset_hint_seconds", lambda text, now: 5400.0)
+    exc = ocls._classify_agent_text("API Error: 429 rate limited")
     assert isinstance(exc, perr.RateLimitError)
     assert exc.detail["retry_after_seconds"] == 5400.0
 
 
 def test_no_hint_attaches_nothing(monkeypatch) -> None:
-    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: None)
-    exc = cc._classify_agent_text(
+    monkeypatch.setattr(ocls, "_reset_hint_seconds", lambda text, now: None)
+    exc = ocls._classify_agent_text(
         "You've hit your session limit · resets 4am (America/Los_Angeles)")
     assert isinstance(exc, perr.RateLimitError)
     assert "retry_after_seconds" not in exc.detail
 
 
 def test_hint_survives_termination_merge(monkeypatch) -> None:
-    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 9000.0)
+    monkeypatch.setattr(ocls, "_reset_hint_seconds", lambda text, now: 9000.0)
     sdk = result(is_error=True, api_error_status=None)
     term = cc._termination_from_result(
         sdk,
@@ -208,8 +209,8 @@ def test_weekly_dated_at_eight_day_ceiling_is_trusted() -> None:
 
 def test_weekly_text_only_classifies_as_rate_limit(monkeypatch) -> None:
     # status absent -> the widened wording alternative alone must classify.
-    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 7200.0)
-    exc = cc._classify_agent_text(
+    monkeypatch.setattr(ocls, "_reset_hint_seconds", lambda text, now: 7200.0)
+    exc = ocls._classify_agent_text(
         "You've hit your weekly limit · resets Jul 16, 8pm (America/Los_Angeles)")
     assert isinstance(exc, perr.RateLimitError)
     assert exc.detail["retry_after_seconds"] == 7200.0

@@ -1,0 +1,23 @@
+{
+  "agent_result": null,
+  "control_types": [
+    "error"
+  ],
+  "errors": [
+    [
+      "auth",
+      "AuthError"
+    ]
+  ],
+  "log_types": [
+    "token_refresh",
+    "step_context",
+    "engine_message",
+    "engine_message",
+    "agent_message",
+    "query_result"
+  ],
+  "raised": null,
+  "step_context_count": 1,
+  "terminal": "error"
+}

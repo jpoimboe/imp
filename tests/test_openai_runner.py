@@ -669,7 +669,8 @@ async def test_runner_outer_except_reclassifies_when_cancel_is_set(
             yield {}
         raise RuntimeError("Cannot write to terminated process (exit code: 0)")
 
-    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
+    monkeypatch.setattr("imp.providers.openai.run_agent_loop",
+                        lambda invocation, session: _boom(invocation))
     runner._cancel = True
     inv = _inv(tmp_path)
 
@@ -694,7 +695,8 @@ async def test_runner_outer_except_unknown_when_cancel_unset(
             yield {}
         raise RuntimeError("SDK broke unexpectedly")
 
-    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
+    monkeypatch.setattr("imp.providers.openai.run_agent_loop",
+                        lambda invocation, session: _boom(invocation))
     inv = _inv(tmp_path)
     events = [ev async for ev in runner.run(inv)]
     errors = [e for e in events if e.get("type") == "error"]

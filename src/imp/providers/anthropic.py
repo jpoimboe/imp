@@ -16,7 +16,6 @@ tool_result, thinking, runner_warning, tool_killed) are written via EventLog.
 from __future__ import annotations
 
 import contextlib
-import inspect
 import os
 import time
 from collections.abc import AsyncGenerator
@@ -24,9 +23,7 @@ from typing import Any, cast
 
 import anyio
 
-from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
-from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
-from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
+from imp.agents.agent_loop import run_agent_loop
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -43,34 +40,25 @@ from imp.agents.runner import (
 )
 from imp.agents.subagents import make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
-from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
-    quest_home_path,
     request_bracketed,
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.transcript import (
-    Transcript,
-    balance_success_on_resume,
-    deliver_continuation_reply,
-    deliver_engine_continuation,
-    repair_dangling_tool_use_on_resume,
-)
 from imp.engine.agent_run import (
-    _CONTINUATION_NUDGE,
-    _resolve_wait_reply,
-    deliver_interject,
-    drain_all_interjects_at_resume,
-    last_assistant_text,
     most_recent_assistant_text,
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
+from imp.engine.reincarnation import (
+    handoff_instruction,
+    handoff_path_for,
+    write_handoff_note,
+)
 from imp.providers import errors as perr
 from imp.providers.base import Provider
-from imp.providers.catalog import ANTHROPIC, model_info
-from imp.providers.resolve import spawn_subagent_via_registry
+from imp.providers.catalog import ANTHROPIC, context_threshold_crossed, model_info
+from imp.providers.push_session import PushSession
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
     anthropic_beta_headers,
@@ -166,7 +154,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             continue
         if name in WEB_TOOL_NAMES:
             # Reserved native-capability names (§4): never registry-looked-up;
-            # routed to the native-injection path in _run_loop.
+            # routed to the native-injection path in AnthropicSession (web tool specs).
             continue
         if name == "load_skill":
             # Auto-injected below; tolerate a redundant explicit declaration.
@@ -470,9 +458,10 @@ class AnthropicAgentRunner:
         self._client = None
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        session = AnthropicSession(invocation, self)
         try:
             try:
-                async for ev in self._run_loop(invocation):
+                async for ev in run_agent_loop(invocation, session):
                     yield ev
             except perr.ProviderError as exc:
                 yield perr.make_error_event(exc)
@@ -489,7 +478,7 @@ class AnthropicAgentRunner:
                     }}
                     return
                 try:
-                    classified = _classify_anthropic_exception(exc)
+                    classified = session._classify_exception(exc)
                 except Exception:
                     yield perr.make_unknown_error_event(exc)
                     return
@@ -497,453 +486,14 @@ class AnthropicAgentRunner:
                 return
         finally:
             if self._ctx is not None:
-                # None guard: self._ctx is None-initialized and assigned
-                # mid-_run_loop, AFTER the _build_tools/check_web_capability
-                # raise sites — the finally runs with None when the generator
-                # is aclosed before its first pull or those early raises fire.
+                # None guard: self._ctx is None-initialized and assigned mid-open,
+                # AFTER the _build_tools/check_web_capability raise sites — the
+                # finally runs with None when the generator is aclosed before its
+                # first pull or those early raises fire.
                 from imp.agents.tools.bg import terminate_background_processes
                 with contextlib.suppress(Exception):
                     await terminate_background_processes(self._ctx)
             await self._close_client()
-
-    async def _run_loop(
-        self, invocation: AgentInvocation,
-    ) -> AsyncGenerator[Event, None]:
-        from imp.engine.state import JsonlEventLog
-        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
-        aid = invocation.agent_id or "step:unnamed"
-        minfo = model_info(ANTHROPIC, self.model)
-        max_output_tokens = minfo.max_output_tokens
-        # The wire model id: catalog aliases like "claude-opus-4-8[1m]" carry a
-        # cli_model that strips the bracket (the raw API rejects that form).
-        wire_model = minfo.cli_model or self.model
-
-        transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
-        tools = _build_tools(invocation)
-        ctx = ToolContext(
-            project_root=invocation.quest_context.project_root,
-            events_path=invocation.events_path,
-            subagent_defs=invocation.subagent_defs,
-            provider_name=invocation.provider_name,
-            model_name=invocation.model_name,
-            parent_transcript_dir=invocation.transcript_dir,
-            agent_id=aid,
-            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.quest_context.quest_home),
-        )
-        ctx.quest_context = invocation.quest_context  # for subagent dispatch
-        ctx.quest_state = invocation.quest_state
-        ctx.quest = invocation.quest          # live quest for rename_quest
-        ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_tiers = invocation.resolved_tiers
-        ctx.subagent_depth = invocation.subagent_depth
-        ctx.coordinator = invocation.coordinator
-        ctx.tiers = invocation.tiers
-        ctx.test_gates = invocation.test_gates
-        ctx.pythonpath = invocation.pythonpath
-        ctx.checkpoint_threshold = invocation.checkpoint_threshold
-        ctx.non_interactive = invocation.headless
-        ctx.base_sandbox_policy = invocation.sandbox_policy
-        ctx.event_log = elog                       # shared write instance
-        if self._user_input_fn is not None:
-            ctx.user_input_fn = self._user_input_fn
-        self._ctx = ctx
-
-        existing = transcript.load(
-            ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
-        if existing:
-            messages = existing
-            tool_calls_used = 0  # per-invocation; never inherit history
-            # A subagent's done-signal is a bare-turn-end terminal (assistant
-            # prose, no complete_step), NOT a complete_step. On resume, re-emit
-            # its final text as the deliverable and return — a top-level step in
-            # the same shape (AWAITING_USER) solicits the human instead.
-            if (invocation.subagent_depth > 0
-                    and classify_resume(messages) is ResumeState.AWAITING_USER):
-                final_text = last_assistant_text(messages)
-                if final_text:
-                    yield {"type": "agent_result",
-                           "payload": {"text": final_text}}
-                return
-            # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
-            # the executor's pause check fires after `tool_result` was yielded
-            # but before the user message was appended. Patch the transcript
-            # before classifying.
-            if invocation.balance_on_resume:
-                balance_success_on_resume(
-                    messages, transcript, elog, aid,
-                    wrapper_text=invocation.retry_feedback)
-            else:
-                synth = repair_dangling_tool_use_on_resume(messages, transcript)
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
-            # STEP_COMPLETED never arises in-process: this runner returns at
-            # complete_step, so a trailing prose turn can never persist over a
-            # resolved complete_step here — the new state is inert for the
-            # in-process providers (openai/codex mirror this resume block).
-            state = classify_resume(messages)
-            if state is ResumeState.DANGLING_TOOL_USE:
-                yield {"type": "error", "payload": {
-                    "category": "config",
-                    "kind": "transcript_invalid",
-                    "message": "transcript ended with dangling tool_use",
-                }}
-                return
-            if state is ResumeState.AWAITING_USER:
-                if ctx.user_input_fn is None:
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "no_user_input_fn",
-                        "message": (
-                            "AWAITING_USER resume requires user_input_fn; "
-                            "none installed by runner"
-                        ),
-                    }}
-                    return
-                # _resolve_wait_reply owns the SOLE awaiting_user_input emit and
-                # fires it only when it actually solicits (not on a queued
-                # interject, not on a retry-continue). Route the reply by source:
-                # a human turn ('solicited'/'interject') renders as `>`; a 'nudge'
-                # is an internal engine continuation, not a user turn.
-                reply, source = await _resolve_wait_reply(
-                    invocation.coordinator, ctx.user_input_fn,
-                    invocation.resume_should_continue,
-                    elog=elog, agent_id=aid,
-                    last_agent_message=last_assistant_text(messages),
-                    halt_writer=invocation.halt_writer,
-                    halt_clearer=invocation.halt_clearer)
-                if source == "nudge":
-                    assert isinstance(reply, str)
-                    deliver_engine_continuation(
-                        messages, transcript, elog, aid, reply)
-                else:
-                    deliver_continuation_reply(
-                        messages, transcript, elog, aid, reply, human=True)
-                # Fall through (do NOT return): the reply drives the next LLM
-                # turn as the transcript's trailing user message.
-            # §2 resume-entry drain: mid-turn pending texts fold into the first
-            # request. (The AWAITING_USER dangling-wait join is handled above.)
-            if state is not ResumeState.AWAITING_USER:
-                drained = drain_all_interjects_at_resume(
-                    invocation.coordinator, messages, transcript, elog, aid)
-                # A mid-tool Ctrl-C resumes as SEND_TO_LLM (the dangling call was
-                # repaired with a synthetic result), never AWAITING_USER, so the
-                # _resolve_wait_reply nudge above can't reach it. Append the same
-                # continuation nudge as the trailing user turn so a no-message
-                # resume continues the step instead of bare-turn-ending on a
-                # clarifying question. A drained human interject already drives
-                # continuation, so it wins (parity with AWAITING_USER).
-                pending_human_tail = (
-                    messages[-1].role == "user"
-                    and not _contains_tool_result(messages[-1])
-                )
-                if (invocation.resume_should_continue and drained == 0
-                        and not pending_human_tail):
-                    deliver_engine_continuation(
-                        messages, transcript, elog, aid,
-                        _CONTINUATION_NUDGE)
-        else:
-            messages = []
-            for m in invocation.initial_messages:
-                messages.append(m)
-                transcript.append(m)
-            tool_calls_used = 0
-            # Fresh-entry audit scaffolding. Ordered IMMEDIATELY after the
-            # transcript append so the "step_context emitted exactly once per
-            # agent_id" invariant holds (resume takes the branch above and
-            # emits nothing).
-            elog.append_step_context(
-                agent_id=aid, parent_id_override=invocation.first_event_parent_id,
-                provider=invocation.provider_name, model=self.model,
-                tools_schema=[_anthropic_tool_schema(t) for t in tools.values()],
-                params={"max_tokens": max_output_tokens},
-                max_tool_calls=invocation.max_tool_calls)
-            elog.append_engine_message(
-                agent_id=aid,
-                message=Message(role="system",
-                                content=(TextBlock(text=invocation.system_prompt),)),
-                subtype="system_prompt")
-            for m in invocation.initial_messages:
-                if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_engine_message(
-                        agent_id=aid, message=m, subtype="agent_prompt")
-
-        # max_tool_calls is opt-in; None means no cap. The engine resolves
-        # agent_def -> workflow.defaults -> None and passes the result via
-        # invocation.max_tool_calls.
-        ceiling = invocation.max_tool_calls  # may be None (no cap)
-        guard = LoopGuard(interactive=invocation.interactive)
-
-        web_specs = anthropic_web_tool_specs(invocation.agent_def)
-        web_headers = anthropic_beta_headers(invocation.agent_def)
-        # Catalog beta opt-ins (e.g. context-1m) join any web-tool beta header.
-        if minfo.betas:
-            prior = web_headers.get("anthropic-beta")
-            joined = ",".join(minfo.betas)
-            web_headers["anthropic-beta"] = f"{prior},{joined}" if prior else joined
-
-        # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
-        # None until the threshold crosses, then "instruction_sent" for the one
-        # handoff-writing turn that follows.
-        from imp.engine.reincarnation import (
-            handoff_instruction,
-            handoff_path_for,
-            write_handoff_note,
-        )
-        from imp.providers.catalog import (
-            context_threshold_crossed,
-            context_tokens_from_usage,
-        )
-        handoff_phase: str | None = None
-        handoff_path = handoff_path_for(invocation.transcript_dir)
-
-        while not self._cancel:
-            anthropic_tools = [_anthropic_tool_schema(t) for t in tools.values()]
-            anthropic_tools.extend(web_specs)
-            client = self._get_client()
-            create_kwargs: dict[str, Any] = dict(
-                model=wire_model,
-                system=invocation.system_prompt,
-                tools=anthropic_tools,
-                messages=[
-                    _message_to_anthropic(m)
-                    for m in messages
-                ],
-                max_tokens=max_output_tokens,
-                cache_control={"type": "ephemeral"},
-                # §4: explicitly PERMIT parallel tool calls per assistant message
-                # so multiple `task` tus can arrive in one turn. Unconditional and
-                # safe — every in-process request carries tools (complete_step is
-                # injected at :158), and Anthropic rejects tool_choice only on a
-                # tools-less request, which has no in-process path. A future forced
-                # tool_choice must compose disable_parallel_tool_use deliberately.
-                tool_choice={"type": "auto", "disable_parallel_tool_use": False},
-            )
-            create_kwargs.update(_anthropic_thinking_posture(invocation.tier))
-            if web_headers:
-                create_kwargs["extra_headers"] = web_headers
-            # N4 race note: if interrupt() lands AFTER `while not self._cancel`
-            # passes but BEFORE this assignment, this one turn's request isn't
-            # cancelled — the loop simply exits on the next iteration via _cancel.
-            # Worst case is one extra in-flight request; cancellation is not
-            # instantaneous, by design.
-            _t0 = time.perf_counter()
-            self._cancel_scope = anyio.CancelScope()
-            response = None
-            request_id: str | None = None
-            try:
-                with self._cancel_scope:
-                    async with client.messages.stream(**create_kwargs) as stream:
-                        async for _event in request_bracketed(
-                                invocation.coordinator, stream):
-                            if invocation.coordinator is not None:
-                                invocation.coordinator.note_activity()
-                        response = await stream.get_final_message()
-                        # Streaming final messages carry no _request_id; the
-                        # public stream.request_id reads the `request-id` header.
-                        request_id = stream.request_id
-            finally:
-                # N3: reset even when the request raises a genuine API error, so a
-                # later interrupt() never calls .cancel() on a stale exited scope.
-                self._cancel_scope = None
-            if response is None:
-                # interrupt() cancelled the in-flight request — exit the loop and
-                # fall through to the "cancelled (interrupt)" yield below.
-                break
-
-            raw = _serialize_anthropic_response(response)
-            assistant_msg = _parse_anthropic_message(raw)
-            diag = _extract_anthropic_diagnostics(raw)
-            for content in diag.thinkings:
-                elog.append(agent_id=aid, type="thinking",
-                            payload={"content": content})
-            for w in diag.block_warnings:
-                elog.append(agent_id=aid, type="runner_warning",
-                            payload={"message": w})
-            messages.append(assistant_msg)
-            transcript.append(assistant_msg)
-            usage = raw.get("usage") or {}
-            elog.append_agent_message(
-                agent_id=aid, provider=invocation.provider_name,
-                model=raw.get("model") or self.model,
-                raw=raw, usage=usage,
-                stop_reason=raw.get("stop_reason"),
-                context_tokens=context_tokens_from_usage(usage),
-                request_id=request_id,
-                duration_ms=(time.perf_counter() - _t0) * 1000.0)
-            if raw.get("stop_reason") == "max_tokens":
-                details = usage.get("output_tokens_details") or {}
-                model_name = raw.get("model") or self.model
-                thinking_tokens = details.get("thinking_tokens")
-                elog.append(agent_id=aid, type="max_tokens_truncated", payload={
-                    "tier": invocation.tier,
-                    "model": model_name,
-                    "max_tokens": max_output_tokens,
-                    "output_tokens": usage.get("output_tokens"),
-                    "thinking_tokens": thinking_tokens,
-                })
-                _thinking_note = (
-                    "; thinking may be incomplete" if thinking_tokens is not None else ""
-                )
-                elog.append(agent_id=aid, type="runner_warning", payload={
-                    "message": (
-                        f"Response truncated at the {max_output_tokens}-token "
-                        f"output cap (stop_reason=max_tokens, tier="
-                        f"{invocation.tier}){_thinking_note}. No "
-                        f"retry — raise max_tokens if this recurs."
-                    ),
-                })
-            _emit_anthropic_web_events(raw, elog, aid)
-            # Post-API sweep + heartbeat (Decision 10): the model-API call is
-            # the longest awaitable with no registry access — sweeping here
-            # narrows the cap's routine inter-sweep gap to API latency. The
-            # heartbeat decouples the watchdog margin from API latency.
-            await _bg._sweep_bg(ctx)
-            yield {"type": "tool_heartbeat", "payload": {}}
-
-            # Tier A watch: compare this turn's occupancy to the checkpoint
-            # threshold (only before a handoff is already in flight).
-            crossed_now = (
-                handoff_phase is None
-                and invocation.checkpoint_threshold is not None
-                and context_threshold_crossed(
-                    raw.get("usage"), self.model,
-                    invocation.checkpoint_threshold))
-
-            tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
-            if not tool_uses:
-                if handoff_phase == "instruction_sent":
-                    # The handoff-writing turn ended without a tool: signal the
-                    # captured handoff and stop (the engine reincarnates).
-                    write_handoff_note(handoff_path, most_recent_assistant_text(messages))
-                    yield {"type": "handoff",
-                           "payload": {"handoff_path": str(handoff_path)}}
-                    return
-                last_text = "".join(
-                    b.text for b in assistant_msg.content
-                    if isinstance(b, TextBlock)
-                )
-                if invocation.subagent_depth > 0:
-                    final_text = last_assistant_text(messages)
-                    if final_text:
-                        yield {"type": "agent_result",
-                               "payload": {"text": final_text}}
-                    return
-                cont = invocation.continuation_fn
-                if cont is not None:
-                    next_text, human = cont(last_text)
-                    if inspect.isawaitable(next_text):
-                        next_text = await next_text
-                    deliver_continuation_reply(
-                        messages, transcript, elog, aid, next_text, human=human)
-                    loop_err = guard.observe(TurnRecord(
-                        assistant_text=last_text, tools=[],
-                        has_complete_step=False))
-                    if loop_err is not None:
-                        yield perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))
-                        return
-                    # Turn boundary (nudge path): the tool-less turn ended and the
-                    # nudge user message was appended. Deliver any queued interject
-                    # now — same as the tool-result turn boundary — so an interject
-                    # during a nudge stall rides into the next model call instead of
-                    # waiting an extra turn. No tool call means no subagent — S4 holds.
-                    deliver_interject(invocation.coordinator, messages, transcript,
-                                      elog, aid)
-                    continue
-                yield {"type": "error", "payload": {
-                    "category": "agent_output_missing",
-                    "kind": "no_complete_step",
-                    "message": "agent finished without calling complete_step",
-                    "detail": {"last_agent_text": last_text[:500]},
-                }}
-                return
-
-            tool_results: list[ToolResultBlock] = []
-            turn = TurnState(tool_calls_used=tool_calls_used)
-            # §1: ALL `task` tus fan out concurrently as one batch at the first
-            # task position; non-task tus stay strict sequential document-order.
-            # The turn dispatcher yields one tool_heartbeat per processed tu and
-            # any terminal event (yield it and stop); SubagentSuspended /
-            # AwaitingUserInput propagate (terminal — no heartbeat).
-            async for ev in dispatch_turn_tool_uses(
-                    ctx=ctx, elog=elog, aid=aid, invocation=invocation,
-                    tools=tools, tool_uses=tool_uses, tool_results=tool_results,
-                    state=turn, guard=guard, ceiling=ceiling):
-                yield ev
-                if ev.get("type") != "tool_heartbeat":
-                    return  # terminal event already yielded; stop the loop
-            tool_calls_used = turn.tool_calls_used
-            ceiling_tripped = turn.ceiling_tripped
-
-            user_msg = Message(role="user", content=tuple(tool_results))
-            messages.append(user_msg)
-            transcript.append(user_msg)
-
-            if ceiling_tripped:
-                yield {"type": "error", "payload": {
-                    "category": "config",
-                    "kind": "tool_call_ceiling_exceeded",
-                    "ceiling": ceiling,
-                }}
-                return
-
-            by_id = {tu.id: tu for tu in tool_uses}
-            if not turn.nudged:
-                # A nudged turn was already observed once by
-                # validate_output_or_nudge; observing again here would
-                # double-count the malformed turn.
-                record = TurnRecord(
-                    assistant_text="".join(
-                        b.text for b in assistant_msg.content if isinstance(b, TextBlock)),
-                    tools=[
-                        ToolOutcome(
-                            name=by_id[b.tool_use_id].name if b.tool_use_id in by_id else "",
-                            tool_use_id=b.tool_use_id,
-                            input=by_id[b.tool_use_id].input if b.tool_use_id in by_id else {},
-                            is_error=b.is_error,
-                            result_preview=_result_preview(b.content))
-                        for b in tool_results
-                    ],
-                    has_complete_step=False)
-                loop_err = guard.observe(record)
-                if loop_err is not None:
-                    yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
-                    return
-
-            if handoff_phase == "instruction_sent":
-                # Provider persists the agent's final reply text to the note,
-                # then signals the handoff; the engine reincarnates seeded from it.
-                write_handoff_note(handoff_path, most_recent_assistant_text(messages))
-                yield {"type": "handoff",
-                       "payload": {"handoff_path": str(handoff_path)}}
-                return
-            if crossed_now:
-                # Approaching the window: inject the agent-authored handoff
-                # instruction as the next user turn (the same user-message append
-                # interjects use), then capture the note on the following turn.
-                instr = handoff_instruction(handoff_path)
-                hmsg = Message(role="user", content=(TextBlock(text=instr),))
-                messages.append(hmsg)
-                transcript.append(hmsg)
-                elog.append_engine_message(agent_id=aid, message=hmsg, subtype="continuation")
-                handoff_phase = "instruction_sent"
-                continue
-
-            # Turn boundary: this turn's tool_results are appended to
-            # messages/transcript; deliver any queued human interject as a user
-            # message before looping into the next model call. Reached only after
-            # every tool (including an awaited `task` dispatch) has resolved, so a
-            # subagent is never mid-dispatch here — guarantees S4.
-            deliver_interject(invocation.coordinator, messages, transcript, elog, aid)
-
-        # cancelled (interrupt)
-        yield {"type": "error", "payload": {
-            "category": "config",
-            "kind": "interrupted",
-            "message": "runner cancelled by interrupt",
-        }}
 
     async def interrupt(self) -> None:
         from imp.agents.tools.bg import terminate_background_processes
@@ -961,6 +511,171 @@ class AnthropicAgentRunner:
             # resistance); the persisted tombstones give the resumed agent an
             # explanation. Idempotent vs the run() finally (both fire on pause).
             await terminate_background_processes(self._ctx)
+
+
+class AnthropicSession(PushSession):
+    async def open(self) -> None:
+        minfo = model_info(ANTHROPIC, self.runner.model)
+        self._max_output_tokens = minfo.max_output_tokens
+        # The wire model id: catalog aliases like "claude-opus-4-8[1m]" carry a
+        # cli_model that strips the bracket (the raw API rejects that form).
+        self._wire_model = minfo.cli_model or self.runner.model
+        self._web_specs = anthropic_web_tool_specs(self.invocation.agent_def)
+        self._web_headers = anthropic_beta_headers(self.invocation.agent_def)
+        # Catalog beta opt-ins (e.g. context-1m) join any web-tool beta header.
+        if minfo.betas:
+            prior = self._web_headers.get("anthropic-beta")
+            joined = ",".join(minfo.betas)
+            self._web_headers["anthropic-beta"] = (
+                f"{prior},{joined}" if prior else joined)
+        # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
+        # None until the threshold crosses, then "instruction_sent" for the one
+        # handoff-writing turn that follows.
+        self._handoff_phase: str | None = None
+        self._handoff_path = handoff_path_for(self.invocation.transcript_dir)
+        self._crossed_now = False
+        await super().open()
+
+    def _build_tools(self) -> dict[str, Any]:
+        return _build_tools(self.invocation)
+
+    def _api_tool_schemas(self) -> list[Any]:
+        return [_anthropic_tool_schema(t) for t in self.tools.values()]
+
+    def _web_tool_specs(self) -> list[Any]:
+        return list(self._web_specs)
+
+    def _step_context_model(self) -> str:
+        return cast(str, self.runner.model)
+
+    def _step_context_params(self) -> dict[str, Any]:
+        return {"max_tokens": self._max_output_tokens}
+
+    async def _complete(self, messages: list[Message], api_tools: list[Any]) -> Any:
+        client = self.runner._get_client()
+        create_kwargs: dict[str, Any] = dict(
+            model=self._wire_model,
+            system=self.invocation.system_prompt,
+            tools=api_tools,
+            messages=[_message_to_anthropic(m) for m in messages],
+            max_tokens=self._max_output_tokens,
+            cache_control={"type": "ephemeral"},
+            # §4: explicitly PERMIT parallel tool calls per assistant message
+            # so multiple `task` tus can arrive in one turn. Unconditional and
+            # safe — every in-process request carries tools (complete_step is
+            # injected at :158), and Anthropic rejects tool_choice only on a
+            # tools-less request, which has no in-process path. A future forced
+            # tool_choice must compose disable_parallel_tool_use deliberately.
+            tool_choice={"type": "auto", "disable_parallel_tool_use": False},
+        )
+        create_kwargs.update(_anthropic_thinking_posture(self.invocation.tier))
+        if self._web_headers:
+            create_kwargs["extra_headers"] = self._web_headers
+        # N4 race note: if interrupt() lands AFTER cancelled() passes but BEFORE
+        # this assignment, this one turn's request isn't cancelled — the loop
+        # simply exits on the next iteration via _cancel. Worst case is one extra
+        # in-flight request; cancellation is not instantaneous, by design.
+        t0 = time.perf_counter()
+        self.runner._cancel_scope = anyio.CancelScope()
+        response = None
+        request_id: str | None = None
+        try:
+            with self.runner._cancel_scope:
+                async with client.messages.stream(**create_kwargs) as stream:
+                    async for _event in request_bracketed(
+                            self.invocation.coordinator, stream):
+                        if self.invocation.coordinator is not None:
+                            self.invocation.coordinator.note_activity()
+                    response = await stream.get_final_message()
+                    # Streaming final messages carry no _request_id; the public
+                    # stream.request_id reads the `request-id` header.
+                    request_id = stream.request_id
+        finally:
+            # N3: reset even when the request raises a genuine API error, so a
+            # later interrupt() never calls .cancel() on a stale exited scope.
+            self.runner._cancel_scope = None
+        if response is None:
+            return None
+        return _serialize_anthropic_response(response), request_id, t0
+
+    def _parse(self, raw: dict[str, Any]) -> Message:
+        return _parse_anthropic_message(raw)
+
+    def _diagnostics(self, raw: dict[str, Any]) -> Any:
+        return _extract_anthropic_diagnostics(raw)
+
+    def _stop_reason(self, raw: dict[str, Any]) -> str | None:
+        return raw.get("stop_reason")
+
+    def _emit_web_events(self, raw: dict[str, Any]) -> None:
+        _emit_anthropic_web_events(raw, self.elog, self.aid)
+
+    def _classify_exception(self, exc: BaseException) -> Any:
+        return _classify_anthropic_exception(exc)
+
+    def _on_agent_message(self, raw: dict[str, Any], usage: dict[str, Any]) -> None:
+        if raw.get("stop_reason") == "max_tokens":
+            details = usage.get("output_tokens_details") or {}
+            model_name = raw.get("model") or self.runner.model
+            thinking_tokens = details.get("thinking_tokens")
+            self.elog.append(agent_id=self.aid, type="max_tokens_truncated", payload={
+                "tier": self.invocation.tier,
+                "model": model_name,
+                "max_tokens": self._max_output_tokens,
+                "output_tokens": usage.get("output_tokens"),
+                "thinking_tokens": thinking_tokens,
+            })
+            _thinking_note = (
+                "; thinking may be incomplete" if thinking_tokens is not None else ""
+            )
+            self.elog.append(agent_id=self.aid, type="runner_warning", payload={
+                "message": (
+                    f"Response truncated at the {self._max_output_tokens}-token "
+                    f"output cap (stop_reason=max_tokens, tier="
+                    f"{self.invocation.tier}){_thinking_note}. No "
+                    f"retry — raise max_tokens if this recurs."
+                ),
+            })
+
+    def _note_turn(self, raw: dict[str, Any]) -> None:
+        # Tier A watch: compare this turn's occupancy to the checkpoint
+        # threshold (only before a handoff is already in flight).
+        self._crossed_now = (
+            self._handoff_phase is None
+            and self.invocation.checkpoint_threshold is not None
+            and context_threshold_crossed(
+                raw.get("usage"), self.runner.model,
+                self.invocation.checkpoint_threshold))
+
+    def handoff_before_nudge(self, last_text: str) -> str | None:
+        if self._handoff_phase == "instruction_sent":
+            # The handoff-writing turn ended without a tool: signal the captured
+            # handoff and stop (the engine reincarnates).
+            write_handoff_note(
+                self._handoff_path, most_recent_assistant_text(self.messages))
+            return str(self._handoff_path)
+        return None
+
+    def handoff_after_tools(self) -> tuple[str, str | None]:
+        if self._handoff_phase == "instruction_sent":
+            # Provider persists the agent's final reply text to the note, then
+            # signals the handoff; the engine reincarnates seeded from it.
+            write_handoff_note(
+                self._handoff_path, most_recent_assistant_text(self.messages))
+            return ("handoff", str(self._handoff_path))
+        if self._crossed_now:
+            # Approaching the window: inject the agent-authored handoff
+            # instruction as the next user turn (the same user-message append
+            # interjects use), then capture the note on the following turn.
+            instr = handoff_instruction(self._handoff_path)
+            hmsg = Message(role="user", content=(TextBlock(text=instr),))
+            self.messages.append(hmsg)
+            self.transcript.append(hmsg)
+            self.elog.append_engine_message(
+                agent_id=self.aid, message=hmsg, subtype="continuation")
+            self._handoff_phase = "instruction_sent"
+            return ("injected", None)
+        return ("none", None)
 
 
 class AnthropicProvider:

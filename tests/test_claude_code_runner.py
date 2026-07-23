@@ -122,7 +122,8 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
 
     # After the flip: runners yield ONLY agent_result/error
     kinds = [e["type"] for e in events]
-    assert kinds == ["agent_result"], f"expected only agent_result, got {kinds}"
+    assert [k for k in kinds if k != "tool_heartbeat"] == ["agent_result"], (
+        f"expected only agent_result, got {kinds}")
     assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
 
     # Audit trail is in the event log
@@ -629,7 +630,8 @@ async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
     # After the flip: thinking is in the log, not yielded
     kinds = [e["type"] for e in events]
     assert "thinking" not in kinds, f"thinking should be in log, not yielded: {kinds}"
-    assert kinds == ["agent_result"], f"expected only agent_result, got {kinds}"
+    assert [k for k in kinds if k != "tool_heartbeat"] == ["agent_result"], (
+        f"expected only agent_result, got {kinds}")
 
     log_events = list(log.read())
     log_types = [e["type"] for e in log_events]
@@ -2888,7 +2890,8 @@ async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
         model_name="claude-opus-4-8[1m]", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
-    assert [e["type"] for e in events] == ["agent_result"]
+    assert [e["type"] for e in events if e["type"] != "tool_heartbeat"] == [
+        "agent_result"]
     resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert "context_window" not in resp["payload"]
     assert "context_pct" not in resp["payload"]
@@ -4076,7 +4079,8 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
         model_name="claude-sonnet-4-5", client_factory=factory)
     yielded = [ev async for ev in runner.run(inv)]
 
-    assert [e["type"] for e in yielded] == ["agent_result"]
+    assert [e["type"] for e in yielded if e["type"] != "tool_heartbeat"] == [
+        "agent_result"]
     assert yielded[-1]["payload"] == {"text": "the conclusion"}
     # Short-circuited before any SDK client / native-resume session was built.
     assert created == []
@@ -4826,8 +4830,10 @@ async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
 
 
 @pytest.mark.anyio
-async def test_cc_run_aclose_cascades_to_run_loop(tmp_path: Path) -> None:
-    """Closing run() mid-stream must synchronously close the inner _run_loop
+async def test_cc_run_aclose_cascades_to_run_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closing run() mid-stream must synchronously close the inner run_agent_loop
     generator (contextlib.aclosing), not abandon it to GC finalization."""
     closed: list[bool] = []
 
@@ -4839,7 +4845,8 @@ async def test_cc_run_aclose_cascades_to_run_loop(tmp_path: Path) -> None:
             closed.append(True)
 
     runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
-    runner._run_loop = _fake_loop  # type: ignore[assignment]  # test seam: bypass SDK client setup
+    monkeypatch.setattr("imp.providers.claude_code.run_agent_loop",
+                        lambda invocation, session: _fake_loop(invocation))
 
     gen = runner.run(_inv(tmp_path))
     first = await gen.__anext__()

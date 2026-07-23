@@ -30,20 +30,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import inspect
 import json
-import re
 import shutil
 import signal
 import time
 import uuid
-import zoneinfo
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from imp.agents.agent_loop import run_agent_loop
 from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
 from imp.agents.loop_guard import (
     LoopGuard,
@@ -51,13 +48,7 @@ from imp.agents.loop_guard import (
     TurnRecord,
     _result_preview,
 )
-from imp.agents.output_guard import (
-    Nudge,
-    Ok,
-    make_nudge_event,
-    make_recovery_event,
-    validate_output_or_nudge,
-)
+from imp.agents.loop_items import EndOfTurn, Error, Thinking, Warning
 from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import (
     AgentInvocation,
@@ -115,7 +106,6 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
-    _USAGE_LIMIT_RE,
     reconcile_store_tail,
     resume_session_id,
     session_key,
@@ -125,6 +115,8 @@ from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
 )
+from imp.providers.observe_classify import _classify_agent_text
+from imp.providers.observe_session import ObserveSession
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     CC_WEB_BUILTIN_TO_NORM,
@@ -135,188 +127,6 @@ from imp.providers.web_native import (
 
 if TYPE_CHECKING:
     from claude_agent_sdk import EffortLevel, ThinkingConfig
-
-_AUTH_PATTERNS = (
-    "Invalid API key",
-    "Please run `/login`",
-    "Please run /login",
-    "Invalid authentication credentials",
-    "Failed to authenticate",
-)
-
-_QUOTA_PATTERNS = (
-    "You have reached your usage limit",
-    "Credit balance is too low",
-)
-
-# Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
-# the underlying Anthropic API returns a non-2xx. 401/403 → AuthError; 408 and
-# 5xx → NetworkError; 429 → RateLimitError; other 4xx → ApiError (Pause);
-# previously the 5xx case fell through to None and was treated as agent text →
-# wrong nudge loop.
-_API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
-
-# Matches the CLI usage-limit reset announcement in two shapes:
-#   bare-time (session):  "resets 4am (America/Los_Angeles)", "resets 16:00 (...)"
-#   dated (weekly):       "resets Jul 16, 8pm (America/Los_Angeles)"
-# The optional leading "<Mon> <DD>," group (present only on the weekly form)
-# selects the dated branch in _reset_hint_seconds.
-_RESET_RE = re.compile(
-    r"resets\s+(?:([A-Za-z]{3})\s+(\d{1,2}),\s+)?"
-    r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(([^)]+)\)",
-    re.IGNORECASE,
-)
-_MONTH_ABBR = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-}
-_RESET_MARGIN_SECONDS = 120.0
-_MAX_RESET_WAIT_SECONDS = 6 * 3600.0
-_MAX_WEEKLY_WAIT_SECONDS = 8 * 24 * 3600.0
-
-
-def _reset_hint_seconds(text: str, now: float) -> float | None:
-    """Seconds to wait until the announced usage-limit reset, + a 2-minute
-    margin, or None. `now` is epoch seconds, injected for testability.
-
-    Two shapes, keyed off whether the match carries a date:
-      - Bare-time (session): today-or-tomorrow, distrusted beyond 6 h
-        (session windows are 5 h, so a larger figure means a bad parse).
-      - Dated (weekly): the explicit month/day + time in the stated zone,
-        this year and rolled forward a year if already past; distrusted
-        beyond 8 days.
-    Returns None on any parse failure, an unknown month or zone, an
-    out-of-range time, a still-past target, or an over-ceiling wait.
-    None means exactly today's fall-back backoff behavior.
-    """
-    m = _RESET_RE.search(text)
-    if m is None:
-        return None
-    month_s, day_s, hour_s, minute_s, ampm, zone_name = m.groups()
-    try:
-        tz = zoneinfo.ZoneInfo(zone_name)
-    except (KeyError, ValueError):
-        # ZoneInfoNotFoundError subclasses KeyError; a malformed name -> ValueError.
-        return None
-    hour = int(hour_s)
-    minute = int(minute_s) if minute_s else 0
-    if ampm:
-        if not 1 <= hour <= 12:
-            return None
-        if ampm.lower() == "pm" and hour != 12:
-            hour += 12
-        elif ampm.lower() == "am" and hour == 12:
-            hour = 0
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return None
-    now_local = datetime.fromtimestamp(now, tz=tz)
-    if month_s is not None:
-        month = _MONTH_ABBR.get(month_s.lower())
-        if month is None:
-            return None
-        try:
-            target = now_local.replace(
-                month=month, day=int(day_s), hour=hour, minute=minute,
-                second=0, microsecond=0)
-            if target <= now_local:
-                target = target.replace(year=target.year + 1)
-        except ValueError:
-            # An impossible day for the month (e.g. "Feb 30") or a Feb-29
-            # roll into a non-leap year.
-            return None
-        if target <= now_local:
-            return None
-        ceiling = _MAX_WEEKLY_WAIT_SECONDS
-    else:
-        target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now_local:
-            target += timedelta(days=1)
-        ceiling = _MAX_RESET_WAIT_SECONDS
-    delta = target.timestamp() - now
-    if delta > ceiling:
-        return None
-    return delta + _RESET_MARGIN_SECONDS
-
-
-def _rate_limit_with_reset_hint(text: str) -> perr.RateLimitError:
-    """Build the usage-limit RateLimitError, attaching the parsed reset time as
-    detail={"retry_after_seconds": <hint>} when one is available. The key is
-    disjoint from every diagnostic key _termination_from_result later merges via
-    labeled.detail.update(...), so a hint set here survives that merge."""
-    hint = _reset_hint_seconds(text, time.time())
-    detail: dict[str, object] | None = (
-        {"retry_after_seconds": hint} if hint is not None else None
-    )
-    return perr.RateLimitError(f"claude CLI: {text[:200]}", detail=detail)
-
-
-def _classify_agent_text(
-    text: str, *, anchored: bool = True,
-) -> perr.ProviderError | None:
-    """Detect known claude CLI terminal-error patterns in agent text.
-
-    The CLI catches its own errors and returns them as a text response
-    with exit 0 (no out-of-band signal). Exact-substring patterns,
-    conservatively chosen: false negatives fall back to existing
-    retry behavior; false positives would convert recoverable agent
-    confusion into fatal pause.
-
-    When `anchored` (the default), patterns must match within the first line
-    of the text: every known genuine CLI error is a terse message that leads
-    with the error, while an agent that merely *quotes* a pattern buries it
-    mid-document behind a prose opener (the redu99 false positive — a
-    subagent report about _AUTH_PATTERNS was reclassified as AuthError, its
-    successful turn rolled back, and the retry returned an empty stub).
-    Callers that already hold an out-of-band error signal
-    (_termination_from_result) pass anchored=False: there the substring only
-    picks the error category, and a miss degrades to TerminatedError, not a
-    false pause.
-
-    Auth/quota patterns are checked first so they win when both substrings
-    appear. The API-error regex matches "API Error: <code>":
-    401/403 → AuthError with kind="http_<code>"; 408 → NetworkError (transient
-    timeout); 429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
-    5xx → NetworkError (network category → RetryWithBackoff; §10).
-    """
-    scan = text.lstrip().split("\n", 1)[0] if anchored else text
-    for pat in _AUTH_PATTERNS:
-        if pat in scan:
-            return perr.AuthError(f"claude CLI: {pat}")
-    for pat in _QUOTA_PATTERNS:
-        if pat in scan:
-            return perr.QuotaError(f"claude CLI: {pat}")
-    if _USAGE_LIMIT_RE.search(scan):
-        return _rate_limit_with_reset_hint(text)
-    m = _API_ERROR_RE.search(scan)
-    if m:
-        code = int(m.group(1))
-        if code == 429:
-            return _rate_limit_with_reset_hint(text)
-        if code in (401, 403):
-            auth_exc = perr.AuthError(f"claude CLI: {text[:200]}")
-            auth_exc.kind = f"http_{code}"  # type: ignore[attr-defined]
-            return auth_exc
-        if code == 408:
-            return perr.NetworkError(f"claude CLI: {text[:200]}")
-        if 400 <= code < 500:
-            exc = perr.ApiError(f"claude CLI: {text[:200]}")
-            # Carried through to make_error_event(kind=...) at the call sites so
-            # the event records kind="http_400" rather than the class name.
-            exc.kind = f"http_{code}"  # type: ignore[attr-defined]
-            return exc
-        if 500 <= code < 600:
-            # §10: 5xx (529 Overloaded et al.) is transient — route to the
-            # `network` category, which maps to RetryWithBackoff (same routing the
-            # SDK providers use for an InternalServerError).
-            return perr.NetworkError(f"claude CLI: {text[:200]}")
-    elif "API Error:" in scan:
-        # A statusless `API Error:` — no routable HTTP code — means the request
-        # never reached the server (ConnectionRefused, reset, EOF, transport
-        # timeout). Broad transport stance: transient -> retry, not pause. A
-        # 3xx/unrouted code that matched the regex above is NOT statusless, so
-        # it falls through to None (Pause) here.
-        return perr.NetworkError(f"claude CLI: {text[:200]}")
-    return None
 
 
 def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object]:
@@ -597,8 +407,7 @@ def _cc_thinking_posture(
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     """Same filtering as anthropic._build_tools, including the bash ->
-    bash_output/bash_kill injection; kept in lockstep for parity (codex
-    reuses this builder verbatim)."""
+    bash_output/bash_kill injection."""
     reg = get_registry()
     out: dict[str, Tool] = {}
     check_web_capability(invocation.provider_name, invocation.agent_def)
@@ -1281,6 +1090,747 @@ async def _context_usage_fields(client: Any) -> dict[str, Any]:
     }
 
 
+_NO_RESULT_SENTINEL = object()
+
+
+class ClaudeCodeSession(ObserveSession):
+    """The observe `Session` claude_code's `run()` drives via `run_agent_loop`.
+
+    Each hook body is a relocated region of the old `_run_loop`, delegating to
+    the surviving module-level helpers. `_enter` builds ctx/tools/client/state and
+    the fresh-vs-resume disposition; `_receive` owns the query/receive_response
+    loop plus the mid-turn steer/handoff/complete cooperative-interrupt machinery;
+    `_message_to_items`/`_is_terminal` shape the per-message appends, the
+    complete_step capture, and the ResultMessage terminal decision. The terminal
+    outcome (validate / nudge / ceiling / subagent / continuation) is owned by the
+    shared driver.
+    """
+
+    # complete_step is captured race-free by the MCP wrapper into runner._state.
+    @property
+    def _complete_step_called(self) -> bool:
+        st = self.runner._state
+        return bool(st and st.complete_step_called)
+
+    @property
+    def _complete_step_args(self) -> dict[str, Any]:
+        st = self.runner._state
+        return st.complete_step_args if st is not None else {}
+
+    async def _enter(self) -> None:
+        invocation = self.invocation
+        runner = self.runner
+        from imp.engine.state import JsonlEventLog
+        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
+        aid = invocation.agent_id or "step:unnamed"
+        self.elog = elog
+        self.aid = aid
+        self.subagent_depth = invocation.subagent_depth
+        from imp.providers.stderr_sink import build_stderr_sink
+        runner._stderr_sink = build_stderr_sink(
+            invocation.transcript_dir / "stderr.log",
+            elog=elog, aid=aid, source="claude")
+
+        transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
+        self.transcript = transcript
+        tools = _build_tools(invocation)
+        self.tools = tools
+        ctx = ToolContext(
+            project_root=invocation.quest_context.project_root,
+            events_path=invocation.events_path,
+            subagent_defs=invocation.subagent_defs,
+            provider_name=invocation.provider_name,
+            model_name=invocation.model_name,
+            parent_transcript_dir=invocation.transcript_dir,
+            agent_id=aid,
+            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
+        )
+        ctx.quest_context = invocation.quest_context
+        ctx.quest_state = invocation.quest_state
+        ctx.quest = invocation.quest          # live quest for rename_quest
+        ctx.spawn_subagent = spawn_subagent_via_registry
+        ctx.resolved_tiers = invocation.resolved_tiers
+        ctx.subagent_depth = invocation.subagent_depth
+        ctx.coordinator = invocation.coordinator
+        ctx.tiers = invocation.tiers
+        ctx.test_gates = invocation.test_gates
+        ctx.pythonpath = invocation.pythonpath
+        ctx.non_interactive = invocation.headless
+        ctx.base_sandbox_policy = invocation.sandbox_policy
+        ctx.checkpoint_threshold = invocation.checkpoint_threshold
+        ctx.event_log = elog
+        if runner._user_input_fn is not None:
+            ctx.user_input_fn = runner._user_input_fn
+        self.ctx = ctx
+        runner._ctx = ctx
+
+        state = _RunState()
+        state.agent_id = aid
+        state.runner_loop = asyncio.get_running_loop()
+        runner._state = state
+        sdk_tools = _make_sdk_tools(tools, ctx, state)
+
+        try:
+            from claude_agent_sdk import create_sdk_mcp_server
+            mcp_server = create_sdk_mcp_server(name="imp", tools=sdk_tools)
+        except ImportError:
+            mcp_server = None   # fakes don't need a server
+
+        impty_server = None
+        if mcp_server is not None and "impty" in invocation.agent_def.drivers:
+            from impty.driver import ImptyDriver
+            runner._impty_driver = ImptyDriver()
+            impty_tools = await _make_impty_sdk_tools(runner._impty_driver)
+            impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
+
+        existing = transcript.load(
+            ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
+        is_fresh = not existing
+        # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
+        # no complete_step): re-emit the final text as the deliverable rather than
+        # native-resuming or soliciting the human (AWAITING_USER).
+        if (invocation.subagent_depth > 0 and not is_fresh
+                and classify_resume(existing) is ResumeState.AWAITING_USER):
+            self.messages = existing
+            self.ceiling = invocation.max_tool_calls
+            self.guard = LoopGuard(interactive=invocation.interactive)
+            self._pending_terminal = EndOfTurn(
+                last_text=last_assistant_text(existing))
+            return
+        store = session_store_for(invocation.transcript_dir)
+        skey = session_key(invocation.quest_context.project_root, aid)
+        store_body = await store.load(skey)
+        shape_native_eligible = (
+            (not is_fresh)
+            and classify_resume(existing) in (
+                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
+                ResumeState.DANGLING_TOOL_USE, ResumeState.STEP_COMPLETED)
+        )
+        resume_base = len(existing)
+        if (shape_native_eligible
+                and classify_resume(existing) is ResumeState.SEND_TO_LLM):
+            while (resume_base > 0
+                   and existing[resume_base - 1].role == "user"
+                   and not _contains_tool_result(existing[resume_base - 1])):
+                resume_base -= 1
+        fresh_stream = shape_native_eligible and resume_base == 0
+        native_resume = shape_native_eligible
+        _pre_spawn_token_refresh(elog, aid)
+        config_dir: Path | None = None
+        if is_fresh or fresh_stream:
+            config_dir = materialize_fresh_config_dir()
+            runner._config_dir = config_dir
+            opt_store, opt_session_id, opt_resume = (
+                store, resume_session_id(aid), None)
+        elif native_resume:
+            opt_store, opt_session_id, opt_resume = (
+                store, None, resume_session_id(aid))
+        if mcp_server is not None:
+            opts = self.runner._build_options(
+                invocation, mcp_server, list(tools), impty_server=impty_server,
+                session_store=opt_store, session_id=opt_session_id,
+                resume=opt_resume, config_dir=config_dir)
+        else:
+            opts = None
+
+        if existing:
+            messages = existing
+            self.tool_calls_used = 0  # per-invocation; never inherit history
+            tail_is_complete_step = _tail_has_complete_step(existing)
+            tail_step_completed = (
+                classify_resume(existing) is ResumeState.STEP_COMPLETED)
+            if tail_is_complete_step and invocation.retry_feedback:
+                synth = repair_dangling_tool_use_on_resume(
+                    messages, transcript, feedback=invocation.retry_feedback,
+                    captured=_load_captured_tool_results(invocation.transcript_dir))
+                if synth is not None:
+                    for rb in synth:
+                        elog.append_tool_result(agent_id=aid, block=rb)
+            elif tail_is_complete_step:
+                injected = synthesize_native_success_on_resume(
+                    messages, transcript, elog, aid)
+                if injected is not None:
+                    resume_base += 1
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+            elif tail_step_completed and invocation.retry_feedback:
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
+            elif tail_step_completed:
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
+                synth = repair_dangling_tool_use_on_resume(
+                    messages, transcript,
+                    captured=_load_captured_tool_results(invocation.transcript_dir))
+                if synth is not None:
+                    for rb in synth:
+                        elog.append_tool_result(agent_id=aid, block=rb)
+            elif (invocation.retry_feedback
+                    and classify_resume(existing) is not ResumeState.AWAITING_USER):
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
+            resume_state = classify_resume(messages)
+            if resume_state is ResumeState.AWAITING_USER:
+                if ctx.user_input_fn is None:
+                    self.messages = messages
+                    self.ceiling = invocation.max_tool_calls
+                    self.guard = LoopGuard(interactive=invocation.interactive)
+                    self._pending_terminal = Error(payload={
+                        "category": "config",
+                        "kind": "no_user_input_fn",
+                        "message": (
+                            "AWAITING_USER resume requires user_input_fn; "
+                            "none installed by runner"
+                        ),
+                    })
+                    return
+                reply, source = await _resolve_wait_reply(
+                    invocation.coordinator, ctx.user_input_fn,
+                    invocation.resume_should_continue,
+                    elog=elog, agent_id=aid,
+                    last_agent_message=last_assistant_text(messages),
+                    halt_writer=invocation.halt_writer,
+                    halt_clearer=invocation.halt_clearer)
+                if source == "nudge":
+                    assert isinstance(reply, str)
+                    deliver_engine_continuation(
+                        messages, transcript, elog, aid, reply)
+                else:
+                    deliver_continuation_reply(
+                        messages, transcript, elog, aid, reply, human=True)
+                # Fall through (do NOT return): the reply drives the next LLM turn.
+            drained = 0
+            if resume_state is not ResumeState.AWAITING_USER:
+                drained = drain_all_interjects_at_resume(
+                    invocation.coordinator, messages, transcript, elog, aid)
+            pending_human_tail = (
+                messages[-1].role == "user"
+                and not _contains_tool_result(messages[-1])
+            )
+            if (resume_state is not ResumeState.AWAITING_USER
+                    and invocation.resume_should_continue and drained == 0
+                    and not pending_human_tail):
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid,
+                    _CONTINUATION_NUDGE)
+            if len(messages) == resume_base:
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, _CONTINUATION_NUDGE)
+        else:
+            messages = []
+            for m in invocation.initial_messages:
+                messages.append(m)
+                transcript.append(m)
+            self.tool_calls_used = 0
+            elog.append_step_context(
+                agent_id=aid, parent_id_override=invocation.first_event_parent_id,
+                provider=invocation.provider_name, model=runner.model,
+                tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
+                params={"env.CLAUDE_CONFIG_DIR": str(config_dir)},
+                max_tool_calls=invocation.max_tool_calls)
+            elog.append_engine_message(
+                agent_id=aid,
+                message=Message(role="system",
+                                content=(TextBlock(text=invocation.system_prompt),)),
+                subtype="system_prompt")
+            for m in invocation.initial_messages:
+                if all(isinstance(b, TextBlock) for b in m.content):
+                    elog.append_engine_message(
+                        agent_id=aid, message=m, subtype="agent_prompt")
+
+        self.messages = messages
+        self.ceiling = invocation.max_tool_calls  # may be None (no cap)
+        self.guard = LoopGuard(interactive=invocation.interactive)
+
+        # Loop-guard turn accumulators (Fix H): one logical turn arrives as many
+        # AssistantMessage fragments; accumulate and flush ONCE at ResultMessage.
+        self._pending_text = ""
+        self._pending_tools: dict[str, ToolOutcome] = {}
+        self._pending_complete = False
+        self._web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
+
+        if native_resume:
+            reconciled = reconcile_store_tail(
+                messages[:resume_base], store_body or [],
+                session_id=skey["session_id"],
+                cwd=str(invocation.quest_context.project_root),
+                model=runner.model,
+            )
+            await store.overwrite(skey, reconciled)
+
+        self._llm_group_open = False
+        self._llm_group_key: str | None = None
+        self._llm_blocks: list[dict[str, Any]] = []
+        self._llm_model: str | None = None
+        self._llm_stop_reason: Any = None
+        self._llm_usage: dict[str, Any] = {}
+        self._stream_usage_by_msg: dict[str, tuple[dict[str, Any], Any]] = {}
+        self._stream_cur_msg_id: str | None = None
+        self._stream_cur_usage: dict[str, Any] = {}
+        self._stream_cur_stop_reason: Any = None
+        self._flush_lock = asyncio.Lock()
+        state.flush_llm_group = self._flush_llm_group
+
+        client_ctx = self.runner._build_client(opts)
+        client = await client_ctx.__aenter__()
+        runner._client = client
+        self.runner._client_ctx = client_ctx
+        self._next_query: Any = _stream_history(messages[resume_base:])
+        self._last_raw: Any = None
+        from imp.engine.reincarnation import handoff_path_for
+        self._handoff_phase: str | None = None
+        self._handoff_path_obj = handoff_path_for(invocation.transcript_dir)
+
+    def _flush_turn_record(self) -> TurnRecord | None:
+        if (not self._pending_text and not self._pending_tools
+                and not self._pending_complete):
+            return None
+        rec = TurnRecord(assistant_text=self._pending_text,
+                         tools=list(self._pending_tools.values()),
+                         has_complete_step=self._pending_complete)
+        self._pending_text = ""
+        self._pending_tools = {}
+        self._pending_complete = False
+        return rec
+
+    async def _flush_llm_group(self, backstop_stop_reason: Any = None) -> None:
+        # Serialize every flush on one per-run lock (see the old closure): the
+        # eager sub_agent flush in _impl blocks here until the in-flight prose
+        # emit completes, then sees the group closed and no-ops.
+        async with self._flush_lock:
+            if not self._llm_group_open:
+                return
+            client = self.runner._client
+            cu_fields = await _context_usage_fields(client)
+            harvested = (self._stream_usage_by_msg.pop(self._llm_group_key, None)
+                         if self._llm_group_key is not None else None)
+            if harvested is not None:
+                usage, harvested_stop = harvested
+                stop = harvested_stop if harvested_stop is not None else (
+                    self._llm_stop_reason if self._llm_stop_reason is not None
+                    else backstop_stop_reason)
+            else:
+                usage = self._llm_usage
+                stop = self._llm_stop_reason if self._llm_stop_reason is not None \
+                    else backstop_stop_reason
+            self.elog.append_agent_message(
+                agent_id=self.aid, provider=self.invocation.provider_name,
+                model=self._llm_model or self.runner.model,
+                raw={"content": self._llm_blocks, "stop_reason": stop,
+                     "usage": usage},
+                usage=usage, stop_reason=stop,
+                message_id=self._llm_group_key,
+                context_window=cu_fields.get("context_window"),
+                context_pct=cu_fields.get("context_pct"),
+                context_tokens=cu_fields.get("context_tokens"))
+            self._llm_group_open = False
+            self._llm_group_key = None
+            self._llm_blocks = []
+            self._llm_model = None
+            self._llm_stop_reason = None
+            self._llm_usage = {}
+
+    async def _receive(self) -> Any:
+        coord = self.invocation.coordinator
+        client = self.runner._client
+        while True:
+            await client.query(self._next_query)
+            requery = False
+            got_result = False
+            async with contextlib.aclosing(request_bracketed(
+                    coord, client.receive_response())) as _stream:
+                async for sdk_msg in _stream:
+                    if self.runner._cancel:
+                        return
+                    if coord is not None:
+                        coord.note_activity()
+                    # Post-API-site analog (Decision 10): one sweep per SDK
+                    # message; the model-API/CLI latency between messages is the
+                    # longest registry-blind gap under this provider.
+                    await _bg._sweep_bg(self.ctx)
+                    yield sdk_msg
+                    if type(sdk_msg).__name__ == "ResultMessage":
+                        got_result = True
+                        if self._requery_pending:
+                            self._requery_pending = False
+                            requery = True
+                        break
+            if requery:
+                continue
+            if got_result:
+                return
+            # receive_response() exhausted without a ResultMessage.
+            if self.runner._cancel:
+                return
+            self.runner._last_no_result_diag = {
+                **_subprocess_diag(client),
+                "stderr_tail": self.runner._stderr_sink.tail()}
+            yield _NO_RESULT_SENTINEL
+            return
+
+    async def _message_to_items(self, raw: Any) -> Any:
+        if raw is _NO_RESULT_SENTINEL:
+            diag = self.runner._last_no_result_diag
+            message = "SDK closed without yielding a ResultMessage"
+            if diag:
+                message = f"{message} (exit={diag.get('exit')})"
+            yield Error(payload={
+                "category": "network",
+                "kind": "no_result_message",
+                "message": message,
+                "detail": diag,
+            })
+            return
+        elog = self.elog
+        aid = self.aid
+        state = self.runner._state
+        client = self.runner._client
+        invocation = self.invocation
+        cls_name = type(raw).__name__
+        if cls_name == "StreamEvent":
+            ev = getattr(raw, "event", None)
+            ev = ev if isinstance(ev, dict) else {}
+            etype = ev.get("type")
+            if etype == "message_start":
+                start_msg = ev.get("message")
+                start_msg = start_msg if isinstance(start_msg, dict) else {}
+                self._stream_cur_msg_id = start_msg.get("id")
+                u = start_msg.get("usage")
+                self._stream_cur_usage = dict(u) if isinstance(u, dict) else {}
+                self._stream_cur_stop_reason = None
+            elif etype == "message_delta":
+                u = ev.get("usage")
+                if isinstance(u, dict):
+                    self._stream_cur_usage.update(u)
+                delta = ev.get("delta")
+                if isinstance(delta, dict) and delta.get("stop_reason") is not None:
+                    self._stream_cur_stop_reason = delta.get("stop_reason")
+            elif etype == "message_stop":
+                if self._stream_cur_msg_id is not None:
+                    self._stream_usage_by_msg[self._stream_cur_msg_id] = (
+                        self._stream_cur_usage, self._stream_cur_stop_reason)
+                self._stream_cur_msg_id = None
+                self._stream_cur_usage = {}
+                self._stream_cur_stop_reason = None
+        imp_msg, warns, thinkings = _sdk_message_to_imp(raw)
+        for content in thinkings:
+            yield Thinking(text=content)
+        for w in warns:
+            yield Warning(text=w)
+        if imp_msg is not None:
+            self.messages.append(imp_msg)
+            self.transcript.append(imp_msg)
+
+            if imp_msg.role == "assistant":
+                turn_text = "".join(
+                    b.text for b in imp_msg.content
+                    if isinstance(b, TextBlock))
+                if turn_text:
+                    self._pending_text = (
+                        self._pending_text + turn_text if self._pending_text
+                        else turn_text)
+                if cls_name == "AssistantMessage":
+                    mid = getattr(raw, "message_id", None)
+                    if (self._llm_group_open and mid is not None
+                            and self._llm_group_key is not None
+                            and mid != self._llm_group_key):
+                        await self._flush_llm_group()
+                    frag = _serialize_claude_code_message(raw)
+                    if not self._llm_group_open:
+                        self._llm_group_open = True
+                        self._llm_group_key = mid
+                    elif self._llm_group_key is None and mid is not None:
+                        self._llm_group_key = mid
+                    self._llm_blocks.extend(frag["content"])
+                    served = getattr(raw, "model", None)
+                    if served is not None and self._llm_model is None:
+                        self._llm_model = served
+                    if (frag.get("stop_reason") is not None
+                            and self._llm_stop_reason is None):
+                        self._llm_stop_reason = frag["stop_reason"]
+                    if frag.get("usage"):
+                        self._llm_usage = frag["usage"]
+                    # Tier A proactive handoff (Mechanism 3): on the configured
+                    # context-threshold crossing, route through the cooperative-
+                    # interrupt path — signal the running query and let the SDK
+                    # close this turn balanced, then continue with a plain
+                    # handoff-instruction increment (handled in _is_terminal).
+                    if (self._handoff_phase is None
+                            and invocation.checkpoint_threshold is not None):
+                        from imp.providers.catalog import (
+                            sdk_context_threshold_crossed,
+                        )
+                        completing = any(
+                            isinstance(b, ToolUseBlock)
+                            and _canon_tool_name(b.name) == "complete_step"
+                            for b in imp_msg.content)
+                        cu_fields = await _context_usage_fields(client)
+                        if (not completing
+                                and sdk_context_threshold_crossed(
+                                    cu_fields.get("context_tokens"),
+                                    cu_fields.get("context_window"),
+                                    invocation.checkpoint_threshold)):
+                            await self._flush_llm_group()
+                            self.runner._handoff_requested = True
+                            self._handoff_phase = "interrupt_requested"
+                            with contextlib.suppress(Exception):
+                                await client.interrupt()
+                            return
+                    if any(isinstance(b, ToolUseBlock)
+                           for b in imp_msg.content):
+                        await self._flush_llm_group()
+                    for b in imp_msg.content:
+                        if isinstance(b, ToolUseBlock):
+                            if b.name in CC_WEB_BUILTIN_TO_NORM:
+                                norm = CC_WEB_BUILTIN_TO_NORM[b.name]
+                                self._web_calls[b.id] = (norm, b.input)
+                                elog.append_tool_call(
+                                    agent_id=aid,
+                                    block=ToolUseBlock(id=b.id, name=norm,
+                                                       input=b.input))
+                                continue
+                            if _canon_tool_name(b.name) == "complete_step":
+                                state.complete_step_called = True
+                                state.complete_step_args = b.input
+                                # Part A: complete_step is terminal — re-emit the
+                                # result-less tool_call, then preempt the trailing
+                                # turn via interrupt.
+                                if not self.runner._complete_requested:
+                                    elog.append_tool_call(
+                                        agent_id=aid,
+                                        block=ToolUseBlock(
+                                            id=b.id, name="complete_step",
+                                            input=b.input))
+                                    await self._flush_llm_group()
+                                    self.runner._complete_requested = True
+                                    with contextlib.suppress(Exception):
+                                        await client.interrupt()
+                                    continue
+                            if (self.ceiling is not None
+                                    and self.tool_calls_used >= self.ceiling):
+                                ceil_msg = (
+                                    f"tool_call_ceiling_exceeded (ceiling={self.ceiling})"
+                                )
+                                elog.append_tool_result(
+                                    agent_id=aid,
+                                    block=ToolResultBlock(b.id, ceil_msg,
+                                                          is_error=True))
+                                continue
+                            self.tool_calls_used += 1
+                            canon = _canon_tool_name(b.name)
+                            if canon == "complete_step":
+                                self._pending_complete = True
+                            self._pending_tools[b.id] = ToolOutcome(
+                                name=canon, tool_use_id=b.id,
+                                input=b.input, is_error=True)
+                            if canon == "sub_agent":
+                                continue
+                            elog.append_tool_call(
+                                agent_id=aid,
+                                block=ToolUseBlock(id=b.id, name=canon,
+                                                   input=b.input))
+            elif imp_msg.role == "user":
+                await self._flush_llm_group()
+                for b in imp_msg.content:
+                    if isinstance(b, ToolResultBlock):
+                        if b.tool_use_id in self._web_calls:
+                            norm, call_input = self._web_calls[b.tool_use_id]
+                            cites = _parse_cc_web_citations(
+                                norm, call_input, b.content)
+                            elog.append_tool_result(
+                                agent_id=aid, block=b, citations=cites,
+                                duration_ms=state.tool_durations.pop(
+                                    b.tool_use_id, None))
+                            continue
+                        pend = self._pending_tools.get(b.tool_use_id)
+                        is_task = pend is not None and pend.name == "sub_agent"
+                        if not is_task:
+                            elog.append_tool_result(
+                                agent_id=aid, block=b,
+                                duration_ms=state.tool_durations.pop(
+                                    b.tool_use_id, None))
+                        if pend is not None:
+                            pend.is_error = b.is_error
+                            pend.result_preview = \
+                                _result_preview(b.content)
+
+    def _drain_kills(self) -> list[dict[str, Any]]:
+        state = self.runner._state
+        infos: list[dict[str, Any]] = []
+        while state.killed_tool_uses:
+            infos.append(state.killed_tool_uses.pop(0))
+        return infos
+
+    def _fatal_error(self) -> dict[str, Any] | None:
+        state = self.runner._state
+        if state.fatal_tool_error is not None:
+            tool_name, msg = state.fatal_tool_error
+            return {
+                "category": "config",
+                "kind": "fatal_tool_error",
+                "tool": tool_name,
+                "message": msg,
+            }
+        return None
+
+    async def _is_terminal(self, raw: Any) -> bool:
+        if type(raw).__name__ != "ResultMessage":
+            return False
+        self._last_raw = raw
+        elog = self.elog
+        aid = self.aid
+        ctx = self.ctx
+        invocation = self.invocation
+        runner = self.runner
+        await self._flush_llm_group(
+            backstop_stop_reason=getattr(raw, "stop_reason", None))
+        elog.append_query_result(
+            agent_id=aid,
+            total_cost_usd=getattr(raw, "total_cost_usd", None),
+            duration_ms=getattr(raw, "duration_ms", None),
+            duration_api_ms=getattr(raw, "duration_api_ms", None),
+            num_turns=getattr(raw, "num_turns", None),
+            stop_reason=getattr(raw, "stop_reason", None),
+            subtype=getattr(raw, "subtype", None),
+            is_error=bool(getattr(raw, "is_error", False)),
+            usage=getattr(raw, "usage", None) or {},
+            model_usage=getattr(raw, "model_usage", None) or {},
+            api_error_status=getattr(raw, "api_error_status", None),
+            permission_denials=getattr(raw, "permission_denials", None),
+            errors=getattr(raw, "errors", None))
+        subtype = getattr(raw, "subtype", None)
+        if (runner._complete_requested and subtype == "error_during_execution"):
+            # Part A: interrupt landed — fall through to complete_step terminal;
+            # deliberately do NOT balance the tail (the dangling result-less
+            # complete_step stays the persisted tail).
+            runner._complete_requested = False
+            self._flush_turn_record()
+        elif ((runner._steer_requested or runner._handoff_requested)
+                and subtype == "error_during_execution"):
+            if runner._handoff_requested:
+                from imp.engine.reincarnation import handoff_instruction
+                runner._handoff_requested = False
+                self._flush_turn_record()
+                repair_dangling_tool_use_on_resume(
+                    self.messages, self.transcript,
+                    captured=_load_captured_tool_results(invocation.transcript_dir))
+                instr = handoff_instruction(self._handoff_path_obj)
+                instr_msg = Message(
+                    role="user", content=(TextBlock(text=instr),))
+                self.messages.append(instr_msg)
+                self.transcript.append(instr_msg)
+                elog.append_engine_message(
+                    agent_id=aid, message=instr_msg, subtype="continuation")
+                self._next_query = instr
+                self._handoff_phase = "instruction_sent"
+                self._requery_pending = True
+                return False
+            # Cooperative interrupt landed: unblock the waiting interrupt() and
+            # route into the attended inline-yield.
+            runner._steer_unblocked.set()
+            runner._steer_requested = False
+            self._flush_turn_record()
+            from imp.agents.tools.bg import terminate_background_processes
+            from imp.agents.tools.context import terminate_running_processes
+            await terminate_running_processes(ctx)
+            await terminate_background_processes(ctx)
+            last_text = ""
+            for prev in reversed(self.messages):
+                if prev.role == "assistant":
+                    last_text = _text_of(prev)
+                    break
+            steer = build_inline_solicit(
+                user_input_fn=runner._user_input_fn,
+                coordinator=invocation.coordinator,
+                event_log=elog, agent_id=aid,
+                steer_prompt=INTERRUPT_STEER_HINT,
+                interrupt=True,
+                halt_writer=invocation.halt_writer,
+                halt_clearer=invocation.halt_clearer)
+            reply = await steer(last_text)
+            if runner._interrupted():
+                return False
+            if invocation.coordinator is not None:
+                invocation.coordinator.clear_pause()
+            if isinstance(reply, str) and not reply.strip():
+                deliver_engine_continuation(
+                    self.messages, self.transcript, elog, aid,
+                    _CONTINUATION_NUDGE)
+                self._next_query = _CONTINUATION_NUDGE
+            else:
+                self._next_query = deliver_continuation_reply(
+                    self.messages, self.transcript, elog, aid, reply, human=True)
+            self._requery_pending = True
+            return False
+        elif (runner._handoff_requested or runner._steer_requested
+                or runner._complete_requested):
+            if runner._handoff_requested:
+                runner._handoff_requested = False
+                self._handoff_phase = None
+            runner._steer_requested = False
+            runner._complete_requested = False
+
+        if self._handoff_phase == "instruction_sent":
+            # The handoff-writing turn completed: capture the handoff and stop.
+            # Wins over a stray complete_step on this turn.
+            from imp.engine.reincarnation import write_handoff_note
+            write_handoff_note(
+                self._handoff_path_obj,
+                most_recent_assistant_text(self.messages))
+            self._handoff_done = True
+            self._handoff_path = str(self._handoff_path_obj)
+        return True
+
+    def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
+        client = self.runner._client
+        term = _termination_from_result(
+            self._last_raw, last_text,
+            {**_subprocess_diag(client),
+             "stderr_tail": self.runner._stderr_sink.tail()},
+            config_dir=self.runner._config_dir)
+        if term is not None:
+            _roll_back_error_turn(self.messages, self.transcript)
+            return cast(dict[str, Any], perr.make_error_event(
+                term, kind=getattr(term, "kind", ""))["payload"])
+        classified = _classify_agent_text(last_text)
+        if classified is not None:
+            classified.detail["last_agent_text"] = last_text[:500]
+            _roll_back_error_turn(self.messages, self.transcript)
+            return cast(dict[str, Any], perr.make_error_event(
+                classified, kind=getattr(classified, "kind", ""))["payload"])
+        return None
+
+    def _last_text(self) -> str:
+        for prev in reversed(self.messages):
+            if prev.role == "assistant":
+                return _text_of(prev)
+        return ""
+
+    def _requery(self, text: Any, *, human: bool) -> None:
+        self._next_query = deliver_continuation_reply(
+            self.messages, self.transcript, self.elog, self.aid, text,
+            human=human)
+
+    def _drain_interject(self) -> None:
+        interject_msg = _drain_interject_message(
+            self.invocation.coordinator, self.elog, self.aid)
+        if interject_msg is not None:
+            self.messages.append(interject_msg)
+            self.transcript.append(interject_msg)
+            self.elog.append_user_message(
+                agent_id=self.aid, message=interject_msg, subtype="interject")
+            self._next_query = f"{self._next_query}\n\n{_text_of(interject_msg)}"
+
+    def _reset_capture(self) -> None:
+        state = self.runner._state
+        if state is not None:
+            state.complete_step_called = False
+            state.complete_step_args = {}
+        self.runner._complete_requested = False
+
+
 class ClaudeCodeAgentRunner:
     """Drives `claude -p` via claude_agent_sdk.
 
@@ -1309,6 +1859,7 @@ class ClaudeCodeAgentRunner:
         # continues with a plain increment. None outside an active
         # `async with client_ctx`.
         self._client: Any = None
+        self._client_ctx: Any = None
         self._impty_driver: Any = None
         # Per-step capture of the nested `claude` CLI's stderr. Built in
         # _run_loop from invocation.transcript_dir; wired into the SDK via the
@@ -1441,9 +1992,11 @@ class ClaudeCodeAgentRunner:
         return ClaudeSDKClient(opts)
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        session = ClaudeCodeSession(invocation, self)
         try:
             try:
-                async with contextlib.aclosing(self._run_loop(invocation)) as loop:
+                async with contextlib.aclosing(
+                        run_agent_loop(invocation, session)) as loop:
                     async for ev in loop:
                         yield ev
             except perr.ProviderError as exc:
@@ -1484,13 +2037,18 @@ class ClaudeCodeAgentRunner:
                 from imp.agents.tools.bg import terminate_background_processes
                 with contextlib.suppress(Exception):
                     await terminate_background_processes(self._ctx)
-            # The client's own `async with` __aexit__ has run (or its generator
-            # was abandoned); drop the stale handle so a late interrupt() is a
-            # no-op rather than disconnecting a dead client.
+            # run()'s finally explicitly exits the client context manager
+            # (graceful disconnect) then reaps the transport group as a safety
+            # net, and drops the stale handle so a late interrupt() is a no-op
+            # rather than disconnecting a dead client.
             if self._impty_driver is not None:
                 with contextlib.suppress(Exception):
                     self._impty_driver.close()
                 self._impty_driver = None
+            if self._client_ctx is not None:
+                with contextlib.suppress(Exception):
+                    await self._client_ctx.__aexit__(None, None, None)
+                self._client_ctx = None
             if self._client is not None:
                 await _reap_transport_group(self._client)
             self._client = None
@@ -1499,1110 +2057,6 @@ class ClaudeCodeAgentRunner:
             if self._config_dir is not None:
                 shutil.rmtree(self._config_dir, ignore_errors=True)
                 self._config_dir = None
-
-    async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
-        from imp.engine.state import JsonlEventLog
-        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
-        aid = invocation.agent_id or "step:unnamed"
-        from imp.providers.stderr_sink import build_stderr_sink
-        self._stderr_sink = build_stderr_sink(
-            invocation.transcript_dir / "stderr.log",
-            elog=elog, aid=aid, source="claude")
-
-        transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
-        tools = _build_tools(invocation)
-        ctx = ToolContext(
-            project_root=invocation.quest_context.project_root,
-            events_path=invocation.events_path,
-            subagent_defs=invocation.subagent_defs,
-            provider_name=invocation.provider_name,
-            model_name=invocation.model_name,
-            parent_transcript_dir=invocation.transcript_dir,
-            agent_id=aid,
-            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.quest_context.quest_home),
-        )
-        ctx.quest_context = invocation.quest_context
-        ctx.quest_state = invocation.quest_state
-        ctx.quest = invocation.quest          # live quest for rename_quest
-        ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_tiers = invocation.resolved_tiers
-        ctx.subagent_depth = invocation.subagent_depth
-        ctx.coordinator = invocation.coordinator
-        ctx.tiers = invocation.tiers
-        ctx.test_gates = invocation.test_gates
-        ctx.pythonpath = invocation.pythonpath
-        ctx.non_interactive = invocation.headless
-        ctx.base_sandbox_policy = invocation.sandbox_policy
-        ctx.checkpoint_threshold = invocation.checkpoint_threshold
-        ctx.event_log = elog
-        if self._user_input_fn is not None:
-            ctx.user_input_fn = self._user_input_fn
-        self._ctx = ctx
-
-        state = _RunState()
-        state.agent_id = aid
-        state.runner_loop = asyncio.get_running_loop()
-        self._state = state
-        sdk_tools = _make_sdk_tools(tools, ctx, state)
-
-        # In-process MCP server hosting imp tools. The real SDK call:
-        #   from claude_agent_sdk import create_sdk_mcp_server
-        #   mcp_server = create_sdk_mcp_server(name="imp", tools=sdk_tools)
-        # Tests stub this via _build_client.
-        try:
-            from claude_agent_sdk import create_sdk_mcp_server
-            mcp_server = create_sdk_mcp_server(name="imp", tools=sdk_tools)
-        except ImportError:
-            mcp_server = None   # fakes don't need a server
-
-        # Second in-process SDK server for the impty driver, when the agent holds
-        # it. The per-run ImptyDriver is stored on self so run()'s finally closes
-        # the session no matter how the turn ends.
-        impty_server = None
-        if mcp_server is not None and "impty" in invocation.agent_def.drivers:
-            from impty.driver import ImptyDriver
-            self._impty_driver = ImptyDriver()
-            impty_tools = await _make_impty_sdk_tools(self._impty_driver)
-            impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
-
-        # Session-store routing. A FRESH run mirrors its clean session into the
-        # store (session_id pins the key). A resume drives claude-p's NATIVE
-        # session resume when that store holds bytes (resume= materializes from
-        # imp's own bytes — faithful, no stream-json placeholder corruption);
-        # absent a stored session it reconstructs the store from the transcript
-        # and still resumes natively (the no-store branch).
-        # resume= and session_id are mutually exclusive in the SDK: native resume
-        # passes resume= and leaves session_id unset.
-        existing = transcript.load(
-            ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
-        is_fresh = not existing
-        # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
-        # no complete_step), complementing _tail_has_complete_step's top-level
-        # complete_step tail: recognize it here and re-emit the final text as the
-        # deliverable rather than native-resuming (which hands a finished
-        # subagent back to claude-p) or soliciting the human (AWAITING_USER).
-        if (invocation.subagent_depth > 0 and not is_fresh
-                and classify_resume(existing) is ResumeState.AWAITING_USER):
-            final_text = last_assistant_text(existing)
-            if final_text:
-                yield {"type": "agent_result", "payload": {"text": final_text}}
-            return
-        store = session_store_for(invocation.transcript_dir)
-        skey = session_key(invocation.quest_context.project_root, aid)
-        # Native resume is sound ONLY when existing's final turn was actually
-        # flushed to the store. The SDK mirror batcher flushes solely at a `result`
-        # boundary, so AWAITING_USER (the agent ended its turn on assistant prose —
-        # a bare turn-end yield) is the only shape whose tail is already flushed.
-        # SEND_TO_LLM ends on an unflushed user turn but is handled on the native
-        # path via reconcile-and-overwrite: the unflushed tail is written into the
-        # store before claude-p loads its native session. A genuinely DANGLING
-        # tool_use likewise resumes natively (with a store) — claude-p's own pairing
-        # injects the is_error placeholder, which is correct for an unfinished call.
-        # A trailing complete_step is balanced with a SUCCESS result inside the
-        # loaded session and the handback rides the streamed delta, and a no-store
-        # resume reconstructs the store from the transcript.
-        store_body = await store.load(skey)
-        # Every well-formed resume takes the native path. A trailing complete_step
-        # is balanced with a SUCCESS tool_result folded INTO the loaded session
-        # (synthesize_native_success_on_resume), so claude-p never auto-pairs an
-        # is_error; the handback (retry_feedback) rides the streamed delta. The
-        # store is reconstructed from the transcript when absent.
-        # Shape eligibility for native resume — decided WITHOUT the store. A
-        # dispatch-only tail collapses resume_base to 0 (fresh_stream) and rebuilds
-        # the store from scratch.
-        shape_native_eligible = (
-            (not is_fresh)
-            and classify_resume(existing) in (
-                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
-                ResumeState.DANGLING_TOOL_USE, ResumeState.STEP_COMPLETED)
-        )
-        # Native resume sends only messages[resume_base:] — the turns appended on
-        # THIS entry; claude-p already holds the rest in its loaded session.
-        resume_base = len(existing)
-        # A SEND_TO_LLM tail needs the LLM to RESPOND to a trailing user turn,
-        # but claude-p never generates from a loaded --resume session alone — it
-        # blocks reading stdin for an input message. Folding that user turn into
-        # the native session (resume_base = len) makes the streamed delta empty,
-        # so claude-p waits forever and the runner parks in receive_response()
-        # (a deadlock broken only by the inactivity watchdog). Instead, keep the
-        # trailing unanswered user turn(s) OUT of the reconciled session and
-        # stream them as the delta — they are the message that kicks the turn.
-        if (shape_native_eligible
-                and classify_resume(existing) is ResumeState.SEND_TO_LLM):
-            while (resume_base > 0
-                   and existing[resume_base - 1].role == "user"
-                   and not _contains_tool_result(existing[resume_base - 1])):
-                resume_base -= 1
-        # Dispatch-only respawn: resume_base collapsed to 0, so the whole (short)
-        # history streams fresh and the store is truncated/rebuilt from scratch.
-        fresh_stream = shape_native_eligible and resume_base == 0
-        # native_resume is False only on the fresh path; it still routes config_dir
-        # (elif native_resume) and the reconcile_store_tail block (if native_resume).
-        native_resume = shape_native_eligible
-        # Best-effort: keep canonical OAuth token fresh before either disposition copies it.
-        _pre_spawn_token_refresh(elog, aid)
-        config_dir: Path | None = None
-        if is_fresh or fresh_stream:
-            config_dir = materialize_fresh_config_dir()
-            self._config_dir = config_dir
-            opt_store, opt_session_id, opt_resume = (
-                store, resume_session_id(aid), None)
-        elif native_resume:
-            # Native resume: hand claude-p the loaded session by id; config_dir
-            # stays None (the only disposition with no ephemeral home).
-            opt_store, opt_session_id, opt_resume = (
-                store, None, resume_session_id(aid))
-        # Build options only when we'll use the real SDK (mcp_server is not None).
-        # When a client_factory is injected (tests), skip building options to
-        # avoid constructing ClaudeAgentOptions with mcp_server=None.
-        if mcp_server is not None:
-            opts = self._build_options(
-                invocation, mcp_server, list(tools), impty_server=impty_server,
-                session_store=opt_store, session_id=opt_session_id,
-                resume=opt_resume, config_dir=config_dir)
-        else:
-            opts = None
-
-        if existing:
-            messages = existing
-            tool_calls_used = 0  # per-invocation; never inherit history
-            # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
-            # Synthesize a placeholder tool_result so the tail is balanced and
-            # emit `tool_result` events so `imp log` shows what the agent sees on
-            # the next turn. This applies to native resume too: claude-p does NOT
-            # auto-pair-and-generate a dangling tail from its loaded session — it
-            # parks reading stdin, so the runner deadlocks in receive_response().
-            # The synth result is appended AFTER resume_base was captured, so it
-            # streams as the delta (claude-p pairs the dangling call in the loaded
-            # session and the result kicks the next turn).
-            # Native tail-balancing.
-            #  - Rework (retry_feedback) + complete_step tail: leave the
-            #    complete_step DANGLING in the loaded session and stream an
-            #    is_error result whose content IS the feedback as the delta —
-            #    claude-p pairs the dangling call against it, so the feedback
-            #    reaches the model AS the result of its own complete_step call
-            #    (parity with the anthropic/openai is_error path). A SUCCESS
-            #    fold here would pre-balance the call and the feedback would
-            #    never reach the model.
-            #  - Bare backward goto (no feedback) + complete_step tail: fold a
-            #    SUCCESS result INTO the loaded session (resume_base advances
-            #    over it) so claude-p never auto-pairs an is_error telling the
-            #    agent its accepted work failed, then kick the otherwise-empty
-            #    delta with a redo nudge.
-            #  - Any other dangling tool_use keeps the placeholder repair.
-            #    Such a genuinely-dangling non-complete_step tail is a
-            #    mid-tool interrupt that resumes as a forward-continue with
-            #    retry_feedback=None, so this arm never coincides with feedback
-            #    (the if/elif ordering would otherwise drop it — it cannot here).
-            #  - A mid-step forward tail (SEND_TO_LLM) carrying rework feedback
-            #    keeps the UNCHANGED separate-user-turn handback — the spec's
-            #    removal scope is completed (complete_step-tail) steps only, and
-            #    such a tail can still carry retry_feedback. The AWAITING_USER
-            #    exclusion is preserved here (that shape delivers its reply via
-            #    the AWAITING_USER arm below, not this handback).
-            # Capture the tail shape BEFORE synthesis: synthesize_*/repair_*
-            # append a user turn to `messages` (which IS `existing`), so a
-            # later _tail_has_complete_step(existing) would wrongly return False.
-            tail_is_complete_step = _tail_has_complete_step(existing)
-            # STEP_COMPLETED: trailing prose over an ALREADY-resolved
-            # complete_step. Unlike the dangling arms above, the result is
-            # already in the loaded session, so there is NO SUCCESS-fold and
-            # NO resume_base advance — rewriting the accepted result to
-            # is_error would lie about history. Deliver the handback (feedback
-            # or redo nudge) as a plain trailing user turn; it becomes the
-            # streamed kicking delta and re-drives the step (an empty delta
-            # would deadlock receive_response()).
-            tail_step_completed = (
-                classify_resume(existing) is ResumeState.STEP_COMPLETED)
-            if tail_is_complete_step and invocation.retry_feedback:
-                synth = repair_dangling_tool_use_on_resume(
-                    messages, transcript, feedback=invocation.retry_feedback,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
-            elif tail_is_complete_step:
-                injected = synthesize_native_success_on_resume(
-                    messages, transcript, elog, aid)
-                if injected is not None:
-                    resume_base += 1
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
-            elif tail_step_completed and invocation.retry_feedback:
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
-            elif tail_step_completed:
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
-            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
-                synth = repair_dangling_tool_use_on_resume(
-                    messages, transcript,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
-            elif (invocation.retry_feedback
-                    and classify_resume(existing) is not ResumeState.AWAITING_USER):
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
-            resume_state = classify_resume(messages)
-            if resume_state is ResumeState.AWAITING_USER:
-                if ctx.user_input_fn is None:
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "no_user_input_fn",
-                        "message": (
-                            "AWAITING_USER resume requires user_input_fn; "
-                            "none installed by runner"
-                        ),
-                    }}
-                    return
-                # _resolve_wait_reply owns the SOLE awaiting_user_input emit and
-                # fires it only when it actually solicits. Route by source: a
-                # human turn ('solicited'/'interject') renders as `>`; a 'nudge'
-                # is an internal engine continuation, not a user turn.
-                reply, source = await _resolve_wait_reply(
-                    invocation.coordinator, ctx.user_input_fn,
-                    invocation.resume_should_continue,
-                    elog=elog, agent_id=aid,
-                    last_agent_message=last_assistant_text(messages),
-                    halt_writer=invocation.halt_writer,
-                    halt_clearer=invocation.halt_clearer)
-                if source == "nudge":
-                    assert isinstance(reply, str)
-                    deliver_engine_continuation(
-                        messages, transcript, elog, aid, reply)
-                else:
-                    deliver_continuation_reply(
-                        messages, transcript, elog, aid, reply, human=True)
-                # Fall through (do NOT return): the reply drives the next LLM
-                # turn as the transcript's trailing user message.
-            # §2 resume-entry drain: fold pending interjects into the history
-            # that feeds _stream_history(messages) on the first query. The SDK
-            # is queried with the WHOLE transcript as a stream, so appending
-            # user Messages here is sufficient — no separate string fold needed.
-            # Guarded for non-AWAITING_USER: the AWAITING_USER join is handled above.
-            drained = 0
-            if resume_state is not ResumeState.AWAITING_USER:
-                drained = drain_all_interjects_at_resume(
-                    invocation.coordinator, messages, transcript, elog, aid)
-            # A mid-tool Ctrl-C resumes as SEND_TO_LLM/DANGLING (the dangling call
-            # was repaired with a synthetic result), never AWAITING_USER, so the
-            # _resolve_wait_reply nudge above can't reach it. Append the same
-            # continuation nudge as the trailing user turn (after any manifest) so
-            # a no-message resume continues the step instead of bare-turn-ending on
-            # a clarifying question. A drained human interject already drives
-            # continuation, so it wins (parity with AWAITING_USER).
-            pending_human_tail = (
-                messages[-1].role == "user"
-                and not _contains_tool_result(messages[-1])
-            )
-            if (resume_state is not ResumeState.AWAITING_USER
-                    and invocation.resume_should_continue and drained == 0
-                    and not pending_human_tail):
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid,
-                    _CONTINUATION_NUDGE)
-            # Native folded-tool_result tail: after the fold, a transcript ending
-            # exactly on the tool_result leaves messages[resume_base:] empty.
-            # claude-p never generates from a loaded --resume session with an empty
-            # delta (it parks reading stdin and the runner deadlocks in
-            # receive_response()). Use the continuation nudge, not the redo nudge:
-            # the folded work stands, so the resumed turn continues from it rather
-            # than redoing it.
-            if len(messages) == resume_base:
-                deliver_engine_continuation(
-                    messages, transcript, elog, aid, _CONTINUATION_NUDGE)
-        else:
-            messages = []
-            for m in invocation.initial_messages:
-                messages.append(m)
-                transcript.append(m)
-            tool_calls_used = 0
-            # Fresh-entry audit scaffolding. Ordered IMMEDIATELY after the
-            # transcript append so the "step_context emitted exactly once per
-            # agent_id" invariant holds (resume takes the branch above and
-            # emits nothing).
-            elog.append_step_context(
-                agent_id=aid, parent_id_override=invocation.first_event_parent_id,
-                provider=invocation.provider_name, model=self.model,
-                # Name-only schemas: the in-process MCP server owns the full
-                # input schemas; unlike anthropic/openai we don't pass them here.
-                tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
-                params={"env.CLAUDE_CONFIG_DIR": str(config_dir)},
-                max_tool_calls=invocation.max_tool_calls)
-            elog.append_engine_message(
-                agent_id=aid,
-                message=Message(role="system",
-                                content=(TextBlock(text=invocation.system_prompt),)),
-                subtype="system_prompt")
-            for m in invocation.initial_messages:
-                if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_engine_message(
-                        agent_id=aid, message=m, subtype="agent_prompt")
-
-        ceiling = invocation.max_tool_calls  # may be None (no cap)
-
-        # Loop guard (Fix H). claude_code streams ONE logical turn as multiple
-        # AssistantMessage objects (thinking, then text, then tool_use) — see
-        # _merge_assistant_fragments. Accumulate the whole turn into pending_*
-        # and flush EXACTLY ONCE at the ResultMessage boundary (true end-of-turn).
-        guard = LoopGuard(interactive=invocation.interactive)
-        pending_text = ""
-        pending_tools: dict[str, ToolOutcome] = {}
-        pending_complete = False
-        # Web builtin call ids: id -> (norm_name, call_input). Populated when a
-        # WebSearch/WebFetch ToolUseBlock is observed; consumed when the matching
-        # ToolResultBlock arrives so citations can be parsed and the result
-        # normalized without incrementing tool_calls_used.
-        web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
-
-        def _flush_pending() -> TurnRecord | None:
-            nonlocal pending_text, pending_tools, pending_complete
-            if not pending_text and not pending_tools and not pending_complete:
-                return None
-            rec = TurnRecord(assistant_text=pending_text,
-                             tools=list(pending_tools.values()),
-                             has_complete_step=pending_complete)
-            pending_text = ""
-            pending_tools = {}
-            pending_complete = False
-            return rec
-
-        if native_resume:
-            reconciled = reconcile_store_tail(
-                messages[:resume_base], store_body or [],
-                session_id=skey["session_id"],
-                cwd=str(invocation.quest_context.project_root),
-                model=self.model,
-            )
-            await store.overwrite(skey, reconciled)
-
-        llm_group_open = False
-        llm_group_key: str | None = None
-        llm_blocks: list[dict[str, Any]] = []
-        llm_model: str | None = None
-        llm_stop_reason: Any = None
-        llm_usage: dict[str, Any] = {}
-        # Finalized per-turn figures harvested from the raw Anthropic stream
-        # events (StreamEvent). Keyed by streaming message id; each entry is
-        # (usage, stop_reason). Popped on flush so it never grows across a run.
-        stream_usage_by_msg: dict[str, tuple[dict[str, Any], Any]] = {}
-        stream_cur_msg_id: str | None = None
-        stream_cur_usage: dict[str, Any] = {}
-        stream_cur_stop_reason: Any = None
-
-        _flush_lock = asyncio.Lock()
-
-        async def _flush_llm_group(backstop_stop_reason: Any = None) -> None:
-            nonlocal llm_group_open, llm_group_key, llm_blocks
-            nonlocal llm_model, llm_stop_reason, llm_usage
-            # Serialize every flush on one per-run lock: whichever caller flushes
-            # first holds the lock across the _context_usage_fields await and the
-            # emit; a concurrent second caller (the eager sub_agent flush in
-            # _impl) BLOCKS on the lock until that emit completes, then sees the
-            # group closed and no-ops. A bare no-op guard would NOT reorder — under
-            # the pinned interleaving the receive-loop flush is suspended in the
-            # await when _impl fires, so the prose would still emit AFTER _impl's
-            # tool_call. The lock is the completion barrier that makes _impl's
-            # flush wait for the in-flight prose emit.
-            async with _flush_lock:
-                if not llm_group_open:
-                    return
-                cu_fields = await _context_usage_fields(client)
-                # Prefer the finalized figures harvested from the stream for this
-                # message_id; fall back to the AssistantMessage-derived values when
-                # the turn produced no stream events for that key.
-                harvested = (stream_usage_by_msg.pop(llm_group_key, None)
-                             if llm_group_key is not None else None)
-                if harvested is not None:
-                    usage, harvested_stop = harvested
-                    stop = harvested_stop if harvested_stop is not None else (
-                        llm_stop_reason if llm_stop_reason is not None
-                        else backstop_stop_reason)
-                else:
-                    usage = llm_usage
-                    stop = llm_stop_reason if llm_stop_reason is not None \
-                        else backstop_stop_reason
-                elog.append_agent_message(
-                    agent_id=aid, provider=invocation.provider_name,
-                    model=llm_model or self.model,
-                    raw={"content": llm_blocks, "stop_reason": stop,
-                         "usage": usage},
-                    usage=usage, stop_reason=stop,
-                    message_id=llm_group_key,
-                    context_window=cu_fields.get("context_window"),
-                    context_pct=cu_fields.get("context_pct"),
-                    context_tokens=cu_fields.get("context_tokens"))
-                llm_group_open = False
-                llm_group_key = None
-                llm_blocks = []
-                llm_model = None
-                llm_stop_reason = None
-                llm_usage = {}
-
-        state.flush_llm_group = _flush_llm_group
-
-        client_ctx = self._build_client(opts)
-        async with client_ctx as client:
-            # Publish the live client so the cooperative interrupt() (called from
-            # the watchdog/pause task) can signal the running query and let the turn
-            # close balanced; only the hard-interrupt escalation disconnects, to
-            # break a parked receive_response().
-            self._client = client
-            # FIRST query streams the prepared history; re-queries send a plain
-            # next_text string (asymmetry preserved from the pre-restructure
-            # code). Each outer iteration runs its OWN receive_response() so a
-            # follow-up turn is consumed from a fresh generator (issue 7:
-            # receive_response() terminates after the first ResultMessage).
-            next_query: Any = _stream_history(messages[resume_base:])
-            from imp.engine.reincarnation import (
-                handoff_instruction,
-                handoff_path_for,
-                write_handoff_note,
-            )
-            from imp.providers.catalog import sdk_context_threshold_crossed
-            # Tier A proactive-handoff watch state (Mechanism 3).
-            handoff_phase: str | None = None
-            handoff_path = handoff_path_for(invocation.transcript_dir)
-            while True:
-                await client.query(next_query)
-                requery = False
-
-                async with contextlib.aclosing(request_bracketed(
-                        invocation.coordinator, client.receive_response())) as _stream:
-                    async for sdk_msg in _stream:
-                        if self._cancel:
-                            yield {"type": "error", "payload": {
-                                "category": "config",
-                                "kind": "interrupted",
-                                "message": "runner cancelled by interrupt",
-                            }}
-                            return
-
-                        if invocation.coordinator is not None:
-                            invocation.coordinator.note_activity()
-
-                        # Post-API-site analog (Decision 10): one sweep per
-                        # received SDK message — the model-API/CLI latency between
-                        # messages is the longest registry-blind gap under this
-                        # provider. Cancel check stays first (interrupt priority).
-                        await _bg._sweep_bg(ctx)
-
-                        cls_name = type(sdk_msg).__name__
-                        if cls_name == "StreamEvent":
-                            # message_start carries accurate input/cache tokens (and
-                            # a priming output_tokens) plus the streaming message id;
-                            # message_delta overlays the finalized cumulative
-                            # output_tokens and the real stop_reason; message_stop
-                            # finalizes the message into stream_usage_by_msg. The
-                            # message id is tracked from message_start because the
-                            # delta/stop events do not repeat it.
-                            ev = getattr(sdk_msg, "event", None)
-                            ev = ev if isinstance(ev, dict) else {}
-                            etype = ev.get("type")
-                            if etype == "message_start":
-                                start_msg = ev.get("message")
-                                start_msg = start_msg if isinstance(start_msg, dict) else {}
-                                stream_cur_msg_id = start_msg.get("id")
-                                u = start_msg.get("usage")
-                                stream_cur_usage = dict(u) if isinstance(u, dict) else {}
-                                stream_cur_stop_reason = None
-                            elif etype == "message_delta":
-                                u = ev.get("usage")
-                                if isinstance(u, dict):
-                                    stream_cur_usage.update(u)
-                                delta = ev.get("delta")
-                                if isinstance(delta, dict) and delta.get("stop_reason") is not None:
-                                    stream_cur_stop_reason = delta.get("stop_reason")
-                            elif etype == "message_stop":
-                                if stream_cur_msg_id is not None:
-                                    stream_usage_by_msg[stream_cur_msg_id] = (
-                                        stream_cur_usage, stream_cur_stop_reason)
-                                stream_cur_msg_id = None
-                                stream_cur_usage = {}
-                                stream_cur_stop_reason = None
-                        imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
-                        for content in thinkings:
-                            elog.append(agent_id=aid, type="thinking",
-                                        payload={"content": content})
-                        for w in warns:
-                            elog.append(agent_id=aid, type="runner_warning",
-                                        payload={"message": w})
-                        if imp_msg is not None:
-                            messages.append(imp_msg)
-                            transcript.append(imp_msg)
-
-                            if imp_msg.role == "assistant":
-                                turn_text = "".join(
-                                    b.text for b in imp_msg.content
-                                    if isinstance(b, TextBlock))
-                                if turn_text:
-                                    pending_text = (
-                                        pending_text + turn_text if pending_text else turn_text)
-                                if cls_name == "AssistantMessage":
-                                    mid = getattr(sdk_msg, "message_id", None)
-                                    if (llm_group_open and mid is not None
-                                            and llm_group_key is not None
-                                            and mid != llm_group_key):
-                                        await _flush_llm_group()
-                                    frag = _serialize_claude_code_message(sdk_msg)
-                                    if not llm_group_open:
-                                        llm_group_open = True
-                                        llm_group_key = mid
-                                    elif llm_group_key is None and mid is not None:
-                                        llm_group_key = mid
-                                    llm_blocks.extend(frag["content"])
-                                    served = getattr(sdk_msg, "model", None)
-                                    if served is not None and llm_model is None:
-                                        llm_model = served
-                                    if (frag.get("stop_reason") is not None
-                                            and llm_stop_reason is None):
-                                        llm_stop_reason = frag["stop_reason"]
-                                    if frag.get("usage"):
-                                        llm_usage = frag["usage"]
-                                    # Tier A proactive handoff (Mechanism 3): on the
-                                    # configured context-threshold crossing, route
-                                    # through the cooperative-interrupt path — signal the
-                                    # running query and let the SDK close this turn
-                                    # balanced, then continue the live session with a
-                                    # plain handoff-instruction increment (handled at the
-                                    # generalized balanced-close site below). Do NOT
-                                    # re-stream history here: interrupt() does not
-                                    # disconnect the subprocess, so a replay would append
-                                    # on top of the already-near-full context and double
-                                    # it. complete_step_called is set later (per-block
-                                    # loop), so detect the completing turn from blocks
-                                    # here, canonicalizing the name: the SDK presents it
-                                    # as mcp__imp__complete_step, so a bare compare would
-                                    # miss it and wrongly preempt it.
-                                    if (handoff_phase is None
-                                            and invocation.checkpoint_threshold is not None):
-                                        completing = any(
-                                            isinstance(b, ToolUseBlock)
-                                            and _canon_tool_name(b.name) == "complete_step"
-                                            for b in imp_msg.content)
-                                        cu_fields = await _context_usage_fields(client)
-                                        if (not completing
-                                                and sdk_context_threshold_crossed(
-                                                    cu_fields.get("context_tokens"),
-                                                    cu_fields.get("context_window"),
-                                                    invocation.checkpoint_threshold)):
-                                            # Flush the crossing turn's LLM group, signal
-                                            # the interrupt, and mark the phase so the
-                                            # watchdog cannot re-fire while the interrupt
-                                            # settles. `continue` (not break) skips this
-                                            # crossing message's remaining blocks but keeps
-                                            # the receive loop iterating, so the balanced
-                                            # error_during_execution ResultMessage reaches
-                                            # the generalized close handler below — exactly
-                                            # as the steer path's external interrupt does.
-                                            await _flush_llm_group()
-                                            self._handoff_requested = True
-                                            handoff_phase = "interrupt_requested"
-                                            with contextlib.suppress(Exception):
-                                                await client.interrupt()
-                                            continue
-                                # Close the coalesced prose group at the text->tool_use
-                                # transition: emit its agent_message BEFORE this fragment's
-                                # tool_calls, so narration renders above the tools it
-                                # introduced. Guard on tool-bearing fragments only — a
-                                # pure-text fragment must not flush (its text is still
-                                # accumulating toward one agent_message). The flush is a
-                                # no-op when the group is already closed.
-                                if any(isinstance(b, ToolUseBlock)
-                                       for b in imp_msg.content):
-                                    await _flush_llm_group()
-                                for b in imp_msg.content:
-                                    if isinstance(b, ToolUseBlock):
-                                        # Web builtins (§5.2): server/CLI-side, already
-                                        # executed. Short-circuit the ENTIRE ceiling
-                                        # block — emit a normalized tool_call, record
-                                        # the id for citation parsing, and do NOT
-                                        # increment tool_calls_used.
-                                        if b.name in CC_WEB_BUILTIN_TO_NORM:
-                                            norm = CC_WEB_BUILTIN_TO_NORM[b.name]
-                                            web_calls[b.id] = (norm, b.input)
-                                            elog.append_tool_call(
-                                                agent_id=aid,
-                                                block=ToolUseBlock(id=b.id, name=norm,
-                                                                   input=b.input))
-                                            continue
-                                        # Dual-write: test fakes don't drive the MCP
-                                        # wrapper; production wrapper also sets these —
-                                        # idempotent. SDK presents the tool as
-                                        # mcp__imp__complete_step so canonicalize before
-                                        # comparing.
-                                        if _canon_tool_name(b.name) == "complete_step":
-                                            state.complete_step_called = True
-                                            state.complete_step_args = b.input
-                                            # Part A: complete_step is terminal — re-emit
-                                            # the result-less tool_call (parity with
-                                            # anthropic/openai), then preempt the trailing
-                                            # turn via interrupt (args already captured from
-                                            # b.input; `continue` skips the normal append
-                                            # path, re-emitted here).
-                                            if not self._complete_requested:
-                                                elog.append_tool_call(
-                                                    agent_id=aid,
-                                                    block=ToolUseBlock(
-                                                        id=b.id, name="complete_step",
-                                                        input=b.input))
-                                                await _flush_llm_group()
-                                                self._complete_requested = True
-                                                with contextlib.suppress(Exception):
-                                                    await client.interrupt()
-                                                continue
-                                        # Ceiling guard: observational here. With
-                                        # Claude Code we can't prevent the (K+1)th
-                                        # tool dispatch — MCP invocation is async
-                                        # claude-side, decoupled from this iteration
-                                        # loop. The ceiling becomes a *post hoc* fatal
-                                        # check after the ResultMessage.
-                                        if ceiling is not None and tool_calls_used >= ceiling:
-                                            ceil_msg = (
-                                                f"tool_call_ceiling_exceeded (ceiling={ceiling})"
-                                            )
-                                            elog.append_tool_result(
-                                                agent_id=aid,
-                                                block=ToolResultBlock(b.id, ceil_msg,
-                                                                      is_error=True))
-                                            continue
-                                        tool_calls_used += 1
-                                        canon = _canon_tool_name(b.name)
-                                        # Accumulate for the loop guard BEFORE the task
-                                        # early-continue so task turns are still tracked.
-                                        # is_error defaults True until the following
-                                        # UserMessage tool_result lands and flips it.
-                                        if canon == "complete_step":
-                                            pending_complete = True
-                                        pending_tools[b.id] = ToolOutcome(
-                                            name=canon, tool_use_id=b.id,
-                                            input=b.input, is_error=True)
-                                        if canon == "sub_agent":
-                                            # tool_call for task is appended inside the
-                                            # MCP wrapper (_impl) keyed on a minted uuid
-                                            # block id (see :356-362), race-free. Don't
-                                            # double-append here.
-                                            continue
-                                        elog.append_tool_call(
-                                            agent_id=aid,
-                                            block=ToolUseBlock(id=b.id, name=canon,
-                                                               input=b.input))
-                            elif imp_msg.role == "user":
-                                await _flush_llm_group()
-                                # ToolResultBlocks generated by claude calling our MCP
-                                # tools. Append the corresponding tool_result events.
-                                for b in imp_msg.content:
-                                    if isinstance(b, ToolResultBlock):
-                                        if b.tool_use_id in web_calls:
-                                            norm, call_input = web_calls[b.tool_use_id]
-                                            cites = _parse_cc_web_citations(
-                                                norm, call_input, b.content)
-                                            elog.append_tool_result(
-                                                agent_id=aid, block=b, citations=cites,
-                                                duration_ms=state.tool_durations.pop(
-                                                    b.tool_use_id, None))
-                                            continue
-                                        # SUPPRESS the SDK's duplicate `task` result.
-                                        # _impl already appended the canonical
-                                        # outcome-carrying result keyed on the minted
-                                        # block id; this incoming toolu_… result is the
-                                        # SAME logical close in the SDK id-space. Appending
-                                        # it too would double the tool_result (and feed
-                                        # narrative a second, fold-less close). Identify
-                                        # it by its tool_use_id ∈ pending_tools with
-                                        # name=="sub_agent" (canon tracked at the tool_use
-                                        # site). Still flip is_error on the task outcome
-                                        # below so a failed dispatch doesn't leave the
-                                        # ToolOutcome is_error=True → LoopGuard
-                                        # repeated_failure on identical re-dispatches.
-                                        pend = pending_tools.get(b.tool_use_id)
-                                        is_task = pend is not None and pend.name == "sub_agent"
-                                        if not is_task:
-                                            elog.append_tool_result(
-                                                agent_id=aid, block=b,
-                                                duration_ms=state.tool_durations.pop(
-                                                    b.tool_use_id, None))
-                                        if pend is not None:
-                                            pend.is_error = b.is_error
-                                            pend.result_preview = \
-                                                _result_preview(b.content)
-
-                        # Drain any bash kills detected by the MCP wrapper.
-                        while state.killed_tool_uses:
-                            info = state.killed_tool_uses.pop(0)
-                            elog.append(agent_id=aid, type="tool_killed", payload=info)
-
-                        # A tool raised FatalToolError → bail out instead of letting
-                        # Claude burn more LLM calls trying to work around a runtime
-                        # misconfiguration.
-                        if state.fatal_tool_error is not None:
-                            tool_name, msg = state.fatal_tool_error
-                            yield {"type": "error", "payload": {
-                                "category": "config",
-                                "kind": "fatal_tool_error",
-                                "tool": tool_name,
-                                "message": msg,
-                            }}
-                            return
-
-                        if cls_name == "ResultMessage":
-                            await _flush_llm_group(
-                                backstop_stop_reason=getattr(
-                                    sdk_msg, "stop_reason", None))
-                            elog.append_query_result(
-                                agent_id=aid,
-                                total_cost_usd=getattr(sdk_msg, "total_cost_usd", None),
-                                duration_ms=getattr(sdk_msg, "duration_ms", None),
-                                duration_api_ms=getattr(sdk_msg, "duration_api_ms", None),
-                                num_turns=getattr(sdk_msg, "num_turns", None),
-                                stop_reason=getattr(sdk_msg, "stop_reason", None),
-                                subtype=getattr(sdk_msg, "subtype", None),
-                                is_error=bool(getattr(sdk_msg, "is_error", False)),
-                                usage=getattr(sdk_msg, "usage", None) or {},
-                                model_usage=getattr(sdk_msg, "model_usage", None) or {},
-                                api_error_status=getattr(sdk_msg, "api_error_status", None),
-                                permission_denials=getattr(sdk_msg, "permission_denials", None),
-                                errors=getattr(sdk_msg, "errors", None))
-                            if (self._complete_requested
-                                    and getattr(sdk_msg, "subtype", None)
-                                    == "error_during_execution"):
-                                # Part A: interrupt landed — fall through to agent_result;
-                                # deliberately do NOT balance the tail so the dangling
-                                # result-less complete_step stays the persisted tail (parity
-                                # with anthropic/openai; the Part B resume relies on it).
-                                self._complete_requested = False
-                                _flush_pending()
-                            elif ((self._steer_requested or self._handoff_requested)
-                                    and getattr(sdk_msg, "subtype", None)
-                                    == "error_during_execution"):
-                                if self._handoff_requested:
-                                    # Tier A proactive handoff: the SDK closed the
-                                    # crossing turn balanced. Continue the LIVE (now
-                                    # balanced) session with a plain handoff-instruction
-                                    # increment — NOT a _stream_history replay, which
-                                    # would double the already-near-full context.
-                                    self._handoff_requested = False
-                                    # Discard the interrupted turn's partial accumulators
-                                    # so they don't bleed into the handoff requery's loop
-                                    # guard (mirrors the steer cleanup below).
-                                    _flush_pending()
-                                    # Balance the crossing turn's dangling tool_use in
-                                    # imp's in-memory messages/transcript (used by the
-                                    # later transcript stash); it no longer feeds a live
-                                    # replay.
-                                    repair_dangling_tool_use_on_resume(
-                                        messages, transcript,
-                                        captured=_load_captured_tool_results(invocation.transcript_dir))
-                                    instr = handoff_instruction(handoff_path)
-                                    instr_msg = Message(
-                                        role="user",
-                                        content=(TextBlock(text=instr),))
-                                    messages.append(instr_msg)
-                                    transcript.append(instr_msg)
-                                    elog.append_engine_message(
-                                        agent_id=aid, message=instr_msg, subtype="continuation")
-                                    next_query = instr
-                                    handoff_phase = "instruction_sent"
-                                    requery = True
-                                    break
-                                # Cooperative interrupt landed: the SDK closed this
-                                # turn balanced. Unblock the waiting interrupt() and
-                                # route into the attended inline-yield instead of
-                                # treating the error result as a termination.
-                                self._steer_unblocked.set()
-                                self._steer_requested = False
-                                # Discard the interrupted turn's partial accumulators
-                                # so they don't bleed into the next turn's loop-guard.
-                                _flush_pending()
-                                # Reap leaked subprocesses only AFTER interrupt():
-                                # a killed-process tool_result must not race the stop.
-                                from imp.agents.tools.bg import terminate_background_processes
-                                from imp.agents.tools.context import terminate_running_processes
-                                await terminate_running_processes(ctx)
-                                await terminate_background_processes(ctx)
-                                last_text = ""
-                                for prev in reversed(messages):
-                                    if prev.role == "assistant":
-                                        last_text = _text_of(prev)
-                                        break
-                                steer = build_inline_solicit(
-                                    user_input_fn=self._user_input_fn,
-                                    coordinator=invocation.coordinator,
-                                    event_log=elog, agent_id=aid,
-                                    steer_prompt=INTERRUPT_STEER_HINT,
-                                    interrupt=True,
-                                    halt_writer=invocation.halt_writer,
-                                    halt_clearer=invocation.halt_clearer)
-                                # Raises AwaitingUserInput when no human is attached;
-                                # the balanced session makes a resume continue with no 400.
-                                reply = await steer(last_text)
-                                if self._interrupted():
-                                    return
-                                # Brake holds until reply is in hand: clear only now.
-                                if invocation.coordinator is not None:
-                                    invocation.coordinator.clear_pause()
-                                if isinstance(reply, str) and not reply.strip():
-                                    # Empty Enter continues the interrupted turn via
-                                    # an engine nudge — never an empty human turn.
-                                    deliver_engine_continuation(
-                                        messages, transcript, elog, aid,
-                                        _CONTINUATION_NUDGE)
-                                    next_query = _CONTINUATION_NUDGE
-                                else:
-                                    next_query = deliver_continuation_reply(
-                                        messages, transcript, elog, aid, reply, human=True)
-                                requery = True
-                                break
-                            elif (self._handoff_requested or self._steer_requested
-                                    or self._complete_requested):
-                                # Non-error_during_execution close while a flag was set:
-                                # the cooperative interrupt() did not land. Reset both flags
-                                # so neither bleeds into a later unrelated
-                                # error_during_execution result.
-                                if self._handoff_requested:
-                                    self._handoff_requested = False
-                                    handoff_phase = None
-                                self._steer_requested = False
-                                self._complete_requested = False
-
-                            # Loop guard: ResultMessage is the true end-of-turn
-                            # marker, so flush the accumulated turn here EXACTLY ONCE
-                            # (a turn ending in complete_step set pending_complete →
-                            # progress → never trips). Observe before the end-of-turn
-                            # handling so a detected loop wins over a nudge.
-                            # A complete_step turn is fed to the guard EXACTLY ONCE by
-                            # validate_output_or_nudge below. Skip the flush-observe
-                            # here so a malformed complete_step turn is not observed a
-                            # second time (double-feed would skew no-progress counters).
-                            flushed = _flush_pending()
-                            if flushed is not None and not state.complete_step_called:
-                                loop_err = guard.observe(flushed)
-                                if loop_err is not None:
-                                    yield perr.make_error_event(
-                                        loop_err, kind=getattr(loop_err, "kind", ""))
-                                    return
-
-                            if handoff_phase == "instruction_sent":
-                                # The handoff-writing turn completed: signal the
-                                # captured handoff and stop. drive_invocation maps
-                                # this to AgentRunResult.handoff_path; the engine
-                                # stashes the transcript and reincarnates the session
-                                # seeded from the note. Wins over a stray
-                                # complete_step on this turn.
-                                write_handoff_note(
-                                    handoff_path,
-                                    most_recent_assistant_text(messages))
-                                yield {"type": "handoff",
-                                       "payload": {"handoff_path": str(handoff_path)}}
-                                return
-
-                            # End-of-turn:
-                            #   a) complete_step captured → emit agent_result, return
-                            #   b) nudge via continuation_fn → send another query
-                            #   c) no complete_step and no nudge → error
-                            if state.complete_step_called:
-                                res = validate_output_or_nudge(
-                                    state.complete_step_args,
-                                    invocation.agent_def.output_schema, guard)
-                                if isinstance(res, Ok):
-                                    # Observe the flush-skipped TurnRecord so co-turn
-                                    # tool outcomes remain visible to the guard. Result
-                                    # is safely discarded: the invocation returns
-                                    # immediately and guard state is thrown away.
-                                    if flushed is not None:
-                                        guard.observe(flushed)
-                                    if res.recovered is not None:
-                                        ev = make_recovery_event(res)
-                                        elog.append(agent_id=aid, type=ev["type"],
-                                                    payload=ev["payload"])
-                                    yield {"type": "agent_result",
-                                           "payload": res.payload}
-                                    return
-                                if isinstance(res, Nudge):
-                                    ev = make_nudge_event(res)
-                                    elog.append(agent_id=aid, type=ev["type"],
-                                                payload=ev["payload"])
-                                    # Re-query the SAME session with the nudge so the
-                                    # agent re-emits. Reset capture and interrupt-preempt
-                                    # flag so next turn's complete_step is detected fresh.
-                                    state.complete_step_called = False
-                                    state.complete_step_args = {}
-                                    self._complete_requested = False
-                                    nudge_msg = Message(
-                                        role="user",
-                                        content=(TextBlock(text=res.message),))
-                                    messages.append(nudge_msg)
-                                    transcript.append(nudge_msg)
-                                    elog.append_engine_message(
-                                        agent_id=aid, message=nudge_msg, subtype="continuation")
-                                    next_query = res.message
-                                    requery = True
-                                    break
-                                # LoopError: pause-to-human.
-                                yield perr.make_error_event(
-                                    res, kind=getattr(res, "kind", ""))
-                                return
-
-                            if (ceiling is not None and tool_calls_used >= ceiling
-                                    and not state.complete_step_called):
-                                yield {"type": "error", "payload": {
-                                    "category": "config",
-                                    "kind": "tool_call_ceiling_exceeded",
-                                    "ceiling": ceiling,
-                                }}
-                                return
-
-                            last_text = ""
-                            # Walk backward through the messages we appended to find
-                            # the most recent assistant message — that's where the
-                            # terminal CLI message lives.
-                            for prev in reversed(messages):
-                                if prev.role == "assistant":
-                                    last_text = _text_of(prev)
-                                    break
-
-                            # P2: a ResultMessage flagged is_error (or a nonzero
-                            # subprocess exit) is a termination, not a benign
-                            # missing-complete_step. Report it typed-or-unknown with
-                            # every structured field — before the substring fallback
-                            # and never through the nudge path.
-                            term = _termination_from_result(
-                                sdk_msg, last_text,
-                                {**_subprocess_diag(client),
-                                 "stderr_tail": self._stderr_sink.tail()},
-                                config_dir=config_dir)
-                            if term is not None:
-                                _roll_back_error_turn(messages, transcript)
-                                yield perr.make_error_event(
-                                    term, kind=getattr(term, "kind", ""))
-                                return
-
-                            # Classify before the nudge: a surfaced provider error
-                            # (auth/quota) must win over a pointless nudge. This runs
-                            # on each nudge turn (up to N+1), not just the terminal one
-                            # — intentional, so an auth failure surfaces on turn 1
-                            # instead of after N nudges.
-                            classified = _classify_agent_text(last_text)
-                            if classified is not None:
-                                # Carry the offending prose so the narrative can
-                                # match-and-drop the held auth text (same [:500]
-                                # truncation the _termination_from_result path uses).
-                                classified.detail["last_agent_text"] = last_text[:500]
-                                _roll_back_error_turn(messages, transcript)
-                                yield perr.make_error_event(
-                                    classified, kind=getattr(classified, "kind", ""))
-                                return
-
-                            if invocation.subagent_depth > 0:
-                                final_text = last_assistant_text(messages)
-                                if final_text:
-                                    yield {"type": "agent_result",
-                                           "payload": {"text": final_text}}
-                                return
-
-                            cont = invocation.continuation_fn
-                            if cont is not None:
-                                next_text, human = cont(last_text)
-                                if inspect.isawaitable(next_text):
-                                    next_text = await next_text
-                                if self._interrupted():
-                                    # The interrupt landed while we were resolving the
-                                    # continuation. Don't nudge the model to keep going
-                                    # after a Ctrl-C — pause at the turn boundary.
-                                    # Without this the nudge + re-query proceeds and the
-                                    # cancel is only caught later at the no-result
-                                    # fallthrough, after a wasted round-trip that
-                                    # surfaces a spurious `network` warning.
-                                    yield {"type": "error", "payload": {
-                                        "category": "config",
-                                        "kind": "interrupted",
-                                        "message": "runner cancelled by interrupt",
-                                    }}
-                                    return
-                                next_query = deliver_continuation_reply(
-                                    messages, transcript, elog, aid, next_text,
-                                    human=human)
-                                # Turn boundary: this is the only point where THIS
-                                # runner sets up the next SDK query (the SDK owns the
-                                # in-query tool loop). Deliver any queued human
-                                # interject as a user_message/interject event and fold
-                                # its text into the next query string so the SDK
-                                # actually sees it on this re-query. Reached only after
-                                # the turn's tool results are flushed — S4 holds.
-                                interject_msg = _drain_interject_message(
-                                    invocation.coordinator, elog, aid)
-                                if interject_msg is not None:
-                                    messages.append(interject_msg)
-                                    transcript.append(interject_msg)
-                                    elog.append_user_message(
-                                        agent_id=aid, message=interject_msg,
-                                        subtype="interject")
-                                    next_query = f"{next_query}\n\n{_text_of(interject_msg)}"
-                                # Re-query on a FRESH receive_response() (issue 7):
-                                # break the inner loop so the outer while restarts.
-                                requery = True
-                                break
-
-                            yield {"type": "error", "payload": {
-                                "category": "agent_output_missing",
-                                "kind": "no_complete_step",
-                                "message": "agent finished without calling complete_step",
-                                "detail": {"last_agent_text": last_text[:500]},
-                            }}
-                            return
-
-                # INVARIANT: any `break` from the inner async-for that intends to
-                # re-query MUST set requery=True first. A bare break falls through
-                # to the no-result diagnostic below and emits no_result_message.
-                if requery:
-                    # A re-query was queued: loop back and run a fresh
-                    # receive_response() for the next turn.
-                    continue
-
-                # Inner loop drained WITHOUT a re-query and without a
-                # ResultMessage-driven return: receive_response() was exhausted
-                # with no ResultMessage this turn. Capture subprocess
-                # diagnostics here, while the transport is still live (before
-                # __aexit__ runs disconnect() and nulls _transport). Against
-                # today's SDK SubprocessCLITransport does not expose
-                # returncode/stderr_tail, so this returns {}; the capture is
-                # forward-compatible for when the SDK adds those attributes.
-                self._last_no_result_diag = {
-                    **_subprocess_diag(client),
-                    "stderr_tail": self._stderr_sink.tail()}
-                break
-
-        # Fell out of the async-with block without yielding a ResultMessage.
-        # If we were cancelled (Ctrl-C), the subprocess was torn down mid-turn
-        # and the re-query's receive_response yields nothing — so the per-message
-        # cancel check above never runs. Report the cancellation here too, as
-        # `config`/interrupted (a Pause), NOT `network` (a retry): auto-retrying
-        # an interrupted turn replays a transcript the API rejects with a 400
-        # ("tool use concurrency issues"). See quest 2026-06-06-06x3ml.
-        if self._cancel:
-            yield {"type": "error", "payload": {
-                "category": "config",
-                "kind": "interrupted",
-                "message": "runner cancelled by interrupt",
-            }}
-            return
-
-        # Otherwise this is a genuine early close. Use the diagnostics captured
-        # inside the block (transport was live). Classification stays `network`
-        # (retryable).
-        diag = self._last_no_result_diag
-        message = "SDK closed without yielding a ResultMessage"
-        if diag:
-            message = f"{message} (exit={diag.get('exit')})"
-        yield {"type": "error", "payload": {
-            "category": "network",
-            "kind": "no_result_message",
-            "message": message,
-            "detail": diag,
-        }}
 
     def _interrupted(self) -> bool:
         """Read the cancel flag through a call so mypy doesn't narrow it to a

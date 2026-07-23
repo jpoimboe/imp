@@ -1,0 +1,28 @@
+{
+  "agent_result": null,
+  "control_types": [
+    "error"
+  ],
+  "errors": [
+    [
+      "config",
+      "tool_call_ceiling_exceeded"
+    ]
+  ],
+  "log_types": [
+    "step_context",
+    "engine_message",
+    "engine_message",
+    "agent_message",
+    "tool_call",
+    "tool_result",
+    "agent_message",
+    "tool_call",
+    "tool_result",
+    "agent_message",
+    "tool_result"
+  ],
+  "raised": null,
+  "step_context_count": 1,
+  "terminal": "error"
+}

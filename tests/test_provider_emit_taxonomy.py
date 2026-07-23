@@ -278,7 +278,7 @@ def _codex_drive(
         quest_context=QuestContext(
             title="T", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
-        agent_id="step:p/s", event_log=log)
+        agent_id="step:p/s", event_log=log, max_tool_calls=7)
     return runner, inv
 
 
@@ -289,7 +289,13 @@ async def test_codex_fresh_entry_emits_system_and_agent_prompt(tmp_path: Path) -
     async for _ in runner.run(inv):
         pass
     evs = [e for e in log.read() if e.get("agent_id") == "step:p/s"]
-    assert not [e for e in evs if e["type"] == "step_context"]   # codex emits none
+    sc = [e for e in evs if e["type"] == "step_context"]
+    assert len(sc) == 1, evs
+    payload = sc[0]["payload"]
+    assert payload["provider"] == "codex"
+    assert payload["model"] == "gpt-5.5"
+    assert payload["max_tool_calls"] == inv.max_tool_calls
+    assert "env.CODEX_HOME" in payload["params"]
     ems = [e for e in evs if e["type"] == "engine_message"]
     subs = [e["payload"]["subtype"] for e in ems]
     assert subs[:2] == ["system_prompt", "agent_prompt"]

@@ -39,7 +39,8 @@ async def test_folded_field_recovered_without_requery(tmp_path: Path) -> None:
                                    client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
 
-    assert [e["type"] for e in events] == ["agent_result"], events
+    assert [e["type"] for e in events
+            if e["type"] != "tool_heartbeat"] == ["agent_result"], events
     assert events[-1]["payload"] == {"note": "did the work", "status": "Success"}
     log_types = [e["type"] for e in log.read()]
     assert log_types.count("output_recovered") == 1

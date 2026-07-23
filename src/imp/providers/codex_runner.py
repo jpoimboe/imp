@@ -19,16 +19,11 @@ import time
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from imp.agents.agent_loop import run_agent_loop
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
-from imp.agents.output_guard import (
-    Nudge,
-    Ok,
-    make_nudge_event,
-    make_recovery_event,
-    validate_output_or_nudge,
-)
+from imp.agents.loop_items import Error
 from imp.agents.runner import (
     AgentInvocation,
     Event,
@@ -37,14 +32,17 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import raise_if_suspended
+from imp.agents.subagents import make_task_tool, raise_if_suspended
+from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
+from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
     quest_home_path,
     request_bracketed,
     terminate_running_processes,
 )
+from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import deliver_continuation_reply
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.awaiting_user_input import AwaitingUserInput
@@ -64,7 +62,6 @@ from imp.providers.codex_config import (
 from imp.providers.codex_mcp import (
     CODEX_APPROVAL_POLICY,
     RunState,
-    ServerHandle,
     start_impty_server,
     start_server,
 )
@@ -72,6 +69,10 @@ from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
 )
+from imp.providers.observe_classify import _classify_agent_text
+from imp.providers.observe_session import ObserveSession
+from imp.providers.stderr_sink import current_stderr_sink
+from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
 
 _logger = logging.getLogger(__name__)
 
@@ -188,6 +189,45 @@ def restore_to_snapshot(cwd: Path, snap: EntrySnapshot) -> None:
 # ── CodexAgentRunner ──────────────────────────────────────────────────────────
 
 
+def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
+    """Same filtering as anthropic._build_tools, including the bash ->
+    bash_output/bash_kill injection."""
+    reg = get_registry()
+    out: dict[str, Tool] = {}
+    check_web_capability(invocation.provider_name, invocation.agent_def)
+    for name in invocation.agent_def.tools:
+        if name == "complete_step":
+            continue
+        if name == "sub_agent":
+            continue
+        if name in WEB_TOOL_NAMES:
+            # Reserved native-capability names (§4): never registry-looked-up;
+            # routed to the native-injection path at provision time.
+            continue
+        if name == "load_skill":
+            # Auto-injected below; tolerate a redundant explicit declaration.
+            continue
+        if name not in reg:
+            raise KeyError(f"agent declares unknown tool {name!r}")
+        out[name] = reg[name]
+    if "sub_agent" in invocation.agent_def.tools:
+        out["sub_agent"] = make_task_tool(invocation.tiers)
+    if invocation.subagent_depth == 0:
+        out["complete_step"] = make_complete_step_tool(
+            invocation.agent_def.output_schema)
+    out["load_skill"] = make_load_skill_tool()
+    if "bash" in invocation.agent_def.tools:
+        # Auto-granted with bash (same block as anthropic/openai
+        # _build_tools): run_in_background is a bash PARAMETER, so an agent
+        # with bash but no read/kill tool is a trap — a backgrounded process
+        # it can never see or stop. The capability set must be atomic.
+        # allowed_tools picks these up automatically (mcp__imp__ prefix is
+        # derived from this dict in _build_options).
+        out["bash_output"] = reg["bash_output"]
+        out["bash_kill"] = reg["bash_kill"]
+    return out
+
+
 def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
     """Refresh the canonical codex token before seed_auth; raise AuthError on a dead token."""
     outcome = refresh_canonical_token(int(time.time() * 1000))
@@ -198,6 +238,527 @@ def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
     if outcome.outcome == FAILED_INVALID_GRANT:
         raise perr.AuthError(
             "codex: OAuth refresh token is dead; re-authentication required")
+
+
+# Internal sentinels _receive yields for the two mid-turn terminal pre-checks
+# (dead MCP server, hard cancel); _message_to_items maps each to a terminal Error.
+_SERVER_DIED = object()
+_CANCEL = object()
+
+
+class CodexSession(ObserveSession):
+    """The observe `Session` codex's `run()` drives via `run_agent_loop`.
+
+    Each hook body is a relocated region of the old `_run_loop`/`_drive_turns`.
+    `_enter` builds ctx/tools/server/client/state and the fresh-vs-resume prompt
+    disposition; `_receive` owns the per-turn `run_streamed` + streamed-event
+    scaffold with the dead-server/cancel/sweep pre-checks; `_message_to_items`
+    shapes the per-event appends (via `process_event`) and the mid-stream terminal
+    checks; `_is_terminal` owns the `turn.completed` handoff/threshold decision.
+    The nudge/continuation/park terminal outcome is owned by the shared driver.
+    Teardown handles are stashed on the runner so run()'s finally reaches them.
+    """
+
+    @property
+    def _complete_step_called(self) -> bool:
+        return bool(self._proc_state.get("complete_step_called"))
+
+    @property
+    def _complete_step_args(self) -> dict[str, Any]:
+        return self._proc_state.get("complete_step_args") or {}
+
+    async def _enter(self) -> None:
+        invocation = self.invocation
+        runner = self.runner
+        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
+        aid = invocation.agent_id or "step:unnamed"
+        self.elog = elog
+        self.aid = aid
+        self.subagent_depth = invocation.subagent_depth
+
+        # 1. Preflight (auth / *-codex / non-git cwd) — raises PreflightError.
+        canonical_auth = runner._canonical_auth_path()
+        cwd = invocation.quest_context.project_root
+        auth_mode = preflight(
+            model=runner.model, cwd=cwd, canonical_auth=canonical_auth,
+            env=os.environ,
+        )
+        runner._auth_mode = auth_mode
+        runner._canonical_auth = canonical_auth
+
+        # 2. Build tools + ToolContext (mirror the claude_code runner exactly).
+        from imp.providers.resolve import spawn_subagent_via_registry
+        tools = _build_tools(invocation)
+        self.tools = tools
+        ctx = ToolContext(
+            project_root=cwd,
+            events_path=invocation.events_path,
+            subagent_defs=invocation.subagent_defs,
+            provider_name=invocation.provider_name,
+            model_name=invocation.model_name,
+            parent_transcript_dir=invocation.transcript_dir,
+            agent_id=aid,
+            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
+        )
+        ctx.quest_context = invocation.quest_context
+        ctx.quest_state = invocation.quest_state
+        ctx.quest = invocation.quest          # live quest for rename_quest
+        ctx.spawn_subagent = spawn_subagent_via_registry
+        ctx.resolved_tiers = invocation.resolved_tiers
+        ctx.subagent_depth = invocation.subagent_depth
+        ctx.coordinator = invocation.coordinator
+        ctx.tiers = invocation.tiers
+        ctx.test_gates = invocation.test_gates
+        ctx.pythonpath = invocation.pythonpath
+        ctx.non_interactive = invocation.headless
+        ctx.base_sandbox_policy = invocation.sandbox_policy
+        ctx.checkpoint_threshold = invocation.checkpoint_threshold
+        ctx.event_log = elog
+        if runner._user_input_fn is not None:
+            ctx.user_input_fn = runner._user_input_fn
+        self.ctx = ctx
+        runner._ctx = ctx
+
+        state = RunState(cap=invocation.max_tool_calls or 1000, agent_id=aid)
+        state.runner_loop = asyncio.get_running_loop()
+        self._state = state
+        # Shared event-processing state (process_event keys).
+        proc_state: dict[str, Any] = {
+            "thread_id": None, "complete_step_args": {},
+            "complete_step_called": False, "native_violation": None,
+            "auth_mode": auth_mode, "pending_usage": None,
+            "turn_tool_outcomes": [], "last_agent_text": "",
+        }
+        self._proc_state = proc_state
+        runner._proc_state = proc_state
+
+        # 3. Stale-CODEX_HOME sweep (best-effort).
+        tmp_root = quest_scratch_root()
+        sweep_stale_codex_homes(tmp_root=tmp_root, max_age_seconds=24 * 3600)
+
+        # 4. Take entry snapshot for the fail-closed revert mechanism.
+        entry_snapshot = take_snapshot(cwd)
+        self._entry_snapshot = entry_snapshot
+        runner._entry_snapshot = entry_snapshot
+
+        # 5. Start the in-process MCP server on an ephemeral port.
+        bearer_token = secrets.token_urlsafe(24)
+        server_handle = await start_server(
+            tools=tools, ctx=ctx, state=state,
+            bearer_token=bearer_token, host="127.0.0.1",
+        )
+        runner._server_handle = server_handle
+
+        from imp.providers.stderr_sink import build_stderr_sink
+        runner._stderr_sink = build_stderr_sink(
+            invocation.transcript_dir / "stderr.log",
+            elog=elog, aid=aid, source="codex")
+        runner._stderr_token = current_stderr_sink.set(runner._stderr_sink)
+
+        # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe against
+        # `server_handle.url` to fail fast before provisioning if imp can't reach
+        # its own server. On failure stash the terminal error (events() yields it
+        # on first pull); run()'s finally shuts the server down (codex_home is
+        # still None, so teardown_codex_home is correctly skipped).
+        try:
+            await _ping_mcp_server(
+                url=server_handle.url, bearer_token=bearer_token,
+                timeout_seconds=2.0,
+            )
+        except Exception as ping_exc:
+            self._pending_terminal = Error(payload=cast(dict[str, Any], perr.make_error_event(
+                perr.NetworkError(
+                    (
+                        f"imp-side MCP server-start ping failed; codex would "
+                        f"not be able to reach the MCP endpoint either. "
+                        f"({type(ping_exc).__name__}: {ping_exc})"),
+                    detail={"url": server_handle.url},
+                ))["payload"]))
+            return
+
+        # 6. Provision CODEX_HOME + config.toml + seed auth. web_search is
+        #    controlled via config.toml's top-level key (the deprecated SDK flag no
+        #    longer disables it on codex >=0.137), so it must be decided here, at
+        #    provision time, from the agent's declared tools.
+        impty_bearer: str | None = None
+        if "impty" in invocation.agent_def.drivers:
+            from impty.driver import ImptyDriver
+            impty_bearer = secrets.token_urlsafe(24)
+            runner._impty_driver = ImptyDriver()
+            runner._impty_handle = await start_impty_server(
+                driver=runner._impty_driver, bearer_token=impty_bearer,
+                host="127.0.0.1", runner_loop=state.runner_loop,
+            )
+        from imp.providers.web_native import declared_web_tools
+        web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
+        codex_home = provision_codex_home(
+            tmp_root=tmp_root, host=server_handle.host,
+            port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
+            web_search_enabled=web_enabled,
+            impty_url=(runner._impty_handle.url
+                       if runner._impty_handle is not None else None),
+            impty_bearer_env_var=(
+                "IMP_IMPTY_TOKEN" if runner._impty_handle is not None else None),
+        )
+        runner._codex_home = codex_home
+        if auth_mode == "chatgpt":
+            # Refresh canonical auth.json before seed_auth; a dead token raises AuthError.
+            _pre_spawn_token_refresh(elog, aid)
+        seed_auth(mode=auth_mode, canonical_path=canonical_auth,
+                  codex_home=codex_home, env=os.environ)
+
+        # Fresh-entry audit scaffolding: step_context exactly once per agent_id.
+        # Resume (balance_on_resume) re-enters and emits nothing.
+        if not invocation.balance_on_resume:
+            elog.append_step_context(
+                agent_id=aid,
+                parent_id_override=invocation.first_event_parent_id,
+                provider=invocation.provider_name, model=runner.model,
+                tools_schema=[{"name": n} for n in tools],
+                params={"env.CODEX_HOME": str(codex_home)},
+                max_tool_calls=invocation.max_tool_calls)
+
+        # 7. Build the SDK client + start/resume the persistent thread.
+        client = runner._build_client(
+            codex_home=codex_home, bearer_token=bearer_token,
+            impty_bearer_token=(impty_bearer if runner._impty_handle is not None
+                                else None))
+        proc_state["web_search_enabled"] = web_enabled
+        thread_options = runner._build_thread_options()
+        if invocation.balance_on_resume:
+            # Resume edge (Fix 1): restore codex's rollout into the fresh
+            # CODEX_HOME, then resume the native thread by id instead of starting a
+            # new one. restore_rollout fails loudly if the rollout is missing.
+            from imp.providers.codex_rollout import restore_rollout
+            thread_id = restore_rollout(
+                codex_home=codex_home,
+                transcript_dir=invocation.transcript_dir)
+            # Seed thread_id now so a subsequent pause persists the resumed thread
+            # even if the SDK does not re-emit thread.started on resume
+            # (process_event overwrites this with the same id if it does).
+            proc_state["thread_id"] = thread_id
+            if thread_options is None:
+                thread = client.resume_thread(thread_id)
+            else:
+                try:
+                    thread = client.resume_thread(thread_id, thread_options)
+                except TypeError:
+                    thread = client.resume_thread(thread_id)
+        elif thread_options is None:
+            # SDK unavailable (test/fake path): start with no options.
+            thread = client.start_thread()
+        else:
+            try:
+                thread = client.start_thread(thread_options)
+            except TypeError:
+                # Fakes ignore the options arg.
+                thread = client.start_thread()
+        self._thread = thread
+        # Build initial prompt with anti-native-tool instruction prepended.
+        next_prompt = runner._build_prompt(invocation, elog, aid)
+        # Hoist rstate so the §2 resume-entry drain below can reference it safely
+        # even when balance_on_resume is False (fresh-entry path has no rstate).
+        rstate = None
+        # Resume seam (Unit G): on a balance_on_resume re-entry, codex holds no
+        # parsed message list, so derive the resume state from imp's own
+        # events.jsonl. An AWAITING_USER turn (a bare-turn-end yield, detected via
+        # the journaled awaiting_user_input event) solicits the human reply via
+        # user_input_fn and injects it as the FIRST resumed prompt instead of the
+        # system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
+        # triggers replay-and-continue (nudge injected as the resumed prompt).
+        if invocation.balance_on_resume:
+            from imp.agents.classify import ResumeState
+            from imp.providers.codex_resume import (
+                derive_codex_resume_state,
+                pending_human_reply,
+            )
+            rstate, last_agent_text = derive_codex_resume_state(
+                invocation.events_path, aid,
+                subagent_depth=invocation.subagent_depth)
+            if rstate is ResumeState.AWAITING_USER:
+                if invocation.user_input_fn is None:
+                    self._pending_terminal = Error(payload={
+                        "category": "config", "kind": "no_user_input_fn",
+                        "message": "AWAITING_USER resume requires user_input_fn"})
+                    return
+                # §2 resume-reply join (F5): queued interjects satisfy the
+                # bare-turn-end yield directly. Fall back to user_input_fn only when
+                # the queue is empty. _resolve_wait_reply owns the SOLE
+                # awaiting_user_input emit (fired only when it actually solicits);
+                # the resume-branch duplicate is dropped (Part 1 is centralized).
+                pending = pending_human_reply(invocation.events_path, aid)
+                reply, source = await _resolve_wait_reply(
+                    invocation.coordinator, invocation.user_input_fn,
+                    invocation.resume_should_continue,
+                    elog=elog, agent_id=aid, pending_reply=pending,
+                    last_agent_message=last_agent_text,
+                    halt_writer=invocation.halt_writer,
+                    halt_clearer=invocation.halt_clearer)
+                if source == "nudge":
+                    assert isinstance(reply, str)
+                    # Internal continuation, not a human turn: emit an
+                    # engine_message/continuation event (no `>` caret).
+                    elog.append_engine_message(
+                        agent_id=aid,
+                        message=Message(role="user", content=(TextBlock(text=reply),)),
+                        subtype="continuation")
+                    next_prompt = reply
+                elif source == "pending_reply":
+                    # The reply's user_message is already durable in events.jsonl
+                    # from the prior attempt; re-journaling would duplicate it.
+                    assert isinstance(reply, str)
+                    next_prompt = reply
+                else:
+                    next_prompt = deliver_continuation_reply(
+                        None, None, elog, aid, reply, human=True)
+            elif rstate is ResumeState.MISSING_COMPLETE_STEP:
+                # Replay-and-continue: nudge is the resumed prompt; journal for audit.
+                from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+                nudge_msg = Message(
+                    role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
+                elog.append_engine_message(agent_id=aid, message=nudge_msg, subtype="continuation")
+                next_prompt = RESUME_CONTINUE_NUDGE
+        # §2 resume-entry drain: fold pending interject texts into the first
+        # resumed prompt (codex re-prompts with a string). AWAITING_USER already
+        # folded the reply above, so skip it here. Only runs on resume
+        # (balance_on_resume=True); fresh-entry has no queued interjects.
+        coordinator = invocation.coordinator
+        if coordinator is not None and invocation.balance_on_resume:
+            from imp.agents.classify import ResumeState as _RS
+            if rstate is not _RS.AWAITING_USER:
+                parts: list[str] = []
+                while True:
+                    t = coordinator.drain_interject()
+                    if t is None:
+                        break
+                    parts.append(t)
+                    elog.append_user_message(
+                        agent_id=aid,
+                        message=Message(role="user", content=(TextBlock(text=t),)),
+                        subtype="interject")
+                if parts:
+                    next_prompt = next_prompt + "\n\n" + "\n".join(parts)
+        self._next_prompt = next_prompt
+        # AbortController for interrupt() — tolerate a fake/SDK without one.
+        try:
+            from openai_codex_sdk import (
+                AbortController,
+            )
+            abort_controller: Any = AbortController()
+        except ImportError:
+            abort_controller = None
+        self._abort_controller = abort_controller
+        runner._abort_controller = abort_controller
+
+        self.guard = LoopGuard(interactive=invocation.interactive)
+        self.ceiling = invocation.max_tool_calls  # inert: codex trips mid-stream
+
+        # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is None
+        # until the threshold crosses, then "instruction_sent" for the one
+        # handoff-writing turn that follows.
+        from imp.engine.reincarnation import handoff_path_for
+        self._handoff_phase: str | None = None
+        self._handoff_path_obj = handoff_path_for(invocation.transcript_dir)
+
+    async def _receive(self) -> Any:
+        coordinator = self.invocation.coordinator
+        first = True
+        while True:
+            if not first:
+                # Internal re-query loop-back (the handoff-crossing threshold
+                # re-query set by _is_terminal): reset capture like the old loop's
+                # top-of-turn reset. A nudge/continuation re-query resets via the
+                # base's send()→new events() call, so the first turn does NOT.
+                self._reset_capture()
+            first = False
+            streamed = await self._thread.run_streamed(self._next_prompt)
+            requery = False
+            async with contextlib.aclosing(request_bracketed(
+                    coordinator, streamed.events)) as _events:
+                async for event in _events:
+                    # Dead-server / cancel checks stay AHEAD of note_activity /
+                    # _sweep_bg so a dead server never dereferences the coordinator.
+                    if self.runner._server_handle.task.done():
+                        yield _SERVER_DIED
+                        return
+                    if self.runner._cancel:
+                        yield _CANCEL
+                        return
+                    if coordinator is not None:
+                        coordinator.note_activity()
+                    # Post-API-site analog (Decision 10): one sweep per streamed
+                    # SDK event.
+                    await _bg._sweep_bg(self.ctx)
+                    yield event
+                    if getattr(event, "type", None) == "turn.completed":
+                        if self._requery_pending:
+                            self._requery_pending = False
+                            requery = True
+                        break
+            if requery:
+                continue
+            return
+
+    async def _message_to_items(self, raw: Any) -> Any:
+        if raw is _SERVER_DIED:
+            sh = self.runner._server_handle
+            exc = (sh.task.exception()
+                   if not sh.task.cancelled() else None)
+            yield Error(payload={
+                "category": "network", "kind": "mcp_server_died",
+                "message": "MCP server task ended mid-turn",
+                "detail": {"server_error": str(exc) if exc else ""}})
+            return
+        if raw is _CANCEL:
+            yield Error(payload={
+                "category": "config", "kind": "interrupted",
+                "message": "runner cancelled by interrupt"})
+            return
+        state = self._state
+        process_event(raw, elog=self.elog, agent_id=self.aid,
+                      state=self._proc_state,
+                      provider=self.invocation.provider_name,
+                      model=self.runner.model, run_state=state,
+                      subagent_defs=self.invocation.subagent_defs)
+
+        # Mirror complete_step_args from the shared state into proc_state so the
+        # terminal check sees them at the boundary.
+        if state.complete_step_called:
+            self._proc_state["complete_step_called"] = True
+            self._proc_state["complete_step_args"] = dict(state.complete_step_args)
+
+        # Cap trip from inside the MCP wrapper → abort the SDK + bail.
+        if state.abort_requested:
+            if self._abort_controller is not None:
+                with contextlib.suppress(Exception):
+                    self._abort_controller.abort()
+            await terminate_running_processes(self.ctx)
+            yield Error(payload={
+                "category": "config",
+                "kind": "tool_call_ceiling_exceeded",
+                "ceiling": state.cap,
+                "message":
+                    f"codex tool dispatch cap ({state.cap}) exceeded"})
+            return
+
+        # Native-tool violation → fail-closed. AC #18: unconditional revert + bail.
+        if self._proc_state.get("native_violation") is not None:
+            detail = self._proc_state["native_violation"]
+            restore_to_snapshot(self.ctx.project_root, self._entry_snapshot)
+            yield Error(payload={
+                "category": "config", "kind": "native_tool_violation",
+                "message": (
+                    f"codex used a native {detail['kind']} tool; "
+                    "worktree reverted to entry state."),
+                "detail": {**detail, "kept_bytes": False}})
+            return
+
+        # turn.failed → categorize + bail.
+        if getattr(raw, "type", None) == "turn.failed":
+            yield Error(payload=cast(dict[str, Any], perr.make_error_event(
+                categorize_turn_failed(getattr(raw, "error", {}) or {}))["payload"]))
+            return
+
+    def _drain_kills(self) -> list[dict[str, Any]]:
+        state = self._state
+        infos: list[dict[str, Any]] = []
+        while state.killed_tool_uses:
+            infos.append(state.killed_tool_uses.pop(0))
+        return infos
+
+    def _fatal_error(self) -> dict[str, Any] | None:
+        state = self._state
+        if state.fatal_tool_error is not None:
+            if self._abort_controller is not None:
+                with contextlib.suppress(Exception):
+                    self._abort_controller.abort()
+            tool_name, msg = state.fatal_tool_error
+            return {
+                "category": "config", "kind": "fatal_tool_error",
+                "tool": tool_name, "message": msg,
+            }
+        return None
+
+    async def _is_terminal(self, raw: Any) -> bool:
+        if getattr(raw, "type", None) != "turn.completed":
+            return False
+        from imp.engine.reincarnation import handoff_instruction, write_handoff_note
+        from imp.providers.catalog import context_threshold_crossed
+        invocation = self.invocation
+        # Tier A watch: this turn crossed the checkpoint threshold while still
+        # working (no complete_step). Inject the handoff instruction as the next
+        # turn prompt and capture the note on the following turn (re-query).
+        # Completion wins over a mere crossing (old ordering: the complete_step
+        # branch returned before the crossing check), so gate on not-completed.
+        if (self._handoff_phase is None
+                and not self._complete_step_called
+                and invocation.checkpoint_threshold is not None
+                and context_threshold_crossed(
+                    self._proc_state.get("pending_usage"), self.runner.model,
+                    invocation.checkpoint_threshold)):
+            instr = handoff_instruction(self._handoff_path_obj)
+            self.elog.append_engine_message(
+                agent_id=self.aid,
+                message=Message(role="user", content=(TextBlock(text=instr),)),
+                subtype="continuation")
+            self._next_prompt = instr
+            self._handoff_phase = "instruction_sent"
+            self._requery_pending = True
+            return False
+        if self._handoff_phase == "instruction_sent":
+            # Handoff wins over a stray complete_step on this turn.
+            write_handoff_note(
+                self._handoff_path_obj, self._proc_state.get("last_agent_text", ""))
+            self._handoff_done = True
+            self._handoff_path = str(self._handoff_path_obj)
+        return True
+
+    def _flush_turn_record(self) -> TurnRecord:
+        ps = self._proc_state
+        return TurnRecord(
+            assistant_text=ps.get("last_agent_text", "") or "",
+            tools=list(ps.get("turn_tool_outcomes", [])),
+            has_complete_step=bool(ps.get("complete_step_called")))
+
+    def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
+        classified = _classify_agent_text(last_text)
+        if classified is not None:
+            return cast(dict[str, Any], perr.make_error_event(
+                classified, kind=getattr(classified, "kind", ""))["payload"])
+        return None
+
+    def _last_text(self) -> str:
+        return self._proc_state.get("last_agent_text", "") or ""
+
+    def subagent_deliverable(self) -> str:
+        return self._last_text()
+
+    def _requery(self, text: Any, *, human: bool) -> None:
+        self._next_prompt = deliver_continuation_reply(
+            None, None, self.elog, self.aid, text, human=human)
+
+    def _drain_interject(self) -> None:
+        coordinator = self.invocation.coordinator
+        if coordinator is None:
+            return
+        t = coordinator.drain_interject()
+        if t is not None:
+            self.elog.append_user_message(
+                agent_id=self.aid,
+                message=Message(role="user", content=(TextBlock(text=t),)),
+                subtype="interject")
+            self._next_prompt = f"{self._next_prompt}\n\n{t}"
+
+    def _reset_capture(self) -> None:
+        ps = self._proc_state
+        ps["complete_step_called"] = False
+        ps["complete_step_args"] = {}
+        ps["turn_tool_outcomes"] = []
+        ps["last_agent_text"] = ""
+        state = self._state
+        state.complete_step_called = False
+        state.complete_step_args = {}
 
 
 class CodexAgentRunner:
@@ -218,15 +779,30 @@ class CodexAgentRunner:
         # `_canonical_auth_path()`; declared here so the attribute the tests set
         # is part of the class contract.
         self._canonical_auth_override: Path | None = None
-        # Per-step capture of the nested `codex` CLI's stderr. Built in _run_loop
-        # and published to current_stderr_sink for the subprocess-patch tee. None
-        # until built (the stubbed-loop outer-except tests never build it).
+        # Per-step capture of the nested `codex` CLI's stderr. Built in
+        # CodexSession._enter and published to current_stderr_sink for the
+        # subprocess-patch tee. None until built (the stubbed-loop outer-except
+        # tests never build it).
         self._stderr_sink: Any = None
+        # Teardown handles stashed by CodexSession._enter so run()'s finally can
+        # reach them on every exit path (an abandoned session generator only
+        # GC-finalizes, so teardown lives in run()'s own finally).
+        self._server_handle: Any = None
+        self._codex_home: Path | None = None
+        self._impty_handle: Any = None
+        self._impty_driver: Any = None
+        self._stderr_token: Any = None
+        self._auth_mode: AuthMode | None = None
+        self._canonical_auth: Path | None = None
+        self._entry_snapshot: Any = None
+        self._proc_state: dict[str, Any] = {}
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        session = CodexSession(invocation, self)
         try:
             try:
-                async with contextlib.aclosing(self._run_loop(invocation)) as loop:
+                async with contextlib.aclosing(
+                        run_agent_loop(invocation, session)) as loop:
                     async for ev in loop:
                         yield ev
             except PreflightError as exc:
@@ -262,196 +838,57 @@ class CodexAgentRunner:
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
-            if self._ctx is not None:
-                # None guard: _ctx is assigned mid-_run_loop (after preflight).
-                # run()'s OWN finally, not _run_loop's existing one — an
-                # abandoned inner generator only GC-finalizes (PEP 525), so
-                # the MCP/CODEX_HOME finally there is not aclose-deterministic
-                # and bg teardown must not depend on it.
-                from imp.agents.tools.bg import terminate_background_processes
-                with contextlib.suppress(Exception):
-                    await terminate_background_processes(self._ctx)
-
-    async def _run_loop(
-        self, invocation: AgentInvocation,
-    ) -> AsyncGenerator[Event, None]:
-        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
-        aid = invocation.agent_id or "step:unnamed"
-
-        # 1. Preflight (auth / *-codex / non-git cwd) — raises PreflightError.
-        canonical_auth = self._canonical_auth_path()
-        cwd = invocation.quest_context.project_root
-        auth_mode = preflight(
-            model=self.model, cwd=cwd, canonical_auth=canonical_auth,
-            env=os.environ,
-        )
-
-        # 2. Build tools + ToolContext (mirror the claude_code runner exactly).
-        from imp.providers.claude_code import _build_tools
-        from imp.providers.resolve import spawn_subagent_via_registry
-        tools = _build_tools(invocation)
-        ctx = ToolContext(
-            project_root=cwd,
-            events_path=invocation.events_path,
-            subagent_defs=invocation.subagent_defs,
-            provider_name=invocation.provider_name,
-            model_name=invocation.model_name,
-            parent_transcript_dir=invocation.transcript_dir,
-            agent_id=aid,
-            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.quest_context.quest_home),
-        )
-        ctx.quest_context = invocation.quest_context
-        ctx.quest_state = invocation.quest_state
-        ctx.quest = invocation.quest          # live quest for rename_quest
-        ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_tiers = invocation.resolved_tiers
-        ctx.subagent_depth = invocation.subagent_depth
-        ctx.coordinator = invocation.coordinator
-        ctx.tiers = invocation.tiers
-        ctx.test_gates = invocation.test_gates
-        ctx.pythonpath = invocation.pythonpath
-        ctx.non_interactive = invocation.headless
-        ctx.base_sandbox_policy = invocation.sandbox_policy
-        ctx.checkpoint_threshold = invocation.checkpoint_threshold
-        ctx.event_log = elog
-        if self._user_input_fn is not None:
-            ctx.user_input_fn = self._user_input_fn
-        self._ctx = ctx
-
-        state = RunState(cap=invocation.max_tool_calls or 1000, agent_id=aid)
-        state.runner_loop = asyncio.get_running_loop()
-        # Shared event-processing state (process_event keys).
-        proc_state: dict[str, Any] = {
-            "thread_id": None, "complete_step_args": None,
-            "complete_step_called": False, "native_violation": None,
-            "auth_mode": auth_mode, "pending_usage": None,
-        }
-
-        # 3. Stale-CODEX_HOME sweep (best-effort).
-        tmp_root = quest_scratch_root()
-        sweep_stale_codex_homes(tmp_root=tmp_root, max_age_seconds=24 * 3600)
-
-        # 4. Take entry snapshot for the fail-closed revert mechanism.
-        entry_snapshot = take_snapshot(cwd)
-
-        # 5. Start the in-process MCP server on an ephemeral port.
-        bearer_token = secrets.token_urlsafe(24)
-        server_handle = await start_server(
-            tools=tools, ctx=ctx, state=state,
-            bearer_token=bearer_token, host="127.0.0.1",
-        )
-
-        # 5a..8. Everything after the server starts runs inside ONE try/finally
-        # so the MCP server is ALWAYS shut down and any provisioned CODEX_HOME
-        # is ALWAYS torn down — even if the ping, provision, or seed_auth step
-        # raises (Task 31: close the provision/seed teardown leak window).
-        from imp.providers.stderr_sink import build_stderr_sink, current_stderr_sink
-        self._stderr_sink = build_stderr_sink(
-            invocation.transcript_dir / "stderr.log",
-            elog=elog, aid=aid, source="codex")
-        _stderr_token = current_stderr_sink.set(self._stderr_sink)
-        codex_home: Path | None = None
-        impty_handle: ServerHandle | None = None
-        impty_driver: Any = None
-        try:
-            # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe
-            # against `server_handle.url` to fail fast before provisioning if
-            # imp can't reach its own server. On failure we just return; the
-            # finally below shuts the server down (codex_home is still None, so
-            # teardown_codex_home is correctly skipped).
+            # Two nested finally blocks preserve the old structure's exception
+            # isolation: the former _run_loop teardown is the inner block; the
+            # former run() bg teardown is the outer finally, so it STILL runs even
+            # if the (unguarded) teardown_codex_home raises. Within the inner block
+            # the impty shutdown/close are Exception-suppressed, and persist_rollout
+            # is wrapped so a rollout-IO failure never skips the auth-shredding
+            # teardown_codex_home.
             try:
-                await _ping_mcp_server(
-                    url=server_handle.url, bearer_token=bearer_token,
-                    timeout_seconds=2.0,
-                )
-            except Exception as ping_exc:
-                yield perr.make_error_event(perr.NetworkError(
-                    (
-                        f"imp-side MCP server-start ping failed; codex would "
-                        f"not be able to reach the MCP endpoint either. "
-                        f"({type(ping_exc).__name__}: {ping_exc})"),
-                    detail={"url": server_handle.url},
-                ))
-                return
-
-            # 6. Provision CODEX_HOME + config.toml + seed auth. web_search is
-            #    controlled via config.toml's top-level key (the deprecated SDK
-            #    flag no longer disables it on codex >=0.137), so it must be
-            #    decided here, at provision time, from the agent's declared tools.
-            impty_bearer: str | None = None
-            if "impty" in invocation.agent_def.drivers:
-                from impty.driver import ImptyDriver
-                impty_bearer = secrets.token_urlsafe(24)
-                impty_driver = ImptyDriver()
-                impty_handle = await start_impty_server(
-                    driver=impty_driver, bearer_token=impty_bearer,
-                    host="127.0.0.1", runner_loop=state.runner_loop,
-                )
-            from imp.providers.web_native import declared_web_tools
-            web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
-            codex_home = provision_codex_home(
-                tmp_root=tmp_root, host=server_handle.host,
-                port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
-                web_search_enabled=web_enabled,
-                impty_url=impty_handle.url if impty_handle is not None else None,
-                impty_bearer_env_var=(
-                    "IMP_IMPTY_TOKEN" if impty_handle is not None else None),
-            )
-            if auth_mode == "chatgpt":
-                # Refresh canonical auth.json before seed_auth; a dead token raises AuthError.
-                _pre_spawn_token_refresh(elog, aid)
-            seed_auth(mode=auth_mode, canonical_path=canonical_auth,
-                      codex_home=codex_home, env=os.environ)
-
-            # 7. Run the SDK turn(s) and consume events.
-            client = self._build_client(
-                codex_home=codex_home, bearer_token=bearer_token,
-                impty_bearer_token=(impty_bearer if impty_handle is not None
-                                    else None))
-            async with contextlib.aclosing(self._drive_turns(
-                client=client, invocation=invocation, elog=elog,
-                aid=aid, ctx=ctx, state=state, proc_state=proc_state,
-                entry_snapshot=entry_snapshot, server_handle=server_handle,
-                codex_home=codex_home,
-            )) as turns:
-                async for ev in turns:
-                    yield ev
-        finally:
-            # 8. Lifecycle teardown — runs on EVERY exit (success, error,
-            #    abort, interrupt, AND a ping/provision/seed failure). The
-            #    server shutdown ALWAYS runs; CODEX_HOME teardown runs only when
-            #    a codex_home was actually provisioned.
-            current_stderr_sink.reset(_stderr_token)
-            self._stderr_sink.close()
-            if impty_handle is not None:
-                with contextlib.suppress(Exception):
-                    await impty_handle.shutdown()
-            if impty_driver is not None:
-                with contextlib.suppress(Exception):
-                    impty_driver.close()
-            await server_handle.shutdown()
-            if codex_home is not None:
-                # Own codex's native rollout across the pause BEFORE teardown
-                # deletes CODEX_HOME (Fix 1). Best-effort: a persist failure must
-                # not skip the auth-shredding teardown below. A later resume that
-                # finds no persisted rollout fails loudly in restore_rollout.
-                tid = proc_state.get("thread_id")
-                if tid:
-                    from imp.providers.codex_rollout import persist_rollout
-                    try:
-                        persist_rollout(
-                            codex_home=codex_home, thread_id=tid,
-                            transcript_dir=invocation.transcript_dir,
-                        )
-                    except Exception as exc:  # pragma: no cover - defensive
-                        _logger.warning(
-                            "codex: rollout persist failed (resume may be "
-                            "unavailable): %s", exc)
-                teardown_codex_home(
-                    codex_home=codex_home, mode=auth_mode,
-                    canonical_path=canonical_auth,
-                )
+                if self._stderr_token is not None:
+                    current_stderr_sink.reset(self._stderr_token)
+                if self._stderr_sink is not None:
+                    self._stderr_sink.close()
+                if self._impty_handle is not None:
+                    with contextlib.suppress(Exception):
+                        await self._impty_handle.shutdown()
+                if self._impty_driver is not None:
+                    with contextlib.suppress(Exception):
+                        self._impty_driver.close()
+                if self._server_handle is not None:
+                    await self._server_handle.shutdown()
+                if self._codex_home is not None:
+                    # A provisioned codex_home implies _enter reached auth setup,
+                    # so canonical_auth is set (both stashed before codex_home).
+                    assert self._canonical_auth is not None
+                    # Own codex's native rollout across the pause BEFORE teardown
+                    # deletes CODEX_HOME (Fix 1). Best-effort: a persist failure
+                    # must not skip the auth-shredding teardown below. A later
+                    # resume that finds no persisted rollout fails loudly in
+                    # restore_rollout.
+                    tid = self._proc_state.get("thread_id")
+                    if tid:
+                        from imp.providers.codex_rollout import persist_rollout
+                        try:
+                            persist_rollout(
+                                codex_home=self._codex_home, thread_id=tid,
+                                transcript_dir=invocation.transcript_dir)
+                        except Exception as exc:  # persist must not skip teardown
+                            _logger.warning(
+                                "codex: rollout persist failed (resume may be "
+                                "unavailable): %s", exc)
+                    teardown_codex_home(
+                        codex_home=self._codex_home, mode=self._auth_mode,
+                        canonical_path=self._canonical_auth)
+            finally:
+                if self._ctx is not None:
+                    # None guard: _ctx is assigned mid-_enter (after preflight).
+                    # run()'s OWN finally — an abandoned session generator only
+                    # GC-finalizes (PEP 525), so bg teardown must not depend on it.
+                    from imp.agents.tools.bg import terminate_background_processes
+                    with contextlib.suppress(Exception):
+                        await terminate_background_processes(self._ctx)
 
     def _canonical_auth_path(self) -> Path:
         """The canonical codex `auth.json` — honors $CODEX_HOME (fallback
@@ -495,442 +932,11 @@ class CodexAgentRunner:
         env = overlay_engine_env(os.environ, overrides)
         return Codex(CodexOptions(env=env))
 
-    async def _drive_turns(
-        self, *, client: Any, invocation: AgentInvocation, elog: Any,
-        aid: str, ctx: ToolContext, state: RunState, proc_state: dict[str, Any],
-        entry_snapshot: EntrySnapshot, server_handle: Any, codex_home: Path,
-    ) -> AsyncGenerator[Event, None]:
-        """Start a thread, run streamed turns, consume events.
-
-        Multi-turn nudge loop (Task 28): on a turn that completes without
-        `complete_step`, classified provider-error text short-circuits; a run
-        with a wired `continuation_fn` is nudged for another turn; exhausted
-        runs emit the appropriate terminal error. Inline cap-abort /
-        native-violation / turn.failed / interrupt handling is preserved
-        verbatim inside the inner loop.
-        """
-        # Enable codex's model-hosted web_search ONLY when this agent declared
-        # the tool (governance: agents opt in via `tools:`). The flag also gates
-        # how process_event surfaces a web_search item (expected tool_call vs
-        # disabled-state tripwire).
-        from imp.providers.web_native import declared_web_tools
-        web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
-        proc_state["web_search_enabled"] = web_enabled
-        thread_options = self._build_thread_options()
-        if invocation.balance_on_resume:
-            # Resume edge (Fix 1): restore codex's rollout into the fresh
-            # CODEX_HOME, then resume the native thread by id instead of starting
-            # a new one. restore_rollout fails loudly if the rollout is missing.
-            from imp.providers.codex_rollout import restore_rollout
-            thread_id = restore_rollout(
-                codex_home=codex_home,
-                transcript_dir=invocation.transcript_dir)
-            # Seed thread_id now so a subsequent pause persists the resumed
-            # thread even if the SDK does not re-emit thread.started on resume
-            # (process_event overwrites this with the same id if it does).
-            proc_state["thread_id"] = thread_id
-            if thread_options is None:
-                thread = client.resume_thread(thread_id)
-            else:
-                try:
-                    thread = client.resume_thread(thread_id, thread_options)
-                except TypeError:
-                    thread = client.resume_thread(thread_id)
-        elif thread_options is None:
-            # SDK unavailable (test/fake path): start with no options.
-            thread = client.start_thread()
-        else:
-            try:
-                thread = client.start_thread(thread_options)
-            except TypeError:
-                # Fakes ignore the options arg.
-                thread = client.start_thread()
-        # Build initial prompt with anti-native-tool instruction prepended.
-        next_prompt = self._build_prompt(invocation, elog, aid)
-        # Hoist rstate so the §2 resume-entry drain below can reference it safely
-        # even when balance_on_resume is False (fresh-entry path has no rstate).
-        rstate = None
-        # Resume seam (Unit G): on a balance_on_resume re-entry, codex holds no
-        # parsed message list, so derive the resume state from imp's own
-        # events.jsonl. An AWAITING_USER turn (a bare-turn-end yield, detected
-        # via the journaled awaiting_user_input event) solicits the human reply
-        # via user_input_fn and injects it as the FIRST resumed prompt instead of
-        # the system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
-        # triggers replay-and-continue (nudge injected as the resumed prompt).
-        if invocation.balance_on_resume:
-            from imp.agents.classify import ResumeState
-            from imp.providers.codex_resume import (
-                derive_codex_resume_state,
-                pending_human_reply,
-            )
-            rstate, last_agent_text = derive_codex_resume_state(
-                invocation.events_path, aid,
-                subagent_depth=invocation.subagent_depth)
-            if rstate is ResumeState.AWAITING_USER:
-                if invocation.user_input_fn is None:
-                    yield {"type": "error", "payload": {
-                        "category": "config", "kind": "no_user_input_fn",
-                        "message": "AWAITING_USER resume requires user_input_fn"}}
-                    return
-                # §2 resume-reply join (F5): queued interjects satisfy the
-                # bare-turn-end yield directly. Fall back to user_input_fn only
-                # when the queue is empty. _resolve_wait_reply owns the SOLE
-                # awaiting_user_input emit (fired only when it actually solicits);
-                # the resume-branch duplicate is dropped (Part 1 is centralized).
-                pending = pending_human_reply(invocation.events_path, aid)
-                reply, source = await _resolve_wait_reply(
-                    invocation.coordinator, invocation.user_input_fn,
-                    invocation.resume_should_continue,
-                    elog=elog, agent_id=aid, pending_reply=pending,
-                    last_agent_message=last_agent_text,
-                    halt_writer=invocation.halt_writer,
-                    halt_clearer=invocation.halt_clearer)
-                if source == "nudge":
-                    assert isinstance(reply, str)
-                    # Internal continuation, not a human turn: emit an
-                    # engine_message/continuation event (no `>` caret).
-                    elog.append_engine_message(
-                        agent_id=aid,
-                        message=Message(role="user", content=(TextBlock(text=reply),)),
-                        subtype="continuation")
-                    next_prompt = reply
-                elif source == "pending_reply":
-                    # The reply's user_message is already durable in events.jsonl
-                    # from the prior attempt; re-journaling would duplicate it.
-                    assert isinstance(reply, str)
-                    next_prompt = reply
-                else:
-                    next_prompt = deliver_continuation_reply(
-                        None, None, elog, aid, reply, human=True)
-            elif rstate is ResumeState.MISSING_COMPLETE_STEP:
-                # Replay-and-continue: nudge is the resumed prompt; journal for audit trail.
-                from imp.agents.transcript import RESUME_CONTINUE_NUDGE
-                nudge_msg = Message(
-                    role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
-                elog.append_engine_message(agent_id=aid, message=nudge_msg, subtype="continuation")
-                next_prompt = RESUME_CONTINUE_NUDGE
-        # §2 resume-entry drain: fold pending interject texts into the first
-        # resumed prompt (codex re-prompts with a string). AWAITING_USER already
-        # folded the reply above, so skip it here. Only runs on resume
-        # (balance_on_resume=True); fresh-entry has no queued interjects.
-        coordinator = invocation.coordinator
-        if coordinator is not None and invocation.balance_on_resume:
-            from imp.agents.classify import ResumeState as _RS
-            if rstate is not _RS.AWAITING_USER:
-                parts: list[str] = []
-                while True:
-                    t = coordinator.drain_interject()
-                    if t is None:
-                        break
-                    parts.append(t)
-                    elog.append_user_message(
-                        agent_id=aid,
-                        message=Message(role="user", content=(TextBlock(text=t),)),
-                        subtype="interject")
-                if parts:
-                    next_prompt = next_prompt + "\n\n" + "\n".join(parts)
-        # AbortController for interrupt() — tolerate a fake/SDK without one.
-        try:
-            from openai_codex_sdk import (
-                AbortController,
-            )
-            self._abort_controller = AbortController()
-        except ImportError:
-            self._abort_controller = None
-
-        guard = LoopGuard(interactive=invocation.interactive)
-
-        # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
-        # None until the threshold crosses, then "instruction_sent" for the one
-        # handoff-writing turn that follows.
-        from imp.engine.reincarnation import (
-            handoff_instruction,
-            handoff_path_for,
-            write_handoff_note,
-        )
-        from imp.providers.catalog import context_threshold_crossed
-        handoff_phase: str | None = None
-        handoff_path = handoff_path_for(invocation.transcript_dir)
-
-        while True:
-            # Reset per-turn completion-capture state before each turn so a
-            # stale flag from a missed-completion turn cannot satisfy the
-            # check on the next.
-            proc_state["complete_step_called"] = False
-            proc_state["complete_step_args"] = {}
-            proc_state["turn_tool_outcomes"] = []
-            proc_state["last_agent_text"] = ""
-            # Mirror onto the shared MCP RunState (which the dispatcher writes).
-            state.complete_step_called = False
-            state.complete_step_args = {}
-            streamed = await thread.run_streamed(next_prompt)
-            need_nudge = False  # set when turn ends without complete_step
-            handoff_turn_queued = False  # set when a Tier A handoff turn is queued
-            nudge_requery = False  # set when a malformed complete_step re-drives
-            async with contextlib.aclosing(request_bracketed(
-                    invocation.coordinator, streamed.events)) as _events:
-                async for event in _events:
-                    # Dead-server poll: if the MCP server task has ended, bail
-                    # immediately rather than letting codex's retry-loop be
-                    # misread as "missing complete_step".
-                    if server_handle.task.done():
-                        exc = (server_handle.task.exception()
-                               if not server_handle.task.cancelled() else None)
-                        yield {"type": "error", "payload": {
-                            "category": "network", "kind": "mcp_server_died",
-                            "message": "MCP server task ended mid-turn",
-                            "detail": {"server_error": str(exc) if exc else ""}}}
-                        return
-                    if self._cancel:
-                        yield {"type": "error", "payload": {
-                            "category": "config", "kind": "interrupted",
-                            "message": "runner cancelled by interrupt"}}
-                        return
-                    if invocation.coordinator is not None:
-                        invocation.coordinator.note_activity()
-                    # Post-API-site analog (Decision 10): one sweep per streamed
-                    # SDK event. Dead-server/cancel checks stay first.
-                    await _bg._sweep_bg(ctx)
-                    etype = getattr(event, "type", None)
-                    process_event(event, elog=elog, agent_id=aid, state=proc_state,
-                                  provider=invocation.provider_name,
-                                  model=self.model, run_state=state,
-                                  subagent_defs=invocation.subagent_defs)
-
-                    # Cap trip from inside the MCP wrapper → abort the SDK + bail.
-                    if state.abort_requested:
-                        if self._abort_controller is not None:
-                            with contextlib.suppress(Exception):
-                                self._abort_controller.abort()
-                        await terminate_running_processes(ctx)
-                        yield {"type": "error", "payload": {
-                            "category": "config",
-                            "kind": "tool_call_ceiling_exceeded",
-                            "ceiling": state.cap,
-                            "message":
-                                f"codex tool dispatch cap ({state.cap}) "
-                                f"exceeded"}}
-                        return
-
-                    if state.fatal_tool_error is not None:
-                        if self._abort_controller is not None:
-                            with contextlib.suppress(Exception):
-                                self._abort_controller.abort()
-                        tool_name, msg = state.fatal_tool_error
-                        # Same payload shape as claude_code.py fatal_tool_error:
-                        # `tool` at the top level, `message` is the raw fatal-tool
-                        # message.
-                        yield {"type": "error", "payload": {
-                            "category": "config", "kind": "fatal_tool_error",
-                            "tool": tool_name, "message": msg}}
-                        return
-
-                    # Drain any bash kills detected by the MCP wrapper (non-terminal).
-                    # tool_killed is an AUDIT event — persisted once via elog.append,
-                    # NOT yielded. drive_invocation re-appends every yielded event to
-                    # the same log, so yielding would cause a double-write.
-                    while state.killed_tool_uses:
-                        info = state.killed_tool_uses.pop(0)
-                        elog.append(agent_id=aid, type="tool_killed", payload=info)
-
-                    # Native-tool violation → fail-closed. AC #18: unconditional
-                    # revert + bail.
-                    if proc_state.get("native_violation") is not None:
-                        detail = proc_state["native_violation"]
-                        restore_to_snapshot(ctx.project_root, entry_snapshot)
-                        yield {"type": "error", "payload": {
-                            "category": "config", "kind": "native_tool_violation",
-                            "message": (
-                                f"codex used a native {detail['kind']} tool; "
-                                "worktree reverted to entry state."),
-                            "detail": {**detail, "kept_bytes": False}}}
-                        return
-
-                    # Mirror complete_step_args from the shared state into
-                    # proc_state so the across-turn check below sees them at the
-                    # next boundary.
-                    if state.complete_step_called:
-                        proc_state["complete_step_called"] = True
-                        proc_state["complete_step_args"] = dict(
-                            state.complete_step_args)
-
-                    # turn.failed → categorize + bail.
-                    if etype == "turn.failed":
-                        exc = categorize_turn_failed(
-                            getattr(event, "error", {}) or {})
-                        yield perr.make_error_event(exc)
-                        return
-
-                    if etype == "turn.completed":
-                        if not proc_state.get("complete_step_called"):
-                            # Only NON-complete turns are observed here. A malformed
-                            # complete_step turn is fed to the guard exactly once by
-                            # validate_output_or_nudge below (as non-progress);
-                            # observing has_complete_step=True here would reset the
-                            # streak and the malformed loop would never trip.
-                            record = TurnRecord(
-                                assistant_text=proc_state.get("last_agent_text", "")
-                                or "",
-                                tools=list(proc_state.get("turn_tool_outcomes", [])),
-                                has_complete_step=False,
-                            )
-                            loop_err = guard.observe(record)
-                            if loop_err is not None:
-                                yield perr.make_error_event(
-                                    loop_err, kind=getattr(loop_err, "kind", ""))
-                                return
-                        if handoff_phase == "instruction_sent":
-                            # Handoff wins over a stray complete_step on this turn.
-                            write_handoff_note(handoff_path, proc_state.get("last_agent_text", ""))
-                            yield {"type": "handoff",
-                                   "payload": {"handoff_path": str(handoff_path)}}
-                            return
-                        if proc_state.get("complete_step_called"):
-                            args = proc_state.get("complete_step_args") or {}
-                            res = validate_output_or_nudge(
-                                args, invocation.agent_def.output_schema, guard)
-                            if isinstance(res, Ok):
-                                if res.recovered is not None:
-                                    ev = make_recovery_event(res)
-                                    elog.append(agent_id=aid, type=ev["type"],
-                                                payload=ev["payload"])
-                                yield {"type": "agent_result", "payload": res.payload}
-                                return
-                            if isinstance(res, Nudge):
-                                ev = make_nudge_event(res)
-                                elog.append(agent_id=aid, type=ev["type"],
-                                            payload=ev["payload"])
-                                elog.append_engine_message(
-                                    agent_id=aid,
-                                    message=Message(
-                                        role="user",
-                                        content=(TextBlock(text=res.message),)),
-                                    subtype="continuation")
-                                # Re-drive this session with the nudge as the next
-                                # prompt (per-turn proc_state reset at the loop top
-                                # clears the stale capture).
-                                next_prompt = res.message
-                                nudge_requery = True
-                                break
-                            # LoopError: pause-to-human.
-                            yield perr.make_error_event(
-                                res, kind=getattr(res, "kind", ""))
-                            return
-                        # Tier A watch: this turn crossed the checkpoint threshold
-                        # while still working (no complete_step). Inject the
-                        # handoff instruction as the next turn prompt and capture
-                        # the note on the following turn.
-                        if (handoff_phase is None
-                                and invocation.checkpoint_threshold is not None
-                                and context_threshold_crossed(
-                                    proc_state.get("pending_usage"), self.model,
-                                    invocation.checkpoint_threshold)):
-                            instr = handoff_instruction(handoff_path)
-                            elog.append_engine_message(
-                                agent_id=aid,
-                                message=Message(role="user",
-                                                content=(TextBlock(text=instr),)),
-                                subtype="continuation")
-                            next_prompt = instr
-                            handoff_phase = "instruction_sent"
-                            handoff_turn_queued = True
-                            break
-                        # Not captured: classified provider-error text wins over
-                        # both nudge and `no_complete_step`. Auth/quota substrings
-                        # must short-circuit nudge attempts (a nudge to a quota'd
-                        # account just burns more).
-                        last_text = proc_state.get("last_agent_text", "") or ""
-                        from imp.providers.claude_code import _classify_agent_text
-                        classified = _classify_agent_text(last_text)
-                        if classified is not None:
-                            yield perr.make_error_event(
-                                classified, kind=getattr(classified, "kind", ""))
-                            return
-                        if invocation.subagent_depth > 0:
-                            if last_text:
-                                yield {"type": "agent_result",
-                                       "payload": {"text": last_text}}
-                            return
-                        # Turn ended without complete_step. If a continuation_fn is
-                        # wired, cross to the outer loop for the autonomous nudge.
-                        if invocation.continuation_fn is not None:
-                            need_nudge = True
-                            break  # exit inner for; outer while handles nudge
-                        # No continuation_fn (degenerate top-level): the inline return
-                        # below ends the run, and drive_invocation surfaces the
-                        # errored (no agent_result) result.
-                        return
-            # Stream ended (possibly silently) after a cancel without the
-            # in-loop check firing — classify it as a clean interrupt.
-            if self._is_cancelled():
-                yield {"type": "error", "payload": {
-                    "category": "config", "kind": "interrupted",
-                    "message": "runner cancelled by interrupt"}}
-                return
-            # A Tier A handoff turn was queued: loop back and run it (next_prompt
-            # already holds the handoff instruction). The write turn's boundary
-            # yields the terminal `handoff` above.
-            if handoff_turn_queued:
-                continue
-            if nudge_requery:
-                continue
-            # Inner loop exited. If we set need_nudge, invoke continuation_fn
-            # and either run another turn or yield the after-nudges error.
-            if not need_nudge:
-                return
-            last_text = proc_state.get("last_agent_text", "") or ""
-            import inspect as _inspect
-            cont = invocation.continuation_fn
-            assert cont is not None  # guarded by need_nudge condition
-            try:
-                nxt, human = cont(last_text)
-                if _inspect.isawaitable(nxt):
-                    nxt = await nxt
-            except AwaitingUserInput:
-                raise  # headless bare-turn-end pause unwinds, not classified
-            except Exception as exc:
-                raise_if_suspended(exc)  # a subagent-origin pause must unwind
-                if self._is_cancelled():
-                    yield {"type": "error", "payload": {
-                        "category": "config", "kind": "interrupted",
-                        "message": "runner cancelled by interrupt"}}
-                    return
-                raise  # unexpected cont() failure must not become a "None" nudge
-            # A Ctrl-C that landed while the nudge was computed pauses cleanly
-            # instead of re-running a turn.
-            if self._is_cancelled():
-                yield {"type": "error", "payload": {
-                    "category": "config", "kind": "interrupted",
-                    "message": "runner cancelled by interrupt"}}
-                return
-            next_prompt = deliver_continuation_reply(
-                None, None, elog, aid, nxt, human=human)
-
-            # Turn boundary: this is the only point where THIS runner sets up
-            # codex's next turn prompt (the codex thread owns the in-turn tool
-            # loop). Codex has no message-list transcript and re-prompts with a
-            # STRING, so the shared agent_run.deliver_interject helper does not
-            # fit — implement the equivalent inline: drain a queued human
-            # interject, emit a single user_message/interject, and fold the
-            # text into next_prompt so codex actually receives it. Reached only
-            # after the turn completed (turn.completed), so no subagent is
-            # mid-dispatch — S4 holds.
-            coordinator = invocation.coordinator
-            if coordinator is not None:
-                interject_text = coordinator.drain_interject()
-                if interject_text is not None:
-                    elog.append_user_message(
-                        agent_id=aid,
-                        message=Message(role="user",
-                                        content=(TextBlock(text=interject_text),)),
-                        subtype="interject")
-                    next_prompt = f"{next_prompt}\n\n{interject_text}"
-
     def _build_thread_options(self) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its
         own method so the test seam can replace it without touching
-        `_drive_turns`. Returns None when the SDK is unavailable (test/fake
-        path) so `_drive_turns` starts the thread without options.
+        `CodexSession._enter`. Returns None when the SDK is unavailable
+        (test/fake path) so `_enter` starts the thread without options.
 
         `webSearchEnabled` is deliberately NOT set: codex >=0.137 deprecated the
         SDK-emitted `features.web_search_request` flag (it no longer disables and
@@ -1051,17 +1057,6 @@ class CodexAgentRunner:
             if self._abort_controller is not None:
                 with contextlib.suppress(Exception):
                     self._abort_controller.abort()
-
-    def _is_cancelled(self) -> bool:
-        """Read the interrupt flag opaquely.
-
-        continuation_fn (and the async transport) can flip ``self._cancel``
-        between checks within a single ``_drive_turns`` pass; routing these
-        re-checks through a method call keeps mypy from narrowing the attribute
-        to a stale ``Literal[False]`` and wrongly flagging the later guards as
-        unreachable.
-        """
-        return self._cancel
 
 
 # ── Event mapping ─────────────────────────────────────────────────────────────

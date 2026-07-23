@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import inspect
 import json
 import os
 import time
@@ -27,9 +26,7 @@ from typing import Any, cast
 
 import anyio
 
-from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
-from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
-from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
+from imp.agents.agent_loop import run_agent_loop
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -44,34 +41,17 @@ from imp.agents.runner import (
 )
 from imp.agents.subagents import make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
-from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
-    quest_home_path,
     request_bracketed,
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.transcript import (
-    Transcript,
-    balance_success_on_resume,
-    deliver_continuation_reply,
-    deliver_engine_continuation,
-    repair_dangling_tool_use_on_resume,
-)
-from imp.engine.agent_run import (
-    _CONTINUATION_NUDGE,
-    _resolve_wait_reply,
-    deliver_interject,
-    drain_all_interjects_at_resume,
-    last_assistant_text,
-)
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
-from imp.providers.catalog import context_tokens_from_usage
-from imp.providers.resolve import spawn_subagent_via_registry
+from imp.providers.push_session import PushSession
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
     check_web_capability,
@@ -150,7 +130,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             continue
         if name in WEB_TOOL_NAMES:
             # Reserved native-capability names (§4): never registry-looked-up;
-            # routed to the native-injection path in _run_loop.
+            # injected via OpenAISession._web_tool_specs().
             continue
         if name == "load_skill":
             # Auto-injected below; tolerate a redundant explicit declaration.
@@ -420,6 +400,77 @@ def _prompt_cache_key(quest_id: str, aid: str) -> str:
     return f"{quest_id[:id_keep]}:{aid[-aid_keep:]}-{digest}"
 
 
+class OpenAISession(PushSession):
+    def _build_tools(self) -> dict[str, Any]:
+        return _build_tools(self.invocation)
+
+    def _api_tool_schemas(self) -> list[Any]:
+        return [_responses_tool_schema(t) for t in self.tools.values()]
+
+    def _web_tool_specs(self) -> list[Any]:
+        return list(openai_web_tool_specs(self.invocation.agent_def))
+
+    def _step_context_model(self) -> str:
+        return cast(str, self.runner.model)
+
+    def _step_context_params(self) -> dict[str, Any]:
+        return {"store": False}
+
+    async def _complete(self, messages: list[Message], api_tools: list[Any]) -> Any:
+        client = self.runner._get_client()
+        t0 = time.perf_counter()
+        self.runner._cancel_scope = anyio.CancelScope()
+        response = None
+        request_id: str | None = None
+        try:
+            with self.runner._cancel_scope:
+                async with client.responses.stream(
+                    model=self.runner.model,
+                    instructions=self.invocation.system_prompt,
+                    input=_imp_to_responses_input(messages),
+                    tools=api_tools,
+                    store=False,
+                    prompt_cache_key=_prompt_cache_key(
+                        self.invocation.quest_context.id, self.aid),
+                    # §4: enable parallel tool calls so multiple `task` tus can
+                    # arrive in one turn. Tools stay strict:True; the weakened
+                    # parallel-turn schema guarantee is backstopped by imp's
+                    # invoke-time arg validation (is_error on malformed input).
+                    parallel_tool_calls=True,
+                ) as stream:
+                    async for _event in request_bracketed(
+                            self.invocation.coordinator, stream):
+                        if self.invocation.coordinator is not None:
+                            self.invocation.coordinator.note_activity()
+                    response = await stream.get_final_response()
+                    # No public request-id accessor on the stream and the final
+                    # response carries no _request_id; read the `x-request-id`
+                    # header off the underlying HTTP response.
+                    request_id = stream._response.headers.get("x-request-id")
+        finally:
+            # N3: reset even on a genuine API error so a later interrupt() never
+            # cancels a stale exited scope.
+            self.runner._cancel_scope = None
+        if response is None:
+            return None
+        return _serialize_responses_response(response), request_id, t0
+
+    def _parse(self, raw: dict[str, Any]) -> Message:
+        return _parse_responses_message(raw)
+
+    def _diagnostics(self, raw: dict[str, Any]) -> Any:
+        return _extract_responses_diagnostics(raw)
+
+    def _stop_reason(self, raw: dict[str, Any]) -> str | None:
+        return _openai_stop_reason(raw)
+
+    def _emit_web_events(self, raw: dict[str, Any]) -> None:
+        _emit_openai_web_events(raw, self.elog, self.aid)
+
+    def _classify_exception(self, exc: BaseException) -> Any:
+        return _classify_openai_exception(exc)
+
+
 class OpenAIAgentRunner:
     """Mirrors AnthropicAgentRunner.run; differences live in the translation
     helpers above and in the API call below."""
@@ -465,9 +516,10 @@ class OpenAIAgentRunner:
         self._client = None
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        session = OpenAISession(invocation, self)
         try:
             try:
-                async for ev in self._run_loop(invocation):
+                async for ev in run_agent_loop(invocation, session):
                     yield ev
             except perr.ProviderError as exc:
                 yield perr.make_error_event(exc)
@@ -484,7 +536,7 @@ class OpenAIAgentRunner:
                     }}
                     return
                 try:
-                    classified = _classify_openai_exception(exc)
+                    classified = session._classify_exception(exc)
                 except Exception:
                     yield perr.make_unknown_error_event(exc)
                     return
@@ -493,355 +545,13 @@ class OpenAIAgentRunner:
         finally:
             if self._ctx is not None:
                 # None guard: self._ctx is None-initialized and assigned
-                # mid-_run_loop, AFTER the _build_tools/check_web_capability
-                # raise sites — the finally runs with None when the generator
-                # is aclosed before its first pull or those early raises fire.
+                # mid-open, AFTER the _build_tools/check_web_capability raise
+                # sites — the finally runs with None when the generator is
+                # aclosed before its first pull or those early raises fire.
                 from imp.agents.tools.bg import terminate_background_processes
                 with contextlib.suppress(Exception):
                     await terminate_background_processes(self._ctx)
             await self._close_client()
-
-    async def _run_loop(
-        self,
-        invocation: AgentInvocation,
-    ) -> AsyncGenerator[Event, None]:
-        from imp.engine.state import JsonlEventLog
-        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
-        aid = invocation.agent_id or "step:unnamed"
-
-        transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
-        tools = _build_tools(invocation)
-        ctx = ToolContext(
-            project_root=invocation.quest_context.project_root,
-            events_path=invocation.events_path,
-            subagent_defs=invocation.subagent_defs,
-            provider_name=invocation.provider_name,
-            model_name=invocation.model_name,
-            parent_transcript_dir=invocation.transcript_dir,
-            agent_id=aid,
-            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.quest_context.quest_home),
-        )
-        ctx.quest_context = invocation.quest_context
-        ctx.quest_state = invocation.quest_state
-        ctx.quest = invocation.quest          # live quest for rename_quest
-        ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_tiers = invocation.resolved_tiers
-        ctx.subagent_depth = invocation.subagent_depth
-        ctx.coordinator = invocation.coordinator
-        ctx.tiers = invocation.tiers
-        ctx.test_gates = invocation.test_gates
-        ctx.pythonpath = invocation.pythonpath
-        ctx.non_interactive = invocation.headless
-        ctx.base_sandbox_policy = invocation.sandbox_policy
-        ctx.event_log = elog                       # shared write instance
-        if self._user_input_fn is not None:
-            ctx.user_input_fn = self._user_input_fn
-        self._ctx = ctx
-
-        existing = transcript.load(
-            ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
-        if existing:
-            messages = existing
-            tool_calls_used = 0  # per-invocation; never inherit history
-            # A subagent's done-signal is a bare-turn-end terminal (assistant
-            # prose, no complete_step), NOT a complete_step. On resume, re-emit
-            # its final text as the deliverable and return — a top-level step in
-            # the same shape (AWAITING_USER) solicits the human instead.
-            if (invocation.subagent_depth > 0
-                    and classify_resume(messages) is ResumeState.AWAITING_USER):
-                final_text = last_assistant_text(messages)
-                if final_text:
-                    yield {"type": "agent_result",
-                           "payload": {"text": final_text}}
-                return
-            # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
-            # the executor's pause check fires after `tool_result` was yielded
-            # but before the user message was appended. Patch the transcript
-            # before classifying.
-            if invocation.balance_on_resume:
-                balance_success_on_resume(
-                    messages, transcript, elog, aid,
-                    wrapper_text=invocation.retry_feedback)
-            else:
-                synth = repair_dangling_tool_use_on_resume(messages, transcript)
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
-            state = classify_resume(messages)
-            if state is ResumeState.DANGLING_TOOL_USE:
-                yield {"type": "error", "payload": {
-                    "category": "config",
-                    "kind": "transcript_invalid",
-                    "message": "transcript ended with dangling tool_use",
-                }}
-                return
-            if state is ResumeState.AWAITING_USER:
-                if ctx.user_input_fn is None:
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "no_user_input_fn",
-                        "message": (
-                            "AWAITING_USER resume requires user_input_fn; "
-                            "none installed by runner"
-                        ),
-                    }}
-                    return
-                # _resolve_wait_reply owns the SOLE awaiting_user_input emit and
-                # fires it only when it actually solicits (not on a queued
-                # interject, not on a retry-continue). Route the reply by source:
-                # a human turn ('solicited'/'interject') renders as `>`; a 'nudge'
-                # is an internal engine continuation, not a user turn.
-                reply, source = await _resolve_wait_reply(
-                    invocation.coordinator, ctx.user_input_fn,
-                    invocation.resume_should_continue,
-                    elog=elog, agent_id=aid,
-                    last_agent_message=last_assistant_text(messages),
-                    halt_writer=invocation.halt_writer,
-                    halt_clearer=invocation.halt_clearer)
-                if source == "nudge":
-                    assert isinstance(reply, str)
-                    deliver_engine_continuation(
-                        messages, transcript, elog, aid, reply)
-                else:
-                    deliver_continuation_reply(
-                        messages, transcript, elog, aid, reply, human=True)
-                # Fall through (do NOT return): the reply drives the next LLM
-                # turn as the transcript's trailing user message.
-            # §2 resume-entry drain: mid-turn pending texts fold into the first
-            # request. (The AWAITING_USER dangling-wait join is handled above.)
-            if state is not ResumeState.AWAITING_USER:
-                drained = drain_all_interjects_at_resume(
-                    invocation.coordinator, messages, transcript, elog, aid)
-                # A mid-tool Ctrl-C resumes as SEND_TO_LLM (the dangling call was
-                # repaired with a synthetic result), never AWAITING_USER, so the
-                # _resolve_wait_reply nudge above can't reach it. Append the same
-                # continuation nudge as the trailing user turn so a no-message
-                # resume continues the step instead of bare-turn-ending on a
-                # clarifying question. A drained human interject already drives
-                # continuation, so it wins (parity with AWAITING_USER).
-                pending_human_tail = (
-                    messages[-1].role == "user"
-                    and not _contains_tool_result(messages[-1])
-                )
-                if (invocation.resume_should_continue and drained == 0
-                        and not pending_human_tail):
-                    deliver_engine_continuation(
-                        messages, transcript, elog, aid,
-                        _CONTINUATION_NUDGE)
-        else:
-            messages = []
-            for m in invocation.initial_messages:
-                messages.append(m)
-                transcript.append(m)
-            tool_calls_used = 0
-            # Fresh-entry audit scaffolding. Ordered IMMEDIATELY after the
-            # transcript append so the "step_context emitted exactly once per
-            # agent_id" invariant holds (resume takes the branch above and
-            # emits nothing).
-            elog.append_step_context(
-                agent_id=aid, parent_id_override=invocation.first_event_parent_id,
-                provider=invocation.provider_name, model=self.model,
-                tools_schema=[_responses_tool_schema(t) for t in tools.values()],
-                params={"store": False},
-                max_tool_calls=invocation.max_tool_calls)
-            elog.append_engine_message(
-                agent_id=aid,
-                message=Message(role="system",
-                                content=(TextBlock(text=invocation.system_prompt),)),
-                subtype="system_prompt")
-            for m in invocation.initial_messages:
-                if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_engine_message(
-                        agent_id=aid, message=m, subtype="agent_prompt")
-
-        ceiling = invocation.max_tool_calls  # may be None (no cap)
-        openai_tools = [_responses_tool_schema(t) for t in tools.values()]
-        openai_tools.extend(openai_web_tool_specs(invocation.agent_def))
-        # Stable routing/affinity hint for OpenAI's automatic prompt cache.
-        # Keyed to one growing conversation (one agent invocation within one
-        # quest) so the prefix stays cache-resident turn-over-turn. id
-        # is required: agent_id alone is quest-agnostic, so concurrent quests
-        # running the same step would collide on one routing slot.
-        # Keyed to the IMMUTABLE id, not the handle: a handle rotates at the
-        # spec->plan title rename and would bust the cache mid-conversation
-        # (spec §9). [AC 10]
-        prompt_cache_key = _prompt_cache_key(invocation.quest_context.id, aid)
-        guard = LoopGuard(interactive=invocation.interactive)
-
-        while not self._cancel:
-            client = self._get_client()
-            # N4 race note: an interrupt() between the loop-head _cancel check and
-            # this assignment leaves this one request uncancelled (loop exits next
-            # iteration via _cancel). One extra in-flight request, worst case.
-            _t0 = time.perf_counter()
-            self._cancel_scope = anyio.CancelScope()
-            response = None
-            request_id: str | None = None
-            try:
-                with self._cancel_scope:
-                    async with client.responses.stream(
-                        model=self.model,
-                        instructions=invocation.system_prompt,
-                        input=_imp_to_responses_input(messages),
-                        tools=openai_tools,
-                        store=False,
-                        prompt_cache_key=prompt_cache_key,
-                        # §4: enable parallel tool calls so multiple `task` tus can
-                        # arrive in one turn. Tools stay strict:True; the weakened
-                        # parallel-turn schema guarantee is backstopped by imp's
-                        # invoke-time arg validation (is_error on malformed input).
-                        parallel_tool_calls=True,
-                    ) as stream:
-                        async for _event in request_bracketed(
-                                invocation.coordinator, stream):
-                            if invocation.coordinator is not None:
-                                invocation.coordinator.note_activity()
-                        response = await stream.get_final_response()
-                        # No public request-id accessor on the stream and the
-                        # final response carries no _request_id; read the
-                        # `x-request-id` header off the underlying HTTP response.
-                        request_id = stream._response.headers.get("x-request-id")
-            finally:
-                # N3: reset even on a genuine API error so a later interrupt()
-                # never cancels a stale exited scope.
-                self._cancel_scope = None
-            if response is None:
-                # interrupt() cancelled the in-flight request — exit the loop and
-                # fall through to the "cancelled (interrupt)" yield below.
-                break
-
-            raw = _serialize_responses_response(response)
-            assistant_msg = _parse_responses_message(raw)
-            diag = _extract_responses_diagnostics(raw)
-            for w in diag.block_warnings:
-                elog.append(agent_id=aid, type="runner_warning",
-                            payload={"message": w})
-            messages.append(assistant_msg)
-            transcript.append(assistant_msg)
-            usage = raw.get("usage") or {}
-            elog.append_agent_message(
-                agent_id=aid, provider=invocation.provider_name,
-                model=raw.get("model") or self.model,
-                raw=raw, usage=usage,
-                stop_reason=_openai_stop_reason(raw),
-                context_tokens=context_tokens_from_usage(usage),
-                request_id=request_id,
-                duration_ms=(time.perf_counter() - _t0) * 1000.0)
-            _emit_openai_web_events(raw, elog, aid)
-            # Post-API sweep + heartbeat (Decision 10): the model-API call is
-            # the longest awaitable with no registry access — sweeping here
-            # narrows the cap's routine inter-sweep gap to API latency. The
-            # heartbeat decouples the watchdog margin from API latency.
-            await _bg._sweep_bg(ctx)
-            yield {"type": "tool_heartbeat", "payload": {}}
-
-            tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
-            if not tool_uses:
-                last_text = "".join(
-                    b.text for b in assistant_msg.content
-                    if isinstance(b, TextBlock)
-                )
-                if invocation.subagent_depth > 0:
-                    final_text = last_assistant_text(messages)
-                    if final_text:
-                        yield {"type": "agent_result",
-                               "payload": {"text": final_text}}
-                    return
-                cont = invocation.continuation_fn
-                if cont is not None:
-                    next_text, human = cont(last_text)
-                    if inspect.isawaitable(next_text):
-                        next_text = await next_text
-                    deliver_continuation_reply(
-                        messages, transcript, elog, aid, next_text, human=human)
-                    loop_err = guard.observe(TurnRecord(
-                        assistant_text=last_text, tools=[],
-                        has_complete_step=False))
-                    if loop_err is not None:
-                        yield perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))
-                        return
-                    # Turn boundary (nudge path): the tool-less turn ended and the
-                    # nudge user message was appended. Deliver any queued interject
-                    # now — same as the tool-result turn boundary — so an interject
-                    # during a nudge stall rides into the next model call instead of
-                    # waiting an extra turn. No tool call means no subagent — S4 holds.
-                    deliver_interject(invocation.coordinator, messages, transcript,
-                                      elog, aid)
-                    continue
-                yield {"type": "error", "payload": {
-                    "category": "agent_output_missing",
-                    "kind": "no_complete_step",
-                    "message": "agent finished without calling complete_step",
-                    "detail": {"last_agent_text": last_text[:500]},
-                }}
-                return
-
-            tool_results: list[ToolResultBlock] = []
-            turn = TurnState(tool_calls_used=tool_calls_used)
-            # §1: ALL `task` tus fan out concurrently as one batch at the first
-            # task position; non-task tus stay strict sequential document-order.
-            # The turn dispatcher yields one tool_heartbeat per processed tu and
-            # any terminal event (yield it and stop); SubagentSuspended /
-            # AwaitingUserInput propagate (terminal — no heartbeat).
-            async for ev in dispatch_turn_tool_uses(
-                    ctx=ctx, elog=elog, aid=aid, invocation=invocation,
-                    tools=tools, tool_uses=tool_uses, tool_results=tool_results,
-                    state=turn, guard=guard, ceiling=ceiling):
-                yield ev
-                if ev.get("type") != "tool_heartbeat":
-                    return  # terminal event already yielded; stop the loop
-            tool_calls_used = turn.tool_calls_used
-            ceiling_tripped = turn.ceiling_tripped
-
-            user_msg = Message(role="user", content=tuple(tool_results))
-            messages.append(user_msg)
-            transcript.append(user_msg)
-
-            if ceiling_tripped:
-                yield {"type": "error", "payload": {
-                    "category": "config",
-                    "kind": "tool_call_ceiling_exceeded",
-                    "ceiling": ceiling,
-                }}
-                return
-
-            by_id = {tu.id: tu for tu in tool_uses}
-            if not turn.nudged:
-                # A nudged turn was already observed once by
-                # validate_output_or_nudge; observing again here would
-                # double-count the malformed turn.
-                record = TurnRecord(
-                    assistant_text="".join(
-                        b.text for b in assistant_msg.content if isinstance(b, TextBlock)),
-                    tools=[
-                        ToolOutcome(
-                            name=by_id[b.tool_use_id].name if b.tool_use_id in by_id else "",
-                            tool_use_id=b.tool_use_id,
-                            input=by_id[b.tool_use_id].input if b.tool_use_id in by_id else {},
-                            is_error=b.is_error,
-                            result_preview=_result_preview(b.content))
-                        for b in tool_results
-                    ],
-                    has_complete_step=False)
-                loop_err = guard.observe(record)
-                if loop_err is not None:
-                    yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
-                    return
-
-            # Turn boundary: this turn's tool_results are appended; deliver any
-            # queued human interject as a user message before the next model
-            # call. Reached only after every tool (including an awaited `task`
-            # dispatch) has resolved, so no subagent is mid-dispatch — S4 holds.
-            deliver_interject(invocation.coordinator, messages, transcript, elog, aid)
-
-        # cancelled (interrupt)
-        yield {"type": "error", "payload": {
-            "category": "config",
-            "kind": "interrupted",
-            "message": "runner cancelled by interrupt",
-        }}
 
     async def interrupt(self) -> None:
         from imp.agents.tools.bg import terminate_background_processes

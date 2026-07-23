@@ -37,15 +37,25 @@ def test_cc_build_tools_no_bg_without_bash() -> None:
     assert "bash_output" not in tools and "bash_kill" not in tools
 
 
-def test_codex_reuses_cc_build_tools() -> None:
-    """codex_runner imports _build_tools from claude_code (codex_runner.py:222)
-    — pin the reuse so the injection above covers codex too. If this ever
-    fails, codex grew its own builder and needs its own injection + tests."""
+def test_codex_build_tools_injects_bg_with_bash() -> None:
+    from imp.providers import codex_runner
+    tools = codex_runner._build_tools(_Inv(["complete_step", "bash"]))
+    assert "bash_output" in tools and "bash_kill" in tools
+
+
+def test_codex_build_tools_no_bg_without_bash() -> None:
+    from imp.providers import codex_runner
+    tools = codex_runner._build_tools(_Inv(["complete_step", "read_file"]))
+    assert "bash_output" not in tools and "bash_kill" not in tools
+
+
+def test_codex_no_claude_code_reachin() -> None:
+    """AC #4b: codex_runner no longer imports any claude_code private internal."""
     import inspect
 
     from imp.providers import codex_runner
     src = inspect.getsource(codex_runner)
-    assert "from imp.providers.claude_code import _build_tools" in src
+    assert "from imp.providers.claude_code import" not in src
 
 
 # ---------------------------------------------------------------------------

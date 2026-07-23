@@ -179,7 +179,8 @@ async def test_post_api_sweep_runs_before_first_dispatch(
         async for ev in real_dispatch(**kw):
             yield ev
 
-    monkeypatch.setattr(anthropic_mod, "dispatch_turn_tool_uses", rec_dispatch)
+    import imp.agents.agent_loop as agent_loop_mod
+    monkeypatch.setattr(agent_loop_mod, "dispatch_turn_tool_uses", rec_dispatch)
     (tmp_path / "f.txt").write_text("x")
     fake = FakeAsyncAnthropic([
         response(tool_use("u1", "read_file", {"path": "f.txt"})),
@@ -196,14 +197,14 @@ async def test_post_api_sweep_runs_before_first_dispatch(
 
 @pytest.mark.anyio
 async def test_wired_providers_enable_background(tmp_path: Path) -> None:
-    """All four providers construct their ToolContext with
-    background_enabled=True (anthropic/openai wired the full surface first;
-    claude_code/codex_runner gained parity wiring). This pins the flag against
-    a silent kwarg removal; runtime behavior is covered by the e2e spawn
-    tests in this file and tests/test_bg_cc_codex_parity.py."""
+    """All wired providers construct their ToolContext with background_enabled=True.
+    anthropic/openai wire it via the shared PushSession base (push_session.py);
+    claude_code/codex_runner wire it directly. This pins the flag against a silent
+    kwarg removal; runtime behavior is covered by the e2e spawn tests in this file
+    and tests/test_bg_cc_codex_parity.py."""
     import re
     from pathlib import Path as _P
-    for mod in ("anthropic", "openai", "claude_code", "codex_runner"):
+    for mod in ("push_session", "claude_code", "codex_runner"):
         src = _P(f"src/imp/providers/{mod}.py").read_text(encoding="utf-8")
         assert re.search(r"background_enabled=True", src), mod
 

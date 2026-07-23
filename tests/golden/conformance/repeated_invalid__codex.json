@@ -1,0 +1,33 @@
+{
+  "agent_result": null,
+  "control_types": [
+    "error"
+  ],
+  "errors": [
+    [
+      "loop",
+      "repeated_failure"
+    ]
+  ],
+  "log_types": [
+    "token_refresh",
+    "step_context",
+    "engine_message",
+    "tool_call",
+    "tool_result",
+    "agent_message",
+    "output_validation_nudge",
+    "engine_message",
+    "tool_call",
+    "tool_result",
+    "agent_message",
+    "output_validation_nudge",
+    "engine_message",
+    "tool_call",
+    "tool_result",
+    "agent_message"
+  ],
+  "raised": null,
+  "step_context_count": 1,
+  "terminal": "error"
+}

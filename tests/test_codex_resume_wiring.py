@@ -82,6 +82,38 @@ def _build_invocation(
 
 
 @pytest.mark.anyio
+async def test_resume_emits_no_step_context(tmp_path: Path) -> None:
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-resume-1.jsonl"
+    (tx / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-resume-1", "rollout_relpath": rel}))
+    saved = tx / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-resume-1"}\n')
+
+    elog = InMemoryEventLog()
+    scripted = [[
+        thread_started("thr-resume-1"),
+        agent_message("resumed; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "42"},
+                 result="ok", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=True)
+    async for _ev in runner.run(inv):
+        pass
+
+    sc = [e for e in elog.read() if e["type"] == "step_context"]
+    assert sc == [], sc
+
+
+@pytest.mark.anyio
 async def test_resume_calls_resume_thread_not_start_thread(tmp_path: Path) -> None:
     _seed_git_and_auth(tmp_path)
     # Pre-seed transcript_dir as if a prior paused run persisted its rollout.
