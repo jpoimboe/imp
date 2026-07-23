@@ -171,3 +171,37 @@ def test_complete_after_merge_reaps_per_quest_var_tmp_dir(tmp_path, monkeypatch)
         assert not a.var_tmp_dir.exists()
     finally:
         shutil.rmtree(a.var_tmp_dir, ignore_errors=True)
+
+
+def test_complete_unlinks_stale_socket_on_merge_path(tmp_path, monkeypatch) -> None:
+    from imp.remote.session.discover import session_socket_path
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    (a.project_root / "f.txt").write_text("hi")
+    _git(a.project_root, "add", "-A")
+    _git(a.project_root, "commit", "-qm", "a")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon",
+                        lambda quest, **kw: None)
+    sock = session_socket_path("aaa")
+    sock.parent.mkdir(parents=True, exist_ok=True)
+    sock.write_bytes(b"")                       # stale socket a crashed daemon left
+    state = State.load(a.state_dir)
+    state.merge_commit = "deadbeef"             # take the merge/archive teardown path
+    _complete(a, state, JsonlEventLog(a.events_path))
+    assert not sock.exists()
+
+
+def test_complete_unlinks_stale_socket_on_early_exit_path(tmp_path, monkeypatch) -> None:
+    from imp.remote.session.discover import session_socket_path
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon",
+                        lambda quest, **kw: None)
+    sock = session_socket_path("aaa")
+    sock.parent.mkdir(parents=True, exist_ok=True)
+    sock.write_bytes(b"")
+    state = State.load(a.state_dir)             # merge_commit unset → early-exit finalize
+    _complete(a, state, JsonlEventLog(a.events_path))
+    assert not sock.exists()
