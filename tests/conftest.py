@@ -78,16 +78,18 @@ _OWNED_BASETEMP: str | None = None
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    # The daemon remote-control socket lives under control_root (pytest's
-    # tmp_path): <tmp_path>/.imp/remote-control.sock (bound in tests via
-    # socket_path(tmp_path)), so it must stay under the 107-byte AF_UNIX sun_path
-    # limit under -n auto. (The per-quest session socket was relocated out of
-    # tmp_path to /tmp/imp-<uid>/<id>.sock and no longer depends on this pin.)
-    # tmp_path descends from basetemp, so
+    # Numerous tests hand-bind AF_UNIX sockets DIRECTLY under tmp_path
+    # (str(tmp_path / "s.sock") / "rc.sock" in test_session_client.py,
+    # test_daemon_southhub_*.py, test_daemon_connector_*.py, test_mutation_proxy.py,
+    # test_daemon_discover_socket.py's socket_is_live tests, etc.), so tmp_path must
+    # stay under the 107-byte AF_UNIX sun_path limit under -n auto. (imp's two
+    # PRODUCTION sockets — the per-quest session socket and the remote-control
+    # socket — have been relocated to /tmp/imp-<uid>/ and no longer depend on this
+    # pin; the test-local binds still do.) tmp_path descends from basetemp, so
     # root the whole run at a short FIXED basetemp `/tmp/ip<6hex>`, independent of
     # tempfile.gettempdir()/TMPDIR length: inside imp's bwrap sandbox TMPDIR is a
     # long per-quest scratch (/tmp/imp-<uid>/<questid>) that would otherwise blow
-    # the socket path over the limit. `/tmp` is the shortest guaranteed-writable
+    # those socket paths over the limit. `/tmp` is the shortest guaranteed-writable
     # root (identity-bound rw in the sandbox, src/imp/engine/sandbox.py); the
     # random 6-hex suffix keeps concurrent suite runs on the shared host /tmp
     # unique. Skip when the user set --basetemp explicitly, and on xdist workers

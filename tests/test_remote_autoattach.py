@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from imp.cli.remote_channel import select_driver_config
+from imp.remote.daemon.discover import socket_path
 
 
 def _telegram_config() -> SimpleNamespace:
@@ -31,13 +32,13 @@ def test_daemon_absent_still_selects_the_connector(tmp_path: Path) -> None:
         quest_id="2026-06-13-abc", title="T", env=env)
     assert dc is not None
     assert dc.command[-1] == "imp.remote.drivers.daemon_connector"
-    assert env["IMP_REMOTE_CONTROL_SOCK"].endswith("remote-control.sock")
+    assert env["IMP_REMOTE_CONTROL_SOCK"] == str(socket_path(tmp_path))
     assert env["IMP_REMOTE_CONTROL_QUEST_ID"] == "2026-06-13-abc"
 
 
 def test_live_socket_selects_the_connector_and_sets_env(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    sock = tmp_path / ".imp" / "remote-control.sock"
+    sock = socket_path(tmp_path)
+    sock.parent.mkdir(parents=True, exist_ok=True)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(str(sock))
     srv.listen()

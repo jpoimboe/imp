@@ -498,6 +498,7 @@ async def run_daemon(
     log_handlers = _install_file_logging(control_root, env)
     _log.info("remote-control daemon starting (control_root=%s)", control_root)
 
+    spath.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with contextlib.suppress(FileNotFoundError):
         spath.unlink()   # clear a stale socket file (guard already proved not live)
     try:

@@ -148,7 +148,7 @@ def test_drain_outbound_is_a_no_op_on_empty_queue() -> None:
 
 
 def test_check_not_running_raises_when_socket_is_live(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
+    socket_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(str(socket_path(tmp_path)))
     srv.listen()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import socket
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,7 +13,9 @@ _log = logging.getLogger("imp.daemon")
 
 
 def socket_path(control_root: Path) -> Path:
-    return control_root / ".imp" / "remote-control.sock"
+    """Short, depth-independent path; `rc-` prefix avoids clashing with session sockets."""
+    digest = hashlib.sha256(os.fsencode(Path(control_root).resolve())).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / f"rc-{digest}.sock"
 
 
 @dataclass(frozen=True)
