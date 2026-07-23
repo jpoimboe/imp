@@ -65,6 +65,18 @@ def test_end_run_preserves_owned_blank_by_descending() -> None:
     assert s._compose is None         # compose cleared like reset()
 
 
+def test_end_run_shows_cursor() -> None:
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["activity", "", "position bar"])
+    out.truncate(0)
+    out.seek(0)
+    s.end_run()
+    assert "\x1b[?25h" in out.getvalue()   # explicit teardown cursor-show
+    assert s._cursor_hidden is False
+
+
 def test_end_run_non_tty_writes_nothing() -> None:
     s = _Pipe()
     ls = LiveStatus(s)
@@ -355,7 +367,7 @@ def test_hide_cursor_emitted_once_across_frames() -> None:
     assert out.getvalue().count("\x1b[?25l") == 1     # no duplicate while already hidden
 
 
-def test_erase_shows_cursor() -> None:
+def test_erase_keeps_cursor_hidden() -> None:
     out = _TTY()
     s = LiveStatus(out)
     s._width_fn = lambda: 80
@@ -363,8 +375,20 @@ def test_erase_shows_cursor() -> None:
     out.truncate(0)
     out.seek(0)
     s.hide()                                   # hide() -> _erase()
-    assert "\x1b[?25h" in out.getvalue()
-    assert s._cursor_hidden is False
+    assert "\x1b[?25h" not in out.getvalue()   # no lone cursor-show flushed
+    assert s._cursor_hidden is True
+
+
+def test_transient_erase_keeps_cursor_hidden_across_boot_window() -> None:
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["working", "", "toolbar"])   # footer lit, cursor hidden
+    s._frame += 1
+    s._draw()                                         # animate a frame
+    s.hide()                                          # transient erase, NO redraw follows
+    assert s._cursor_hidden is True
+    assert "\x1b[?25h" not in out.getvalue()          # cursor never revealed onto the toolbar row
 
 
 def test_reset_shows_cursor() -> None:
@@ -392,13 +416,13 @@ def test_suspend_entry_shows_cursor_and_exit_rehides() -> None:
     assert s._cursor_hidden is True            # exit redraws -> re-hidden
 
 
-def test_hide_then_erase_ends_cursor_shown() -> None:
+def test_hide_then_erase_ends_cursor_hidden() -> None:
     out = _TTY()
     s = LiveStatus(out)
     s._width_fn = lambda: 80
     s.update(lambda f: ["busy"])
     s.hide()
-    assert s._cursor_hidden is False
+    assert s._cursor_hidden is True
 
 
 def test_narrowing_redraw_ends_cursor_hidden() -> None:
@@ -412,8 +436,8 @@ def test_narrowing_redraw_ends_cursor_hidden() -> None:
     w[0] = 4
     s.update(lambda f: ["second"])               # width now 4 -> narrowing
     v = out.getvalue()
-    assert "\x1b[?25h" in v and "\x1b[?25l" in v     # clear shows, frame re-hides
-    assert v.rindex("\x1b[?25l") > v.index("\x1b[?25h")   # re-hide sequenced AFTER the show
+    assert "\x1b[?25h" not in v                   # narrowing erase no longer shows the cursor
+    assert "\x1b[?25l" not in v                   # cursor already hidden -> no re-hide needed
     assert s._cursor_hidden is True
 
 
