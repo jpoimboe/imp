@@ -447,6 +447,46 @@ def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
     ) in body
 
 
+def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:
+    from imp.engine.loader import parse_agent_file
+    path = pathlib.Path(
+        "src/imp/assets/workflows/imp/agents/spec-finalizer.md"
+    ).resolve()
+    full = path.read_text()
+    agent = parse_agent_file(path)
+    body = agent.prompt_template_source
+    desc = agent.description
+    flat = " ".join(body.split())
+    # (a) The moved-base conditional and both persisted-head vars are gone from
+    # the whole file (mirrors the AC grep over spec-finalizer.md).
+    assert "cur_base_head" not in full
+    assert "orig_base_head" not in full
+    assert "{% if quest.cur_base_head" not in full
+    # (a2) No re-grounding language survives anywhere in the file (frontmatter
+    # description OR prompt body).
+    assert "re-ground" not in full
+    # (a2) The frontmatter description now describes adopting the grounded draft.
+    # It lives in frontmatter, so read it via parse_agent_file().description —
+    # prompt_template_source (body) excludes the frontmatter.
+    assert "already grounded against the current base at go-live" in desc
+    # (a2/b) The Your Role summary and the handoff (both body-resident) describe
+    # adopting the grounded draft.
+    assert "adopt the already-grounded draft as-is" in flat
+    assert "already grounded against the current base tip at go-live" in flat
+    assert "**Adopt the draft as-is**" in flat
+    # (b) The surrounding adopt directives are preserved.
+    assert "**adopt and finalize** it, do not re-author" in flat
+    assert (
+        "Skip the opening question, do not call `create_and_enter_worktree`, "
+        "and do not run the build-or-save gate" in flat
+    )
+    # (c) The parking escape hatch is still referenced from the handoff.
+    assert "Surfacing a decision you cannot resolve" in body
+    # (f) The template still renders without error.
+    out = _render_agent("spec-finalizer", tmp_path)
+    assert "Adopt the draft as-is" in out
+
+
 def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
     body = _agent_prompt("threshold")
 
