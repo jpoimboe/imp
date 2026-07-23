@@ -70,6 +70,7 @@ class LiveStatus:
     def reset(self) -> None:
         """Erase the footer and clear the compose fn."""
         self._erase()
+        self._show_cursor()
         self._compose = None
 
     def end_run(self) -> None:
@@ -80,6 +81,7 @@ class LiveStatus:
         nothing, keeping the live/log scrollback parity intact."""
         descend = self._enabled and self._visible and self._owns_lead_blank
         self._erase()
+        self._show_cursor()
         self._compose = None
         if descend:
             self._stream.write("\n")
@@ -98,6 +100,7 @@ class LiveStatus:
         """Clear the footer and suppress drawing around terminal I/O (a prompt)."""
         self._suspended = True
         self._erase()
+        self._show_cursor()
         try:
             yield
         finally:
@@ -221,7 +224,6 @@ class LiveStatus:
                 self._stream.write("\x1b[K")
                 if self._owns_lead_blank or i < phys - 1:
                     self._stream.write(_UP)
-            self._show_cursor()
             self._stream.flush()
         self._visible = False
         self._prev_width = None
