@@ -11,6 +11,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
 
 PARTIALS = Path("src/imp/assets/partials")
+FRONT_DOOR = Path("src/imp/assets/partials/front-door.md")
 
 
 def _threshold() -> str:
@@ -24,25 +25,25 @@ def _finalize() -> str:
 
 
 def test_threshold_names_only_hub() -> None:
-    body = _threshold()
-    assert "imp-knowledge" in body
-    assert '{% include "partials/imp-grounding.md" %}' in body
-    assert "imp-introspection" not in body
-    assert "imp-memory" not in body
+    fd = FRONT_DOOR.read_text()
+    assert "imp-knowledge" in fd
+    assert '{% include "partials/imp-grounding.md" %}' in fd
+    assert "imp-introspection" not in fd
+    assert "imp-memory" not in fd
 
 
 def test_threshold_hats_name_only_hub() -> None:
-    body = _threshold()
-    concierge = body[body.index("**concierge**"):body.index("**scout**")]
+    fd = FRONT_DOOR.read_text()
+    concierge = fd[fd.index("**concierge**"):fd.index("**scout**")]
     assert "imp-knowledge" in concierge
     assert "imp-introspection" not in concierge
-    scout = body[body.index("**scout**"):body.index("**brainstorming")]
+    scout = fd[fd.index("**scout**"):fd.index("**brainstorming")]
     assert "imp-knowledge" in scout
 
 
 def test_threshold_includes_grounding_partial() -> None:
-    body = _threshold()
-    assert '{% include "partials/imp-grounding.md" %}' in body
+    fd = FRONT_DOOR.read_text()
+    assert '{% include "partials/imp-grounding.md" %}' in fd
     partial = (PARTIALS / "imp-grounding.md").read_text().lower()
     assert "do not answer from memory" in partial
     assert "how imp works" in partial
@@ -53,28 +54,27 @@ def test_finalize_includes_grounding_partial() -> None:
 
 
 def test_threshold_action_rule_present() -> None:
-    body = _threshold()
-    assert "## Acting on imp" in body
-    # current-session mutations handed back via the slash commands
-    assert "/save" in body
-    assert "/keep" not in body
-    assert "/abandon" in body
-    assert "/clear" in body
-    low = body.lower()
-    # mutations proposed and confirmed first; other-change mutations on confirmation
-    assert "confirm" in low
+    fd = FRONT_DOOR.read_text()
+    assert "## Acting on imp" in fd
+    assert "/save" in fd
+    assert "/keep" not in fd
+    assert "/abandon" in fd
+    assert "/clear" in fd
+    assert "confirm" in fd.lower()
 
 
 def test_threshold_preserves_speak_plainly() -> None:
-    body = _threshold()
-    assert "## Speak plainly" in body
-    assert "never surface these internal terms" in body
+    fd = FRONT_DOOR.read_text()
+    assert "## Speak plainly" in fd
+    assert "never surface these internal terms" in fd
 
 
 def test_threshold_introduces_no_new_cli_command_or_read_tool() -> None:
+    fd = FRONT_DOOR.read_text()
     body = _threshold()
     for banned in ("list_quests", "show_change",
                    "imp explain", "imp doctor", "imp workflow show"):
+        assert banned not in fd, banned
         assert banned not in body, banned
 
 
@@ -90,33 +90,24 @@ def test_grounding_partial_carries_memory_rule_and_names_only_hub() -> None:
 
 
 def test_threshold_has_lazy_orientation_cue() -> None:
-    body = _threshold()
-    # The cue lives in its own section.
-    assert "## Orienting before you offer" in body
-    low = body.lower()
-    # Orient by reading the tree (manifest/build files) or dispatching an explorer.
+    fd = FRONT_DOOR.read_text()
+    assert "## Orienting before you offer" in fd
+    low = fd.lower()
     assert "manifest" in low
     assert "explorer" in low
-    # Ground the offer in an established stack when one is found.
     assert "established stack" in low
-    # Treat an empty/greenfield repo's stack as an open design question.
     assert "greenfield" in low
     assert "open design question" in low
-    # Orientation is lazy / on demand — a pure imp-mechanics question does not
-    # trigger a project-stack read.
     assert "how does imp work" in low
     assert "lazy" in low or "on demand" in low
-    # The cue honors Speak plainly and surfaces no internal terms. Scope this to
-    # the new section so the assertion can't pass on the body's pre-existing
-    # "## Speak plainly" heading.
     marker = "## Orienting before you offer"
-    start = body.index(marker)
-    section = body[start:body.index("{% include", start)].lower()
+    start = fd.index(marker)
+    section = fd[start:fd.index("{% include", start)].lower()
     assert "speak plainly" in section
 
 
 def test_threshold_includes_sandbox_debugging_partial() -> None:
-    assert '{% include "partials/sandbox-debugging.md" %}' in _threshold()
+    assert '{% include "partials/sandbox-debugging.md" %}' in FRONT_DOOR.read_text()
 
 
 def test_finalize_includes_sandbox_debugging_partial() -> None:
@@ -150,8 +141,8 @@ def test_grounding_partial_points_at_the_corpus_path_variable() -> None:
 
 
 def test_threshold_concierge_routes_to_corpus_not_removed_spokes() -> None:
-    body = _threshold()
-    concierge = body[body.index("**concierge**"):body.index("**scout**")]
+    fd = FRONT_DOOR.read_text()
+    concierge = fd[fd.index("**concierge**"):fd.index("**scout**")]
     assert "corpus" in concierge.lower()
     assert "the skills it maps to" not in concierge
 
@@ -175,13 +166,10 @@ def test_sandbox_debugging_partial_documents_both_hatches() -> None:
 
 
 def test_threshold_surfaces_dependency_subsection_and_carveout_exception() -> None:
-    body = _threshold()
-    # The new "keep dependency-blocked work here" subsection.
-    assert "## When the work depends on another quest" in body
-    # the phrase wraps after "that's a" in the source; assert from the within-line part
-    assert "**dependency of this quest**, not a reason to spawn a separate one" in body
-    assert "imp edit {{ quest.id }} --depends-on <id>" in body
-    assert "Keep the work in this quest — don't split it into a child." in body
-    # The Acting-on-imp carve-out permits the one self-quest dependency edit.
-    assert "except `imp edit {{ quest.id }} --depends-on`" in body
-    assert "to record a dependency before going live" in body
+    fd = FRONT_DOOR.read_text()
+    assert "## When the work depends on another quest" in fd
+    assert "**dependency of this quest**, not a reason to spawn a separate one" in fd
+    assert "imp edit {{ quest.id }} --depends-on <id>" in fd
+    assert "Keep the work in this quest — don't split it into a child." in fd
+    assert "except `imp edit {{ quest.id }} --depends-on`" in fd
+    assert "to record a dependency before going live" in fd

@@ -17,7 +17,6 @@ _ACTION_CARE_AGENTS = {
     "reconciler.md",
     "plan-writer.md",
     "spec-finalizer.md",
-    "threshold.md",
     "finalize.md",
 }
 
@@ -36,7 +35,6 @@ _CODING_STANCE_AGENTS = {
     "plan-reviewer.md",
     "spec-finalizer.md",
     "spec-reviewer.md",
-    "threshold.md",
     "finalize.md",
 }
 
@@ -93,3 +91,9 @@ def test_action_care_renders_into_agent_prompt() -> None:
                       vars={"fast_path": False}),
         workflow_dir=wf)
     assert "Measure twice, cut once" in rendered
+
+
+def test_front_door_includes_coding_stance_and_action_care() -> None:
+    fd = Path("src/imp/assets/partials/front-door.md").read_text()
+    assert '{% include "partials/coding-stance.md" %}' in fd
+    assert '{% include "partials/action-care.md" %}' in fd

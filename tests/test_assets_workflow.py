@@ -1127,8 +1127,7 @@ def test_spiker_prose_documents_copy_on_write_home() -> None:
 
 
 def test_threshold_prose_resolves_spec_shaping_unknowns_via_spiker() -> None:
-    from imp.assets import bundled_workflow_dir
-    low = (bundled_workflow_dir("imp") / "agents" / "threshold.md").read_text().lower()
+    low = Path("src/imp/assets/partials/front-door.md").read_text().lower()
     assert "spiker" in low
     assert "spec-shaping" in low
     assert "before finalizing" in low

@@ -200,12 +200,13 @@ def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
 
 
 def test_threshold_renames_early_on_design_formation() -> None:
+    fd = pathlib.Path("src/imp/assets/partials/front-door.md").read_text()
     body = _agent_prompt("threshold")
     # Rename fires as soon as a design forms, not deferred to go-live.
-    assert "as soon as a design has formed" in body
+    assert "as soon as a design has formed" in fd
     # Pure concierge/scout conversations are explicitly excluded from renaming.
-    assert "so they never rename" in body
-    # The go-live rename survives as a fallback for straight-to-build.
+    assert "so they never rename" in fd
+    # The go-live rename survives as a fallback for straight-to-build (threshold tail).
     assert "a fallback for when you went" in body
 
 
@@ -489,27 +490,28 @@ def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:
 
 
 def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
-    body = _agent_prompt("threshold")
+    fd = pathlib.Path("src/imp/assets/partials/front-door.md").read_text()
 
     # The section exists with its exact heading, placed AFTER the depends-on
     # section and BEFORE "## Acting on imp".
     heading = "## Close redundant backlog quests at approval"
-    assert heading in body
-    depends = body.index("## When the work depends on another quest")
-    acting = body.index("## Acting on imp")
-    here = body.index(heading)
+    assert heading in fd
+    depends = fd.index("## When the work depends on another quest")
+    acting = fd.index("## Acting on imp")
+    here = fd.index(heading)
     assert depends < here < acting
 
     # Verbatim load-bearing phrases from the agreed copy.
-    assert "clearly supersedes existing **backlog** quests" in body
-    assert "carry them into the go-live proposal: approving the build closes them too" in body
-    assert '`imp abandon <id>` each; say plainly the close is permanent' in body
-    assert 'Don\'t defer it to a "close at merge" note in the spec' in body
-    assert "A superseded **in-flight** quest you flag" in body
-    assert "never close this way" in body
+    assert "clearly supersedes existing **backlog** quests" in fd
+    assert "carry them into the go-live proposal: approving the build closes them too" in fd
+    assert '`imp abandon <id>` each; say plainly the close is permanent' in fd
+    assert 'Don\'t defer it to a "close at merge" note in the spec' in fd
+    assert "A superseded **in-flight** quest you flag" in fd
+    assert "never close this way" in fd
 
-    # NOT autonomy-wrapped: rendering with autonomous=True strips every
-    # `{% if not run.autonomous %}` block, yet this section must survive.
+    # NOT autonomy-wrapped: rendering the threshold with autonomous=True strips
+    # every `{% if not run.autonomous %}` block, yet this section must survive.
+    body = _agent_prompt("threshold")
     log = JsonlEventLog(tmp_path / "threshold-events.jsonl")
     rendered = render_prompt(
         body,
