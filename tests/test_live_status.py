@@ -33,7 +33,7 @@ def test_in_place_rewrite_climbs_to_first_row_then_rewrites_each() -> None:
     out.seek(0)
     s.update(lambda f: ["a2", "", "bar2"])
     v = out.getvalue()
-    assert v.startswith("\r\x1b[2A")        # \r + up (rows-1) onto the first row
+    assert v.startswith("\x1b[?25l\r\x1b[2A")   # per-frame hide, then \r + up onto the first row
     assert v.count("\r\x1b[K") == 3         # each of the 3 rows rewritten col-reset
     assert v.endswith("bar2")
 
@@ -355,16 +355,19 @@ def test_first_visible_draw_hides_cursor() -> None:
     assert s._cursor_hidden is True
 
 
-def test_hide_cursor_emitted_once_across_frames() -> None:
+def test_hide_cursor_reasserted_each_frame() -> None:
     out = _TTY()
     s = LiveStatus(out)
     s._width_fn = lambda: 80
-    s.update(lambda f: ["busy"])
+    s.update(lambda f: ["busy"])          # frame 1: first draw (else path)
     s._frame += 1
-    s._draw()
+    s._draw()                             # frame 2: same-row-count fast redraw
     s._frame += 1
-    s._draw()
-    assert out.getvalue().count("\x1b[?25l") == 1     # no duplicate while already hidden
+    s._draw()                             # frame 3: same-row-count fast redraw
+    # The footer owns the cursor: the hide is re-emitted on EVERY footer frame,
+    # not once, so a stray external cursor-show cannot persist past one tick.
+    assert out.getvalue().count("\x1b[?25l") == 3
+    assert s._cursor_hidden is True
 
 
 def test_erase_keeps_cursor_hidden() -> None:
@@ -436,8 +439,8 @@ def test_narrowing_redraw_ends_cursor_hidden() -> None:
     w[0] = 4
     s.update(lambda f: ["second"])               # width now 4 -> narrowing
     v = out.getvalue()
-    assert "\x1b[?25h" not in v                   # narrowing erase no longer shows the cursor
-    assert "\x1b[?25l" not in v                   # cursor already hidden -> no re-hide needed
+    assert "\x1b[?25h" not in v                   # narrowing erase still never shows the cursor
+    assert "\x1b[?25l" in v                        # redraw re-asserts the hide every frame
     assert s._cursor_hidden is True
 
 
