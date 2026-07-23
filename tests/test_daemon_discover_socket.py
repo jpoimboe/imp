@@ -1,17 +1,37 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import socket
+import tempfile
 from pathlib import Path
 
 from imp.remote.daemon.discover import socket_is_live, socket_path
 
 
-def test_socket_path_is_under_control_imp_dir(tmp_path: Path) -> None:
-    assert socket_path(tmp_path) == tmp_path / ".imp" / "remote-control.sock"
+def test_socket_path_is_tmp_rc_digest(tmp_path: Path) -> None:
+    digest = hashlib.sha256(os.fsencode(tmp_path.resolve())).hexdigest()[:16]
+    assert socket_path(tmp_path) == (
+        Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / f"rc-{digest}.sock")
+
+
+def test_socket_path_leaf_length_is_independent_of_depth() -> None:
+    shallow = socket_path(Path("/a"))
+    deep = socket_path(
+        Path("/a/bbbbbbbbbb/cccccccccc/dddddddddd/eeeeeeeeee/ffffffffff"))
+    assert len(shallow.name) == len(deep.name)
+
+
+def test_socket_path_is_stable_for_the_same_root(tmp_path: Path) -> None:
+    assert socket_path(tmp_path) == socket_path(tmp_path)
+
+
+def test_socket_path_differs_for_different_roots(tmp_path: Path) -> None:
+    assert socket_path(tmp_path / "a") != socket_path(tmp_path / "b")
 
 
 def test_socket_is_live_false_when_absent(tmp_path: Path) -> None:
-    assert socket_is_live(tmp_path / ".imp" / "remote-control.sock") is False
+    assert socket_is_live(tmp_path / "absent.sock") is False
 
 
 def test_socket_is_live_false_for_a_stray_socket_with_no_listener(tmp_path: Path) -> None:

@@ -29,7 +29,7 @@ def test_parser_wires_start_and_stop() -> None:
 
 
 def test_start_daemon_rejects_a_second_live_daemon(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
+    socket_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(str(socket_path(tmp_path)))
     srv.listen()
