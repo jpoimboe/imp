@@ -104,7 +104,7 @@ async def attach_or_spawn(
     connect_timeout: float | None = None,
     lease: bool = False,
 ) -> SessionClient:
-    socket_path = str(session_socket_path(quest.control_root, quest.id))
+    socket_path = str(session_socket_path(quest.id))
     client = SessionClient(socket_path, quest.id, quest.title, on_event=on_event, lease=lease)
     try:
         await client.connect()

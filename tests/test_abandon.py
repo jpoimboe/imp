@@ -126,7 +126,7 @@ def test_abandon_resident_routes_through_daemon(
     delivered: list[str] = []
     monkeypatch.setattr(_m, "session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(_m, "_deliver_abandon_resident",
-                        lambda _ctrl, cid: delivered.append(cid))
+                        lambda cid: delivered.append(cid))
     rc = _abandon_local(tmp_path, "feat")
     assert rc == 0
     assert delivered == ["feat"]
@@ -142,7 +142,7 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
 
     monkeypatch.setattr(main_mod, "session_is_resident", lambda c, cid: True)
 
-    def _hang(_control: Path, _cid: str) -> None:
+    def _hang(_cid: str) -> None:
         raise TimeoutError  # simulate the bounded receive timing out
 
     torn: list[str] = []

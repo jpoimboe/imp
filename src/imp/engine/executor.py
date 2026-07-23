@@ -100,6 +100,7 @@ from imp.engine.types import (
 )
 from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.resolve import provider_from_model, resolve_run
+from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 
 if TYPE_CHECKING:
@@ -864,6 +865,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         _emit(log, "workflow_completed", {})
         shutil.rmtree(quest.quest_dir / "steps", ignore_errors=True)
         shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+        session_socket_path(quest.id).unlink(missing_ok=True)
         _force_rmtree(quest.var_tmp_dir)
         return RunResult.COMPLETED
 
@@ -881,6 +883,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     )
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    session_socket_path(quest.id).unlink(missing_ok=True)
     _force_rmtree(quest.var_tmp_dir)
     return RunResult.COMPLETED
 

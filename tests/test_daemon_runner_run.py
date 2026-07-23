@@ -63,7 +63,7 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
     adapter = FakeAdapter()
     shutdown = anyio.Event()
     spath = socket_path(tmp_path)
-    sess = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    sess = SessionSocket(str(session_socket_path(cid)))
     await sess.open()
 
     async with anyio.create_task_group() as tg:

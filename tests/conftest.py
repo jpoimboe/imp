@@ -78,9 +78,12 @@ _OWNED_BASETEMP: str | None = None
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    # Session sockets live under control_root (pytest's tmp_path), so
-    # <tmp_path>/.imp/quests/<id>/session.sock must stay under the 107-byte
-    # AF_UNIX sun_path limit under -n auto. tmp_path descends from basetemp, so
+    # The daemon remote-control socket lives under control_root (pytest's
+    # tmp_path): <tmp_path>/.imp/remote-control.sock (bound in tests via
+    # socket_path(tmp_path)), so it must stay under the 107-byte AF_UNIX sun_path
+    # limit under -n auto. (The per-quest session socket was relocated out of
+    # tmp_path to /tmp/imp-<uid>/<id>.sock and no longer depends on this pin.)
+    # tmp_path descends from basetemp, so
     # root the whole run at a short FIXED basetemp `/tmp/ip<6hex>`, independent of
     # tempfile.gettempdir()/TMPDIR length: inside imp's bwrap sandbox TMPDIR is a
     # long per-quest scratch (/tmp/imp-<uid>/<questid>) that would otherwise blow
@@ -243,10 +246,10 @@ def _isolate_quest_tmp_root(
 ) -> Generator[None, None, None]:
     """Give every test its own short, unique per-quest tmp/socket root.
 
-    The session socket now lives under the quest home
-    (<control_root>/.imp/quests/<id>/session.sock), independent of this tmp root;
-    the fixture keeps redirecting tempfile.tempdir + TMPDIR so Quest.tmp_dir and
-    spawned session daemons land in a short unique per-test dir.
+    The session socket now lives as a sibling of Quest.tmp_dir under
+    tempfile.gettempdir() (<tmpdir>/imp-<uid>/<id>.sock), so redirecting
+    tempfile.tempdir + TMPDIR gives Quest.tmp_dir, spawned session daemons, and
+    the socket a single short unique per-test root.
 
     Realize pytest's session basetemp FIRST: getbasetemp() derives (and caches)
     the basetemp from tempfile.gettempdir(), so patching tempfile.tempdir before

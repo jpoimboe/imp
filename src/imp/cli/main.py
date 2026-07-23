@@ -2900,13 +2900,13 @@ async def _resolve_resume_target(
         return 2
 
 
-def _deliver_abandon_resident(control: Path, quest_id: str) -> None:
+def _deliver_abandon_resident(quest_id: str) -> None:
     from imp.remote.session.client import SessionClient
     from imp.remote.session.discover import session_socket_path
     from imp.remote.session.protocol import CONTROL_ABANDON
 
     async def _run() -> None:
-        path = str(session_socket_path(control, quest_id))
+        path = str(session_socket_path(quest_id))
         client = SessionClient(path, quest_id, "", on_event=lambda _: None)
         await client.connect()
         try:
@@ -2939,7 +2939,7 @@ def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
     token = quest.id
     if session_is_resident(control, quest_id):
         try:
-            _deliver_abandon_resident(control, quest_id)
+            _deliver_abandon_resident(quest_id)
         except OSError:
             pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:

@@ -1,28 +1,23 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
-
-import pytest
 
 from imp.remote.session.discover import session_socket_path
 
 
-def test_session_socket_path_is_under_quest_home() -> None:
-    path = session_socket_path(Path("/ctl"), "2026-06-15-abc")
-    assert path == Path("/ctl/.imp/quests/2026-06-15-abc/session.sock")
+def test_session_socket_path_is_tmp_sibling() -> None:
+    path = session_socket_path("2026-06-15-abc")
+    assert path == (
+        Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "2026-06-15-abc.sock")
 
 
 def test_session_socket_path_differs_per_quest() -> None:
-    root = Path("/ctl")
-    assert session_socket_path(root, "c1") != session_socket_path(root, "c2")
+    assert session_socket_path("c1") != session_socket_path("c2")
 
 
-def test_session_socket_path_depends_on_control_root() -> None:
-    a = session_socket_path(Path("/ctl/a"), "c1")
-    b = session_socket_path(Path("/ctl/b"), "c1")
-    assert a != b
-
-
-def test_session_socket_path_over_length_limit_raises() -> None:
-    with pytest.raises(ValueError, match="AF_UNIX"):
-        session_socket_path(Path("/some/control/root"), "x" * 200)
+def test_session_socket_path_is_sibling_of_quest_tmp_leaf() -> None:
+    sock = session_socket_path("c1")
+    assert sock.parent == Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
+    assert sock.name == "c1.sock"

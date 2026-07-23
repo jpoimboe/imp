@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
-_SUN_PATH_MAX = 107  # AF_UNIX sun_path is 108 bytes incl. the NUL terminator
 
-
-def session_socket_path(control_root: Path, quest_id: str) -> Path:
-    """Per-quest session socket under the quest home
-    (<control_root>/.imp/quests/<quest_id>/session.sock): reachable at the same real
-    path host-side and in-sandbox via the quest-home rw bind, so no rewriting is
-    needed. Fail fast (before any bind/connect) if the resolved path exceeds the
-    AF_UNIX sun_path limit."""
-    sock = control_root / ".imp" / "quests" / quest_id / "session.sock"
-    encoded = os.fsencode(sock)
-    if len(encoded) > _SUN_PATH_MAX:
-        raise ValueError(
-            f"session socket path is {len(encoded)} bytes, over the "
-            f"{_SUN_PATH_MAX}-byte AF_UNIX sun_path limit: {sock}")
-    return sock
+def session_socket_path(quest_id: str) -> Path:
+    """Per-quest session socket at /tmp/imp-<uid>/<quest_id>.sock — a short, stable
+    sibling of Quest.tmp_dir whose length is independent of project-root depth.
+    Reachable at the same real path host-side and in-sandbox via the existing /tmp
+    identity rw bind (sandbox.py bind_plan), so nothing is rewritten across the
+    boundary. Real 6-char quest ids keep this far under the AF_UNIX sun_path limit,
+    so no length guard is needed."""
+    return Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / f"{quest_id}.sock"

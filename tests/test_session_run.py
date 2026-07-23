@@ -96,7 +96,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
         "imp.remote.session.attach.spawn_session_daemon",
         lambda ch, **_kw: None)
 
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     server = SessionServer(sock, hibernate=False)
     answered: list[str] = []
 
@@ -148,7 +148,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
         "imp.remote.session.attach.spawn_session_daemon",
         lambda ch, **_kw: None)
 
-    sock = str(session_socket_path(quest.control_root, quest.id))
+    sock = str(session_socket_path(quest.id))
     server = SessionServer(sock, hibernate=False)
     tick_started = anyio.Event()
 

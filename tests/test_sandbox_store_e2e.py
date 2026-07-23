@@ -215,7 +215,7 @@ async def _serve_and_run(
     argv = build_sandbox_argv(
         command, cwd=str(control), policy=policy, engine_env=engine_env)
 
-    sock_path = session_socket_path(control, CUR)
+    sock_path = session_socket_path(CUR)
     socket = SessionSocket(str(sock_path), on_query=build_session_handler(control))
     await socket.open()
 

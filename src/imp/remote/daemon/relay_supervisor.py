@@ -69,7 +69,7 @@ class RelaySupervisor:
 
     async def _relay_one(self, quest_id: str) -> None:
         relay = SessionRelay(
-            socket_path=str(session_socket_path(self._control_root, quest_id)),
+            socket_path=str(session_socket_path(quest_id)),
             quest_id=quest_id,
             title_provider=lambda: self._title_for(quest_id),
             events=self._events,

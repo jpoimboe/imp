@@ -73,7 +73,7 @@ async def test_e2e_chat_commands_round_trip(
 
             # A resident session daemon serves its socket; the supervisor attaches a
             # relay and pulls its events.
-            sess = SessionSocket(str(session_socket_path(tmp_path, CHANGE)))
+            sess = SessionSocket(str(session_socket_path(CHANGE)))
             await sess.open()
             tg.start_soon(sess.serve)
             await _wait(lambda: sess.attached_count > 0)

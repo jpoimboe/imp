@@ -12,7 +12,7 @@ from tests.conftest import _seed_control
 def test_spawn_against_held_lock_exits_without_opening_socket(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    sock = Path(session_socket_path(ch.control_root, ch.id))
+    sock = Path(session_socket_path(ch.id))
 
     async def _scenario() -> object:
         # Simulate a RESIDENT change holding its ProjectLock; the wake-spawned

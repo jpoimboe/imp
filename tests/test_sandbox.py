@@ -1727,7 +1727,7 @@ def test_resolve_policy_injects_session_socket_marker(tmp_path):
     )
     # No rewriting: the in-sandbox value is the real host socket path.
     assert ("IMP_SESSION_SOCKET",
-            str(session_socket_path(control, "abc"))) in pol.setenv
+            str(session_socket_path("abc"))) in pol.setenv
 
 
 def test_session_socket_marker_absent_when_inactive(tmp_path):
@@ -1758,7 +1758,7 @@ def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
     from imp.remote.session.discover import session_socket_path
     i = argv.index("IMP_SESSION_SOCKET")
     assert argv[i - 1] == "--setenv"
-    assert argv[i + 1] == str(session_socket_path(control, "abc"))
+    assert argv[i + 1] == str(session_socket_path("abc"))
 
 
 def test_build_setenv_prepends_shim_dir_to_path():
@@ -1826,8 +1826,8 @@ def test_build_setenv_session_socket_passes_through():
     from imp.engine.sandbox import _build_setenv
     setenv = dict(_build_setenv(
         {}, {"PATH": "/usr/bin"}, (),
-        session_socket="/ctl/.imp/quests/abc/session.sock"))
-    assert setenv["IMP_SESSION_SOCKET"] == "/ctl/.imp/quests/abc/session.sock"
+        session_socket="/tmp/imp-1000/abc.sock"))
+    assert setenv["IMP_SESSION_SOCKET"] == "/tmp/imp-1000/abc.sock"
 
 
 def test_imp_output_env_passes_through_unrewritten():
