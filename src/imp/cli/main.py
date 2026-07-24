@@ -837,14 +837,17 @@ def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool)
 
 async def _read_intent_line(
     prompt: Any, quest: Any, *, color: bool, width: int,
-    model_sink: dict[str, str] | None = None, hint: str = DEFAULT_HINT,
+    model_sink: dict[str, str] | None = None,
+    sandbox_sink: dict[str, bool] | None = None,
+    hint: str = DEFAULT_HINT,
     toolbar: str | None = None,
 ) -> str:
-    """Read one pre-session intent line, capturing a `/model` selection into `model_sink`."""
+    """Read one pre-session intent line, capturing `/model` into `model_sink`
+    and `/sandbox` into `sandbox_sink`."""
     while True:
         line = await ask_line_with_slash(
             prompt, None, quest, color=color, width=width, hint=hint,
-            pre_session=True, toolbar_override=toolbar)
+            pre_session=True, toolbar_override=toolbar, sandbox_sink=sandbox_sink)
         if isinstance(line, SkillRequest):
             # Opening prompt is pre-session: no daemon gate exists yet, so the
             # skill body is loaded here and becomes the opening message.
@@ -854,6 +857,11 @@ async def _read_intent_line(
         if line.strip().startswith("/model "):
             if model_sink is not None:
                 model_sink["model"] = line.strip()[len("/model "):].strip()
+            continue
+        if line.strip().startswith("/sandbox "):
+            if sandbox_sink is not None:
+                arg = line.strip()[len("/sandbox "):].strip()
+                sandbox_sink["unsandboxed"] = (arg == "off")
             continue
         if line == "/abandon":
             # No daemon pre-session; _abandon_local's rc threads out through SystemExit.
@@ -865,6 +873,7 @@ async def _read_opening_message(
     quest: Quest, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
     model_sink: dict[str, str] | None = None,
+    sandbox_sink: dict[str, bool] | None = None,
     _prompt_factory: Callable[[], Any] | None = None,
 ) -> str | None:
     """Lead with the run header, then the splash (when interactive), then read the
@@ -876,7 +885,8 @@ async def _read_opening_message(
                        editing_mode=editing_mode, color=color, quest=quest))
     prompt = make()
     reply = await _read_intent_line(
-        prompt, quest, color=color, width=width, model_sink=model_sink)
+        prompt, quest, color=color, width=width, model_sink=model_sink,
+        sandbox_sink=sandbox_sink)
     return _normalize_opening_reply(reply)
 
 

@@ -313,3 +313,43 @@ async def test_opening_prompt_skill_name_loads_body_as_message(
     line = await main._read_intent_line(
         _QueuePrompt(["/refactor src/foo.py"]), quest, color=False, width=80)
     assert line == "# Refactor\nstep one\n\nsrc/foo.py\n"
+
+
+@pytest.mark.anyio
+async def test_read_intent_line_captures_sandbox_off(tmp_path) -> None:
+    prompt = _QueuePrompt(["/sandbox off", "build the thing"])
+    quest = _fake_quest(tmp_path)
+    sink: dict[str, bool] = {}
+
+    line = await main._read_intent_line(
+        prompt, quest, color=False, width=80, sandbox_sink=sink)
+
+    assert line == "build the thing"
+    assert sink["unsandboxed"] is True
+
+
+@pytest.mark.anyio
+async def test_read_intent_line_sandbox_on_cancels_pending_off(tmp_path) -> None:
+    prompt = _QueuePrompt(["/sandbox off", "/sandbox on", "build the thing"])
+    quest = _fake_quest(tmp_path)
+    sink: dict[str, bool] = {}
+
+    line = await main._read_intent_line(
+        prompt, quest, color=False, width=80, sandbox_sink=sink)
+
+    assert line == "build the thing"
+    assert sink["unsandboxed"] is False
+
+
+@pytest.mark.anyio
+async def test_read_opening_message_threads_sandbox_sink(tmp_path) -> None:
+    quest = _fake_quest(tmp_path)
+    sink: dict[str, bool] = {}
+
+    reply = await main._read_opening_message(
+        quest, leave_mode="new", banner_shown=False, color=False, width=80,
+        editing_mode="emacs", sandbox_sink=sink,
+        _prompt_factory=lambda: _QueuePrompt(["/sandbox off", "build the thing"]))
+
+    assert reply == "build the thing"
+    assert sink["unsandboxed"] is True
