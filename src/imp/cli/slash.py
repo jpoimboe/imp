@@ -257,6 +257,7 @@ async def ask_line_with_slash(
     coord: Any = None, driver: Any = None, hint: str | None = None,
     pre_session: bool = False, toolbar_override: str | None = None,
     allow_empty: bool = False,
+    sandbox_sink: dict[str, bool] | None = None,
 ) -> str | SkillRequest:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> that matches a
@@ -355,8 +356,11 @@ async def ask_line_with_slash(
                                     return ""
                                 continue
                             return line
-                        current_unsandboxed = bool(
-                            getattr(driver, "unsandboxed", False))
+                        if pre_session and sandbox_sink is not None:
+                            current_unsandboxed = bool(sandbox_sink.get("unsandboxed"))
+                        else:
+                            current_unsandboxed = bool(
+                                getattr(driver, "unsandboxed", False))
                         result = handle_slash_line(
                             line, quest=quest, output_fn=print, color=color,
                             unsandboxed=current_unsandboxed, pre_session=pre_session)
