@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import os
-import subprocess
-from pathlib import Path
-
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.gates import evaluate_rules
@@ -22,12 +18,23 @@ def _steps(wf):
     return {s.name: s for s in wf.flat_steps()}
 
 
-def test_light_loads_with_the_three_named_steps_plus_capture() -> None:
+def test_light_loads_with_the_three_named_steps() -> None:
     wf = _wf()
     names = [s.name for s in wf.flat_steps()]
-    assert names == ["front-door", "capture-base", "implement", "review"]
+    assert names == ["front-door", "implement", "review"]
     # No vestigial name: field — identity follows the directory.
     assert wf.name == "light"
+
+
+def test_light_declares_no_workflow_vars() -> None:
+    # base_head is removed; the light workflow declares no vars.
+    assert _wf().vars.types() == {}
+
+
+def test_light_has_no_capture_base_step_or_script() -> None:
+    names = [s.name for s in _wf().flat_steps()]
+    assert "capture-base" not in names
+    assert not (LIGHT / "scripts" / "capture-base-head.sh").exists()
 
 
 def test_front_door_is_interactive_high_tier_status_only() -> None:
@@ -104,31 +111,16 @@ def test_review_is_read_only_high_tier_and_diffs_fork_point() -> None:
 def test_review_routes_rework_to_implement_and_approve_completes() -> None:
     rules = _steps(_wf())["review"].rules
     rework = evaluate_rules(
-        rules, vars={"base_head": ""},
+        rules, vars={},
         output={"status": "Success", "verdict": "rework", "findings": "fix x"})
     assert isinstance(rework.action, Goto)
     assert rework.action.target == "implement"
     assert rework.action.resume is True
     assert rework.action.feedback == "Here's review feedback to address:"
     approve = evaluate_rules(
-        rules, vars={"base_head": ""},
+        rules, vars={},
         output={"status": "Success", "verdict": "approve", "findings": ""})
     assert isinstance(approve.action, Continue)          # off the end -> _complete
-
-
-def test_light_declares_base_head_var() -> None:
-    types = _wf().vars.types()
-    assert "base_head" in types
-
-
-def test_capture_base_step_sets_base_head_from_stdout() -> None:
-    cap = _steps(_wf())["capture-base"]
-    assert cap.command == "./scripts/capture-base-head.sh"
-    match = evaluate_rules(
-        cap.rules, vars={"base_head": ""},
-        output={"exit": 0, "stdout": "deadbeefcafe", "stderr": ""})
-    assert match.var_mutations == {"base_head": "deadbeefcafe"}
-    assert isinstance(match.action, Continue)
 
 
 def test_light_front_door_forks_worktree_others_do_not() -> None:
@@ -145,24 +137,3 @@ def test_implement_commits_in_the_worktree() -> None:
     assert "worktree" in body
     assert "directly on the current branch" not in body
     assert "no worktree" not in body
-
-
-def test_capture_base_head_script_echoes_head(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    def run(*a):
-        return subprocess.run(a, cwd=repo, check=True,
-                              capture_output=True, text=True)
-    run("git", "init", "-q")
-    run("git", "config", "user.email", "t@t")
-    run("git", "config", "user.name", "t")
-    (repo / "f.txt").write_text("hi\n")
-    run("git", "add", "-A")
-    run("git", "commit", "-qm", "seed")
-    expected = run("git", "rev-parse", "HEAD").stdout.strip()
-    script = LIGHT / "scripts" / "capture-base-head.sh"
-    out = subprocess.run(
-        ["bash", str(script)], cwd=tmp_path,
-        env={**os.environ, "IMP_PROJECT_ROOT": str(repo)},
-        check=True, capture_output=True, text=True)
-    assert out.stdout.strip() == expected
