@@ -36,3 +36,14 @@ def test_knowledge_map_names_the_three_layers_and_routing_rule() -> None:
 
 def test_knowledge_map_states_the_thin_index_pattern() -> None:
     assert "thin index" in DOC.read_text().lower()
+
+
+def test_knowledge_map_names_the_shared_partials_overlay() -> None:
+    text = DOC.read_text()
+    low = text.lower()
+    # workflow-agnostic partials ship bundled and are overlaid like skills
+    assert "src/imp/assets/partials/" in text
+    assert "shared partial" in low
+    # the overlay is local-first, into each quest's workflow/partials/
+    assert "workflow/partials/" in text
+    assert "local-first" in low
