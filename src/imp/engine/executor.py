@@ -380,6 +380,7 @@ async def run_quest(
     autonomous: bool = False,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
     opening_model: str | None = None,
+    opening_unsandboxed: bool = False,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
     if wait_for_turn_fn is None:
@@ -493,6 +494,17 @@ async def run_quest(
             from imp.engine.model_override import apply_model_override
             apply_model_override(
                 quest, state, opening_model, step_name=opening_step)
+
+        if did_fresh_resolve and opening_unsandboxed:
+            # Step-scoped override for the opening/scoping conversation; the
+            # step-boundary clear below retires it at go-live. Broadcast the marker
+            # via the raw on_event callback — NOT _emit(log, ...) — so it never
+            # persists and replays stale on a post-go-live re-attach.
+            coordinator.set_unsandboxed(True)
+            state.unsandboxed = True
+            state.save(quest.state_dir)
+            on_event({"type": "sandbox_marker",
+                      "payload": {"unsandboxed": True}})
 
         # A hold mark surviving to process entry with lane_retained unset means a prior
         # run crashed while holding; with lane_retained set it was a clean interrupt /
