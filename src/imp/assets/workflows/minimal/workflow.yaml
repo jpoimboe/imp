@@ -4,7 +4,8 @@ description: |
   A minimal workflow. It scopes a small change in an open conversation (reusing the
   shared front-door), then on go-live forks an isolated worktree on imp/<id> and
   builds it there — no plan is written, no merge happens. A read-only reviewer bounces
-  the implementer until the change is approved, then the run completes leaving the
+  the implementer until the change is approved, then an interactive finalize gate lets
+  the user review the change and request tweaks before the run completes, leaving the
   commits on the imp/<id> branch for the user to integrate manually. Review
   independence is by MODEL TIER (a high-tier reviewer judging the implementer's work),
   not by vendor.
