@@ -80,7 +80,7 @@ def test_feedback_lead_leads_ahead_of_memory_section(tmp_path: Path) -> None:
 
 def test_no_workflow_template_references_project_guidance() -> None:
     roots = [
-        Path("src/imp/assets/workflows/imp"),
+        Path("src/imp/assets/workflows/default"),
         Path("src/imp/assets/workflows/patent"),
         Path("src/imp/assets/partials"),
     ]

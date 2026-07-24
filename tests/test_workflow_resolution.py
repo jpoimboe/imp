@@ -13,8 +13,8 @@ from imp.providers.config import parse_default_base, parse_default_workflow
 from tests.conftest import _git, _seed_control
 
 
-def test_bundled_workflow_dir_resolves_imp() -> None:
-    d = bundled_workflow_dir("imp")
+def test_bundled_workflow_dir_resolves_default() -> None:
+    d = bundled_workflow_dir("default")
     assert d.is_dir()
     assert (d / "workflow.yaml").exists()
 
@@ -25,15 +25,15 @@ def test_bundled_workflow_dir_missing_raises() -> None:
 
 
 def test_is_bundled_workflow_predicate() -> None:
-    assert is_bundled_workflow("imp") is True
+    assert is_bundled_workflow("default") is True
     assert is_bundled_workflow("does-not-exist") is False
 
 
-def test_parse_default_workflow_defaults_to_imp(tmp_path: Path) -> None:
-    assert parse_default_workflow(tmp_path / "absent.yaml") == "imp"
+def test_parse_default_workflow_defaults_to_default(tmp_path: Path) -> None:
+    assert parse_default_workflow(tmp_path / "absent.yaml") == "default"
     p = tmp_path / "project.yaml"
     p.write_text("vars: {}\n")
-    assert parse_default_workflow(p) == "imp"
+    assert parse_default_workflow(p) == "default"
 
 
 def test_parse_default_workflow_reads_field(tmp_path: Path) -> None:
@@ -97,7 +97,7 @@ def test_resolve_workflow_dir_prefers_committed(tmp_path: Path) -> None:
 def test_resolve_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
     from imp.assets import bundled_workflow_dir, resolve_workflow_dir
     # Nothing committed under tmp_path -> the installed bundled workflow.
-    assert resolve_workflow_dir(tmp_path, "imp") == bundled_workflow_dir("imp")
+    assert resolve_workflow_dir(tmp_path, "default") == bundled_workflow_dir("default")
 
 
 def test_resolve_workflow_dir_unknown_names_valid_set(tmp_path: Path) -> None:
@@ -106,7 +106,7 @@ def test_resolve_workflow_dir_unknown_names_valid_set(tmp_path: Path) -> None:
         resolve_workflow_dir(tmp_path, "bogus")
     msg = str(exc.value)
     assert "bogus" in msg
-    assert "imp" in msg and "patent" in msg  # bundled set is named in the error
+    assert "default" in msg and "patent" in msg  # bundled set is named in the error
 
 
 def test_resolve_workflow_dir_rejects_invalid_name(tmp_path: Path) -> None:
@@ -157,5 +157,5 @@ def test_available_workflow_names_unions_bundled_and_committed(tmp_path: Path) -
     from imp.assets import available_workflow_names
     (tmp_path / "imp" / "workflows" / "mine").mkdir(parents=True)
     names = available_workflow_names(tmp_path)
-    assert {"imp", "patent", "mine"} <= set(names)
+    assert {"default", "patent", "mine"} <= set(names)
     assert names == sorted(names)

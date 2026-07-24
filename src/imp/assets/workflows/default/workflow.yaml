@@ -1,4 +1,3 @@
-name: feature
 description: |
   threshold -> spec -> (plan -> implement)* -> converge -> integrate
 

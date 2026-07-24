@@ -13,12 +13,12 @@ _BASE = {
 
 
 def _steps():
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return {s.name: s for s in wf.flat_steps()}
 
 
 def test_check_next_plan_advances_plan_index() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     step = next(s for s in wf.flat_steps() if s.name == "check-next-plan")
     m = evaluate_rules(step.rules,
                        vars={**_BASE, "coverage_settled": False, "plan_index": 1, "plan_total": 3},
@@ -28,7 +28,7 @@ def test_check_next_plan_advances_plan_index() -> None:
 
 
 def test_settled_batch_does_not_advance_plan_index() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     step = next(s for s in wf.flat_steps() if s.name == "check-next-plan")
     m = evaluate_rules(step.rules,
                        vars={**_BASE, "coverage_settled": True, "plan_index": 2, "plan_total": 2},

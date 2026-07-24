@@ -10,7 +10,7 @@ from pathlib import Path
 
 from imp.assets import bundled_workflow_dir
 
-SCRIPTS = bundled_workflow_dir("imp") / "scripts"
+SCRIPTS = bundled_workflow_dir("default") / "scripts"
 
 
 def _run_capture(script: str, root: Path, quest_dir: Path, quest_id: str):

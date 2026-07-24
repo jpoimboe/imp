@@ -15,7 +15,7 @@ from imp.engine.agent_run import _BASH_VIRTUAL_PATHS_NOTE
 
 CODER = (
     Path(__file__).resolve().parents[1]
-    / "src" / "imp" / "assets" / "workflows" / "imp" / "agents" / "coder.md"
+    / "src" / "imp" / "assets" / "workflows" / "default" / "agents" / "coder.md"
 )
 
 

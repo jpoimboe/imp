@@ -106,7 +106,7 @@ def test_coder_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
 
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["coder"].prompt_template_source
     log = _log(tmp_path / "events.jsonl", [])
 
@@ -114,13 +114,13 @@ def test_coder_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
         body,
         build_context(quest_title="t", event_log=log,
                       vars={"fast_path": True}),
-        workflow_dir=bundled_workflow_dir("imp"),
+        workflow_dir=bundled_workflow_dir("default"),
     )
     slow = render_prompt(
         body,
         build_context(quest_title="t", event_log=log,
                       vars={"fast_path": False}),
-        workflow_dir=bundled_workflow_dir("imp"),
+        workflow_dir=bundled_workflow_dir("default"),
     )
     # fast-path: no new tests, TDD skill NOT loaded; the coder does NOT run
     # the suite or a lint gate itself — the phase-level verify gate owns that.
@@ -274,7 +274,7 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     rendered = render_prompt(
         src,
         build_context(quest_title="t", event_log=log),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "a single recommendation-anchored question, not a menu" in rendered
     assert "save this to your backlog" not in rendered
 
@@ -326,7 +326,7 @@ def test_build_or_save_attended_build_default_yields(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
         src, build_context(quest_title="t", event_log=log),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "a single recommendation-anchored question, not a menu" in rendered
     assert "end your turn to yield" in rendered
     assert "take the default and proceed without yielding" not in rendered
@@ -404,7 +404,7 @@ def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
         src, build_context(quest_title="t", event_log=log, autonomous=True),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "take the default and proceed without yielding" in rendered
     assert "Want me to build this out now?" not in rendered
     assert "create_and_enter_worktree" in rendered

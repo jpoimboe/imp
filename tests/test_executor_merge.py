@@ -26,7 +26,7 @@ def _merge_step():
     """The shipped `merge-to-base` step (kind: merge_and_exit_worktree) with its real rules."""
     wf = load_workflow(
         Path(__file__).resolve().parents[1]
-        / "src" / "imp" / "assets" / "workflows" / "imp")
+        / "src" / "imp" / "assets" / "workflows" / "default")
     for s in wf.flat_steps():
         if s.name == "merge-to-base":
             return s

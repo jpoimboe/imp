@@ -37,7 +37,7 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     wf = load_workflow(
         Path(__file__).resolve().parents[1]
-        / "src" / "imp" / "assets" / "workflows" / "imp")
+        / "src" / "imp" / "assets" / "workflows" / "default")
     merge_step = next(s for s in wf.flat_steps() if s.name == "merge-to-base")
 
     a = Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
@@ -142,7 +142,7 @@ def test_workflow_edits_isolated_between_changes(tmp_path: Path) -> None:
 def test_committed_workflow_edit_is_tracked_on_branch(tmp_path: Path) -> None:
     """Editing + committing a Quest's workflow agent produces a real tracked
     diff on imp/<slug>. (In imp's own repo imp/workflows/imp is a symlink, so
-    the tracked path is src/imp/assets/workflows/imp/...; the test fixture
+    the tracked path is src/imp/assets/workflows/default/...; the test fixture
     uses a real dir, so the path here is imp/workflows/imp/...)."""
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="X", quest_id="ver", base_branch="main")

@@ -17,7 +17,7 @@ from imp.assets import bundled_workflow_dir
 
 
 def _scripts_dir() -> Path:
-    return bundled_workflow_dir("imp") / "scripts"
+    return bundled_workflow_dir("default") / "scripts"
 
 
 def _run(script: str, *args: str, env_extra: dict[str, str] | None = None,

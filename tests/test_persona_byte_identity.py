@@ -8,7 +8,7 @@ from imp.agents.runner import QuestContext
 from imp.engine.agent_run import build_agent_invocation
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
-_ASSET = Path("src/imp/assets/workflows/imp")
+_ASSET = Path("src/imp/assets/workflows/default")
 _GOLDEN = Path("tests/golden")
 
 

@@ -15,12 +15,12 @@ FRONT_DOOR = Path("src/imp/assets/partials/front-door.md")
 
 
 def _threshold() -> str:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return wf.agents["threshold"].prompt_template_source
 
 
 def _finalize() -> str:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return wf.agents["finalize"].prompt_template_source
 
 
@@ -119,7 +119,7 @@ def test_threshold_and_finalize_render_sandbox_debugging_partial(tmp_path) -> No
     # resolves into each rendered prompt, not merely that the directive text is
     # present in the source.
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     for name, extra_vars in (("threshold", {}), ("finalize", {"auto_merge": False})):
         body = wf.agents[name].prompt_template_source
         rendered = render_prompt(
@@ -127,7 +127,7 @@ def test_threshold_and_finalize_render_sandbox_debugging_partial(tmp_path) -> No
             build_context(
                 quest_title="t", event_log=log, quest_id="abc",
                 quest_home=".imp/quests/abc", vars=extra_vars),
-            workflow_dir=bundled_workflow_dir("imp"))
+            workflow_dir=bundled_workflow_dir("default"))
         assert "only the user can type it" in rendered, name
 
 

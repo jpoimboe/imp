@@ -22,7 +22,7 @@ REVIEW_AGENTS = (
 
 @pytest.fixture(scope="module")
 def imp_workflow():
-    return load_workflow(bundled_workflow_dir("imp"))
+    return load_workflow(bundled_workflow_dir("default"))
 
 
 @pytest.mark.parametrize("name", REVIEW_AGENTS)

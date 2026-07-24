@@ -18,7 +18,7 @@ _SKILLS = [
 
 
 def _skills_dir():
-    return bundled_workflow_dir("imp") / "skills"
+    return bundled_workflow_dir("default") / "skills"
 
 
 def test_all_four_skills_present_via_internal_path() -> None:

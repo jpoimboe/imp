@@ -9,7 +9,7 @@ from imp.engine.state import JsonlEventLog
 
 
 def _render(tmp_path: Path, *, autonomous: bool = False) -> str:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     return render_prompt(
@@ -18,7 +18,7 @@ def _render(tmp_path: Path, *, autonomous: bool = False) -> str:
                       quest_home=".imp/quests/abc",
                       autonomous=autonomous,
                       project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
 
 
 def test_attended_keeps_build_solicit(tmp_path: Path) -> None:

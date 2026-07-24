@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-IMP = Path("src/imp/assets/workflows/imp/agents")
+IMP = Path("src/imp/assets/workflows/default/agents")
 
 
 def _imp(name: str) -> str:

@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-SCRIPT = Path("src/imp/assets/workflows/imp/scripts/integrate-rebase.sh").resolve()
+SCRIPT = Path("src/imp/assets/workflows/default/scripts/integrate-rebase.sh").resolve()
 
 
 def _home(project_root: Path) -> Path:

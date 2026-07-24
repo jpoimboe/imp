@@ -150,7 +150,7 @@ def test_refresh_missing_live_source_keeps_snapshot(tmp_path: Path) -> None:
     # Point the default workflow at a name with no committed dir and no bundle:
     # resolve_workflow_dir then RAISES (unknown workflow), so the live source is
     # unavailable and refresh is a best-effort no-op. (Removing the committed
-    # imp/workflows/imp does NOT do this — the bundled "imp" workflow is a live
+    # imp/workflows/imp does NOT do this — the bundled "default" workflow is a live
     # fallback, so live_workflow_dir always resolves to an existing dir.)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: nosuch\n")
     assert _refresh_workflow_snapshot(quest) is False
@@ -165,7 +165,7 @@ def test_refresh_unresolvable_live_source_keeps_snapshot(tmp_path: Path) -> None
     # Malformed project.yaml makes parse_default_workflow RAISE LoadError,
     # which propagates through live_workflow_dir and is caught by the helper's
     # best-effort except → snapshot kept, returns False. (A MISSING project.yaml
-    # would NOT raise: parse_default_workflow returns "imp" for an absent file.)
+    # would NOT raise: parse_default_workflow returns "default" for an absent file.)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: [bad yaml\n")
     assert _refresh_workflow_snapshot(quest) is False
     assert (snapshot / "workflow.yaml").read_bytes() == before
@@ -191,7 +191,7 @@ def test_refresh_recovers_workflow_old_when_workflow_missing(tmp_path: Path) -> 
     # Make the live source unresolvable too (unknown workflow name), so the
     # snapshot can ONLY reappear if workflow.old was renamed back — never via a
     # fresh copy. (rmtree of imp/workflows/imp would fall back to the bundled
-    # "imp" workflow, which is a live source, defeating the point.)
+    # "default" workflow, which is a live source, defeating the point.)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: nosuch\n")
     assert not snapshot.exists()
     assert _refresh_workflow_snapshot(quest) is False
@@ -579,7 +579,7 @@ def test_capture_pins_to_committed_head_ignoring_dirty_worktree(
 def test_capture_resolves_workflow_symlink_to_tracked_target(
         tmp_path: Path) -> None:
     """The imp self-hosting layout: imp/workflows/imp is a SYMLINK to the real
-    tracked tree (src/imp/assets/workflows/imp). The capture must resolve the
+    tracked tree (src/imp/assets/workflows/default). The capture must resolve the
     symlink to that real path and archive HEAD of the target tree."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     wf = tmp_path / "imp" / "workflows" / "imp"

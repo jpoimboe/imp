@@ -9,7 +9,7 @@ from imp.engine.state import JsonlEventLog
 
 
 def _agent_prompt(name: str) -> str:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return wf.agents[name].prompt_template_source
 
 
@@ -35,7 +35,7 @@ def test_spec_finalizer_writes_to_artifacts_no_commit_script() -> None:
 
 def test_no_agent_or_partial_names_the_old_spec_writer() -> None:
     import pathlib
-    base = pathlib.Path("src/imp/assets/workflows/imp")
+    base = pathlib.Path("src/imp/assets/workflows/default")
     dirs = [base / "agents", base / "partials", pathlib.Path("src/imp/assets/partials")]
     for d in dirs:
         for p in sorted(d.glob("*.md")):
@@ -82,7 +82,7 @@ def test_both_prompts_route_recorded_scope_deviations_to_the_gate() -> None:
 
 
 def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     for name, agent in wf.agents.items():
         body = agent.prompt_template_source
         assert "imp/specs/" not in body, f"{name} still references imp/specs/"
@@ -102,7 +102,7 @@ def test_batch_code_reviewer_renders_quest_diff(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", cur_base_head="BASE",
         vars={"fast_path": False}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "git diff BASE..imp/abc" in out
     assert "..HEAD" not in out
 
@@ -134,7 +134,7 @@ def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
 
 
 def test_no_workflow_prompt_invokes_artifact_commit() -> None:
-    for wf_name in ("imp",):
+    for wf_name in ("default",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name, agent in wf.agents.items():
             body = agent.prompt_template_source
@@ -153,14 +153,14 @@ def test_gap_check_quest_review_is_unconditional() -> None:
 def test_batch_code_reviewer_description_is_whole_diff() -> None:
     from imp.engine.loader import parse_agent_file
     desc = parse_agent_file(
-        pathlib.Path("src/imp/assets/workflows/imp/agents/batch-code-reviewer.md").resolve()
+        pathlib.Path("src/imp/assets/workflows/default/agents/batch-code-reviewer.md").resolve()
     ).description
     assert "per-batch" not in desc
     assert "whole diff" in desc
 
 
 def test_events_query_references_frame_provenance_not_current_state() -> None:
-    for wf_name in ("imp",):
+    for wf_name in ("default",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name in ("summarizer", "plan-reviewer"):
             body = wf.agents[name].prompt_template_source
@@ -194,7 +194,7 @@ def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
     # firmly on complete_step with no "re-emit"/handoff resume sentence. Lock
     # that so a future edit cannot reintroduce the pattern.
     imp_reconciler = pathlib.Path(
-        "src/imp/assets/workflows/imp/agents/reconciler.md").read_text()
+        "src/imp/assets/workflows/default/agents/reconciler.md").read_text()
     assert "re-emit" not in imp_reconciler
     assert "complete_step" in imp_reconciler
 
@@ -375,7 +375,7 @@ def _render_agent(name: str, tmp_path) -> str:
             cur_base_head="BASE",
             vars={"fast_path": False, "task_total": 0},
         ),
-        workflow_dir=bundled_workflow_dir("imp"),
+        workflow_dir=bundled_workflow_dir("default"),
     )
 
 
@@ -523,7 +523,7 @@ def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
             autonomous=True,
             vars={"fast_path": False},
         ),
-        workflow_dir=bundled_workflow_dir("imp"),
+        workflow_dir=bundled_workflow_dir("default"),
     )
     assert heading in rendered
     # Sanity: the autonomy-guarded section IS stripped in the same render, so a

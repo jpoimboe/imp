@@ -192,7 +192,7 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
     Also initializes a bare-minimum git repo so the merge gate
     can run `git status --porcelain` without failing.
     """
-    src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "imp"
+    src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
     dst = tmp_path / "imp" / "workflows" / "imp"
     shutil.copytree(src, dst)
     # Replace script gates with always-pass stubs. plan-finalized declares an

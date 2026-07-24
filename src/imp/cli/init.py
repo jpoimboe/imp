@@ -44,7 +44,7 @@ from imp.engine import worktree
 from imp.engine.sandbox import SandboxConfig, sandbox_available
 from imp.remote.drivers import REGISTRY
 
-_DEFAULT_WORKFLOW = "imp"
+_DEFAULT_WORKFLOW = "default"
 
 _INIT_COMMIT_PATHS: tuple[str, ...] = (
     "imp/project.yaml",
@@ -74,9 +74,9 @@ Use it EXTREMELY sparingly -- prefer a per-step file
 """
 
 _MEMORY_WORKFLOW_SCAFFOLD = """<!--
-imp memory for every step of the `imp` workflow. Write standing instructions
+imp memory for every step of the `default` workflow. Write standing instructions
 below to reach all steps of this workflow, or scope to a single step with a
-sibling file named for that step (e.g. imp/memory/imp/threshold.md).
+sibling file named for that step (e.g. imp/memory/default/threshold.md).
 `all.md` means "everything at this level". HTML comments are stripped before
 injection, so this scaffold injects nothing until you add real prose below.
 

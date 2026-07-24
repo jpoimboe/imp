@@ -24,7 +24,7 @@ _BASE_VARS = {
 
 
 def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/imp").resolve()
+    asset = Path("src/imp/assets/workflows/default").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     assert wf.name
@@ -40,7 +40,7 @@ def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
 
 def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) -> None:
     from imp.engine.loader import BASE_CAPS
-    asset = Path("src/imp/assets/workflows/imp").resolve()
+    asset = Path("src/imp/assets/workflows/default").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
 
@@ -74,7 +74,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
 
 
 def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/imp").resolve()
+    asset = Path("src/imp/assets/workflows/default").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     spec_finalizer = wf.agents["spec-finalizer"]
@@ -85,7 +85,7 @@ def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
 def test_bundled_workflow_loads_and_producers_resume() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.types import Goto
-    wf_dir = bundled_workflow_dir("imp")
+    wf_dir = bundled_workflow_dir("default")
     wf = load_workflow(wf_dir)
     by = {s.name: s for s in wf.flat_steps()}
     # producer back-edges resume their target's conversation
@@ -116,7 +116,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
 def test_review_step_has_no_differ_from():
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     by = {s.name: s for s in wf.flat_steps()}
     assert by["quest-review"].differ_from is None
 
@@ -124,14 +124,14 @@ def test_review_step_has_no_differ_from():
 def test_review_step_declares_high_tier():
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     by = {s.name: s for s in wf.flat_steps()}
     assert by["quest-review"].tier == "high"
 
 
 def test_gap_check_declares_high_tier() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     by = {s.name: s for s in wf.flat_steps()}
     assert by["gap-check"].tier == "high"
 
@@ -140,14 +140,14 @@ def test_default_workflow_loads() -> None:
     # Verify the default workflow loads without errors.
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    assert wf.name == "feature"
+    wf = load_workflow(bundled_workflow_dir("default"))
+    assert wf.name == "default"
     assert len(wf.flat_steps()) > 0
 
 
 def test_spec_writer_declares_complexity_output() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     spec_finalizer = wf.agents["spec-finalizer"]
     assert "complexity" in spec_finalizer.output_schema.field_names()
     # complexity drives the thin-spec decision only; fast_path is owned by the
@@ -160,13 +160,13 @@ def test_spec_writer_declares_complexity_output() -> None:
 
 def test_fast_path_var_declared_default_false() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert wf.vars.defaults()["fast_path"] is False
 
 
 def test_minors_integrated_vars_declared_default_false() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     defaults = wf.vars.defaults()
     assert defaults["spec_minors_integrated"] is False
     assert defaults["plan_minors_integrated"] is False
@@ -174,7 +174,7 @@ def test_minors_integrated_vars_declared_default_false() -> None:
 
 def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
     # Critical/Major -> rework to spec-finalizer; clear the minors-integrated flag so a
     # real fix re-opens the one minors pass.
@@ -190,7 +190,7 @@ def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
 
 def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
     # Clean + actionable minors, not yet integrated -> resume writer to integrate and
     # set the flag, so the next (clean) review terminates.
@@ -206,7 +206,7 @@ def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
 
 def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
     # The owed verification review (minors already integrated): a clean review stops
     # and advances to plan-writer even if it surfaced fresh minors (those are dropped).
@@ -222,7 +222,7 @@ def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
 
 def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
     # Clean with nothing actionable -> advance to plan-writer, no minors pass.
     m = evaluate_rules(
@@ -237,7 +237,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
 
 def test_threshold_sets_fast_path_from_ceremony() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["threshold"].rules
     express = evaluate_rules(rules, vars=_BASE_VARS,
                              output={"status": "Success", "ceremony": "express"})
@@ -249,7 +249,7 @@ def test_threshold_sets_fast_path_from_ceremony() -> None:
 
 def test_threshold_authors_summary_on_express() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["threshold"].prompt_template_source
     assert "imp artifact-commit" not in body
     assert "{{ quest.home }}/artifacts/summary/{{ quest.id }}.md" in body
@@ -262,7 +262,7 @@ def test_threshold_authors_summary_on_express() -> None:
 
 def test_threshold_rules_route_through_scope_gate() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["threshold"].rules
     express = evaluate_rules(rules, vars=_BASE_VARS,
                              output={"status": "Success", "ceremony": "express"})
@@ -277,7 +277,7 @@ def test_threshold_rules_route_through_scope_gate() -> None:
 
 def test_scope_code_check_clean_routes_by_fast_path() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["scope-code-check"].rules
     express = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                              output={"exit": 0, "stdout": "", "stderr": ""})
@@ -294,7 +294,7 @@ def test_scope_code_check_clean_routes_by_fast_path() -> None:
 
 def test_scope_code_check_dirty_resumes_threshold() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["scope-code-check"].rules
     m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
                        output={"exit": 1, "stdout": "", "stderr": "boom"})
@@ -305,7 +305,7 @@ def test_scope_code_check_dirty_resumes_threshold() -> None:
 
 def test_scope_code_check_rides_default_cap_and_label_suppressed() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     step = _steps(wf)["scope-code-check"]
     assert step.max_loops == 10   # dropped its explicit cap; rides the convergence default
     assert step.show_label is False
@@ -321,7 +321,7 @@ def test_commit_tool_is_removed_from_registry() -> None:
 
 def test_finalize_tails_the_integrate_phase():
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     integ = next(p for p in wf.phases if p.name == "integrate")
     names = [s.name for s in integ.steps]
     assert "stamp-trailers" not in names
@@ -333,7 +333,7 @@ def test_finalize_tails_the_integrate_phase():
 
 def test_no_agent_declares_the_commit_tool() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     for agent in wf.agents.values():
         assert "commit" not in agent.tools, f"{agent.name} still declares commit"
 
@@ -341,14 +341,14 @@ def test_no_agent_declares_the_commit_tool() -> None:
 def test_committing_agents_declare_bash() -> None:
     # coder/task-lead/spec-finalizer/plan-writer commit with raw git via bash.
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     for name in ("coder", "task-lead", "spec-finalizer", "plan-writer"):
         assert "bash" in wf.agents[name].tools, f"{name} missing bash"
 
 
 def test_plan_verify_commit_fast_path_skips_plan_review() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-verify-commit"].rules
     m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                        output={"exit": 0, "stdout": "", "stderr": ""})
@@ -361,7 +361,7 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
     # human pause — never bounce the agent back into another doomed run.
     from imp.assets import bundled_workflow_dir
     from imp.engine.types import Pause
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     steps = _steps(wf)
     vars_ = _BASE_VARS
     for name in ("verify", "integration-verify"):
@@ -379,7 +379,7 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
 
 def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
@@ -393,7 +393,7 @@ def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
 
 def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
@@ -407,7 +407,7 @@ def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
 
 def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
@@ -421,7 +421,7 @@ def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
 
 def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
@@ -435,7 +435,7 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
 
 def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["spec-finalizer"].prompt_template_source
     # The clean-review branch keys on the injected `blocking:` line and integrates minors.
     assert "blocking: false" in body
@@ -445,7 +445,7 @@ def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
 
 def test_plan_writer_prompt_has_minors_integration_branch() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["plan-writer"].prompt_template_source
     assert "blocking: false" in body
     assert "minors" in body.lower()
@@ -454,7 +454,7 @@ def test_plan_writer_prompt_has_minors_integration_branch() -> None:
 
 def test_no_goto_spec_finalizer_edge() -> None:
     from pathlib import Path
-    wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
+    wf = Path("src/imp/assets/workflows/default/workflow.yaml").read_text()
     # Rework edges back into spec-finalizer must be `resume:` (transcript kept), so a
     # resumed spec-finalizer always has its rename_quest result in history. The one
     # permitted `goto: spec-finalizer` is threshold's forward entry on the full path.
@@ -464,13 +464,13 @@ def test_no_goto_spec_finalizer_edge() -> None:
 
 def test_plan_writer_does_not_declare_wait_for_user() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "wait_for_user" not in wf.agents["plan-writer"].tools
 
 
 def test_review_cadence_vars_declared():
     from imp.assets import bundled_workflow_dir
-    d = load_workflow(bundled_workflow_dir("imp")).vars.defaults()
+    d = load_workflow(bundled_workflow_dir("default")).vars.defaults()
     for gone in ("review_scope", "review_base", "tasks_since_review",
                  "review_batch_size", "panel_done", "multi_plan"):
         assert gone not in d, gone
@@ -478,20 +478,20 @@ def test_review_cadence_vars_declared():
 
 def test_integration_fork_var_declared_default_empty() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert wf.vars.defaults()["integration_fork"] == ""
 
 
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
-    # Acceptance #1/#2/#6: in this repo, imp/workflows/imp must be a
-    # symlink whose resolved target equals src/imp/assets/workflows/imp.
+    # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
+    # symlink whose resolved target equals src/imp/assets/workflows/default.
     # This pins the dogfood install against silent drift from the bundled
     # assets — if someone re-materializes the directory, this test fails.
     repo_root = Path(__file__).resolve().parents[1]
-    link = repo_root / "imp" / "workflows" / "imp"
-    target = repo_root / "src" / "imp" / "assets" / "workflows" / "imp"
+    link = repo_root / "imp" / "workflows" / "default"
+    target = repo_root / "src" / "imp" / "assets" / "workflows" / "default"
     assert link.is_symlink(), f"{link} is not a symlink"
-    assert os.readlink(link) == "../../src/imp/assets/workflows/imp", (
+    assert os.readlink(link) == "../../src/imp/assets/workflows/default", (
         f"unexpected symlink literal target: {os.readlink(link)!r}"
     )
     assert link.resolve() == target.resolve(), (
@@ -501,7 +501,7 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
 
 def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-verify-commit"].rules
     # Non-fast path, clean commit -> continue (falls through to spec-reviewer).
     m = evaluate_rules(
@@ -514,21 +514,21 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
 
 def test_plan_writer_is_first_plan_phase_step() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     plan_phase = next(p for p in wf.phases if p.name == "plan")
     assert plan_phase.steps[0].name == "plan-writer"
 
 
 def test_verify_step_rides_default_max_loops() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     # verify dropped its bespoke cap and rides the uniform convergence default of 10.
     assert _steps(wf)["verify"].max_loops == 10
 
 
 def test_max_loops_value_slate() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     steps = _steps(wf)
     # Uniform convergence default; every step that dropped its explicit cap rides it.
     assert wf.defaults.max_loops == 10
@@ -542,7 +542,7 @@ def test_max_loops_value_slate() -> None:
 
 def test_progress_edges_marked_on_iteration_routes() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     # check-next-plan's plan-advance edge iterates to a NEW plan -> progress reset.
     cnp = evaluate_rules(
         _steps(wf)["check-next-plan"].rules,
@@ -561,13 +561,13 @@ def test_progress_edges_marked_on_iteration_routes() -> None:
 
 def test_task_lead_declares_verify_tolerated_output() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "verify_tolerated" in wf.agents["task-lead"].output_schema.field_names()
 
 
 def test_task_lead_tolerated_routes_to_check_next_plan() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["task-lead"].rules
     # All current failures tolerated: task-lead made NO change and routes straight to
     # check-next-plan, skipping the verify gate; it carries no var. Fold+stamp is
@@ -583,7 +583,7 @@ def test_task_lead_tolerated_routes_to_check_next_plan() -> None:
 
 def test_task_lead_normal_return_advances_to_verify() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["task-lead"].rules
     # task-lead implements the whole plan in one entry; a normal (non-tolerated)
     # return advances to the verify gate. There is no per-task
@@ -597,7 +597,7 @@ def test_task_lead_normal_return_advances_to_verify() -> None:
 
 def test_task_lead_forward_only_no_deviation() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     tl = wf.agents["task-lead"]
     # The deviation escalation field is gone from the output schema.
     assert "deviation" not in tl.output_schema.field_names()
@@ -611,7 +611,7 @@ def test_task_lead_forward_only_no_deviation() -> None:
 
 def test_verify_red_resumes_task_lead() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["verify"].rules
     # A red suite resumes task-lead for triage (the three-rule no-carry form).
     m = evaluate_rules(rules, vars=_BASE_VARS,
@@ -622,18 +622,18 @@ def test_verify_red_resumes_task_lead() -> None:
 
 def test_coverage_settled_var_declared_and_change_panel_done_absent() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     d = wf.vars.defaults()
     assert d["coverage_settled"] is False
     assert "change_panel_done" not in d
     assert "converge_verify_tolerated" not in d
-    body = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
+    body = Path("src/imp/assets/workflows/default/workflow.yaml").read_text()
     assert "change_panel_done" not in body
 
 
 def test_gap_check_first_coverage_complete_multi_plan_runs_panel_and_latches() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["gap-check"].rules
     # Multi-plan change, coverage complete: the quest-wide panel fires
     # (review_scope=change) and coverage_settled latches true.
@@ -648,7 +648,7 @@ def test_gap_check_first_coverage_complete_multi_plan_runs_panel_and_latches() -
 
 def test_check_next_plan_settled_routes_to_quest_review():
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     step = _steps(wf)["check-next-plan"]
     assert step.kind == "branch"
     m = evaluate_rules(
@@ -660,7 +660,7 @@ def test_check_next_plan_settled_routes_to_quest_review():
 
 def test_check_next_plan_mid_change_advances_to_plan_writer():
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     step = _steps(wf)["check-next-plan"]
     m = evaluate_rules(
         step.rules,
@@ -672,7 +672,7 @@ def test_check_next_plan_mid_change_advances_to_plan_writer():
 
 def test_deferred_sweep_declares_converge_verify_tolerated_output() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     fields = wf.agents["deferred-sweep"].output_schema.field_names()
     assert "converge_verify_tolerated" in fields
     assert "sweep_tolerated" not in fields
@@ -680,7 +680,7 @@ def test_deferred_sweep_declares_converge_verify_tolerated_output() -> None:
 
 def test_deferred_sweep_normal_return_continues_without_carry() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["deferred-sweep"].rules
     # A normal sweep entry (no toleration) continues positionally into converge-verify.
     m = evaluate_rules(rules, vars=_BASE_VARS,
@@ -692,7 +692,7 @@ def test_deferred_sweep_normal_return_continues_without_carry() -> None:
 
 def test_deferred_sweep_slow_tolerated_routes_to_wait_for_head():
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     step = _steps(wf)["deferred-sweep"]
     m = evaluate_rules(step.rules, vars=_BASE_VARS,
                        output={"status": "Success",
@@ -704,7 +704,7 @@ def test_deferred_sweep_slow_tolerated_routes_to_wait_for_head():
 def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert wf.agents["explorer"].label == "exploring codebase"
     assert wf.agents["researcher"].label == "researching"
     assert wf.agents["coder"].label == "writing code"
@@ -723,7 +723,7 @@ def test_no_bundled_agent_prompt_references_the_change_handle() -> None:
     still reference the removed `change.handle` Jinja var or a `<handle>` stem."""
     from imp.assets import bundled_workflow_dir
 
-    agents = bundled_workflow_dir("imp") / "agents"
+    agents = bundled_workflow_dir("default") / "agents"
     offenders = []
     for p in sorted(agents.glob("*.md")):
         text = p.read_text()
@@ -734,7 +734,7 @@ def test_no_bundled_agent_prompt_references_the_change_handle() -> None:
 
 def test_finalize_merge_gate_is_recommendation_anchored() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["finalize"].prompt_template_source
     # Removed verbatim example and token scripting.
     assert "Reply `merge`, or describe the rework" not in body
@@ -765,7 +765,7 @@ def test_spec_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
     from imp.engine.state import InMemoryEventLog
-    wf_dir = bundled_workflow_dir("imp")
+    wf_dir = bundled_workflow_dir("default")
     body = load_workflow(wf_dir).agents["spec-reviewer"].prompt_template_source
     ctx = build_context(quest_title="t", event_log=InMemoryEventLog())
     out = render_prompt(body, ctx, workflow_dir=wf_dir)
@@ -776,7 +776,7 @@ def test_spec_reviewer_renders_canonical_severity_rubric() -> None:
 
 def test_review_steps_read_only_tightening():
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     steps = {s.name: s for s in wf.flat_steps()}
     # Write-free, test-free reviewers are locked to a read-only worktree.
     assert steps["spec-reviewer"].read_only == (".",)
@@ -791,7 +791,7 @@ def test_code_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
     from imp.engine.state import InMemoryEventLog
-    wf_dir = bundled_workflow_dir("imp")
+    wf_dir = bundled_workflow_dir("default")
     body = load_workflow(wf_dir).agents["code-reviewer"].prompt_template_source
     ctx = build_context(quest_title="t", event_log=InMemoryEventLog())
     out = render_prompt(body, ctx, workflow_dir=wf_dir)
@@ -802,7 +802,7 @@ def test_code_reviewer_renders_canonical_severity_rubric() -> None:
 
 def test_spec_finalizer_replaces_spec_writer() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "spec-finalizer" in wf.agents
     assert "spec-writer" not in wf.agents
     # The finalizer includes the shared design lens but NOT the dialogue partial.
@@ -823,7 +823,7 @@ def test_spec_finalizer_replaces_spec_writer() -> None:
 
 def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
     from pathlib import Path
-    wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
+    wf = Path("src/imp/assets/workflows/default/workflow.yaml").read_text()
     assert "spec-writer" not in wf
     assert "spec_writer" not in wf
     assert wf.count("goto: spec-finalizer") == 1   # only the scope-code-check gate's forward entry
@@ -831,7 +831,7 @@ def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
 
 def test_summarizer_immediately_precedes_finalize():
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     integ = next(p for p in wf.phases if p.name == "integrate")
     names = [s.name for s in integ.steps]
     assert names[names.index("summarizer") + 1] == "finalize"
@@ -839,13 +839,13 @@ def test_summarizer_immediately_precedes_finalize():
 
 def test_summarizer_declares_medium_tier() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert _steps(wf)["summarizer"].tier == "medium"
 
 
 def test_summarizer_routes_to_finalize_on_success_and_error() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["summarizer"].rules
     for status in ("Success", "Error"):
         m = evaluate_rules(rules, vars=_BASE_VARS, output={"status": status})
@@ -855,19 +855,19 @@ def test_summarizer_routes_to_finalize_on_success_and_error() -> None:
 
 def test_summarizer_output_schema_is_status_only() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert set(wf.agents["summarizer"].output_schema.field_names()) == {"status"}
 
 
 def test_finalize_drops_built_field() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "built" not in wf.agents["finalize"].output_schema.field_names()
 
 
 def test_finalize_leads_with_summary_artifact() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["finalize"].prompt_template_source
     assert "artifacts/summary/" in body
     low = body.lower()
@@ -888,14 +888,14 @@ def test_no_wait_for_user_in_workflow_prompts() -> None:
 
 
 def test_explorer_nudges_symbol_outline_in_both_copies() -> None:
-    for wf in ("imp",):
+    for wf in ("default",):
         text = Path(f"src/imp/assets/workflows/{wf}/agents/explorer.md").read_text()
         assert "symbol_outline" in text
         assert "before reading full bodies" in text
 
 
 def test_explorer_opts_into_symbol_outline(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/imp").resolve()
+    asset = Path("src/imp/assets/workflows/default").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     assert "symbol_outline" in wf.agents["explorer"].tools
@@ -904,14 +904,14 @@ def test_explorer_opts_into_symbol_outline(tmp_path: Path) -> None:
 def test_task_lead_step_declares_position_label() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     steps = {s.name: s for ph in wf.phases for s in ph.steps}
     assert steps["task-lead"].position_label is True
 
 
 def test_spec_finalizer_authors_plan_outline() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["spec-finalizer"].prompt_template_source
     low = body.lower()
     # The finalized spec carries a coarse, WHAT-only decomposition that seeds plan_total.
@@ -930,7 +930,7 @@ def test_spec_finalizer_authors_plan_outline() -> None:
 
 def test_plan_writer_consumes_outline_with_express_carveout() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     text = wf.agents["plan-writer"].prompt_template_source
     low = text.lower()
     # Full path: read the outline, find this plan's slice, write only the HOW.
@@ -950,11 +950,11 @@ def test_plan_writer_consumes_outline_with_express_carveout() -> None:
 
 def test_plan_cycle_check_gone_gap_check_present_and_reachable() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     by = _steps(wf)
     # The retired guard is gone from steps and disk; gap-check replaces it.
     assert "plan-cycle-check" not in by
-    agents_dir = bundled_workflow_dir("imp") / "agents"
+    agents_dir = bundled_workflow_dir("default") / "agents"
     assert not (agents_dir / "plan-cycle-check.md").exists()
     assert (agents_dir / "gap-check.md").exists()
     assert "gap-check" in by and by["gap-check"].tier == "high"
@@ -969,7 +969,7 @@ def test_plan_cycle_check_gone_gap_check_present_and_reachable() -> None:
 
 def test_gap_check_routing_and_latch() -> None:
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["gap-check"].rules
     # Gap found -> author a corrective via plan-writer; latch stays false.
     gap = evaluate_rules(rules, vars={**_BASE_VARS, "plan_index": 2, "plan_total": 2},
@@ -996,7 +996,7 @@ def test_gap_check_routing_and_latch() -> None:
 
 
 def test_gap_check_agent_is_end_of_change_backstop() -> None:
-    text = (Path("src/imp/assets/workflows/imp/agents") / "gap-check.md").read_text()
+    text = (Path("src/imp/assets/workflows/default/agents") / "gap-check.md").read_text()
     low = text.lower()
     assert "name: gap-check" in text
     assert "end-of-quest" in low or "end of quest" in low
@@ -1029,7 +1029,7 @@ def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> 
     from imp.assets import bundled_workflow_dir
     from imp.engine.state import JsonlEventLog
 
-    body = load_workflow(bundled_workflow_dir("imp")).agents["task-lead"].prompt_template_source
+    body = load_workflow(bundled_workflow_dir("default")).agents["task-lead"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
     def render(task_total: int) -> str:
@@ -1037,7 +1037,7 @@ def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> 
             quest_title="t", event_log=log, quest_id="abc",
             quest_home=".imp/quests/abc",
             vars={"task_total": task_total, "fast_path": False}),
-            workflow_dir=bundled_workflow_dir("imp"))
+            workflow_dir=bundled_workflow_dir("default"))
 
     # Both the default (medium) and the plan-marked (high) coder examples appear
     # regardless of task count. Under the old task_total-gated rule this failed:
@@ -1049,7 +1049,7 @@ def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> 
 
 def test_imp_gate_steps_pass_tier_arg() -> None:
     from imp.assets import bundled_workflow_dir
-    steps = _steps(load_workflow(bundled_workflow_dir("imp")))
+    steps = _steps(load_workflow(bundled_workflow_dir("default")))
     assert steps["verify"].command == "./scripts/run-verify.sh fast"
     assert steps["converge-verify"].command == "./scripts/run-verify.sh slow"
     assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
@@ -1072,7 +1072,7 @@ def test_no_legacy_verify_surface_under_src_imp() -> None:
 def test_spiker_is_isolated_dispatchable_subagent() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import BASE_CAPS
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     spiker = wf.agents["spiker"]
     # opts into the Part-1 isolation primitive
     assert spiker.isolated_worktree is True
@@ -1091,7 +1091,7 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
 
 def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
     from imp.assets import bundled_workflow_dir
-    text = (bundled_workflow_dir("imp") / "agents" / "spiker.md").read_text()
+    text = (bundled_workflow_dir("default") / "agents" / "spiker.md").read_text()
     low = text.lower()
     assert "name: spiker" in text
     assert "isolated_worktree: true" in text
@@ -1109,7 +1109,7 @@ def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
 
 def test_spiker_prose_documents_copy_on_write_home() -> None:
     from imp.assets import bundled_workflow_dir
-    text = (bundled_workflow_dir("imp") / "agents" / "spiker.md").read_text()
+    text = (bundled_workflow_dir("default") / "agents" / "spiker.md").read_text()
     # Collapse all whitespace (incl. the prose's hard-wrap newlines) to single
     # spaces so the asserted phrases match regardless of where lines wrap.
     low = " ".join(text.split()).lower()
@@ -1136,7 +1136,7 @@ def test_threshold_prose_resolves_spec_shaping_unknowns_via_spiker() -> None:
 
 def test_finalize_prose_settles_gate_questions_via_spiker() -> None:
     from imp.assets import bundled_workflow_dir
-    low = (bundled_workflow_dir("imp") / "agents" / "finalize.md").read_text().lower()
+    low = (bundled_workflow_dir("default") / "agents" / "finalize.md").read_text().lower()
     assert "spiker" in low
     assert "empiric" in low
     assert "gate" in low
@@ -1145,7 +1145,7 @@ def test_finalize_prose_settles_gate_questions_via_spiker() -> None:
 
 def test_task_lead_prose_allows_implementation_local_spikes() -> None:
     from imp.assets import bundled_workflow_dir
-    low = (bundled_workflow_dir("imp") / "agents" / "task-lead.md").read_text().lower()
+    low = (bundled_workflow_dir("default") / "agents" / "task-lead.md").read_text().lower()
     assert "spiker" in low
     assert "implementation-local" in low
     assert "spike" in low
@@ -1153,7 +1153,7 @@ def test_task_lead_prose_allows_implementation_local_spikes() -> None:
 
 def test_plan_writer_express_row_documents_delivered_feedback_string() -> None:
     from imp.assets import bundled_workflow_dir
-    text = (bundled_workflow_dir("imp") / "agents" / "plan-writer.md").read_text()
+    text = (bundled_workflow_dir("default") / "agents" / "plan-writer.md").read_text()
     # The gate forwards the express opener again, so the row documents it as delivered.
     assert "Plan this from the spec drafted with the user:" in text
     assert "Threshold express" in text
@@ -1161,7 +1161,7 @@ def test_plan_writer_express_row_documents_delivered_feedback_string() -> None:
 
 def test_spec_finalizer_documents_delivered_adopt_preamble_string() -> None:
     from imp.assets import bundled_workflow_dir
-    text = (bundled_workflow_dir("imp") / "agents" / "spec-finalizer.md").read_text()
+    text = (bundled_workflow_dir("default") / "agents" / "spec-finalizer.md").read_text()
     # The gate forwards the adopt preamble again on the clean exit-0 route.
     assert "Adopt the spec drafted with the user and finalize it:" in text
 
@@ -1182,7 +1182,7 @@ def test_imp_flat_is_not_bundled() -> None:
     from imp.assets import bundled_workflow_names
     names = bundled_workflow_names()
     assert "imp-flat" not in names
-    assert "imp" in names        # the surviving default workflow still discovers
+    assert "default" in names     # the surviving default workflow still discovers
 
 
 def test_interactive_steps_are_exactly_the_conversational_gates() -> None:
@@ -1196,8 +1196,8 @@ def test_interactive_steps_are_exactly_the_conversational_gates() -> None:
                 interactive.add((name, s.name))
 
     assert interactive == {
-        ("imp", "threshold"),
-        ("imp", "finalize"),
+        ("default", "threshold"),
+        ("default", "finalize"),
         ("light", "front-door"),
         ("patent", "invention-interviewer"),
         ("patent", "disclosure-gate"),
@@ -1207,15 +1207,15 @@ def test_interactive_steps_are_exactly_the_conversational_gates() -> None:
     }, sorted(interactive)
 
     # The deliberately-unflagged autonomous escalation steps must NOT opt in.
-    imp = {s.name: s for s in load_workflow(bundled_workflow_dir("imp")).flat_steps()}
-    assert imp["spec-finalizer"].interactive is False
-    assert imp["plan-writer"].interactive is False
+    default = {s.name: s for s in load_workflow(bundled_workflow_dir("default")).flat_steps()}
+    assert default["spec-finalizer"].interactive is False
+    assert default["plan-writer"].interactive is False
     patent = {s.name: s for s in load_workflow(bundled_workflow_dir("patent")).flat_steps()}
     assert patent["ids"].interactive is False
 
 
 def test_wait_for_head_has_no_hold_glyph(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/imp").resolve()
+    asset = Path("src/imp/assets/workflows/default").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     step = _steps(wf)["wait-for-head"]
@@ -1228,7 +1228,7 @@ def test_shipped_workflow_has_no_unknown_tool_grant_warnings(tmp_path: Path) -> 
     real typo in a shipped agent's deny_tools/allow_tools would silently no-op.
     Guard it in CI: loading the shipped default workflow must yield ZERO
     unknown-grant warnings."""
-    asset = Path("src/imp/assets/workflows/imp").resolve()
+    asset = Path("src/imp/assets/workflows/default").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     skew = [w for w in wf.load_warnings if "unknown to this engine" in w]
@@ -1236,7 +1236,7 @@ def test_shipped_workflow_has_no_unknown_tool_grant_warnings(tmp_path: Path) -> 
 
 
 def test_loop_budget_prose_is_de_hardcoded() -> None:
-    base = Path("src/imp/assets/workflows/imp/agents")
+    base = Path("src/imp/assets/workflows/default/agents")
     for fname in ("deferred-sweep.md", "finalize.md", "task-lead.md"):
         text = (base / fname).read_text()
         assert "capped at 5 fix laps" not in text, fname

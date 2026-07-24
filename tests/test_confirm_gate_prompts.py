@@ -9,11 +9,11 @@ from imp.engine.feedback import _WRAPPER
 from imp.engine.loader import load_workflow
 from imp.engine.types import Goto
 
-AGENTS = Path("src/imp/assets/workflows/imp/agents")
+AGENTS = Path("src/imp/assets/workflows/default/agents")
 
 
 def test_spec_writer_schema_drops_unseen_changes() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     schema = wf.agents["spec-finalizer"].output_schema
     phase = next(f for f in schema.fields if f.name == "phase")
     assert phase.type == "enum"
@@ -124,7 +124,7 @@ _WRITER_FILES = {
 
 
 def _writer_targeting_goto_rules():
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     for step in wf.flat_steps():
         for rule in step.rules:
             act = rule.action
@@ -163,7 +163,7 @@ def test_engine_sourced_taxonomy_strings_present_in_both_prompts() -> None:
 
 
 def test_spec_gate_and_confirm_vars_are_gone() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     names = {v.name for v in wf.vars.decls}
     assert "spec_gate_pending" not in names
     assert "spec_gate_passed" not in names
@@ -172,7 +172,7 @@ def test_spec_gate_and_confirm_vars_are_gone() -> None:
 
 
 def test_spec_phase_steps_have_no_confirm_or_exit_gate() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     spec = next(p for p in wf.phases if p.name == "spec")
     names = [s.name for s in spec.steps]
     assert "spec-exit-gate" not in names

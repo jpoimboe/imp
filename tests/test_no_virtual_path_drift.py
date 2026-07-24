@@ -21,7 +21,7 @@ _FORBIDDEN = re.compile(r"(?<![~\w])/(?:project|scratch)(?![A-Za-z0-9_-])")
 
 
 def test_no_virtual_paths_in_default_workflow_assets():
-    root = Path(bundled_workflow_dir("imp"))
+    root = Path(bundled_workflow_dir("default"))
     offenders: list[str] = []
     for f in root.rglob("*"):
         if not f.is_file() or f.suffix not in (".md", ".yaml", ".yml"):

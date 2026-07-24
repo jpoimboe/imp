@@ -7,11 +7,11 @@ from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.types import Continue
 
-AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
+AGENTS_DIR = Path("src/imp/assets/workflows/default/agents")
 
 
 def _wf():
-    return load_workflow(bundled_workflow_dir("imp"))
+    return load_workflow(bundled_workflow_dir("default"))
 
 
 def _plan_writer_step():

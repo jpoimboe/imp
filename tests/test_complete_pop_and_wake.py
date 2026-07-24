@@ -41,7 +41,7 @@ def test_complete_after_merge_pops_self_and_wakes_next(tmp_path, monkeypatch) ->
 
 def _merge_step():
     wf = load_workflow(
-        Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "imp")
+        Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default")
     for s in wf.flat_steps():
         if s.name == "merge-to-base":
             return s

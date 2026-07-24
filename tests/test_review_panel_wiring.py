@@ -17,7 +17,7 @@ from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import Goto
 
-AGENTS = Path("src/imp/assets/workflows/imp/agents")
+AGENTS = Path("src/imp/assets/workflows/default/agents")
 _TIERS = frozenset({"low", "medium", "high"})
 
 _BASE_VARS = {
@@ -29,7 +29,7 @@ _BASE_VARS = {
 
 
 def _wf():
-    return load_workflow(bundled_workflow_dir("imp"), configured_tiers=_TIERS)
+    return load_workflow(bundled_workflow_dir("default"), configured_tiers=_TIERS)
 
 
 def _steps(wf):
@@ -203,7 +203,7 @@ def _render_reviewer(tmp_path, *, cur_base_head: str = "forkSHA") -> str:
     ctx = build_context(quest_title="t", event_log=log, cur_base_head=cur_base_head,
                         quest_id="chg",
                         vars={"fast_path": False})
-    return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
+    return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("default"))
 
 
 def test_end_of_quest_reviews_whole_quest_diff(tmp_path) -> None:

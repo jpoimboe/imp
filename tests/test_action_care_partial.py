@@ -4,7 +4,7 @@ from pathlib import Path
 
 from imp.engine.agent_run import _CORE_TAIL
 
-_AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
+_AGENTS_DIR = Path("src/imp/assets/workflows/default/agents")
 _PARTIAL = Path("src/imp/assets/partials/action-care.md")
 _CODING_STANCE_PARTIAL = Path("src/imp/assets/partials/coding-stance.md")
 

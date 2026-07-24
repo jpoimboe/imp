@@ -9,7 +9,7 @@ from imp.agents.prompts import build_context, render_prompt
 from imp.agents.reflow import reflow_markdown
 from imp.engine.state import JsonlEventLog
 
-_ASSET = Path("src/imp/assets/workflows/imp")
+_ASSET = Path("src/imp/assets/workflows/default")
 
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _ATX = re.compile(r"^\s*#{1,6}\s")

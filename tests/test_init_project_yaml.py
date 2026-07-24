@@ -41,7 +41,7 @@ def test_init_writes_project_yaml_without_bindings(
     assert "tiers" not in proj      # bindings come from the code floor
     assert "providers" not in proj  # providers are user-homed
     assert "theme" not in proj
-    assert proj["default-workflow"] == "imp"
+    assert proj["default-workflow"] == "default"
     assert "workflow" not in proj
     assert not (root / "imp" / "workflows").exists()
     assert not (root / "imp" / "playbooks").exists()
@@ -267,7 +267,7 @@ def test_init_scaffolds_inert_memory_files(
     _run(root, xdg, ["claude_code"])
 
     global_md = root / "imp" / "memory" / "all.md"
-    wf_md = root / "imp" / "memory" / "imp" / "all.md"
+    wf_md = root / "imp" / "memory" / "default" / "all.md"
     assert global_md.is_file()
     assert wf_md.is_file()
     # Both are comment-only: they strip to empty and inject nothing.
@@ -290,9 +290,9 @@ def test_init_memory_snapshot_resolves_to_nothing(
     _run(root, xdg, ["claude_code"])
 
     snap = load_memory_snapshot(root / "imp" / "memory")
-    assert set(snap) == {"all.md", "imp/all.md"}
+    assert set(snap) == {"all.md", "default/all.md"}
     # A freshly initialized project injects no memory at any step.
-    assert resolve_memory(snap, workflow="imp", step="threshold") == ""
+    assert resolve_memory(snap, workflow="default", step="threshold") == ""
 
 
 def test_init_facts_hint_points_at_memory_not_guidance(

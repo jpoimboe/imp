@@ -7,7 +7,7 @@ from imp.engine.loader import load_workflow
 
 
 def _imp_workflow(tmp_path: Path) -> Path:
-    asset = Path("src/imp/assets/workflows/imp").resolve()
+    asset = Path("src/imp/assets/workflows/default").resolve()
     dst = tmp_path / "wf"
     shutil.copytree(asset, dst)
     return dst
