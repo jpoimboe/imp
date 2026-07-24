@@ -139,6 +139,14 @@ def test_light_front_door_forks_worktree_others_do_not() -> None:
         assert "create_and_enter_worktree" not in wf.agents[role].tools
 
 
+def test_implement_commits_in_the_worktree() -> None:
+    body = _wf().agents["implementer"].prompt_template_source
+    # Commits happen in the quest's worktree, not "in place on the current branch".
+    assert "worktree" in body
+    assert "directly on the current branch" not in body
+    assert "no worktree" not in body
+
+
 def test_capture_base_head_script_echoes_head(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

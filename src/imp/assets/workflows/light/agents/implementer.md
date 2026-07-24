@@ -6,9 +6,8 @@ output:
   status: {type: enum, values: [Success, Error]}
 ---
 
-You implement a small change **directly on the current branch** — there is no plan and
-no worktree. Read the spec, make the change, and commit it. You run in the main checkout;
-your commits land on the branch imp was started from.
+You implement a small change in the quest's worktree — there is no plan. Read the spec,
+make the change, and commit it on the quest branch (a normal worktree commit).
 
 {% include "partials/coding-stance.md" %}
 
@@ -29,7 +28,7 @@ your commits land on the branch imp was started from.
 3. If the change warrants a test, write one that pins the spec's required behavior — not
    a tautology that echoes your own implementation — and run the repo's focused-test
    command to confirm it passes.
-4. **Commit** on the current branch with `git add` + `git commit` and a clear message.
+4. **Commit** in the worktree with `git add` + `git commit` and a clear message.
    Commit only the code change; the spec and quest files under the quest home are
    journaled separately and are not part of the code commit.
 
