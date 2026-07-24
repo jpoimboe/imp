@@ -1,29 +1,18 @@
-"""Agent-backed detection of a project's import roots for the PYTHONPATH shadow.
+"""Validation and formatting helpers for a project's import roots.
 
-At `imp init`, a sandboxed one-shot agent reads the project's declared packaging
-and confirms the layout on disk; the reported roots are validated here before
-being written to `imp/project.yaml` as the worktree-relative `pythonpath` — dirs
-prepended to gate/agent subprocess PYTHONPATH so an editable-installed package
-resolves to the worktree under test, not a stale main checkout.
+The module validates and formats a project's import roots for the `pythonpath`
+shadow written to `imp/project.yaml` (worktree-relative dirs prepended to
+gate/agent subprocess PYTHONPATH so an editable-installed package resolves to
+the worktree under test, not a stale main checkout), and offers the offline
+provider-credential readiness check (`resolve_detection_provider`).
 """
 
 from __future__ import annotations
 
-import functools
 import json
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
-import anyio
-
-from imp.agents.detached import (
-    DetachedEnvironmentFailure,
-    DetachedSuccess,
-    DetachedTransientFailure,
-    run_detached_agent,
-)
-from imp.engine.loader import parse_agent_file
-from imp.engine.sandbox import SandboxConfig
 from imp.providers.effective import load_effective_config
 from imp.providers.resolve import available_providers
 
@@ -79,63 +68,6 @@ def validate_detected_roots(project_root: Path, roots: list[str]) -> list[str]:
         if (project_root / norm).is_dir():
             out.append(norm)
     return out
-
-
-_KICKOFF = (
-    "Determine the Python import root(s) for the project at the repository root "
-    "and report them via complete_step."
-)
-
-
-@dataclass(frozen=True, slots=True)
-class DetectedRoots:
-    roots: list[str]  # validated, worktree-relative; empty => no importable package
-
-
-@dataclass(frozen=True, slots=True)
-class DetectionFailed:
-    kind: str  # "credential" | "transient"
-    detail: str
-
-
-def detect_pythonpath_via_agent(
-    project_root: Path,
-    workflow_dir: Path,
-    provider_name: str,
-    model_name: str,
-    sandbox_cfg: SandboxConfig,
-) -> DetectedRoots | DetectionFailed:
-    """Run the bundled init-pythonpath agent and validate its answer against
-    disk. Assumes `project_root` is a Python-packaging project (init pre-checks
-    with `is_python_packaging_project`)."""
-    agent_def = parse_agent_file(workflow_dir / "agents" / "init-pythonpath.md")
-    result = anyio.run(functools.partial(
-        run_detached_agent,
-        agent_def=agent_def,
-        provider_name=provider_name,
-        model_name=model_name,
-        initial_message=_KICKOFF,
-        project_root=project_root,
-        workflow_dir=workflow_dir,
-        sandbox_cfg=sandbox_cfg,
-        title="pythonpath detection",
-        tier="medium",
-        max_tool_calls=25,
-        timeout_s=60.0,
-    ))
-    if isinstance(result, DetachedEnvironmentFailure):
-        kind = "credential" if result.category in ("auth", "config") else "transient"
-        return DetectionFailed(kind, result.detail)
-    if isinstance(result, DetachedTransientFailure):
-        return DetectionFailed("transient", f"{result.category}: {result.detail}")
-    assert isinstance(result, DetachedSuccess)
-    if result.output.get("status") == "Error":
-        return DetectionFailed("transient", "packaging unreadable")
-    raw = list((result.output.get("pythonpath") or {}).get("roots", []))
-    validated = validate_detected_roots(project_root, raw)
-    if raw and not validated:
-        return DetectionFailed("transient", "detected roots not found on disk")
-    return DetectedRoots(validated)
 
 
 def format_pythonpath_yaml(dirs: list[str]) -> str:
