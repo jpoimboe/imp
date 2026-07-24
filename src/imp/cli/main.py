@@ -40,7 +40,6 @@ from imp.cli.inert_resume import (
     run_inert_resume,
 )
 from imp.cli.init import (
-    GitSetupDeclined,
     IntegrationBranchUnresolved,
     run_init,
     run_init_noninteractive,
@@ -821,7 +820,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
             )
         else:
             run_init(project, input_fn=input, output_fn=print)
-    except (GitSetupDeclined, IntegrationBranchUnresolved) as e:
+    except IntegrationBranchUnresolved as e:
         _emit_cli_error(f"{e}")
         return 2
     except FileExistsError as e:

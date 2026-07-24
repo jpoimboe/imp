@@ -10,11 +10,13 @@ Committed config+workflows live under imp/ (tracked by git).
 Runtime state (quests, locks, etc.) lives under .imp/ (gitignored wholesale).
 
 Tier→model bindings come from the provider-code floor now, so init asks no
-model question — it just records the enabled providers + detected theme. For a
-Python-packaging project it also runs a one-shot sandboxed agent to detect the
-import root, so a fresh init there needs a working provider plus an OS sandbox
-(or an accepted unsandboxed offer) and stops with an actionable message if
-either is missing; non-Python projects skip that gate entirely.
+model question — it just records the enabled providers + detected theme. A
+fresh interactive init then hands off to an agent-driven setup conversation
+(default workflow, integration branch, fast test command, import root), so it
+needs a working provider plus an OS sandbox (or an accepted unsandboxed offer)
+and stops with an actionable message if either is missing. The non-interactive
+path (`--use-defaults`, or an auto-selected no-TTY run) writes defaults with no
+model call.
 """
 
 from __future__ import annotations
@@ -28,24 +30,20 @@ from typing import Any
 import yaml
 
 from imp.agents.interactive import (
+    InteractiveFailure,
     InteractiveResult,
     run_interactive_agent_sync,
 )
 from imp.assets import available_workflow_names, resolve_workflow_dir
 from imp.cli.prompt import Prompt
 from imp.cli.pythonpath_detect import (
-    DetectedRoots,
-    DetectionFailed,
-    detect_pythonpath_via_agent,
     format_pythonpath_yaml,
-    is_python_packaging_project,
     resolve_detection_provider,
     validate_detected_roots,
 )
 from imp.cli.verify_detect import (
     detect_test_command,
     format_test_cmd_fast_yaml,
-    resolve_test_cmd_choice,
 )
 from imp.engine import worktree
 from imp.engine.loader import parse_agent_file
@@ -94,10 +92,6 @@ prefer a per-step file scoped to just the step that needs it.
 """
 
 
-class GitSetupDeclined(Exception):
-    """The user declined `imp init`'s offer to set up a git repository."""
-
-
 class IntegrationBranchUnresolved(Exception):
     """imp init needs an integration branch but couldn't determine one — the
     prompt couldn't read input (non-TTY / EOF), or no branch was resolvable."""
@@ -117,27 +111,6 @@ def _in_git_repo(project_root: Path) -> bool:
         ["git", "rev-parse", "--git-dir"],
         cwd=project_root, capture_output=True, text=True,
     ).returncode == 0
-
-
-def _ensure_git_repo(
-    project_root: Path, *,
-    input_fn: Callable[[str], str],
-    output_fn: Callable[[str], None],
-) -> bool:
-    """Ensure `project_root` is a git repo. Returns True iff this call ran
-    `git init` (a fresh repo was created this run), False if one already
-    existed. Raises GitSetupDeclined when the user declines the offer."""
-    if _in_git_repo(project_root):
-        return False
-    answer = input_fn("Initialize a git repository here? [Y/n] ").strip().lower()
-    if answer in ("n", "no"):
-        raise GitSetupDeclined(
-            "imp needs a git repository — re-run `imp init` and allow git setup."
-        )
-    subprocess.run(["git", "init"], cwd=project_root, check=True,
-                   capture_output=True, text=True)
-    output_fn("Initialized a git repository.")
-    return True
 
 
 def _ensure_git_repo_silent(project_root: Path) -> bool:
@@ -554,6 +527,17 @@ def _build_init_kickoff(
     return "\n".join(lines)
 
 
+def _conversation_failure_message(
+    provider_name: str, failure: InteractiveFailure,
+) -> str:
+    if failure.category in ("auth", "config"):
+        hint = _CREDENTIAL_HINTS.get(provider_name, "check its credential")
+        return (f"imp reached {provider_name} but setup couldn't authenticate. "
+                f"{hint[0].upper()}{hint[1:]}, then re-run `imp init`.")
+    return (f"Setup didn't finish ({failure.detail}). "
+            "Re-run `imp init` when you're ready.")
+
+
 def _run_init_conversation(
     *,
     project_root: Path,
@@ -587,16 +571,12 @@ def run_init(
     output_fn: Callable[[str], None],
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
-    detect_verify_fn: Callable[[Path], str | None] | None = None,
 ) -> None:
     from imp.providers.effective import user_config_path
 
     imp_dir = project_root / "imp"
     project_file = imp_dir / "project.yaml"
     already_initialized = project_file.is_file()
-
-    git_created = _ensure_git_repo(
-        project_root, input_fn=input_fn, output_fn=output_fn)
 
     output_fn(f"Setting up imp in {project_root}")
 
@@ -614,7 +594,6 @@ def run_init(
         pick = picker_fn or _interactive_provider_picker
         providers = pick(list(_PROVIDER_DISPLAY_ORDER))
         if not providers:
-            # The interactive picker enforces ≥1; a custom picker_fn might not.
             raise ValueError("at least one provider must be selected")
         theme = (detect_theme_fn or _default_detect_theme)()
         picked_this_run = True
@@ -623,152 +602,125 @@ def run_init(
         if prov in _PROVIDERS_WITHOUT_ENV:
             continue
         output_fn(f"  {prov} → {prov.upper()}_API_KEY (set this env var)")
-    # Theme message after Enabled/env, matching the pre-reorder output order.
     if picked_this_run and theme != "ansi":
         output_fn(f"Detected a {theme} terminal — colors tuned to match.")
 
-    # --- readiness gate + agent detection (fresh init on a Python-packaging
-    #     project only); otherwise keep today's behavior ---
-    detected_roots: list[str] | None = None   # None/[] => write the teaching hint
-    run_gate = (not already_initialized
-                and is_python_packaging_project(project_root))
-
-    if not run_gate:
-        if not sandbox_available():
-            output_fn("")
-            output_fn("WARNING: bubblewrap (bwrap) not found — imp can't OS-sandbox the agent's")
-            output_fn("   shell. Install it for a real filesystem boundary:")
-            output_fn("     Fedora:  sudo dnf install bubblewrap")
-            output_fn("     Debian:  sudo apt install bubblewrap")
-            output_fn("   Until then, set `sandbox.allow_unsandboxed: true` in your")
-            output_fn(f"   user config ({user_path}) to run without a boundary,")
-            output_fn("   or runs will hard-fail. (You can also re-run init after installing.)")
-            output_fn("")
-    else:
-        # 1. Credential check (offline) over the picked providers.
-        resolved = resolve_detection_provider(providers)
-        if resolved is None:
-            if wrote_user_config:
-                _bootstrap_user_config(
-                    user_path, providers, theme, allow_unsandboxed=False)
-            width = max(len(p) for p in providers)
-            output_fn(
-                "imp needs a working model provider to finish setting up this project.")
-            output_fn("None of the providers you enabled has a usable credential yet:")
-            for prov in providers:
-                hint = _CREDENTIAL_HINTS.get(prov, "set up its credential")
-                output_fn(f"  {prov:<{width}} → {hint}")
-            output_fn("Set one up, then re-run `imp init`.")
-            return
-        provider_name, model_name = resolved
-
-        # 2. Sandbox check.
-        allow_unsandboxed = False
-        if not sandbox_available():
-            answer = input_fn(
-                "bubblewrap (bwrap) isn't installed, so imp can't OS-sandbox the "
-                "commands its agents run.\n"
-                "Run imp without that sandbox for now? Agent shell commands won't be "
-                "isolated from your machine. [y/N] "
-            ).strip().lower()
-            if answer in ("y", "yes"):
-                allow_unsandboxed = True
-                output_fn(
-                    "Running without an OS sandbox. Install bubblewrap later and "
-                    "remove sandbox.allow_unsandboxed to re-enable it.")
-            else:
-                if wrote_user_config:
-                    _bootstrap_user_config(
-                        user_path, providers, theme, allow_unsandboxed=False)
-                output_fn(
-                    "Install bubblewrap for a real filesystem boundary, then "
-                    "re-run `imp init`:")
-                output_fn("  Fedora:  sudo dnf install bubblewrap")
-                output_fn("  Debian:  sudo apt install bubblewrap")
-                output_fn(
-                    f"Or set `sandbox.allow_unsandboxed: true` in {user_path} to "
-                    "proceed without one.")
-                return
-
-        # 3. Persist the user config before running the agent (so a re-run never
-        #    re-asks the questions already answered).
+    # --- re-init idempotency: an already-committed project file means no
+    #     conversation; just bootstrap a missing machine config and re-commit ---
+    if already_initialized:
         if wrote_user_config:
             _bootstrap_user_config(
-                user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
-
-        # 4. Run the agent detection.
-        output_fn(
-            "Inspecting your project's packaging to find its Python import root "
-            f"(via {provider_name})…")
-        workflow_dir = resolve_workflow_dir(project_root, _DEFAULT_WORKFLOW)
-        outcome = detect_pythonpath_via_agent(
-            project_root, workflow_dir, provider_name, model_name,
-            SandboxConfig(allow_unsandboxed=allow_unsandboxed))
-        if isinstance(outcome, DetectionFailed):
-            if outcome.kind == "credential":
-                output_fn(
-                    f"imp reached {provider_name} but the credential was rejected.")
-                hint = _CREDENTIAL_HINTS.get(provider_name, "check its credential")
-                output_fn(f"{hint[0].upper()}{hint[1:]}, then re-run `imp init`.")
-            else:
-                output_fn(
-                    "imp couldn't finish detecting your Python import root "
-                    f"({outcome.detail}).")
-                output_fn("Re-run `imp init` once your environment is ready.")
-            return
-        assert isinstance(outcome, DetectedRoots)
-        detected_roots = outcome.roots
-
-    # --- committed project file (idempotent: never overwrite an existing one) ---
-    committed = False
-    if not already_initialized:
-        default_base = _resolve_init_base(
-            project_root, git_created=git_created, input_fn=input_fn)
-        output_fn(f"Integration branch: {default_base}")
-        detect_cmd = detect_verify_fn or detect_test_command
-        suggested = detect_cmd(project_root)
-        test_cmd_fast: str | None = None
-        if suggested is not None:
-            test_cmd_fast = resolve_test_cmd_choice(suggested, input_fn, output_fn)
-        pythonpath = detected_roots or []
-        if pythonpath:
-            output_fn(f"Set pythonpath: {pythonpath} in imp/project.yaml.")
-            output_fn(
-                "Review your configuration with `imp config`; edit "
-                "imp/project.yaml to change it.")
-        elif run_gate:
-            output_fn(
-                "No installable Python package detected — leaving pythonpath "
-                "unset.")
-        settings = InitSettings(
-            default_workflow=_DEFAULT_WORKFLOW, default_base=default_base,
-            test_cmd_fast=test_cmd_fast, pythonpath=pythonpath)
-        committed = write_init_files(project_root, settings)
-
-    # --- bootstrap user config (only if the machine still has none) ---
-    if wrote_user_config:
-        _bootstrap_user_config(user_path, providers, theme, allow_unsandboxed=False)
-
-    # --- re-init tail: ensure gitignore + commit for an already-initialized clone ---
-    if already_initialized:
+                user_path, providers, theme, allow_unsandboxed=False)
+        _ensure_git_repo_silent(project_root)
         _ensure_imp_gitignore(project_root)
         committed = _commit_init_files(project_root)
-
-    output_fn("")
-    if already_initialized:
+        output_fn("")
         output_fn("Project already initialized (imp/project.yaml is committed).")
         if wrote_user_config:
             output_fn("Bootstrapped your machine config (providers, theme).")
         else:
             output_fn("Your machine config is already set up — nothing to do.")
-    else:
-        output_fn("Created:")
-        output_fn("  imp/project.yaml")
+        output_fn(f"  {user_path}  (your machine: providers, theme)")
+        if committed:
+            output_fn("Committed imp/project.yaml.")
+        return
+
+    # --- fresh init: credential + sandbox gate (a working provider is required
+    #     for the setup conversation) ---
+    resolved = resolve_detection_provider(providers)
+    if resolved is None:
+        if wrote_user_config:
+            _bootstrap_user_config(
+                user_path, providers, theme, allow_unsandboxed=False)
+        width = max(len(p) for p in providers)
+        output_fn(
+            "imp needs a working model provider to finish setting up this project.")
+        output_fn("None of the providers you enabled has a usable credential yet:")
+        for prov in providers:
+            hint = _CREDENTIAL_HINTS.get(prov, "set up its credential")
+            output_fn(f"  {prov:<{width}} → {hint}")
+        output_fn("Set one up, then re-run `imp init`.")
+        return
+    provider_name, model_name = resolved
+
+    allow_unsandboxed = False
+    if not sandbox_available():
+        answer = input_fn(
+            "bubblewrap (bwrap) isn't installed, so imp can't OS-sandbox the "
+            "commands its agents run.\n"
+            "Run imp without that sandbox for now? Agent shell commands won't be "
+            "isolated from your machine. [y/N] "
+        ).strip().lower()
+        if answer in ("y", "yes"):
+            allow_unsandboxed = True
+            output_fn(
+                "Running without an OS sandbox. Install bubblewrap later and "
+                "remove sandbox.allow_unsandboxed to re-enable it.")
+        else:
+            if wrote_user_config:
+                _bootstrap_user_config(
+                    user_path, providers, theme, allow_unsandboxed=False)
+            output_fn(
+                "Install bubblewrap for a real filesystem boundary, then "
+                "re-run `imp init`:")
+            output_fn("  Fedora:  sudo dnf install bubblewrap")
+            output_fn("  Debian:  sudo apt install bubblewrap")
+            output_fn(
+                f"Or set `sandbox.allow_unsandboxed: true` in {user_path} to "
+                "proceed without one.")
+            return
+
+    # Persist the machine config before the conversation so a re-run never
+    # re-asks the questions already answered.
+    if wrote_user_config:
+        _bootstrap_user_config(
+            user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
+
+    # --- hand off to the setup conversation ---
+    output_fn("Now let's finish setting up this project.")
+    workflow_dir = resolve_workflow_dir(project_root, _DEFAULT_WORKFLOW)
+    result = _run_init_conversation(
+        project_root=project_root, workflow_dir=workflow_dir,
+        provider_name=provider_name, model_name=model_name,
+        allow_unsandboxed=allow_unsandboxed,
+        color=theme in ("dark", "light"), output_fn=output_fn)
+
+    if isinstance(result, InteractiveFailure):
+        output_fn(_conversation_failure_message(provider_name, result))
+        return
+    output = result.output
+    if output.get("status") != "Success":
+        output_fn(
+            "Setup didn't finish — the assistant reported it couldn't complete. "
+            "Re-run `imp init` when you're ready.")
+        return
+
+    # --- host applies the agent's decisions and writes the files ---
+    if output.get("git_init"):
+        _ensure_git_repo_silent(project_root)
+    elif not _in_git_repo(project_root):
+        # The agent declined git in a repo-less dir: a clean message beats an
+        # uncaught CalledProcessError from _commit_init_files' `git status`.
+        output_fn(
+            "imp needs a git repository but setup left this directory without "
+            "one. Re-run `imp init` and allow git setup.")
+        return
+    roots = list((output.get("pythonpath") or {}).get("roots", []))
+    settings = InitSettings(
+        default_workflow=str(output["default_workflow"]),
+        default_base=str(output["default_base"]),
+        test_cmd_fast=str(output["test_cmd_fast"]),
+        pythonpath=validate_detected_roots(project_root, roots))
+    committed = write_init_files(project_root, settings)
+
+    output_fn("")
+    output_fn("Created:")
+    output_fn("  imp/project.yaml")
     output_fn(f"  {user_path}  (your machine: providers, theme)")
     if committed:
         output_fn("Committed imp/project.yaml.")
     output_fn("")
-    output_fn("Try: imp new \"Add a dark-mode toggle\"")
+    output_fn('Try: imp new "Add a dark-mode toggle"')
 
 
 def run_init_noninteractive(

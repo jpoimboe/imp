@@ -16,6 +16,15 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
+    import imp.cli.init as initmod
+    from imp.agents.interactive import InteractiveSuccess
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: ("anthropic", "m"), raising=False)
+    monkeypatch.setattr(initmod, "_run_init_conversation", lambda **kw: InteractiveSuccess({
+        "status": "Success", "git_init": True, "default_workflow": "default",
+        "default_base": "main", "test_cmd_fast": "", "pythonpath": {"roots": []}}),
+        raising=False)
 
 
 def _git(root: Path, *args: str) -> str:
@@ -25,7 +34,7 @@ def _git(root: Path, *args: str) -> str:
 
 def _run(root: Path) -> None:
     run_init(root, input_fn=lambda _p: "", output_fn=lambda _m: None,
-             picker_fn=lambda _a: ["anthropic"], detect_verify_fn=lambda _p: None)
+             picker_fn=lambda _a: ["anthropic"])
 
 
 def test_creates_scoped_initial_commit(tmp_path: Path) -> None:
@@ -56,14 +65,6 @@ def test_idempotent_rerun_makes_no_new_commit(tmp_path: Path) -> None:
     _run(tmp_path)
     head2 = _git(tmp_path, "rev-parse", "HEAD").strip()
     assert head1 == head2
-
-
-def test_commit_becomes_first_commit_when_git_just_initialized(
-    tmp_path: Path,
-) -> None:
-    _run(tmp_path)  # non-repo: run_init runs `git init` (default Yes)
-    assert (tmp_path / ".git").is_dir()
-    assert _git(tmp_path, "rev-list", "--count", "HEAD").strip() == "1"
 
 
 def test_commit_includes_memory_scaffolds(tmp_path: Path) -> None:

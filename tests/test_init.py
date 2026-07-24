@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
 from imp.cli.init import run_init
 
 
@@ -20,37 +21,27 @@ def _picks(*selected: str) -> object:
     return lambda _available: list(selected)
 
 
-def _py_project(root: Path) -> None:
-    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
-    pkg = root / "src" / "x"
-    pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text("")
+def _conv_result(*, status="Success", git_init=False, default_workflow="default",
+                 default_base="main", test_cmd_fast="", roots=()):
+    return InteractiveSuccess({
+        "status": status, "git_init": git_init,
+        "default_workflow": default_workflow, "default_base": default_base,
+        "test_cmd_fast": test_cmd_fast, "pythonpath": {"roots": list(roots)}})
 
 
-def _stub_gate(monkeypatch, *, provider=("anthropic", "m"), outcome=None):
+def _stub_conv(monkeypatch, result) -> None:
     import imp.cli.init as initmod
-    from imp.cli.pythonpath_detect import DetectedRoots
-    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _providers: provider, raising=False)
-    monkeypatch.setattr(
-        initmod, "detect_pythonpath_via_agent",
-        lambda *a, **k: outcome if outcome is not None else DetectedRoots(["src"]),
-        raising=False)
+    monkeypatch.setattr(initmod, "_run_init_conversation",
+                        lambda **kw: result, raising=False)
 
 
 @pytest.fixture(autouse=True)
 def _isolate_user_config(monkeypatch, tmp_path):
-    # init bootstraps ~/.config/imp/config.yaml — pin XDG into the tmp tree so a
-    # test NEVER writes the developer's real machine config.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
 
 
 @pytest.fixture(autouse=True)
 def _stub_theme_detection(monkeypatch):
-    # init tests must NOT fire a real OSC-11 query at the terminal — pin the
-    # detector to a deterministic 'ansi'. Persistence of a detected theme is
-    # covered separately via the detect_theme_fn injection point.
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
 
 
@@ -62,6 +53,19 @@ def _git_repo(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+
+
+@pytest.fixture(autouse=True)
+def _stub_setup_gate(monkeypatch):
+    # Fresh interactive init now always runs the credential+sandbox gate and the
+    # conversation. Default them to "ready + success"; specific tests override.
+    # git_init=False is safe: _git_repo already git-inits tmp_path before every test.
+    import imp.cli.init as initmod
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _providers: ("anthropic", "m"), raising=False)
+    monkeypatch.setattr(initmod, "_run_init_conversation",
+                        lambda **kw: _conv_result(), raising=False)
 
 
 def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
@@ -201,64 +205,30 @@ def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_init_no_verify_line_when_nothing_detected(tmp_path: Path) -> None:
-    # A bare project (no Makefile/package.json/etc.) → no detection, no prompt,
-    # no verify_command line (stays undecided; the `imp new` backstop covers it).
-    run_init(
-        tmp_path, input_fn=_inputs(), output_fn=lambda _m: None,
-        picker_fn=lambda _avail: ["anthropic"],
-    )
-    text = (tmp_path / "imp" / "project.yaml").read_text()
-    assert "test_cmd_fast" not in text
-    assert "lint_command" not in text
-
-
-def test_init_writes_test_cmd_fast_on_yes(tmp_path: Path) -> None:
-    run_init(
-        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: "make check",
-    )
+def test_init_writes_test_cmd_fast_from_conversation(tmp_path, monkeypatch):
+    _stub_conv(monkeypatch, _conv_result(test_cmd_fast="make check"))
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=lambda _m: None)
     data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
     assert data["test_cmd_fast"] == "make check"
 
 
-def test_init_writes_optout_on_skip(tmp_path: Path) -> None:
-    run_init(
-        tmp_path, input_fn=_inputs("skip"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: "make check",
-    )
+def test_init_writes_optout_when_conversation_opts_out(tmp_path, monkeypatch):
+    _stub_conv(monkeypatch, _conv_result(test_cmd_fast=""))
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=lambda _m: None)
     data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
     assert data["test_cmd_fast"] == ""
 
 
-def test_init_comment_names_timeout_defaults(tmp_path: Path) -> None:
-    run_init(
-        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: "make check",
-    )
+def test_init_comment_names_timeout_defaults(tmp_path, monkeypatch):
+    _stub_conv(monkeypatch, _conv_result(test_cmd_fast="make check"))
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=lambda _m: None)
     text = (tmp_path / "imp" / "project.yaml").read_text()
     assert "120s" in text and "300s" in text
     assert "test_cmd_fast_timeout" in text
-    assert "test_cmd_slow" in text
-    assert "test_cmd_slow_timeout" in text
-
-
-def test_init_surfaces_bwrap_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import imp.cli.init as initmod
-    monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
-    msgs: list[str] = []
-    run_init(
-        project_root=tmp_path,
-        picker_fn=_picks("anthropic"),
-        input_fn=_inputs(),
-        output_fn=msgs.append,
-        detect_theme_fn=lambda: "ansi",
-    )
-    blob = "\n".join(msgs)
-    assert "bubblewrap" in blob.lower()
+    assert "test_cmd_slow" in text and "test_cmd_slow_timeout" in text
 
 
 def test_init_available_bwrap_is_quiet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -369,77 +339,42 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
     assert inactive.startswith("  ")
 
 
-def test_python_project_sets_pythonpath_and_informs(tmp_path, monkeypatch):
-    from imp.cli.pythonpath_detect import DetectedRoots
-    _py_project(tmp_path)
-    _stub_gate(monkeypatch, outcome=DetectedRoots(["src"]))
-    msgs: list[str] = []
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
-    assert data["pythonpath"] == ["src"]
-    blob = "\n".join(msgs)
-    assert "Set pythonpath: ['src'] in imp/project.yaml." in blob
-    assert "Review your configuration with `imp config`" in blob
-
-
-def test_python_project_empty_roots_leaves_unset(tmp_path, monkeypatch):
-    from imp.cli.pythonpath_detect import DetectedRoots
-    _py_project(tmp_path)
-    _stub_gate(monkeypatch, outcome=DetectedRoots([]))
-    msgs: list[str] = []
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
-    text = (tmp_path / "imp" / "project.yaml").read_text()
-    assert yaml.safe_load(text).get("pythonpath") is None
-    assert "No installable Python package detected" in "\n".join(msgs)
-
-
 def test_no_usable_credential_stops_without_project_yaml(tmp_path, monkeypatch):
     import imp.cli.init as initmod
-    _py_project(tmp_path)
-    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
     monkeypatch.setattr(initmod, "resolve_detection_provider",
                         lambda _p: None, raising=False)
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+             output_fn=msgs.append)
     assert not (tmp_path / "imp" / "project.yaml").exists()
     assert "usable credential" in "\n".join(msgs)
-    # Persisted so a re-run skips the picker.
     user = tmp_path / "xdg" / "imp" / "config.yaml"
     assert yaml.safe_load(user.read_text())["providers"] == ["anthropic"]
 
 
 def test_configured_providers_skip_picker(tmp_path, monkeypatch):
-    from imp.cli.pythonpath_detect import DetectedRoots
-    _py_project(tmp_path)
     cfg_dir = tmp_path / "xdg" / "imp"
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
-    _stub_gate(monkeypatch, outcome=DetectedRoots(["src"]))
+    (tmp_path / "src").mkdir()
+    _stub_conv(monkeypatch, _conv_result(roots=["src"]))
 
     def _boom(_available):
         raise AssertionError("picker must not run when providers are configured")
 
-    run_init(tmp_path, picker_fn=_boom, input_fn=_inputs(),
-             output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    run_init(tmp_path, picker_fn=_boom, input_fn=_inputs(), output_fn=lambda _m: None)
     assert yaml.safe_load(
         (tmp_path / "imp" / "project.yaml").read_text())["pythonpath"] == ["src"]
 
 
 def test_bwrap_missing_offer_accept_continues(tmp_path, monkeypatch):
     import imp.cli.init as initmod
-    from imp.cli.pythonpath_detect import DetectedRoots
-    _py_project(tmp_path)
     monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p: ("anthropic", "m"), raising=False)
-    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent",
-                        lambda *a, **k: DetectedRoots(["src"]), raising=False)
+    (tmp_path / "src").mkdir()
+    _stub_conv(monkeypatch, _conv_result(roots=["src"]))
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs("y"),
-             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+             output_fn=msgs.append)
     assert yaml.safe_load(
         (tmp_path / "imp" / "project.yaml").read_text())["pythonpath"] == ["src"]
     assert "Running without an OS sandbox." in "\n".join(msgs)
@@ -449,68 +384,98 @@ def test_bwrap_missing_offer_accept_continues(tmp_path, monkeypatch):
 
 def test_bwrap_missing_offer_decline_stops(tmp_path, monkeypatch):
     import imp.cli.init as initmod
-    _py_project(tmp_path)
     monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p: ("anthropic", "m"), raising=False)
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs("n"),
-             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+             output_fn=msgs.append)
     assert not (tmp_path / "imp" / "project.yaml").exists()
     assert "Install bubblewrap for a real filesystem boundary" in "\n".join(msgs)
 
 
-def test_detection_credential_rejected_stops(tmp_path, monkeypatch):
-    import imp.cli.init as initmod
-    from imp.cli.pythonpath_detect import DetectionFailed
-    _py_project(tmp_path)
-    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p: ("claude_code", "m"), raising=False)
-    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent",
-                        lambda *a, **k: DetectionFailed("credential", "rejected"),
-                        raising=False)
-    msgs: list[str] = []
-    run_init(tmp_path, picker_fn=_picks("claude_code"), input_fn=_inputs(),
-             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
-    assert not (tmp_path / "imp" / "project.yaml").exists()
-    assert "the credential was rejected" in "\n".join(msgs)
-    user = tmp_path / "xdg" / "imp" / "config.yaml"
-    assert user.exists()
-
-
-def test_detection_transient_failure_stops(tmp_path, monkeypatch):
-    import imp.cli.init as initmod
-    from imp.cli.pythonpath_detect import DetectionFailed
-    _py_project(tmp_path)
-    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p: ("anthropic", "m"), raising=False)
-    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent",
-                        lambda *a, **k: DetectionFailed("transient", "timeout: slow"),
-                        raising=False)
-    msgs: list[str] = []
+def test_conversation_writes_chosen_workflow_and_pythonpath(tmp_path, monkeypatch):
+    (tmp_path / "src").mkdir()
+    _stub_conv(monkeypatch, _conv_result(
+        default_workflow="minimal", default_base="develop",
+        test_cmd_fast="make check", roots=["src"]))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
-    assert not (tmp_path / "imp" / "project.yaml").exists()
-    assert "couldn't finish detecting" in "\n".join(msgs)
-    user = tmp_path / "xdg" / "imp" / "config.yaml"
-    assert user.exists()
+             output_fn=lambda _m: None)
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["default-workflow"] == "minimal"      # agent's choice, not hardcoded
+    assert data["default-base"] == "develop"
+    assert data["test_cmd_fast"] == "make check"
+    assert data["pythonpath"] == ["src"]
 
 
-def test_non_python_project_skips_detection_and_writes_hint(tmp_path, monkeypatch):
-    import imp.cli.init as initmod
-
-    def _boom(*a, **k):
-        raise AssertionError("detection must not run for a non-Python project")
-
-    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent", _boom, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider", _boom, raising=False)
+def test_conversation_pythonpath_validated_against_disk(tmp_path, monkeypatch):
+    (tmp_path / "real").mkdir()
+    _stub_conv(monkeypatch, _conv_result(roots=["real", "ghost"]))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+             output_fn=lambda _m: None)
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["pythonpath"] == ["real"]              # ghost dropped: not on disk
+
+
+def test_conversation_empty_roots_writes_hint(tmp_path, monkeypatch):
+    _stub_conv(monkeypatch, _conv_result(roots=[]))
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=lambda _m: None)
     text = (tmp_path / "imp" / "project.yaml").read_text()
     assert yaml.safe_load(text).get("pythonpath") is None
     assert "# pythonpath:" in text
+
+
+def test_conversation_git_init_true_initializes_repo(tmp_path_factory, monkeypatch):
+    fresh = tmp_path_factory.mktemp("norepo")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fresh / "xdg"))
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+    _stub_conv(monkeypatch, _conv_result(git_init=True))
+    run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=lambda _m: None)
+    assert (fresh / ".git").exists()
+    assert (fresh / "imp" / "project.yaml").is_file()
+    import subprocess
+    count = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"], cwd=fresh,
+        capture_output=True, text=True, check=True).stdout.strip()
+    assert count == "1"
+
+
+def test_conversation_git_declined_in_non_repo_stops_cleanly(
+    tmp_path_factory, monkeypatch,
+):
+    # Agent returned Success but git_init=False with no repo present: the host
+    # must emit a clean message and write nothing, not crash in `git status`.
+    fresh = tmp_path_factory.mktemp("norepo2")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fresh / "xdg"))
+    _stub_conv(monkeypatch, _conv_result(git_init=False))
+    msgs: list[str] = []
+    run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append)
+    assert not (fresh / "imp" / "project.yaml").exists()
+    assert "git repository" in "\n".join(msgs).lower()
+
+
+def test_conversation_failure_stops_without_project_yaml(tmp_path, monkeypatch):
+    _stub_conv(monkeypatch, InteractiveFailure("auth", "bad_key"))
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append)
+    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert "re-run `imp init`" in "\n".join(msgs).lower()
+
+
+def test_conversation_status_error_stops(tmp_path, monkeypatch):
+    _stub_conv(monkeypatch, _conv_result(status="Error"))
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append)
+    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert "didn't finish" in "\n".join(msgs).lower()
 
 
 def test_write_init_files_renders_project_yaml_from_settings(tmp_path: Path) -> None:
@@ -565,7 +530,6 @@ def test_use_defaults_writes_project_yaml_no_model_call(tmp_path, monkeypatch):
     def _boom(*a, **k):
         raise AssertionError("--use-defaults must make no model/agent/provider call")
 
-    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent", _boom, raising=False)
     monkeypatch.setattr(initmod, "resolve_detection_provider", _boom, raising=False)
     run_init_noninteractive(
         tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)

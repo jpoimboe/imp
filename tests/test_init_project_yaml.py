@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from imp.cli.init import IntegrationBranchUnresolved, run_init
+from imp.cli.init import run_init
 from imp.providers.config import parse_project_facts
 
 
@@ -16,6 +16,15 @@ def _git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+    import imp.cli.init as initmod
+    from imp.agents.interactive import InteractiveSuccess
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: ("anthropic", "m"), raising=False)
+    monkeypatch.setattr(initmod, "_run_init_conversation", lambda **kw: InteractiveSuccess({
+        "status": "Success", "git_init": True, "default_workflow": "default",
+        "default_base": "main", "test_cmd_fast": "", "pythonpath": {"roots": []}}),
+        raising=False)
 
 
 def _run(root: Path, xdg: Path, providers: list[str]) -> None:
@@ -107,152 +116,6 @@ def test_init_appends_commented_facts_example(
 
     facts = parse_project_facts(root / "imp" / "project.yaml")
     assert facts == {}
-
-
-def test_init_records_checked_out_branch_without_remote(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", "-b", "trunk", str(root)], check=True)
-    run_init(
-        root,
-        input_fn=lambda _p: "",
-        output_fn=lambda _s: None,
-        picker_fn=lambda _avail: ["claude_code"],
-        detect_theme_fn=lambda: "dark",
-        detect_verify_fn=lambda _p: None,
-    )
-    proj = yaml.safe_load((root / "imp" / "project.yaml").read_text())
-    assert proj["default-base"] == "trunk"
-
-
-def test_init_prefers_origin_head_over_checked_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", "-b", "feature", str(root)], check=True)
-    # `symbolic-ref <name> <target>` writes the ref without requiring <target>
-    # to exist; a non-`feature` target proves origin/HEAD wins over the checkout.
-    subprocess.run(
-        ["git", "-C", str(root), "symbolic-ref",
-         "refs/remotes/origin/HEAD", "refs/remotes/origin/mainline"],
-        check=True,
-    )
-    lines: list[str] = []
-    run_init(
-        root,
-        input_fn=lambda _p: "",
-        output_fn=lines.append,
-        picker_fn=lambda _avail: ["claude_code"],
-        detect_theme_fn=lambda: "dark",
-        detect_verify_fn=lambda _p: None,
-    )
-    proj = yaml.safe_load((root / "imp" / "project.yaml").read_text())
-    assert proj["default-base"] == "mainline"
-    assert "Integration branch: mainline" in lines
-
-
-def test_init_prompts_for_base_on_existing_repo(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
-    subprocess.run(
-        ["git", "-C", str(root), "commit", "--allow-empty", "-qm", "seed"],
-        check=True,
-    )
-    prompts: list[str] = []
-
-    def _input(p: str = "") -> str:
-        prompts.append(p)
-        return "release"
-
-    run_init(
-        root,
-        input_fn=_input,
-        output_fn=lambda _s: None,
-        picker_fn=lambda _a: ["claude_code"],
-        detect_theme_fn=lambda: "dark",
-        detect_verify_fn=lambda _p: None,
-    )
-    proj = yaml.safe_load((root / "imp" / "project.yaml").read_text())
-    assert proj["default-base"] == "release"
-    assert any("integrate into" in p for p in prompts)
-
-
-def test_init_unreadable_prompt_writes_no_project_yaml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
-    subprocess.run(
-        ["git", "-C", str(root), "commit", "--allow-empty", "-qm", "seed"],
-        check=True,
-    )
-
-    def _eof(_p: str = "") -> str:
-        raise EOFError
-
-    with pytest.raises(IntegrationBranchUnresolved):
-        run_init(
-            root,
-            input_fn=_eof,
-            output_fn=lambda _s: None,
-            picker_fn=lambda _a: ["claude_code"],
-            detect_theme_fn=lambda: "dark",
-            detect_verify_fn=lambda _p: None,
-        )
-    assert not (root / "imp" / "project.yaml").exists()
-    assert not (root / "imp").exists()  # resolve runs before mkdir — no partial artifact
-
-
-def test_init_fresh_repo_records_base_without_integration_prompt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = tmp_path / "repo"
-    root.mkdir()
-    prompts: list[str] = []
-
-    def _input(p: str = "") -> str:
-        prompts.append(p)
-        return ""  # accept the "Initialize a git repository?" default (Y)
-
-    run_init(
-        root,
-        input_fn=_input,
-        output_fn=lambda _s: None,
-        picker_fn=lambda _a: ["claude_code"],
-        detect_theme_fn=lambda: "dark",
-        detect_verify_fn=lambda _p: None,
-    )
-    proj = yaml.safe_load((root / "imp" / "project.yaml").read_text())
-    # Value depends on git's init.defaultBranch; the precise-value case is
-    # covered by test_init_records_checked_out_branch_without_remote.
-    assert "default-base" in proj                       # base always recorded
-    assert not any("integrate into" in p for p in prompts)  # no integration prompt
-
-
-def test_init_echoes_integration_branch_line(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", "-b", "trunk", str(root)], check=True)
-    lines: list[str] = []
-    run_init(
-        root,
-        input_fn=lambda _p: "",
-        output_fn=lines.append,
-        picker_fn=lambda _avail: ["claude_code"],
-        detect_theme_fn=lambda: "dark",
-        detect_verify_fn=lambda _p: None,
-    )
-    assert "Integration branch: trunk" in lines
 
 
 def test_init_scaffolds_inert_memory_files(
