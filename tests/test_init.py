@@ -556,3 +556,107 @@ def test_write_init_files_writes_optout_block_for_empty_string(tmp_path: Path) -
     )
     data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
     assert data["test_cmd_fast"] == ""          # "" => explicit opt-out block written
+
+
+def test_use_defaults_writes_project_yaml_no_model_call(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    from imp.cli.init import run_init_noninteractive
+
+    def _boom(*a, **k):
+        raise AssertionError("--use-defaults must make no model/agent/provider call")
+
+    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent", _boom, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider", _boom, raising=False)
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["default-workflow"] == "default"
+    assert data["default-base"]            # resolved from the repo's current branch
+    assert data.get("pythonpath") is None  # no --pythonpath => teaching hint only
+
+
+def test_use_defaults_override_flags(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "pkg").mkdir()
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None,
+        workflow="light", base="develop", pythonpath=["pkg"],
+        detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["default-workflow"] == "light"
+    assert data["default-base"] == "develop"
+    assert data["pythonpath"] == ["pkg"]
+
+
+def test_use_defaults_pythonpath_drops_absent_dirs(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "real").mkdir()
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None,
+        pythonpath=["real", "ghost"], detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["pythonpath"] == ["real"]   # validated against disk
+
+
+def test_use_defaults_fills_offline_test_command(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None,
+        detect_verify_fn=lambda _r: "make check")   # heuristic hit, no prompt
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["test_cmd_fast"] == "make check"
+
+
+def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch):
+    # A truly repo-less dir OUTSIDE the autouse _git_repo fixture's repo (which
+    # git-inits tmp_path, so any tmp_path subdir is already inside a repo). Cap
+    # git's upward repo discovery at the temp base so no ancestor repo is found;
+    # user config stays isolated via the autouse _isolate_user_config fixture.
+    from imp.cli.init import run_init_noninteractive
+    fresh = tmp_path_factory.mktemp("fresh")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
+    run_init_noninteractive(fresh, output_fn=lambda _m: None,
+                            detect_verify_fn=lambda _r: None)
+    assert (fresh / ".git").exists()
+    assert (fresh / "imp" / "project.yaml").is_file()
+
+
+def test_use_defaults_idempotent_on_existing_clone(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    msgs: list[str] = []
+    run_init_noninteractive(tmp_path, output_fn=msgs.append,
+                            detect_verify_fn=lambda _r: None)
+    assert (tmp_path / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
+    assert "already initialized" in "\n".join(msgs).lower()
+
+
+def test_use_defaults_idempotent_in_non_git_dir(tmp_path_factory, monkeypatch):
+    # Re-init on a copied imp/project.yaml sitting in a dir with NO git repo must
+    # not raise: the already-initialized branch ensures a repo before committing.
+    from imp.cli.init import run_init_noninteractive
+    fresh = tmp_path_factory.mktemp("copied")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
+    (fresh / "imp").mkdir()
+    (fresh / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    run_init_noninteractive(fresh, output_fn=lambda _m: None,
+                            detect_verify_fn=lambda _r: None)
+    assert (fresh / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
+    assert (fresh / ".git").exists()
+
+
+def test_use_defaults_raises_when_base_unresolvable(tmp_path):
+    import subprocess
+
+    from imp.cli.init import IntegrationBranchUnresolved, run_init_noninteractive
+
+    # A born repo (has a commit, so not the unborn shortcut) with no origin
+    # remote and no --base override: base resolution reaches the prompt seam,
+    # which the non-interactive path wires to an EOF-raising stub, so it must
+    # raise IntegrationBranchUnresolved rather than block on input.
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "seed", "-q"],
+                   cwd=tmp_path, check=True)
+    with pytest.raises(IntegrationBranchUnresolved):
+        run_init_noninteractive(tmp_path, output_fn=lambda _m: None,
+                                detect_verify_fn=lambda _r: None)

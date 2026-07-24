@@ -35,6 +35,7 @@ from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
     is_python_packaging_project,
     resolve_detection_provider,
+    validate_detected_roots,
 )
 from imp.cli.verify_detect import (
     detect_test_command,
@@ -131,6 +132,20 @@ def _ensure_git_repo(
                    capture_output=True, text=True)
     output_fn("Initialized a git repository.")
     return True
+
+
+def _ensure_git_repo_silent(project_root: Path) -> bool:
+    """Non-interactive `git init` when no repo exists; returns True iff one was
+    created this run. No prompt — the non-interactive path never asks."""
+    if _in_git_repo(project_root):
+        return False
+    subprocess.run(["git", "init"], cwd=project_root, check=True,
+                   capture_output=True, text=True)
+    return True
+
+
+def _raise_eof(_prompt: str = "") -> str:
+    raise EOFError
 
 
 def _repo_is_unborn(project_root: Path) -> bool:
@@ -678,3 +693,59 @@ def run_init(
         output_fn("Committed imp/project.yaml.")
     output_fn("")
     output_fn("Try: imp new \"Add a dark-mode toggle\"")
+
+
+def run_init_noninteractive(
+    project_root: Path,
+    *,
+    output_fn: Callable[[str], None],
+    workflow: str | None = None,
+    base: str | None = None,
+    pythonpath: list[str] | None = None,
+    detect_verify_fn: Callable[[Path], str | None] | None = None,
+) -> None:
+    """Provider-free, non-interactive `imp init`: write imp/project.yaml from
+    defaults (+ overrides) with no model call. Both `--use-defaults` and the
+    no-TTY auto-headless fallback land here. Never prompts — resolves the
+    integration branch from git or raises IntegrationBranchUnresolved."""
+    from imp.providers.effective import user_config_path
+
+    workflow = workflow or _DEFAULT_WORKFLOW
+    imp_dir = project_root / "imp"
+    already_initialized = (imp_dir / "project.yaml").is_file()
+    user_path = user_config_path()
+    wrote_user_config = not user_path.exists()
+
+    if already_initialized:
+        _ensure_git_repo_silent(project_root)  # a copied project.yaml may sit in a non-git dir
+        if wrote_user_config:
+            _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
+        _ensure_imp_gitignore(project_root)
+        _commit_init_files(project_root)
+        output_fn("Project already initialized (imp/project.yaml is committed).")
+        return
+
+    git_created = _ensure_git_repo_silent(project_root)
+    if base is not None:
+        default_base = base
+    else:
+        default_base = _resolve_init_base(
+            project_root, git_created=git_created, input_fn=_raise_eof)
+    output_fn(f"Integration branch: {default_base}")
+
+    detect_cmd = detect_verify_fn or detect_test_command
+    test_cmd_fast = detect_cmd(project_root)  # None omits; a heuristic hit fills it
+    roots = validate_detected_roots(project_root, pythonpath) if pythonpath else []
+
+    settings = InitSettings(
+        default_workflow=workflow, default_base=default_base,
+        test_cmd_fast=test_cmd_fast, pythonpath=roots)
+    committed = write_init_files(project_root, settings)
+
+    if wrote_user_config:
+        _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
+
+    output_fn("Created:")
+    output_fn("  imp/project.yaml")
+    if committed:
+        output_fn("Committed imp/project.yaml.")
