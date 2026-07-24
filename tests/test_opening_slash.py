@@ -74,7 +74,7 @@ def _fake_intent_line(*, model: str, reply: str):
     """Stand-in for _read_intent_line: populates the passed model_sink and returns
     the reply, mirroring the new signature."""
 
-    async def _f(prompt, quest, *, color, width, model_sink=None):
+    async def _f(prompt, quest, *, color, width, model_sink=None, sandbox_sink=None):
         if model_sink is not None:
             model_sink["model"] = model
         return reply
@@ -313,3 +313,107 @@ async def test_opening_prompt_skill_name_loads_body_as_message(
     line = await main._read_intent_line(
         _QueuePrompt(["/refactor src/foo.py"]), quest, color=False, width=80)
     assert line == "# Refactor\nstep one\n\nsrc/foo.py\n"
+
+
+@pytest.mark.anyio
+async def test_read_intent_line_captures_sandbox_off(tmp_path) -> None:
+    prompt = _QueuePrompt(["/sandbox off", "build the thing"])
+    quest = _fake_quest(tmp_path)
+    sink: dict[str, bool] = {}
+
+    line = await main._read_intent_line(
+        prompt, quest, color=False, width=80, sandbox_sink=sink)
+
+    assert line == "build the thing"
+    assert sink["unsandboxed"] is True
+
+
+@pytest.mark.anyio
+async def test_read_intent_line_sandbox_on_cancels_pending_off(tmp_path) -> None:
+    prompt = _QueuePrompt(["/sandbox off", "/sandbox on", "build the thing"])
+    quest = _fake_quest(tmp_path)
+    sink: dict[str, bool] = {}
+
+    line = await main._read_intent_line(
+        prompt, quest, color=False, width=80, sandbox_sink=sink)
+
+    assert line == "build the thing"
+    assert sink["unsandboxed"] is False
+
+
+@pytest.mark.anyio
+async def test_read_opening_message_threads_sandbox_sink(tmp_path) -> None:
+    quest = _fake_quest(tmp_path)
+    sink: dict[str, bool] = {}
+
+    reply = await main._read_opening_message(
+        quest, leave_mode="new", banner_shown=False, color=False, width=80,
+        editing_mode="emacs", sandbox_sink=sink,
+        _prompt_factory=lambda: _QueuePrompt(["/sandbox off", "build the thing"]))
+
+    assert reply == "build the thing"
+    assert sink["unsandboxed"] is True
+
+
+@pytest.mark.anyio
+async def test_async_cmd_new_threads_sandbox_sink_to_opening_message(
+    tmp_path, monkeypatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_open(quest, *, model_sink=None, sandbox_sink=None, **kw):
+        captured["sandbox_sink"] = sandbox_sink
+        return "brainstorm this"
+
+    async def _fake_rsc(quest, **kw):
+        return 0
+
+    monkeypatch.setattr(main, "_read_opening_message", _fake_open)
+    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
+    monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
+
+    rc = await main._async_cmd_new(argparse.Namespace(
+        base=None, workflow=None, idea=None, title=None,
+        non_interactive=False, autonomous=False, message=None,
+        opening=None, depends_on=None))
+
+    assert rc == 0
+    assert isinstance(captured["sandbox_sink"], dict)
+
+
+@pytest.mark.anyio
+async def test_cleared_session_threads_sandbox_sink(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_intent(prompt, quest, *, color, width,
+                           model_sink=None, sandbox_sink=None):
+        captured["sandbox_sink"] = sandbox_sink
+        return "brainstorm"
+
+    monkeypatch.setattr(main, "_read_intent_line", _fake_intent)
+    monkeypatch.setattr(main, "_print_splash_banner", lambda *, interactive: False)
+    monkeypatch.setattr(main, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    class _StubPrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "brainstorm"
+
+    monkeypatch.setattr(main, "Prompt", _StubPrompt)
+
+    async def _fake_rsc(quest, **kw):
+        return 0
+
+    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+
+    rc = await main._run_cleared_session(tmp_path, "main", leave_state={})
+    assert rc == 0
+    assert isinstance(captured["sandbox_sink"], dict)

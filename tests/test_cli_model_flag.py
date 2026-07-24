@@ -140,3 +140,132 @@ async def test_typed_opening_model_overrides_flag_model(
     assert rc == 0
     # the /model typed at the opening prompt wins over the --model flag
     assert captured["model"] == "anthropic:claude-sonnet-4-6"
+
+
+@pytest.mark.anyio
+async def test_typed_sandbox_off_threads_opening_unsandboxed_to_run(
+    tmp_path, monkeypatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "imp.providers.resolve.available_providers", lambda config: ["anthropic"])
+
+    async def _fake_open(quest, *, model_sink=None, sandbox_sink=None, **kw):
+        if sandbox_sink is not None:
+            sandbox_sink["unsandboxed"] = True   # a typed /sandbox off
+        return "brainstorm this"
+
+    captured: dict[str, object] = {}
+
+    async def _fake_rsc(quest, **kw):
+        captured.update(kw)
+        return 0
+
+    monkeypatch.setattr(main, "_read_opening_message", _fake_open)
+    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
+    monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
+
+    rc = await main._async_cmd_new(_full_ns(non_interactive=False, opening=None))
+
+    assert rc == 0
+    assert captured["opening_unsandboxed"] is True
+
+
+@pytest.mark.anyio
+async def test_typed_sandbox_off_threads_opening_unsandboxed_headless(
+    tmp_path, monkeypatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "imp.providers.resolve.available_providers", lambda config: ["anthropic"])
+
+    async def _fake_open(quest, *, model_sink=None, sandbox_sink=None, **kw):
+        if sandbox_sink is not None:
+            sandbox_sink["unsandboxed"] = True   # a typed /sandbox off
+        return "brainstorm this"
+
+    captured: dict[str, object] = {}
+
+    async def _fake_rsc(quest, **kw):
+        captured.update(kw)
+        return 0
+
+    monkeypatch.setattr(main, "_read_opening_message", _fake_open)
+    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
+    monkeypatch.setattr(main, "_select_headless", lambda args: (True, False))
+
+    rc = await main._async_cmd_new(_full_ns(non_interactive=False, opening=None))
+
+    assert rc == 0
+    assert captured["opening_unsandboxed"] is True
+
+
+@pytest.mark.anyio
+async def test_no_typed_sandbox_threads_opening_unsandboxed_false(
+    tmp_path, monkeypatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "imp.providers.resolve.available_providers", lambda config: ["anthropic"])
+
+    async def _fake_open(quest, *, model_sink=None, sandbox_sink=None, **kw):
+        return "brainstorm this"   # nothing typed; sink stays empty
+
+    captured: dict[str, object] = {}
+
+    async def _fake_rsc(quest, **kw):
+        captured.update(kw)
+        return 0
+
+    monkeypatch.setattr(main, "_read_opening_message", _fake_open)
+    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
+    monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
+
+    rc = await main._async_cmd_new(_full_ns(non_interactive=False, opening=None))
+
+    assert rc == 0
+    assert captured["opening_unsandboxed"] is False
+
+
+@pytest.mark.anyio
+async def test_cleared_session_threads_opening_unsandboxed_to_run(
+    tmp_path, monkeypatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    async def _fake_intent(prompt, quest, *, color, width,
+                           model_sink=None, sandbox_sink=None):
+        if sandbox_sink is not None:
+            sandbox_sink["unsandboxed"] = True   # a typed /sandbox off
+        return "brainstorm"
+
+    monkeypatch.setattr(main, "_read_intent_line", _fake_intent)
+    monkeypatch.setattr(main, "_print_splash_banner", lambda *, interactive: False)
+    monkeypatch.setattr(main, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    class _StubPrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "brainstorm"
+
+    monkeypatch.setattr(main, "Prompt", _StubPrompt)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_rsc(quest, **kw):
+        captured.update(kw)
+        return 0
+
+    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+
+    rc = await main._run_cleared_session(tmp_path, "main", leave_state={})
+    assert rc == 0
+    assert captured["opening_unsandboxed"] is True

@@ -587,22 +587,20 @@ def test_sandbox_off_applies_immediately_with_no_prompt(
     assert "Sandbox off" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("command", ["/sandbox on", "/sandbox off", "/sandbox", "/sandbox maybe"])
-def test_sandbox_pre_session_reprompts_then_returns_real_line(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str,
+@pytest.mark.parametrize("command", ["/sandbox on", "/sandbox", "/sandbox maybe"])
+def test_sandbox_pre_session_reprompt_forms_return_real_line(
+    tmp_path: Path, command: str,
 ) -> None:
     from functools import partial
 
-    from imp.cli.slash import SANDBOX_PRE_SESSION, ask_line_with_slash
+    from imp.cli.slash import ask_line_with_slash
     quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt([command, "build the thing"])
     line = anyio.run(
         partial(ask_line_with_slash, prompt, _NullStatus(), quest,
                 pre_session=True))
-    # The /sandbox line was intercepted and re-prompted; only the real opening
-    # line is returned — /sandbox is never submitted as the opening message.
+    # These forms print and re-prompt; only the real opening line is returned.
     assert line == "build the thing"
-    assert SANDBOX_PRE_SESSION in capsys.readouterr().out
 
 
 def test_help_lists_sandbox() -> None:
@@ -648,3 +646,37 @@ def test_ask_line_with_slash_empty_loops_when_not_allowed(tmp_path: Path) -> Non
     prompt = _FakePrompt(["", "real input"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "real input"
+
+
+def test_ask_line_with_slash_pre_session_reads_pending_off_from_sink(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A no-arg /sandbox must report pending state from the sink, not the
+    # (always-False pre-session) driver flag.
+    import functools
+
+    from imp.cli.slash import SANDBOX_STATE_OFF, ask_line_with_slash
+    quest = _FakeQuest(tmp_path)
+    prompt = _FakePrompt(["/sandbox", "go"])
+    sink = {"unsandboxed": True}
+    line = anyio.run(functools.partial(
+        ask_line_with_slash, prompt, _NullStatus(), quest,
+        pre_session=True, sandbox_sink=sink))
+    assert line == "go"
+    assert SANDBOX_STATE_OFF in capsys.readouterr().out
+
+
+def test_ask_line_with_slash_pre_session_no_pending_reports_on(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    import functools
+
+    from imp.cli.slash import SANDBOX_STATE_ON, ask_line_with_slash
+    quest = _FakeQuest(tmp_path)
+    prompt = _FakePrompt(["/sandbox", "go"])
+    sink: dict[str, bool] = {}
+    line = anyio.run(functools.partial(
+        ask_line_with_slash, prompt, _NullStatus(), quest,
+        pre_session=True, sandbox_sink=sink))
+    assert line == "go"
+    assert SANDBOX_STATE_ON in capsys.readouterr().out

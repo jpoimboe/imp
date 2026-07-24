@@ -52,6 +52,7 @@ async def run_session_client(
     non_interactive: bool = False,
     autonomous: bool = False,
     model: str | None = None,
+    opening_unsandboxed: bool = False,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state = {} if leave_state is None else leave_state
@@ -59,7 +60,7 @@ async def run_session_client(
     attach = build_session_attach(
         quest, resume=resume,
         non_interactive=non_interactive, autonomous=autonomous, lease=True,
-        model=model)
+        model=model, opening_unsandboxed=opening_unsandboxed)
     startup_failed = False
     startup_error: DaemonStartupError | None = None
     async with anyio.create_task_group() as tg:

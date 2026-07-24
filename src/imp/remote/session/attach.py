@@ -30,7 +30,7 @@ def ensure_quest_tmp_dir(quest: Quest) -> None:
 def spawn_session_daemon(
     quest: Quest, *, resume: bool = False,
     non_interactive: bool = False, autonomous: bool = False,
-    model: str | None = None,
+    model: str | None = None, opening_unsandboxed: bool = False,
 ) -> subprocess.Popen[bytes] | None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
@@ -45,6 +45,8 @@ def spawn_session_daemon(
         argv.append("--autonomous")
     if model is not None:
         argv += ["--model", model]
+    if opening_unsandboxed:
+        argv.append("--unsandboxed")
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     env[QUEST_TMP_ENV] = str(quest.tmp_dir)
@@ -134,6 +136,7 @@ def build_session_attach(
     autonomous: bool = False,
     lease: bool = False,
     model: str | None = None,
+    opening_unsandboxed: bool = False,
 ) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
     async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
         return await attach_or_spawn(
@@ -143,7 +146,7 @@ def build_session_attach(
             spawn_fn=lambda ch: spawn_session_daemon(
                 ch, resume=resume,
                 non_interactive=non_interactive, autonomous=autonomous,
-                model=model),
+                model=model, opening_unsandboxed=opening_unsandboxed),
         )
 
     return attach

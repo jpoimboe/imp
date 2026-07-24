@@ -52,6 +52,7 @@ def test_new_non_interactive_routes_through_session_client(
         non_interactive: object = False,
         autonomous: object = False,
         model: str | None = None,
+        opening_unsandboxed: object = False,
     ) -> int:
         captured["quest_id"] = quest.id
         captured["seed_opening"] = seed_opening
@@ -104,6 +105,7 @@ def test_new_interactive_routes_through_session_client(
         leave_state: object = None, title: object = None,
         autonomous: object = False,
         model: str | None = None,
+        opening_unsandboxed: object = False,
     ) -> int:
         captured["quest_id"] = quest.id
         captured["seed_opening"] = seed_opening

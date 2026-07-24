@@ -35,9 +35,6 @@ SANDBOX_STATE_OFF = (
 SANDBOX_ALREADY_ON = "Sandbox is already on."
 SANDBOX_ALREADY_OFF = "Sandbox is already off."
 SANDBOX_USAGE = "Usage: /sandbox [on|off]"
-SANDBOX_PRE_SESSION = (
-    "/sandbox applies to a running step — there's nothing to toggle yet. "
-    "It's on by default once the quest starts; run /sandbox off then to lift it.")
 
 MATERIALIZED_LEAVE_REDIRECT = (
     "/save, /shelve, and /clear apply only before a quest is built — this one "
@@ -131,7 +128,19 @@ def handle_slash_line(
     if cmd == "sandbox":
         if pre_session:
             _echo_command(text, output_fn, color=color)
-            output_fn(SANDBOX_PRE_SESSION)
+            if args == "off":
+                output_fn(SANDBOX_STATE_OFF)
+                return "/sandbox off"
+            if args == "on":
+                if unsandboxed:
+                    output_fn(SANDBOX_STATE_ON)
+                    return "/sandbox on"
+                output_fn(SANDBOX_ALREADY_ON)
+                return REPROMPT
+            if args == "":
+                output_fn(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
+                return REPROMPT
+            output_fn(SANDBOX_USAGE)
             return REPROMPT
         if args == "on":
             if not unsandboxed:
@@ -248,6 +257,7 @@ async def ask_line_with_slash(
     coord: Any = None, driver: Any = None, hint: str | None = None,
     pre_session: bool = False, toolbar_override: str | None = None,
     allow_empty: bool = False,
+    sandbox_sink: dict[str, bool] | None = None,
 ) -> str | SkillRequest:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> that matches a
@@ -346,8 +356,11 @@ async def ask_line_with_slash(
                                     return ""
                                 continue
                             return line
-                        current_unsandboxed = bool(
-                            getattr(driver, "unsandboxed", False))
+                        if pre_session and sandbox_sink is not None:
+                            current_unsandboxed = bool(sandbox_sink.get("unsandboxed"))
+                        else:
+                            current_unsandboxed = bool(
+                                getattr(driver, "unsandboxed", False))
                         result = handle_slash_line(
                             line, quest=quest, output_fn=print, color=color,
                             unsandboxed=current_unsandboxed, pre_session=pre_session)

@@ -133,3 +133,71 @@ async def test_same_step_pause_and_resume_preserves_override(
     assert State.load(quest.state_dir).unsandboxed is True
     assert coord.unsandboxed is True
     assert not any(e.get("type") == "sandbox_marker" for e in events)
+
+
+@pytest.mark.anyio
+async def test_opening_unsandboxed_applies_override_on_fresh_entry(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    quest = _make_quest(tmp_path, agents={"writer.md": _WRITER},
+                        workflow_yaml=_SINGLE_WF)
+    # Fresh quest: State + coordinator both default to sandboxed.
+    coord = InterruptCoordinator()
+
+    class _InterruptingRunner:
+        async def run(self, invocation: Any) -> Any:
+            await coord.signal_pause(reason="ctrl-c")
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: Any) -> _InterruptingRunner:
+            return _InterruptingRunner()
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    events: list[dict] = []
+    result = await run_quest(
+        quest, on_event=events.append, coordinator=coord,
+        opening_unsandboxed=True)
+
+    assert result is RunResult.PAUSED
+    # Fresh entry lifted the sandbox on both substrates (the default is sandboxed).
+    assert coord.unsandboxed is True
+    assert State.load(quest.state_dir).unsandboxed is True
+    # A transient sandbox_marker {unsandboxed: true} was broadcast via on_event...
+    markers = [e for e in events if e.get("type") == "sandbox_marker"]
+    assert markers and markers[0]["payload"] == {"unsandboxed": True}
+    # ...but never persisted to the event log (it is a live-only UI mirror).
+    assert "sandbox_marker" not in quest.events_path.read_text()
+
+
+@pytest.mark.anyio
+async def test_opening_unsandboxed_cleared_when_run_advances_to_next_step(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    quest = _make_quest(tmp_path, agents={"a.md": _A}, workflow_yaml=_TWO_STEP_WF)
+    coord = InterruptCoordinator()
+    provider_registry("fake", env_check=lambda: True,
+                      factory=lambda _m: _SuccessProvider())
+
+    events: list[dict] = []
+    result = await run_quest(
+        quest, on_event=events.append, coordinator=coord,
+        opening_unsandboxed=True)
+
+    assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    # Fresh entry lifted it; the s1 -> s2 advance retired it at go-live.
+    assert State.load(quest.state_dir).unsandboxed is False
+    assert coord.unsandboxed is False
+    payloads = [e["payload"] for e in events if e.get("type") == "sandbox_marker"]
+    assert payloads[0] == {"unsandboxed": True}    # fresh-entry apply
+    assert payloads[-1] == {"unsandboxed": False}  # go-live clear

@@ -288,31 +288,77 @@ def test_abandon_pre_session_returns_literal(tmp_path: Path) -> None:
     assert result == "/abandon"
 
 
-SANDBOX_PRE_SESSION = (
-    "/sandbox applies to a running step — there's nothing to toggle yet. "
-    "It's on by default once the quest starts; run /sandbox off then to lift it.")
-
-
-@pytest.mark.parametrize("command", ["/sandbox on", "/sandbox off",
-                                     "/sandbox", "/sandbox maybe"])
-def test_sandbox_pre_session_intercepted_for_every_form(
-    tmp_path: Path, command: str,
+@pytest.mark.parametrize("unsandboxed", [False, True])
+def test_sandbox_pre_session_off_echoes_state_off_and_returns_literal(
+    tmp_path: Path, unsandboxed: bool,
 ) -> None:
-    # Pre-session: no running step, no daemon. Every /sandbox form must echo the
-    # caret line, print the explanatory copy, and re-prompt — never return a
-    # /sandbox command string that would become the opening message.
+    from imp.cli.slash import SANDBOX_STATE_OFF, handle_slash_line
     quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
     out: list[str] = []
     result = handle_slash_line(
-        command, quest=quest, output_fn=out.append, pre_session=True)
+        "/sandbox off", quest=quest, output_fn=out.append,
+        pre_session=True, unsandboxed=unsandboxed)
+    assert result == "/sandbox off"
+    assert out[0] == "> /sandbox off"
+    assert any(SANDBOX_STATE_OFF in line for line in out)
+
+
+def test_sandbox_pre_session_on_cancels_pending_off_returns_literal(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.slash import SANDBOX_STATE_ON, handle_slash_line
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/sandbox on", quest=quest, output_fn=out.append,
+        pre_session=True, unsandboxed=True)
+    assert result == "/sandbox on"
+    assert any(SANDBOX_STATE_ON in line for line in out)
+
+
+def test_sandbox_pre_session_on_with_nothing_pending_reprompts(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.slash import SANDBOX_ALREADY_ON, handle_slash_line
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/sandbox on", quest=quest, output_fn=out.append,
+        pre_session=True, unsandboxed=False)
     assert result is REPROMPT
-    assert out[0] == f"> {command}"
-    assert any(SANDBOX_PRE_SESSION in line for line in out)
+    assert any(SANDBOX_ALREADY_ON in line for line in out)
 
 
-def test_sandbox_pre_session_copy_is_verbatim() -> None:
+@pytest.mark.parametrize("pending,constant", [
+    (True, "SANDBOX_STATE_OFF"),
+    (False, "SANDBOX_STATE_ON"),
+])
+def test_sandbox_pre_session_no_arg_reports_pending_state(
+    tmp_path: Path, pending: bool, constant: str,
+) -> None:
     from imp.cli import slash
-    assert slash.SANDBOX_PRE_SESSION == SANDBOX_PRE_SESSION
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = slash.handle_slash_line(
+        "/sandbox", quest=quest, output_fn=out.append,
+        pre_session=True, unsandboxed=pending)
+    assert result is slash.REPROMPT
+    assert any(getattr(slash, constant) in line for line in out)
+
+
+def test_sandbox_pre_session_bad_arg_prints_usage(tmp_path: Path) -> None:
+    from imp.cli.slash import SANDBOX_USAGE, handle_slash_line
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/sandbox maybe", quest=quest, output_fn=out.append, pre_session=True)
+    assert result is REPROMPT
+    assert any(SANDBOX_USAGE in line for line in out)
+
+
+def test_sandbox_pre_session_constant_removed() -> None:
+    from imp.cli import slash
+    assert not hasattr(slash, "SANDBOX_PRE_SESSION")
 
 
 @pytest.mark.parametrize("command,expected", [

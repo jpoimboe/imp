@@ -837,14 +837,17 @@ def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool)
 
 async def _read_intent_line(
     prompt: Any, quest: Any, *, color: bool, width: int,
-    model_sink: dict[str, str] | None = None, hint: str = DEFAULT_HINT,
+    model_sink: dict[str, str] | None = None,
+    sandbox_sink: dict[str, bool] | None = None,
+    hint: str = DEFAULT_HINT,
     toolbar: str | None = None,
 ) -> str:
-    """Read one pre-session intent line, capturing a `/model` selection into `model_sink`."""
+    """Read one pre-session intent line, capturing `/model` into `model_sink`
+    and `/sandbox` into `sandbox_sink`."""
     while True:
         line = await ask_line_with_slash(
             prompt, None, quest, color=color, width=width, hint=hint,
-            pre_session=True, toolbar_override=toolbar)
+            pre_session=True, toolbar_override=toolbar, sandbox_sink=sandbox_sink)
         if isinstance(line, SkillRequest):
             # Opening prompt is pre-session: no daemon gate exists yet, so the
             # skill body is loaded here and becomes the opening message.
@@ -854,6 +857,11 @@ async def _read_intent_line(
         if line.strip().startswith("/model "):
             if model_sink is not None:
                 model_sink["model"] = line.strip()[len("/model "):].strip()
+            continue
+        if line.strip().startswith("/sandbox "):
+            if sandbox_sink is not None:
+                arg = line.strip()[len("/sandbox "):].strip()
+                sandbox_sink["unsandboxed"] = (arg == "off")
             continue
         if line == "/abandon":
             # No daemon pre-session; _abandon_local's rc threads out through SystemExit.
@@ -865,6 +873,7 @@ async def _read_opening_message(
     quest: Quest, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
     model_sink: dict[str, str] | None = None,
+    sandbox_sink: dict[str, bool] | None = None,
     _prompt_factory: Callable[[], Any] | None = None,
 ) -> str | None:
     """Lead with the run header, then the splash (when interactive), then read the
@@ -876,7 +885,8 @@ async def _read_opening_message(
                        editing_mode=editing_mode, color=color, quest=quest))
     prompt = make()
     reply = await _read_intent_line(
-        prompt, quest, color=color, width=width, model_sink=model_sink)
+        prompt, quest, color=color, width=width, model_sink=model_sink,
+        sandbox_sink=sandbox_sink)
     return _normalize_opening_reply(reply)
 
 
@@ -901,10 +911,13 @@ async def _run_cleared_session(
                         editing_mode=_editing_mode(control), color=color, quest=quest)
         # A `/model` typed at this reopened prompt lands here; empty when none.
         cleared_model_sink: dict[str, str] = {}
+        # A `/sandbox off|on` typed at this reopened prompt lands here; empty when none.
+        cleared_sandbox_sink: dict[str, bool] = {}
         try:
             reply = await _read_intent_line(
                 prompt, quest, color=color, width=_term_width(),
-                model_sink=cleared_model_sink)
+                model_sink=cleared_model_sink,
+                sandbox_sink=cleared_sandbox_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -914,6 +927,7 @@ async def _run_cleared_session(
             return 130
         _session_started = True
         cleared_model = cleared_model_sink.get("model")
+        cleared_unsandboxed = bool(cleared_sandbox_sink.get("unsandboxed"))
         opening_text = _normalize_opening_reply(reply)
         # Persist the intent durably so the reopened chat's opening step seeds from
         # quest.json (mirroring the imp new path), surviving any later resume.
@@ -930,7 +944,8 @@ async def _run_cleared_session(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title, model=cleared_model)
+            leave_state=leave_state, title=term_title, model=cleared_model,
+            opening_unsandboxed=cleared_unsandboxed)
     finally:
         if not _session_started:
             discard_conversation(quest)
@@ -1249,6 +1264,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     header_printed = False
     # A `/model` typed at the opening prompt lands here; empty when none was typed.
     opening_model_sink: dict[str, str] = {}
+    # A `/sandbox off|on` typed at the opening prompt lands here; empty when none.
+    opening_sandbox_sink: dict[str, bool] = {}
     if show_opening_prompt:
         try:
             async with prompt_sigint_guard():
@@ -1256,7 +1273,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                     quest, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),
                     editing_mode=_editing_mode(control),
-                    model_sink=opening_model_sink)
+                    model_sink=opening_model_sink,
+                    sandbox_sink=opening_sandbox_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -1270,6 +1288,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
     opening_model = opening_model_sink.get("model") or model_arg
+    opening_unsandboxed = bool(opening_sandbox_sink.get("unsandboxed"))
 
     # Persist the finalized intent so it survives any resume (including a restart
     # from an errored transcript). Covers both the positional and interactive
@@ -1297,7 +1316,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             status=status,
             title=term_title,
             leave_mode=leave_mode,
-            non_interactive=True, autonomous=autonomous, model=opening_model)
+            non_interactive=True, autonomous=autonomous, model=opening_model,
+            opening_unsandboxed=opening_unsandboxed)
 
     if not header_printed:
         _print_opening(quest, leave_mode, interactive=interactive, color=color)
@@ -1318,7 +1338,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous,
-            model=opening_model)
+            model=opening_model, opening_unsandboxed=opening_unsandboxed)
 
     return await _clear_loop(control, first=_first, leave_mode=leave_mode)
 

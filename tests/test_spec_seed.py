@@ -99,7 +99,8 @@ def test_new_positional_delivers_verbatim_seed(
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
-                           model: str | None = None) -> int:
+                           model: str | None = None,
+                           opening_unsandboxed: object = False) -> int:
         captured["change"] = quest
         return 0
 
@@ -128,7 +129,8 @@ def test_new_title_flag_sets_quest_title(
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
-                           model: str | None = None) -> int:
+                           model: str | None = None,
+                           opening_unsandboxed: object = False) -> int:
         captured["change"] = quest
         return 0
 
@@ -235,7 +237,8 @@ def test_opening_prompt_reply_wires_to_seed_opening(
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
-                           model: str | None = None) -> int:
+                           model: str | None = None,
+                           opening_unsandboxed: object = False) -> int:
         captured["change"] = quest
         return 0
 
@@ -276,7 +279,8 @@ def test_opening_prompt_empty_reply_reprompts(
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
-                           model: str | None = None) -> int:
+                           model: str | None = None,
+                           opening_unsandboxed: object = False) -> int:
         captured["change"] = quest
         return 0
 
@@ -318,7 +322,8 @@ def test_new_creates_unmaterialized_draft(
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
-                           model: str | None = None) -> int:
+                           model: str | None = None,
+                           opening_unsandboxed: object = False) -> int:
         captured["change"] = quest
         return 0
 
