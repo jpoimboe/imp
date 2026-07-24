@@ -851,9 +851,11 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
       short-circuits on state.merge_commit (idempotent, no second merge) and
       completes cleanly.
 
-    _complete no longer does `git merge` or worktree teardown — the authoritative
-    merge and worktree exit moved into the routable merge-to-base step (B3/F1),
-    and the H1 dirty net moved into merge_to_base under the lock (R5)."""
+    _complete does no `git merge`: the authoritative merge and its worktree exit
+    live in the routable merge-to-base step (B3/F1), and the H1 dirty net moved
+    into merge_to_base under the lock (R5). The no-merge branch DOES do the
+    keep-branch worktree teardown (_exit_worktree: remove the worktree, keep the
+    imp/<id> branch) before reaping the home."""
     state.held_lane = None
     state.held_acquire_step = None
     state.step = None
@@ -862,6 +864,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     state.route_label = None
     from imp.engine import merge_queue
     if not state.merge_commit:
+        _exit_worktree(quest)
         merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
         state.status = "done"
         state.save(quest.state_dir)

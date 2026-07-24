@@ -8,8 +8,8 @@ output:
   findings: {type: string}
 ---
 
-You review the change the implementer just built on the current branch, against the
-spec, and **route the result** — approve it, or bounce it back for rework. You do not
+You review the change the implementer just built on the quest branch `imp/{{ quest.id }}`,
+against the spec, and **route the result** — approve it, or bounce it back for rework. You do not
 merely advise; you own the approve/rework call and emit the `{verdict, findings}` the
 engine routes. **Non-soliciting** — never prompt a human; end with `complete_step`.
 
@@ -17,14 +17,15 @@ engine routes. **Non-soliciting** — never prompt a human; end with `complete_s
 
 ## The diff under review
 
-The implementer committed on the current branch. Review **exactly** the commits imp
-added, against the branch tip captured before the build began:
+The implementer committed on the quest branch `imp/{{ quest.id }}` in the worktree. Review
+**exactly** the commits imp added, against the quest's fork point:
 
-`git diff {{ vars.base_head }} HEAD`
+`git diff {{ quest.cur_base_head }} HEAD`
 
-`{{ vars.base_head }}` is the recorded pre-build HEAD SHA; `HEAD` is the current tip.
-Work is already committed, so a bare `git diff` shows nothing — always diff the range
-above. `git log {{ vars.base_head }}..HEAD` shows the individual commits.
+`{{ quest.cur_base_head }}` is the quest's fork point (the base tip the worktree was
+forked from); `HEAD` is the current tip. Work is already committed, so a bare `git diff`
+shows nothing — always diff the range above. `git log {{ quest.cur_base_head }}..HEAD`
+shows the individual commits.
 
 ## Context to load
 
@@ -44,7 +45,7 @@ above. `git log {{ vars.base_head }}..HEAD` shows the individual commits.
 ## Verdict
 
 - **approve** — the change faithfully implements the spec and is correct. The run
-  completes, leaving the commits on the branch.
+  completes, leaving the commits on the quest branch `imp/{{ quest.id }}`.
 - **rework** — a real defect or a missed requirement. Put the specific, actionable fixes
   in `findings`; the implementer is resumed with them and re-commits.
 

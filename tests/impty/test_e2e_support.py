@@ -35,10 +35,18 @@ def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
-    # The scripted bash ran as a REAL side effect on the change branch in the worktree.
-    markers = list(tmp_path.glob(".imp/worktrees/*/src/marker.py"))
-    assert markers, f"no committed scripted marker; stderr:\n{proc.stderr}"
-    assert sentinel in markers[0].read_text()
+    # The scripted bash committed a REAL side effect on the quest branch imp/<id>.
+    # The no-merge completion removes the worktree, so read the marker from the branch.
+    branches = subprocess.run(
+        ["git", "-C", str(tmp_path), "branch", "--format=%(refname:short)",
+         "--list", "imp/*"],
+        capture_output=True, text=True).stdout.split()
+    assert branches, f"no imp/<id> branch; stderr:\n{proc.stderr}"
+    marker = subprocess.run(
+        ["git", "-C", str(tmp_path), "show", f"{branches[0]}:src/marker.py"],
+        capture_output=True, text=True)
+    assert marker.returncode == 0, marker.stderr
+    assert sentinel in marker.stdout
 
 
 def test_write_imp_shim_is_executable_and_runs_imp(tmp_path: Path) -> None:

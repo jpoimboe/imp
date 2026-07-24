@@ -223,3 +223,28 @@ def test_complete_unlinks_stale_socket_on_early_exit_path(tmp_path, monkeypatch)
     state = State.load(a.state_dir)             # merge_commit unset → early-exit finalize
     _complete(a, state, JsonlEventLog(a.events_path))
     assert not sock.exists()
+
+
+def test_complete_without_merge_removes_worktree_keeps_branch(tmp_path, monkeypatch) -> None:
+    from imp.engine import worktree
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    (ch.project_root / "f.txt").write_text("hi")          # work committed on imp/feat
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "work")
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+
+    wt = tmp_path / ".imp" / "worktrees" / "feat"
+    assert wt.exists()  # falsifiable: worktree present pre-finalize
+    assert ch.project_root == wt                          # ...and project_root points into it
+
+    state = State.load(ch.state_dir)                      # merge_commit is None -> no-merge branch
+    result = _complete(ch, state, JsonlEventLog(ch.events_path))
+
+    assert result == RunResult.COMPLETED
+    assert not wt.exists()                                # worktree dir removed
+    porcelain = _git(tmp_path, "worktree", "list", "--porcelain").stdout
+    assert "worktrees/feat" not in porcelain              # unregistered from git worktree list
+    assert worktree.branch_exists(tmp_path, "imp/feat")   # branch KEPT, holding the commits
+    assert ch.project_root == ch.control_root  # project_root flipped back to control root

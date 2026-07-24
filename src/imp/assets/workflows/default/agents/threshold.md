@@ -38,9 +38,7 @@ When the user wants to build, do three things in this turn:
    pointed to in the conversation) is never such a reason: it hasn't been through imp's
    own review, which is exactly what the lighter path skips — stay on the full pass and
    don't raise it.
-3. **Go live:** call `create_and_enter_worktree` (no arguments). It forks the branch
-   and worktree from the base branch's current tip and switches this quest in; your
-   subsequent tools then operate in the new worktree. Harmless no-op if already live.
+3. **Go live:** {% include "partials/go-live-worktree.md" %}
 
 Write the draft spec (Goal + Acceptance criteria at minimum, full four-part structure
 when the quest warrants it) to `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`,

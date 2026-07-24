@@ -85,7 +85,7 @@ def test_threshold_agent_prose_carries_the_three_hats_and_handoff() -> None:
     assert "{{ quest.home }}/artifacts/spec/{{ quest.id }}.md" in fd
     assert "never surface these internal terms" in low
     assert "announce the name in prose without asking permission" in fd
-    assert "create_and_enter_worktree" in body         # go-live tool stays in the tail
+    assert '{% include "partials/go-live-worktree.md" %}' in body  # go-live step stays in the tail
 
 
 def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None:
@@ -169,7 +169,7 @@ def test_threshold_tail_keeps_workflow_specific_sections() -> None:
     body = _wf().agents["threshold"].prompt_template_source
     assert "## Classifying the draft's shape" in body
     assert "## Going live (the build path)" in body
-    assert "create_and_enter_worktree" in body
+    assert '{% include "partials/go-live-worktree.md" %}' in body
     assert "## Output" in body
     # the extracted body no longer lives inline in threshold.md.
     assert "## Orienting before you offer" not in body

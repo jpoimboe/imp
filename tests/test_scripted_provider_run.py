@@ -79,8 +79,8 @@ def test_scripted_tool_calls_produce_real_commit_and_sentinel(
     result = anyio.run(functools.partial(run_quest, ch, on_event=events.append))
     assert result is RunResult.COMPLETED
 
-    worktree = tmp_path / ".imp" / "worktrees" / "2026-06-12-aaa111"
-    committed = _git(worktree, "show", "HEAD:src/sentinel.py").stdout
+    # The no-merge completion removes the worktree; the commit lives on imp/<id>.
+    committed = _git(tmp_path, "show", "imp/2026-06-12-aaa111:src/sentinel.py").stdout
     assert sentinel in committed
 
     bash_calls = [e for e in events
