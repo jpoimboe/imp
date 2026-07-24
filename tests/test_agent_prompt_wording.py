@@ -452,7 +452,7 @@ def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
 def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:
     from imp.engine.loader import parse_agent_file
     path = pathlib.Path(
-        "src/imp/assets/workflows/imp/agents/spec-finalizer.md"
+        "src/imp/assets/workflows/default/agents/spec-finalizer.md"
     ).resolve()
     full = path.read_text()
     agent = parse_agent_file(path)
