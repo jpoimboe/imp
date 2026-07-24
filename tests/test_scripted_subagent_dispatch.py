@@ -111,9 +111,9 @@ def test_scripted_parent_dispatches_scripted_subagent(
     result = anyio.run(functools.partial(run_quest, ch, on_event=events.append))
     assert result is RunResult.COMPLETED
 
-    # The coder (child) really ran: its commit is on the change worktree.
-    worktree = tmp_path / ".imp" / "worktrees" / "2026-07-03-aaa111"
-    committed = _git(worktree, "show", "HEAD:src/sentinel.py").stdout
+    # The coder (child) really ran: its commit is on the quest branch imp/<id>
+    # (the no-merge completion removes the worktree, keeping the branch).
+    committed = _git(tmp_path, "show", "imp/2026-07-03-aaa111:src/sentinel.py").stdout
     assert sentinel in committed
 
     # The driver received the coder's deliverable as the sub_agent tool_result.

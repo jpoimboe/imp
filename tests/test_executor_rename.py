@@ -124,7 +124,10 @@ def test_run_quest_rename_keeps_id_and_path(
     reloaded = Quest.load(tmp_path, "ccc333")
     assert reloaded.title == "Renamed Thing"
     assert reloaded.id == "ccc333"
-    assert (tmp_path / ".imp" / "worktrees" / "ccc333").is_dir()
+    from imp.engine import worktree
+    # The no-merge completion removes the worktree but keeps the imp/<id> branch.
+    assert not (tmp_path / ".imp" / "worktrees" / "ccc333").exists()
+    assert worktree.branch_exists(tmp_path, "imp/ccc333")
 
 
 def test_run_quest_restores_cwd_on_error(tmp_path: Path, provider_registry) -> None:
