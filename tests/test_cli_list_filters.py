@@ -39,12 +39,12 @@ def test_flags_union_additively() -> None:
         _ns(merged=True, abandoned=True)) == {"merged", "abandoned"}
 
 
-def test_archived_expands_to_the_three_archive_dispositions() -> None:
+def test_archived_expands_to_the_four_archive_dispositions() -> None:
     assert _selected_list_dispositions(
-        _ns(archived=True)) == {"merged", "abandoned", "shelved"}
+        _ns(archived=True)) == {"merged", "done", "abandoned", "shelved"}
     # --archived unioned with a redundant flag stays the same set.
     assert _selected_list_dispositions(
-        _ns(archived=True, merged=True)) == {"merged", "abandoned", "shelved"}
+        _ns(archived=True, merged=True)) == {"merged", "done", "abandoned", "shelved"}
 
 
 _NOW = datetime(2026, 7, 15, 12, 0, 0, tzinfo=UTC)

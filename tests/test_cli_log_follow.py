@@ -132,7 +132,7 @@ def test_follow_step_live_footer_uses_compose_status(tmp_path: Path) -> None:
     status.update.assert_called_with(driver.compose_status)
 
 
-@pytest.mark.parametrize("terminal", ["merged", "abandoned", "shelved"])
+@pytest.mark.parametrize("terminal", ["merged", "done", "abandoned", "shelved"])
 def test_follow_step_terminal_drains_and_finishes(
     tmp_path: Path, terminal: str,
 ) -> None:

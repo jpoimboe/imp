@@ -300,7 +300,7 @@ def test_overview_default_shows_merged_disposition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Default overview: completed changes appear under `merged:` with
+    """Default overview: completed changes appear under `finished:` with
     disposition `merged` (not the raw `completed`); abandoned are excluded."""
     import imp.cli.main as m
 
@@ -319,7 +319,7 @@ def test_overview_default_shows_merged_disposition(
     assert rc == 0
     out = capsys.readouterr().out
     assert "live" in out
-    assert "merged:" in out
+    assert "finished:" in out
     assert "history:" not in out
     assert "done" in out
     assert "merged" in out
@@ -712,6 +712,36 @@ def test_show_falls_through_stale_empty_dir_to_archive(
     assert "Stale Show" in buf.getvalue()
 
 
+def test_overview_lists_done_quest_in_history(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Light change", quest_id="lightid", base_branch="main")
+    _complete_and_archive(tmp_path, "lightid", status="done")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["list"])                 # bare list -> default overview history block
+    out = buf.getvalue()
+    assert rc == 0
+    assert "lightid" in out and "done" in out
+
+
+def test_list_archived_flag_includes_done_quest(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Light change", quest_id="lightarc", base_branch="main")
+    _complete_and_archive(tmp_path, "lightarc", status="done")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["list", "--archived"])
+    out = buf.getvalue()
+    assert rc == 0
+    assert "lightarc" in out and "done" in out
+
+
 def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     import imp.cli.main as m
 
@@ -739,3 +769,12 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     out = buf.getvalue()
     assert "arch01" in out
     assert "Archived One" in out
+
+
+def test_resolve_dependencies_marks_archived_done_dep_satisfied(tmp_path: Path) -> None:
+    from imp.engine.quest_refs import resolve_dependencies
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Dep", quest_id="depid", base_branch="main")
+    _complete_and_archive(tmp_path, "depid", status="done")
+    deps = resolve_dependencies(tmp_path, ["depid"])
+    assert deps == [{"id": "depid", "title": "Dep", "merged": True}]

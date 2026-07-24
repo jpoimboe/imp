@@ -338,6 +338,15 @@ def test_cmd_search_archived_shows_last_activity_age(tmp_path: Path, capsys) -> 
     assert re.search(r"· archive · \d", out)
 
 
+def test_cmd_search_default_includes_done_quest(tmp_path: Path, capsys) -> None:
+    _archive(tmp_path, "dn1", "Dark done work", status="done")
+    rc = _cmd_search(_ns("Dark done"), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "dn1" in out
+    assert "· archive ·" in out
+
+
 def test_cmd_search_missing_timestamp_renders_dash_age(tmp_path: Path, capsys) -> None:
     _archive(tmp_path, "darkid", "Dark mode")
     rc = _cmd_search(_ns("dark"), tmp_path)
