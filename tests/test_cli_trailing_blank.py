@@ -448,6 +448,8 @@ def test_cmd_init_appends_trailing_blank_on_tty(
 
     import imp.cli.main as m
 
+    # Both streams a tty + non_interactive False => interactive branch (run_init).
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
 
@@ -456,7 +458,7 @@ def test_cmd_init_appends_trailing_blank_on_tty(
         output_fn("  imp/project.yaml")
 
     monkeypatch.setattr(m, "run_init", fake_run_init)
-    rc = m._cmd_init(argparse.Namespace())
+    rc = m._cmd_init(argparse.Namespace(non_interactive=False))
     assert rc == 0
     assert capsys.readouterr().out == "Created:\n  imp/project.yaml\n\n"
 
@@ -468,14 +470,17 @@ def test_cmd_init_unchanged_when_piped(
 
     import imp.cli.main as m
 
+    # Non-tty stdout auto-routes to the non-interactive writer; the auto-headless
+    # note goes to stderr, so captured stdout stays blank-line-free when piped.
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
 
-    def fake_run_init(project, *, input_fn, output_fn):
+    def fake_noninteractive(project, *, output_fn, **kwargs):
         output_fn("Created:")
 
-    monkeypatch.setattr(m, "run_init", fake_run_init)
-    rc = m._cmd_init(argparse.Namespace())
+    monkeypatch.setattr(m, "run_init_noninteractive", fake_noninteractive)
+    rc = m._cmd_init(argparse.Namespace(non_interactive=False))
     assert rc == 0
     assert capsys.readouterr().out == "Created:\n"
 

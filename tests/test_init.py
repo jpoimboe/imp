@@ -660,3 +660,46 @@ def test_use_defaults_raises_when_base_unresolvable(tmp_path):
     with pytest.raises(IntegrationBranchUnresolved):
         run_init_noninteractive(tmp_path, output_fn=lambda _m: None,
                                 detect_verify_fn=lambda _r: None)
+
+
+def test_init_parser_maps_use_defaults_to_non_interactive() -> None:
+    from imp.cli.main import _build_parser
+    args = _build_parser().parse_args(["init", "--use-defaults"])
+    assert args.non_interactive is True
+    args2 = _build_parser().parse_args(["init"])
+    assert args2.non_interactive is False
+
+
+def test_init_parser_accepts_override_flags() -> None:
+    from imp.cli.main import _build_parser
+    args = _build_parser().parse_args(
+        ["init", "--workflow", "light", "--base", "develop",
+         "--pythonpath", "src,lib"])
+    assert args.workflow == "light"
+    assert args.base == "develop"
+    assert args.pythonpath == "src,lib"
+
+
+def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
+    # No --use-defaults, but a non-tty stdin/stdout must auto-route to the
+    # provider-free path (no hang, no picker).
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(m.sys.stdout, "isatty", lambda: False, raising=False)
+
+    called: dict[str, object] = {}
+
+    def _spy(project, **kw):
+        called["project"] = project
+        called["kw"] = kw
+
+    monkeypatch.setattr(m, "run_init_noninteractive", _spy)
+    monkeypatch.setattr(m, "run_init",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("interactive path must not run without a tty")))
+    args = m._build_parser().parse_args(["init", "--pythonpath", "src, ,lib"])
+    args.func(args)
+    assert called["project"] == tmp_path
+    assert called["kw"]["pythonpath"] == ["src", "lib"]   # comma-split, blanks dropped
