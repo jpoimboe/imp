@@ -457,7 +457,7 @@ def build_agent_invocation(
     system_prompt_override: str | None = None,
     initial_messages: tuple[Message, ...],
     quest_context: QuestContext,
-    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
+    user_chat_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]] | None,
     transcript_dir: Path,
     events_path: Path,
     subagent_defs: dict[str, AgentDef],

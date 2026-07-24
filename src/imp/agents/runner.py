@@ -151,8 +151,8 @@ class AgentInvocation:
     max_tool_calls: int | None = None
     # The bare-turn-end / AWAITING_USER resume input channel. Wired for attended
     # top-level agents; None for subagents (their bare-turn-end pause is headless).
-    # May return either a `str` or an `Awaitable[str]`; call-sites await-if-awaitable.
-    user_input_fn: Callable[[str], str | Awaitable[str]] | None = None
+    # May return a str, SkillReply, or an Awaitable thereof; call-sites await-if-awaitable.
+    user_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]] | None = None
     # Set by the executor for the END-OF-TURN nudge — distinct from
     # user_input_fn, which serves the bare-turn-end / AWAITING_USER resume path.
     # Called with the agent's last text; returns the next user-message text to
