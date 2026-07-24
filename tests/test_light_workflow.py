@@ -85,7 +85,7 @@ def test_implement_is_high_tier_writer_that_commits() -> None:
         assert banned not in tools
 
 
-def test_review_is_read_only_high_tier_and_diffs_recorded_base() -> None:
+def test_review_is_read_only_high_tier_and_diffs_fork_point() -> None:
     wf = _wf()
     rev = _steps(wf)["review"]
     assert rev.tier == "high"
@@ -96,8 +96,9 @@ def test_review_is_read_only_high_tier_and_diffs_recorded_base() -> None:
                    if f.name == "verdict")
     assert set(verdict.values) == {"approve", "rework"}
     body = wf.agents["reviewer"].prompt_template_source
-    assert "{{ vars.base_head }}" in body               # the recorded diff base
-    assert "git diff {{ vars.base_head }} HEAD" in body
+    assert "{{ quest.cur_base_head }}" in body               # the fork-point diff base
+    assert "git diff {{ quest.cur_base_head }} HEAD" in body
+    assert "{{ vars.base_head }}" not in body                # the removed var is gone
 
 
 def test_review_routes_rework_to_implement_and_approve_completes() -> None:
