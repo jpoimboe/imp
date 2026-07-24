@@ -555,3 +555,82 @@ async def test_r_byte_requests_retry_now_and_keeps_reading(monkeypatch) -> None:
         os.close(master)
         with contextlib.suppress(OSError):
             os.close(slave)
+
+
+def test_dispatch_force_forwarded_at_most_once_per_round() -> None:
+    """AC4: once a force-forward is enqueued while a stop is unwinding, further
+    ctrl-c presses in the SAME round are harmless no-ops — no repeated FORCE frames
+    (each of which would drive a second-gesture hard-kill / interrupt_escalated
+    record). A fresh round (end_gesture_round) re-arms the one-shot latch."""
+    import signal as _sig
+
+    from imp.cli.signals import _FORCE_FORWARD
+
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+
+    # A stop is already unwinding (first gesture landed).
+    coord._should_pause = True
+    coord._first_gesture_at = 100.0
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    # First press PAST the suppression window → forwards one FORCE.
+    t["now"] = 101.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == [_FORCE_FORWARD]
+
+    # Two more presses in the SAME round, both past the window → no-ops.
+    t["now"] = 101.6
+    coord._dispatch_signal(_sig.SIGINT)
+    t["now"] = 101.7
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == [_FORCE_FORWARD]   # still exactly one FORCE frame
+
+    # A fresh round re-arms the latch: the next round's repeat forwards again.
+    coord.end_gesture_round()
+    coord._should_pause = True
+    coord._first_gesture_at = 200.0
+    t["now"] = 201.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == [_FORCE_FORWARD, _FORCE_FORWARD]
+
+
+def test_reset_rearms_force_forward_latch() -> None:
+    """reset() (the between-round session reset) also clears the one-shot
+    force-forward latch, so a new session round can force-quit again."""
+    import signal as _sig
+
+    from imp.cli.signals import _FORCE_FORWARD
+
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    coord._should_pause = True
+    coord._first_gesture_at = 100.0
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    t["now"] = 101.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == [_FORCE_FORWARD]
+
+    coord.reset()
+    coord._should_pause = True
+    coord._first_gesture_at = 200.0
+    t["now"] = 201.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == [_FORCE_FORWARD, _FORCE_FORWARD]

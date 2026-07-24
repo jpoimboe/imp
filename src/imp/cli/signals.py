@@ -239,6 +239,7 @@ class InterruptCoordinator:
         self._trigger_exit: Any = None
         self._save_hook: Any = None
         self._forward_force: Any = None   # client force-forward hook (SessionControls)
+        self._force_forwarded = False     # one-shot: a FORCE was forwarded this round
         self._forward_retry_now: Any = None   # client retry-now forward hook (SessionControls)
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
@@ -486,6 +487,7 @@ class InterruptCoordinator:
         self.pause_reason = None
         self.leave_reason = None
         self._first_gesture_at = None
+        self._force_forwarded = False
         self.escalated = False
         self._yielded = None
         self._backoff_wait_depth = 0
@@ -512,6 +514,7 @@ class InterruptCoordinator:
         self._should_pause = False
         self.pause_reason = None
         self._first_gesture_at = None
+        self._force_forwarded = False
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
@@ -838,8 +841,11 @@ class InterruptCoordinator:
             # client to bash (ctrl-c never exits) — it enqueues a FORCE forward so
             # the daemon skips the cooperative tier and hard-kills now, while the
             # client stays attached. Gate synchronously; forward only past the
-            # suppression window. The leave path above keeps _trigger_escalation.
-            if self._register_gesture(kind="ctrl-c"):
+            # suppression window, and AT MOST ONCE per round — extra presses on an
+            # already-forwarded round are no-ops (no redundant hard-kills of an
+            # already-dead runner). The leave path above keeps _trigger_escalation.
+            if not self._force_forwarded and self._register_gesture(kind="ctrl-c"):
+                self._force_forwarded = True
                 self._note_gesture_ack(force_quit_available=True)
                 send = self._sig_send
                 if send is not None:
