@@ -1198,7 +1198,7 @@ def test_interactive_steps_are_exactly_the_conversational_gates() -> None:
     assert interactive == {
         ("default", "threshold"),
         ("default", "finalize"),
-        ("light", "front-door"),
+        ("minimal", "front-door"),
         ("patent", "invention-interviewer"),
         ("patent", "disclosure-gate"),
         ("patent", "independent-claims-gate"),

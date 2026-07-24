@@ -1,7 +1,7 @@
 description: |
   front-door -> implement -> review
 
-  A light workflow. It scopes a small change in an open conversation (reusing the
+  A minimal workflow. It scopes a small change in an open conversation (reusing the
   shared front-door), then on go-live forks an isolated worktree on imp/<id> and
   builds it there — no plan is written, no merge happens. A read-only reviewer bounces
   the implementer until the change is approved, then the run completes leaving the

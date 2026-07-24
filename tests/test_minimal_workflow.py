@@ -7,34 +7,34 @@ from imp.engine.loader import load_workflow
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import Continue, Goto
 
-LIGHT = bundled_workflow_dir("light")
+MINIMAL = bundled_workflow_dir("minimal")
 
 
 def _wf():
-    return load_workflow(LIGHT)
+    return load_workflow(MINIMAL)
 
 
 def _steps(wf):
     return {s.name: s for s in wf.flat_steps()}
 
 
-def test_light_loads_with_the_three_named_steps() -> None:
+def test_minimal_loads_with_the_three_named_steps() -> None:
     wf = _wf()
     names = [s.name for s in wf.flat_steps()]
     assert names == ["front-door", "implement", "review"]
     # No vestigial name: field — identity follows the directory.
-    assert wf.name == "light"
+    assert wf.name == "minimal"
 
 
-def test_light_declares_no_workflow_vars() -> None:
-    # base_head is removed; the light workflow declares no vars.
+def test_minimal_declares_no_workflow_vars() -> None:
+    # base_head is removed; the minimal workflow declares no vars.
     assert _wf().vars.types() == {}
 
 
-def test_light_has_no_capture_base_step_or_script() -> None:
+def test_minimal_has_no_capture_base_step_or_script() -> None:
     names = [s.name for s in _wf().flat_steps()]
     assert "capture-base" not in names
-    assert not (LIGHT / "scripts" / "capture-base-head.sh").exists()
+    assert not (MINIMAL / "scripts" / "capture-base-head.sh").exists()
 
 
 def test_front_door_is_interactive_high_tier_status_only() -> None:
@@ -65,7 +65,7 @@ def test_front_door_body_includes_partials_and_goes_live_in_worktree() -> None:
 
 def test_front_door_renders_full_include_closure() -> None:
     # Rendering the front-door agent resolves the whole shared closure with no
-    # leftover {% include %}. workflow_dir=LIGHT has no local partials/, so the
+    # leftover {% include %}. workflow_dir=MINIMAL has no local partials/, so the
     # render-loader fallback resolves them from the bundled shared pool.
     body = _wf().agents["front-door"].prompt_template_source
     out = render_prompt(
@@ -73,7 +73,7 @@ def test_front_door_renders_full_include_closure() -> None:
         build_context(quest_title="t", event_log=InMemoryEventLog(),
                       quest_id="abc", quest_home=".imp/quests/abc",
                       project_facts={}),
-        workflow_dir=LIGHT)
+        workflow_dir=MINIMAL)
     assert "{% include" not in out                      # every include resolved
     assert "Measure twice, cut once" in out             # action-care leaf
     assert "explorer" in out.lower()                    # delegate-exploration leaf
@@ -123,7 +123,7 @@ def test_review_routes_rework_to_implement_and_approve_completes() -> None:
     assert isinstance(approve.action, Continue)          # off the end -> _complete
 
 
-def test_light_front_door_forks_worktree_others_do_not() -> None:
+def test_minimal_front_door_forks_worktree_others_do_not() -> None:
     wf = _wf()
     assert all(s.kind != "merge_and_exit_worktree" for s in wf.flat_steps())
     assert "create_and_enter_worktree" in wf.agents["front-door"].tools

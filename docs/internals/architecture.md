@@ -70,7 +70,7 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/quest/` (gitignored); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `light` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
+All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/quest/` (gitignored); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `minimal` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
 
 ```mermaid
 flowchart LR
@@ -278,9 +278,9 @@ All four live under `.imp/quest/` (gitignored); spec/plan artifacts are journale
 
 ---
 
-## Light workflow
+## Minimal workflow
 
-`src/imp/assets/workflows/light/` is a minimal workflow: it scopes a small change, then
+`src/imp/assets/workflows/minimal/` is a small, no-merge workflow: it scopes a small change, then
 builds it in a **forked worktree** on `imp/<id>` and completes with **no merge**, leaving
 the commits on that branch for the user to integrate manually. The change runs through a
 short sequence of steps:
