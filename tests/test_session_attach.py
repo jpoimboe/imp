@@ -260,7 +260,8 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
         lambda ch, *, resume=False,
-        non_interactive=False, autonomous=False, model=None: spawned.append(ch))
+        non_interactive=False, autonomous=False, model=None,
+        opening_unsandboxed=False: spawned.append(ch))
 
     received: list[dict[str, Any]] = []
     server = SessionSocket(sock)
@@ -304,7 +305,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
         def fake_spawn(
             ch: Quest, *, resume: bool = False,
             non_interactive: bool = False, autonomous: bool = False,
-            model: str | None = None,
+            model: str | None = None, opening_unsandboxed: bool = False,
         ) -> None:
             captured["resume"] = resume
             tg.start_soon(_start_server)
@@ -441,6 +442,67 @@ def test_spawn_session_daemon_appends_model_arg(
     assert "--model" in captured["argv"]
     i = captured["argv"].index("--model")
     assert captured["argv"][i + 1] == "anthropic:claude-fable-5"
+
+
+def test_spawn_session_daemon_appends_unsandboxed_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-unsbx")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(quest, opening_unsandboxed=True)
+    assert "--unsandboxed" in captured["argv"]
+
+
+def test_spawn_session_daemon_omits_unsandboxed_when_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-sbx")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(quest)
+    assert "--unsandboxed" not in captured["argv"]
+
+
+@pytest.mark.anyio
+async def test_build_session_attach_threads_unsandboxed_into_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.remote.session import attach as attach_mod
+
+    quest = _make_quest(tmp_path, "2026-06-15-unsbx2")
+    sock = str(session_socket_path(quest.id))
+    captured: dict[str, Any] = {}
+    holder: dict[str, SessionSocket] = {}
+
+    async with anyio.create_task_group() as tg:
+        async def _start_server() -> None:
+            server = SessionSocket(sock)
+            await server.open()
+            holder["server"] = server
+            await server.serve()
+
+        def fake_spawn(
+            ch: Quest, *, resume: bool = False,
+            non_interactive: bool = False, autonomous: bool = False,
+            model: str | None = None, opening_unsandboxed: bool = False,
+        ) -> None:
+            captured["opening_unsandboxed"] = opening_unsandboxed
+            tg.start_soon(_start_server)
+
+        monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
+
+        attach = attach_mod.build_session_attach(quest, opening_unsandboxed=True)
+        client = await attach(lambda _e: None)
+
+        assert captured["opening_unsandboxed"] is True
+        await wait_until(
+            lambda: holder.get("server") is not None and holder["server"].attached_count == 1)
+        await client.aclose()
+        await holder["server"].close()
+        tg.cancel_scope.cancel()
 
 
 def test_spawn_session_daemon_omits_model_when_none(
