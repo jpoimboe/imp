@@ -1,6 +1,7 @@
 # tests/test_live_driver.py
 from __future__ import annotations
 
+import asyncio
 import inspect
 import io
 import json
@@ -10,6 +11,7 @@ from imp.cli import palette as pal
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import render_tree
+from imp.cli.signals import InterruptCoordinator
 from tests._event_fixtures import _TTY, _two_phase_events, ev
 
 
@@ -3369,3 +3371,45 @@ def test_resume_echo_keeps_blank_before_first_live_agent_prose() -> None:
     # Exactly one blank line separates the echoed message from the agent prose.
     assert prose_idx == echo_idx + 2
     assert lines[echo_idx + 1] == ""
+
+
+def _tty_driver():
+    out = _TTY()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    return drv, out
+
+
+def test_show_stop_ack_renders_ack_text_on_the_status_line() -> None:
+    """LiveDriver exposes a public show_stop_ack that renders the transient stop
+    acknowledgment on the live status line (delegating to LiveStatus)."""
+    drv, out = _tty_driver()
+    drv.show_stop_ack("stopping…")
+    assert "stopping…" in out.getvalue()
+
+
+def test_ack_hook_wired_to_driver_renders_stopping_then_force_quit() -> None:
+    """Registering driver.show_stop_ack as the coordinator ack hook renders
+    'stopping…' on the first gesture and the force-quit upgrade on the second."""
+    drv, out = _tty_driver()
+    coord = InterruptCoordinator()
+    coord.set_ack_hook(drv.show_stop_ack)
+
+    asyncio.run(coord.signal_pause(reason="ctrl-c"))
+    assert "stopping…" in out.getvalue()
+    assert "interrupt again to force-quit" not in out.getvalue()
+
+    coord._note_gesture_ack(force_quit_available=True)
+    assert "stopping… (interrupt again to force-quit)" in out.getvalue()
+
+
+def test_stop_ack_cleared_when_prompt_gate_lands() -> None:
+    """AC5: the stop-ack clears when the interrupt steer gate appears —
+    prepare_for_prompt hides the status line, erasing the drawn ack."""
+    drv, out = _tty_driver()
+    drv.show_stop_ack("stopping…")
+    assert drv._status._visible is True
+    out.truncate(0)
+    out.seek(0)
+    drv.prepare_for_prompt()          # the interrupt steer gate lands
+    assert drv._status._visible is False       # ack no longer owns the status line
+    assert "\x1b[K" in out.getvalue()          # the ack row was erased

@@ -117,6 +117,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "imp"
@@ -168,6 +169,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None: ...
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count != 0)
@@ -217,6 +219,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
@@ -404,6 +407,7 @@ async def test_run_session_client_threads_resume_into_attach(
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
@@ -424,6 +428,7 @@ class _NullDriver:
     def finish(self) -> None: ...
     def seed_pending_reply(self, _text: str) -> None: ...
     def install_startup_status(self) -> None: ...
+    def show_stop_ack(self, _text: str) -> None: ...
 
 
 async def _never(*_a: Any) -> str:
@@ -766,6 +771,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
@@ -950,6 +956,7 @@ async def test_run_session_client_threads_model(
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
@@ -994,6 +1001,7 @@ async def test_run_session_client_threads_opening_unsandboxed(
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
@@ -1047,3 +1055,74 @@ async def test_daemon_layout_downgrade_surfaces_message_directly(
     captured = capsys.readouterr()
     assert "Update imp to v13 or newer" in captured.err  # message surfaced directly
     assert "startup failed" not in captured.out          # NOT the generic crash block
+
+
+@pytest.mark.anyio
+async def test_run_session_client_registers_ack_hook_when_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-ack-on")
+    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+        quest.state_dir)
+
+    async def _noop(**_kwargs: object) -> None:
+        pass
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+
+    class _Driver:
+        def __init__(self) -> None:
+            self.acks: list[str] = []
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, text: str) -> None:
+            self.acks.append(text)
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
+        return ""
+
+    coord = InterruptCoordinator()
+    drv = _Driver()
+    rc = await run_session_client(
+        quest, driver=drv, coord=coord, solicit=_solicit,
+        leave_mode="new", non_interactive=False)
+
+    assert rc == 0
+    assert coord._ack_hook is not None            # hook registered on an interactive run
+    coord._ack_hook("stopping…")                  # and it routes to the driver
+    assert drv.acks == ["stopping…"]
+
+
+@pytest.mark.anyio
+async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-ack-off")
+    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+        quest.state_dir)
+
+    async def _noop(**_kwargs: object) -> None:
+        pass
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
+        def show_stop_ack(self, _text: str) -> None:  # pragma: no cover
+            raise AssertionError("headless run must not render an interrupt ack")
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
+        return ""
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        leave_mode="new", non_interactive=True)
+
+    assert rc == 0
+    assert coord._ack_hook is None                # never registered in a headless run

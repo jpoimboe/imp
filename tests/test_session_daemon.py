@@ -7,6 +7,7 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.engine.completion import INTERRUPT_STEER_HINT
 from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
@@ -412,9 +413,9 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
         tg.cancel_scope.cancel()
 
 
-def test_is_interrupt_pause_true_only_for_paused_with_should_pause() -> None:
-    paused_interrupt = SimpleNamespace(should_pause=True)
-    paused_workflow = SimpleNamespace(should_pause=False)
+def test_is_interrupt_pause_true_only_for_paused_with_interrupted_latch() -> None:
+    paused_interrupt = SimpleNamespace(interrupted=True)
+    paused_workflow = SimpleNamespace(interrupted=False)
     assert _is_interrupt_pause(RunResult.PAUSED, paused_interrupt) is True
     assert _is_interrupt_pause(RunResult.PAUSED, paused_workflow) is False
     assert _is_interrupt_pause(RunResult.COMPLETED, paused_interrupt) is False
@@ -463,6 +464,62 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
         assert calls["n"] == 2
         assert {"type": "agent_result",
                 "payload": {"redirect": "go left"}} in received
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_hard_kill_interrupt_pause_posts_interrupted_gate(
+    tmp_path: Path,
+) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-hk")
+    sock = str(session_socket_path(quest.id))
+    calls = {"n": 0, "redirect": None}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # Reproduce the hard-kill flag state: a real ctrl-c gesture latched
+            # both should_pause and the durable interrupted latch; the force /
+            # teardown then cleared should_pause (end_gesture_round) while
+            # interrupted survives. No inline steer gate was emitted (the
+            # mid-generation kill unwound past it).
+            await coordinator.signal_pause(reason="ctrl-c")
+            coordinator.end_gesture_round()
+            assert not coordinator.should_pause
+            assert coordinator.interrupted
+            return RunResult.PAUSED
+        calls["redirect"] = coordinator.drain_interject()
+        on_event({"type": "agent_result",
+                  "payload": {"redirect": calls["redirect"]}})
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        await wait_until(
+            lambda: any(e.get("type") == "awaiting_user_input" for e in received))
+        gate = next(e for e in received if e.get("type") == "awaiting_user_input")
+        assert gate["payload"]["steer_hint"] == INTERRUPT_STEER_HINT
+        assert gate["payload"]["interrupt"] is True
+        await client.send_input("go north")
+        await wait_until(lambda: "r" in result)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["redirect"] == "go north"
         await client.aclose()
         tg.cancel_scope.cancel()
 
@@ -974,14 +1031,14 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
 def test_hold_prompt_resume_prompt_for_interrupt() -> None:
     import imp.remote.session.daemon as daemon
 
-    coord = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
-    assert daemon._hold_prompt(RunResult.PAUSED, coord) == daemon._RESUME_PROMPT
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert daemon._hold_prompt(RunResult.PAUSED, coord) == daemon._RESUME_INTERRUPTED_PROMPT
 
 
 def test_hold_prompt_none_for_model_override() -> None:
     import imp.remote.session.daemon as daemon
 
-    coord = SimpleNamespace(should_pause=True, pause_reason="model-override")
+    coord = SimpleNamespace(interrupted=False, pause_reason="model-override")
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 
 
@@ -991,14 +1048,14 @@ def test_hold_prompt_returns_resume_for_sandbox_override_style_interrupt() -> No
     # in production, but the guard itself must not suppress arbitrary interrupt reasons.
     import imp.remote.session.daemon as daemon
 
-    coord = SimpleNamespace(should_pause=True, pause_reason="sandbox-override")
+    coord = SimpleNamespace(interrupted=True, pause_reason="sandbox-override")
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is not None
 
 
 def test_hold_prompt_none_for_script_blocked() -> None:
     import imp.remote.session.daemon as daemon
 
-    coord = SimpleNamespace(should_pause=False)
+    coord = SimpleNamespace(interrupted=False)
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 
 
@@ -1010,7 +1067,7 @@ def test_hold_prompt_none_for_awaiting_turn(tmp_path: Path) -> None:
     quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     quest.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
-    coord = SimpleNamespace(should_pause=False)
+    coord = SimpleNamespace(interrupted=False)
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 
 
@@ -2065,9 +2122,10 @@ async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
                     if e.get("type") == "awaiting_user_input"]
 
         await wait_until(lambda: _awaiting())
-        # unchanged agent hold copy — offers a redirect
+        # unchanged agent hold: hard-kill and cooperative interrupt share one
+        # surface — offers a redirect
         assert _awaiting()[0]["payload"]["steer_hint"] == (
-            "paused · enter to continue · type to redirect · Ctrl-D to leave")
+            "interrupted · enter to continue · type to redirect · Ctrl-D to leave")
 
         await client.send_input("go left")
         await wait_until(lambda: "r" in result)
@@ -2204,15 +2262,15 @@ def test_is_side_effect_pause_false_when_result_not_paused() -> None:
 def test_hold_prompt_suppressed_for_side_effect_reason() -> None:
     from imp.remote.session.daemon import _hold_prompt
 
-    coord = SimpleNamespace(should_pause=True, pause_reason="model-override")
+    coord = SimpleNamespace(interrupted=True, pause_reason="model-override")
     assert _hold_prompt(RunResult.PAUSED, coord) is None
 
 
 def test_hold_prompt_returns_resume_for_plain_interrupt() -> None:
-    from imp.remote.session.daemon import _RESUME_PROMPT, _hold_prompt
+    from imp.remote.session.daemon import _RESUME_INTERRUPTED_PROMPT, _hold_prompt
 
-    coord = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
-    assert _hold_prompt(RunResult.PAUSED, coord) == _RESUME_PROMPT
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert _hold_prompt(RunResult.PAUSED, coord) == _RESUME_INTERRUPTED_PROMPT
 
 
 def test_run_compaction_slims_transcript_and_emits_confirmation(
@@ -2471,3 +2529,117 @@ async def test_agent_step_hold_empty_reply_continues_without_interject(
         assert drained["v"] is None        # empty was never enqueued as an interject
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+def test_interrupt_gate_already_emitted_detects_inline_gate(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    assert daemon._interrupt_gate_already_emitted(log) is True
+
+
+def test_interrupt_gate_not_emitted_after_resume(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="workflow_resumed", payload={})
+    assert daemon._interrupt_gate_already_emitted(log) is False
+
+
+def test_interrupt_gate_ignores_non_interrupt_awaiting(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": "", "interrupt": False})
+    assert daemon._interrupt_gate_already_emitted(log) is False
+
+
+def test_interrupt_gate_resolved_by_continuation_is_not_open(
+    tmp_path: Path,
+) -> None:
+    # The Major-2 case: a cooperative inline steer was ANSWERED (delivering a
+    # continuation event, exactly as deliver_continuation_reply does), the run
+    # continued, then a fresh mid-generation hard-kill paused it. The stale gate
+    # must NOT count as open, or the daemon would suppress the real hard-kill gate
+    # and re-strand the user.
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="user_message",
+               payload={"text": "go north", "subtype": "reply"})
+    log.append(agent_id=None, type="workflow_paused",
+               payload={"reason": "interrupt"})
+    assert daemon._interrupt_gate_already_emitted(log) is False
+
+
+def test_hold_prompt_suppressed_when_inline_gate_already_emitted(
+    tmp_path: Path,
+) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    # Case B (cooperative detach): the inline gate is the newest event before
+    # this pause's own workflow_paused teardown -> still open -> suppress.
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="workflow_paused",
+               payload={"reason": "interrupt"})
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert daemon._hold_prompt(RunResult.PAUSED, coord, log=log) is None
+
+
+def test_hold_prompt_posts_when_no_inline_gate(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert (daemon._hold_prompt(RunResult.PAUSED, coord, log=log)
+            == daemon._RESUME_INTERRUPTED_PROMPT)
+
+
+def test_hold_prompt_posts_after_gate_resolved_by_continuation(
+    tmp_path: Path,
+) -> None:
+    # Case C (Major-2 regression guard): an older inline gate was answered
+    # (continuation delivered) and the run then hard-killed. The daemon MUST post
+    # the interrupt gate — suppressing it would re-strand the user.
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="user_message",
+               payload={"text": "go north", "subtype": "reply"})
+    log.append(agent_id=None, type="workflow_paused",
+               payload={"reason": "interrupt"})
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert (daemon._hold_prompt(RunResult.PAUSED, coord, log=log)
+            == daemon._RESUME_INTERRUPTED_PROMPT)

@@ -725,6 +725,9 @@ class LiveDriver:
         for lines, prose, sep in deferred:
             self._emit_now(lines, prose=prose, separator_indent=sep)
 
+    def show_stop_ack(self, text: str) -> None:
+        self._status.show_stop_ack(text)
+
     def _maybe_reemit_header(self) -> None:
         # On a mid-step POSITION change, emit a fresh position-only header into the
         # scrollback (deduped). A verb push or the internal phrase rotation does not

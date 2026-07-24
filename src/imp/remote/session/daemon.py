@@ -44,7 +44,7 @@ _SCRIPT_REDIRECT_REFUSED = (
 
 
 def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
-    return result is RunResult.PAUSED and coordinator.should_pause
+    return result is RunResult.PAUSED and coordinator.interrupted
 
 
 def _is_side_effect_pause(result: Any, coordinator: Any) -> bool:
@@ -81,12 +81,27 @@ def _last_pause_was_awaiting_turn(log: EventLog) -> bool:
     return False
 
 
+def _interrupt_gate_already_emitted(log: EventLog) -> bool:
+    """True when the run is parked at a still-open inline interrupt steer gate."""
+    for event in reversed(list(log.read())):
+        if event.get("type") == "workflow_paused":
+            continue
+        return (event.get("type") == "awaiting_user_input"
+                and bool((event.get("payload") or {}).get("interrupt")))
+    return False
+
+
 def _hold_prompt(
     result: Any, coordinator: Any, *, is_script: bool = False,
+    log: EventLog | None = None,
 ) -> str | None:
     if (_is_interrupt_pause(result, coordinator)
             and coordinator.pause_reason not in SIDE_EFFECT_REASONS):
-        return _SCRIPT_HOLD_PROMPT if is_script else _RESUME_PROMPT
+        if is_script:
+            return _SCRIPT_HOLD_PROMPT
+        if log is not None and _interrupt_gate_already_emitted(log):
+            return None
+        return _RESUME_INTERRUPTED_PROMPT
     return None
 
 
@@ -199,7 +214,9 @@ async def serve_quest_session(
                 **run_kwargs,
             )
             coordinator.note_yield()  # run_quest returned -> the run has yielded
-            prompt = _hold_prompt(result, coordinator, is_script=_paused_is_script())
+            prompt = _hold_prompt(
+                result, coordinator, is_script=_paused_is_script(),
+                log=quest.event_log())
         while (prompt is not None
                or _is_side_effect_pause(result, coordinator)):
             if _is_side_effect_pause(result, coordinator):
@@ -260,7 +277,9 @@ async def serve_quest_session(
                 **run_kwargs,
             )
             coordinator.note_yield()  # run_quest returned -> the run has yielded
-            prompt = _hold_prompt(result, coordinator, is_script=_paused_is_script())
+            prompt = _hold_prompt(
+                result, coordinator, is_script=_paused_is_script(),
+                log=quest.event_log())
         return result
 
     # Snapshot crash liveness BEFORE acquire(): ProjectLock.acquire() overwrites

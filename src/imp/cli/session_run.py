@@ -68,6 +68,9 @@ async def run_session_client(
         if _should_run_ctrl_d_reader(non_interactive=non_interactive):
             from imp.cli.signals import CtrlDReader
             await tg.start(CtrlDReader(coord).run)
+        if not non_interactive:
+            # Interactive tty only; headless never registers it so the ack no-ops.
+            coord.set_ack_hook(driver.show_stop_ack)
         if status is not None:
             tg.start_soon(status.tick)
         driver.install_startup_status()
