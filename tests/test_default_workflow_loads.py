@@ -81,7 +81,7 @@ def test_no_orphan_agent_files() -> None:
     # Agents invoked programmatically outside the workflow graph (e.g. imp init's
     # detached pythonpath detector, run via run_detached_agent) are legitimately
     # unreferenced by any step or subagent — exclude them from the orphan check.
-    OUT_OF_WORKFLOW = {"init-pythonpath"}
+    OUT_OF_WORKFLOW = {"init-pythonpath", "init-conversation"}
     on_disk = {p.stem for p in (bundled_workflow_dir("default") / "agents").glob("*.md")}
     on_disk -= OUT_OF_WORKFLOW
     assert on_disk == referenced, (
