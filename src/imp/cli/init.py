@@ -27,7 +27,12 @@ from typing import Any
 
 import yaml
 
-from imp.assets import resolve_workflow_dir
+from imp.agents.interactive import (
+    InteractiveResult,
+    run_interactive_agent_sync,
+)
+from imp.assets import available_workflow_names, resolve_workflow_dir
+from imp.cli.prompt import Prompt
 from imp.cli.pythonpath_detect import (
     DetectedRoots,
     DetectionFailed,
@@ -43,6 +48,7 @@ from imp.cli.verify_detect import (
     resolve_test_cmd_choice,
 )
 from imp.engine import worktree
+from imp.engine.loader import parse_agent_file
 from imp.engine.sandbox import SandboxConfig, sandbox_available
 from imp.remote.drivers import REGISTRY
 
@@ -502,6 +508,76 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     _write_memory_scaffold(imp_dir)
     _ensure_imp_gitignore(project_root)
     return _commit_init_files(project_root)
+
+
+def _workflow_choices(project_root: Path) -> list[tuple[str, str]]:
+    """(name, description) for every available workflow — the agent's context for
+    framing the default-workflow choice. The description is the FIRST line of each
+    workflow.yaml `description:` block (the pipeline summary): the bundled blocks
+    are multi-paragraph, so taking one line keeps the kickoff compact and free of
+    mid-line newlines. Empty when absent."""
+    out: list[tuple[str, str]] = []
+    for name in available_workflow_names(project_root):
+        wf_yaml = resolve_workflow_dir(project_root, name) / "workflow.yaml"
+        desc = ""
+        if wf_yaml.is_file():
+            data = yaml.safe_load(wf_yaml.read_text()) or {}
+            raw = str(data.get("description", "")).strip()
+            desc = raw.splitlines()[0].strip() if raw else ""
+        out.append((name, desc))
+    return out
+
+
+def _build_init_kickoff(
+    *,
+    workflows: list[tuple[str, str]],
+    base_hint: str | None,
+    git_exists: bool,
+) -> str:
+    """The setup-context kickoff message handed to the init-conversation agent."""
+    lines = ["Repository setup context for this conversation:", ""]
+    lines.append("Available workflows (name — description):")
+    for name, desc in workflows:
+        lines.append(f"  {name} — {desc}" if desc else f"  {name}")
+    lines.append("")
+    if git_exists:
+        lines.append("This project is already a git repository.")
+    else:
+        lines.append("This directory is NOT yet a git repository; imp needs one.")
+    if base_hint:
+        lines.append(
+            f"The repository's default integration branch appears to be `{base_hint}`.")
+    else:
+        lines.append("No default integration branch could be detected from git.")
+    lines.append("")
+    lines.append("Begin the setup conversation now.")
+    return "\n".join(lines)
+
+
+def _run_init_conversation(
+    *,
+    project_root: Path,
+    workflow_dir: Path,
+    provider_name: str,
+    model_name: str,
+    allow_unsandboxed: bool,
+    color: bool,
+    output_fn: Callable[[str], None],
+) -> InteractiveResult:
+    """Default conversation seam: run the read-only init-conversation agent in the
+    foreground host and return its InteractiveResult. Tests monkeypatch this."""
+    agent_def = parse_agent_file(workflow_dir / "agents" / "init-conversation.md")
+    kickoff = _build_init_kickoff(
+        workflows=_workflow_choices(project_root),
+        base_hint=worktree.origin_head_branch(project_root),
+        git_exists=_in_git_repo(project_root))
+    reader = Prompt(color=color).ask_async
+    return run_interactive_agent_sync(
+        agent_def=agent_def, provider_name=provider_name, model_name=model_name,
+        initial_message=kickoff, project_root=project_root,
+        workflow_dir=workflow_dir,
+        sandbox_cfg=SandboxConfig(allow_unsandboxed=allow_unsandboxed),
+        read_line=reader, output_fn=output_fn, color=color, title="imp setup")
 
 
 def run_init(
