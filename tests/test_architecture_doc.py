@@ -58,23 +58,23 @@ def test_imp_operator_notes_names_quest_concept() -> None:
     assert ".imp/changes/" not in text
 
 
-def test_architecture_documents_the_light_workflow() -> None:
+def test_architecture_documents_the_minimal_workflow() -> None:
     text = ARCH.read_text()
     low = text.lower()
-    assert "## Light workflow" in text
-    assert "src/imp/assets/workflows/light/" in text
+    assert "## Minimal workflow" in text
+    assert "src/imp/assets/workflows/minimal/" in text
     # forks a worktree on imp/<id>, no plan, no merge
     assert "no merge" in low
     # the three steps
     for step in ("front-door", "implement", "review"):
         assert step in text
-    light_section = text.split("## Light workflow", 1)[1]
-    low_section = light_section.lower()
+    minimal_section = text.split("## Minimal workflow", 1)[1]
+    low_section = minimal_section.lower()
     # the read-only reviewer diffs the fork point; the branch is kept on completion
     assert "worktree" in low_section
     assert "read-only" in low_section
-    assert "cur_base_head" in light_section
-    assert "imp/<id>" in light_section
+    assert "cur_base_head" in minimal_section
+    assert "imp/<id>" in minimal_section
     # stale in-place / capture-base / base_head claims are gone
     assert "capture-base" not in text
     assert "no worktree is forked" not in text

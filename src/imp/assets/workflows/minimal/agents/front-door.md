@@ -11,7 +11,7 @@ output:
 
 ## Going live (forking a worktree)
 
-This is the **light** workflow: no plan is written and no merge happens. Going live forks
+This is the **minimal** workflow: no plan is written and no merge happens. Going live forks
 an isolated worktree on `imp/{{ quest.id }}`; the change is built and committed there,
 leaving the commits on that branch for the user to integrate manually. When the user
 wants to build, do these in one turn:
