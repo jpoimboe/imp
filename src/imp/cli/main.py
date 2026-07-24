@@ -911,10 +911,13 @@ async def _run_cleared_session(
                         editing_mode=_editing_mode(control), color=color, quest=quest)
         # A `/model` typed at this reopened prompt lands here; empty when none.
         cleared_model_sink: dict[str, str] = {}
+        # A `/sandbox off|on` typed at this reopened prompt lands here; empty when none.
+        cleared_sandbox_sink: dict[str, bool] = {}
         try:
             reply = await _read_intent_line(
                 prompt, quest, color=color, width=_term_width(),
-                model_sink=cleared_model_sink)
+                model_sink=cleared_model_sink,
+                sandbox_sink=cleared_sandbox_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -1259,6 +1262,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     header_printed = False
     # A `/model` typed at the opening prompt lands here; empty when none was typed.
     opening_model_sink: dict[str, str] = {}
+    # A `/sandbox off|on` typed at the opening prompt lands here; empty when none.
+    opening_sandbox_sink: dict[str, bool] = {}
     if show_opening_prompt:
         try:
             async with prompt_sigint_guard():
@@ -1266,7 +1271,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                     quest, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),
                     editing_mode=_editing_mode(control),
-                    model_sink=opening_model_sink)
+                    model_sink=opening_model_sink,
+                    sandbox_sink=opening_sandbox_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
