@@ -2119,7 +2119,7 @@ class ClaudeCodeProvider:
 TIER_DEFAULTS: dict[str, str] = {
     "low": "claude-haiku-4-5",
     "medium": "claude-sonnet-4-6",
-    "high": "claude-opus-4-8[1m]",
+    "high": "claude-opus-5[1m]",
 }
 ENV_VAR: str | None = None  # CLI-authenticated (claude login); no env var
 
