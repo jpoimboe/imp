@@ -2529,3 +2529,117 @@ async def test_agent_step_hold_empty_reply_continues_without_interject(
         assert drained["v"] is None        # empty was never enqueued as an interject
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+def test_interrupt_gate_already_emitted_detects_inline_gate(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    assert daemon._interrupt_gate_already_emitted(log) is True
+
+
+def test_interrupt_gate_not_emitted_after_resume(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="workflow_resumed", payload={})
+    assert daemon._interrupt_gate_already_emitted(log) is False
+
+
+def test_interrupt_gate_ignores_non_interrupt_awaiting(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": "", "interrupt": False})
+    assert daemon._interrupt_gate_already_emitted(log) is False
+
+
+def test_interrupt_gate_resolved_by_continuation_is_not_open(
+    tmp_path: Path,
+) -> None:
+    # The Major-2 case: a cooperative inline steer was ANSWERED (delivering a
+    # continuation event, exactly as deliver_continuation_reply does), the run
+    # continued, then a fresh mid-generation hard-kill paused it. The stale gate
+    # must NOT count as open, or the daemon would suppress the real hard-kill gate
+    # and re-strand the user.
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="user_message",
+               payload={"text": "go north", "subtype": "reply"})
+    log.append(agent_id=None, type="workflow_paused",
+               payload={"reason": "interrupt"})
+    assert daemon._interrupt_gate_already_emitted(log) is False
+
+
+def test_hold_prompt_suppressed_when_inline_gate_already_emitted(
+    tmp_path: Path,
+) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    # Case B (cooperative detach): the inline gate is the newest event before
+    # this pause's own workflow_paused teardown -> still open -> suppress.
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="workflow_paused",
+               payload={"reason": "interrupt"})
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert daemon._hold_prompt(RunResult.PAUSED, coord, log=log) is None
+
+
+def test_hold_prompt_posts_when_no_inline_gate(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert (daemon._hold_prompt(RunResult.PAUSED, coord, log=log)
+            == daemon._RESUME_INTERRUPTED_PROMPT)
+
+
+def test_hold_prompt_posts_after_gate_resolved_by_continuation(
+    tmp_path: Path,
+) -> None:
+    # Case C (Major-2 regression guard): an older inline gate was answered
+    # (continuation delivered) and the run then hard-killed. The daemon MUST post
+    # the interrupt gate — suppressing it would re-strand the user.
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
+    log.append(agent_id=None, type="awaiting_user_input",
+               payload={"steer_hint": INTERRUPT_STEER_HINT, "interrupt": True})
+    log.append(agent_id=None, type="user_message",
+               payload={"text": "go north", "subtype": "reply"})
+    log.append(agent_id=None, type="workflow_paused",
+               payload={"reason": "interrupt"})
+    coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
+    assert (daemon._hold_prompt(RunResult.PAUSED, coord, log=log)
+            == daemon._RESUME_INTERRUPTED_PROMPT)
