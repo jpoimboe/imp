@@ -511,3 +511,48 @@ def test_non_python_project_skips_detection_and_writes_hint(tmp_path, monkeypatc
     text = (tmp_path / "imp" / "project.yaml").read_text()
     assert yaml.safe_load(text).get("pythonpath") is None
     assert "# pythonpath:" in text
+
+
+def test_write_init_files_renders_project_yaml_from_settings(tmp_path: Path) -> None:
+    from imp.cli.init import InitSettings, write_init_files
+    (tmp_path / "src").mkdir()
+    settings = InitSettings(
+        default_workflow="light",
+        default_base="develop",
+        test_cmd_fast="make check",
+        pythonpath=["src"],
+    )
+    committed = write_init_files(tmp_path, settings)
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["default-workflow"] == "light"
+    assert data["default-base"] == "develop"
+    assert data["vars"] == {}
+    assert data["test_cmd_fast"] == "make check"
+    assert data["pythonpath"] == ["src"]
+    # Memory scaffold written; commit created for a fresh tree.
+    assert (tmp_path / "imp" / "memory" / "all.md").is_file()
+    assert committed is True
+
+
+def test_write_init_files_omits_test_block_when_none(tmp_path: Path) -> None:
+    from imp.cli.init import InitSettings, write_init_files
+    write_init_files(
+        tmp_path,
+        InitSettings(default_workflow="default", default_base="main",
+                     test_cmd_fast=None, pythonpath=[]),
+    )
+    text = (tmp_path / "imp" / "project.yaml").read_text()
+    assert "test_cmd_fast" not in text          # None => block omitted entirely
+    assert "# pythonpath:" in text              # empty roots => teaching hint
+    assert ".imp/" in (tmp_path / ".gitignore").read_text()
+
+
+def test_write_init_files_writes_optout_block_for_empty_string(tmp_path: Path) -> None:
+    from imp.cli.init import InitSettings, write_init_files
+    write_init_files(
+        tmp_path,
+        InitSettings(default_workflow="default", default_base="main",
+                     test_cmd_fast="", pythonpath=[]),
+    )
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["test_cmd_fast"] == ""          # "" => explicit opt-out block written

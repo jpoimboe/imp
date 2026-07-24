@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,15 @@ class GitSetupDeclined(Exception):
 class IntegrationBranchUnresolved(Exception):
     """imp init needs an integration branch but couldn't determine one — the
     prompt couldn't read input (non-TTY / EOF), or no branch was resolvable."""
+
+
+@dataclass(frozen=True, slots=True)
+class InitSettings:
+    """The settings the shared writer serializes into imp/project.yaml."""
+    default_workflow: str
+    default_base: str
+    test_cmd_fast: str | None  # None omits the block; "" writes an explicit opt-out
+    pythonpath: list[str]      # validated roots; empty writes the teaching hint
 
 
 def _in_git_repo(project_root: Path) -> bool:
@@ -216,14 +226,22 @@ def _default_detect_theme() -> str:
         return "ansi"
 
 
-def _build_project_config(default_base: str) -> dict[str, Any]:
-    """The committed imp/project.yaml: workflow ref + the resolved integration
+def _ensure_imp_gitignore(project_root: Path) -> None:
+    """Ensure `.imp/` (runtime control-root state) is gitignored; idempotent."""
+    project_gi = project_root / ".gitignore"
+    existing = project_gi.read_text() if project_gi.exists() else ""
+    existing_lines = {ln.strip() for ln in existing.splitlines()}
+    if ".imp/" not in existing_lines:
+        sep = "" if existing.endswith("\n") or not existing else "\n"
+        project_gi.write_text(existing + sep + "\n# imp\n.imp/\n")
+
+
+def _build_project_config(default_workflow: str, default_base: str) -> dict[str, Any]:
+    """The committed imp/project.yaml body: chosen workflow + resolved integration
     branch + empty vars. No bindings (the provider-code floor supplies tiers);
-    no theme (user-homed). `default-base` is always written now — `imp init`
-    resolves it up front (detect / ask / error), so `imp new` consumes it
-    directly with no runtime fallback."""
+    no theme (user-homed)."""
     return {
-        "default-workflow": _DEFAULT_WORKFLOW,
+        "default-workflow": default_workflow,
         "default-base": default_base,
         "vars": {},
     }
@@ -282,6 +300,22 @@ def _bootstrap_user_config(
         + "editing_mode: emacs  # emacs | vi\n"
         + sandbox_block
         + _remote_hint())
+
+
+_TEST_CMD_FAST_COMMENT = (
+    "\n# Fast test gate: lint + typecheck + fast tests, run after each\n"
+    "# implement loop to catch regressions. Empty string opts out.\n"
+    "# The slow gate (test_cmd_slow) runs the full suite once per quest\n"
+    "# and falls back to test_cmd_fast when unset. Timeouts default to\n"
+    "# 120s (fast) / 300s (slow) — override with test_cmd_fast_timeout /\n"
+    "# test_cmd_slow_timeout.\n"
+)
+
+_PYTHONPATH_BLOCK_COMMENT = (
+    "\n# Worktree-relative import roots prepended to gate/agent\n"
+    "# subprocess PYTHONPATH, so an editable-installed package resolves\n"
+    "# to the worktree under test, not the stale main checkout.\n"
+)
 
 
 def _facts_hint() -> str:
@@ -429,6 +463,32 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     return list(app.run())
 
 
+def write_init_files(project_root: Path, settings: InitSettings) -> bool:
+    """Write imp/project.yaml + the memory scaffold from `settings`, ensure `.imp/`
+    is gitignored, and commit the init files. Returns True iff a commit was created.
+    Callers ensure the git repo exists first (base resolution needs it)."""
+    imp_dir = project_root / "imp"
+    imp_dir.mkdir(parents=True, exist_ok=True)
+    body = yaml.safe_dump(
+        _build_project_config(settings.default_workflow, settings.default_base),
+        sort_keys=False, default_flow_style=False)
+    if settings.test_cmd_fast is None:
+        test_block = ""
+    else:
+        test_block = (
+            _TEST_CMD_FAST_COMMENT + format_test_cmd_fast_yaml(settings.test_cmd_fast))
+    if settings.pythonpath:
+        pythonpath_block = (
+            _PYTHONPATH_BLOCK_COMMENT + format_pythonpath_yaml(settings.pythonpath))
+    else:
+        pythonpath_block = _pythonpath_hint()
+    (imp_dir / "project.yaml").write_text(
+        body + test_block + pythonpath_block + _facts_hint())
+    _write_memory_scaffold(imp_dir)
+    _ensure_imp_gitignore(project_root)
+    return _commit_init_files(project_root)
+
+
 def run_init(
     project_root: Path,
     *,
@@ -569,62 +629,39 @@ def run_init(
         detected_roots = outcome.roots
 
     # --- committed project file (idempotent: never overwrite an existing one) ---
+    committed = False
     if not already_initialized:
         default_base = _resolve_init_base(
             project_root, git_created=git_created, input_fn=input_fn)
         output_fn(f"Integration branch: {default_base}")
-        imp_dir.mkdir(parents=True, exist_ok=True)
-        body = yaml.safe_dump(
-            _build_project_config(default_base),
-            sort_keys=False, default_flow_style=False)
         detect_cmd = detect_verify_fn or detect_test_command
         suggested = detect_cmd(project_root)
-        test_block = ""
+        test_cmd_fast: str | None = None
         if suggested is not None:
-            chosen = resolve_test_cmd_choice(suggested, input_fn, output_fn)
-            test_block = (
-                "\n# Fast test gate: lint + typecheck + fast tests, run after each\n"
-                "# implement loop to catch regressions. Empty string opts out.\n"
-                "# The slow gate (test_cmd_slow) runs the full suite once per quest\n"
-                "# and falls back to test_cmd_fast when unset. Timeouts default to\n"
-                "# 120s (fast) / 300s (slow) — override with test_cmd_fast_timeout /\n"
-                "# test_cmd_slow_timeout.\n"
-                + format_test_cmd_fast_yaml(chosen)
-            )
-        if detected_roots:
-            pythonpath_block = (
-                "\n# Worktree-relative import roots prepended to gate/agent\n"
-                "# subprocess PYTHONPATH, so an editable-installed package resolves\n"
-                "# to the worktree under test, not the stale main checkout.\n"
-                + format_pythonpath_yaml(detected_roots)
-            )
-            output_fn(f"Set pythonpath: {detected_roots} in imp/project.yaml.")
+            test_cmd_fast = resolve_test_cmd_choice(suggested, input_fn, output_fn)
+        pythonpath = detected_roots or []
+        if pythonpath:
+            output_fn(f"Set pythonpath: {pythonpath} in imp/project.yaml.")
             output_fn(
                 "Review your configuration with `imp config`; edit "
                 "imp/project.yaml to change it.")
-        else:
-            pythonpath_block = _pythonpath_hint()
-            if run_gate:
-                output_fn(
-                    "No installable Python package detected — leaving pythonpath "
-                    "unset.")
-        project_file.write_text(
-            body + test_block + pythonpath_block + _facts_hint())
-        _write_memory_scaffold(imp_dir)
+        elif run_gate:
+            output_fn(
+                "No installable Python package detected — leaving pythonpath "
+                "unset.")
+        settings = InitSettings(
+            default_workflow=_DEFAULT_WORKFLOW, default_base=default_base,
+            test_cmd_fast=test_cmd_fast, pythonpath=pythonpath)
+        committed = write_init_files(project_root, settings)
 
     # --- bootstrap user config (only if the machine still has none) ---
     if wrote_user_config:
         _bootstrap_user_config(user_path, providers, theme, allow_unsandboxed=False)
 
-    # --- ensure .imp/ is gitignored (control-root state lives there) ---
-    project_gi = project_root / ".gitignore"
-    existing = project_gi.read_text() if project_gi.exists() else ""
-    existing_lines = {ln.strip() for ln in existing.splitlines()}
-    if ".imp/" not in existing_lines:
-        sep = "" if existing.endswith("\n") or not existing else "\n"
-        project_gi.write_text(existing + sep + "\n# imp\n.imp/\n")
-
-    committed = _commit_init_files(project_root)
+    # --- re-init tail: ensure gitignore + commit for an already-initialized clone ---
+    if already_initialized:
+        _ensure_imp_gitignore(project_root)
+        committed = _commit_init_files(project_root)
 
     output_fn("")
     if already_initialized:
