@@ -1860,6 +1860,71 @@ def test_main_forwards_model_to_serve(
 
 
 @pytest.mark.anyio
+async def test_serve_threads_opening_unsandboxed_to_run_fn(tmp_path) -> None:
+    from imp.engine.executor import RunResult
+    from imp.remote.session.daemon import serve_quest_session
+
+    captured: dict[str, object] = {}
+
+    async def _run_fn(quest, **kw):
+        captured.update(kw)
+        return RunResult.COMPLETED
+
+    await serve_quest_session(
+        _make_quest(tmp_path, "2026-07-10-unsbx"), run_fn=_run_fn, hibernate=False,
+        opening_unsandboxed=True)
+    assert captured["opening_unsandboxed"] is True
+
+
+@pytest.mark.anyio
+async def test_serve_omits_opening_unsandboxed_when_false(tmp_path) -> None:
+    from imp.engine.executor import RunResult
+    from imp.remote.session.daemon import serve_quest_session
+
+    captured: dict[str, object] = {}
+
+    async def _run_fn(quest, **kw):
+        captured.update(kw)
+        return RunResult.COMPLETED
+
+    await serve_quest_session(
+        _make_quest(tmp_path, "2026-07-10-sbx"), run_fn=_run_fn, hibernate=False)
+    assert "opening_unsandboxed" not in captured
+
+
+def test_main_forwards_unsandboxed_to_serve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = SimpleNamespace(quest_dir=tmp_path)
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, quest_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--quest-id", "2026-07-10-unsbx",
+        "--unsandboxed",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_quest_session
+    assert fn.keywords.get("opening_unsandboxed") is True
+
+
+@pytest.mark.anyio
 async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-svr")
     sock = str(session_socket_path(quest.id))

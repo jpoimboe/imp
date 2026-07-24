@@ -115,6 +115,7 @@ async def serve_quest_session(
     autonomous: bool = False,
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
     model: str | None = None,
+    opening_unsandboxed: bool = False,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_quest's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -169,6 +170,8 @@ async def serve_quest_session(
             run_kwargs["autonomous"] = True
         if model is not None:
             run_kwargs["opening_model"] = model
+        if opening_unsandboxed:
+            run_kwargs["opening_unsandboxed"] = True
         if (resume_target in ("prompt-interrupted", "prompt-paused")
                 and not (non_interactive or autonomous)):
             # Resume back to the resteer hold prompt the user left from, before
@@ -336,6 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
     parser.add_argument("--model", default=None)
+    parser.add_argument("--unsandboxed", action="store_true")
     ns = parser.parse_args(argv)
     warm_module_graph()
     try:
@@ -356,6 +360,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["autonomous"] = True
     if ns.model is not None:
         kwargs["model"] = ns.model
+    if ns.unsandboxed:
+        kwargs["opening_unsandboxed"] = True
     try:
         if kwargs:
             result = anyio.run(functools.partial(serve_quest_session, quest, **kwargs))
