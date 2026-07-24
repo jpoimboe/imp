@@ -5,7 +5,7 @@ from imp.engine.loader import load_workflow
 
 
 def _body() -> str:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return wf.agents["plan-reviewer"].prompt_template_source
 
 
@@ -26,7 +26,7 @@ def test_plan_reviewer_references_canonical_rubric() -> None:
 
 
 def test_canonical_rubric_carries_two_major_sharpenings() -> None:
-    partial = (bundled_workflow_dir("imp") / "partials" / "severity.md").read_text().lower()
+    partial = (bundled_workflow_dir("default") / "partials" / "severity.md").read_text().lower()
     assert "non-trivial risk" in partial        # probabilistic defects are Major
     assert "behavioral impact" in partial and "not file type" in partial
 

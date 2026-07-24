@@ -9,7 +9,7 @@ from imp.assets import bundled_workflow_dir
 
 
 def test_commit_verify_scripts_exist() -> None:
-    scripts = bundled_workflow_dir("imp") / "scripts"
+    scripts = bundled_workflow_dir("default") / "scripts"
     for name in ("spec-commit-verify.sh", "plan-commit-verify.sh"):
         p = scripts / name
         assert p.exists(), f"missing script: {p}"

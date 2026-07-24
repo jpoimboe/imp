@@ -67,10 +67,10 @@ def test_paused_record_remaps_to_shelved(tmp_path: Path) -> None:
     assert _index_status(tmp_path, "rm-p") == "shelved"
 
 
-def test_marker_reads_four_after_migration(tmp_path: Path) -> None:
+def test_marker_reads_five_after_migration(tmp_path: Path) -> None:
     _seed_pre_migration_record(tmp_path, "rm-m", "completed")
     archive.ensure_current(tmp_path)
-    assert archive.data_version_path(tmp_path).read_text().strip() == "4"
+    assert archive.data_version_path(tmp_path).read_text().strip() == "5"
 
 
 def test_remap_is_idempotent_on_already_merged(tmp_path: Path) -> None:

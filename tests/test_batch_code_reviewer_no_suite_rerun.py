@@ -1,6 +1,6 @@
 from pathlib import Path
 
-WF = Path("src/imp/assets/workflows/imp")
+WF = Path("src/imp/assets/workflows/default")
 
 
 def test_batch_code_reviewer_no_redundant_suite_rerun() -> None:

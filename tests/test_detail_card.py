@@ -550,3 +550,23 @@ def test_quest_card_shows_merged_for_archived_quest(tmp_path: Path) -> None:
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
     assert "merged" in status_line          # archived merged quest -> display word is merged
     assert "completed" not in status_line    # raw internal word not shown
+
+
+def test_quest_card_shows_done_for_archived_no_merge_quest(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    events = tmp_path / "arcd.jsonl"
+    events.write_text("")
+    quest_json = tmp_path / "arcd.quest.json"
+    quest_json.write_text(json.dumps({
+        "id": "2026-06-20-done1", "title": "Archived done", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "arcd.state.json"
+    state_json.write_text(json.dumps({
+        "id": "2026-06-20-done1", "status": "done", "step": None}))
+    archive.archive_quest(
+        tmp_path, "2026-06-20-done1", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-done1", now=_NOW, color=False))
+    status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
+    assert "done" in status_line
+    assert "merged" not in status_line

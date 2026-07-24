@@ -4,7 +4,7 @@ from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.types import Continue, Goto, Pause
 
-WF = Path("src/imp/assets/workflows/imp").resolve()
+WF = Path("src/imp/assets/workflows/default").resolve()
 
 
 def _phase(wf, name):

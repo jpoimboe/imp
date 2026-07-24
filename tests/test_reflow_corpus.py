@@ -9,7 +9,7 @@ from imp.agents.prompts import build_context, render_prompt
 from imp.agents.reflow import reflow_markdown
 from imp.engine.state import JsonlEventLog
 
-_ASSET = Path("src/imp/assets/workflows/imp")
+_ASSET = Path("src/imp/assets/workflows/default")
 
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _ATX = re.compile(r"^\s*#{1,6}\s")
@@ -44,7 +44,10 @@ def _table_rows(text: str) -> int:
 
 
 def _md_assets() -> list[Path]:
-    return sorted(_ASSET.glob("**/*.md"))
+    return sorted([
+        *_ASSET.glob("**/*.md"),
+        *Path("src/imp/assets/partials").glob("**/*.md"),
+    ])
 
 
 @pytest.mark.parametrize("path", _md_assets(), ids=lambda p: p.name)
@@ -70,7 +73,7 @@ def test_reflow_folds_wrapped_lines_in_rendered_coding_stance(tmp_path: Path) ->
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(quest_title="t", event_log=log)
     rendered = render_prompt(
-        (_ASSET / "partials" / "coding-stance.md").read_text(), ctx,
+        (Path("src/imp/assets/partials") / "coding-stance.md").read_text(), ctx,
         workflow_dir=_ASSET)
     out = reflow_markdown(rendered)
     # Structure survives the rendered coding-stance body.

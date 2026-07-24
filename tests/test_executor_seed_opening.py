@@ -167,6 +167,8 @@ async def test_intent_user_message_emitted_from_seed_opening(tmp_path: Path) -> 
     result = await run_quest(quest)
     assert result is RunResult.COMPLETED
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
     assert "user_message" in types
     intent = next(e for e in JsonlEventLog(quest.events_path).read()
@@ -182,6 +184,8 @@ async def test_no_intent_user_message_when_seed_opening_absent_or_empty(tmp_path
     _register_prompt_capturing({"status": "Success"}, [])
     result = await run_quest(quest)
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
     assert "user_message" not in types
 
@@ -191,6 +195,7 @@ async def test_no_intent_user_message_when_seed_opening_absent_or_empty(tmp_path
     _register_prompt_capturing({"status": "Success"}, [])
     result2 = await run_quest(change2)
     assert result2 is RunResult.COMPLETED
+    archive_read.rehydrate_quest(change2.control_root, change2.id)  # home reaped on done
     types2 = [e["type"] for e in JsonlEventLog(change2.events_path).read()]
     assert "user_message" not in types2
 
@@ -212,6 +217,8 @@ async def test_opening_model_seeds_first_agent_step(tmp_path: Path) -> None:
             quest, opening_model="anthropic:claude-fable-5")
         assert result is RunResult.COMPLETED
 
+        from imp.engine.archive import read as archive_read
+        archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
         state = State.load(quest.state_dir)
         assert state.resolved_steps["w"] == ProviderModel(
             "anthropic", "claude-fable-5")

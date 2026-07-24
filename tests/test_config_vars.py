@@ -119,7 +119,7 @@ def test_shipped_workflow_declares_auto_merge_bool_default_true() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
 
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     decls = {d.name: d for d in wf.vars.decls}
     assert "auto_merge" in decls
     assert decls["auto_merge"].type == "bool"
@@ -130,7 +130,7 @@ def test_shipped_auto_merge_override_type_enforced() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
 
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     # A bool override applies over the default...
     out = apply_var_overrides(wf.vars, {"auto_merge": False})
     assert out["auto_merge"] is False

@@ -308,6 +308,8 @@ async def test_retained_lane_resume_does_not_reevict_at_entry(
 
     await run_quest(ch, on_event=_on_event)
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(ch.control_root, ch.id)  # home reaped on done
     assert "lane_evicted" not in _types(ch)           # entry guard did NOT evict
     assert disk_flag_at_dispatch["value"] is False    # cleared + persisted first
     assert State.load(ch.state_dir).lane_retained is False

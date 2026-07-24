@@ -36,6 +36,13 @@ Agent system prompts and partial templates, snapshotted per quest. These carry
 Procedure that must actually reach a running agent lives here — not in a doc that
 would only be read if the agent explicitly loads it.
 
+Workflow-agnostic partials can also ship **bundled and shared**: a
+`src/imp/assets/partials/` pool is overlaid into each quest's `workflow/partials/`
+at snapshot time — the same mechanism that overlays skills. The overlay is
+**local-first**: a workflow's own `partials/<name>.md` wins over a shared partial of
+the same name, so a reusable body (the front-door conversation) lives once in the
+shared pool while any workflow can still override a partial by name.
+
 ---
 
 ## Routing Rule

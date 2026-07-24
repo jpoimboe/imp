@@ -13,7 +13,7 @@ _BASE = {
 
 
 def _rules():
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return {s.name: s for s in wf.flat_steps()}["gap-check"].rules
 
 

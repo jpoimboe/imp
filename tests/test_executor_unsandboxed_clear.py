@@ -41,6 +41,8 @@ async def test_advance_to_different_step_clears_override_and_broadcasts_marker(
     result = await run_quest(quest, on_event=events.append, coordinator=coord)
 
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     # The s1 -> s2 advance retired the override on both substrates.
     assert State.load(quest.state_dir).unsandboxed is False
     assert coord.unsandboxed is False

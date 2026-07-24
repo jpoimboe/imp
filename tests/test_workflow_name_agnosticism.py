@@ -18,7 +18,7 @@ def _src_imp_root() -> Path:
 
 def _distinctive_workflow_names() -> set[str]:
     """Hyphen-containing phase/step/agent identifiers from the imp workflow."""
-    wf_dir = bundled_workflow_dir("imp")
+    wf_dir = bundled_workflow_dir("default")
     doc = yaml.safe_load((wf_dir / "workflow.yaml").read_text(encoding="utf-8"))
     names: set[str] = set()
     for phase in doc.get("phases", []):

@@ -13,12 +13,12 @@ _TIERS_SET = frozenset({"low", "medium", "high"})
 
 
 def _wf():
-    return load_workflow(bundled_workflow_dir("imp"), configured_tiers=_TIERS_SET)
+    return load_workflow(bundled_workflow_dir("default"), configured_tiers=_TIERS_SET)
 
 
 def test_workflow_loads_with_scaffolded_roles() -> None:
     wf = _wf()
-    assert wf.name == "feature"
+    assert wf.name == "default"
     assert [p.name for p in wf.phases] == [
         "threshold", "spec", "plan", "implement", "converge", "integrate"
     ]
@@ -44,7 +44,7 @@ def test_supercycle_back_edges_present() -> None:
 
 
 def test_skills_shipped() -> None:
-    skills = bundled_workflow_dir("imp") / "skills"
+    skills = bundled_workflow_dir("default") / "skills"
     for name in ("test-driven-development", "systematic-debugging",
                  "verification-before-completion", "receiving-code-review"):
         assert load_internal_skill(skills, name).strip(), f"{name} missing/empty"
@@ -82,7 +82,7 @@ def test_no_orphan_agent_files() -> None:
     # detached pythonpath detector, run via run_detached_agent) are legitimately
     # unreferenced by any step or subagent — exclude them from the orphan check.
     OUT_OF_WORKFLOW = {"init-pythonpath"}
-    on_disk = {p.stem for p in (bundled_workflow_dir("imp") / "agents").glob("*.md")}
+    on_disk = {p.stem for p in (bundled_workflow_dir("default") / "agents").glob("*.md")}
     on_disk -= OUT_OF_WORKFLOW
     assert on_disk == referenced, (
         f"orphan agent files: {on_disk - referenced}; "
@@ -114,14 +114,14 @@ def test_finalize_is_high_tier_and_routes_merge_rework_pause() -> None:
 
 
 def test_deleted_merge_vars_absent_and_no_artifacts_paths() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     names = {v.name for v in wf.vars.decls}
     for gone in ("ready_to_merge", "final_review", "integration_needs_review"):
         assert gone not in names, gone
 
 
 def test_no_deleted_var_names_anywhere_in_workflow_assets() -> None:
-    wf_dir = bundled_workflow_dir("imp")
+    wf_dir = bundled_workflow_dir("default")
     banned = ["ready_to_merge", "final_review", "integration_pass",
               "integration_needs_review", "spec_gate_pending", "spec_gate_passed"]
     targets = [wf_dir / "workflow.yaml"]
@@ -134,7 +134,7 @@ def test_no_deleted_var_names_anywhere_in_workflow_assets() -> None:
 
 
 def test_no_agent_prompt_uses_artifacts_namespace() -> None:
-    for md in (bundled_workflow_dir("imp") / "agents").glob("*.md"):
+    for md in (bundled_workflow_dir("default") / "agents").glob("*.md"):
         body = md.read_text()
         assert "{{ artifacts" not in body, md.name
 

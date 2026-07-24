@@ -276,10 +276,11 @@ def _print_warnings_block(messages: list[str]) -> None:
 def _emit_completed(quest: Quest, *, merged: bool,
                     warnings: list[str] | None = None,
                     intent: str | None = None) -> None:
-    """The clean-finish block: a gold `merged into <base>` / `completed` headline on
+    """The clean-finish block: a gold `merged into <base>` / `done · commits on <base>` headline on
     its own line, the identity line, then the warnings block; one trailing blank."""
     color = should_use_color(sys.stdout)
-    head = f"merged into {quest.base_branch}" if merged else "completed"
+    head = (f"merged into {quest.base_branch}" if merged
+            else f"done · commits on {quest.base_branch}")
     for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent):
         print(ln)
     _print_warnings_block(warnings or [])
@@ -1992,7 +1993,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     except ValueError:
         _emit_cli_error(_SINCE_ERROR)
         raise SystemExit(2) from None
-    selected = dispositions or {"active", "backlog", "merged"}
+    selected = dispositions or {"active", "backlog", "merged", "done"}
     lines = _filtered_overview_lines(
         control, dispositions=selected, cutoff=cutoff, now=now, color=color)
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
@@ -2243,7 +2244,7 @@ class _EventTail:
         return events
 
 
-_FOLLOW_TERMINAL = frozenset({"merged", "abandoned", "shelved"})
+_FOLLOW_TERMINAL = frozenset({"merged", "done", "abandoned", "shelved"})
 
 
 def _follow_paused_status(quest_id: str) -> Callable[[int], list[str]]:
@@ -3224,19 +3225,19 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     if args.shelved:
         picked.add("shelved")
     if args.archived:
-        picked |= {"merged", "abandoned", "shelved"}
+        picked |= {"merged", "done", "abandoned", "shelved"}
     return picked
 
 
 def _history_rows(control: Path, *, show_all: bool,
                   live_ids: set[str] | None = None) -> list[_Row]:
-    """History-block rows: merged/abandoned, plus shelved rows under --all."""
+    """History-block rows: merged/done/abandoned, plus shelved rows under --all."""
     rows = [r for r in _completed_rows(control, live_ids)
-            if r[1] in {"merged", "abandoned", "shelved"}]
+            if r[1] in {"merged", "done", "abandoned", "shelved"}]
     if show_all:
         rows += _shelved_rows(control, live_ids)
     else:
-        rows = [r for r in rows if r[1] == "merged"]
+        rows = [r for r in rows if r[1] in {"merged", "done"}]
     return _sort_rows_newest_first(rows)
 
 
@@ -3304,7 +3305,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                             live_ids={r[0] for r in status_rows})
     if not inflight and not backlog_rows and not history:
         return [_NO_QUESTS_MESSAGE]
-    label = "history:" if show_all else "merged:"
+    label = "history:" if show_all else "finished:"
     intents = {d.quest_id: d.intent_title for d in scanned}
     for r in history:
         if not r[4].strip() and r[0] not in intents:
@@ -3340,7 +3341,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                 if "active" in dispositions else [])
     backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
                     if "backlog" in dispositions else [])
-    wanted = dispositions & {"merged", "abandoned", "shelved"}
+    wanted = dispositions & {"merged", "done", "abandoned", "shelved"}
     history_all = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
     history = _sort_rows_newest_first([r for r in history_all if r[1] in wanted])
 
@@ -3384,11 +3385,11 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
     if args.shelved:
         statuses.add("shelved")
     if args.archived:
-        statuses |= {"merged", "abandoned", "shelved"}
+        statuses |= {"merged", "done", "abandoned", "shelved"}
     if args.merged_after is not None:
         statuses.add("merged")
     if not (args.active or args.backlog or statuses):
-        return True, True, {"merged", "abandoned", "shelved"}
+        return True, True, {"merged", "done", "abandoned", "shelved"}
     return args.active, args.backlog, statuses
 
 

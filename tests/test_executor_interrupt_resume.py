@@ -324,7 +324,8 @@ async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -
     r2 = await run_quest(quest)
     assert r2 is RunResult.COMPLETED
     assert runs["n"] == runs_after_round1  # no second agent turn ran
-    assert State.load(quest.state_dir).status == "merged"
+    from imp.engine.archive import read as archive_read
+    assert archive_read.status_of(quest.control_root, quest.id) == "done"
 
 
 @pytest.mark.anyio

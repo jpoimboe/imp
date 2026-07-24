@@ -1335,7 +1335,7 @@ def test_rule_release_parsed_and_non_goto_rejected(tmp_path: Path) -> None:
 def test_task_lead_step_carries_position_label_flag() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     steps = {s.name: s for ph in wf.phases for s in ph.steps}
     assert steps["task-lead"].position_label is True
     # every other step defaults to a plain activity-verb label
@@ -1709,7 +1709,7 @@ def test_release_test_lane_rejected(tmp_path) -> None:
 def test_verify_gates_acquire_test_lane() -> None:
     from imp.assets import bundled_workflow_dir
 
-    imp = {s.name: s for ph in load_workflow(bundled_workflow_dir("imp")).phases
+    imp = {s.name: s for ph in load_workflow(bundled_workflow_dir("default")).phases
            for s in ph.steps}
     for gate in ("verify", "converge-verify", "integration-verify"):
         assert imp[gate].acquire == "test-lane", gate

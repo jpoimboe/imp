@@ -20,7 +20,7 @@ _BASE = {
 
 
 def _steps():
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return {s.name: s for s in wf.flat_steps()}
 
 
@@ -68,10 +68,10 @@ def test_task_loop_and_rework_bypass_plan_finalized() -> None:
 
 
 def test_plan_finalized_agent_prompt_is_gone() -> None:
-    assert not (bundled_workflow_dir("imp") / "agents" / "plan-finalized.md").exists()
+    assert not (bundled_workflow_dir("default") / "agents" / "plan-finalized.md").exists()
 
 
-@pytest.mark.parametrize("workflow", ["imp"])
+@pytest.mark.parametrize("workflow", ["default"])
 def test_plan_finalized_script_counts_highest_plan_and_writes_output(tmp_path, workflow) -> None:
     script = Path(f"src/imp/assets/workflows/{workflow}/scripts/plan-finalized.sh").resolve()
     plans = tmp_path / "artifacts" / "plans"

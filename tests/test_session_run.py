@@ -49,6 +49,12 @@ def test_infer_session_result_completed_when_merged_no_worktree(tmp_path: Path) 
     assert infer_session_result(quest) is RunResult.COMPLETED
 
 
+def test_infer_session_result_completed_when_done_no_worktree(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-doneres")
+    State(id=quest.id, step=None, step_attempt=0, status="done").save(quest.state_dir)
+    assert infer_session_result(quest) is RunResult.COMPLETED
+
+
 def test_infer_session_result_paused_for_parked_draft_no_worktree(tmp_path: Path) -> None:
     # A parked draft: never materialized (no worktree), spec phase paused.
     quest = _make_quest(tmp_path, "2026-06-15-draft")

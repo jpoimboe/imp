@@ -1,4 +1,4 @@
-default-workflow: imp
+default-workflow: default
 default-base: master
 
 # Optional lint-clean gate: a command the implementer runs before each

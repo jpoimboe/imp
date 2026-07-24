@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 
-WF = pathlib.Path("src/imp/assets/workflows/imp")
+WF = pathlib.Path("src/imp/assets/workflows/default")
 INCLUDE = '{% include "partials/verifying-claims.md" %}'
 
 

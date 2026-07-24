@@ -85,6 +85,8 @@ async def test_first_resume_bootstraps_deferred_draft(tmp_path: Path) -> None:
     # The override reached the agent through apply_var_overrides, not backfill.
     assert "n=42" in _task_text(sink[0])
     # The initial seed must not masquerade as a late backfill.
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
     assert "vars_backfilled" not in types
 

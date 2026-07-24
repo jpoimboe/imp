@@ -10,7 +10,7 @@ from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
 
-AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
+AGENTS_DIR = Path("src/imp/assets/workflows/default/agents")
 
 # Subagents (non-interactive, dispatched via `task`): the contract under test.
 SUBAGENT_FILES = ["coder.md", "code-reviewer.md"]
@@ -18,7 +18,7 @@ SUBAGENT_FILES = ["coder.md", "code-reviewer.md"]
 # question is correct for them. Exempt from the no-bare-question rule.
 INTERACTIVE_STEP_FILES = ["threshold.md", "spec-finalizer.md", "finalize.md"]
 
-SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
+SKILLS_DIR = Path("src/imp/assets/workflows/default/skills")
 
 # Falsifiability-hardening guards: each component's edit leaves a marker in a
 # specific file. These are per-(path, marker) pairs spanning skills/ and direct
@@ -99,7 +99,7 @@ def test_subagent_prompt_forbids_turn_ending_question(name: str) -> None:
 
 
 def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
-    body = load_workflow(bundled_workflow_dir("imp")).agents[
+    body = load_workflow(bundled_workflow_dir("default")).agents[
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     # Pasted material arrives as the opening message, so it renders in the seeded
@@ -110,7 +110,7 @@ def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={},
         opening="pasted imp log for change abc"),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "Pasted material" in out
     assert "classification recital" in out
     assert "ending your turn" in out
@@ -518,7 +518,7 @@ def test_integration_prompts_use_recorded_endpoints() -> None:
     assert "cur_base_head" in integ
 
 
-RUBRIC_PARTIAL = Path("src/imp/assets/workflows/imp/partials/severity.md")
+RUBRIC_PARTIAL = Path("src/imp/assets/workflows/default/partials/severity.md")
 RUBRIC_REVIEWERS = [
     "spec-reviewer.md", "plan-reviewer.md", "batch-code-reviewer.md",
     "code-reviewer.md", "integration-review.md",
@@ -569,7 +569,7 @@ def test_committing_agents_carry_no_fixup_outside_change_rule(name: str) -> None
 
 
 HUMAN_DECISION_PARTIAL = Path(
-    "src/imp/assets/workflows/imp/partials/human-decision.md")
+    "src/imp/assets/workflows/default/partials/human-decision.md")
 
 
 def test_human_decision_partial_holds_canonical_bar() -> None:
@@ -628,13 +628,13 @@ def test_reconciler_sources_human_decision_bar() -> None:
 
 
 def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
-    body = load_workflow(bundled_workflow_dir("imp")).agents[
+    body = load_workflow(bundled_workflow_dir("default")).agents[
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     attended = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     # Adoption is the unmarked default: discovered work folds into the current quest.
     assert "## Keep discovered work here by default" in attended
     assert "fold it into this quest" in attended
@@ -657,7 +657,7 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", autonomous=True,
         project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "## Keep discovered work here by default" not in autonomous
     assert "imp new --backlog" not in autonomous
 
@@ -702,7 +702,7 @@ def test_authoring_agent_renders_human_decision_partial(
     name: str, tmp_path: Path,
 ) -> None:
     body = load_workflow(
-        bundled_workflow_dir("imp")).agents[name].prompt_template_source
+        bundled_workflow_dir("default")).agents[name].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     rendered = render_prompt(
         body,
@@ -713,7 +713,7 @@ def test_authoring_agent_renders_human_decision_partial(
             vars={"fast_path": False, "plan_index": 1, "plan_total": 1,
                   "task_total": 1, "integration_fork": "P"},
             project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     # Sentinel lives entirely on one partial line (the canonical sentence wraps
     # across a newline, so assert a within-line substring that survives the wrap).
     assert "never the bar for code quality." in rendered, (
@@ -728,7 +728,7 @@ def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
 
 
 def test_no_prompt_references_transport_non_interactive() -> None:
-    roots = [Path("src/imp/assets/workflows/imp")]
+    roots = [Path("src/imp/assets/workflows/default"), Path("src/imp/assets/partials")]
     offenders = [str(p) for root in roots for p in root.rglob("*.md")
                  if "run.non_interactive" in p.read_text()]
     assert offenders == [], offenders
@@ -749,7 +749,7 @@ def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
     assert "final message reports `NEEDS_CONTEXT` or `BLOCKED`" in text
 
 
-@pytest.mark.parametrize("tree", ["imp", "patent"])
+@pytest.mark.parametrize("tree", ["default", "patent"])
 def test_dispatched_subagents_have_no_schema_or_complete_step(tree: str) -> None:
     wf = load_workflow(bundled_workflow_dir(tree))
     dispatchable: set[str] = set()
@@ -775,7 +775,7 @@ def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None
 def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    for tree in ("imp",):
+    for tree in ("default",):
         wdir = bundled_workflow_dir(tree)
         body = (wdir / "agents" / "finalize.md").read_text()
         assert "run.non_interactive" not in body   # transport flag never leaks
@@ -838,7 +838,7 @@ def test_finalize_tracked_check_merged_after_dimension_is_fork_point_gated(tmp_p
         quest_home=".imp/quests/abc",
         cur_base_head="NEWTIP", orig_base_head="OLDTIP",
         project_facts={}, vars={"auto_merge": True}),
-        workflow_dir=bundled_workflow_dir("imp")).lower()
+        workflow_dir=bundled_workflow_dir("default")).lower()
     # With a fork point, §1a searches the merged-after-fork archive subset.
     assert "imp search --active --backlog --merged-after oldtip -l" in with_fork
 
@@ -847,7 +847,7 @@ def test_finalize_tracked_check_merged_after_dimension_is_fork_point_gated(tmp_p
         quest_home=".imp/quests/abc",
         cur_base_head="X", orig_base_head="",
         project_facts={}, vars={"auto_merge": True}),
-        workflow_dir=bundled_workflow_dir("imp")).lower()
+        workflow_dir=bundled_workflow_dir("default")).lower()
     # No fork point → fall back to the plain active+backlog search, no merged-after dimension.
     assert "imp search --active --backlog -l" in without_fork
     assert "imp search --active --backlog --merged-after" not in without_fork

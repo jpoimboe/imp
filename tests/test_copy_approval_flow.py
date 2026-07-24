@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-WF = Path("src/imp/assets/workflows/imp")
-PARTIALS = WF / "partials"
+WF = Path("src/imp/assets/workflows/default")
+PARTIALS = Path("src/imp/assets/partials")
 AGENTS = WF / "agents"
 
 

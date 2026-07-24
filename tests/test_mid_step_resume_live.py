@@ -31,6 +31,7 @@ from tests._live import (
     anthropic_key,
     openai_key,
     sandbox_sleep_precondition_failed,
+    wait_for_archived_status,
 )
 from tests.conftest import _WORKTREE_SRC, _seed_project
 
@@ -92,26 +93,6 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
         if last.get("status") == "paused":
             return last
         time.sleep(0.1)
-    return last
-
-
-def _wait_for_status(state_path: Path, want: str, timeout: float) -> str:
-    """Poll state.json until status == want (or timeout); return the last status.
-
-    `imp resume` runs the engine in a detached session daemon, so the client can
-    return a beat before the daemon persists the terminal status. Reading
-    state.json once right after the client exits races that write; poll instead.
-    """
-    deadline = time.time() + timeout
-    last = ""
-    while time.time() < deadline:
-        try:
-            last = json.loads(state_path.read_text()).get("status", "")
-        except (OSError, json.JSONDecodeError):
-            last = ""
-        if last == want:
-            return last
-        time.sleep(0.2)
     return last
 
 
@@ -196,7 +177,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
             proc.wait()
 
     # Resume by slug; the minimal workflow never goes live, so it completes as a
-    # draft and state.json reads "merged" from the change home (no journal needed).
+    # done draft — the home is archived and reaped, so read the terminal status
+    # from the archive.
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
@@ -206,8 +188,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         f"resume failed rc={resume.returncode} stdout={resume.stdout} stderr={resume.stderr}"
     )
 
-    final_state = json.loads(state_path.read_text())
-    assert final_state["status"] == "merged"
+    final_status = wait_for_archived_status(tmp_path, slug, "done", 30.0)
+    assert final_status == "done", final_status
 
 
 @pytest.mark.live("openai")
@@ -366,5 +348,5 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
 
-    final_status = _wait_for_status(state_path, "merged", 30.0)
-    assert final_status == "merged", final_status
+    final_status = wait_for_archived_status(tmp_path, slug, "done", 30.0)
+    assert final_status == "done", final_status

@@ -28,12 +28,12 @@ def test_update_step_label_is_opt_in() -> None:
 
 
 def test_task_lead_receives_progress_tools() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "update_step_label" in wf.agents["task-lead"].tools
 
 
 def test_agent_without_allow_tools_lacks_update_step_label() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "update_step_label" not in wf.agents["threshold"].tools
 
 

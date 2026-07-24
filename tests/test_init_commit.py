@@ -71,4 +71,4 @@ def test_commit_includes_memory_scaffolds(tmp_path: Path) -> None:
     _run(tmp_path)
     tracked = _git(tmp_path, "ls-tree", "-r", "--name-only", "HEAD").split()
     assert "imp/memory/all.md" in tracked
-    assert "imp/memory/imp/all.md" in tracked
+    assert "imp/memory/default/all.md" in tracked

@@ -16,14 +16,14 @@ _QUIET = {
 
 
 def test_plumbing_steps_are_quiet() -> None:
-    wf = load_workflow(Path("src/imp/assets/workflows/imp"))
+    wf = load_workflow(Path("src/imp/assets/workflows/default"))
     by_name = {s.name: s for s in wf.flat_steps()}
     for name in _QUIET:
         assert by_name[name].show_label is False, name
 
 
 def test_substantive_steps_stay_loud() -> None:
-    wf = load_workflow(Path("src/imp/assets/workflows/imp"))
+    wf = load_workflow(Path("src/imp/assets/workflows/default"))
     by_name = {s.name: s for s in wf.flat_steps()}
     # agents and the consequential merge step carry real narrative — never quiet.
     for name in ("spec-finalizer", "plan-writer", "task-lead", "spec-reviewer",

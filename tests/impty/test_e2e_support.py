@@ -75,7 +75,7 @@ def test_seed_default_repo_installs_the_real_default_workflow(tmp_path: Path) ->
         tmp_path, script=default_workflow_script("IMP_DOGFOOD_seed01"))
     assert script_path.is_file()
     # The shipped default workflow (with its gate scripts) was copied in.
-    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf = tmp_path / "imp" / "workflows" / "default"
     assert (wf / "workflow.yaml").is_file()
     assert (wf / "scripts" / "cleanup.sh").is_file()
     assert (wf / "scripts" / "run-verify.sh").is_file()

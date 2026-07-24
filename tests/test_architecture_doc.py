@@ -58,6 +58,46 @@ def test_imp_operator_notes_names_quest_concept() -> None:
     assert ".imp/changes/" not in text
 
 
+def test_architecture_documents_the_light_workflow() -> None:
+    text = ARCH.read_text()
+    low = text.lower()
+    assert "## Light workflow" in text
+    assert "src/imp/assets/workflows/light/" in text
+    # in-place on the current branch: no worktree, no plan, no merge
+    assert "in-place" in low
+    assert "no worktree is forked" in text
+    assert "no merge occurs" in text
+    # the three steps
+    for step in ("front-door", "implement", "review"):
+        assert step in text
+    # the read-only reviewer diffs the commits; capture-base records the diff base
+    light_section = text.split("## Light workflow", 1)[1].lower()
+    assert "read-only" in light_section
+    assert "capture-base" in text
+
+
+def test_architecture_documents_the_done_terminal_status() -> None:
+    text = ARCH.read_text()
+    assert "terminal status" in text
+    assert "`done`" in text
+    # a no-merge completion is archived, not merged
+    assert "archived" in text.lower()
+
+
+def test_architecture_documents_the_shared_partials_overlay() -> None:
+    text = ARCH.read_text()
+    low = text.lower()
+    assert "assets/partials/" in text
+    assert "overlaid" in low
+    assert "local-first" in low
+
+
+def test_architecture_notes_the_workflow_memory_rename() -> None:
+    text = ARCH.read_text()
+    assert "imp/memory/default/" in text
+    assert "imp/memory/imp/" in text
+
+
 def test_docs_reorg_moved_all_eight_with_no_stale_root_copy() -> None:
     moved = {
         "docs/what-is-imp.md": "docs/guide/what-is-imp.md",

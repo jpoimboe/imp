@@ -18,7 +18,8 @@ def _dead_pid() -> int:
 
 def test_persisted_status_set_is_at_rest_only() -> None:
     assert set(get_args(Status)) == {
-        "new", "paused", "merge_blocked", "merged", "shelved", "abandoned", "error"
+        "new", "paused", "merge_blocked", "merged", "done", "shelved", "abandoned",
+        "error",
     }
 
 

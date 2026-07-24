@@ -16,7 +16,7 @@ import os
 import subprocess
 from pathlib import Path
 
-CLEANUP = Path("src/imp/assets/workflows/imp/scripts/cleanup.sh").resolve()
+CLEANUP = Path("src/imp/assets/workflows/default/scripts/cleanup.sh").resolve()
 ID = "2026-06-20-cleanup-test"
 
 

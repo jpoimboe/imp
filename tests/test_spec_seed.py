@@ -162,13 +162,13 @@ def test_resolve_both_positional_and_message_raises() -> None:
 
 
 def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
-    body = load_workflow(bundled_workflow_dir("imp")).agents[
+    body = load_workflow(bundled_workflow_dir("default")).agents[
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     # Rendered with no opening -> the unseeded (bare-open) branch, no <imp:begin/>.
     assert "<imp:begin/>" not in out
     assert "Open by asking" in out
@@ -177,19 +177,19 @@ def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={},
         opening="wire up telemetry"),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "wire up telemetry" in seeded
     assert "Open by asking" not in seeded
 
 
 def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
-    body = load_workflow(bundled_workflow_dir("imp")).agents[
+    body = load_workflow(bundled_workflow_dir("default")).agents[
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     # Unseeded render -> the bare-open branch. The seeded branch no longer uses
     # "verbatim opening intent" wording; it is titled "Opening message in hand".
     assert "verbatim opening intent" not in out
@@ -199,7 +199,7 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={},
         opening="wire up telemetry"),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "Opening message in hand" in seeded     # seeded branch title
     assert "wire up telemetry" in seeded          # ...and the verbatim opening
     # No spec is inlined into the prompt; the user names a spec file threshold reads.
@@ -208,13 +208,13 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
 
 
 def test_threshold_prompt_has_read_and_verify_section(tmp_path) -> None:
-    body = load_workflow(bundled_workflow_dir("imp")).agents[
+    body = load_workflow(bundled_workflow_dir("default")).agents[
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     # The seeded/adopt marker is gone; a named spec is read and verified instead.
     assert "Reading a referenced spec file" in out
     assert "Implement this spec" not in out

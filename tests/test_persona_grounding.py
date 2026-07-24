@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-PERSONA = Path("src/imp/assets/workflows/imp/partials/coding-stance.md")
+PERSONA = Path("src/imp/assets/partials/coding-stance.md")
 
 
 def _doing_tasks_first_bullet() -> str:

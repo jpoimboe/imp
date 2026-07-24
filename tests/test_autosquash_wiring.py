@@ -9,7 +9,7 @@ from pathlib import Path
 from imp.engine.loader import load_workflow
 from imp.engine.types import Continue, Goto
 
-WF_DIR = Path("src/imp/assets/workflows/imp")
+WF_DIR = Path("src/imp/assets/workflows/default")
 
 
 def _wf():

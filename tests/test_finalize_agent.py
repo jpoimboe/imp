@@ -1,6 +1,6 @@
 from pathlib import Path
 
-WF = Path("src/imp/assets/workflows/imp")
+WF = Path("src/imp/assets/workflows/default")
 
 
 def test_finalize_no_longer_reviews_integration_resolution() -> None:
@@ -53,7 +53,7 @@ def _render_finalize(tmp_path: Path, *, auto_merge: bool, autonomous: bool) -> s
     from imp.assets import bundled_workflow_dir
     from imp.engine.state import JsonlEventLog
 
-    wf_dir = bundled_workflow_dir("imp")
+    wf_dir = bundled_workflow_dir("default")
     body = (wf_dir / "agents" / "finalize.md").read_text()
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(

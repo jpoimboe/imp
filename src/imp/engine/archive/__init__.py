@@ -150,10 +150,10 @@ def _read_user_version(control_root: Path) -> int:
         conn.close()
 
 
-# blob schema versions: 4 == final_state.resume_target `prompt` split;
-# 3 == final_state.status realigned; 2 == started_at backfilled; 1 == triad;
-# absent == pre-triad
-_DATA_VERSION = 4
+# blob schema versions: 5 == quest_meta.workflow rename imp->default;
+# 4 == final_state.resume_target `prompt` split; 3 == final_state.status
+# realigned; 2 == started_at backfilled; 1 == triad; absent == pre-triad
+_DATA_VERSION = 5
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -199,6 +199,7 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     ts → else created_at). Also remap each record's final_state.status to the realigned
     vocabulary (completed->merged, paused->shelved), and remap each record's
     final_state.resume_target `prompt` -> `prompt-paused` (the pre-split tell).
+    Also rewrite each record's quest_meta.workflow "imp"->"default".
     Rebuilds the index once so its derived columns match, then stamps the data-version
     marker. A triad blob is left untouched (migrate_events is a no-op on it); old blobs
     orphan harmlessly (nothing GCs blobs)."""
@@ -235,6 +236,11 @@ def _migrate_archive_blobs(control_root: Path) -> None:
             if final_state.get("resume_target") == "prompt":
                 final_state["resume_target"] = "prompt-paused"
                 rec["final_state"] = final_state
+                dirty = True
+            quest_meta = rec.get("quest_meta") or {}
+            if quest_meta.get("workflow") == "imp":
+                quest_meta["workflow"] = "default"
+                rec["quest_meta"] = quest_meta
                 dirty = True
             if dirty:
                 record.write_record(records_dir, rec)

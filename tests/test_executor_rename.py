@@ -119,6 +119,8 @@ def test_run_quest_rename_keeps_id_and_path(
     assert os.getcwd() == cwd_before
     # Reload to confirm the rename persisted to quest.json (the in-memory ch is
     # the same object the runner mutated; reloading proves durability).
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(ch.control_root, ch.id)  # home reaped on done
     reloaded = Quest.load(tmp_path, "ccc333")
     assert reloaded.title == "Renamed Thing"
     assert reloaded.id == "ccc333"

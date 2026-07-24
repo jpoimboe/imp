@@ -21,7 +21,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._live import _await_change_dir, sandbox_sleep_precondition_failed
+from tests._live import (
+    _await_change_dir,
+    sandbox_sleep_precondition_failed,
+    wait_for_archived_status,
+)
 from tests.conftest import _init_repo
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
@@ -229,8 +233,15 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     assert resume.returncode == 0, (
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
-    final_status = _wait_for_status(state_path, "merged", 30.0)
-    assert final_status == "merged", final_status
+    from imp.engine.archive import read as archive_read
+    final_status = wait_for_archived_status(tmp_path, slug, "done", 30.0)
+    assert final_status == "done", final_status
+    # The done completion reaped the live home; rehydrate so the archived events
+    # (read by the assertions below) are readable again.
+    deadline = time.time() + 30.0
+    while quest_dir.exists() and time.time() < deadline:
+        time.sleep(0.2)
+    archive_read.rehydrate_quest(tmp_path, slug)
 
     # Part C: the deferred-MCP-tool replay did NOT trip `400 due to tool use
     # concurrency issues` — imp's default standard tool mode (ENABLE_TOOL_SEARCH=

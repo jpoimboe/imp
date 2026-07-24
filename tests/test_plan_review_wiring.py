@@ -17,7 +17,7 @@ _BASE_VARS = {
 
 
 def _wf():
-    return load_workflow(bundled_workflow_dir("imp"))
+    return load_workflow(bundled_workflow_dir("default"))
 
 
 def _steps(wf):

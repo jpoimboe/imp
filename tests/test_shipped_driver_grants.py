@@ -5,7 +5,7 @@ HOLDERS = {"batch-code-reviewer", "threshold", "finalize", "spiker"}
 
 
 def _drivers(name: str) -> frozenset[str]:
-    path = bundled_workflow_dir("imp") / "agents" / f"{name}.md"
+    path = bundled_workflow_dir("default") / "agents" / f"{name}.md"
     return parse_agent_file(path).drivers
 
 
@@ -24,7 +24,7 @@ def test_named_non_holders_hold_no_drivers() -> None:
 
 
 def test_no_agent_outside_the_holder_set_holds_drivers() -> None:
-    agents_dir = bundled_workflow_dir("imp") / "agents"
+    agents_dir = bundled_workflow_dir("default") / "agents"
     for path in sorted(agents_dir.glob("*.md")):
         name = path.stem
         if name in HOLDERS:

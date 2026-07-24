@@ -301,15 +301,15 @@ def test_emit_completed_merged_prints_gold_block_no_green(
     assert not out.endswith("\n\n\n")
 
 
-def test_emit_completed_non_merge_headline_is_completed_gold(monkeypatch, capsys) -> None:
+def test_emit_completed_non_merge_headline_is_done_gold(monkeypatch, capsys) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     main._emit_completed(_Change([]), merged=False)
     out = capsys.readouterr().out
     lines = out.split("\n")
-    assert lines[0] == pal.ansi("completed", "wordmark")            # gold headline
-    assert pal.ansi("completed", "green") not in out               # completion no longer green
-    assert lines[1] == pal.ansi("2026-06-12-run-x", "wordmark")  # gold identity, bare id
+    assert lines[0] == pal.ansi("done · commits on master", "wordmark")   # gold headline
+    assert pal.ansi("done · commits on master", "green") not in out       # not green
+    assert lines[1] == pal.ansi("2026-06-12-run-x", "wordmark")           # gold identity
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
 
@@ -462,10 +462,9 @@ def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> 
     main._emit_completed(_Change([]), merged=False, intent="add a dark mode toggle")
     out = capsys.readouterr().out
     lines = out.split("\n")
-    assert lines[0] == "completed"                                  # headline on its own line
+    assert lines[0] == "done · commits on master"                    # headline on its own line
     assert lines[1] == "2026-06-12-run-x · > add a dark mode toggle"  # identity, prompt fallback
     assert "(unnamed)" not in out
-    assert "· completed" not in out                                 # no crammed spine tail
     assert "\x1b[" not in out
 
 

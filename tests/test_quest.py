@@ -15,7 +15,7 @@ def _seed_control_without_workflow(root: Path) -> None:
     imp/workflows/imp, so resolution falls back to the bundled workflow."""
     _init_repo(root)
     (root / "imp").mkdir()
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: default\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
@@ -87,7 +87,7 @@ def test_create_without_committed_workflow_resolves_bundled(tmp_path: Path) -> N
     _seed_control_without_workflow(tmp_path)
     ch = Quest.create(tmp_path, title="X", quest_id="bund01", base_branch="main")
     # No committed imp/workflows/imp -> the installed bundled workflow runs.
-    assert ch.workflow_dir == bundled_workflow_dir("imp")
+    assert ch.workflow_dir == bundled_workflow_dir("default")
     assert (tmp_path / ".imp" / "worktrees" / "bund01").exists()
 
 
@@ -248,7 +248,7 @@ def test_create_draft_without_committed_workflow_resolves_bundled(tmp_path: Path
     _seed_control_without_workflow(tmp_path)
     ch = Quest.create_draft(tmp_path, title="X", quest_id="drf3", base_branch="main")
     # No committed imp/workflows/imp -> the installed bundled workflow runs.
-    assert ch.live_workflow_dir == bundled_workflow_dir("imp")
+    assert ch.live_workflow_dir == bundled_workflow_dir("default")
     assert (tmp_path / ".imp" / "quests" / "drf3").exists()
 
 
@@ -647,12 +647,12 @@ def test_control_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
     from imp.assets import bundled_workflow_dir
     ctl = tmp_path / "ctl"
     (ctl / "imp").mkdir(parents=True)
-    (ctl / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (ctl / "imp" / "project.yaml").write_text("default-workflow: default\n")
     ch = Quest(
         id="c", title="t", base_branch="main",
         control_root=ctl, project_root=tmp_path / "wt", quest_dir=tmp_path / "cd",
     )
-    assert ch.control_workflow_dir == bundled_workflow_dir("imp")
+    assert ch.control_workflow_dir == bundled_workflow_dir("default")
 
 
 def _seed_control_with_skew_workflow(root: Path) -> None:

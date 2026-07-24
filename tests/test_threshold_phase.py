@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import Goto
+
+FRONT_DOOR = Path("src/imp/assets/partials/front-door.md")
 
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
@@ -16,7 +20,7 @@ _BASE_VARS = {
 
 
 def _wf():
-    return load_workflow(bundled_workflow_dir("imp"))
+    return load_workflow(bundled_workflow_dir("default"))
 
 
 def _steps(wf):
@@ -72,16 +76,16 @@ def test_spec_finalizer_no_longer_sets_fast_path() -> None:
 
 
 def test_threshold_agent_prose_carries_the_three_hats_and_handoff() -> None:
+    fd = FRONT_DOOR.read_text()
     body = _wf().agents["threshold"].prompt_template_source
-    low = body.lower()
+    low = fd.lower()
     for hat in ("concierge", "scout", "brainstorm"):
         assert hat in low, hat
-    assert "create_and_enter_worktree" in body         # go-live tool
-    assert "rename_quest" in body                      # names the change
-    assert "{{ quest.home }}/artifacts/spec/{{ quest.id }}.md" in body
-    # AC10: a standing directive never to leak internal vocabulary to the user.
+    assert "rename_quest" in fd                        # names the change
+    assert "{{ quest.home }}/artifacts/spec/{{ quest.id }}.md" in fd
     assert "never surface these internal terms" in low
-    assert "announce the name in prose without asking permission" in body
+    assert "announce the name in prose without asking permission" in fd
+    assert "create_and_enter_worktree" in body         # go-live tool stays in the tail
 
 
 def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None:
@@ -91,7 +95,7 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
     attended = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     # Attended runs render the adoption-first section.
     assert "## Keep discovered work here by default" in attended
     assert "imp new --backlog" in attended
@@ -100,7 +104,7 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", autonomous=True,
         project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     # Autonomous runs omit the whole {% if not run.autonomous %} block.
     assert "## Keep discovered work here by default" not in autonomous
     assert "imp new --backlog" not in autonomous
@@ -119,15 +123,57 @@ def test_threshold_has_no_headless_branch(tmp_path) -> None:
             quest_title="t", event_log=log, quest_id="abc",
             quest_home=".imp/quests/abc", autonomous=autonomous,
             project_facts={}),
-            workflow_dir=bundled_workflow_dir("imp")).lower()
+            workflow_dir=bundled_workflow_dir("default")).lower()
         assert "the ceremony is predetermined" not in out
         assert 'ceremony="full"' not in out
 
 
 def test_threshold_includes_both_brainstorm_partials() -> None:
+    fd = FRONT_DOOR.read_text()
+    assert '{% include "partials/spec-design-principles.md" %}' in fd
+    assert '{% include "partials/brainstorm-dialogue.md" %}' in fd
+
+
+def test_threshold_includes_shared_front_door_partial(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
-    assert '{% include "partials/spec-design-principles.md" %}' in body
-    assert '{% include "partials/brainstorm-dialogue.md" %}' in body
+    assert '{% include "partials/front-door.md" %}' in body
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", project_facts={}),
+        workflow_dir=bundled_workflow_dir("default"))
+    # front-door body renders inline — behaviorally identical to before.
+    assert "## Orienting before you offer" in out
+    assert "## Acting on imp" in out
+    assert "## Speak plainly" in out
+
+
+def test_front_door_carries_the_workflow_agnostic_body() -> None:
+    fd = FRONT_DOOR.read_text()
+    for inc in ("coding-stance", "action-care", "imp-grounding",
+                "spec-design-principles", "brainstorm-dialogue",
+                "memory-authoring", "sandbox-debugging"):
+        assert f'{{% include "partials/{inc}.md" %}}' in fd, inc
+    for heading in ("## Orienting before you offer", "## Acting on imp",
+                    "## Speak plainly", "## Naming the quest early",
+                    "## When the work depends on another quest"):
+        assert heading in fd, heading
+    # workflow-specific tail sections must NOT leak into the shared body.
+    assert "## Classifying the draft's shape" not in fd
+    assert "## Going live (the build path)" not in fd
+    assert "create_and_enter_worktree" not in fd
+    assert "## Output" not in fd
+
+
+def test_threshold_tail_keeps_workflow_specific_sections() -> None:
+    body = _wf().agents["threshold"].prompt_template_source
+    assert "## Classifying the draft's shape" in body
+    assert "## Going live (the build path)" in body
+    assert "create_and_enter_worktree" in body
+    assert "## Output" in body
+    # the extracted body no longer lives inline in threshold.md.
+    assert "## Orienting before you offer" not in body
+    assert "## Acting on imp" not in body
 
 
 def test_threshold_renders_full_brainstorm_depth(tmp_path) -> None:
@@ -137,7 +183,7 @@ def test_threshold_renders_full_brainstorm_depth(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc",
         project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     low = out.lower()
     # dialogue conduct expanded from brainstorm-dialogue
     assert "one question at a time" in low
@@ -166,7 +212,7 @@ def test_threshold_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc",
         project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "spec-writer" not in out
     assert "spec-finalizer" in out
 
@@ -179,7 +225,7 @@ def test_threshold_bare_open_keeps_concierge_and_scout_hats(tmp_path) -> None:
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     low = out.lower()
     assert "do not read any files, do not explore the codebase" not in low
     assert "what the user wants to build" not in low
@@ -211,19 +257,18 @@ def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
 
 
 def test_threshold_routes_inline_satisfiable_requests_to_bare_turn_end_yield() -> None:
-    # A pure question or a content/text-generation ask that is not a software
-    # change is answered in prose and then the agent ends its turn to yield —
-    # never complete_step, which is exclusively the go-live build terminator.
+    fd = FRONT_DOOR.read_text()
     body = _wf().agents["threshold"].prompt_template_source
-    low = body.lower()
+    low = fd.lower()
     assert "text-generation ask" in low
-    assert "answered in prose" in low and "end your turn to yield" in body
+    assert "answered in prose" in low and "end your turn to yield" in fd
+    assert "wait_for_user" not in fd
     assert "wait_for_user" not in body
-    assert "**never** `complete_step`" in body
-    # complete_step is framed as the build terminator, and express stays a build path.
-    assert "go-live build terminator" in low
+    assert "**never** `complete_step`" in fd
+    # complete_step is framed as the build terminator in the threshold tail.
+    assert "go-live build terminator" in body.lower()
     assert "build *quickly*" in body
-    assert "no-build exit" in low
+    assert "no-build exit" in body.lower()
 
 
 def _render_threshold(tmp_path, **ctx_kwargs) -> str:
@@ -232,7 +277,7 @@ def _render_threshold(tmp_path, **ctx_kwargs) -> str:
     return render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}, **ctx_kwargs),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
 
 
 def test_threshold_surfaces_parent_only(tmp_path) -> None:
@@ -273,5 +318,5 @@ def test_threshold_live_gate_conventions_relocated_to_partial(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc",
         project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "no co-equal dangling alternative" in out

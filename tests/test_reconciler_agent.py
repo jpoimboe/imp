@@ -1,6 +1,6 @@
 from pathlib import Path
 
-WF = Path("src/imp/assets/workflows/imp")
+WF = Path("src/imp/assets/workflows/default")
 
 
 def test_reconciler_declares_stuck_envelope() -> None:

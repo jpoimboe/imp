@@ -22,7 +22,7 @@ def _run(tmp_path, monkeypatch, fake_result):
     import imp.cli.pythonpath_detect as pp
     monkeypatch.setattr(pp, "run_detached_agent", _fake)
     return detect_pythonpath_via_agent(
-        tmp_path, bundled_workflow_dir("imp"), "anthropic", "m",
+        tmp_path, bundled_workflow_dir("default"), "anthropic", "m",
         SandboxConfig(allow_unsandboxed=True))
 
 

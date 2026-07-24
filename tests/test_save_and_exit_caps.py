@@ -15,11 +15,11 @@ def test_save_and_exit_is_a_denyable_top_level_cap() -> None:
 
 
 def test_conversation_agent_is_granted_save_and_exit() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "save_and_exit" in wf.agents["threshold"].tools
 
 
 def test_reviewers_are_denied_save_and_exit() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     for name in REVIEW_AGENTS:
         assert "save_and_exit" not in wf.agents[name].tools, name

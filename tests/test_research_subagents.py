@@ -7,7 +7,7 @@ from imp.engine.state import JsonlEventLog
 
 
 def _wf():
-    return load_workflow(bundled_workflow_dir("imp"))
+    return load_workflow(bundled_workflow_dir("default"))
 
 
 def test_explorer_agent_is_read_only_leaf() -> None:
@@ -56,7 +56,7 @@ def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "no more than 3 question rounds" not in out
     assert "Do not over-research a clear request" not in out
     assert "Research before you converge" in out
@@ -86,7 +86,7 @@ def test_finalize_declares_research_subagents() -> None:
 
 def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
     from pathlib import Path
-    p = Path("src/imp/assets/workflows/imp/partials/delegate-exploration.md")
+    p = Path("src/imp/assets/partials/delegate-exploration.md")
     text = p.read_text()
     # The default rule: delegate to explorer/researcher; read inline only what you edit.
     assert "read inline only what you will edit" in text.lower()
@@ -97,7 +97,7 @@ def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
 def test_brainstorm_dialogue_includes_partial_and_drops_inline_duplication() -> None:
     from pathlib import Path
     body = Path(
-        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+        "src/imp/assets/partials/brainstorm-dialogue.md"
     ).read_text()
     assert '{% include "partials/delegate-exploration.md" %}' in body
     # The extracted delegation specifics no longer live inline in brainstorm-dialogue.
@@ -111,7 +111,7 @@ def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "present it in sections" in out
     assert "do not propose unrelated refactoring" not in out
     assert "improvements to the code this quest touches." in out

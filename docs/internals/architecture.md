@@ -70,7 +70,7 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/quest/` (gitignored); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events).
+All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/quest/` (gitignored); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `light` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
 
 ```mermaid
 flowchart LR
@@ -110,7 +110,7 @@ flowchart LR
 | Agent drive / tools | `engine/agent_run.py`, `agents/runner.py`, `agents/tools/*` | Build `AgentInvocation`, consume the event stream, dispatch per-agent allowlisted tools (incl. synthesized `complete_step`, `wait_for_user`). |
 | Subagents | `agents/subagents.py`, `agents/dispatch.py` | `dispatch_task()` spawns child invocations with depth + parent-event threading. |
 | Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-quest `refs/imp/artifacts/<id>` artifact ref; at completion the quest is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under `.imp/archive/`). |
-| Workflow assets | `assets/__init__.py` | Bundled workflows ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one. |
+| Workflow assets | `assets/__init__.py` | Bundled workflows ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one. Workflow-agnostic front-door partials ship bundled under `assets/partials/` and are overlaid (local-first) into each quest's `workflow/partials/` at snapshot time, like skills. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
 | Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |
 | Live drivers | `engine/drivers.py` | Per-agent live-driver capability (`drivers:` frontmatter, e.g. `impty`): stdio MCP servers granted to an agent, launched self-hosted. |
@@ -121,7 +121,9 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/imp/workflow.yaml` (workflow name: **feature**; bundled with the install — a committed `imp/workflows/imp` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop inside *implement*, a single **change-end** code-review pass that covers the whole quest (forward plans are not reviewed individually), and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the spec and plan-document review gates and the supercycle, but still gets the change-end code review.
+Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop inside *implement*, a single **change-end** code-review pass that covers the whole quest (forward plans are not reviewed individually), and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the spec and plan-document review gates and the supercycle, but still gets the change-end code review.
+
+Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<workflow>/`), so a downstream repo carrying `imp/memory/imp/*.md` renames that directory to `imp/memory/default/` after the `imp` → `default` rename.
 
 ### Overview
 
@@ -273,6 +275,31 @@ All four live under `.imp/quest/` (gitignored); spec/plan artifacts are journale
 | `.imp/quest/artifacts/spec/{slug}.md` | spec-writer | all phases |
 | `.imp/quest/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
 | `.imp/quest/progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
+
+---
+
+## Light workflow
+
+`src/imp/assets/workflows/light/` is a minimal **in-place** workflow: it builds a
+small change directly on the current branch — no worktree is forked, no plan is
+written, and no merge occurs. The change is built in a short sequence of steps:
+
+- **front-door** — the shared front-door conversation (the same
+  `partials/front-door.md` the default workflow uses) scopes the change and, on
+  go-live, writes the final spec directly. It never calls
+  `create_and_enter_worktree`, so the quest stays unmaterialized and every step runs
+  in the main checkout. A `capture-base` script step then records the branch HEAD
+  (into the `base_head` var) as the reviewer's stable diff base.
+- **implement** — the `implementer` agent reads the spec, makes the change, and
+  commits on the current branch (no plan).
+- **review** — the **read-only** `reviewer` agent diffs exactly the commits imp added
+  against the spec; a `rework` verdict resumes `implement` with feedback, `approve`
+  lets the run complete.
+
+The run has no test/verify gate, no worktree, and no summarizer. It completes with the
+terminal status **`done`** and is archived like a merged quest — searchable, home
+cleaned up — leaving the commits on the branch (`imp show` / `imp list` display it as
+`done`, not merged).
 
 ---
 

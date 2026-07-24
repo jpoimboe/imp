@@ -34,7 +34,7 @@ from imp.agents.runner import (
     QuestContext,
     TextBlock,
 )
-from imp.agents.skills import overlay_global_skills, overlay_project_skills
+from imp.agents.skills import overlay_global_skills, overlay_project_skills, overlay_shared_partials
 from imp.engine import quest_refs
 from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
@@ -311,6 +311,7 @@ def _refresh_workflow_snapshot(quest: Quest) -> bool:
     _capture_workflow_tree(quest.control_root, live, tmp)
     overlay_global_skills(tmp / "skills")
     overlay_project_skills(quest.project_root, tmp / "skills" / "user")
+    overlay_shared_partials(tmp / "partials")
 
     # 4. No-op when the candidate matches the current snapshot.
     if had_snapshot and _trees_identical(snapshot, tmp):
@@ -836,8 +837,10 @@ def _complete_or_park(
 
 def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     """Terminal handler. Two paths:
-    - No merge happened (merge-to-base was never reached, or the gate never set
-      it): mark completed, drop steps/, COMPLETED — unchanged legacy behaviour.
+    - No merge happened: mark `done`, archive the terminal snapshot, reap the
+      whole home. Crash-safe: status='done' is saved before archive/reap, so a
+      crash mid-reap leaves re-entry clean — re-running re-enters _complete
+      (step=None, status='done') and idempotently re-archives + re-reaps.
     - merge-to-base already merged and exited the worktree (state.merge_commit set,
       base ref durably advanced): finalize — mark completed, archive the final
       snapshot. Ordering is crash-safe: status is written + saved BEFORE archive,
@@ -860,10 +863,17 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     from imp.engine import merge_queue
     if not state.merge_commit:
         merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
-        state.status = "merged"
+        state.status = "done"
         state.save(quest.state_dir)
         _emit(log, "workflow_completed", {})
-        shutil.rmtree(quest.quest_dir / "steps", ignore_errors=True)
+        from imp.engine import archive
+        archive.archive_quest(
+            quest.control_root, quest.id,
+            events_path=quest.events_path,
+            quest_json_path=quest.quest_dir / "quest.json",
+            state_json_path=quest.state_dir / "state.json",
+        )
+        shutil.rmtree(quest.quest_dir, ignore_errors=True)
         shutil.rmtree(quest.tmp_dir, ignore_errors=True)
         session_socket_path(quest.id).unlink(missing_ok=True)
         _force_rmtree(quest.var_tmp_dir)

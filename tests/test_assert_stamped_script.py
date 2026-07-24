@@ -12,7 +12,7 @@ import os
 import subprocess
 from pathlib import Path
 
-ASSERT = Path("src/imp/assets/workflows/imp/scripts/assert-stamped.sh").resolve()
+ASSERT = Path("src/imp/assets/workflows/default/scripts/assert-stamped.sh").resolve()
 ID = "2026-06-20-assert-test"
 
 

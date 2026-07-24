@@ -5,7 +5,7 @@ from imp.engine.loader import parse_agent_file
 
 
 def test_init_pythonpath_agent_parses_and_declares_schema() -> None:
-    path = bundled_workflow_dir("imp") / "agents" / "init-pythonpath.md"
+    path = bundled_workflow_dir("default") / "agents" / "init-pythonpath.md"
     agent = parse_agent_file(path)
     assert agent.name == "init-pythonpath"
     assert agent.tier == "medium"

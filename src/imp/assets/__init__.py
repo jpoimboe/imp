@@ -40,6 +40,18 @@ def bundled_skills_dir() -> Path:
     return p
 
 
+def bundled_partials_dir() -> Path:
+    """Return a real filesystem Path to the bundled shared-partials pool
+    (src/imp/assets/partials/), mirroring bundled_skills_dir. Raises if absent."""
+    p = Path(str(files("imp.assets").joinpath("partials")))
+    if not p.is_dir():
+        raise RuntimeError(
+            f"bundled shared partials pool not found at {p}; was the package "
+            f"installed without its assets? Try `pip install -e .` from a checkout."
+        )
+    return p
+
+
 def bundled_docs_dir() -> Path:
     """Return a real filesystem Path to imp's repo-root docs/ corpus, resolved
     relative to the install (editable-from-a-clone), mirroring

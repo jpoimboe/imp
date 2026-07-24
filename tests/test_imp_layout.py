@@ -33,7 +33,7 @@ def test_init_writes_committed_imp_tree(tmp_path: Path) -> None:
     proj = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
     # New shape: a workflow ref + empty vars. Bindings/providers are NOT here
     # (the floor owns tiers; providers are user-homed).
-    assert proj["default-workflow"] == "imp"
+    assert proj["default-workflow"] == "default"
     assert "tiers" not in proj
     assert "providers" not in proj
     assert "roles" not in proj

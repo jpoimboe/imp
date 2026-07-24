@@ -6,7 +6,7 @@ import pytest
 
 from imp.cli.main import _build_parser
 
-_ASSETS = Path("src/imp/assets/workflows/imp")
+_ASSETS = Path("src/imp/assets/workflows/default")
 
 
 def _help_for(cmd: str, capsys) -> str:

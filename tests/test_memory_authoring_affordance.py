@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from imp.agents.prompts import build_context, render_prompt
-from imp.assets import bundled_workflow_dir
+from imp.assets import bundled_partials_dir, bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import InMemoryEventLog
 
 # Derive the partial path from the bundled workflow dir (the same
 # FileSystemLoader root the include resolves against), so the test does not
 # depend on pytest's cwd.
-PARTIAL_PATH = bundled_workflow_dir("imp") / "partials" / "memory-authoring.md"
+PARTIAL_PATH = bundled_partials_dir() / "memory-authoring.md"
 
 
 def test_memory_authoring_partial_has_pinned_prose() -> None:
@@ -28,7 +28,7 @@ def test_memory_authoring_partial_has_pinned_prose() -> None:
 
 
 def _render_agent(name: str, vars: dict) -> str:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents[name].prompt_template_source
     return render_prompt(
         body,
@@ -39,7 +39,7 @@ def _render_agent(name: str, vars: dict) -> str:
             quest_home=".imp/quests/x",
             vars=vars,
         ),
-        workflow_dir=bundled_workflow_dir("imp"),
+        workflow_dir=bundled_workflow_dir("default"),
     )
 
 
@@ -49,7 +49,7 @@ def test_commit_memory_is_fully_retired() -> None:
 
     assert "commit_memory" not in get_registry()
     assert "commit_memory" not in ALLOWABLE_TOOLS
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     assert "commit_memory" not in wf.agents["threshold"].tools
     assert "commit_memory" not in wf.agents["finalize"].tools
 

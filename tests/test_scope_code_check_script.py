@@ -11,7 +11,7 @@ from pathlib import Path
 
 from imp.assets import bundled_workflow_dir
 
-SCRIPT = bundled_workflow_dir("imp") / "scripts" / "scope-code-check.sh"
+SCRIPT = bundled_workflow_dir("default") / "scripts" / "scope-code-check.sh"
 
 
 def _git(root: Path, *args: str) -> None:

@@ -94,20 +94,20 @@ def _seed_scripted_gate_project(root: Path) -> Path:
     _git(root, "config", "user.name", "t")
     (root / ".gitignore").write_text(".imp/\n")
     (root / "README.md").write_text("seed\n")
-    agents = root / "imp" / "workflows" / "imp" / "agents"
+    agents = root / "imp" / "workflows" / "default" / "agents"
     agents.mkdir(parents=True)
     (agents / "gate.md").write_text(
         "---\nname: gate\ndescription: yields to the human at a bare turn-end.\n"
         "tools: [bash, complete_step, create_and_enter_worktree]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nAsk the human something, then end your turn to yield.\n")
-    (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
+    (root / "imp" / "workflows" / "default" / "workflow.yaml").write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: work\n    steps:\n"
         "      - name: gate\n        file: agents/gate.md\n        tier: low\n"
         "        interactive: true\n")
     (root / "imp" / "project.yaml").write_text(
-        "default-workflow: imp\ndefault-base: main\n")
+        "default-workflow: default\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"

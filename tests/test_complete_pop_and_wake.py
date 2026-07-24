@@ -41,7 +41,7 @@ def test_complete_after_merge_pops_self_and_wakes_next(tmp_path, monkeypatch) ->
 
 def _merge_step():
     wf = load_workflow(
-        Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "imp")
+        Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default")
     for s in wf.flat_steps():
         if s.name == "merge-to-base":
             return s
@@ -90,6 +90,22 @@ def test_complete_without_merge_releases_queue_slot(tmp_path, monkeypatch) -> No
     assert mq.read(tmp_path) == []                       # lane released on completion
 
 
+def test_complete_without_merge_archives_and_removes_home(tmp_path, monkeypatch) -> None:
+    from imp.engine.archive import read as archive_read
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    state = State.load(ch.state_dir)          # merge_commit is None -> no-merge branch
+    home = ch.quest_dir
+    assert home.exists()                      # falsifiable: home present before finalize
+    result = _complete(ch, state, JsonlEventLog(ch.events_path))
+    assert result == RunResult.COMPLETED
+    assert not home.exists()                  # whole home reaped, not just steps/
+    assert archive_read.is_archived(tmp_path, "feat")
+    assert archive_read.status_of(tmp_path, "feat") == "done"
+
+
 def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
@@ -99,6 +115,8 @@ def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) 
     log = JsonlEventLog(ch.events_path)
     result = _complete(ch, state, log)
     assert result == RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(ch.control_root, ch.id)  # home reaped on done
     types = [e.get("type") for e in log.read()]
     assert "workflow_completed" in types                 # generic terminal event emitted
     # the merge-only event is NOT emitted on the no-merge path

@@ -118,10 +118,12 @@ def test_crash_resume_with_held_mark_evicts_at_entry(tmp_path: Path, provider_re
     state.save(ch.state_dir)
 
     anyio.run(run_quest, ch)
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(ch.control_root, ch.id)  # home reaped on done
     types_seen = [e.get("type") for e in JsonlEventLog(ch.events_path).read()]
     assert "lane_evicted" in types_seen            # entry eviction fired on resume
     # After eviction the change re-acquires, runs touch-base, and completes with
     # no merge — the no-merge completion path must release the lane (AC2), so the
     # queue is empty rather than leaking the re-acquired entry.
-    assert State.load(ch.state_dir).status == "merged"
+    assert State.load(ch.state_dir).status == "done"
     assert mq.read(tmp_path) == []

@@ -9,7 +9,7 @@ from imp.engine.state import JsonlEventLog
 
 
 def _agent_prompt(name: str) -> str:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     return wf.agents[name].prompt_template_source
 
 
@@ -35,9 +35,10 @@ def test_spec_finalizer_writes_to_artifacts_no_commit_script() -> None:
 
 def test_no_agent_or_partial_names_the_old_spec_writer() -> None:
     import pathlib
-    base = pathlib.Path("src/imp/assets/workflows/imp")
-    for sub in ("agents", "partials"):
-        for p in sorted((base / sub).glob("*.md")):
+    base = pathlib.Path("src/imp/assets/workflows/default")
+    dirs = [base / "agents", base / "partials", pathlib.Path("src/imp/assets/partials")]
+    for d in dirs:
+        for p in sorted(d.glob("*.md")):
             assert "spec-writer" not in p.read_text(), \
                 f"{p.name} still names spec-writer"
 
@@ -81,7 +82,7 @@ def test_both_prompts_route_recorded_scope_deviations_to_the_gate() -> None:
 
 
 def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
-    wf = load_workflow(bundled_workflow_dir("imp"))
+    wf = load_workflow(bundled_workflow_dir("default"))
     for name, agent in wf.agents.items():
         body = agent.prompt_template_source
         assert "imp/specs/" not in body, f"{name} still references imp/specs/"
@@ -101,7 +102,7 @@ def test_batch_code_reviewer_renders_quest_diff(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", cur_base_head="BASE",
         vars={"fast_path": False}),
-        workflow_dir=bundled_workflow_dir("imp"))
+        workflow_dir=bundled_workflow_dir("default"))
     assert "git diff BASE..imp/abc" in out
     assert "..HEAD" not in out
 
@@ -123,7 +124,7 @@ def test_code_reviewer_flags_defensive_sprawl() -> None:
 
 def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
     text = pathlib.Path(
-        "src/imp/assets/workflows/imp/partials/coding-stance.md"
+        "src/imp/assets/partials/coding-stance.md"
     ).read_text()
     assert "Design so bad states can't arise; then add no error handling, fallbacks," in text
     # The remainder of the rule stays intact.
@@ -133,7 +134,7 @@ def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
 
 
 def test_no_workflow_prompt_invokes_artifact_commit() -> None:
-    for wf_name in ("imp",):
+    for wf_name in ("default",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name, agent in wf.agents.items():
             body = agent.prompt_template_source
@@ -152,14 +153,14 @@ def test_gap_check_quest_review_is_unconditional() -> None:
 def test_batch_code_reviewer_description_is_whole_diff() -> None:
     from imp.engine.loader import parse_agent_file
     desc = parse_agent_file(
-        pathlib.Path("src/imp/assets/workflows/imp/agents/batch-code-reviewer.md").resolve()
+        pathlib.Path("src/imp/assets/workflows/default/agents/batch-code-reviewer.md").resolve()
     ).description
     assert "per-batch" not in desc
     assert "whole diff" in desc
 
 
 def test_events_query_references_frame_provenance_not_current_state() -> None:
-    for wf_name in ("imp",):
+    for wf_name in ("default",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name in ("summarizer", "plan-reviewer"):
             body = wf.agents[name].prompt_template_source
@@ -193,18 +194,19 @@ def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
     # firmly on complete_step with no "re-emit"/handoff resume sentence. Lock
     # that so a future edit cannot reintroduce the pattern.
     imp_reconciler = pathlib.Path(
-        "src/imp/assets/workflows/imp/agents/reconciler.md").read_text()
+        "src/imp/assets/workflows/default/agents/reconciler.md").read_text()
     assert "re-emit" not in imp_reconciler
     assert "complete_step" in imp_reconciler
 
 
 def test_threshold_renames_early_on_design_formation() -> None:
+    fd = pathlib.Path("src/imp/assets/partials/front-door.md").read_text()
     body = _agent_prompt("threshold")
     # Rename fires as soon as a design forms, not deferred to go-live.
-    assert "as soon as a design has formed" in body
+    assert "as soon as a design has formed" in fd
     # Pure concierge/scout conversations are explicitly excluded from renaming.
-    assert "so they never rename" in body
-    # The go-live rename survives as a fallback for straight-to-build.
+    assert "so they never rename" in fd
+    # The go-live rename survives as a fallback for straight-to-build (threshold tail).
     assert "a fallback for when you went" in body
 
 
@@ -373,7 +375,7 @@ def _render_agent(name: str, tmp_path) -> str:
             cur_base_head="BASE",
             vars={"fast_path": False, "task_total": 0},
         ),
-        workflow_dir=bundled_workflow_dir("imp"),
+        workflow_dir=bundled_workflow_dir("default"),
     )
 
 
@@ -450,7 +452,7 @@ def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
 def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:
     from imp.engine.loader import parse_agent_file
     path = pathlib.Path(
-        "src/imp/assets/workflows/imp/agents/spec-finalizer.md"
+        "src/imp/assets/workflows/default/agents/spec-finalizer.md"
     ).resolve()
     full = path.read_text()
     agent = parse_agent_file(path)
@@ -488,27 +490,28 @@ def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:
 
 
 def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
-    body = _agent_prompt("threshold")
+    fd = pathlib.Path("src/imp/assets/partials/front-door.md").read_text()
 
     # The section exists with its exact heading, placed AFTER the depends-on
     # section and BEFORE "## Acting on imp".
     heading = "## Close redundant backlog quests at approval"
-    assert heading in body
-    depends = body.index("## When the work depends on another quest")
-    acting = body.index("## Acting on imp")
-    here = body.index(heading)
+    assert heading in fd
+    depends = fd.index("## When the work depends on another quest")
+    acting = fd.index("## Acting on imp")
+    here = fd.index(heading)
     assert depends < here < acting
 
     # Verbatim load-bearing phrases from the agreed copy.
-    assert "clearly supersedes existing **backlog** quests" in body
-    assert "carry them into the go-live proposal: approving the build closes them too" in body
-    assert '`imp abandon <id>` each; say plainly the close is permanent' in body
-    assert 'Don\'t defer it to a "close at merge" note in the spec' in body
-    assert "A superseded **in-flight** quest you flag" in body
-    assert "never close this way" in body
+    assert "clearly supersedes existing **backlog** quests" in fd
+    assert "carry them into the go-live proposal: approving the build closes them too" in fd
+    assert '`imp abandon <id>` each; say plainly the close is permanent' in fd
+    assert 'Don\'t defer it to a "close at merge" note in the spec' in fd
+    assert "A superseded **in-flight** quest you flag" in fd
+    assert "never close this way" in fd
 
-    # NOT autonomy-wrapped: rendering with autonomous=True strips every
-    # `{% if not run.autonomous %}` block, yet this section must survive.
+    # NOT autonomy-wrapped: rendering the threshold with autonomous=True strips
+    # every `{% if not run.autonomous %}` block, yet this section must survive.
+    body = _agent_prompt("threshold")
     log = JsonlEventLog(tmp_path / "threshold-events.jsonl")
     rendered = render_prompt(
         body,
@@ -520,7 +523,7 @@ def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
             autonomous=True,
             vars={"fast_path": False},
         ),
-        workflow_dir=bundled_workflow_dir("imp"),
+        workflow_dir=bundled_workflow_dir("default"),
     )
     assert heading in rendered
     # Sanity: the autonomy-guarded section IS stripped in the same render, so a

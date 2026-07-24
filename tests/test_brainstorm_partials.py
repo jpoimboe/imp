@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-PARTIALS = Path("src/imp/assets/workflows/imp/partials")
+PARTIALS = Path("src/imp/assets/partials")
 
 
 def test_spec_design_principles_carries_judgment_lens_only() -> None:
