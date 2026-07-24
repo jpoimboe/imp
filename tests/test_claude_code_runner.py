@@ -2835,7 +2835,7 @@ def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
 
 def test_high_tier_floor_defaults_to_opus_1m() -> None:
     from imp.providers.claude_code import TIER_DEFAULTS
-    assert TIER_DEFAULTS["high"] == "claude-opus-4-8[1m]"
+    assert TIER_DEFAULTS["high"] == "claude-opus-5[1m]"
 
 
 @pytest.mark.anyio
