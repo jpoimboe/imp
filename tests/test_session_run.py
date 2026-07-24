@@ -382,6 +382,7 @@ async def test_run_session_client_threads_resume_into_attach(
         ch: Quest, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False, model: str | None = None,
+        opening_unsandboxed: bool = False,
     ) -> Any:
         captured["resume"] = resume
         captured["lease"] = lease
@@ -744,6 +745,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
         ch: Quest, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False, model: str | None = None,
+        opening_unsandboxed: bool = False,
     ) -> Any:
         captured["autonomous"] = autonomous
 
@@ -959,6 +961,50 @@ async def test_run_session_client_threads_model(
 
     assert rc == 0
     assert captured["model"] == "anthropic:claude-fable-5"
+
+
+@pytest.mark.anyio
+async def test_run_session_client_threads_opening_unsandboxed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-unsbx")
+    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+        quest.state_dir)
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(ch: Any, **kw: Any) -> Any:
+        captured.update(kw)
+
+        async def _attach(_on_event: Any) -> Any:  # pragma: no cover
+            raise AssertionError("attach must not be invoked in this test")
+
+        return _attach
+
+    monkeypatch.setattr("imp.cli.session_run.build_session_attach", _fake_build)
+
+    async def _noop(**_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+
+    class _Driver:
+        def on_event(self, _event: Any) -> None: ...
+        def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
+        return ""
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        opening_unsandboxed=True, leave_mode="new")
+
+    assert rc == 0
+    assert captured["opening_unsandboxed"] is True
 
 
 def test_run_session_client_leave_mode_is_required() -> None:
