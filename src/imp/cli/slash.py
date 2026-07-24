@@ -35,9 +35,6 @@ SANDBOX_STATE_OFF = (
 SANDBOX_ALREADY_ON = "Sandbox is already on."
 SANDBOX_ALREADY_OFF = "Sandbox is already off."
 SANDBOX_USAGE = "Usage: /sandbox [on|off]"
-SANDBOX_PRE_SESSION = (
-    "/sandbox applies to a running step — there's nothing to toggle yet. "
-    "It's on by default once the quest starts; run /sandbox off then to lift it.")
 
 MATERIALIZED_LEAVE_REDIRECT = (
     "/save, /shelve, and /clear apply only before a quest is built — this one "
@@ -131,7 +128,19 @@ def handle_slash_line(
     if cmd == "sandbox":
         if pre_session:
             _echo_command(text, output_fn, color=color)
-            output_fn(SANDBOX_PRE_SESSION)
+            if args == "off":
+                output_fn(SANDBOX_STATE_OFF)
+                return "/sandbox off"
+            if args == "on":
+                if unsandboxed:
+                    output_fn(SANDBOX_STATE_ON)
+                    return "/sandbox on"
+                output_fn(SANDBOX_ALREADY_ON)
+                return REPROMPT
+            if args == "":
+                output_fn(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
+                return REPROMPT
+            output_fn(SANDBOX_USAGE)
             return REPROMPT
         if args == "on":
             if not unsandboxed:

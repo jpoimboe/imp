@@ -587,22 +587,20 @@ def test_sandbox_off_applies_immediately_with_no_prompt(
     assert "Sandbox off" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("command", ["/sandbox on", "/sandbox off", "/sandbox", "/sandbox maybe"])
-def test_sandbox_pre_session_reprompts_then_returns_real_line(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str,
+@pytest.mark.parametrize("command", ["/sandbox on", "/sandbox", "/sandbox maybe"])
+def test_sandbox_pre_session_reprompt_forms_return_real_line(
+    tmp_path: Path, command: str,
 ) -> None:
     from functools import partial
 
-    from imp.cli.slash import SANDBOX_PRE_SESSION, ask_line_with_slash
+    from imp.cli.slash import ask_line_with_slash
     quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt([command, "build the thing"])
     line = anyio.run(
         partial(ask_line_with_slash, prompt, _NullStatus(), quest,
                 pre_session=True))
-    # The /sandbox line was intercepted and re-prompted; only the real opening
-    # line is returned — /sandbox is never submitted as the opening message.
+    # These forms print and re-prompt; only the real opening line is returned.
     assert line == "build the thing"
-    assert SANDBOX_PRE_SESSION in capsys.readouterr().out
 
 
 def test_help_lists_sandbox() -> None:
