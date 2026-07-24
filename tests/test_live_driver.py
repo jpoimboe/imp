@@ -3400,3 +3400,16 @@ def test_ack_hook_wired_to_driver_renders_stopping_then_force_quit() -> None:
 
     coord._note_gesture_ack(force_quit_available=True)
     assert "stopping… (interrupt again to force-quit)" in out.getvalue()
+
+
+def test_stop_ack_cleared_when_prompt_gate_lands() -> None:
+    """AC5: the stop-ack clears when the interrupt steer gate appears —
+    prepare_for_prompt hides the status line, erasing the drawn ack."""
+    drv, out = _tty_driver()
+    drv.show_stop_ack("stopping…")
+    assert drv._status._visible is True
+    out.truncate(0)
+    out.seek(0)
+    drv.prepare_for_prompt()          # the interrupt steer gate lands
+    assert drv._status._visible is False       # ack no longer owns the status line
+    assert "\x1b[K" in out.getvalue()          # the ack row was erased
