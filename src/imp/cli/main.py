@@ -276,11 +276,11 @@ def _print_warnings_block(messages: list[str]) -> None:
 def _emit_completed(quest: Quest, *, merged: bool,
                     warnings: list[str] | None = None,
                     intent: str | None = None) -> None:
-    """The clean-finish block: a gold `merged into <base>` / `done · commits on <base>` headline on
-    its own line, the identity line, then the warnings block; one trailing blank."""
+    """The clean-finish block: a gold `merged into <base>` / `done · commits on imp/<id>`
+    headline on its own line, the identity line, then the warnings block; one trailing blank."""
     color = should_use_color(sys.stdout)
     head = (f"merged into {quest.base_branch}" if merged
-            else f"done · commits on {quest.base_branch}")
+            else f"done · commits on imp/{quest.id}")
     for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent):
         print(ln)
     _print_warnings_block(warnings or [])
