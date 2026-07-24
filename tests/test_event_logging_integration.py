@@ -345,6 +345,8 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     result = await run_quest(quest, on_event=collected_events.append)
     assert result is RunResult.COMPLETED, f"expected COMPLETED, got {result}"
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     events = list(quest.event_log().read())
 
     # Verify step_started events: work should appear twice, check should appear twice.

@@ -29,13 +29,13 @@ def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
 
 
 def infer_session_result(quest: Quest) -> RunResult:
-    """Read persisted status, home first then archive: 'merged' → COMPLETED, else PAUSED."""
+    """Read persisted status, home first then archive: 'merged'/'done' → COMPLETED, else PAUSED."""
     try:
         status: str | None = State.load(quest.state_dir).status
     except FileNotFoundError:
         from imp.engine.archive import read as archive_read
         status = archive_read.status_of(quest.control_root, quest.id)
-    return RunResult.COMPLETED if status == "merged" else RunResult.PAUSED
+    return RunResult.COMPLETED if status in ("merged", "done") else RunResult.PAUSED
 
 
 async def run_session_client(

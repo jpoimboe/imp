@@ -261,9 +261,8 @@ async def test_run_quest_completes_minimal_workflow(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
-    state = State.load(quest.state_dir)
-    assert state.status == "merged"
-    assert state.step is None
+    from imp.engine.archive import read as archive_read
+    assert archive_read.status_of(quest.control_root, quest.id) == "done"
 
 
 @pytest.mark.anyio
@@ -274,6 +273,8 @@ async def test_run_quest_sets_has_started_at_dispatch(tmp_path: Path) -> None:
 
     await run_quest(quest, on_event=lambda _e: None)
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     assert State.load(quest.state_dir).has_started is True     # a step ran
 
 
@@ -322,6 +323,8 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.vars["review_done"] is True
 
@@ -429,6 +432,8 @@ async def test_goto_with_release_releases_held_lane(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.held_lane is None
     released = [e for e in events if e.get("type") == "lane_released"]
@@ -672,6 +677,8 @@ async def test_progress_goto_resets_counter_and_never_trips(tmp_path: Path) -> N
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED           # progress edge never trips max_loops
     assert len(reviewer_calls) == 6                # 5 progress reworks + 1 approve
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.loop_counts.get("reviewer", 0) == 0   # reset to 0 by each progress goto
 
@@ -755,6 +762,8 @@ async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> N
 
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     # The leap a→c popped b's counter; the accumulating-leak bug leaves it at 1.
     assert state.loop_counts.get("b", 0) == 0
@@ -793,6 +802,8 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
 
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     assert State.load(quest.state_dir).step is None
 
 
@@ -841,6 +852,8 @@ async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
     _register_fake({"status": "Success"})
 
     await run_quest(quest, on_event=lambda _e: None)
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     events = list(quest.event_log().read())
     started = next(e for e in events if e["type"] == "step_started")
     output = next(e for e in events if e["type"] == "agent_result")
@@ -1027,6 +1040,8 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
     assert result is RunResult.COMPLETED
     assert runner.run_count == 2
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.step_attempt == 0
 
@@ -1379,6 +1394,8 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     assert "verdict: " in coder_runs[1]   # render_output_fields half is present
 
     # Feedback consumed: cleared on the engine's state.
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     assert State.load(quest.state_dir).retry_feedback is None
 
     # No agent_output_missing surfaced anywhere.
@@ -1413,6 +1430,8 @@ async def test_run_quest_computes_and_persists_resolved_tiers(tmp_path):
     captured: list[dict] = []
     await run_quest(quest, on_event=captured.append)
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.resolved_tiers is not None
     assert "medium" in state.resolved_tiers
@@ -1432,6 +1451,10 @@ async def test_resume_reuses_resolved_tiers_no_second_event(tmp_path):
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_quest(quest)
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    from imp.engine.executor import _refresh_workflow_snapshot
+    _refresh_workflow_snapshot(quest)
 
     # Re-run run_quest on the same (now-completed) change: it re-loads state,
     # sees resolved_tiers already set, and must not emit a second event.
@@ -1652,6 +1675,8 @@ async def test_resume_marker_is_one_shot(tmp_path: Path) -> None:
     reviewer_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/reviewer")]
     assert reviewer_balances == [False, False]
     # Marker is cleared by completion.
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     assert State.load(quest.state_dir).resume_pending is None
 
 
@@ -1946,6 +1971,10 @@ async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    from imp.engine.executor import _refresh_workflow_snapshot
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     assert (snapshot / "workflow.yaml").exists()
     assert (snapshot / "agents" / "writer.md").exists()
 
@@ -1964,6 +1993,10 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    from imp.engine.executor import _refresh_workflow_snapshot
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     # The stale tmp dir should be gone.
     assert not tmp.exists()
     # And the real snapshot should be present and correct.
@@ -2037,7 +2070,8 @@ async def test_none_step_resolves_to_complete(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
-    assert State.load(quest.state_dir).status == "merged"
+    from imp.engine.archive import read as archive_read
+    assert archive_read.status_of(quest.control_root, quest.id) == "done"
 
 
 @pytest.mark.anyio
@@ -2210,6 +2244,8 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
 
     # No max_loops pause: the tolerated cycle completed.
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     # The forward advance fired FROM the gate, popping its counter: the tolerated
     # cycle cost 0 of the gate's budget. The rejected design leaves this == 1.
@@ -2243,6 +2279,8 @@ async def test_run_quest_records_step_outcome(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.outcome_history["w"] == [
         {"lap": 1, "outcome": "did the thing", "head": ""}]
@@ -2835,6 +2873,8 @@ async def test_complete_clears_step_label(tmp_path: Path) -> None:
 
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.step is None
     assert state.step_label is None
@@ -3114,15 +3154,20 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv1\n")
 
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    from imp.engine.executor import _refresh_workflow_snapshot
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     overlaid = quest.quest_dir / "workflow" / "skills" / "user" / "mine.md"
     assert overlaid.read_text() == "# Mine\nv1\n"
 
     # Once per process: a source-skill edit AFTER the first capture is NOT
     # adopted on a later same-process entry — no re-snapshot, no event.
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
+    # The snapshot is decoupled from the live source: the edit does not leak in.
+    assert overlaid.read_text() == "# Mine\nv1\n"
     events: list[dict] = []
     await run_quest(quest, on_event=events.append)
-    assert overlaid.read_text() == "# Mine\nv1\n"
     assert not [e for e in events if e["type"] == "workflow_refreshed"]
 
 
@@ -3139,6 +3184,8 @@ async def test_run_quest_persists_configured_max_reincarnations(tmp_path):
 
     await run_quest(quest, on_event=lambda _e: None)
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     assert State.load(quest.state_dir).max_reincarnations == 5
 
 
@@ -3997,6 +4044,8 @@ async def test_complete_clears_phase_label(tmp_path: Path) -> None:
 
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.step is None
     assert state.phase_label is None
@@ -4375,6 +4424,8 @@ async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED           # no cross-plan max_loops pause
     assert len(cnp_calls) == PLANS                 # all 12 plans ran
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.loop_counts.get("verify", 0) <= 1  # reset each plan, never accumulates
 
@@ -4477,6 +4528,10 @@ async def test_unknown_tool_grant_surfaces_as_warning_event(tmp_path: Path) -> N
 
     events: list[dict] = []
     await run_quest(quest, on_event=events.append)   # first entry: captures + warns
+    from imp.engine.archive import read as archive_read
+    from imp.engine.executor import _refresh_workflow_snapshot
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     await run_quest(quest, on_event=events.append)   # re-entry: gated, no re-warn
 
     skew = [
@@ -4501,6 +4556,8 @@ async def test_run_quest_stamps_started_at_once_at_first_dispatch(tmp_path: Path
 
     await run_quest(quest, on_event=lambda _e: None)
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     stamped = State.load(quest.state_dir).started_at
     assert stamped is not None                              # stamped when a step ran
     # ISO-8601 UTC (datetime.now(UTC).isoformat()) -> parses and is tz-aware.
@@ -4521,6 +4578,8 @@ async def test_started_at_not_overwritten_on_a_second_run(tmp_path: Path) -> Non
     await run_quest(quest, on_event=lambda _e: None)
 
     # The transition fired (has_started flipped) but started_at was preserved.
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     reloaded = State.load(quest.state_dir)
     assert reloaded.has_started is True
     assert reloaded.started_at == "2020-01-01T00:00:00+00:00"

@@ -53,7 +53,7 @@ def _make_quest(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Qu
         "  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
 
-    quest_dir = root / ".imp" / "quests" / "test-quest"
+    quest_dir = root / ".imp" / "quests" / "c"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
@@ -254,6 +254,8 @@ async def test_completion_clears_resume_pair(
 
     result = await run_quest(quest)
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     # The in-loop arm left the pair set; the terminal Continue must clear it.
     st = State.load(quest.state_dir)
     assert st.resume_pending is None

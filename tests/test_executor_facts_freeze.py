@@ -58,6 +58,8 @@ async def test_first_run_freezes_facts_and_memory(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert state.project_facts == {"greeting": "hi"}
     assert state.memory == {"all.md": "live note"}
@@ -103,6 +105,8 @@ async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> No
     _register_invocation_capturing({"status": "Success"}, sink)
     await run_quest(quest, on_event=lambda _e: None)
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     body = sink[0].initial_messages[0].content[0].text
     assert "hello FROZEN" in body                 # frozen fact, not live project.yaml
     assert "## Project memory" in body

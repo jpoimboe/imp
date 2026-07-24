@@ -141,8 +141,10 @@ async def test_stalled_retries_with_backoff_without_burning_step_attempt(
         e["type"] == "error" and e["payload"].get("category") == "config"
         for e in events)
 
-    state = State.load(quest.state_dir)
-    assert state.status == "merged"
+    from imp.engine.archive import read as archive_read
+    rehydrated = archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    state = State.load(rehydrated / "state")
+    assert state.status == "done"
     assert state.step_attempt == 0
 
 

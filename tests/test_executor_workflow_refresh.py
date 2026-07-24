@@ -229,6 +229,9 @@ async def test_resume_refreshes_unloadable_snapshot(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     assert "chrome" not in (snapshot / "workflow.yaml").read_text()
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
 
@@ -241,6 +244,9 @@ async def test_unchanged_resume_emits_no_refresh_event(tmp_path: Path) -> None:
     _register_fake({"status": "Success"})
     events: list[dict] = []
     await run_quest(quest, on_event=events.append)   # fresh: initial copy
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     await run_quest(quest, on_event=events.append)   # unchanged: no-op
     assert not [e for e in events if e["type"] == "workflow_refreshed"]
 
@@ -280,14 +286,20 @@ async def test_self_edit_not_adopted_same_process(tmp_path: Path) -> None:
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_quest(quest, on_event=lambda _e: None)          # first entry: captures
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
 
     writer = tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md"
     writer.write_text(writer.read_text() + "\nlate-edit\n")
 
-    events: list[dict] = []
-    await run_quest(quest, on_event=events.append)            # second entry: gated
+    # The snapshot is decoupled from the live source: the live edit above does
+    # not leak into the already-captured snapshot.
     snap_writer = quest.quest_dir / "workflow" / "agents" / "writer.md"
     assert "late-edit" not in snap_writer.read_text()
+
+    events: list[dict] = []
+    await run_quest(quest, on_event=events.append)            # second entry: gated
     assert not [e for e in events if e["type"] == "workflow_refreshed"]
 
 
@@ -300,6 +312,9 @@ async def test_new_quest_snapshots_on_first_entry(tmp_path: Path) -> None:
     assert not (quest.quest_dir / "workflow").exists()
 
     await run_quest(quest, on_event=lambda _e: None)
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     assert (quest.quest_dir / "workflow" / "workflow.yaml").exists()
 
 
@@ -319,6 +334,9 @@ async def test_reconcile_adds_missing_tier_keeps_pinned(tmp_path: Path) -> None:
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_quest(quest, on_event=lambda _e: None)   # persists {low,medium,high}
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     workflow, config = _load_workflow_and_config(quest)
 
     state = State.load(quest.state_dir)
@@ -338,6 +356,9 @@ async def test_reconcile_no_missing_returns_false_no_overwrite(tmp_path: Path) -
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_quest(quest, on_event=lambda _e: None)
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
     workflow, config = _load_workflow_and_config(quest)
 
     state = State.load(quest.state_dir)
@@ -354,6 +375,8 @@ async def test_reconcile_adds_missing_step_override(tmp_path: Path) -> None:
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_quest(quest, on_event=lambda _e: None)   # resolved_steps == {}
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
 
     # Add a differ_from step to the live workflow, then refresh the snapshot.
     wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
@@ -384,6 +407,9 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_quest(quest, on_event=lambda _e: None)   # resolves {low,medium,high}
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
 
     # Pin low to a sentinel so we can prove reconcile never overwrites it.
     state = State.load(quest.state_dir)
@@ -407,6 +433,7 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
     from imp.engine import executor as _executor
     _executor._SNAPSHOT_CAPTURED.clear()
     await run_quest(quest, on_event=lambda _e: None)   # fresh process: refresh + reconcile
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
 
     state = State.load(quest.state_dir)
     assert "w2" in state.resolved_steps                        # new step override merged
@@ -445,6 +472,8 @@ async def test_var_added_after_creation_backfilled_no_render_crash(tmp_path: Pat
     result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.COMPLETED
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     assert State.load(quest.state_dir).vars["auto_merge"] is True
     assert any(e["type"] == "vars_backfilled"
                and e["payload"]["names"] == ["auto_merge"] for e in events)
@@ -458,12 +487,16 @@ async def test_unchanged_workflow_resume_skips_reconcile(tmp_path: Path) -> None
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_quest(quest, on_event=lambda _e: None)
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    _refresh_workflow_snapshot(quest)
 
     state = State.load(quest.state_dir)
     del state.resolved_tiers["high"]
     state.save(quest.state_dir)
 
     await run_quest(quest, on_event=lambda _e: None)   # workflow byte-identical
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
     assert "high" not in state.resolved_tiers
 

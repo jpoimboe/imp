@@ -52,7 +52,7 @@ def _seed_single_agent(root: Path) -> Quest:
         "  high: {fake: m}\n"
     )
 
-    quest_dir = root / ".imp" / "quests" / "test-quest"
+    quest_dir = root / ".imp" / "quests" / "c"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
@@ -122,7 +122,9 @@ async def test_auth_retry_recovers_through_backoff_loop(
     out = await run_quest(quest)
 
     assert out is RunResult.COMPLETED
-    assert State.load(quest.state_dir).status == "merged"
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    assert State.load(quest.state_dir).status == "done"
     assert calls["n"] == 2
 
     log_types = [e["type"] for e in quest.event_log().read()]
@@ -170,7 +172,9 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
     out = await run_quest(quest)
 
     assert out is RunResult.COMPLETED
-    assert State.load(quest.state_dir).status == "merged"
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    assert State.load(quest.state_dir).status == "done"
     assert calls["n"] == 2
 
     log_types = [e["type"] for e in quest.event_log().read()]

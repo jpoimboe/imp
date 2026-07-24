@@ -52,7 +52,7 @@ _FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
 
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
-_PRESERVE_ON_PAUSE = ("merge_blocked", "merged", "shelved", "abandoned", "error")
+_PRESERVE_ON_PAUSE = ("merge_blocked", "merged", "done", "shelved", "abandoned", "error")
 
 
 def _leave_signals() -> tuple[int, ...]:

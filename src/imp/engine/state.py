@@ -32,7 +32,7 @@ from imp.engine.errors import StateDecodeError
 from imp.engine.pagecache import drop_page_cache
 
 Status = Literal[
-    "new", "paused", "merge_blocked", "merged", "shelved", "abandoned", "error"
+    "new", "paused", "merge_blocked", "merged", "done", "shelved", "abandoned", "error"
 ]
 
 # Durable live-gate marker written to state.json. `waiting` = live, parked at a

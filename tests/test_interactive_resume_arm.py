@@ -48,7 +48,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n"
         "  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    quest_dir = root / ".imp" / "quests" / "test-quest"
+    quest_dir = root / ".imp" / "quests" / "c"
     (quest_dir / "state").mkdir(parents=True, exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main", "seed_opening": SEED},
@@ -148,6 +148,8 @@ async def test_armed_resume_keeps_transcript_native_and_no_seed(
     assert observed["seed_in_initial"] is False
     # AC3(a)/(b) made explicit: the entry step re-rendered as a resume, not a
     # restart — the step_started event carries resumed=True.
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     events = [json.loads(ln) for ln in
               quest.events_path.read_text().splitlines() if ln.strip()]
     starts = [e for e in events if e["type"] == "step_started"]

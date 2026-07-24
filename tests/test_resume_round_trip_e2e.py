@@ -85,6 +85,8 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     assert seen_transcript_nonempty == [True]
     assert seen_system_prompt == ["seeded prompt"]   # reconstructed verbatim (AC #6a)
 
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     lines = quest.events_path.read_text().splitlines()
     events = [json.loads(ln) for ln in lines if ln.strip()]
     starts = [e for e in events if e["type"] == "step_started"]
