@@ -4,8 +4,9 @@ from pathlib import Path
 
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.skills import overlay_shared_partials
-from imp.assets import bundled_partials_dir
+from imp.assets import bundled_partials_dir, bundled_workflow_dir
 from imp.engine.executor import _refresh_workflow_snapshot
+from imp.engine.loader import load_workflow
 from imp.engine.state import InMemoryEventLog
 from tests.test_executor import _seed_minimal_workflow
 
@@ -66,3 +67,23 @@ def test_refresh_workflow_partial_shadows_shared_on_collision(tmp_path: Path) ->
     snap = quest.quest_dir / "workflow" / "partials"
     assert (snap / "coding-stance.md").read_text() == sentinel
     assert (snap / "action-care.md").is_file()   # non-colliding shared still overlays
+
+
+def test_go_live_worktree_partial_shared_and_included_by_threshold() -> None:
+    partial = bundled_partials_dir() / "go-live-worktree.md"
+    assert partial.is_file()
+    assert "create_and_enter_worktree" in partial.read_text()
+    threshold_src = (
+        bundled_workflow_dir("default") / "agents" / "threshold.md").read_text()
+    assert '{% include "partials/go-live-worktree.md" %}' in threshold_src
+    # It renders in place: the full go-live sentence survives include expansion.
+    body = load_workflow(
+        bundled_workflow_dir("default")).agents["threshold"].prompt_template_source
+    out = render_prompt(
+        body,
+        build_context(quest_title="t", event_log=InMemoryEventLog(),
+                      quest_id="abc", quest_home=".imp/quests/abc",
+                      project_facts={}),
+        workflow_dir=bundled_workflow_dir("default"))
+    assert "forks the branch and worktree from the base branch's current tip" in out
+    assert "{% include" not in out
