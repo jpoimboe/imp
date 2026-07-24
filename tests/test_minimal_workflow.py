@@ -18,10 +18,10 @@ def _steps(wf):
     return {s.name: s for s in wf.flat_steps()}
 
 
-def test_minimal_loads_with_the_three_named_steps() -> None:
+def test_minimal_loads_with_the_four_named_steps() -> None:
     wf = _wf()
     names = [s.name for s in wf.flat_steps()]
-    assert names == ["front-door", "implement", "review"]
+    assert names == ["front-door", "implement", "review", "finalize"]
     # No vestigial name: field — identity follows the directory.
     assert wf.name == "minimal"
 
@@ -123,11 +123,56 @@ def test_review_routes_rework_to_implement_and_approve_completes() -> None:
     assert isinstance(approve.action, Continue)          # off the end -> _complete
 
 
+def test_finalize_is_interactive_high_tier_status_only_and_can_write() -> None:
+    wf = _wf()
+    fin = _steps(wf)["finalize"]
+    assert fin.interactive is True
+    assert fin.tier == "high"
+    # Not read-only — contrast the reviewer, whose read_only == (".",).
+    assert fin.read_only == ()
+    agent = wf.agents["finalize"]
+    # Drives the interactive gate with impty.
+    assert agent.drivers == {"impty"}
+    # Status only — no merge/rework/pause routing.
+    assert set(agent.output_schema.field_names()) == {"status"}
+    tools = agent.tools
+    # It applies and commits requested tweaks itself.
+    assert {"edit_file", "write_file", "bash"} <= tools
+    # deny_tools mirrors the other minimal coding agents.
+    for banned in ("rename_quest", "create_and_enter_worktree", "save_and_exit"):
+        assert banned not in tools
+
+
+def test_finalize_body_guards_on_autonomous_with_both_branches() -> None:
+    body = _wf().agents["finalize"].prompt_template_source
+
+    def _render(autonomous: bool) -> str:
+        return render_prompt(
+            body,
+            build_context(quest_title="t", event_log=InMemoryEventLog(),
+                          quest_id="abc", quest_home=".imp/quests/abc",
+                          project_facts={}, autonomous=autonomous),
+            workflow_dir=MINIMAL)
+
+    attended = _render(False)
+    autonomous = _render(True)
+    # Every include resolves in both branches.
+    assert "{% include" not in attended
+    assert "{% include" not in autonomous
+    # Attended branch opens the human gate — the live-gate-dialogue partial resolved.
+    assert "Converse until ready" in attended
+    # Autonomous branch auto-completes without a gate.
+    assert "complete immediately without soliciting" in autonomous
+    # The guard genuinely branches: the human-gate leaf is absent under autonomy.
+    assert "Converse until ready" not in autonomous
+    assert "complete immediately without soliciting" not in attended
+
+
 def test_minimal_front_door_forks_worktree_others_do_not() -> None:
     wf = _wf()
     assert all(s.kind != "merge_and_exit_worktree" for s in wf.flat_steps())
     assert "create_and_enter_worktree" in wf.agents["front-door"].tools
-    for role in ("implementer", "reviewer"):
+    for role in ("implementer", "reviewer", "finalize"):
         assert "create_and_enter_worktree" not in wf.agents[role].tools
 
 

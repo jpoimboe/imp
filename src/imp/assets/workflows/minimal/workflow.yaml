@@ -1,10 +1,11 @@
 description: |
-  front-door -> implement -> review
+  front-door -> implement -> review -> finalize
 
   A minimal workflow. It scopes a small change in an open conversation (reusing the
   shared front-door), then on go-live forks an isolated worktree on imp/<id> and
   builds it there — no plan is written, no merge happens. A read-only reviewer bounces
-  the implementer until the change is approved, then the run completes leaving the
+  the implementer until the change is approved, then an interactive finalize gate lets
+  the user review the change and request tweaks before the run completes, leaving the
   commits on the imp/<id> branch for the user to integrate manually. Review
   independence is by MODEL TIER (a high-tier reviewer judging the implementer's work),
   not by vendor.
@@ -43,8 +44,7 @@ phases:
   - name: review
     label: "review phase"
     steps:
-      # Read-only reviewer. approve -> runs off the end of the phase list into the
-      # engine's no-merge _complete (the run finishes with commits on the branch).
+      # Read-only reviewer. approve -> continues into the finalize phase.
       # rework -> resume implement with the reviewer's findings.
       - name: review
         file: agents/reviewer.md
@@ -53,5 +53,17 @@ phases:
         read_only: ["."]
         rules:
           - {if: {verdict: rework}, resume: implement, label: "addressing review feedback", feedback: "Here's review feedback to address:"}
+          - {if: {status: Error}, pause: true}
+          - {else: true, continue: true}
+
+  - name: finalize
+    label: "finalize phase"
+    steps:
+      - name: finalize
+        file: agents/finalize.md
+        tier: high
+        label: "finalizing"
+        interactive: true
+        rules:
           - {if: {status: Error}, pause: true}
           - {else: true, continue: true}
