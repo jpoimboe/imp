@@ -39,27 +39,27 @@ def test_front_door_is_interactive_high_tier_status_only() -> None:
     assert set(wf.agents["front-door"].output_schema.field_names()) == {"status"}
 
 
-def test_front_door_denies_worktree_but_keeps_naming_parking_and_scouting() -> None:
+def test_front_door_allows_worktree_and_keeps_naming_parking_and_scouting() -> None:
     tools = _wf().agents["front-door"].tools
-    assert "create_and_enter_worktree" not in tools   # never forks a worktree
-    assert "save_and_exit" in tools                    # parking stays available
-    assert "rename_quest" in tools                     # it names the quest
-    assert "sub_agent" in tools                         # explorer/researcher/spiker
+    assert "create_and_enter_worktree" in tools   # forks the worktree on go-live
+    assert "save_and_exit" in tools               # parking stays available
+    assert "rename_quest" in tools                # it names the quest
+    assert "sub_agent" in tools                   # explorer/researcher/spiker
 
 
-def test_front_door_body_includes_shared_partial_and_goes_live_in_place() -> None:
+def test_front_door_body_includes_partials_and_goes_live_in_worktree() -> None:
     body = _wf().agents["front-door"].prompt_template_source
     assert '{% include "partials/front-door.md" %}' in body
+    assert '{% include "partials/go-live-worktree.md" %}' in body
     assert "{{ quest.home }}/artifacts/spec/{{ quest.id }}.md" in body
-    assert "current branch" in body
-    # It must NOT instruct the go-live worktree tool.
-    assert "create_and_enter_worktree" not in body
+    # The stale in-place framing is gone.
+    assert "in place on the current branch" not in body
 
 
 def test_front_door_renders_full_include_closure() -> None:
-    # AC3: rendering the front-door agent resolves the whole shared closure with no
+    # Rendering the front-door agent resolves the whole shared closure with no
     # leftover {% include %}. workflow_dir=LIGHT has no local partials/, so the
-    # render-loader fallback (plan 1) resolves them from the bundled shared pool.
+    # render-loader fallback resolves them from the bundled shared pool.
     body = _wf().agents["front-door"].prompt_template_source
     out = render_prompt(
         body,
@@ -70,6 +70,7 @@ def test_front_door_renders_full_include_closure() -> None:
     assert "{% include" not in out                      # every include resolved
     assert "Measure twice, cut once" in out             # action-care leaf
     assert "explorer" in out.lower()                    # delegate-exploration leaf
+    assert "create_and_enter_worktree" in out           # go-live worktree include
 
 
 def test_implement_is_high_tier_writer_that_commits() -> None:
@@ -129,11 +130,12 @@ def test_capture_base_step_sets_base_head_from_stdout() -> None:
     assert isinstance(match.action, Continue)
 
 
-def test_light_has_no_merge_or_worktree_step() -> None:
+def test_light_front_door_forks_worktree_others_do_not() -> None:
     wf = _wf()
     assert all(s.kind != "merge_and_exit_worktree" for s in wf.flat_steps())
-    for agent in wf.agents.values():
-        assert "create_and_enter_worktree" not in agent.tools
+    assert "create_and_enter_worktree" in wf.agents["front-door"].tools
+    for role in ("implementer", "reviewer"):
+        assert "create_and_enter_worktree" not in wf.agents[role].tools
 
 
 def test_capture_base_head_script_echoes_head(tmp_path: Path) -> None:
