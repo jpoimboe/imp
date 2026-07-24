@@ -308,3 +308,23 @@ def _await_change_dir(control_root: Path, timeout: float) -> Path:
     raise TimeoutError(
         f"no Quest home appeared under {root} within {timeout}s"
     )
+
+
+def wait_for_archived_status(
+    control_root: Path, quest_id: str, want: str, timeout: float
+) -> str | None:
+    """Poll the archive for a quest's terminal status after its live home is reaped.
+
+    A no-merge draft completion finishes `done`, archives the terminal snapshot,
+    then rmtrees the live home. The CLI client returns before the detached daemon
+    finishes that archive+reap, so poll the archived state.json for the settled
+    status instead of the (about-to-vanish) live home."""
+    from imp.engine.archive import read as archive_read
+    deadline = time.time() + timeout
+    last: str | None = None
+    while time.time() < deadline:
+        last = archive_read.status_of(control_root, quest_id)
+        if last == want:
+            return last
+        time.sleep(0.2)
+    return last
