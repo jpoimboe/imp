@@ -44,7 +44,7 @@ _SCRIPT_REDIRECT_REFUSED = (
 
 
 def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
-    return result is RunResult.PAUSED and coordinator.should_pause
+    return result is RunResult.PAUSED and coordinator.interrupted
 
 
 def _is_side_effect_pause(result: Any, coordinator: Any) -> bool:
@@ -86,7 +86,7 @@ def _hold_prompt(
 ) -> str | None:
     if (_is_interrupt_pause(result, coordinator)
             and coordinator.pause_reason not in SIDE_EFFECT_REASONS):
-        return _SCRIPT_HOLD_PROMPT if is_script else _RESUME_PROMPT
+        return _SCRIPT_HOLD_PROMPT if is_script else _RESUME_INTERRUPTED_PROMPT
     return None
 
 
