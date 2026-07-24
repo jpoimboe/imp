@@ -280,26 +280,25 @@ All four live under `.imp/quest/` (gitignored); spec/plan artifacts are journale
 
 ## Light workflow
 
-`src/imp/assets/workflows/light/` is a minimal **in-place** workflow: it builds a
-small change directly on the current branch — no worktree is forked, no plan is
-written, and no merge occurs. The change is built in a short sequence of steps:
+`src/imp/assets/workflows/light/` is a minimal workflow: it scopes a small change, then
+builds it in a **forked worktree** on `imp/<id>` and completes with **no merge**, leaving
+the commits on that branch for the user to integrate manually. The change runs through a
+short sequence of steps:
 
 - **front-door** — the shared front-door conversation (the same
-  `partials/front-door.md` the default workflow uses) scopes the change and, on
-  go-live, writes the final spec directly. It never calls
-  `create_and_enter_worktree`, so the quest stays unmaterialized and every step runs
-  in the main checkout. A `capture-base` script step then records the branch HEAD
-  (into the `base_head` var) as the reviewer's stable diff base.
-- **implement** — the `implementer` agent reads the spec, makes the change, and
-  commits on the current branch (no plan).
+  `partials/front-door.md` the default workflow uses) scopes the change and, on go-live,
+  calls `create_and_enter_worktree` — so the quest **is** materialized — and writes the
+  final spec directly. There is no separate finalizer and no plan.
+- **implement** — the `implementer` agent reads the spec, makes the change, and commits
+  on the quest branch `imp/<id>` in the worktree (no plan).
 - **review** — the **read-only** `reviewer` agent diffs exactly the commits imp added
-  against the spec; a `rework` verdict resumes `implement` with feedback, `approve`
-  lets the run complete.
+  (`git diff cur_base_head HEAD`, the quest's fork point) against the spec; a `rework`
+  verdict resumes `implement` with feedback, `approve` lets the run complete.
 
-The run has no test/verify gate, no worktree, and no summarizer. It completes with the
-terminal status **`done`** and is archived like a merged quest — searchable, home
-cleaned up — leaving the commits on the branch (`imp show` / `imp list` display it as
-`done`, not merged).
+The run has no test/verify gate and no summarizer. It completes with the terminal status
+**`done`** and is archived like a merged quest — searchable, home cleaned up — with its
+worktree removed and the `imp/<id>` branch kept, holding the commits (`imp show` /
+`imp list` display it as `done`, not merged).
 
 ---
 

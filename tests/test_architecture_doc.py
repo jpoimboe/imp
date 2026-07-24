@@ -63,17 +63,22 @@ def test_architecture_documents_the_light_workflow() -> None:
     low = text.lower()
     assert "## Light workflow" in text
     assert "src/imp/assets/workflows/light/" in text
-    # in-place on the current branch: no worktree, no plan, no merge
-    assert "in-place" in low
-    assert "no worktree is forked" in text
-    assert "no merge occurs" in text
+    # forks a worktree on imp/<id>, no plan, no merge
+    assert "no merge" in low
     # the three steps
     for step in ("front-door", "implement", "review"):
         assert step in text
-    # the read-only reviewer diffs the commits; capture-base records the diff base
-    light_section = text.split("## Light workflow", 1)[1].lower()
-    assert "read-only" in light_section
-    assert "capture-base" in text
+    light_section = text.split("## Light workflow", 1)[1]
+    low_section = light_section.lower()
+    # the read-only reviewer diffs the fork point; the branch is kept on completion
+    assert "worktree" in low_section
+    assert "read-only" in low_section
+    assert "cur_base_head" in light_section
+    assert "imp/<id>" in light_section
+    # stale in-place / capture-base / base_head claims are gone
+    assert "capture-base" not in text
+    assert "no worktree is forked" not in text
+    assert "in-place" not in low_section
 
 
 def test_architecture_documents_the_done_terminal_status() -> None:
