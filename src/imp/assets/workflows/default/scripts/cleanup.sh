@@ -163,7 +163,9 @@ fi
 # when a directive was folded or some commit was unstamped; the fast path above
 # already returned for already-folded + already-stamped history, keeping re-entry
 # zero-churn.)
-if ! git rebase "$FORK" \
+# The --exec child re-reads repo config; with rerere active for integrate-rebase it would contend on the per-worktree MERGE_RR.lock. The stamp replay is conflict-free, so disable rerere via the environment (which the exec child inherits — a -c on the outer rebase does not reach it).
+if ! GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=rerere.enabled GIT_CONFIG_VALUE_0=false \
+  git rebase "$FORK" \
   --exec 'git -c trailer.ifexists=doNothing commit --amend --no-edit --trailer "Quest: '"$ID"'"'; then
   git rebase --abort 2>/dev/null || true
   echo "cleanup stamp rebase failed; branch left intact for human resolution" >&2

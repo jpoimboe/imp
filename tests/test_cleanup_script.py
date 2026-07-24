@@ -340,3 +340,27 @@ def test_verify_exhaustion_restores_pristine(tmp_path: Path) -> None:
     assert not (_state(pr) / "autosquash-before-head").exists()
     assert not (_state(pr) / "autosquash-resolve-attempts").exists()
     assert "rebase -i --autosquash" in res.stderr        # manual-recovery hint
+
+
+def test_stamps_under_active_rerere(tmp_path: Path) -> None:
+    """With rerere active AND a stale MERGE_RR.lock present, the stamp rebase's
+    --exec child would contend on the per-worktree lock and die. The env override
+    disables rerere for that invocation, so git never touches MERGE_RR.lock:
+    cleanup ignores the stale lock, stamps every non-merge commit in range with
+    Quest: <id>, and exits 0."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "config", "rerere.enabled", "true")           # rerere active repo-wide
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
+    _git(pr, "checkout", "-b", "imp/x")
+    for i in range(3):
+        (pr / f"f{i}.txt").write_text(f"{i}\n")
+        _git(pr, "add", f"f{i}.txt")
+        _git(pr, "commit", "-m", f"feat {i}")
+    (pr / ".git" / "MERGE_RR.lock").write_text("")          # stale lock: trips the unfixed script
+
+    res = _run(pr)
+    assert res.returncode == 0, res.stderr
+    for h in _git(pr, "rev-list", "--no-merges", f"{fork}..HEAD").stdout.split():
+        assert _trailer(pr, h) == ID, f"{h} not stamped"
