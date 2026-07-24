@@ -293,12 +293,19 @@ short sequence of steps:
   on the quest branch `imp/<id>` in the worktree (no plan).
 - **review** — the **read-only** `reviewer` agent diffs exactly the commits imp added
   (`git diff cur_base_head HEAD`, the quest's fork point) against the spec; a `rework`
-  verdict resumes `implement` with feedback, `approve` lets the run complete.
+  verdict resumes `implement` with feedback, `approve` flows into `finalize`.
+- **finalize** — an interactive, high-tier human gate. It composes its own intent-level
+  summary from the spec and the quest diff (there is no summarizer step or artifact),
+  opens with it (confirming the commits sit on `imp/<id>` for manual integration), and
+  lets the user request changes — which the gate applies and commits itself on the
+  branch, with no re-review by the reviewer. On approval it completes the run; an
+  autonomous run auto-completes without soliciting.
 
-The run has no test/verify gate and no summarizer. It completes with the terminal status
-**`done`** and is archived like a merged quest — searchable, home cleaned up — with its
-worktree removed and the `imp/<id>` branch kept, holding the commits (`imp show` /
-`imp list` display it as `done`, not merged).
+The run has no test/verify gate and no summarizer step; it ends on the interactive
+`finalize` human gate before completing. It
+completes with the terminal status **`done`** and is archived like a merged quest —
+searchable, home cleaned up — with its worktree removed and the `imp/<id>` branch kept,
+holding the commits (`imp show` / `imp list` display it as `done`, not merged).
 
 ---
 
