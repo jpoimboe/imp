@@ -60,8 +60,9 @@ lands stays maintainable.
 Don't dig through `.imp/` — the raw event log is masked and the rest is internal
 bookkeeping. Ask the CLI instead:
 
-- `imp list` — the board: in-flight quests and drafts, the backlog, and merged
-  quests; `--all` adds abandoned and shelved conversations.
+- `imp list` — the board: in-flight quests and drafts, the backlog, and
+  finished quests (merged or done); `--all` adds abandoned and shelved
+  conversations.
 - `imp show <id>` — a quest's card: status, current step, intent, and summary
   (`show <id> spec` for the raw spec, `--json` for a structured card).
 - `imp search <query>` — case-insensitive substring search across in-flight,
