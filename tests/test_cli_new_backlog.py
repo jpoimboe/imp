@@ -166,7 +166,7 @@ def test_non_backlog_non_interactive_runs_headless(
         quest, *, driver, coord, solicit, seed_opening=None, status=None,
         leave_mode=None, title=None,
         non_interactive=False, autonomous=False, leave_state=None,
-        model=None,
+        model=None, opening_unsandboxed=False,
     ) -> int:
         captured["non_interactive"] = non_interactive
         captured["quest_id"] = quest.id

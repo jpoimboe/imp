@@ -927,6 +927,7 @@ async def _run_cleared_session(
             return 130
         _session_started = True
         cleared_model = cleared_model_sink.get("model")
+        cleared_unsandboxed = bool(cleared_sandbox_sink.get("unsandboxed"))
         opening_text = _normalize_opening_reply(reply)
         # Persist the intent durably so the reopened chat's opening step seeds from
         # quest.json (mirroring the imp new path), surviving any later resume.
@@ -943,7 +944,8 @@ async def _run_cleared_session(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title, model=cleared_model)
+            leave_state=leave_state, title=term_title, model=cleared_model,
+            opening_unsandboxed=cleared_unsandboxed)
     finally:
         if not _session_started:
             discard_conversation(quest)
@@ -1286,6 +1288,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
     opening_model = opening_model_sink.get("model") or model_arg
+    opening_unsandboxed = bool(opening_sandbox_sink.get("unsandboxed"))
 
     # Persist the finalized intent so it survives any resume (including a restart
     # from an errored transcript). Covers both the positional and interactive
@@ -1313,7 +1316,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             status=status,
             title=term_title,
             leave_mode=leave_mode,
-            non_interactive=True, autonomous=autonomous, model=opening_model)
+            non_interactive=True, autonomous=autonomous, model=opening_model,
+            opening_unsandboxed=opening_unsandboxed)
 
     if not header_printed:
         _print_opening(quest, leave_mode, interactive=interactive, color=color)
@@ -1334,7 +1338,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous,
-            model=opening_model)
+            model=opening_model, opening_unsandboxed=opening_unsandboxed)
 
     return await _clear_loop(control, first=_first, leave_mode=leave_mode)
 
