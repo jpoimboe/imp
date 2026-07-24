@@ -29,7 +29,7 @@ from imp.engine.state import (
 )
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 12  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 13  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -338,6 +338,20 @@ def _migrate_v11_to_v12(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v12_to_v13(quest_dir: Path) -> None:
+    """v12->v13: the bundled default workflow was renamed `imp` -> `default`.
+    Rewrite a live home's quest.json so an explicit `"workflow": "imp"` becomes
+    `"default"`; a null workflow (the project-default follower) is left untouched
+    and simply tracks the renamed directory. Single-file rewrite via the atomic
+    _write_quest_json helper; the `== "imp"` guard makes the hop a no-op on re-run."""
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    if meta.get("workflow") == "imp":
+        meta["workflow"] = "default"
+    meta["layout_version"] = 13
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -350,6 +364,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (9, 10): _migrate_v9_to_v10,
     (10, 11): _migrate_v10_to_v11,
     (11, 12): _migrate_v11_to_v12,
+    (12, 13): _migrate_v12_to_v13,
 }
 
 

@@ -257,8 +257,29 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_four() -> None:
-    assert archive._DATA_VERSION == 4
+def test_data_version_bumped_to_five() -> None:
+    assert archive._DATA_VERSION == 5
+
+
+def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "wf01", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+         "workflow": "imp"},
+        {"id": "wf01", "status": "merged", "step": "finalize"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+    assert not archive.data_version_path(tmp_path).exists()   # pre-migration
+
+    archive.ensure_current(tmp_path)
+
+    migrated = record.read_record(archive.records_root(tmp_path), "wf01")
+    assert migrated is not None
+    assert migrated["quest_meta"]["workflow"] == "default"
+    assert archive.data_version_path(tmp_path).read_text().strip() == "5"
 
 
 def test_migrate_remaps_resume_target_prompt_to_prompt_paused(tmp_path: Path) -> None:
@@ -295,3 +316,41 @@ def test_migrate_leaves_agent_resume_target_unchanged(tmp_path: Path) -> None:
     archive._migrate_archive_blobs(tmp_path)
 
     assert _final_state_of(tmp_path, "rt2")["resume_target"] == "agent"
+
+
+def test_ensure_current_leaves_non_imp_workflow_untouched(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "wf02", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+         "workflow": "patent"},
+        {"id": "wf02", "status": "merged", "step": "finalize"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+
+    archive.ensure_current(tmp_path)
+
+    migrated = record.read_record(archive.records_root(tmp_path), "wf02")
+    assert migrated is not None
+    assert migrated["quest_meta"]["workflow"] == "patent"
+
+
+def test_ensure_current_leaves_null_workflow_untouched(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "wf03", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+         "workflow": None},
+        {"id": "wf03", "status": "merged", "step": "finalize"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+
+    archive.ensure_current(tmp_path)
+
+    migrated = record.read_record(archive.records_root(tmp_path), "wf03")
+    assert migrated is not None
+    assert migrated["quest_meta"]["workflow"] is None
