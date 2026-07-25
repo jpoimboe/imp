@@ -328,3 +328,24 @@ def wait_for_archived_status(
             return last
         time.sleep(0.2)
     return last
+
+
+_EVIDENCE_TAIL_LINES = 40
+
+
+def _tail(path: Path, lines: int = _EVIDENCE_TAIL_LINES) -> str:
+    if not path.exists():
+        return f"<no {path.name}>"
+    try:
+        return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
+    except OSError as exc:
+        return f"<unreadable {path.name}: {exc}>"
+
+
+def evidence(quest_dir: Path) -> str:
+    """Failure evidence for a live subprocess run. events.jsonl carries the real
+    trace; daemon.stderr is empty unless the daemon itself crashed."""
+    return (
+        f"events.jsonl tail:\n{_tail(quest_dir / 'events.jsonl')}\n"
+        f"daemon.stderr tail:\n{_tail(quest_dir / 'daemon.stderr')}"
+    )

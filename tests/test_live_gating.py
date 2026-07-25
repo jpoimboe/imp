@@ -580,3 +580,44 @@ def test_hook_ignores_unlisted_session_file():
     item = _StubItem("tests/test_session_hibernate.py")
     pytest_collection_modifyitems(_StubConfig(None), [item])
     assert [d for d in item.added if d.mark.name == "timeout"] == []
+
+
+from tests._live import _EVIDENCE_TAIL_LINES, _tail, evidence  # noqa: E402
+
+
+def test_evidence_puts_events_tail_first_then_daemon_stderr(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text(
+        '{"type": "step_started"}\n{"type": "error"}\n'
+    )
+    (quest_dir / "daemon.stderr").write_text("Traceback: boom\n")
+    text = evidence(quest_dir)
+    # events.jsonl is the primary evidence and must come first (spike ranking).
+    assert text.index("events.jsonl tail:") < text.index("daemon.stderr tail:")
+    assert '{"type": "error"}' in text
+    assert "Traceback: boom" in text
+
+
+def test_evidence_marks_missing_files_instead_of_raising(tmp_path):
+    quest_dir = tmp_path / "empty"
+    quest_dir.mkdir()
+    text = evidence(quest_dir)
+    assert "<no events.jsonl>" in text
+    assert "<no daemon.stderr>" in text
+
+
+def test_tail_returns_only_the_last_lines(tmp_path):
+    log = tmp_path / "events.jsonl"
+    total = _EVIDENCE_TAIL_LINES + 10
+    log.write_text("\n".join(f"line-{i}" for i in range(total)) + "\n")
+    lines = _tail(log).splitlines()
+    assert len(lines) == _EVIDENCE_TAIL_LINES
+    assert lines[0] == "line-10"
+    assert lines[-1] == f"line-{total - 1}"
+
+
+def test_tail_replaces_undecodable_bytes(tmp_path):
+    log = tmp_path / "daemon.stderr"
+    log.write_bytes(b"ok \xff\xfe bad\n")
+    assert "ok " in _tail(log)  # no UnicodeDecodeError
