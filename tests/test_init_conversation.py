@@ -72,7 +72,7 @@ def test_workflow_choices_exclude_internal_memory(tmp_path) -> None:
     choices = _workflow_choices(tmp_path)
     names = [name for name, _desc in choices]
     assert "memory" not in names
-    assert {"default", "minimal"} <= set(names)
+    assert {"default", "minimal", "patent"} <= set(names)
     # descriptions still come from each workflow.yaml
     assert all(desc.strip() for _name, desc in choices)
     kickoff = _build_init_kickoff(
@@ -82,7 +82,7 @@ def test_workflow_choices_exclude_internal_memory(tmp_path) -> None:
 
 
 def test_run_init_conversation_pins_default_workflow_enum(tmp_path, monkeypatch):
-    from imp.assets import bundled_assets_dir, selectable_workflow_names
+    from imp.assets import selectable_workflow_names
     from imp.engine.loader import parse_agent_file
 
     _result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
