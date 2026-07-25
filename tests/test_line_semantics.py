@@ -6,7 +6,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.agents.tools.limits import FILE_READ_CAP_BYTES, MATCH_LINE_CAP_BYTES
-from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
+from imp.agents.tools.lines import (
+    clip_long_lines,
+    file_is_cap_truncated,
+    split_lines,
+    truncate_line,
+)
 
 
 def test_terminal_newline_phantom_is_not_a_line() -> None:
@@ -74,3 +79,31 @@ def test_truncate_line_caps_content_with_marker() -> None:
     long_line = "x" * (MATCH_LINE_CAP_BYTES + 5)
     assert truncate_line(long_line) == "x" * MATCH_LINE_CAP_BYTES + "…[truncated]"
     assert truncate_line("short") == "short"
+
+
+def test_clip_long_lines_leaves_short_text_byte_identical() -> None:
+    text = "a\nbb\n\nccc"
+    assert clip_long_lines(text) == (text, 0)
+    assert clip_long_lines("") == ("", 0)
+    assert clip_long_lines("a\nb\n") == ("a\nb\n", 0)
+
+
+def test_clip_long_lines_clips_and_preserves_trailing_newline() -> None:
+    long_line = "x" * (MATCH_LINE_CAP_BYTES + 5)
+    clipped, count = clip_long_lines(f"{long_line}\nshort\n")
+    assert clipped == "x" * MATCH_LINE_CAP_BYTES + "…[truncated]" + "\nshort\n"
+    assert count == 1
+
+
+def test_clip_long_lines_preserves_final_unterminated_line() -> None:
+    long_line = "y" * (MATCH_LINE_CAP_BYTES + 1)
+    clipped, count = clip_long_lines(f"a\n{long_line}")
+    assert clipped == "a\n" + "y" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert count == 1
+
+
+def test_clip_long_lines_counts_every_clipped_line() -> None:
+    over = "z" * (MATCH_LINE_CAP_BYTES + 1)
+    clipped, count = clip_long_lines("\n".join([over, "ok", over, over]))
+    assert count == 3
+    assert clipped.split("\n")[1] == "ok"

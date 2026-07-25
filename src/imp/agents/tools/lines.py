@@ -74,3 +74,16 @@ def truncate_line(line: str) -> str:
     if len(line) > MATCH_LINE_CAP_BYTES:
         return line[:MATCH_LINE_CAP_BYTES] + "…[truncated]"
     return line
+
+
+def clip_long_lines(text: str) -> tuple[str, int]:
+    """Clip every over-long line in `text`; returns (clipped, lines_clipped).
+
+    Splits on "\\n" only — NOT via split_lines, whose phantom/fragment popping
+    would drop a trailing newline — so a trailing newline and a final
+    unterminated line both survive and text with no over-long line comes back
+    byte-identical with count 0.
+    """
+    segments = text.split("\n")
+    clipped = [truncate_line(s) for s in segments]
+    return "\n".join(clipped), sum(c != s for s, c in zip(segments, clipped, strict=True))
