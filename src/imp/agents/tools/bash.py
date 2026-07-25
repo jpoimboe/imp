@@ -87,6 +87,20 @@ def _effective_foreground_timeout(timeout: float | None) -> float:
     return min(timeout or BASH_FOREGROUND_TIMEOUT_S, BASH_FOREGROUND_TIMEOUT_MAX_S)
 
 
+def _clip_cap_notice_clause(clipped_lines: int, over_cap: bool) -> str | None:
+    """Leading clause naming what altered the returned output, or None when
+    nothing did — there is then no notice to emit and the text is byte-exact.
+    The "2000" / "30 KB" literals are MATCH_LINE_CAP_BYTES /
+    BASH_OUTPUT_CAP_BYTES in prose (F4 lockstep note in limits.py)."""
+    if not clipped_lines:
+        return "Output truncated at the 30 KB cap." if over_cap else None
+    noun = "line" if clipped_lines == 1 else "lines"
+    clip = f"{clipped_lines} long {noun} clipped at 2000 chars"
+    if over_cap:
+        return f"{clip}, then output truncated at the 30 KB cap."
+    return f"{clip}."
+
+
 @imp_tool(
     name="bash",
     description=(

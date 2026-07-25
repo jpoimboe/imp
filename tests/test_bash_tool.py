@@ -824,3 +824,17 @@ def test_bash_promoted_proc_is_killable_and_torn_down(tmp_path: Path) -> None:
     assert killed["status"] == "killed"
     assert killed["kill_reason"] == "agent"
     assert _tombstone_path(ctx).exists()
+
+
+def test_bash_notice_clause_wording_for_clip_and_cap() -> None:
+    # AC 4: the three shapes verbatim, plus the singular form. These literals are
+    # bound to MATCH_LINE_CAP_BYTES / BASH_OUTPUT_CAP_BYTES (F4 note in limits.py).
+    from imp.agents.tools.bash import _clip_cap_notice_clause as clause
+    assert clause(0, False) is None      # nothing fired -> nothing to disclose
+    assert clause(0, True) == "Output truncated at the 30 KB cap."
+    assert clause(1, False) == "1 long line clipped at 2000 chars."
+    assert clause(3, False) == "3 long lines clipped at 2000 chars."
+    assert clause(3, True) == (
+        "3 long lines clipped at 2000 chars, then output truncated at the 30 KB cap.")
+    assert clause(1, True) == (
+        "1 long line clipped at 2000 chars, then output truncated at the 30 KB cap.")
