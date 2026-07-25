@@ -265,6 +265,17 @@ def test_knowledge_cheatsheet_documents_events_search() -> None:
     assert "backlog, and archived quests' conversation content." in body
 
 
+def test_knowledge_imp_edit_bullet_documents_base_flag() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    # the source wraps, so assert each within-line half separately
+    assert "`--base <branch>` re-points the fork at another existing" in body
+    assert "branch (also before go-live only)." in body
+    # the clause rides the imp edit bullet: after --depends-on, before the next bullet
+    assert (body.index("rejected once materialized).")
+            < body.index("`--base <branch>` re-points")
+            < body.index("- `imp help`"))
+
+
 def test_knowledge_memory_line_uses_background_and_carries_imp_edit_bullet() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
     # the memory-recording line now launches the memory quest in the background
