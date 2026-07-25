@@ -6,9 +6,14 @@ from typing import Any
 
 import pytest
 
-from imp.agents.interactive import build_setup_input_fn, handle_setup_slash
+from imp.agents.interactive import (
+    build_setup_input_fn,
+    handle_setup_slash,
+    SANDBOX_SETUP_OFF,
+    SANDBOX_SETUP_ON,
+)
 from imp.agents.transcript import SkillReply
-from imp.cli.slash import REPROMPT, SANDBOX_STATE_OFF, SANDBOX_STATE_ON
+from imp.cli.slash import REPROMPT
 
 
 @pytest.fixture
@@ -36,11 +41,11 @@ def test_setup_slash_sandbox_status_reflects_flag(tmp_path):
     on: list[str] = []
     handle_setup_slash("/sandbox", workflow_dir=tmp_path,
                        output_fn=on.append, unsandboxed=False)
-    assert on == [SANDBOX_STATE_ON]
+    assert on == [SANDBOX_SETUP_ON]
     off: list[str] = []
     handle_setup_slash("/sandbox", workflow_dir=tmp_path,
                        output_fn=off.append, unsandboxed=True)
-    assert off == [SANDBOX_STATE_OFF]
+    assert off == [SANDBOX_SETUP_OFF]
 
 
 @pytest.mark.parametrize(

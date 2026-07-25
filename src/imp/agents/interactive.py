@@ -27,8 +27,6 @@ from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import (
     _COMMAND_SHAPED,
     REPROMPT,
-    SANDBOX_STATE_OFF,
-    SANDBOX_STATE_ON,
     is_slash_command,
 )
 from imp.engine.agent_run import (
@@ -61,6 +59,14 @@ _SETUP_HELP_LINES = (
     "Other slash commands (e.g. /save, /abandon) are not available during setup.",
     "Type your answer and press Enter to continue.",
 )
+
+SANDBOX_SETUP_ON = (
+    "Sandbox is on. Shell and file tools are confined to this project "
+    "directory; secrets are masked.")
+SANDBOX_SETUP_OFF = (
+    "Sandbox is off — setup is running unsandboxed. Shell and file tools "
+    "run as you: your home directory and secrets are readable and writes "
+    "are unconfined.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +113,7 @@ def handle_setup_slash(
             output_fn(f"/{name}" + (f" — {description}" if description else ""))
         return REPROMPT
     if cmd == "sandbox":
-        output_fn(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
+        output_fn(SANDBOX_SETUP_OFF if unsandboxed else SANDBOX_SETUP_ON)
         return REPROMPT
     if cmd in _LIFECYCLE_COMMANDS:
         output_fn(f"/{cmd} is not available during setup.")
