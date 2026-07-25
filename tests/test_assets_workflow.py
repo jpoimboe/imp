@@ -5,6 +5,9 @@ import re
 import shutil
 from pathlib import Path
 
+import yaml
+
+from imp.assets import bundled_workflow_dir, bundled_workflow_names
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.types import Continue, Goto
@@ -1257,3 +1260,25 @@ def test_bundled_assets_dir_is_the_root_of_the_asset_pools() -> None:
         assert (root / sub).is_dir(), sub
     assert bundled_skills_dir().parent == root
     assert bundled_partials_dir().parent == root
+
+
+def test_bundled_agent_steps_resolve_to_their_declared_tier() -> None:
+    """Every shipped agent step declares tier: in workflow.yaml and resolves to
+    exactly that, so frontmatter-defaulting cannot move a bundled workflow."""
+    names = bundled_workflow_names()
+    assert set(names) >= {"default", "memory", "minimal", "patent"}
+    for name in names:
+        wf_dir = bundled_workflow_dir(name)
+        raw = yaml.safe_load((wf_dir / "workflow.yaml").read_text())
+        declared = {
+            s["name"]: s.get("tier")
+            for ph in raw["phases"] for s in (ph.get("steps") or [])
+        }
+        agent_steps = [s for s in load_workflow(wf_dir).flat_steps()
+                       if s.kind == "agent"]
+        assert agent_steps, name
+        for step in agent_steps:
+            assert declared[step.name], (
+                f"{name}/{step.name} omits tier: — shipped steps declare theirs "
+                "explicitly; if that is deliberately changing, update this test")
+            assert step.tier == declared[step.name], f"{name}/{step.name}"
