@@ -175,8 +175,8 @@ def parse_default_base(path: Path) -> str | None:
     if not path.exists():
         return None
     try:
-        raw: Any = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
+        raw: Any = load_config_yaml(path.read_text()) or {}
+    except YAMLError as e:
         raise LoadError(
             f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)
         ) from e

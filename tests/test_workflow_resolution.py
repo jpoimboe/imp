@@ -153,6 +153,16 @@ def test_parse_default_base_non_string_raises(tmp_path: Path) -> None:
         parse_default_base(p)
 
 
+def test_parse_default_base_malformed_yaml_raises_load_error(tmp_path: Path) -> None:
+    # ruamel's YAMLError is unrelated to PyYAML's, so an unswapped except clause
+    # would let a raw ruamel traceback escape instead of imp's LoadError.
+    p = tmp_path / "config.yaml"
+    p.write_text("default-base: [master\n")
+    with pytest.raises(LoadError) as exc:
+        parse_default_base(p)
+    assert "invalid YAML in config.yaml" in str(exc.value)
+
+
 def test_available_workflow_names_unions_bundled_and_committed(tmp_path: Path) -> None:
     from imp.assets import available_workflow_names
     (tmp_path / "imp" / "workflows" / "mine").mkdir(parents=True)
