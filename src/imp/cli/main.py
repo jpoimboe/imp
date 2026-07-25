@@ -4043,8 +4043,9 @@ def _build_parser() -> argparse.ArgumentParser:
              "hints — no model call, works in CI with no credentials.")
     p_init.add_argument(
         "--workflow", metavar="NAME", default=None,
-        help="Default workflow to record in the non-interactive path (defaults "
-             "to `default`); must name one of the project's selectable workflows.")
+        help="Default workflow recorded by the non-interactive path (defaults "
+             "to `default`); must name an available workflow — an unknown name "
+             "is rejected in either mode.")
     p_init.add_argument(
         "--base", metavar="BRANCH", default=None,
         help="Integration branch to record as default-base in the "

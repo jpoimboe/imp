@@ -266,7 +266,8 @@ def test_init_help_describes_what_it_does(capsys: pytest.CaptureFixture[str]) ->
     assert "default workflow" in help_text
     assert "never makes a git commit" not in help_text
     assert "initial commit" in help_text.lower()
-    assert "selectable workflows" in help_text
+    assert "must name an available workflow" in help_text
+    assert "either mode" in help_text
 
 
 def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
