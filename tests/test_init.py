@@ -497,6 +497,12 @@ def test_write_init_files_renders_project_yaml_from_settings(tmp_path: Path) -> 
     # Memory scaffold written; commit created for a fresh tree.
     assert (tmp_path / "imp" / "memory" / "all.md").is_file()
     assert committed is True
+    # Workflow scaffold uses the chosen workflow, not the hardcoded default.
+    assert (tmp_path / "imp" / "memory" / "light" / "all.md").is_file()
+    assert not (tmp_path / "imp" / "memory" / "default").exists()
+    text = (tmp_path / "imp" / "memory" / "light" / "all.md").read_text()
+    assert "`light` workflow" in text
+    assert "`default` workflow" not in text
 
 
 def test_write_init_files_omits_test_block_when_none(tmp_path: Path) -> None:

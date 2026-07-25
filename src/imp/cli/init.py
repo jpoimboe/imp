@@ -56,7 +56,6 @@ _INIT_COMMIT_PATHS: tuple[str, ...] = (
     "imp/project.yaml",
     ".gitignore",
     "imp/memory/all.md",
-    f"imp/memory/{_DEFAULT_WORKFLOW}/all.md",
 )
 
 # Both scaffolds are wholly wrapped in one HTML comment, so strip_html_comments
@@ -79,10 +78,11 @@ Use it EXTREMELY sparingly -- prefer a per-step file
 -->
 """
 
-_MEMORY_WORKFLOW_SCAFFOLD = """<!--
-imp memory for every step of the `default` workflow. Write standing instructions
+def _memory_workflow_scaffold(workflow: str) -> str:
+    return f"""<!--
+imp memory for every step of the `{workflow}` workflow. Write standing instructions
 below to reach all steps of this workflow, or scope to a single step with a
-sibling file named for that step (e.g. imp/memory/default/threshold.md).
+sibling file named for that step (e.g. imp/memory/{workflow}/threshold.md).
 `all.md` means "everything at this level". HTML comments are stripped before
 injection, so this scaffold injects nothing until you add real prose below.
 
@@ -176,12 +176,12 @@ def _resolve_init_base(
     return resolved
 
 
-def _commit_init_files(project_root: Path) -> bool:
+def _commit_init_files(project_root: Path, *, extra_paths: tuple[str, ...] = ()) -> bool:
     """Stage and commit init files by explicit pathspec; return True iff a commit
     was created. Only paths that exist on disk are staged — the imp/memory/
     scaffolds are absent on an already-initialized re-init, and `git add` with a
     pathspec matching no file exits non-zero."""
-    paths = [p for p in _INIT_COMMIT_PATHS if (project_root / p).exists()]
+    paths = [p for p in list(_INIT_COMMIT_PATHS) + list(extra_paths) if (project_root / p).exists()]
     if not paths:
         return False
     status = subprocess.run(
@@ -241,16 +241,17 @@ def _build_project_config(default_workflow: str, default_base: str) -> dict[str,
     }
 
 
-def _write_memory_scaffold(imp_dir: Path) -> None:
+def _write_memory_scaffold(imp_dir: Path, workflow: str) -> None:
     """Create the two inert comment-only memory files a fresh init ships:
-    the global imp/memory/all.md and the default-workflow imp/memory/<wf>/all.md.
-    Both are wholly commented, so they inject nothing until the user edits them."""
+    the global imp/memory/all.md and imp/memory/<workflow>/all.md matching the
+    chosen workflow. Both are wholly commented, so they inject nothing until the
+    user edits them."""
     memory_dir = imp_dir / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
     (memory_dir / "all.md").write_text(_MEMORY_GLOBAL_SCAFFOLD)
-    wf_dir = memory_dir / _DEFAULT_WORKFLOW
+    wf_dir = memory_dir / workflow
     wf_dir.mkdir(parents=True, exist_ok=True)
-    (wf_dir / "all.md").write_text(_MEMORY_WORKFLOW_SCAFFOLD)
+    (wf_dir / "all.md").write_text(_memory_workflow_scaffold(workflow))
 
 
 def _build_user_config(providers: list[str]) -> dict[str, Any]:
@@ -478,9 +479,9 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
         pythonpath_block = _pythonpath_hint()
     (imp_dir / "project.yaml").write_text(
         body + test_block + pythonpath_block + _facts_hint())
-    _write_memory_scaffold(imp_dir)
+    _write_memory_scaffold(imp_dir, settings.default_workflow)
     _ensure_imp_gitignore(project_root)
-    return _commit_init_files(project_root)
+    return _commit_init_files(project_root, extra_paths=(f"imp/memory/{settings.default_workflow}/all.md",))
 
 
 def _workflow_choices(project_root: Path) -> list[tuple[str, str]]:
