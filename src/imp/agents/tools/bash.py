@@ -335,8 +335,7 @@ async def bash(
         # structural — absence of a `notice` means the returned text is byte-exact.
         clipped_out, n_out = clip_long_lines(stdout)
         clipped_err, n_err = clip_long_lines(stderr)
-        over_cap = (len(clipped_out.encode("utf-8"))
-                    + len(clipped_err.encode("utf-8"))) > BASH_OUTPUT_CAP_BYTES
+        disp_out, disp_err, over_cap = _cap_combined(clipped_out, clipped_err)
         clause = _clip_cap_notice_clause(n_out + n_err, over_cap)
         notice: str | None = None
         if clause is not None:
@@ -347,11 +346,9 @@ async def bash(
             notice = f"{clause} {spill_tool_output(ctx, uuid4().hex, full, preview_bytes=0)}"
 
         def _finish(**fields: object) -> str:
-            # Slicing is unconditional: under the byte cap a stream's char count is
-            # <= its byte count, so the slice is an identity there.
             result: dict[str, object] = {
-                "stdout": clipped_out[:BASH_OUTPUT_CAP_BYTES],
-                "stderr": clipped_err[:BASH_OUTPUT_CAP_BYTES],
+                "stdout": disp_out,
+                "stderr": disp_err,
                 **fields,
             }
             if notice is not None:

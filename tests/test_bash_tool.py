@@ -44,6 +44,29 @@ _ONE_LONG_20_SHORT_RAW = (
 _THREE_LONG_LINES = (
     "python3 -c 'import sys; sys.stdout.write((\"L\" * 28000 + chr(10)) * 3)'"
 )
+# 40 000 ASCII bytes on EACH stream: both streams exceed their 15 000-byte half,
+# so each is cut to exactly half the combined budget.
+_FLOOD_BOTH_STREAMS = (
+    "python3 -c 'import sys; sys.stdout.write((\"O\" * 99 + chr(10)) * 400); "
+    "sys.stderr.write((\"E\" * 99 + chr(10)) * 400)'"
+)
+# 20 000 + 10 000 == exactly BASH_OUTPUT_CAP_BYTES combined: at the cap, not over.
+_EXACT_CAP_BOTH_STREAMS = (
+    "python3 -c 'import sys; sys.stdout.write((\"O\" * 99 + chr(10)) * 200); "
+    "sys.stderr.write((\"E\" * 99 + chr(10)) * 100)'"
+)
+# 200 lines of 100 U+00E9 = 40 200 bytes but only 20 200 characters, in 201-byte
+# lines that do NOT divide the 30 000-byte budget, so the cut lands mid-sequence.
+_MULTIBYTE_FLOOD = (
+    "python3 -c 'import sys; sys.stdout.buffer.write("
+    "((chr(233) * 100 + chr(10)) * 200).encode(\"utf-8\"))'"
+)
+# A 5-byte stderr beside a 100 000-byte stdout flood: the small stream is under
+# its half and yields its remainder.
+_SMALL_ERR_BESIDE_FLOOD = (
+    "python3 -c 'import sys; sys.stderr.write(\"boom\" + chr(10)); "
+    "sys.stdout.write((\"A\" * 99 + chr(10)) * 1000)'"
+)
 
 
 def test_bash_runs_simple_command(tmp_path: Path) -> None:
@@ -910,7 +933,10 @@ def test_bash_clip_then_cap_notice_reports_both(tmp_path: Path) -> None:
     out = json.loads(_run_bash(ctx, {"command": cmd}))
     assert out["notice"].startswith(
         "3 long lines clipped at 2000 chars, then output truncated at the 30 KB cap. [")
-    assert len(out["stdout"]) == 30_000
+    assert len(out["stdout"].encode("utf-8")) == 30_000
+    # The head carries three U+2026 clip markers (3 bytes, 1 char each), so a
+    # 30 000-BYTE head is 29 994 characters.
+    assert len(out["stdout"]) == 29_994
     assert out["stdout"].startswith("L" * MATCH_LINE_CAP_BYTES + "…[truncated]")
 
 
@@ -1088,3 +1114,62 @@ def test_cap_combined_cuts_multibyte_under_the_char_count_but_over_in_bytes() ->
     assert len(out.encode("utf-8")) == 30_000
     assert out == "é" * 15_000
     assert err == ""
+
+
+def test_bash_both_streams_flooded_share_the_combined_cap(tmp_path: Path) -> None:
+    # AC 1: 40 KB on each stream -> 15 000 displayed bytes each (30 000 combined),
+    # the cap clause, and a spill carrying BOTH streams in full.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": _FLOOD_BOTH_STREAMS}))
+    n_out = len(out["stdout"].encode("utf-8"))
+    n_err = len(out["stderr"].encode("utf-8"))
+    assert n_out == 15_000
+    assert n_err == 15_000
+    assert n_out + n_err == 30_000
+    assert out["notice"].startswith("Output truncated at the 30 KB cap. [")
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    content = spilled[0].read_text(encoding="utf-8")
+    assert content.count("O" * 99 + "\n") == 400      # FULL stdout recoverable
+    assert content.count("E" * 99 + "\n") == 400      # FULL stderr recoverable
+
+
+def test_bash_small_stream_beside_a_flood_keeps_its_bytes(tmp_path: Path) -> None:
+    # AC 4: the 5-byte stderr survives byte-for-byte and the flooder gets
+    # 30 000 - 5 bytes, so the combined display is exactly the cap.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": _SMALL_ERR_BESIDE_FLOOD}))
+    assert out["stderr"] == "boom\n"
+    assert len(out["stdout"].encode("utf-8")) == 29_995
+    assert len(out["stdout"].encode("utf-8")) + len(out["stderr"].encode("utf-8")) == 30_000
+    assert out["notice"].startswith("Output truncated at the 30 KB cap. [")
+
+
+def test_bash_multibyte_flood_cuts_on_bytes_at_a_char_boundary(tmp_path: Path) -> None:
+    # AC 5 + AC 6: 40 200 bytes / 20 200 chars — over the cap in BYTES while under
+    # it in characters, which the old character slice let through untouched. The
+    # 201-byte lines leave the 30 000-byte cut mid-sequence: the dangling byte is
+    # dropped (1 byte under the budget) and no U+FFFD appears.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": _MULTIBYTE_FLOOD}))
+    assert out["notice"].startswith("Output truncated at the 30 KB cap. [")
+    assert len(out["stdout"].encode("utf-8")) == 29_999
+    assert len(out["stdout"]) == 15_074
+    assert "�" not in out["stdout"]
+    assert out["stdout"].startswith("é" * 100 + "\n")
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert len(spilled[0].read_bytes()) == 40_200      # FULL output recoverable
+
+
+def test_bash_exactly_at_the_combined_cap_is_byte_exact_and_unannounced(
+    tmp_path: Path,
+) -> None:
+    # AC 7 + AC 8: a two-stream total of exactly 30 000 bytes is UNDER the cap —
+    # both streams byte-exact, no notice key at all, no spill file.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": _EXACT_CAP_BOTH_STREAMS}))
+    assert len(out["stdout"]) == 20_000
+    assert len(out["stderr"]) == 10_000
+    assert "notice" not in out
+    assert not (tmp_path / "tool-results").exists()
