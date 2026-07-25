@@ -106,8 +106,10 @@ def _clip_cap_notice_clause(clipped_lines: int, over_cap: bool) -> str | None:
     name="bash",
     description=(
         "Run a shell command. Foreground: returns JSON {stdout, stderr, "
-        "returncode}; output over 30 KB spills to a file with a `notice` path "
-        "to read the tail. `run_in_background=true` returns {id, pid, …} "
+        "returncode}; lines over 2000 chars are clipped with `…[truncated]` and "
+        "output over 30 KB is cut short — either way the full output spills to a "
+        "file with a `notice` path, and no `notice` means what you got is "
+        "byte-exact. `run_in_background=true` returns {id, pid, …} "
         "immediately — read output with `bash_output(id)`, stop with "
         "`bash_kill(id)`; a bad command still spawns then fails, so check "
         "`bash_output` after. A foreground command that exceeds its deadline "
