@@ -44,7 +44,7 @@ providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | 
 theme: ansi
 YAML
 cd "$WT" && imp config      # the `providers` row must resolve to your provider, ending in
-                            # `…/.imp/config.yaml (local)` — NOT `(user)`. If it ends in `(user)`,
+                            # `…/.imp/config.yaml (local)` — NOT `(global)`. If it ends in `(global)`,
                             # your file landed at the wrong path; fix it before driving.
 ```
 

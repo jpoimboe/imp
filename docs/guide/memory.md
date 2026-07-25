@@ -27,7 +27,7 @@ its own). Pair with `imp-knowledge` for the stable picture.
     gates run.
 
   Other config (providers, tiers, sandbox, …) layers across
-  `floor ← imp/project.yaml ← ~/.config/imp/config.yaml ← .imp/config.yaml`;
+  `floor ← imp/project.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`;
   `facts` and the workflow/base defaults live only in the project layer;
   `imp/memory/` files live in the repo's `imp/` config dir, not the merged config;
   change them by editing the markdown files under `imp/memory/` directly. Changing

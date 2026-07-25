@@ -143,8 +143,8 @@ to score).
   headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at
   (snapshot list — the live `--help` wins; flag drift):
   - `imp init` — first-run bootstrap. A clone of an already-init'd imp repo (or a machine
-    that already has `~/.config/imp/config.yaml`) short-circuits to "already set up"; to see
-    the real interactive path, run in a **fresh non-imp git repo** with `XDG_CONFIG_HOME`
+    that already has `~/.imp/config.yaml`) short-circuits to "already set up"; to see
+    the real interactive path, run in a **fresh non-imp git repo** with `IMP_HOME`
     pointed at an empty dir. Only the **provider multi-select** is interactive — theme is
     **auto-detected silently** (no prompt; under a non-truecolor pty it picks `ansi`).
   - `imp new -h` — the flag surface (`--backlog`, `--background`, `--depends-on`,

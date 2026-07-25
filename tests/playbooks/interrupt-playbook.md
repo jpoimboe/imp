@@ -190,9 +190,9 @@ A correct imp does **all** of:
   nested worktrees, journals) are contained and discardable.
 - **Config layout:** the `config-file-split` layout — a provider **code floor** (tier→model
   defaults) under three layers: committed `imp/project.yaml` (workflow/lint/test/vars, read
-  from the worktree), user `~/.config/imp/config.yaml` (`providers`/`theme`, global), and
+  from the worktree), global `~/.imp/config.yaml` (`providers`/`theme`, per machine), and
   gitignored `.imp/config.yaml` (local, control root, highest precedence). Precedence
-  (low→high): `floor < project < user < local` — operator-wins among the config layers.
+  (low→high): `floor < project < global < local` — operator-wins among the config layers.
 - **Provider:** exactly one per run — `claude_code` by default, or whichever single provider
   the operator names (`anthropic`, `openai`, or `codex`). That one provider is in scope for the
   full §0 classification bar; the others are out of scope for this run.
@@ -227,11 +227,11 @@ For any provider missing a prerequisite: **skip and note it** — not a bug. imp
 env_check is the source of truth: if imp skips or errors a provider at launch, treat that as
 the skip signal and note it.
 
-> **`imp init` / user config.** This machine already has user config
-> (`~/.config/imp/config.yaml`) with detected `providers`/`theme`; the clone inherits it and
+> **`imp init` / global config.** This machine already has a global config
+> (`~/.imp/config.yaml`) with detected `providers`/`theme`; the clone inherits it and
 > §4's local override forces the one under test. You should **not** need `imp init`. If
 > `imp new` prints `✗ no provider available — run `imp init` first`, run `imp init` once
-> (idempotent; only bootstraps user config). Note that same preflight also fires when a
+> (idempotent; only bootstraps the global config). Note that same preflight also fires when a
 > *forced* provider's env-check fails — there it's a missing-credential **skip** (§2's gating
 > table), not an init problem.
 
@@ -264,10 +264,10 @@ You force the provider via `"$WT"/.imp/config.yaml` (the gitignored local layer)
 
 ---
 
-## 4. Forcing a provider (local layer beats the operator's user config)
+## 4. Forcing a provider (local layer beats the operator's global config)
 
 imp runs the **first** provider in the resolved `providers:` whose env_check passes. Since
-`providers` is **user**-config-homed and precedence is operator-wins (`project < user <
+`providers` is **global**-config-homed and precedence is operator-wins (`project < global <
 local`), the layer that forces a provider is **local** — `$WT/.imp/config.yaml` (gitignored,
 read from the control root). Because `$WT` is a standalone clone, its control root is `$WT`
 itself, so this file both **wins** (highest precedence) and **stays isolated**.
@@ -291,12 +291,12 @@ floor** (current models, shipped with imp). Confirm the override won — and on 
 before testing:
 ```bash
 cd "$WT" && imp config                  # the `providers` row must resolve to the provider under test,
-                                        # its arrow ending in `…/.imp/config.yaml (local)` — NOT `(user)`
+                                        # its arrow ending in `…/.imp/config.yaml (local)` — NOT `(global)`
 cd "$WT" && imp config --explain high   # the high-tier model the forced provider will use
 ```
 `imp config`'s arrow prints the leaf's **full source path** + a `(layer)` tag. If the
-`providers` arrow ends in `(user)`, your file landed at the wrong path (`$WT/imp/config.yaml`,
-not `$WT/.imp/config.yaml`) and the user layer silently won — fix it before recording anything.
+`providers` arrow ends in `(global)`, your file landed at the wrong path (`$WT/imp/config.yaml`,
+not `$WT/.imp/config.yaml`) and the global layer silently won — fix it before recording anything.
 The `--explain` line shows the floor model **before** you spend a billable call.
 
 > Model names drift, but they live in the **code floor**, not this file. If a floor model 404s

@@ -138,7 +138,7 @@ decision at the spec, plan, and merge boundaries.
 
 imp can stream a run's events to an external chat surface and accept replies back —
 so you can watch and drive `imp new` from your phone. Enable exactly one built-in
-driver by name in your machine's `~/.config/imp/config.yaml`:
+driver by name in your machine's `~/.imp/config.yaml`:
 
 ```yaml
 remote:
