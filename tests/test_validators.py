@@ -31,6 +31,17 @@ output:
 prompt body
 """
 
+_GHOST_TIER_AGENT = """\
+---
+name: stub
+tier: ghost-tier
+tools: [complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
 # ── new cases from spec (Step 1) ─────────────────────────────────────────────
 
 
@@ -277,6 +288,25 @@ def test_v12_step_tier_unconfigured(tmp_path: Path) -> None:
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf, configured_tiers=frozenset({"default"}))
     assert any("'missing-role'" in str(e) for e in ei.value.errors)
+
+
+def test_v12_step_tier_unconfigured_from_agent_frontmatter(tmp_path: Path) -> None:
+    """A step that omits tier: inherits the agent file's, and that inherited
+    tier is validated against configured tiers at the step's own source."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/stub.md
+        """, agents={"stub": _GHOST_TIER_AGENT})
+    step_source = load_workflow(wf).flat_steps()[0].source
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf, configured_tiers=frozenset({"medium"}))
+    err = next(e for e in ei.value.errors if "ghost-tier" in str(e))
+    assert err.source == step_source
 
 
 # ── _v_required_blocks_per_kind ───────────────────────────────────────────────
