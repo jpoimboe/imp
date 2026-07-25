@@ -16,7 +16,8 @@ import anyio
 # --- Output / read bounds ---------------------------------------------------
 TOOL_OUTPUT_CAP_BYTES = 50_000           # head-only cap on what the LLM sees
 FILE_READ_CAP_BYTES = 5_000_000          # per-file ceiling for the bounded reader
-MATCH_LINE_CAP_BYTES = 2_000             # byte-truncate each matched grep line
+# per-line content cap: grep/read_file rows and bash stdout/stderr
+MATCH_LINE_CAP_BYTES = 2_000
 PREVIEW_BYTES = 2_000                    # spill-to-disk preview head (spill.py)
 READ_CHUNK_BYTES = 65_536                # cooperative read granularity
 # F4: the "50 KB" text is bound to TOOL_OUTPUT_CAP_BYTES above — if you change the
@@ -25,6 +26,10 @@ READ_CHUNK_BYTES = 65_536                # cooperative read granularity
 # edit_file notice skeletons (fs.py, nav.py): they are FILE_READ_CAP_BYTES in
 # prose, and tests assert them verbatim — change the constant => change those
 # skeletons and their tests in lockstep.
+# bash's notice clauses carry "2000" and "30 KB" as prose literals bound to
+# MATCH_LINE_CAP_BYTES and BASH_OUTPUT_CAP_BYTES (_clip_cap_notice_clause in
+# bash.py): change either constant => change those clauses and the tests that
+# assert them verbatim in lockstep.
 OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 
 # Bash-tool-specific inline output cap. Deliberately SMALLER than the shared

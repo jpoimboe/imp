@@ -44,3 +44,15 @@ def test_tool_reference_holds_relocated_reference_detail() -> None:
         "advances the output cursors",  # bash_kill
     ):
         assert sentinel in body, f"imp-tool-reference missing: {sentinel!r}"
+
+
+def test_tool_reference_describes_line_clipping_and_byte_exactness() -> None:
+    # AC 6b: the bash bullet leads with clip-then-cap and the byte-exactness
+    # invariant, and keeps its interruptibility/deadline text. Asserted against
+    # whitespace-normalized prose: the sentences are hard-wrapped in the markdown,
+    # so a raw-substring assertion would break on the line breaks (and on any
+    # future rewrap).
+    body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
+    assert "each line over 2000 chars is clipped to 2000" in body
+    assert "no `notice` means the output is byte-exact" in body
+    assert "Foreground commands are interruptible" in body

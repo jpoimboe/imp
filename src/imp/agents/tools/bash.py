@@ -29,6 +29,7 @@ from imp.agents.tools.limits import (
     BASH_OUTPUT_CAP_BYTES,
     tool_checkpoint,
 )
+from imp.agents.tools.lines import clip_long_lines
 from imp.agents.tools.spill import spill_tool_output
 from imp.engine.env import engine_env, overlay_engine_env
 from imp.engine.sandbox import (
@@ -87,12 +88,28 @@ def _effective_foreground_timeout(timeout: float | None) -> float:
     return min(timeout or BASH_FOREGROUND_TIMEOUT_S, BASH_FOREGROUND_TIMEOUT_MAX_S)
 
 
+def _clip_cap_notice_clause(clipped_lines: int, over_cap: bool) -> str | None:
+    """Leading clause naming what altered the returned output, or None when
+    nothing did — there is then no notice to emit and the text is byte-exact.
+    The "2000" / "30 KB" literals are MATCH_LINE_CAP_BYTES /
+    BASH_OUTPUT_CAP_BYTES in prose (F4 lockstep note in limits.py)."""
+    if not clipped_lines:
+        return "Output truncated at the 30 KB cap." if over_cap else None
+    noun = "line" if clipped_lines == 1 else "lines"
+    clip = f"{clipped_lines} long {noun} clipped at 2000 chars"
+    if over_cap:
+        return f"{clip}, then output truncated at the 30 KB cap."
+    return f"{clip}."
+
+
 @imp_tool(
     name="bash",
     description=(
         "Run a shell command. Foreground: returns JSON {stdout, stderr, "
-        "returncode}; output over 30 KB spills to a file with a `notice` path "
-        "to read the tail. `run_in_background=true` returns {id, pid, …} "
+        "returncode}; lines over 2000 chars are clipped with `…[truncated]` and "
+        "output over 30 KB is cut short — either way the full output spills to a "
+        "file with a `notice` path, and no `notice` means what you got is "
+        "byte-exact. `run_in_background=true` returns {id, pid, …} "
         "immediately — read output with `bash_output(id)`, stop with "
         "`bash_kill(id)`; a bad command still spawns then fails, so check "
         "`bash_output` after. A foreground command that exceeds its deadline "
@@ -292,53 +309,57 @@ async def bash(
             # The sandbox never entered the command, so re-spawning is provably safe
             # (the command never ran). Signal the outer loop to retry after backoff.
             return None
+        # Clip-then-cap, decided ONCE for every branch below: clipping first is what
+        # keeps a pathological line from eating the whole 30 KB budget, and routing
+        # every return through _finish is what makes the advertised invariant
+        # structural — absence of a `notice` means the returned text is byte-exact.
+        clipped_out, n_out = clip_long_lines(stdout)
+        clipped_err, n_err = clip_long_lines(stderr)
+        over_cap = (len(clipped_out.encode("utf-8"))
+                    + len(clipped_err.encode("utf-8"))) > BASH_OUTPUT_CAP_BYTES
+        clause = _clip_cap_notice_clause(n_out + n_err, over_cap)
+        notice: str | None = None
+        if clause is not None:
+            # The spill body is the RAW decoded output — unclipped and uncapped — so
+            # the exact bytes stay recoverable with an ordinary read_file.
+            full = (f"=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}"
+                    if stderr else stdout)
+            notice = f"{clause} {spill_tool_output(ctx, uuid4().hex, full, preview_bytes=0)}"
+
+        def _finish(**fields: object) -> str:
+            # Slicing is unconditional: under the byte cap a stream's char count is
+            # <= its byte count, so the slice is an identity there.
+            result: dict[str, object] = {
+                "stdout": clipped_out[:BASH_OUTPUT_CAP_BYTES],
+                "stderr": clipped_err[:BASH_OUTPUT_CAP_BYTES],
+                **fields,
+            }
+            if notice is not None:
+                result["notice"] = notice
+            return json.dumps(result, ensure_ascii=False)
+
         if spawn_failed:
             # Retries exhausted: report distinctly. Such a failure exits immediately,
             # so it never reaches promotion.
             _emit_overlay_setup_warning(ctx, command)
-            return json.dumps({
-                "stdout": stdout,
-                "stderr": stderr,
-                "status": "sandbox_setup_failed",
-                "error": SANDBOX_SPAWN_FAILED_MESSAGE,
-                "returncode": proc.returncode,
-            }, ensure_ascii=False)
+            return _finish(status="sandbox_setup_failed",
+                           error=SANDBOX_SPAWN_FAILED_MESSAGE,
+                           returncode=proc.returncode)
         if paused:
             # A pause landed mid-command: the poller SIGKILL'd the group. Return the
             # terminated-by-pause tombstone (the same shape
             # terminate_background_processes writes). returncode stays the real
             # negative signal (an honest kill — unlike the cap path).
-            result: dict[str, object] = {
-                "stdout": stdout,
-                "stderr": stderr,
-                "status": "killed",
-                "kill_reason": "interrupted",
-                "returncode": (proc.returncode if proc.returncode is not None
-                               else -signal.SIGKILL),
-            }
-        else:
-            # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
-            # SIGKILL we issued was cleanup and must NOT read as tool_killed (the
-            # provider keys that on returncode < 0).
-            returncode = 0 if capped else (
-                proc.returncode if proc.returncode is not None else -signal.SIGKILL)
-            result = {
-                "stdout": stdout,
-                "stderr": stderr,
-                "returncode": returncode,
-            }
-        if len(out_bytes) + len(err_bytes) > BASH_OUTPUT_CAP_BYTES:
-            # Over the 30 KB display cap: spill the FULL decoded output so the
-            # truncated tail is recoverable with an ordinary read_file, then bound
-            # each displayed stream to the 30 KB head. Covers the pause tombstone too.
-            full = (f"=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}"
-                    if stderr else stdout)
-            result["notice"] = spill_tool_output(
-                ctx, uuid4().hex, full, preview_bytes=0)
-            result["stdout"] = stdout[:BASH_OUTPUT_CAP_BYTES]
-            result["stderr"] = stderr[:BASH_OUTPUT_CAP_BYTES]
-
-        return json.dumps(result, ensure_ascii=False)
+            return _finish(
+                status="killed", kill_reason="interrupted",
+                returncode=(proc.returncode if proc.returncode is not None
+                            else -signal.SIGKILL))
+        # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
+        # SIGKILL we issued was cleanup and must NOT read as tool_killed (the
+        # provider keys that on returncode < 0).
+        returncode = 0 if capped else (
+            proc.returncode if proc.returncode is not None else -signal.SIGKILL)
+        return _finish(returncode=returncode)
 
     for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
         result = await _run_once(attempt)

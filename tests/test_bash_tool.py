@@ -12,7 +12,7 @@ import imp.agents.tools.bash  # noqa: F401
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.limits import ToolAborted
+from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES, ToolAborted
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -29,6 +29,21 @@ def _ctx(tmp_path: Path) -> ToolContext:
 
 def _run_bash(ctx, args):
     return anyio.run(get_registry()["bash"].async_invoke, ctx, args)
+
+
+# The incident's shape: one 28 KB line (far over MATCH_LINE_CAP_BYTES) followed by
+# 20 ordinary short lines, all on stdout.
+_ONE_LONG_20_SHORT = (
+    "python3 -c 'import sys; sys.stdout.write(\"L\" * 28000 + chr(10)); "
+    "sys.stdout.writelines(f\"short-{i}\" + chr(10) for i in range(1, 21))'"
+)
+_ONE_LONG_20_SHORT_RAW = (
+    b"L" * 28_000 + b"\n" + b"".join(f"short-{i}\n".encode() for i in range(1, 21))
+)
+# Three 28 KB lines and nothing else: 84 KB raw that clips down to ~6 KB.
+_THREE_LONG_LINES = (
+    "python3 -c 'import sys; sys.stdout.write((\"L\" * 28000 + chr(10)) * 3)'"
+)
 
 
 def test_bash_runs_simple_command(tmp_path: Path) -> None:
@@ -824,3 +839,184 @@ def test_bash_promoted_proc_is_killable_and_torn_down(tmp_path: Path) -> None:
     assert killed["status"] == "killed"
     assert killed["kill_reason"] == "agent"
     assert _tombstone_path(ctx).exists()
+
+
+def test_bash_notice_clause_wording_for_clip_and_cap() -> None:
+    # AC 4: the three shapes verbatim, plus the singular form. These literals are
+    # bound to MATCH_LINE_CAP_BYTES / BASH_OUTPUT_CAP_BYTES (F4 note in limits.py).
+    from imp.agents.tools.bash import _clip_cap_notice_clause as clause
+    assert clause(0, False) is None      # nothing fired -> nothing to disclose
+    assert clause(0, True) == "Output truncated at the 30 KB cap."
+    assert clause(1, False) == "1 long line clipped at 2000 chars."
+    assert clause(3, False) == "3 long lines clipped at 2000 chars."
+    assert clause(3, True) == (
+        "3 long lines clipped at 2000 chars, then output truncated at the 30 KB cap.")
+    assert clause(1, True) == (
+        "1 long line clipped at 2000 chars, then output truncated at the 30 KB cap.")
+
+
+def test_bash_clips_long_line_and_keeps_short_lines_intact(tmp_path: Path) -> None:
+    # AC 1: the 28 KB line comes back as exactly MATCH_LINE_CAP_BYTES chars plus the
+    # marker; every short line is untouched. Post-clip the whole result is well under
+    # the 30 KB cap, so nothing else is dropped — the point of clipping BEFORE capping.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": _ONE_LONG_20_SHORT}))
+    lines = out["stdout"].split("\n")
+    assert lines[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert lines[1:] == [f"short-{i}" for i in range(1, 21)] + [""]
+    assert out["returncode"] == 0
+    assert out["notice"].startswith("1 long line clipped at 2000 chars. [")
+
+
+def test_bash_spill_holds_the_unclipped_output(tmp_path: Path) -> None:
+    # AC 2: single stdout stream, empty stderr, ASCII -> the spill file is
+    # byte-identical to what the command emitted (unlabeled, unclipped, uncapped).
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": _ONE_LONG_20_SHORT}))
+    assert "notice" in out
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert spilled[0].read_bytes() == _ONE_LONG_20_SHORT_RAW
+
+
+def test_bash_output_without_long_lines_is_untouched_and_unannounced(
+    tmp_path: Path,
+) -> None:
+    # AC 3: no over-long line and under the cap -> byte-identical text (trailing
+    # newline and final unterminated line both preserved) and NO notice key at all.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "printf 'a\\nb\\n'"}))
+    assert out["stdout"] == "a\nb\n"
+    assert "notice" not in out
+    out2 = json.loads(_run_bash(ctx, {"command": "printf 'a\\nb'"}))
+    assert out2["stdout"] == "a\nb"
+    assert "notice" not in out2
+    assert not (tmp_path / "tool-results").exists()
+
+
+def test_bash_cap_only_notice_names_the_cap(tmp_path: Path) -> None:
+    # AC 4 (cap-only): short lines flooding past 30 KB -> the cap clause alone.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ | head -c 100000"}))
+    assert out["notice"].startswith("Output truncated at the 30 KB cap. [")
+    assert len(out["stdout"]) == 30_000
+
+
+def test_bash_clip_then_cap_notice_reports_both(tmp_path: Path) -> None:
+    # AC 4 (both): three 28 KB lines clip down to ~6 KB, and the 40 KB short-line
+    # flood still puts the POST-CLIP text over the cap -> both clauses, in order.
+    ctx = _ctx(tmp_path)
+    cmd = f"{_THREE_LONG_LINES}; yes ABCDEFGHIJ | head -c 40000"
+    out = json.loads(_run_bash(ctx, {"command": cmd}))
+    assert out["notice"].startswith(
+        "3 long lines clipped at 2000 chars, then output truncated at the 30 KB cap. [")
+    assert len(out["stdout"]) == 30_000
+    assert out["stdout"].startswith("L" * MATCH_LINE_CAP_BYTES + "…[truncated]")
+
+
+def test_bash_midcommand_pause_tombstone_reports_clipped_output(tmp_path: Path) -> None:
+    # AC 5a: the pause tombstone keeps its status/kill_reason but carries the SAME
+    # clipped text and notice as any other branch.
+    class _Coord:
+        should_pause = False
+
+    coord = _Coord()
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    holder: dict[str, dict] = {}
+
+    async def _scenario() -> None:
+        with anyio.fail_after(30):      # deadlock backstop only
+            async with anyio.create_task_group() as tg:
+                async def _runner() -> None:
+                    holder["out"] = json.loads(
+                        await get_registry()["bash"].async_invoke(
+                            ctx, {"command": f"{_ONE_LONG_20_SHORT}; sleep 30"}))
+
+                async def _pauser() -> None:
+                    from imp.agents.tools.bg import _bg_dir
+                    d = _bg_dir(ctx)
+                    # Poll for the long line to actually land: a fixed sleep would
+                    # race a loaded machine and pause before the write.
+                    while not any(p.stat().st_size >= 28_000
+                                  for p in d.glob("fg-*.out")):
+                        await anyio.sleep(0.05)
+                    coord.should_pause = True
+
+                tg.start_soon(_runner)
+                tg.start_soon(_pauser)
+
+    anyio.run(_scenario)
+    out = holder["out"]
+    assert out["status"] == "killed"
+    assert out["kill_reason"] == "interrupted"
+    assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert out["notice"].startswith("1 long line clipped at 2000 chars. [")
+    assert ctx.running_processes == []
+
+
+def test_bash_cap_killed_runaway_reports_clipped_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 5a: the own-cap kill branch (returncode massaged to 0) also reports clipped
+    # text and discloses the alteration. The emitter is BOUNDED (84 KB, then it
+    # blocks in sleep): that already exceeds the shrunken 50 000-byte ceiling, so the
+    # poller kills it deterministically without an unbounded write race.
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools import limits
+    monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+    monkeypatch.setattr(bash_mod, "_FG_CAP_POLL_S", 0.05)
+    ctx = _ctx(tmp_path)
+
+    async def go() -> dict:
+        with anyio.fail_after(30):      # deadlock backstop only
+            raw = await get_registry()["bash"].async_invoke(
+                ctx, {"command": f"{_THREE_LONG_LINES}; sleep 30"})
+            return json.loads(raw)
+
+    out = anyio.run(go)
+    assert out["returncode"] == 0                     # cap-kill is a NORMAL result
+    assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    # The kill can land while the 84 KB is still being written, so the exact line
+    # COUNT is not deterministic here (the exact wordings are pinned in
+    # test_bash_notice_clause_wording_for_clip_and_cap); what is deterministic is
+    # that the kill needs > 50 KB on disk, hence at least one over-long line.
+    assert "clipped at 2000 chars" in out["notice"]
+    assert ctx.running_processes == []
+
+
+def test_bash_sandbox_setup_failure_clips_and_discloses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 5b: the sandbox-setup-failure branch returns the same clipped text with the
+    # same notice + spill as any other branch — no branch returns altered output
+    # without disclosing it. AC 5c: the four RETRIED attempts (whose output is
+    # discarded) write no spill file, so exactly one file exists.
+    import imp.agents.tools.bash as bashmod
+    monkeypatch.setattr(bashmod, "build_sandbox_argv", lambda command, **kw: [
+        "sh", "-c", "python3 -c 'print(\"L\" * 28000)'; exit 3"])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
+    assert out["status"] == "sandbox_setup_failed"
+    assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert out["notice"].startswith("1 long line clipped at 2000 chars. [")
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert spilled[0].read_bytes() == b"L" * 28_000 + b"\n"
+
+
+def test_bash_clips_long_line_on_stderr_and_sums_cross_stream_count(
+    tmp_path: Path,
+) -> None:
+    # Pins that stderr is clipped (not just stdout) and the clip count is cross-stream.
+    ctx = _ctx(tmp_path)
+    cmd = (
+        "python3 -c 'import sys; sys.stdout.write(\"L\" * 28000 + chr(10)); "
+        "sys.stderr.write(\"E\" * 28000 + chr(10))'"
+    )
+    out = json.loads(_run_bash(ctx, {"command": cmd}))
+    assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert out["stderr"].split("\n")[0] == "E" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert out["notice"].startswith("2 long lines clipped at 2000 chars. [")
