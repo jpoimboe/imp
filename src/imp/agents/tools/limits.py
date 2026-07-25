@@ -28,8 +28,11 @@ READ_CHUNK_BYTES = 65_536                # cooperative read granularity
 # skeletons and their tests in lockstep.
 # bash's notice clauses carry "2000" and "30 KB" as prose literals bound to
 # MATCH_LINE_CAP_BYTES and BASH_OUTPUT_CAP_BYTES (_clip_cap_notice_clause in
-# bash.py): change either constant => change those clauses and the tests that
-# assert them verbatim in lockstep.
+# bash.py), as does the imp-tool-reference skill's bash bullet, which states the
+# cap's SHAPE and not just its number ("the two streams are cut to a combined
+# 30 KB head"): change either constant => change those clauses, that bullet, and
+# the tests that assert them verbatim (tests/test_bash_tool.py,
+# tests/test_tool_reference_skill.py) in lockstep.
 OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 
 # Bash-tool-specific inline output cap. Deliberately SMALLER than the shared
