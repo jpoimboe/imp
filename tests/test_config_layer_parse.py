@@ -203,6 +203,36 @@ def test_context_max_reincarnations_zero_accepted(tmp_path: Path) -> None:
     assert out["context"] == {"max_reincarnations": 0}
 
 
+# --- YAML 1.2 read semantics (ruamel safe loader) ---
+
+
+def test_layer_numeric_forms_read_as_yaml_1_2(tmp_path: Path) -> None:
+    # YAML 1.1 read `0777` as octal 511; 1.2 reads it as the decimal 777.
+    p = tmp_path / "config.yaml"
+    p.write_text("test_cmd_fast_timeout: 0777\n")
+    layer, _src = parse_config_layer(p)  # type: ignore[misc]
+    assert layer["test_cmd_fast_timeout"] == 777
+
+
+def test_malformed_layer_raises_load_error_naming_the_file(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("providers: [claude_code\n")
+    with pytest.raises(LoadError) as exc:
+        parse_config_layer(p)
+    assert "invalid YAML in config.yaml" in str(exc.value)
+
+
+def test_duplicate_key_raises_load_error(tmp_path: Path) -> None:
+    # PyYAML kept the last value silently; ruamel surfaces the repeat.
+    p = tmp_path / "config.yaml"
+    p.write_text("theme: dark\ntheme: light\n")
+    with pytest.raises(LoadError) as exc:
+        parse_config_layer(p)
+    msg = str(exc.value)
+    assert "invalid YAML in config.yaml" in msg
+    assert "duplicate key" in msg
+
+
 # --- pythonpath tests ---
 
 

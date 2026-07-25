@@ -26,8 +26,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from ruamel.yaml.error import YAMLError
 
-from imp.engine._yaml import LineLoader, items, key_loc, loc
+from imp.engine._yaml import LineLoader, items, key_loc, load_config_yaml, loc
 from imp.engine.errors import LoadError
 from imp.engine.expr import ExprType
 from imp.engine.types import SourceLoc, Vars
@@ -200,8 +201,8 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
     if not path.exists():
         return None
     try:
-        raw: Any = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
+        raw: Any = load_config_yaml(path.read_text()) or {}
+    except YAMLError as e:
         raise LoadError(f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)) from e
     if not isinstance(raw, dict):
         raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
