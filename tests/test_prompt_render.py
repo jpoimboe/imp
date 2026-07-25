@@ -464,3 +464,24 @@ def test_quest_all_merged_deps_are_not_blocked(tmp_path: Path) -> None:
     src = "{% if quest.depends_on | rejectattr('merged') | list %}BLOCKED{% else %}CLEAR{% endif %}"
     assert render_prompt(src, ctx) == "CLEAR"
 
+
+def test_renders_base_and_checkout_branch(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(quest_title="t", event_log=log,
+                        base_branch="release-2.0", checkout_branch="main")
+    # Both fields render independently, so a template can branch on divergence.
+    assert render_prompt(
+        "{{ quest.base_branch }}|{{ quest.checkout_branch }}|"
+        "{% if quest.checkout_branch and quest.checkout_branch != quest.base_branch %}"
+        "DIVERGED{% else %}SAME{% endif %}", ctx) == "release-2.0|main|DIVERGED"
+
+
+def test_base_and_checkout_branch_default_empty(tmp_path: Path) -> None:
+    ctx = build_context(
+        quest_title="t", event_log=_log(tmp_path / "events.jsonl", []))
+    # An unpopulated checkout_branch never reads as divergence.
+    assert render_prompt(
+        "[{{ quest.base_branch }}][{{ quest.checkout_branch }}]"
+        "{% if quest.checkout_branch and quest.checkout_branch != quest.base_branch %}"
+        "DIVERGED{% else %}SAME{% endif %}", ctx) == "[][]SAME"
+

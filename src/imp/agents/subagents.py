@@ -278,6 +278,7 @@ async def dispatch_task(
                 "dispatched with no live quest context (nested dispatch); "
                 "isolated_worktree is only supported from a top-level agent")
         from imp.engine import worktree as _worktree
+        ctx.quest.reload_base()
         spike_worktree = _worktree.create_spike_worktree(
             ctx.quest.control_root, ctx.quest.id, invocation_id,
             ctx.quest.base_branch)

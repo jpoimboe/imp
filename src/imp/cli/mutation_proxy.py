@@ -36,7 +36,8 @@ def run_mutation(
         rc, msg = apply_edit(
             control_root, matches[0], title=args["title"], backlog=args["backlog"],
             active=args["active"], depends_on=args["depends_on"],
-            clear_deps=args["clear_deps"], append_intent=args["append_intent"])
+            clear_deps=args["clear_deps"], append_intent=args["append_intent"],
+            base=args["base"])
         return {"returncode": rc, "message": msg or ""}
     if op == "new":
         from imp.cli.main import apply_new

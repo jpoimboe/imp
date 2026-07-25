@@ -13,7 +13,7 @@ from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.quest import Quest
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
-from tests.conftest import _git, _seed_control
+from tests.conftest import _branch_with_commit, _git, _seed_control
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 
@@ -518,3 +518,31 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
     argv = build_sandbox_argv("curl example.com", cwd=pol.worktree, policy=pol,
                               engine_env={})
     assert "--unshare-net" in argv
+
+
+def test_isolated_dispatch_forks_spike_from_base_changed_on_disk(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
+    _seed_control(tmp_path)
+    # A pre-go-live draft: this is the window in which a spiker runs.
+    quest = Quest.create_draft(tmp_path, title="T", quest_id="prb900",
+                               base_branch="main")
+    release_tip = _branch_with_commit(tmp_path, "release-2.0")
+    # `imp edit --base` runs in the daemon against its own Quest.load; `quest` stays stale.
+    Quest.load(tmp_path, "prb900").set_base_branch("release-2.0")
+    assert quest.base_branch == "main"
+
+    seen: dict = {}
+
+    def _record(inv) -> None:
+        # Captured inside the runner: teardown removes the spike tree on the way out.
+        seen["head"] = _git(
+            inv.quest_context.project_root, "rev-parse", "HEAD").stdout.strip()
+
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
+                            on_run=_record))
+
+    assert anyio.run(dispatch_task, ctx, "prober", "spike it") == "ok"
+    assert seen["head"] == release_tip

@@ -18,6 +18,8 @@ announced:
 {% if quest.parent %}This quest was spawned from **{{ quest.parent.id }} · {{ quest.parent.title }}**.
 {% endif %}{% if quest.depends_on %}This quest depends on {% for d in quest.depends_on %}**{{ d.id }} · {{ d.title }}** ({{ 'merged' if d.merged else 'not yet merged' }}){% if not loop.last %}, {% endif %}{% endfor %}. {% if quest.depends_on | rejectattr('merged') | list %}You can scope and refine now, but can't go live until every dependency has merged.{% else %}Clear to go live.{% endif %}
 {% endif %}
+{% if quest.base_branch %}This quest forks from **{{ quest.base_branch }}** at go-live{% if quest.checkout_branch and quest.checkout_branch != quest.base_branch %}, but the main checkout is on **{{ quest.checkout_branch }}** — what you read here may not match the fork point; check against the base with `git show {{ quest.base_branch }}:<path>` when it matters{% endif %}.
+{% endif %}
 {% include "partials/imp-grounding.md" %}
 
 ## Orienting before you offer
@@ -113,6 +115,15 @@ If what you've scoped can only be built after another in-flight quest merges, th
 `imp edit {{ quest.id }} --depends-on <id>` (allowed while un-materialized); it then flows
 into the gate above. Keep the work in this quest — don't split it into a child.
 
+## Changing the base branch
+
+This quest forks from its base branch at go-live. If the conversation calls for a
+different integration branch (a release line, say), run
+`imp edit {{ quest.id }} --base <branch>` — the branch must already exist, and only
+before go-live. Your reads still come from the main checkout, so verify anything the
+design turns on with `git show <branch>:<path>`. Don't raise it unprompted; to build on
+top of an unmerged quest use `--depends-on`, not a base change.
+
 ## Close redundant backlog quests at approval
 
 When the quest you're scoping clearly supersedes existing **backlog** quests —
@@ -137,8 +148,8 @@ done; nothing to do.
   never write the tree yourself, never `.imp/`.
 - **This conversation** (keep it, abandon it, clear it) you hand back to the user via
   the `/save`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
-  own quest to mutate it, **except `imp edit {{ quest.id }} --depends-on`
-  to record a dependency before going live**.
+  own quest to mutate it, **except `imp edit {{ quest.id }} --depends-on` / `--base`
+  before going live**.
 - **Another quest** you may mutate with `imp …` only after the user explicitly confirms.
 
 {% include "partials/memory-authoring.md" %}

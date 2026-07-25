@@ -10,7 +10,7 @@ import pytest
 from imp.cli import main
 from imp.engine import worktree
 from imp.engine.quest import Quest
-from tests.conftest import _seed_control
+from tests.conftest import _branch_with_commit, _git, _seed_control
 
 
 def _make_draft(control: Path, quest_id: str, *, origin: str = "draft") -> Quest:
@@ -25,10 +25,10 @@ def _meta(quest: Quest) -> dict:
 
 
 def _edit_args(token: str, **kw) -> argparse.Namespace:
-    base = dict(token=token, title=None, backlog=False, active=False,
-                depends_on=None, clear_deps=False, append_intent=None)
-    base.update(kw)
-    return argparse.Namespace(**base)
+    fields = dict(token=token, title=None, backlog=False, active=False,
+                  depends_on=None, clear_deps=False, append_intent=None, base=None)
+    fields.update(kw)
+    return argparse.Namespace(**fields)
 
 
 def test_edit_title_rewrites_title(tmp_path: Path, monkeypatch) -> None:
@@ -278,7 +278,7 @@ def test_apply_edit_sets_title_and_returns_ok(tmp_path: Path, monkeypatch) -> No
     _make_draft(tmp_path, "2026-06-24-edit90")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit90", title="Renamed", backlog=False,
-        active=False, depends_on=None, clear_deps=False, append_intent=None)
+        active=False, depends_on=None, clear_deps=False, append_intent=None, base=None)
     assert rc == 0
     assert msg == 'edited 2026-06-24-edit90 · title → "Renamed"'
     assert Quest.load(tmp_path, "2026-06-24-edit90").title == "Renamed"
@@ -290,7 +290,7 @@ def test_apply_edit_no_fields_returns_usage_error(tmp_path: Path, monkeypatch) -
     _make_draft(tmp_path, "2026-06-24-edit91")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit91", title=None, backlog=False,
-        active=False, depends_on=None, clear_deps=False, append_intent=None)
+        active=False, depends_on=None, clear_deps=False, append_intent=None, base=None)
     assert rc == 2
     assert msg is not None and "at least one of" in msg
 
@@ -301,7 +301,7 @@ def test_apply_edit_title_noop_reports_no_changes(tmp_path: Path, monkeypatch) -
     _make_draft(tmp_path, "2026-06-24-edit92")  # fixture title is "Original"
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit92", title="Original", backlog=False,
-        active=False, depends_on=None, clear_deps=False, append_intent=None)
+        active=False, depends_on=None, clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit92 · no changes")
 
 
@@ -311,7 +311,7 @@ def test_apply_edit_moved_to_backlog_fragment(tmp_path: Path, monkeypatch) -> No
     _make_draft(tmp_path, "2026-06-24-edit93", origin="draft")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit93", title=None, backlog=True,
-        active=False, depends_on=None, clear_deps=False, append_intent=None)
+        active=False, depends_on=None, clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit93 · moved to backlog")
 
 
@@ -321,7 +321,7 @@ def test_apply_edit_backlog_noop_reports_no_changes(tmp_path: Path, monkeypatch)
     _make_draft(tmp_path, "2026-06-24-edit94", origin="backlog")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit94", title=None, backlog=True,
-        active=False, depends_on=None, clear_deps=False, append_intent=None)
+        active=False, depends_on=None, clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit94 · no changes")
 
 
@@ -331,7 +331,7 @@ def test_apply_edit_moved_to_active_fragment(tmp_path: Path, monkeypatch) -> Non
     _make_draft(tmp_path, "2026-06-24-edit95", origin="idea")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit95", title=None, backlog=False,
-        active=True, depends_on=None, clear_deps=False, append_intent=None)
+        active=True, depends_on=None, clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit95 · moved to active")
 
 
@@ -341,7 +341,7 @@ def test_apply_edit_active_noop_reports_no_changes(tmp_path: Path, monkeypatch) 
     _make_draft(tmp_path, "2026-06-24-edita2", origin="draft")  # already draft
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edita2", title=None, backlog=False,
-        active=True, depends_on=None, clear_deps=False, append_intent=None)
+        active=True, depends_on=None, clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edita2 · no changes")
 
 
@@ -351,7 +351,7 @@ def test_apply_edit_depends_on_fragment(tmp_path: Path, monkeypatch) -> None:
     _make_draft(tmp_path, "2026-06-24-edit96")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit96", title=None, backlog=False,
-        active=False, depends_on=["A", "B"], clear_deps=False, append_intent=None)
+        active=False, depends_on=["A", "B"], clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit96 · depends on A, B")
 
 
@@ -362,7 +362,7 @@ def test_apply_edit_depends_on_noop_reports_no_changes(tmp_path: Path, monkeypat
     quest.set_depends_on(["A"])
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit97", title=None, backlog=False,
-        active=False, depends_on=["A"], clear_deps=False, append_intent=None)
+        active=False, depends_on=["A"], clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit97 · no changes")
 
 
@@ -373,7 +373,7 @@ def test_apply_edit_cleared_dependencies_fragment(tmp_path: Path, monkeypatch) -
     quest.set_depends_on(["A"])
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit98", title=None, backlog=False,
-        active=False, depends_on=None, clear_deps=True, append_intent=None)
+        active=False, depends_on=None, clear_deps=True, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit98 · cleared dependencies")
 
 
@@ -383,7 +383,7 @@ def test_apply_edit_clear_deps_noop_reports_no_changes(tmp_path: Path, monkeypat
     _make_draft(tmp_path, "2026-06-24-edit99")  # deps already empty
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit99", title=None, backlog=False,
-        active=False, depends_on=None, clear_deps=True, append_intent=None)
+        active=False, depends_on=None, clear_deps=True, append_intent=None, base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edit99 · no changes")
 
 
@@ -393,7 +393,7 @@ def test_apply_edit_appended_to_intent_fragment(tmp_path: Path, monkeypatch) -> 
     _make_draft(tmp_path, "2026-06-24-edita0")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edita0", title=None, backlog=False,
-        active=False, depends_on=None, clear_deps=False, append_intent="a note")
+        active=False, depends_on=None, clear_deps=False, append_intent="a note", base=None)
     assert (rc, msg) == (0, "edited 2026-06-24-edita0 · appended to intent")
 
 
@@ -404,7 +404,7 @@ def test_apply_edit_combined_fragments_join_with_semicolons(
     _make_draft(tmp_path, "2026-06-24-edita1", origin="draft")
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edita1", title="Combined", backlog=True,
-        active=False, depends_on=["X"], clear_deps=False, append_intent=None)
+        active=False, depends_on=["X"], clear_deps=False, append_intent=None, base=None)
     assert rc == 0
     assert msg == ('edited 2026-06-24-edita1 · title → "Combined"; '
                    "moved to backlog; depends on X")
@@ -422,7 +422,7 @@ def test_apply_edit_depends_on_rejected_for_materialized(
         json.dumps(meta, indent=2, sort_keys=True))
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit40", title=None, backlog=False,
-        active=False, depends_on=["B"], clear_deps=False, append_intent=None)
+        active=False, depends_on=["B"], clear_deps=False, append_intent=None, base=None)
     assert (rc, msg) == (2, "imp: cannot set dependencies on a materialized quest")
     # The rejected edit must not have mutated the dependency list.
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit40"))["depends_on"] == ["A"]
@@ -440,7 +440,7 @@ def test_apply_edit_clear_deps_rejected_for_materialized(
         json.dumps(meta, indent=2, sort_keys=True))
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit41", title=None, backlog=False,
-        active=False, depends_on=None, clear_deps=True, append_intent=None)
+        active=False, depends_on=None, clear_deps=True, append_intent=None, base=None)
     assert (rc, msg) == (2, "imp: cannot set dependencies on a materialized quest")
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit41"))["depends_on"] == ["A"]
 
@@ -506,3 +506,122 @@ def test_edit_title_materialized_keeps_logged_rename(
     renamed = [e for e in _events(reloaded) if e["type"] == "quest_renamed"]
     assert len(renamed) == 1
     assert renamed[0]["payload"]["new_title"] == "Renamed"
+
+
+def test_edit_base_rewrites_base_and_orig_base_head(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit50")
+    tip = _branch_with_commit(tmp_path, "release-2.0")
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit50", base="release-2.0"))
+    assert rc == 0
+    meta = _meta(Quest.load(tmp_path, "2026-06-24-edit50"))
+    assert meta["base_branch"] == "release-2.0"
+    assert meta["orig_base_head"] == tip
+
+
+def test_edit_base_rejected_for_materialized(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit51")
+    _branch_with_commit(tmp_path, "release-2.0")
+    before = _meta(quest)
+    before["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(before, indent=2, sort_keys=True))
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit51", base="release-2.0"))
+    assert rc == 2
+    assert "cannot change the base of a materialized quest" in capsys.readouterr().err
+    after = _meta(Quest.load(tmp_path, "2026-06-24-edit51"))
+    assert after["base_branch"] == before["base_branch"]
+    assert after["orig_base_head"] == before["orig_base_head"]
+
+
+def test_edit_base_nonexistent_branch_rejected(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit52")
+    before = _meta(quest)
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit52", base="release-2.0"))
+    assert rc == 2
+    assert capsys.readouterr().err.strip() == \
+        "imp: --base 'release-2.0' does not name an existing branch"
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit52")) == before
+
+
+def test_edit_no_flags_guard_names_base(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit53")
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit53"))
+    assert rc == 2
+    assert capsys.readouterr().err.strip() == (
+        "imp: imp edit needs at least one of --title, --backlog/--active, "
+        "--depends-on/--clear-deps, --base, or --append-intent")
+
+
+def test_apply_edit_base_fragment(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit54")
+    _branch_with_commit(tmp_path, "release-2.0")
+    _git(tmp_path, "checkout", "-q", "release-2.0")  # checkout agrees with the new base
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit54", title=None, backlog=False, active=False,
+        depends_on=None, clear_deps=False, append_intent=None, base="release-2.0")
+    assert (rc, msg) == (0, "edited 2026-06-24-edit54 · base → release-2.0")
+
+
+def test_edit_base_combines_with_other_flags() -> None:
+    parser = main._build_parser()
+    ns = parser.parse_args(
+        ["edit", "2026-06-24-x", "--title", "T", "--depends-on", "A",
+         "--base", "release-2.0"])
+    assert (ns.title, ns.depends_on, ns.base) == ("T", ["A"], "release-2.0")
+
+
+def test_apply_edit_base_noop_preserves_orig_base_head(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit55")  # based on main
+    original = _meta(quest)["orig_base_head"]
+    (tmp_path / "moved.txt").write_text("x\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "advance main")
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() != original
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit55", title=None, backlog=False, active=False,
+        depends_on=None, clear_deps=False, append_intent=None, base="main")
+    assert (rc, msg) == (0, "edited 2026-06-24-edit55 · no changes")
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit55"))["orig_base_head"] == original
+
+
+def test_apply_edit_base_fragment_notes_diverged_checkout(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit56")
+    _branch_with_commit(tmp_path, "release-2.0")  # leaves the checkout on main
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit56", title=None, backlog=False, active=False,
+        depends_on=None, clear_deps=False, append_intent=None, base="release-2.0")
+    assert (rc, msg) == (
+        0, "edited 2026-06-24-edit56 · base → release-2.0 (main checkout is on main)")
+
+
+def test_apply_edit_base_fragment_omits_parenthetical_on_detached_head(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit57")
+    _branch_with_commit(tmp_path, "release-2.0")
+    _git(tmp_path, "checkout", "-q", "--detach")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit57", title=None, backlog=False, active=False,
+        depends_on=None, clear_deps=False, append_intent=None, base="release-2.0")
+    assert (rc, msg) == (0, "edited 2026-06-24-edit57 · base → release-2.0")

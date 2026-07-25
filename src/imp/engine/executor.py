@@ -133,6 +133,14 @@ def _worktree_head(quest: Quest) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
+def _checkout_branch(quest: Quest) -> str:
+    """The control root's branch — meaningful only before the worktree exists."""
+    if quest.materialized:
+        return ""
+    from imp.engine import worktree
+    return worktree.checked_out_branch(quest.control_root) or ""
+
+
 def _render_prior_attempts(step_name: str, entries: list[dict[str, Any]]) -> str:
     lines = ["⟳ Prior attempts at this step:"]
     for e in entries:
@@ -1128,7 +1136,9 @@ async def _route_script(
             quest_title=quest.title, event_log=log,
             quest_id=quest.id, quest_home=f".imp/quests/{quest.id}",
             cur_base_head=quest.cur_base_head,
-            orig_base_head=quest.orig_base_head, vars=state.vars,
+            orig_base_head=quest.orig_base_head,
+            base_branch=quest.base_branch,
+            checkout_branch=_checkout_branch(quest), vars=state.vars,
         ))
     # The script gate's subprocess runs to completion under a blocking
     # proc.communicate() (gates.run_script). Offload it to a worker thread so the
@@ -1807,6 +1817,8 @@ async def _run_agent_invocation(
             quest_home=f".imp/quests/{quest.id}",
             cur_base_head=quest.cur_base_head,
             orig_base_head=quest.orig_base_head,
+            base_branch=quest.base_branch,
+            checkout_branch=_checkout_branch(quest),
             event_log=log, vars=state.vars,
             project_facts=project_facts,
             autonomous=autonomous, opening=opening,

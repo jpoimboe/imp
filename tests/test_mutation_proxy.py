@@ -14,7 +14,7 @@ from imp.cli.mutation_proxy import build_session_handler, proxy_mutation, run_mu
 from imp.engine import worktree
 from imp.engine.quest import Quest
 from imp.remote.session.socket_server import SessionSocket
-from tests.conftest import _seed_control
+from tests.conftest import _branch_with_commit, _seed_control
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ def test_run_mutation_edit_sets_depends_on(tmp_path: Path) -> None:
     _draft(tmp_path, "2026-06-24-mut10")
     result = run_mutation(tmp_path, "edit", {
         "token": "mut10", "title": None, "backlog": False, "active": False,
-        "depends_on": ["dep77"], "clear_deps": False, "append_intent": None})
+        "depends_on": ["dep77"], "clear_deps": False, "append_intent": None, "base": None})
     assert result == {
         "returncode": 0,
         "message": "edited 2026-06-24-mut10 · depends on dep77"}
@@ -71,7 +71,7 @@ def test_run_mutation_edit_no_match_returns_error(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     result = run_mutation(tmp_path, "edit", {
         "token": "ghost", "title": "X", "backlog": False, "active": False,
-        "depends_on": None, "clear_deps": False, "append_intent": None})
+        "depends_on": None, "clear_deps": False, "append_intent": None, "base": None})
     assert result["returncode"] == 2
     assert "no quest matches" in result["message"]
 
@@ -82,7 +82,7 @@ def test_run_mutation_edit_ambiguous_returns_error(tmp_path: Path) -> None:
     _draft(tmp_path, "2026-06-24-ambig20")
     result = run_mutation(tmp_path, "edit", {
         "token": "ambig", "title": "X", "backlog": False, "active": False,
-        "depends_on": None, "clear_deps": False, "append_intent": None})
+        "depends_on": None, "clear_deps": False, "append_intent": None, "base": None})
     assert result["returncode"] == 2
     assert "is ambiguous" in result["message"]
 
@@ -97,10 +97,25 @@ def test_run_mutation_edit_rejects_materialized_deps(tmp_path: Path) -> None:
         json.dumps(meta, indent=2, sort_keys=True))
     result = run_mutation(tmp_path, "edit", {
         "token": "mut15", "title": None, "backlog": False, "active": False,
-        "depends_on": ["B"], "clear_deps": False, "append_intent": None})
+        "depends_on": ["B"], "clear_deps": False, "append_intent": None, "base": None})
     assert result["returncode"] == 2
     assert result["message"] == "imp: cannot set dependencies on a materialized quest"
     assert _meta(tmp_path, "2026-06-24-mut15")["depends_on"] == ["A"]
+
+
+def test_run_mutation_edit_sets_base(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _draft(tmp_path, "2026-06-24-mut18")
+    tip = _branch_with_commit(tmp_path, "release-2.0")
+    result = run_mutation(tmp_path, "edit", {
+        "token": "mut18", "title": None, "backlog": False, "active": False,
+        "depends_on": None, "clear_deps": False, "append_intent": None,
+        "base": "release-2.0"})
+    assert result["returncode"] == 0
+    assert "base → release-2.0" in result["message"]
+    meta = _meta(tmp_path, "2026-06-24-mut18")
+    assert meta["base_branch"] == "release-2.0"
+    assert meta["orig_base_head"] == tip
 
 
 def test_run_mutation_new_records_backlog(tmp_path: Path) -> None:
@@ -132,7 +147,7 @@ async def test_proxy_mutation_edit_round_trips_over_socket(
             proxy_mutation, "edit", {
                 "token": "mut50", "title": "Renamed via socket", "backlog": False,
                 "active": False, "depends_on": None, "clear_deps": False,
-                "append_intent": None})
+                "append_intent": None, "base": None})
         assert result == {
             "returncode": 0,
             "message": 'edited 2026-06-24-mut50 · title → "Renamed via socket"'}
@@ -154,11 +169,14 @@ def test_cmd_edit_proxies_when_socket_set(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(main, "proxy_mutation", _fake)
     args = argparse.Namespace(
         token="q1", title="New", backlog=False, active=False,
-        depends_on=None, clear_deps=False, append_intent=None)
+        depends_on=None, clear_deps=False, append_intent=None,
+        base="release-2.0")
     assert main._cmd_edit(args) == 0
     assert seen["op"] == "edit"
     assert seen["args"]["token"] == "q1"
     assert seen["args"]["title"] == "New"
+    # The daemon reads args["base"] unconditionally, so a dropped key is a KeyError.
+    assert seen["args"]["base"] == "release-2.0"
 
 
 def test_async_cmd_resume_proxies_when_socket_set(

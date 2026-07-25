@@ -427,6 +427,7 @@ def test_route_script_renders_command_template(tmp_path) -> None:
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         cur_base_head="basesha", orig_base_head="basesha",
+        base_branch="main", materialized=True,
         quest_dir=tmp_path / ".imp" / "quests" / "test-quest",
     )
     step = Step(
@@ -1121,3 +1122,37 @@ def test_route_script_output_tempfile_created_under_quest_tmp_dir(tmp_path, monk
     anyio.run(main)
     assert captured["dir"] == qtmp   # explicit dir=quest.tmp_dir, not ambient temp
     assert qtmp.is_dir()             # executor created it idempotently
+
+
+def test_route_script_renders_base_and_checkout_branch(tmp_path) -> None:
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+    from tests.conftest import _git, _init_repo
+
+    _init_repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "release-2.0")   # checkout diverges from base
+    quest = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path, control_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        base_branch="main", materialized=False,
+        cur_base_head="basesha", orig_base_head="basesha",
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest",
+    )
+    step = Step(
+        name="g", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        # run_script executes with `sh -c`, so the `|` separator must be quoted.
+        command='echo "{{ quest.base_branch }}|{{ quest.checkout_branch }}" > rendered.txt',
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        await _route_script(step, quest, state, InMemoryEventLog())
+
+    anyio.run(main)
+    assert (tmp_path / "rendered.txt").read_text().strip() == "main|release-2.0"

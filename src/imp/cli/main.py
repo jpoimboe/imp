@@ -3120,7 +3120,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
 def apply_edit(
     control: Path, quest_id: str, *, title: str | None, backlog: bool,
     active: bool, depends_on: list[str] | None, clear_deps: bool,
-    append_intent: str | None,
+    append_intent: str | None, base: str | None,
 ) -> tuple[int, str | None]:
     """Return (rc, message) for an `imp edit` mutation so host CLI and daemon proxy share it."""
     quest = Quest.load(control, quest_id)
@@ -3128,9 +3128,9 @@ def apply_edit(
     zone_change = backlog or active
     dep_change = depends_on is not None or clear_deps
     if (title is None and not zone_change and not dep_change
-            and append_intent is None):
+            and append_intent is None and base is None):
         return 2, ("imp: imp edit needs at least one of --title, --backlog/--active, "
-                   "--depends-on/--clear-deps, or --append-intent")
+                   "--depends-on/--clear-deps, --base, or --append-intent")
 
     if zone_change and quest.materialized:
         return 2, (f"imp: {quest_id} is already built; zone moves apply to "
@@ -3138,6 +3138,12 @@ def apply_edit(
 
     if dep_change and quest.materialized:
         return 2, "imp: cannot set dependencies on a materialized quest"
+
+    if base is not None:
+        if quest.materialized:
+            return 2, "imp: cannot change the base of a materialized quest"
+        if not worktree.branch_exists(control, base):
+            return 2, f"imp: --base {base!r} does not name an existing branch"
 
     if append_intent is not None:
         conversed = _first_user_message(list(quest.event_log().read())) is not None
@@ -3148,6 +3154,7 @@ def apply_edit(
     prior_origin = quest.origin
     prior_deps = list(quest.depends_on)
     title_changed = title is not None and title != quest.title
+    new_base = base if base is not None and base != quest.base_branch else None
 
     if title is not None and title != quest.title:
         if quest.materialized:
@@ -3168,6 +3175,8 @@ def apply_edit(
             quest.set_seed_opening(existing + "\n\n" + append_intent)
         else:
             quest.set_seed_opening(append_intent)
+    if new_base is not None:
+        quest.set_base_branch(new_base)
 
     fragments: list[str] = []
     if title_changed:
@@ -3180,6 +3189,11 @@ def apply_edit(
         fragments.append(f'depends on {", ".join(depends_on)}')
     elif (clear_deps or (depends_on is not None and not depends_on)) and prior_deps:
         fragments.append("cleared dependencies")
+    if new_base is not None:
+        checkout = worktree.checked_out_branch(control)
+        diverged = (f" (main checkout is on {checkout})"
+                    if checkout is not None and checkout != new_base else "")
+        fragments.append(f"base → {new_base}{diverged}")
     if append_intent is not None:
         fragments.append("appended to intent")
 
@@ -3200,13 +3214,15 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         return _emit_mutation_result(proxy_mutation("edit", {
             "token": args.token, "title": args.title, "backlog": args.backlog,
             "active": args.active, "depends_on": args.depends_on,
-            "clear_deps": args.clear_deps, "append_intent": args.append_intent}))
+            "clear_deps": args.clear_deps, "append_intent": args.append_intent,
+            "base": args.base}))
     control = _control_root()
     quest_id = _resolve_id(control, args.token)
     rc, msg = apply_edit(
         control, quest_id, title=args.title, backlog=args.backlog,
         active=args.active, depends_on=args.depends_on,
-        clear_deps=args.clear_deps, append_intent=args.append_intent)
+        clear_deps=args.clear_deps, append_intent=args.append_intent,
+        base=args.base)
     if msg:
         print(msg, file=sys.stderr if rc else sys.stdout)
     return rc
@@ -4422,11 +4438,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_edit = sub.add_parser(
         "edit",
-        help="Edit a quest's title, backlog membership, dependencies, or opening intent.",
+        help=("Edit a quest's title, backlog membership, dependencies, base branch, "
+              "or opening intent."),
         description=(
-            "Edit a quest's title, backlog membership, dependencies, or append to "
-            "its opening intent. Zone moves (--backlog/--active) apply to "
-            "un-materialized quests only."))
+            "Edit a quest's title, backlog membership, dependencies, or base branch, "
+            "or append to its opening intent. Zone moves (--backlog/--active) and "
+            "base changes apply to un-materialized quests only."))
     p_edit.add_argument("token", help="Quest id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
                         help="Set the quest title.")
@@ -4447,6 +4464,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_edit_deps.add_argument(
         "--clear-deps", action="store_true",
         help="Empty the dependency list.")
+    p_edit.add_argument(
+        "--base", metavar="BRANCH", default=None,
+        help="Re-base an un-materialized quest on an existing BRANCH. Rejected "
+             "once the quest has been built.")
     p_edit.set_defaults(func=_cmd_edit)
 
     p_rc = sub.add_parser(

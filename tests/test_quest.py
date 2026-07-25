@@ -7,7 +7,7 @@ import pytest
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
-from tests.conftest import _git, _init_repo, _seed_control
+from tests.conftest import _branch_with_commit, _git, _init_repo, _seed_control
 
 
 def _seed_control_without_workflow(root: Path) -> None:
@@ -776,3 +776,79 @@ def test_create_writes_create_mode_new(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="X", quest_id="cmode3", base_branch="main")
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["create_mode"] == "new"
+
+
+def test_set_base_branch_rewrites_base_and_recomputes_orig_base_head(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="sbb1", base_branch="main")
+    main_tip = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    _git(tmp_path, "checkout", "-q", "-b", "release-2.0")
+    (tmp_path / "release.txt").write_text("x\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "release commit")
+    release_tip = _git(tmp_path, "rev-parse", "release-2.0").stdout.strip()
+    assert release_tip != main_tip
+
+    ch.set_base_branch("release-2.0")
+
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["base_branch"] == "release-2.0"
+    assert meta["orig_base_head"] == release_tip
+    assert ch.base_branch == "release-2.0"
+    assert ch.orig_base_head == release_tip
+    # No event is emitted (mirrors set_depends_on).
+    events = [json.loads(line)
+              for line in (ch.quest_dir / "events.jsonl").read_text().splitlines()
+              if line]
+    assert [e["type"] for e in events] == ["quest_created"]
+
+
+def test_reload_base_rereads_base_branch_and_orig_base_head(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    main_tip = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="rlb1", base_branch="main")
+    release_tip = _branch_with_commit(tmp_path, "release-2.0")
+    # A separate Quest.load performs the mutation, as the daemon does; `ch` stays stale.
+    Quest.load(tmp_path, "rlb1").set_base_branch("release-2.0")
+    assert (ch.base_branch, ch.orig_base_head) == ("main", main_tip)
+
+    ch.reload_base()
+
+    assert ch.base_branch == "release-2.0"
+    assert ch.orig_base_head == release_tip
+
+
+def test_materialize_forks_from_base_changed_on_disk(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="mz10", base_branch="main")
+    release_tip = _branch_with_commit(tmp_path, "release-2.0")
+    Quest.load(tmp_path, "mz10").set_base_branch("release-2.0")
+    assert ch.base_branch == "main"          # the executor's object is stale
+
+    head_changed = ch.materialize()
+
+    assert _git(tmp_path, "rev-parse", "imp/mz10").stdout.strip() == release_tip
+    wt = tmp_path / ".imp" / "worktrees" / "mz10"
+    assert (wt / "release-2.0.txt").exists()   # the file that exists only on the new base
+    assert ch.base_branch == "release-2.0"
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["cur_base_head"] == release_tip
+    assert head_changed is False              # the chosen branch has not moved since
+
+
+def test_materialize_head_changed_measured_against_new_base(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="mz11", base_branch="main")
+    _branch_with_commit(tmp_path, "release-2.0")
+    Quest.load(tmp_path, "mz11").set_base_branch("release-2.0")
+    # release-2.0 moves AFTER the base change: head_changed must report that.
+    _git(tmp_path, "checkout", "-q", "release-2.0")
+    (tmp_path / "hotfix.txt").write_text("x\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "hotfix")
+    moved_tip = _git(tmp_path, "rev-parse", "release-2.0").stdout.strip()
+    _git(tmp_path, "checkout", "-q", "main")
+
+    assert ch.materialize() is True
+    assert ch.cur_base_head == moved_tip
+    assert _git(tmp_path, "rev-parse", "imp/mz11").stdout.strip() == moved_tip

@@ -350,6 +350,17 @@ def _init_repo(root: Path) -> None:
     _git(root, "commit", "-qm", "seed")
 
 
+def _branch_with_commit(root: Path, name: str) -> str:
+    """Create `name` with an extra commit, restore the checkout to main, return its tip sha."""
+    _git(root, "checkout", "-q", "-b", name)
+    (root / f"{name}.txt").write_text("x\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", f"seed {name}")
+    tip = _git(root, "rev-parse", name).stdout.strip()
+    _git(root, "checkout", "-q", "main")
+    return tip
+
+
 def _seed_project(tmp_path: Path) -> None:
     """Produce the committed imp/ layout the worktree model requires.
 

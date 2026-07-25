@@ -86,6 +86,8 @@ class _QuestNamespace:
     home: str = ""
     cur_base_head: str = ""
     orig_base_head: str = ""
+    base_branch: str = ""
+    checkout_branch: str = ""
     parent: dict[str, str] | None = None
     depends_on: tuple[dict[str, Any], ...] = ()
 
@@ -148,6 +150,7 @@ def build_context(
     quest_title: str, event_log: EventLog,
     *, quest_id: str = "", quest_home: str = "",
     cur_base_head: str = "", orig_base_head: str = "",
+    base_branch: str = "", checkout_branch: str = "",
     parent: dict[str, str] | None = None,
     depends_on: list[dict[str, Any]] | None = None,
     vars: dict[str, Any] | None = None,
@@ -164,6 +167,8 @@ def build_context(
         quest=_QuestNamespace(id=quest_id, title=quest_title,
                               home=quest_home, cur_base_head=cur_base_head,
                               orig_base_head=orig_base_head,
+                              base_branch=base_branch,
+                              checkout_branch=checkout_branch,
                               parent=parent,
                               depends_on=tuple(depends_on or ())),
         events=_EventsNamespace(event_log),

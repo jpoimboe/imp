@@ -80,7 +80,8 @@ bookkeeping. Ask the CLI instead:
   "[<quest>] <note>"` cross-links a note onto another quest's opening intent (only
   while that quest is still an untouched draft — rejected once it's been built or even
   conversed with); `--depends-on <id>` adds a dependency edge (only before go-live —
-  rejected once materialized).
+  rejected once materialized). `--base <branch>` re-points the fork at another existing
+  branch (also before go-live only).
 - `imp help`, `imp <cmd> --help` — the command list, or one command's flags.
 
 The event log is unbounded — filter (`--step`, `--agent`, `--limit`) rather than
