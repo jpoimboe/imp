@@ -102,6 +102,24 @@ def _clip_cap_notice_clause(clipped_lines: int, over_cap: bool) -> str | None:
     return f"{clip}."
 
 
+def _cap_combined(out: str, err: str) -> tuple[str, str, bool]:
+    """Cut stdout/stderr to a COMBINED BASH_OUTPUT_CAP_BYTES, reporting whether
+    anything was cut — one function, so the flag cannot drift from the slice.
+    Fair share (half each; the smaller stream yields its remainder) keeps a
+    chatty stream from starving the other's error line. Byte slicing with
+    errors="ignore" drops only the trailing partial sequence, never a U+FFFD."""
+    out_bytes = out.encode("utf-8")
+    err_bytes = err.encode("utf-8")
+    if len(out_bytes) + len(err_bytes) <= BASH_OUTPUT_CAP_BYTES:
+        return out, err, False
+    half = BASH_OUTPUT_CAP_BYTES // 2
+    out_budget = min(len(out_bytes), BASH_OUTPUT_CAP_BYTES - min(len(err_bytes), half))
+    err_budget = min(len(err_bytes), BASH_OUTPUT_CAP_BYTES - min(len(out_bytes), half))
+    return (out_bytes[:out_budget].decode("utf-8", "ignore"),
+            err_bytes[:err_budget].decode("utf-8", "ignore"),
+            True)
+
+
 @imp_tool(
     name="bash",
     description=(
@@ -315,8 +333,7 @@ async def bash(
         # structural — absence of a `notice` means the returned text is byte-exact.
         clipped_out, n_out = clip_long_lines(stdout)
         clipped_err, n_err = clip_long_lines(stderr)
-        over_cap = (len(clipped_out.encode("utf-8"))
-                    + len(clipped_err.encode("utf-8"))) > BASH_OUTPUT_CAP_BYTES
+        disp_out, disp_err, over_cap = _cap_combined(clipped_out, clipped_err)
         clause = _clip_cap_notice_clause(n_out + n_err, over_cap)
         notice: str | None = None
         if clause is not None:
@@ -327,11 +344,9 @@ async def bash(
             notice = f"{clause} {spill_tool_output(ctx, uuid4().hex, full, preview_bytes=0)}"
 
         def _finish(**fields: object) -> str:
-            # Slicing is unconditional: under the byte cap a stream's char count is
-            # <= its byte count, so the slice is an identity there.
             result: dict[str, object] = {
-                "stdout": clipped_out[:BASH_OUTPUT_CAP_BYTES],
-                "stderr": clipped_err[:BASH_OUTPUT_CAP_BYTES],
+                "stdout": disp_out,
+                "stderr": disp_err,
                 **fields,
             }
             if notice is not None:

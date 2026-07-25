@@ -54,5 +54,6 @@ def test_tool_reference_describes_line_clipping_and_byte_exactness() -> None:
     # future rewrap).
     body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
     assert "each line over 2000 chars is clipped to 2000" in body
+    assert "the two streams are cut to a combined 30 KB head" in body
     assert "no `notice` means the output is byte-exact" in body
     assert "Foreground commands are interruptible" in body
