@@ -28,6 +28,12 @@ def engine_prompt(name: str) -> str:
     return text.strip("\n")
 
 
+def bundled_assets_dir() -> Path:
+    """Return a real filesystem Path to the bundled assets root (src/imp/assets/),
+    the parent of skills/, partials/, engine-prompts/ and workflows/."""
+    return Path(str(files("imp.assets")))
+
+
 def bundled_skills_dir() -> Path:
     """Return a real filesystem Path to the bundled global skills pool
     (src/imp/assets/skills/), mirroring bundled_workflow_dir. Raises if absent."""
