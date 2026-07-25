@@ -16,6 +16,7 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.feedback import COMPLETION_BACKSTOP
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from tests.conftest import _git, _init_repo
 
 
 @pytest.fixture
@@ -4937,3 +4938,67 @@ async def test_step_level_sticky_flap_gives_up_at_budget(
     assert runner.run_count == 3
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert paused and paused[0]["payload"]["reason"] == "retry_ceiling"
+
+
+def _seed_base_namespace_workflow(root: Path) -> None:
+    """A one-agent workflow whose body renders the two base fields, in a real repo."""
+    _init_repo(root)
+    wf = root / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "base={{ quest.base_branch }} checkout={{ quest.checkout_branch }}|\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n  - name: only\n    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+    )
+    _write_fake_config(root)
+
+
+@pytest.mark.anyio
+async def test_step_prompt_carries_base_and_checkout_branch_before_go_live(
+        tmp_path: Path) -> None:
+    _seed_base_namespace_workflow(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "release-2.0")
+    quest = _make_quest(tmp_path)          # quest.json records base_branch "main"
+    quest.materialized = False
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+    body = sink[0].initial_messages[0].content[0].text
+    assert "base=main checkout=release-2.0|" in body
+
+
+@pytest.mark.anyio
+async def test_step_prompt_suppresses_checkout_branch_after_go_live(
+        tmp_path: Path) -> None:
+    _seed_base_namespace_workflow(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "release-2.0")
+    quest = _make_quest(tmp_path)          # materialized: post-go-live
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+    body = sink[0].initial_messages[0].content[0].text
+    assert "base=main checkout=|" in body
+    assert "release-2.0" not in body
+
+
+@pytest.mark.anyio
+async def test_step_prompt_suppresses_checkout_branch_on_detached_head(
+        tmp_path: Path) -> None:
+    _seed_base_namespace_workflow(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    quest = _make_quest(tmp_path)
+    quest.materialized = False
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+    body = sink[0].initial_messages[0].content[0].text
+    assert "base=main checkout=|" in body
