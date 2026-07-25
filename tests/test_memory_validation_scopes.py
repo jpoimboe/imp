@@ -59,3 +59,12 @@ def test_preloaded_steps_parameter_removed(tmp_path: Path) -> None:
             {},
             preloaded_steps={"imp": frozenset({"planted"})},
         )
+
+
+def test_scopes_still_accept_the_internal_memory_workflow(tmp_path: Path) -> None:
+    valid, workflow_steps = memory_validation_scopes(
+        tmp_path, ["memory/all.md"], {}
+    )
+    # Narrowing the *selectable* set must not narrow memory-tree validation.
+    assert "memory" in valid
+    assert "memory-editor" in workflow_steps["memory"]

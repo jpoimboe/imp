@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,7 @@ from imp.agents.interactive import (
     InteractiveResult,
     run_interactive_agent_sync,
 )
-from imp.assets import available_workflow_names, resolve_workflow_dir
+from imp.assets import resolve_workflow_dir, selectable_workflow_names
 from imp.cli.prompt import Prompt
 from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
@@ -48,6 +48,7 @@ from imp.cli.verify_detect import (
 from imp.engine import worktree
 from imp.engine.loader import parse_agent_file
 from imp.engine.sandbox import SandboxConfig, sandbox_available
+from imp.engine.types import OutputField
 from imp.remote.drivers import REGISTRY
 
 _DEFAULT_WORKFLOW = "default"
@@ -488,13 +489,13 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
 
 
 def _workflow_choices(project_root: Path) -> list[tuple[str, str]]:
-    """(name, description) for every available workflow — the agent's context for
+    """(name, description) for every SELECTABLE workflow — the agent's context for
     framing the default-workflow choice. The description is the FIRST line of each
     workflow.yaml `description:` block (the pipeline summary): the bundled blocks
     are multi-paragraph, so taking one line keeps the kickoff compact and free of
     mid-line newlines. Empty when absent."""
     out: list[tuple[str, str]] = []
-    for name in available_workflow_names(project_root):
+    for name in selectable_workflow_names(project_root):
         wf_yaml = resolve_workflow_dir(project_root, name) / "workflow.yaml"
         desc = ""
         if wf_yaml.is_file():
@@ -555,6 +556,17 @@ def _run_init_conversation(
     """Default conversation seam: run the read-only init-conversation agent in the
     foreground host and return its InteractiveResult. Tests monkeypatch this."""
     agent_def = parse_agent_file(workflow_dir / "agents" / "init-conversation.md")
+    # Pinned at runtime: the per-project valid set (bundled plus committed
+    # imp/workflows/*) can't be declared statically in the agent's frontmatter.
+    schema = agent_def.output_schema
+    fields = tuple(
+        OutputField(name="default_workflow", type="enum",
+                    values=tuple(selectable_workflow_names(project_root)),
+                    required=True)
+        if f.name == "default_workflow" else f
+        for f in schema.fields
+    )
+    agent_def = replace(agent_def, output_schema=replace(schema, fields=fields))
     kickoff = _build_init_kickoff(
         workflows=_workflow_choices(project_root),
         base_hint=worktree.origin_head_branch(project_root),

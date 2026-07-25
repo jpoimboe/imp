@@ -1,7 +1,36 @@
 from __future__ import annotations
 
+import pytest
+
 from imp.agents.interactive import InteractiveSuccess
 from imp.assets import bundled_workflow_dir
+
+
+def _run_capturing_init_conversation(tmp_path, monkeypatch):
+    """Run _run_init_conversation against a fake conversation seam (no model
+    call); return (result, the kwargs handed to run_interactive_agent_sync)."""
+    import imp.cli.init as initmod
+
+    captured: dict[str, object] = {}
+
+    def _fake_sync(**kw):
+        captured.update(kw)
+        return InteractiveSuccess({"status": "Success"})
+
+    class _FakePrompt:
+        def __init__(self, **kw) -> None:
+            pass
+
+        async def ask_async(self, *a, **k) -> str:
+            return ""
+
+    monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_sync)
+    monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
+    result = initmod._run_init_conversation(
+        project_root=tmp_path, workflow_dir=bundled_workflow_dir("default"),
+        provider_name="anthropic", model_name="m",
+        allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
+    return result, captured
 
 
 def test_build_init_kickoff_embeds_workflows_and_base() -> None:
@@ -30,30 +59,69 @@ def test_workflow_choices_include_bundled_minimal(tmp_path) -> None:
 
 
 def test_run_init_conversation_loads_agent_and_passes_kickoff(tmp_path, monkeypatch):
-    import imp.cli.init as initmod
-
-    captured: dict[str, object] = {}
-
-    def _fake_sync(**kw):
-        captured.update(kw)
-        return InteractiveSuccess({"status": "Success"})
-
-    class _FakePrompt:
-        def __init__(self, **kw) -> None:
-            pass
-
-        async def ask_async(self, *a, **k) -> str:
-            return ""
-
-    monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_sync)
-    monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
-
-    result = initmod._run_init_conversation(
-        project_root=tmp_path, workflow_dir=bundled_workflow_dir("default"),
-        provider_name="anthropic", model_name="m",
-        allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
+    result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
 
     assert isinstance(result, InteractiveSuccess)
     assert captured["agent_def"].name == "init-conversation"      # real file loaded
     assert captured["provider_name"] == "anthropic"
     assert "minimal" in captured["initial_message"]               # workflow context embedded
+
+
+def test_workflow_choices_exclude_internal_memory(tmp_path) -> None:
+    from imp.cli.init import _build_init_kickoff, _workflow_choices
+    choices = _workflow_choices(tmp_path)
+    names = [name for name, _desc in choices]
+    assert "memory" not in names
+    assert {"default", "minimal"} <= set(names)
+    # descriptions still come from each workflow.yaml
+    assert all(desc.strip() for _name, desc in choices)
+    kickoff = _build_init_kickoff(
+        workflows=choices, base_hint=None, git_exists=True)
+    assert "memory" not in kickoff
+    assert "minimal" in kickoff
+
+
+def test_run_init_conversation_pins_default_workflow_enum(tmp_path, monkeypatch):
+    from imp.assets import selectable_workflow_names
+    from imp.engine.loader import parse_agent_file
+
+    _result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
+    schema = captured["agent_def"].output_schema
+    original = parse_agent_file(
+        bundled_workflow_dir("default") / "agents" / "init-conversation.md"
+    ).output_schema
+
+    # same fields, same order — the enum takes the original field's slot
+    assert [f.name for f in schema.fields] == [f.name for f in original.fields]
+    field = {f.name: f for f in schema.fields}["default_workflow"]
+    assert field.type == "enum"
+    assert field.values == tuple(selectable_workflow_names(tmp_path))
+    assert field.required
+    # every other field of THIS AgentDef's schema is untouched
+    assert [f for f in schema.fields if f.name != "default_workflow"] == [
+        f for f in original.fields if f.name != "default_workflow"]
+
+
+def test_pinned_enum_bounces_offlist_workflow(tmp_path, monkeypatch):
+    from imp.assets import selectable_workflow_names
+    from imp.engine.completion import completion_instruction
+    from imp.engine.errors import LoadError
+    from imp.engine.schema import validate_agent_output
+
+    _result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
+    schema = captured["agent_def"].output_schema
+    payload = {"status": "Success", "git_init": False, "default_base": "main",
+               "test_cmd_fast": "make check", "pythonpath": {"roots": ["src"]}}
+
+    assert validate_agent_output(
+        {**payload, "default_workflow": "minimal"}, schema) is None
+    for bad in ("memory", "minimial"):
+        with pytest.raises(LoadError, match="default_workflow"):
+            validate_agent_output({**payload, "default_workflow": bad}, schema)
+
+    expected = (
+        "`default_workflow` ("
+        + "|".join(selectable_workflow_names(tmp_path))
+        + ")"
+    )
+    assert expected in completion_instruction(schema)

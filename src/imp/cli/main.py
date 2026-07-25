@@ -31,6 +31,7 @@ import anyio
 from imp import __version__
 from imp.agents.random_status import random_status_phrase
 from imp.agents.skills import load_user_skill
+from imp.assets import selectable_workflow_names
 from imp.cli import palette as pal
 from imp.cli import quest_row, resume_select, splash
 from imp.cli.inert_resume import (
@@ -796,6 +797,13 @@ def _apply_theme() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
+    wf_arg = getattr(args, "workflow", None)
+    if wf_arg is not None:
+        names = selectable_workflow_names(project)
+        if wf_arg not in names:
+            _emit_cli_error(
+                f"unknown workflow {wf_arg!r}; available: {', '.join(names)}")
+            return 2
     headless, auto_headless = _select_headless(args)
     try:
         if headless:
@@ -4035,8 +4043,9 @@ def _build_parser() -> argparse.ArgumentParser:
              "hints — no model call, works in CI with no credentials.")
     p_init.add_argument(
         "--workflow", metavar="NAME", default=None,
-        help="Default workflow to record in the non-interactive path "
-             "(defaults to `default`).")
+        help="Default workflow recorded by the non-interactive path (defaults "
+             "to `default`); must name an available workflow — an unknown name "
+             "is rejected in either mode.")
     p_init.add_argument(
         "--base", metavar="BRANCH", default=None,
         help="Integration branch to record as default-base in the "
