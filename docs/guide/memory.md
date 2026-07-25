@@ -32,7 +32,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
   `imp/memory/` files live in the repo's `imp/` config dir, not the merged config;
   change them by editing the markdown files under `imp/memory/` directly. Changing
   `facts` or defaults means editing `imp/project.yaml` by hand — there is no
-  `imp config set`; `imp init` scaffolds the file.
+  `imp config set`; `imp init` scaffolds the file — its interactive setup picks the
+  default workflow and base (use `imp init --use-defaults` to skip the conversation
+  in CI).
 
 ## Reading what is active
 

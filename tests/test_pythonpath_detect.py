@@ -93,3 +93,15 @@ def test_validate_deduplicates(tmp_path: Path) -> None:
 
 def test_validate_empty_input_returns_empty(tmp_path: Path) -> None:
     assert validate_detected_roots(tmp_path, []) == []
+
+
+def test_detector_and_agent_are_retired() -> None:
+    import imp.cli.pythonpath_detect as ppd
+    from imp.assets import bundled_workflow_dir
+    # The one-shot detector is gone; its validation/format helpers remain.
+    assert not hasattr(ppd, "detect_pythonpath_via_agent")
+    assert hasattr(ppd, "validate_detected_roots")
+    assert hasattr(ppd, "resolve_detection_provider")
+    # The bundled agent file is gone.
+    assert not (bundled_workflow_dir("default") / "agents"
+                / "init-pythonpath.md").exists()

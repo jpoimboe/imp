@@ -39,7 +39,11 @@ from imp.cli.inert_resume import (
     render_inert_question,
     run_inert_resume,
 )
-from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
+from imp.cli.init import (
+    IntegrationBranchUnresolved,
+    run_init,
+    run_init_noninteractive,
+)
 from imp.cli.live_driver import LiveDriver, compose_prelaunch_position_row
 from imp.cli.live_status import LiveStatus
 from imp.cli.mutation_proxy import proxy_mutation, proxy_mutation_async
@@ -792,9 +796,31 @@ def _apply_theme() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
+    headless, auto_headless = _select_headless(args)
     try:
-        run_init(project, input_fn=input, output_fn=print)
-    except (GitSetupDeclined, IntegrationBranchUnresolved) as e:
+        if headless:
+            if auto_headless:
+                print(
+                    "No interactive terminal detected — writing defaults to "
+                    "imp/project.yaml. Override with --workflow / --base / "
+                    "--pythonpath.",
+                    file=sys.stderr,
+                )
+            pythonpath = None
+            if getattr(args, "pythonpath", None):
+                pythonpath = [
+                    s.strip() for s in args.pythonpath.split(",") if s.strip()
+                ]
+            run_init_noninteractive(
+                project,
+                output_fn=print,
+                workflow=getattr(args, "workflow", None),
+                base=getattr(args, "base", None),
+                pythonpath=pythonpath,
+            )
+        else:
+            run_init(project, input_fn=input, output_fn=print)
+    except IntegrationBranchUnresolved as e:
         _emit_cli_error(f"{e}")
         return 2
     except FileExistsError as e:
@@ -4002,6 +4028,23 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_init.set_defaults(func=_cmd_init)
+    p_init.add_argument(
+        "--use-defaults", action="store_true", dest="non_interactive",
+        help="Non-interactive, provider-free setup: write imp/project.yaml with "
+             "the default workflow, resolved integration branch, and teaching "
+             "hints — no model call, works in CI with no credentials.")
+    p_init.add_argument(
+        "--workflow", metavar="NAME", default=None,
+        help="Default workflow to record in the non-interactive path "
+             "(defaults to `default`).")
+    p_init.add_argument(
+        "--base", metavar="BRANCH", default=None,
+        help="Integration branch to record as default-base in the "
+             "non-interactive path (otherwise resolved from git).")
+    p_init.add_argument(
+        "--pythonpath", metavar="CSV", default=None,
+        help="Comma-separated worktree-relative import roots recorded as "
+             "pythonpath in the non-interactive path; validated against disk.")
 
     p_new = sub.add_parser(
         "new", help="Start a new quest: run the workflow from an opening intent.")

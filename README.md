@@ -119,7 +119,8 @@ clone for now.
 ```bash
 git clone <repo-url> imp && cd imp
 python3 -m pip install -e .
-imp init          # set up imp in your project (git, imp/project.yaml, config)
+imp init          # interactive setup: pick your default workflow + settings
+                  # (imp init --use-defaults for a non-interactive CI setup)
 ```
 
 ### Start a change

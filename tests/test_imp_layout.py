@@ -19,6 +19,15 @@ def _isolate_user_config(monkeypatch, tmp_path):
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+    import imp.cli.init as initmod
+    from imp.agents.interactive import InteractiveSuccess
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: ("anthropic", "m"), raising=False)
+    monkeypatch.setattr(initmod, "_run_init_conversation", lambda **kw: InteractiveSuccess({
+        "status": "Success", "git_init": True, "default_workflow": "default",
+        "default_base": "main", "test_cmd_fast": "", "pythonpath": {"roots": []}}),
+        raising=False)
 
 
 def _init(tmp_path: Path) -> None:
