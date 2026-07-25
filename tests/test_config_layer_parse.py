@@ -83,7 +83,7 @@ def test_sandbox_merges_one_level(tmp_path: Path) -> None:
 
 
 def test_config_exposes_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     # With no config files, sandbox defaults to an empty mapping (code defaults
     # apply in SandboxConfig downstream).
     eff = load_effective_config(project_root=None, control_root=None)
@@ -292,7 +292,7 @@ def test_context_merges_one_level(tmp_path: Path) -> None:
 
 
 def test_config_exposes_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     assert isinstance(eff.config.context, dict)
     # With no config files, accessors fall back to documented defaults.

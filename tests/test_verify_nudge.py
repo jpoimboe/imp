@@ -26,7 +26,7 @@ def _seq(*answers: str):
 def test_non_interactive_warns_and_does_not_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     errs: list[str] = []
     _test_cmd_fast_nudge(
@@ -41,7 +41,7 @@ def test_non_interactive_warns_and_does_not_write(
 def test_interactive_yes_appends_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
@@ -54,7 +54,7 @@ def test_interactive_yes_appends_command(
 def test_no_nudge_when_already_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\ntest_cmd_fast: make test\n")
     errs: list[str] = []
     _test_cmd_fast_nudge(
@@ -68,7 +68,7 @@ def test_no_nudge_when_already_configured(
 def test_no_nudge_when_opted_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, 'default-workflow: imp\ntest_cmd_fast: ""\n')
     errs: list[str] = []
     _test_cmd_fast_nudge(
@@ -82,7 +82,7 @@ def test_no_nudge_when_opted_out(
 def test_interactive_skip_writes_optout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
@@ -95,7 +95,7 @@ def test_interactive_skip_writes_optout(
 def test_interactive_edit_writes_custom_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
@@ -108,7 +108,7 @@ def test_interactive_edit_writes_custom_command(
 def test_no_nudge_when_nothing_detected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     errs: list[str] = []
     _test_cmd_fast_nudge(

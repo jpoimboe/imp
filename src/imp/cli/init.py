@@ -1,10 +1,10 @@
 """`imp init`: scaffold imp/ in a project.
 
 Spec §4: split output. A committed imp/project.yaml (workflow ref + empty
-vars — NO bindings, NO theme) and a bootstrapped ~/.config/imp/config.yaml
+vars — NO bindings, NO theme) and a bootstrapped ~/.imp/config.yaml
 (providers + theme + editing_mode). On a clone that already carries the
 committed imp/project.yaml, init is idempotent: it never overwrites the
-project file and only bootstraps the machine's user config if absent.
+project file and only bootstraps the machine's global config if absent.
 
 Committed config+workflows live under imp/ (tracked by git).
 Runtime state (quests, locks, etc.) lives under .imp/ (gitignored wholesale).
@@ -266,7 +266,7 @@ def _write_memory_scaffold(imp_dir: Path, workflow: str) -> None:
 
 
 def _build_user_config(providers: list[str]) -> dict[str, Any]:
-    """The bootstrapped ~/.config/imp/config.yaml providers block (theme/editing_mode
+    """The bootstrapped ~/.imp/config.yaml providers block (theme/editing_mode
     appended separately as commented raw lines)."""
     return {
         "providers": list(providers),
@@ -601,7 +601,7 @@ def run_init(
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
 ) -> None:
-    from imp.providers.effective import user_config_path
+    from imp.providers.effective import global_config_path
 
     color_on = pal.should_use_color(sys.stdout)
     imp_dir = project_root / "imp"
@@ -611,7 +611,7 @@ def run_init(
     output_fn("Setting up imp in "
               + pal.ansi(str(project_root), "wordmark", enabled=color_on))
 
-    user_path = user_config_path()
+    user_path = global_config_path()
     wrote_user_config = not user_path.exists()
 
     # --- providers + theme: skip the picker when the user config already
@@ -781,12 +781,12 @@ def run_init_noninteractive(
     defaults (+ overrides) with no model call. Both `--use-defaults` and the
     no-TTY auto-headless fallback land here. Never prompts — resolves the
     integration branch from git or raises IntegrationBranchUnresolved."""
-    from imp.providers.effective import user_config_path
+    from imp.providers.effective import global_config_path
 
     workflow = workflow or _DEFAULT_WORKFLOW
     imp_dir = project_root / "imp"
     already_initialized = (imp_dir / "project.yaml").is_file()
-    user_path = user_config_path()
+    user_path = global_config_path()
     wrote_user_config = not user_path.exists()
 
     if already_initialized:

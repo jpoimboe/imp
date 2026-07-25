@@ -216,7 +216,7 @@ def _reset_theme() -> Generator[None, None, None]:
     which leaks the resolved theme into the next test. A test that asserts the
     ansi-named SGR codes (e.g. gray `\\x1b[90m`) then fails under random ordering
     if a prior test resolved a dark/light theme — most visibly when a non-ansi
-    `theme:` lives in the merged config (a real `~/.config/imp/config.yaml`, or
+    `theme:` lives in the merged config (a real `~/.imp/config.yaml`, or
     the dogfood's bootstrapped user config). Resetting on both sides makes the
     SGR-literal tests order-independent. (test_palette.py defines an identically
     named fixture; that local one overrides this for its own module — same
@@ -228,10 +228,14 @@ def _reset_theme() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_user_config(
+def _isolate_global_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Redirect XDG_CONFIG_HOME to an absent per-test dir so no test reads the real user config."""
+    """Point IMP_HOME at an absent per-test dir so no test reads the real global
+    config. XDG_CONFIG_HOME stays set for one reason only — it is the startup
+    migration's legacy source, and a test that shells out to a real `imp`
+    inherits both."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / ".imp-isolated"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg-isolated"))
 
 

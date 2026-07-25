@@ -16,10 +16,10 @@ def _registry() -> None:
 
 
 def _eff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text("providers: [openai]\ntheme: light\n")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [openai]\ntheme: light\n")
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     return load_effective_config(project_root=None, control_root=None)
 
 
@@ -53,15 +53,15 @@ def test_render_shows_test_cmd_unset_defaults(
 def test_render_shows_configured_test_cmds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text(
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text(
         "providers: [openai]\n"
         "test_cmd_fast: make check\n"
         "test_cmd_slow: make check && make test-live\n"
         "test_cmd_slow_timeout: 600\n"
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)
@@ -78,14 +78,14 @@ def test_render_shows_configured_test_cmds(
 def test_render_shows_disabled_test_cmds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text(
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text(
         "providers: [openai]\n"
         'test_cmd_fast: ""\n'
         'test_cmd_slow: ""\n'
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)
@@ -111,10 +111,10 @@ def test_cli_authenticated_provider_skips_key_check(
 ) -> None:
     """claude_code/codex authenticate via login, not an API key — render must NOT
     fabricate a `CLAUDE_CODE_API_KEY not set` line (finding I1)."""
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text("providers: [claude_code]\n")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [claude_code]\n")
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)
@@ -164,10 +164,10 @@ def test_config_default_shows_full_matrix_when_no_providers_configured(
     # When no providers: key is set, cfg.providers is (), the "and configured"
     # guard short-circuits to False, and the full matrix is shown even with
     # show_all=False.
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text("theme: ansi\n")  # no providers: key
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("theme: ansi\n")  # no providers: key
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)              # show_all=False (default)
@@ -179,10 +179,10 @@ def test_config_default_shows_full_matrix_when_no_providers_configured(
 def test_render_marks_enabled_driver(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text("providers: [openai]\n")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [openai]\n")
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     (tmp_path / ".imp").mkdir()
     (tmp_path / ".imp" / "config.yaml").write_text("remote:\n  driver: telegram\n")
     eff = load_effective_config(project_root=None, control_root=tmp_path)
@@ -195,17 +195,17 @@ def test_render_marks_enabled_driver(
 def test_explain_colors_sources_when_layers_differ(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
     # User overrides only the openai binding of `high`; anthropic stays at the
     # provider-default floor — so the two rows' sources differ.
-    (xdg / "config.yaml").write_text(
+    (imp_home / "config.yaml").write_text(
         "providers: [anthropic, openai]\n"
         "tiers:\n"
         "  high:\n"
         "    openai: gpt-5-custom\n"
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_explain(eff, "high", out, color=True)
@@ -230,15 +230,15 @@ def test_explain_colors_even_when_layers_match(
 def test_explain_never_colors_under_no_color(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text(
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text(
         "providers: [anthropic, openai]\n"
         "tiers:\n"
         "  high:\n"
         "    openai: gpt-5-custom\n"
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_explain(eff, "high", out, color=False)
@@ -272,10 +272,10 @@ def test_explain_plain_unchanged_under_no_color(
 def test_render_shows_configured_pythonpath(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text("providers: [openai]\npythonpath: [src, lib]\n")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [openai]\npythonpath: [src, lib]\n")
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)
@@ -287,14 +287,14 @@ def test_render_shows_configured_pythonpath(
 def test_config_settings_arrows_align_with_a_long_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text(
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text(
         "providers: [openai]\n"
         "test_cmd_fast: make check\n"
         "test_cmd_slow: make check && make test-live\n"   # 28 chars, exceeds 24
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)
@@ -325,12 +325,12 @@ def test_render_shows_unset_pythonpath(
 def test_provenance_path_is_elided_to_fit_80_cols(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    eff = _eff(tmp_path, monkeypatch)   # user config at <xdg>/imp/config.yaml sets theme
+    eff = _eff(tmp_path, monkeypatch)   # global config at <IMP_HOME>/config.yaml sets theme
     out = io.StringIO()
     render_config(eff, out, color=False)
     theme_line = next(ln for ln in out.getvalue().splitlines()
                       if ln.strip().startswith("theme "))
-    assert "…/imp/config.yaml" in theme_line   # elided to trailing dir/file
+    assert "…/imphome/config.yaml" in theme_line   # elided to trailing dir/file
     assert str(tmp_path) not in theme_line      # full absolute path is gone
     assert len(theme_line) <= 80                 # fits an 80-col terminal, no wrap
 

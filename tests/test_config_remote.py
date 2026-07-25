@@ -94,7 +94,7 @@ def test_parse_remote_rejects_unknown_remote_key(tmp_path: Path) -> None:
 def test_effective_config_surfaces_remote_from_local_layer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # no user config
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))  # no global config
     (tmp_path / ".imp").mkdir()
     (tmp_path / ".imp" / "config.yaml").write_text("remote:\n  driver: telegram\n")
     cfg = load_effective_config(control_root=tmp_path).config
@@ -104,6 +104,6 @@ def test_effective_config_surfaces_remote_from_local_layer(
 def test_effective_config_remote_empty_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # no user config
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))  # no global config
     cfg = load_effective_config(control_root=tmp_path).config
     assert cfg.remote == {}

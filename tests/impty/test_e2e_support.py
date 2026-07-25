@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tests.impty.e2e_support import (
     E2E_SUBPROCESS_TIMEOUT,
     clean_env,
@@ -103,3 +105,16 @@ def test_clean_env_explicit_connect_override_wins() -> None:
 def test_e2e_subprocess_timeout_is_below_the_pytest_ceiling() -> None:
     # 235 < the 240s pytest-timeout ceiling, so the child is killed with captured output.
     assert E2E_SUBPROCESS_TIMEOUT == 235
+
+
+def test_clean_env_keeps_imp_home_and_strips_other_imp_vars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # IMP_HOME locates the per-test global config layer. Strip it with the other
+    # IMP_* engine vars and an impty child reads the developer's real
+    # ~/.imp/config.yaml, whose `providers` outrank the seeded project layer.
+    monkeypatch.setenv("IMP_HOME", "/tmp/imp-home-x")
+    monkeypatch.setenv("IMP_QUEST_ID", "leaked")
+    env = clean_env()
+    assert env["IMP_HOME"] == "/tmp/imp-home-x"
+    assert "IMP_QUEST_ID" not in env

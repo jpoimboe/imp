@@ -10,7 +10,7 @@ from imp.cli.main import main
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # A non-git directory, isolated from the developer's real machine config.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     monkeypatch.chdir(tmp_path)
 
 

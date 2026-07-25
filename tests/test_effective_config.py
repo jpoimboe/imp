@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from imp.providers import register_builtin_providers, resolve
-from imp.providers.effective import load_effective_config, user_config_path
+from imp.providers.effective import global_config_path, load_effective_config
 
 
 @pytest.fixture(autouse=True)
@@ -14,7 +14,7 @@ def _registry() -> None:
 
 
 def test_floor_only_populates_all_tiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # no user config
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))  # no global config
     eff = load_effective_config(project_root=None, control_root=None)
     cfg = eff.config
     assert cfg.tiers["high"]["anthropic"] == "claude-opus-5[1m]"
@@ -26,7 +26,7 @@ def test_floor_only_populates_all_tiers(tmp_path: Path, monkeypatch: pytest.Monk
 def test_project_leaf_override_is_additive_over_floor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "project.yaml").write_text("tiers:\n  high: {anthropic: opus-pinned}\n")
@@ -38,13 +38,13 @@ def test_project_leaf_override_is_additive_over_floor(
     assert "provider code" in str(eff.provenance[("tiers", "high", "openai")].file)
 
 
-def test_local_beats_user_beats_project(
+def test_local_beats_global_beats_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg"
-    (xdg / "imp").mkdir(parents=True)
-    (xdg / "imp" / "config.yaml").write_text("theme: light\nproviders: [openai]\n")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("theme: light\nproviders: [openai]\n")
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "project.yaml").write_text("theme: dark\n")
@@ -53,13 +53,20 @@ def test_local_beats_user_beats_project(
     (control / ".imp" / "config.yaml").write_text("theme: ansi\n")
     eff = load_effective_config(project_root=proj, control_root=control)
     assert eff.config.theme == "ansi"  # local wins
-    assert eff.config.providers == ("openai",)  # from user
+    assert eff.config.providers == ("openai",)  # from global
     assert eff.provenance[("theme",)].file.name == "config.yaml"
 
 
-def test_user_config_path_respects_xdg(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/x")
-    assert user_config_path() == Path("/tmp/x/imp/config.yaml")
+def test_global_config_path_respects_imp_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMP_HOME", "/tmp/x")
+    assert global_config_path() == Path("/tmp/x/config.yaml")
+
+
+def test_global_config_path_defaults_under_the_home_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("IMP_HOME", raising=False)
+    assert global_config_path() == Path.home() / ".imp" / "config.yaml"
 
 
 def test_test_cmd_fields_flow_from_project_to_config(
@@ -67,7 +74,7 @@ def test_test_cmd_fields_flow_from_project_to_config(
 ) -> None:
     # End-to-end: project.yaml test_cmd_* land on Config, which the engine bundles
     # into TestGates / IMP_TEST_CMD_* for the gate subprocesses.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "project.yaml").write_text(
@@ -85,7 +92,7 @@ def test_test_cmd_fields_flow_from_project_to_config(
 def test_test_cmd_fields_default_to_none_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     assert eff.config.test_cmd_fast is None
     assert eff.config.test_cmd_slow is None
@@ -96,7 +103,7 @@ def test_test_cmd_fields_default_to_none_when_unset(
 def test_pythonpath_flows_from_project_to_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "project.yaml").write_text("pythonpath: [src, vendor]\n")
@@ -107,7 +114,7 @@ def test_pythonpath_flows_from_project_to_config(
 def test_pythonpath_defaults_to_empty_tuple_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config(project_root=None, control_root=None)
     assert eff.config.pythonpath == ()
 
@@ -118,7 +125,7 @@ def test_repo_project_yaml_uses_tiered_test_cmds(
     # The shipped imp/project.yaml is migrated to the tiered keys; guard against a
     # regression to the removed verify_command/verify_timeout surface.
     repo_root = Path(__file__).resolve().parents[1]
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(repo_root / "nonexistent-xdg"))
+    monkeypatch.setenv("IMP_HOME", str(repo_root / "nonexistent-imp-home"))
     eff = load_effective_config(project_root=repo_root, control_root=None)
     assert eff.config.test_cmd_fast == "make check"
     assert eff.config.test_cmd_slow == "make check && make test-live"
@@ -135,6 +142,6 @@ def test_repo_project_yaml_declares_pythonpath_src(
     # covers both src/imp and src/impty. Must be declared since the env-level
     # auto-shadow branch was deleted.
     repo_root = Path(__file__).resolve().parents[1]
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(repo_root / "nonexistent-xdg"))
+    monkeypatch.setenv("IMP_HOME", str(repo_root / "nonexistent-imp-home"))
     eff = load_effective_config(project_root=repo_root, control_root=None)
     assert eff.config.pythonpath == ("src",)

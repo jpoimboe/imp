@@ -1,5 +1,5 @@
 """`imp init` scaffolding: split committed imp/project.yaml + bootstrapped
-user config (spec §4)."""
+global config (spec §4)."""
 
 from __future__ import annotations
 
@@ -50,8 +50,11 @@ def _stub_conv_recording_theme(monkeypatch, seen: dict) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_user_config(monkeypatch, tmp_path):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+def _isolate_global_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    # This override shadows conftest's autouse fixture for the module, so it must
+    # neuter the migration's legacy source too.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg-isolated"))
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +96,7 @@ def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
     assert proj.is_file()
     data = yaml.safe_load(proj.read_text())
     # The committed project file carries the workflow ref + project settings —
-    # NO bindings (the floor owns tiers), NO providers/theme (user-homed).
+    # NO bindings (the floor owns tiers), NO providers/theme (global-homed).
     assert data["default-workflow"] == "default"
     assert "workflow" not in data
     assert "tiers" not in data
@@ -112,7 +115,7 @@ def test_bootstraps_user_config_with_providers(tmp_path: Path) -> None:
         project_root=tmp_path, picker_fn=_picks("anthropic"),
         input_fn=_inputs(), output_fn=lambda _msg: None,
     )
-    user = tmp_path / "xdg" / "imp" / "config.yaml"
+    user = tmp_path / "imphome" / "config.yaml"
     assert user.is_file()
     data = yaml.safe_load(user.read_text())
     assert data["providers"] == ["anthropic"]
@@ -120,14 +123,14 @@ def test_bootstraps_user_config_with_providers(tmp_path: Path) -> None:
 
 
 def test_persists_detected_theme(tmp_path: Path) -> None:
-    # The detected theme is written to the user config so the runtime never
+    # The detected theme is written to the global config so the runtime never
     # re-queries the terminal.
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
         input_fn=_inputs(), output_fn=lambda _msg: None,
         detect_theme_fn=lambda: "dark",
     )
-    data = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
     assert data["theme"] == "dark"
 
 
@@ -138,7 +141,7 @@ def test_user_config_documents_theme_and_editing_mode(tmp_path: Path) -> None:
         input_fn=_inputs(), output_fn=lambda _msg: None,
         detect_theme_fn=lambda: "dark",
     )
-    text = (tmp_path / "xdg" / "imp" / "config.yaml").read_text()
+    text = (tmp_path / "imphome" / "config.yaml").read_text()
     assert "theme: dark  # dark | light | ansi\n" in text
     assert "editing_mode: emacs  # emacs | vi\n" in text
     assert text.index("providers:") < text.index("theme:") < text.index("editing_mode:")
@@ -157,7 +160,7 @@ def test_appends_to_project_gitignore(tmp_path: Path) -> None:
 
 def test_init_idempotent_on_existing_clone(tmp_path: Path) -> None:
     # A clone that already carries the committed project file must NOT raise —
-    # init just bootstraps the machine's user config.
+    # init just bootstraps the machine's global config.
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     run_init(
@@ -165,9 +168,9 @@ def test_init_idempotent_on_existing_clone(tmp_path: Path) -> None:
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
-    # Project file untouched; user config bootstrapped.
+    # Project file untouched; global config bootstrapped.
     assert (tmp_path / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
-    assert (tmp_path / "xdg" / "imp" / "config.yaml").exists()
+    assert (tmp_path / "imphome" / "config.yaml").exists()
 
 
 def test_supports_two_providers_recorded_in_user_config(tmp_path: Path) -> None:
@@ -177,7 +180,7 @@ def test_supports_two_providers_recorded_in_user_config(tmp_path: Path) -> None:
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
-    data = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
     assert data["providers"] == ["claude_code", "openai"]
     # Bindings are NOT scaffolded — the provider-code floor owns tiers.
     proj = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
@@ -192,7 +195,7 @@ def test_supports_claude_code_no_env_prompt(tmp_path: Path) -> None:
         project_root=tmp_path, picker_fn=_picks("claude_code"),
         input_fn=_no_input, output_fn=lambda _msg: None,
     )
-    data = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
     assert data["providers"] == ["claude_code"]
 
 
@@ -288,7 +291,7 @@ def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
         project_root=tmp_path, picker_fn=_picks("anthropic"),
         input_fn=_inputs(), output_fn=lambda _msg: None,
     )
-    text = (tmp_path / "xdg" / "imp" / "config.yaml").read_text()
+    text = (tmp_path / "imphome" / "config.yaml").read_text()
     assert yaml.safe_load(text).get("remote") is None
     assert "# remote:" in text
     assert "#   driver: telegram" in text
@@ -311,10 +314,10 @@ def test_post_init_manifest_notes_the_commit(tmp_path: Path) -> None:
 def test_already_initialized_with_existing_user_config_claims_no_write(
     tmp_path: Path,
 ) -> None:
-    # Both the committed project file AND the machine user config already exist.
+    # Both the committed project file AND the machine global config already exist.
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
-    imp_config_dir = tmp_path / "xdg" / "imp"
+    imp_config_dir = tmp_path / "imphome"
     imp_config_dir.mkdir(parents=True)
     (imp_config_dir / "config.yaml").write_text("providers: [anthropic]\n")
 
@@ -324,7 +327,7 @@ def test_already_initialized_with_existing_user_config_claims_no_write(
         input_fn=_inputs(), output_fn=msgs.append,
     )
     text = "\n".join(msgs)
-    # Must NOT claim a write that did not happen; user config is untouched.
+    # Must NOT claim a write that did not happen; global config is untouched.
     assert "bootstrapped" not in text
     assert "already set up" in text
     assert (imp_config_dir / "config.yaml").read_text() == "providers: [anthropic]\n"
@@ -364,12 +367,12 @@ def test_no_usable_credential_stops_without_project_yaml(tmp_path, monkeypatch):
              output_fn=msgs.append)
     assert not (tmp_path / "imp" / "project.yaml").exists()
     assert "usable credential" in "\n".join(msgs)
-    user = tmp_path / "xdg" / "imp" / "config.yaml"
+    user = tmp_path / "imphome" / "config.yaml"
     assert yaml.safe_load(user.read_text())["providers"] == ["anthropic"]
 
 
 def test_configured_providers_skip_picker(tmp_path, monkeypatch):
-    cfg_dir = tmp_path / "xdg" / "imp"
+    cfg_dir = tmp_path / "imphome"
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
     (tmp_path / "src").mkdir()
@@ -394,7 +397,7 @@ def test_bwrap_missing_offer_accept_continues(tmp_path, monkeypatch):
     assert yaml.safe_load(
         (tmp_path / "imp" / "project.yaml").read_text())["pythonpath"] == ["src"]
     assert "Running without an OS sandbox." in "\n".join(msgs)
-    user = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
+    user = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
     assert user["sandbox"]["allow_unsandboxed"] is True
 
 
@@ -443,7 +446,7 @@ def test_conversation_empty_roots_writes_hint(tmp_path, monkeypatch):
 def test_conversation_git_init_true_initializes_repo(tmp_path_factory, monkeypatch):
     fresh = tmp_path_factory.mktemp("norepo")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(fresh / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(fresh / "imphome"))
     monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
@@ -467,7 +470,7 @@ def test_conversation_git_declined_in_non_repo_stops_cleanly(
     # must emit a clean message and write nothing, not crash in `git status`.
     fresh = tmp_path_factory.mktemp("norepo2")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(fresh / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(fresh / "imphome"))
     _stub_conv(monkeypatch, _conv_result(git_init=False))
     msgs: list[str] = []
     run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(),
@@ -597,7 +600,7 @@ def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch
     # A truly repo-less dir OUTSIDE the autouse _git_repo fixture's repo (which
     # git-inits tmp_path, so any tmp_path subdir is already inside a repo). Cap
     # git's upward repo discovery at the temp base so no ancestor repo is found;
-    # user config stays isolated via the autouse _isolate_user_config fixture.
+    # global config stays isolated via the autouse _isolate_global_config fixture.
     from imp.cli.init import run_init_noninteractive
     fresh = tmp_path_factory.mktemp("fresh")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))

@@ -2,7 +2,7 @@
 2026-06-08-config-file-split §2).
 
 Precedence (later wins):
-    provider code (floor) ← imp/project.yaml ← ~/.config/imp/config.yaml
+    provider code (floor) ← imp/project.yaml ← ~/.imp/config.yaml
                           ← .imp/config.yaml (control root, gitignored)
 
 The merged `Config.tiers` is always fully populated (floor + overrides), so
@@ -36,8 +36,20 @@ class EffectiveConfig:
     provenance: Provenance
 
 
-def user_config_path() -> Path:
-    """$XDG_CONFIG_HOME/imp/config.yaml, default ~/.config/imp/config.yaml."""
+def imp_home() -> Path:
+    """$IMP_HOME, default ~/.imp — imp's per-machine directory."""
+    base = os.environ.get("IMP_HOME") or str(Path.home() / ".imp")
+    return Path(base)
+
+
+def global_config_path() -> Path:
+    """$IMP_HOME/config.yaml, default ~/.imp/config.yaml."""
+    return imp_home() / "config.yaml"
+
+
+def legacy_global_config_path() -> Path:
+    """The pre-IMP_HOME location: $XDG_CONFIG_HOME/imp/config.yaml, default
+    ~/.config/imp/config.yaml. Read only by the startup migration."""
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "imp" / "config.yaml"
 
@@ -117,12 +129,12 @@ def _to_config(
 def load_effective_config(
     *, project_root: Path | None = None, control_root: Path | None = None,
 ) -> EffectiveConfig:
-    """Build the floor, then merge project ← user ← local on top.
+    """Build the floor, then merge project ← global ← local on top.
 
     - project layer: `project_root/imp/project.yaml` (the worktree for a quest;
       the control-root checkout for quest-less commands). Skipped when
       project_root is None.
-    - user layer: `user_config_path()` (live).
+    - global layer: `global_config_path()` (live).
     - local layer: `control_root/.imp/config.yaml` (live, gitignored). Skipped
       when control_root is None.
     """
@@ -136,9 +148,9 @@ def load_effective_config(
             layers.append(p)
         project_facts = parse_project_facts(proj_path)
         memory = load_memory_snapshot(project_root / "imp" / "memory")
-    u = parse_config_layer(user_config_path())
-    if u is not None:
-        layers.append(u)
+    g = parse_config_layer(global_config_path())
+    if g is not None:
+        layers.append(g)
     if control_root is not None:
         local = parse_config_layer(control_root / ".imp" / "config.yaml")
         if local is not None:

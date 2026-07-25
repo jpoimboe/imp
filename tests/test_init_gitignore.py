@@ -10,10 +10,13 @@ from imp.cli.init import run_init
 
 
 @pytest.fixture(autouse=True)
-def _isolate_user_config(monkeypatch, tmp_path):
-    # init bootstraps the user config — pin XDG into the tmp tree so these
+def _isolate_global_config(monkeypatch, tmp_path):
+    # init bootstraps the global config — pin IMP_HOME into the tmp tree so these
     # gitignore tests never write the developer's real machine config.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    # This override shadows conftest's autouse fixture for the module, so it must
+    # neuter the migration's legacy source too.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg-isolated"))
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
     monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
