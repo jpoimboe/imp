@@ -29,6 +29,7 @@ import pytest
 from tests._live import (
     _await_change_dir,
     anthropic_key,
+    fail_no_bash_tool_call,
     openai_key,
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
@@ -124,10 +125,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         state_path = quest_dir / "state" / "state.json"
 
         if not wait_for_bash_tool_call(events, timeout=60.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(
-                f"never saw bash tool_call event; stdout={stdout!r} stderr={stderr!r}"
-            )
+            fail_no_bash_tool_call(proc, quest_dir, 60.0)
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
         # Generous deadlines: under `-n` concurrency the post-SIGINT exit and the
@@ -216,8 +214,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         state_path = quest_dir / "state" / "state.json"
 
         if not wait_for_bash_tool_call(events, timeout=60.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+            fail_no_bash_tool_call(proc, quest_dir, 60.0)
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
         rc = proc.wait(timeout=60)
@@ -292,8 +289,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         state_path = quest_dir / "state" / "state.json"
 
         if not wait_for_bash_tool_call(events, timeout=120.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+            fail_no_bash_tool_call(proc, quest_dir, 120.0)
         time.sleep(2.0)  # CC subprocess startup is slower; extra grace
         os.killpg(proc.pid, signal.SIGINT)
         rc = proc.wait(timeout=60)

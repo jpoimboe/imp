@@ -752,3 +752,20 @@ def test_status_poller_defined_once_in_live_helpers():
     import tests.test_native_session_resume_live as native
     assert native.wait_for_status is live.wait_for_status
     assert not hasattr(native, "_wait_for_status")
+
+
+def test_group_a_sites_route_failures_through_the_evidence_helper():
+    import tests.test_mid_step_resume_live as mid
+    import tests.test_native_session_resume_live as native
+    mid_src = Path(mid.__file__).read_text()
+    native_src = Path(native.__file__).read_text()
+    for src in (mid_src, native_src):
+        # A pre-kill communicate() on a still-running client can only raise
+        # TimeoutExpired, burying the diagnostic it was meant to print.
+        assert "communicate(timeout=" not in src
+        assert src.count("wait_for_bash_tool_call(events, timeout=") == src.count(
+            "fail_no_bash_tool_call(proc, quest_dir, "
+        )
+    assert mid_src.count("wait_for_bash_tool_call(events, timeout=60.0)") == 2
+    assert mid_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
+    assert native_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1

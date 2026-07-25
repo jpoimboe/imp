@@ -23,6 +23,7 @@ import pytest
 
 from tests._live import (
     _await_change_dir,
+    fail_no_bash_tool_call,
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
     wait_for_bash_tool_call,
@@ -165,8 +166,7 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
         state_path = quest_dir / "state" / "state.json"
 
         if not wait_for_bash_tool_call(events, timeout=120.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+            fail_no_bash_tool_call(proc, quest_dir, 120.0)
         # Give the model time to actually enter `sleep 30` before the interrupt.
         time.sleep(2.0)
         os.killpg(proc.pid, signal.SIGINT)
