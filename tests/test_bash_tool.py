@@ -1005,3 +1005,18 @@ def test_bash_sandbox_setup_failure_clips_and_discloses(
     spilled = list((tmp_path / "tool-results").iterdir())
     assert len(spilled) == 1
     assert spilled[0].read_bytes() == b"L" * 28_000 + b"\n"
+
+
+def test_bash_clips_long_line_on_stderr_and_sums_cross_stream_count(
+    tmp_path: Path,
+) -> None:
+    # Pins that stderr is clipped (not just stdout) and the clip count is cross-stream.
+    ctx = _ctx(tmp_path)
+    cmd = (
+        "python3 -c 'import sys; sys.stdout.write(\"L\" * 28000 + chr(10)); "
+        "sys.stderr.write(\"E\" * 28000 + chr(10))'"
+    )
+    out = json.loads(_run_bash(ctx, {"command": cmd}))
+    assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert out["stderr"].split("\n")[0] == "E" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert out["notice"].startswith("2 long lines clipped at 2000 chars. [")
