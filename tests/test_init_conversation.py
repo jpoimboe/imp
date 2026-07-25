@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from imp.agents.interactive import InteractiveSuccess
+from imp.assets import bundled_assets_dir
 
 
 def _run_capturing_init_conversation(tmp_path, monkeypatch):
@@ -129,3 +130,37 @@ def test_run_init_resolves_no_workflow_dir() -> None:
 
     from imp.cli import init as initmod
     assert "resolve_workflow_dir" not in inspect.getsource(initmod.run_init)
+
+
+def test_run_init_conversation_ignores_a_project_local_default_workflow(
+    tmp_path, monkeypatch,
+):
+    """A committed imp/workflows/default/ used to shadow and break setup."""
+    import imp.cli.init as initmod
+
+    (tmp_path / "imp" / "workflows" / "default").mkdir(parents=True)
+
+    captured: dict[str, object] = {}
+
+    def _fake_sync(**kw):
+        captured.update(kw)
+        return InteractiveSuccess({"status": "Success"})
+
+    class _FakePrompt:
+        def __init__(self, **kw) -> None:
+            pass
+
+        async def ask_async(self, *a, **k) -> str:
+            return ""
+
+    monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_sync)
+    monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
+
+    result = initmod._run_init_conversation(
+        project_root=tmp_path,
+        provider_name="anthropic", model_name="m",
+        allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
+
+    assert isinstance(result, InteractiveSuccess)
+    assert captured["agent_def"].name == "init"
+    assert captured["asset_dir"] == bundled_assets_dir()
