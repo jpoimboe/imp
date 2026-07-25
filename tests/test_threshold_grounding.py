@@ -172,4 +172,19 @@ def test_threshold_surfaces_dependency_subsection_and_carveout_exception() -> No
     assert "imp edit {{ quest.id }} --depends-on <id>" in fd
     assert "Keep the work in this quest — don't split it into a child." in fd
     assert "except `imp edit {{ quest.id }} --depends-on`" in fd
-    assert "to record a dependency before going live" in fd
+    assert "--depends-on` / `--base`" in fd
+    assert "to record a dependency before going live" not in fd
+
+
+def test_threshold_documents_changing_the_base_branch() -> None:
+    fd = FRONT_DOOR.read_text()
+    assert "## Changing the base branch" in fd
+    # The remedy for reading the wrong branch, and the two guardrails.
+    assert ("`imp edit {{ quest.id }} --base <branch>` — the branch must already exist, "
+            "and only") in fd
+    assert "design turns on with `git show <branch>:<path>`." in fd
+    assert "top of an unmerged quest use `--depends-on`, not a base change." in fd
+    # Placement: immediately after the dependency section, before the backlog section.
+    assert (fd.index("## When the work depends on another quest")
+            < fd.index("## Changing the base branch")
+            < fd.index("## Close redundant backlog quests at approval"))

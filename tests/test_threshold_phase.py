@@ -320,3 +320,40 @@ def test_threshold_live_gate_conventions_relocated_to_partial(tmp_path) -> None:
         project_facts={}),
         workflow_dir=bundled_workflow_dir("default"))
     assert "no co-equal dangling alternative" in out
+
+
+def test_threshold_base_line_single_clause_when_checkout_matches(tmp_path) -> None:
+    out = _render_threshold(tmp_path, base_branch="main", checkout_branch="main")
+    assert "This quest forks from **main** at go-live." in out
+    assert "the main checkout is on" not in out
+
+
+def test_threshold_base_line_names_both_branches_on_divergence(tmp_path) -> None:
+    out = _render_threshold(
+        tmp_path, base_branch="release-2.0", checkout_branch="master")
+    assert (
+        "This quest forks from **release-2.0** at go-live, but the main checkout is on "
+        "**master** — what you read here may not match the fork point; check against the "
+        "base with `git show release-2.0:<path>` when it matters."
+    ) in out
+
+
+def test_threshold_base_line_single_clause_when_checkout_branch_empty(tmp_path) -> None:
+    # Materialized quest, or a detached main checkout: no divergence clause.
+    out = _render_threshold(tmp_path, base_branch="release-2.0")
+    assert "This quest forks from **release-2.0** at go-live." in out
+    assert "the main checkout is on" not in out
+
+
+def test_threshold_base_line_absent_without_a_base(tmp_path) -> None:
+    # No base in the namespace -> no state line at all (the section's own
+    # "forks from its base branch" sentence is unconditional and stays).
+    out = _render_threshold(tmp_path)
+    assert "This quest forks from **" not in out
+
+
+def test_threshold_renders_base_change_section_with_quest_id(tmp_path) -> None:
+    out = _render_threshold(tmp_path, base_branch="main", checkout_branch="main")
+    assert "## Changing the base branch" in out
+    assert "imp edit abc --base <branch>" in out
+    assert "imp edit abc --depends-on` / `--base`" in out
