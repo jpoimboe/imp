@@ -34,7 +34,7 @@ from imp.agents.interactive import (
     InteractiveResult,
     run_interactive_agent_sync,
 )
-from imp.assets import available_workflow_names, resolve_workflow_dir
+from imp.assets import resolve_workflow_dir, selectable_workflow_names
 from imp.cli.prompt import Prompt
 from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
@@ -488,13 +488,13 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
 
 
 def _workflow_choices(project_root: Path) -> list[tuple[str, str]]:
-    """(name, description) for every available workflow — the agent's context for
+    """(name, description) for every SELECTABLE workflow — the agent's context for
     framing the default-workflow choice. The description is the FIRST line of each
     workflow.yaml `description:` block (the pipeline summary): the bundled blocks
     are multi-paragraph, so taking one line keeps the kickoff compact and free of
     mid-line newlines. Empty when absent."""
     out: list[tuple[str, str]] = []
-    for name in available_workflow_names(project_root):
+    for name in selectable_workflow_names(project_root):
         wf_yaml = resolve_workflow_dir(project_root, name) / "workflow.yaml"
         desc = ""
         if wf_yaml.is_file():

@@ -57,3 +57,17 @@ def test_run_init_conversation_loads_agent_and_passes_kickoff(tmp_path, monkeypa
     assert captured["agent_def"].name == "init-conversation"      # real file loaded
     assert captured["provider_name"] == "anthropic"
     assert "minimal" in captured["initial_message"]               # workflow context embedded
+
+
+def test_workflow_choices_exclude_internal_memory(tmp_path) -> None:
+    from imp.cli.init import _build_init_kickoff, _workflow_choices
+    choices = _workflow_choices(tmp_path)
+    names = [name for name, _desc in choices]
+    assert "memory" not in names
+    assert {"default", "minimal"} <= set(names)
+    # descriptions still come from each workflow.yaml
+    assert all(desc.strip() for _name, desc in choices)
+    kickoff = _build_init_kickoff(
+        workflows=choices, base_hint=None, git_exists=True)
+    assert "memory" not in kickoff
+    assert "minimal" in kickoff
