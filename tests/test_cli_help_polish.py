@@ -55,3 +55,13 @@ def test_edit_has_description() -> None:
     desc = _subparser("edit").description
     assert desc is not None
     assert "title" in desc
+
+
+def test_edit_documents_base_flag() -> None:
+    sp = _subparser("edit")
+    help_text = " ".join(sp.format_help().split())
+    assert ("Re-base an un-materialized quest on an existing BRANCH. Rejected "
+            "once the quest has been built.") in help_text
+    assert sp.description is not None and "base branch" in sp.description
+    # The subparser's own one-line help (as `imp --help` lists it) names it too.
+    assert "base branch" in " ".join(_build_parser().format_help().split())
