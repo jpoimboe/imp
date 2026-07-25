@@ -834,3 +834,14 @@ def test_skip_or_fail_unpaused_skips_on_overlay_mount_precondition(tmp_path):
     with pytest.raises(pytest.skip.Exception) as exc:
         _skip_or_fail_unpaused(quest_dir, {"status": "running"}, _NoPipeProc())
     assert str(exc.value) == _EXPECTED_REASON
+
+
+def test_group_c_state_reads_poll_and_report_evidence():
+    import tests.impty.test_e2e_relay_hibernation_gate as gate
+    import tests.test_relay_hibernation_live as live
+    for mod in (gate, live):
+        src = Path(mod.__file__).read_text()
+        # An unguarded single read misreports a write race as a state bug.
+        assert 'json.loads(state_path.read_text())["status"]' not in src
+        assert 'wait_for_status(state_path, "paused", timeout=E2E_POLL_TIMEOUT)' in src
+        assert "evidence(" in src

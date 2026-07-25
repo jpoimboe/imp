@@ -28,8 +28,10 @@ import pytest
 from impty import TerminalSession
 from tests._live import (
     _await_change_dir,
+    evidence,
     sandbox_sleep_precondition_failed,
     wait_for_bash_tool_call,
+    wait_for_status,
 )
 from tests.conftest import _init_repo
 from tests.impty.e2e_support import (
@@ -241,7 +243,8 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
 
         assert _poll(_pid_gone, timeout=E2E_POLL_TIMEOUT), "daemon pid did not exit on detach"
         assert _poll(lambda: _flock_free(lock_path), timeout=E2E_POLL_TIMEOUT), "flock not released"
-        assert json.loads(state_path.read_text())["status"] == "paused"
+        status = wait_for_status(state_path, "paused", timeout=E2E_POLL_TIMEOUT)
+        assert status == "paused", f"expected paused, got {status!r}\n{evidence(quest_dir)}"
     finally:
         s.close()
 
