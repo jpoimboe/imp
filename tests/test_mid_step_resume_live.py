@@ -29,6 +29,7 @@ import pytest
 from tests._live import (
     _await_change_dir,
     anthropic_key,
+    assert_sigint_exit,
     evidence,
     fail_no_bash_tool_call,
     openai_key,
@@ -127,11 +128,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         os.killpg(proc.pid, signal.SIGINT)
         # Generous deadlines: under `-n` concurrency the post-SIGINT exit and the
         # daemon's async pause-write both stretch; these only bite on a real hang.
-        try:
-            rc = proc.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            pytest.fail(f"client never exited within 60s of SIGINT\n{evidence(quest_dir)}")
-        assert rc == 130, f"expected exit 130, got {rc}\n{evidence(quest_dir)}"
+        assert_sigint_exit(proc, quest_dir, timeout=60)
 
         state = _wait_for_paused(state_path, timeout=30.0)
         if state.get("status") != "paused":
@@ -217,11 +214,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
             fail_no_bash_tool_call(proc, quest_dir, 60.0)
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
-        try:
-            rc = proc.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            pytest.fail(f"client never exited within 60s of SIGINT\n{evidence(quest_dir)}")
-        assert rc == 130, f"expected exit 130, got {rc}\n{evidence(quest_dir)}"
+        assert_sigint_exit(proc, quest_dir, timeout=60)
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -295,11 +288,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
             fail_no_bash_tool_call(proc, quest_dir, 120.0)
         time.sleep(2.0)  # CC subprocess startup is slower; extra grace
         os.killpg(proc.pid, signal.SIGINT)
-        try:
-            rc = proc.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            pytest.fail(f"client never exited within 60s of SIGINT\n{evidence(quest_dir)}")
-        assert rc == 130, f"expected exit 130, got {rc}\n{evidence(quest_dir)}"
+        assert_sigint_exit(proc, quest_dir, timeout=60)
     finally:
         if proc.poll() is None:
             proc.kill()

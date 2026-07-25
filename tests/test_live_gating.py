@@ -624,7 +624,7 @@ def test_tail_replaces_undecodable_bytes(tmp_path):
     assert "ok " in _tail(log)  # no UnicodeDecodeError
 
 
-from tests._live import fail_no_bash_tool_call  # noqa: E402
+from tests._live import assert_sigint_exit, fail_no_bash_tool_call  # noqa: E402
 
 # Still-running client with non-empty pipes, signalling readiness via argv[1].
 # The escaped byte literal keeps the -c source pure ASCII (no locale dependency)
@@ -684,6 +684,45 @@ def test_fail_no_bash_tool_call_drains_an_already_exited_client(tmp_path):
     msg = str(exc.value)
     assert "never saw bash tool_call within 120.0s" in msg
     assert "done" in msg  # the exited client's stderr is still reported
+
+
+def test_assert_sigint_exit_accepts_130(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    proc = subprocess.Popen([sys.executable, "-c", "raise SystemExit(130)"])
+    assert_sigint_exit(proc, quest_dir, timeout=60)
+
+
+def test_assert_sigint_exit_reports_evidence_on_wrong_exit(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "recognizable_sentinel"}\n')
+    proc = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"])
+    with pytest.raises(pytest.fail.Exception) as exc:
+        assert_sigint_exit(proc, quest_dir, timeout=60)
+    msg = str(exc.value)
+    assert "expected exit 130, got 0" in msg
+    assert "events.jsonl tail:" in msg
+    assert "daemon.stderr tail:" in msg
+    assert "recognizable_sentinel" in msg
+
+
+def test_assert_sigint_exit_reports_evidence_on_hang(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "hang_sentinel"}\n')
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    try:
+        with pytest.raises(pytest.fail.Exception) as exc:
+            assert_sigint_exit(proc, quest_dir, timeout=0.5)
+        msg = str(exc.value)
+        assert "client never exited within 0.5s of SIGINT" in msg
+        assert "events.jsonl tail:" in msg
+        assert "daemon.stderr tail:" in msg
+        assert "hang_sentinel" in msg
+    finally:
+        proc.kill()
+        proc.wait()
 
 
 def test_wait_for_bash_tool_call_finds_bash_call(tmp_path):
@@ -776,13 +815,11 @@ def test_group_b_post_sigint_waits_report_evidence():
     import tests.test_native_session_resume_live as native
     for mod, waits in ((mid, 3), (native, 1)):
         src = Path(mod.__file__).read_text()
-        assert src.count("proc.wait(timeout=") == waits
-        assert src.count("proc.wait(timeout=60)") == waits
-        assert src.count("client never exited within") == waits
-        rc_lines = [ln for ln in src.splitlines() if "assert rc == 130" in ln]
-        assert len(rc_lines) == waits
-        for ln in rc_lines:
-            assert "evidence(" in ln, ln
+        # A bare wait() hides a hang as TimeoutExpired and a bare `assert rc == 130`
+        # names no state; both must route through the shared helper.
+        assert "proc.wait(timeout=" not in src
+        assert "assert rc == 130" not in src
+        assert src.count("assert_sigint_exit(proc, quest_dir, timeout=60)") == waits
 
 
 def test_skip_or_fail_unpaused_reports_daemon_stderr_section(tmp_path):

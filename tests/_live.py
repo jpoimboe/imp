@@ -372,6 +372,16 @@ def fail_no_bash_tool_call(
     )
 
 
+def assert_sigint_exit(proc: subprocess.Popen, quest_dir: Path, timeout: float) -> None:
+    """A bare wait() raises a content-free TimeoutExpired when the client hangs."""
+    try:
+        rc = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"client never exited within {timeout}s of SIGINT\n{evidence(quest_dir)}")
+    if rc != 130:
+        pytest.fail(f"expected exit 130, got {rc}\n{evidence(quest_dir)}")
+
+
 def wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
     """Re-scan events.jsonl from the start until a tool_call(name=bash) event
     appears. Returns True on found, False on timeout.
