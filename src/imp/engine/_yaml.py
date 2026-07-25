@@ -1,4 +1,5 @@
-"""Shared YAML helpers (line-tracking loader, source-loc derivation, scrub)."""
+"""Shared YAML helpers (line-tracking loader, config-layer loader, source-loc
+derivation, scrub)."""
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from ruamel.yaml import YAML
 
 from imp.engine.types import SourceLoc
 
@@ -101,3 +103,8 @@ def items(d: dict[str, Any]) -> Iterator[tuple[str, Any]]:
         if isinstance(k, str) and k.startswith("__"):
             continue
         yield k, v
+
+
+def load_config_yaml(text: str) -> Any:
+    """Parse a config-layer YAML 1.2 doc — ruamel, so config reader and writer are one library."""
+    return YAML(typ="safe").load(text)  # fresh instance: a YAML() is not thread-safe
