@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -580,3 +581,304 @@ def test_hook_ignores_unlisted_session_file():
     item = _StubItem("tests/test_session_hibernate.py")
     pytest_collection_modifyitems(_StubConfig(None), [item])
     assert [d for d in item.added if d.mark.name == "timeout"] == []
+
+
+from tests._live import _EVIDENCE_TAIL_LINES, _tail, evidence  # noqa: E402
+
+
+def test_evidence_puts_events_tail_first_then_daemon_stderr(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text(
+        '{"type": "step_started"}\n{"type": "error"}\n'
+    )
+    (quest_dir / "daemon.stderr").write_text("Traceback: boom\n")
+    text = evidence(quest_dir)
+    # events.jsonl is the primary evidence and must come first (spike ranking).
+    assert text.index("events.jsonl tail:") < text.index("daemon.stderr tail:")
+    assert '{"type": "error"}' in text
+    assert "Traceback: boom" in text
+
+
+def test_evidence_marks_missing_files_instead_of_raising(tmp_path):
+    quest_dir = tmp_path / "empty"
+    quest_dir.mkdir()
+    text = evidence(quest_dir)
+    assert "<no events.jsonl>" in text
+    assert "<no daemon.stderr>" in text
+
+
+def test_tail_returns_only_the_last_lines(tmp_path):
+    log = tmp_path / "events.jsonl"
+    total = _EVIDENCE_TAIL_LINES + 10
+    log.write_text("\n".join(f"line-{i}" for i in range(total)) + "\n")
+    lines = _tail(log).splitlines()
+    assert len(lines) == _EVIDENCE_TAIL_LINES
+    assert lines[0] == "line-10"
+    assert lines[-1] == f"line-{total - 1}"
+
+
+def test_tail_replaces_undecodable_bytes(tmp_path):
+    log = tmp_path / "daemon.stderr"
+    log.write_bytes(b"ok \xff\xfe bad\n")
+    assert "ok " in _tail(log)  # no UnicodeDecodeError
+
+
+from tests._live import assert_sigint_exit, fail_no_bash_tool_call  # noqa: E402
+
+# Still-running client with non-empty pipes, signalling readiness via argv[1].
+# The escaped byte literal keeps the -c source pure ASCII (no locale dependency)
+# while the child's stdout stays byte-identical to UTF-8 "héllo".
+_STUCK_CHILD = (
+    "import pathlib, sys, time; "
+    "sys.stdout.buffer.write(b'h\\xc3\\xa9llo\\n'); sys.stdout.buffer.flush(); "
+    "pathlib.Path(sys.argv[1]).write_text('1'); time.sleep(600)"
+)
+
+
+def test_fail_no_bash_tool_call_reports_evidence_not_timeout_expired(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "turn_started"}\n')
+    marker = tmp_path / "child-ready"
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _STUCK_CHILD, str(marker)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        # The helper's first act is SIGKILL, which lands mid-interpreter-startup
+        # without this sync (measured 0/10 stdout captures, 10/10 with it); a
+        # marker file syncs without consuming the pipe the assertions read.
+        while not marker.exists() and proc.poll() is None:
+            time.sleep(0.05)
+        assert marker.exists(), f"stuck child exited early rc={proc.returncode}"
+        # A pre-kill communicate() raises TimeoutExpired, which pytest.raises
+        # re-raises -> this test errors; the Failed proves the drain returned.
+        with pytest.raises(pytest.fail.Exception) as exc:
+            fail_no_bash_tool_call(proc, quest_dir, 60.0)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    msg = str(exc.value)
+    assert "never saw bash tool_call within 60.0s" in msg
+    assert "events.jsonl tail:" in msg
+    assert '{"type": "turn_started"}' in msg
+    assert "daemon.stderr tail:" in msg
+    assert "<no daemon.stderr>" in msg
+    assert "client stdout:" in msg
+    assert "client stderr:" in msg
+    assert "héllo" in msg  # captured bytes are decoded, not repr'd as mojibake
+
+
+def test_fail_no_bash_tool_call_drains_an_already_exited_client(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stderr.buffer.write(b'done\\n')"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    proc.wait()
+    with pytest.raises(pytest.fail.Exception) as exc:
+        fail_no_bash_tool_call(proc, quest_dir, 120.0)
+    msg = str(exc.value)
+    assert "never saw bash tool_call within 120.0s" in msg
+    assert "done" in msg  # the exited client's stderr is still reported
+
+
+def test_assert_sigint_exit_accepts_130(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    proc = subprocess.Popen([sys.executable, "-c", "raise SystemExit(130)"])
+    assert_sigint_exit(proc, quest_dir, timeout=60)
+
+
+def test_assert_sigint_exit_reports_evidence_on_wrong_exit(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "recognizable_sentinel"}\n')
+    proc = subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"])
+    with pytest.raises(pytest.fail.Exception) as exc:
+        assert_sigint_exit(proc, quest_dir, timeout=60)
+    msg = str(exc.value)
+    assert "expected exit 130, got 0" in msg
+    assert "events.jsonl tail:" in msg
+    assert "daemon.stderr tail:" in msg
+    assert "recognizable_sentinel" in msg
+
+
+def test_assert_sigint_exit_reports_evidence_on_hang(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "hang_sentinel"}\n')
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    try:
+        with pytest.raises(pytest.fail.Exception) as exc:
+            assert_sigint_exit(proc, quest_dir, timeout=0.5)
+        msg = str(exc.value)
+        assert "client never exited within 0.5s of SIGINT" in msg
+        assert "events.jsonl tail:" in msg
+        assert "daemon.stderr tail:" in msg
+        assert "hang_sentinel" in msg
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_wait_for_bash_tool_call_finds_bash_call(tmp_path):
+    from tests._live import wait_for_bash_tool_call
+    ev = tmp_path / "events.jsonl"
+    # A trailing partial JSON line must not choke the scan.
+    _write_events(ev, [_bash_call()], extra_lines=('{"type": "tool_ca',))
+    assert wait_for_bash_tool_call(ev, timeout=2.0) is True
+
+
+def test_wait_for_bash_tool_call_false_when_only_other_tools(tmp_path):
+    from tests._live import wait_for_bash_tool_call
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"type": "tool_call", "payload": {"id": "r1", "name": "read_file"}},
+    ])
+    assert wait_for_bash_tool_call(ev, timeout=2.0) is False
+
+
+def test_wait_for_bash_tool_call_false_when_events_missing(tmp_path):
+    from tests._live import wait_for_bash_tool_call
+    assert wait_for_bash_tool_call(tmp_path / "nope.jsonl", timeout=2.0) is False
+
+
+def test_bash_tool_call_poller_defined_once_in_live_helpers():
+    import tests._live as live
+    import tests.test_mid_step_resume_live as mid
+    import tests.test_native_session_resume_live as native
+    import tests.test_relay_hibernation_live as relay
+    for mod in (mid, native, relay):
+        assert mod.wait_for_bash_tool_call is live.wait_for_bash_tool_call
+        assert not hasattr(mod, "_wait_for_bash_tool_call")
+
+
+# timeout=2.0 is comfortably more than the poller's 0.2s tick, so at least one
+# read lands even on a saturated host; the want-never-arrives cases spend the
+# whole ~2s by construction and assert no elapsed-time bound.
+def test_wait_for_status_returns_empty_for_missing_file(tmp_path):
+    from tests._live import wait_for_status
+    assert wait_for_status(tmp_path / "state.json", "paused", timeout=2.0) == ""
+
+
+def test_wait_for_status_returns_empty_for_half_written_file(tmp_path):
+    from tests._live import wait_for_status
+    state = tmp_path / "state.json"
+    state.write_text('{"status": "pau')
+    assert wait_for_status(state, "paused", timeout=2.0) == ""
+
+
+def test_wait_for_status_returns_last_status_when_want_never_arrives(tmp_path):
+    from tests._live import wait_for_status
+    state = tmp_path / "state.json"
+    state.write_text('{"status": "running", "step": "w"}')
+    assert wait_for_status(state, "paused", timeout=2.0) == "running"
+
+
+def test_wait_for_status_returns_want_once_it_is_settled(tmp_path):
+    from tests._live import wait_for_status
+    state = tmp_path / "state.json"
+    state.write_text('{"status": "paused", "step": "w"}')
+    assert wait_for_status(state, "paused", timeout=2.0) == "paused"
+
+
+def test_status_poller_defined_once_in_live_helpers():
+    import tests._live as live
+    import tests.test_native_session_resume_live as native
+    assert native.wait_for_status is live.wait_for_status
+    assert not hasattr(native, "_wait_for_status")
+
+
+def test_group_a_sites_route_failures_through_the_evidence_helper():
+    import tests.test_mid_step_resume_live as mid
+    import tests.test_native_session_resume_live as native
+    mid_src = Path(mid.__file__).read_text()
+    native_src = Path(native.__file__).read_text()
+    for src in (mid_src, native_src):
+        # A pre-kill communicate() on a still-running client can only raise
+        # TimeoutExpired, burying the diagnostic it was meant to print.
+        assert "communicate(timeout=" not in src
+        assert src.count("wait_for_bash_tool_call(events, timeout=") == src.count(
+            "fail_no_bash_tool_call(proc, quest_dir, "
+        )
+    assert mid_src.count("wait_for_bash_tool_call(events, timeout=60.0)") == 2
+    assert mid_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
+    assert native_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
+
+
+def test_group_b_post_sigint_waits_report_evidence():
+    import tests.test_mid_step_resume_live as mid
+    import tests.test_native_session_resume_live as native
+    for mod, waits in ((mid, 3), (native, 1)):
+        src = Path(mod.__file__).read_text()
+        # A bare wait() hides a hang as TimeoutExpired and a bare `assert rc == 130`
+        # names no state; both must route through the shared helper.
+        assert "proc.wait(timeout=" not in src
+        assert "assert rc == 130" not in src
+        assert src.count("assert_sigint_exit(proc, quest_dir, timeout=60)") == waits
+
+
+def test_skip_or_fail_unpaused_reports_daemon_stderr_section(tmp_path):
+    from tests.test_mid_step_resume_live import _skip_or_fail_unpaused
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "workflow_started"}\n')
+    (quest_dir / "daemon.stderr").write_text("daemon boom\n")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdout.write('cli out')"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    proc.wait()
+    with pytest.raises(pytest.fail.Exception) as exc:
+        _skip_or_fail_unpaused(quest_dir, {"status": "running"}, proc)
+    msg = str(exc.value)
+    assert "expected state 'paused', got 'running'" in msg
+    assert "events.jsonl tail:" in msg
+    assert '{"type": "workflow_started"}' in msg
+    assert "daemon.stderr tail:" in msg
+    assert "daemon boom" in msg
+    assert "cli out" in msg
+
+
+def test_skip_or_fail_unpaused_call_sites_pass_quest_dir():
+    import tests.test_mid_step_resume_live as mid
+    src = Path(mid.__file__).read_text()
+    assert src.count("_skip_or_fail_unpaused(quest_dir, state, proc)") == 3
+
+
+class _NoPipeProc:
+    """Stands in for the client on the skip path, which never reads its pipes."""
+    stdout = None
+    stderr = None
+
+
+def test_skip_or_fail_unpaused_skips_on_overlay_mount_precondition(tmp_path):
+    from tests.test_mid_step_resume_live import _skip_or_fail_unpaused
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    # The helper must derive events.jsonl from quest_dir: handed the directory
+    # itself, sandbox_sleep_precondition_failed swallows the IsADirectoryError in
+    # its `except OSError: return None` guard, silently killing this skip and
+    # turning a sandbox precondition miss into a hard failure.
+    _write_events(quest_dir / "events.jsonl", [
+        _bash_call(),
+        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
+    ])
+    with pytest.raises(pytest.skip.Exception) as exc:
+        _skip_or_fail_unpaused(quest_dir, {"status": "running"}, _NoPipeProc())
+    assert str(exc.value) == _EXPECTED_REASON
+
+
+def test_group_c_state_reads_poll_and_report_evidence():
+    import tests.impty.test_e2e_relay_hibernation_gate as gate
+    import tests.test_relay_hibernation_live as live
+    for mod in (gate, live):
+        src = Path(mod.__file__).read_text()
+        # An unguarded single read misreports a write race as a state bug.
+        assert 'json.loads(state_path.read_text())["status"]' not in src
+        assert 'wait_for_status(state_path, "paused", timeout=E2E_POLL_TIMEOUT)' in src
+        assert "evidence(" in src

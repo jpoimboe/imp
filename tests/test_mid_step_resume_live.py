@@ -29,44 +29,15 @@ import pytest
 from tests._live import (
     _await_change_dir,
     anthropic_key,
+    assert_sigint_exit,
+    evidence,
+    fail_no_bash_tool_call,
     openai_key,
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
+    wait_for_bash_tool_call,
 )
 from tests.conftest import _WORKTREE_SRC, _seed_project
-
-
-def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
-    """Re-scan events.jsonl from the start until a tool_call(name=bash) event
-    appears. Returns True on found, False on timeout.
-
-    Re-scanning each tick (instead of tracking an offset) sidesteps the
-    partial-line read race: EventLog.append issues two `write()` calls
-    (`f.write(json); f.write("\\n"); f.flush(); fsync()`), so a reader can
-    in theory catch the file between them. events.jsonl during a single
-    step is tens of lines at most — cheap to re-read."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not events_path.exists():
-            time.sleep(0.2)
-            continue
-        try:
-            text = events_path.read_text()
-        except OSError:
-            time.sleep(0.2)
-            continue
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue  # partial write; next tick picks it up
-            if (rec.get("type") == "tool_call"
-                    and rec.get("payload", {}).get("name") == "bash"):
-                return True
-        time.sleep(0.2)
-    return False
 
 
 def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
@@ -97,22 +68,18 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
 
 
 def _skip_or_fail_unpaused(
-    events: Path, state: dict[str, object], proc: subprocess.Popen
+    quest_dir: Path, state: dict[str, object], proc: subprocess.Popen
 ) -> NoReturn:
     """Skip on the overlay-mount precondition failure, else fail with diagnostics."""
-    reason = sandbox_sleep_precondition_failed(events)
+    reason = sandbox_sleep_precondition_failed(quest_dir / "events.jsonl")
     if reason is not None:
         pytest.skip(reason)
     out = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
     err = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
-    tail = (
-        "\n".join(events.read_text().splitlines()[-40:])
-        if events.exists() else "<no events.jsonl>"
-    )
     pytest.fail(
         f"expected state 'paused', got {state.get('status')!r}\n"
         f"state.json: {state}\n"
-        f"events.jsonl tail:\n{tail}\n"
+        f"{evidence(quest_dir)}\n"
         f"subprocess stdout:\n{out}\n"
         f"subprocess stderr:\n{err}"
     )
@@ -155,21 +122,17 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=60.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(
-                f"never saw bash tool_call event; stdout={stdout!r} stderr={stderr!r}"
-            )
+        if not wait_for_bash_tool_call(events, timeout=60.0):
+            fail_no_bash_tool_call(proc, quest_dir, 60.0)
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
         # Generous deadlines: under `-n` concurrency the post-SIGINT exit and the
         # daemon's async pause-write both stretch; these only bite on a real hang.
-        rc = proc.wait(timeout=60)
-        assert rc == 130, f"expected exit 130, got {rc}"
+        assert_sigint_exit(proc, quest_dir, timeout=60)
 
         state = _wait_for_paused(state_path, timeout=30.0)
         if state.get("status") != "paused":
-            _skip_or_fail_unpaused(events, state, proc)
+            _skip_or_fail_unpaused(quest_dir, state, proc)
         assert state["step"] == "w"
     finally:
         if proc.poll() is None:
@@ -247,13 +210,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=60.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+        if not wait_for_bash_tool_call(events, timeout=60.0):
+            fail_no_bash_tool_call(proc, quest_dir, 60.0)
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
-        rc = proc.wait(timeout=60)
-        assert rc == 130
+        assert_sigint_exit(proc, quest_dir, timeout=60)
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -261,7 +222,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
 
     state = _wait_for_paused(state_path, timeout=30.0)
     if state.get("status") != "paused":
-        _skip_or_fail_unpaused(events, state, proc)
+        _skip_or_fail_unpaused(quest_dir, state, proc)
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
@@ -323,13 +284,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=120.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+        if not wait_for_bash_tool_call(events, timeout=120.0):
+            fail_no_bash_tool_call(proc, quest_dir, 120.0)
         time.sleep(2.0)  # CC subprocess startup is slower; extra grace
         os.killpg(proc.pid, signal.SIGINT)
-        rc = proc.wait(timeout=60)
-        assert rc == 130
+        assert_sigint_exit(proc, quest_dir, timeout=60)
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -337,7 +296,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
 
     state = _wait_for_paused(state_path, timeout=30.0)
     if state.get("status") != "paused":
-        _skip_or_fail_unpaused(events, state, proc)
+        _skip_or_fail_unpaused(quest_dir, state, proc)
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],

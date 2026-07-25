@@ -33,7 +33,7 @@ import pytest
 
 from imp.engine.quest import Quest
 from impty import TerminalSession
-from tests._live import _await_worktree
+from tests._live import _await_worktree, evidence, wait_for_status
 from tests.impty.e2e_support import (
     _MINIMAL_CONFIG,
     E2E_POLL_TIMEOUT,
@@ -187,7 +187,10 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
 
         assert _poll(_pid_gone, timeout=E2E_POLL_TIMEOUT), "daemon pid did not exit on detach"
         assert _poll(lambda: _flock_free(lock_path), timeout=E2E_POLL_TIMEOUT), "flock not released"
-        assert json.loads(state_path.read_text())["status"] == "paused"
+        status = wait_for_status(state_path, "paused", timeout=E2E_POLL_TIMEOUT)
+        assert status == "paused", (
+            f"expected paused, got {status!r}\n{evidence(quest.quest_dir)}"
+        )
     finally:
         s.close()
 

@@ -23,8 +23,12 @@ import pytest
 
 from tests._live import (
     _await_change_dir,
+    assert_sigint_exit,
+    fail_no_bash_tool_call,
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
+    wait_for_bash_tool_call,
+    wait_for_status,
 )
 from tests.conftest import _init_repo
 
@@ -97,40 +101,6 @@ def _iter_events(events_path: Path):
             continue
 
 
-def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        for rec in _iter_events(events_path):
-            if (rec.get("type") == "tool_call"
-                    and rec.get("payload", {}).get("name") == "bash"):
-                return True
-        time.sleep(0.2)
-    return False
-
-
-def _wait_for_status(state_path: Path, want: str, timeout: float) -> str:
-    """Poll state.json until status == want (or timeout); return the last status.
-
-    Both `imp new` and `imp resume` run the engine in a detached session daemon,
-    so the CLI client exits a beat before the daemon finishes persisting the
-    settled status: the SIGINT'd `imp new` client exits (rc 130) before the pause
-    is written, and the `imp resume` client can return before the daemon persists
-    `completed`. Reading state.json once right after the client exits races that
-    write and can still see a running status; poll for the settled status instead.
-    """
-    deadline = time.time() + timeout
-    last = ""
-    while time.time() < deadline:
-        try:
-            last = json.loads(state_path.read_text()).get("status", "")
-        except (OSError, json.JSONDecodeError):
-            last = ""
-        if last == want:
-            return last
-        time.sleep(0.2)
-    return last
-
-
 def _read_paths(events_path: Path) -> list[str]:
     """Every read_file tool_call's target path, in order.
 
@@ -196,22 +166,20 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=120.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+        if not wait_for_bash_tool_call(events, timeout=120.0):
+            fail_no_bash_tool_call(proc, quest_dir, 120.0)
         # Give the model time to actually enter `sleep 30` before the interrupt.
         time.sleep(2.0)
         os.killpg(proc.pid, signal.SIGINT)
         # Generous: under `-n` concurrency the post-SIGINT exit stretches; this
         # only bites on a real hang.
-        rc = proc.wait(timeout=60)
-        assert rc == 130
+        assert_sigint_exit(proc, quest_dir, timeout=60)
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
 
-    status = _wait_for_status(state_path, "paused", timeout=30.0)
+    status = wait_for_status(state_path, "paused", timeout=30.0)
     if status != "paused":
         reason = sandbox_sleep_precondition_failed(events)
         if reason is not None:

@@ -16,8 +16,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
+
+from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT
 
 KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude_code", "codex")
 
@@ -324,6 +327,111 @@ def wait_for_archived_status(
     last: str | None = None
     while time.time() < deadline:
         last = archive_read.status_of(control_root, quest_id)
+        if last == want:
+            return last
+        time.sleep(0.2)
+    return last
+
+
+_EVIDENCE_TAIL_LINES = 40
+
+
+def _tail(path: Path, lines: int = _EVIDENCE_TAIL_LINES) -> str:
+    if not path.exists():
+        return f"<no {path.name}>"
+    try:
+        return "\n".join(path.read_text(errors="replace").splitlines()[-lines:])
+    except OSError as exc:
+        return f"<unreadable {path.name}: {exc}>"
+
+
+def evidence(quest_dir: Path) -> str:
+    """Failure evidence for a live subprocess run. events.jsonl carries the real
+    trace; daemon.stderr is empty unless the daemon itself crashed."""
+    return (
+        f"events.jsonl tail:\n{_tail(quest_dir / 'events.jsonl')}\n"
+        f"daemon.stderr tail:\n{_tail(quest_dir / 'daemon.stderr')}"
+    )
+
+
+def fail_no_bash_tool_call(
+    proc: subprocess.Popen, quest_dir: Path, waited: float
+) -> NoReturn:
+    """Kill the client BEFORE draining: on this path `imp new` has not exited, so a
+    bare communicate() only ever raises TimeoutExpired and buries the diagnostic.
+    The detached daemon holds neither pipe, so the drain returns once the client
+    dies (measured 0.004s)."""
+    if proc.poll() is None:
+        proc.kill()
+    out, err = proc.communicate(timeout=E2E_EXIT_POLL_TIMEOUT)
+    pytest.fail(
+        f"never saw bash tool_call within {waited}s\n"
+        f"{evidence(quest_dir)}\n"
+        f"client stdout:\n{out.decode(errors='replace')}\n"
+        f"client stderr:\n{err.decode(errors='replace')}"
+    )
+
+
+def assert_sigint_exit(proc: subprocess.Popen, quest_dir: Path, timeout: float) -> None:
+    """A bare wait() raises a content-free TimeoutExpired when the client hangs."""
+    try:
+        rc = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"client never exited within {timeout}s of SIGINT\n{evidence(quest_dir)}")
+    if rc != 130:
+        pytest.fail(f"expected exit 130, got {rc}\n{evidence(quest_dir)}")
+
+
+def wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
+    """Re-scan events.jsonl from the start until a tool_call(name=bash) event
+    appears. Returns True on found, False on timeout.
+
+    Re-scanning each tick (instead of tracking an offset) sidesteps the
+    partial-line read race: EventLog.append issues two `write()` calls
+    (`f.write(json); f.write("\\n"); f.flush(); fsync()`), so a reader can
+    in theory catch the file between them. events.jsonl during a single
+    step is tens of lines at most — cheap to re-read."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not events_path.exists():
+            time.sleep(0.2)
+            continue
+        try:
+            text = events_path.read_text()
+        except OSError:
+            time.sleep(0.2)
+            continue
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # partial write; next tick picks it up
+            if (rec.get("type") == "tool_call"
+                    and rec.get("payload", {}).get("name") == "bash"):
+                return True
+        time.sleep(0.2)
+    return False
+
+
+def wait_for_status(state_path: Path, want: str, timeout: float) -> str:
+    """Poll state.json until status == want (or timeout); return the last status.
+
+    Both `imp new` and `imp resume` run the engine in a detached session daemon,
+    so the CLI client exits a beat before the daemon finishes persisting the
+    settled status: the SIGINT'd `imp new` client exits (rc 130) before the pause
+    is written, and the `imp resume` client can return before the daemon persists
+    `completed`. Reading state.json once right after the client exits races that
+    write and can still see a running status; poll for the settled status instead.
+    """
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        try:
+            last = json.loads(state_path.read_text()).get("status", "")
+        except (OSError, json.JSONDecodeError):
+            last = ""
         if last == want:
             return last
         time.sleep(0.2)
