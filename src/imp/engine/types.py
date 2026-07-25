@@ -143,9 +143,10 @@ class AgentDef:
     source_path: Path
     source: SourceLoc
     max_tool_calls: int | None = None
-    # Capability tier this agent wants WHEN RUN AS A SUBAGENT. MUST default to
+    # The tier this agent declares for itself: used when it runs as a subagent,
+    # and as the default for a workflow step that omits tier:. MUST default to
     # None so dispatch_task can tell "inherit parent" (None) from "use the
-    # 'medium' tier". Top-level steps override at the step level via Step.tier.
+    # 'medium' tier".
     tier: str | None = None
     explicit_tools: bool = False
     deny_tools: frozenset[str] = frozenset()
