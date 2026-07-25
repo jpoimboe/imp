@@ -7,10 +7,10 @@ from typing import Any
 import pytest
 
 from imp.agents.interactive import (
-    build_setup_input_fn,
-    handle_setup_slash,
     SANDBOX_SETUP_OFF,
     SANDBOX_SETUP_ON,
+    build_setup_input_fn,
+    handle_setup_slash,
 )
 from imp.agents.transcript import SkillReply
 from imp.cli.slash import REPROMPT

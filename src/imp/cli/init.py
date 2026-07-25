@@ -481,7 +481,10 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
         body + test_block + pythonpath_block + _facts_hint())
     _write_memory_scaffold(imp_dir, settings.default_workflow)
     _ensure_imp_gitignore(project_root)
-    return _commit_init_files(project_root, extra_paths=(f"imp/memory/{settings.default_workflow}/all.md",))
+    return _commit_init_files(
+        project_root,
+        extra_paths=(f"imp/memory/{settings.default_workflow}/all.md",),
+    )
 
 
 def _workflow_choices(project_root: Path) -> list[tuple[str, str]]:
