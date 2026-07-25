@@ -716,3 +716,39 @@ def test_bash_tool_call_poller_defined_once_in_live_helpers():
     for mod in (mid, native, relay):
         assert mod.wait_for_bash_tool_call is live.wait_for_bash_tool_call
         assert not hasattr(mod, "_wait_for_bash_tool_call")
+
+
+# timeout=2.0 is comfortably more than the poller's 0.2s tick, so at least one
+# read lands even on a saturated host; the want-never-arrives cases spend the
+# whole ~2s by construction and assert no elapsed-time bound.
+def test_wait_for_status_returns_empty_for_missing_file(tmp_path):
+    from tests._live import wait_for_status
+    assert wait_for_status(tmp_path / "state.json", "paused", timeout=2.0) == ""
+
+
+def test_wait_for_status_returns_empty_for_half_written_file(tmp_path):
+    from tests._live import wait_for_status
+    state = tmp_path / "state.json"
+    state.write_text('{"status": "pau')
+    assert wait_for_status(state, "paused", timeout=2.0) == ""
+
+
+def test_wait_for_status_returns_last_status_when_want_never_arrives(tmp_path):
+    from tests._live import wait_for_status
+    state = tmp_path / "state.json"
+    state.write_text('{"status": "running", "step": "w"}')
+    assert wait_for_status(state, "paused", timeout=2.0) == "running"
+
+
+def test_wait_for_status_returns_want_once_it_is_settled(tmp_path):
+    from tests._live import wait_for_status
+    state = tmp_path / "state.json"
+    state.write_text('{"status": "paused", "step": "w"}')
+    assert wait_for_status(state, "paused", timeout=2.0) == "paused"
+
+
+def test_status_poller_defined_once_in_live_helpers():
+    import tests._live as live
+    import tests.test_native_session_resume_live as native
+    assert native.wait_for_status is live.wait_for_status
+    assert not hasattr(native, "_wait_for_status")

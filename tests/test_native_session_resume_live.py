@@ -26,6 +26,7 @@ from tests._live import (
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
     wait_for_bash_tool_call,
+    wait_for_status,
 )
 from tests.conftest import _init_repo
 
@@ -96,29 +97,6 @@ def _iter_events(events_path: Path):
             yield json.loads(line)
         except json.JSONDecodeError:
             continue
-
-
-def _wait_for_status(state_path: Path, want: str, timeout: float) -> str:
-    """Poll state.json until status == want (or timeout); return the last status.
-
-    Both `imp new` and `imp resume` run the engine in a detached session daemon,
-    so the CLI client exits a beat before the daemon finishes persisting the
-    settled status: the SIGINT'd `imp new` client exits (rc 130) before the pause
-    is written, and the `imp resume` client can return before the daemon persists
-    `completed`. Reading state.json once right after the client exits races that
-    write and can still see a running status; poll for the settled status instead.
-    """
-    deadline = time.time() + timeout
-    last = ""
-    while time.time() < deadline:
-        try:
-            last = json.loads(state_path.read_text()).get("status", "")
-        except (OSError, json.JSONDecodeError):
-            last = ""
-        if last == want:
-            return last
-        time.sleep(0.2)
-    return last
 
 
 def _read_paths(events_path: Path) -> list[str]:
@@ -201,7 +179,7 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
             proc.kill()
             proc.wait()
 
-    status = _wait_for_status(state_path, "paused", timeout=30.0)
+    status = wait_for_status(state_path, "paused", timeout=30.0)
     if status != "paused":
         reason = sandbox_sleep_precondition_failed(events)
         if reason is not None:
