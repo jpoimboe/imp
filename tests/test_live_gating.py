@@ -783,3 +783,54 @@ def test_group_b_post_sigint_waits_report_evidence():
         assert len(rc_lines) == waits
         for ln in rc_lines:
             assert "evidence(" in ln, ln
+
+
+def test_skip_or_fail_unpaused_reports_daemon_stderr_section(tmp_path):
+    from tests.test_mid_step_resume_live import _skip_or_fail_unpaused
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "workflow_started"}\n')
+    (quest_dir / "daemon.stderr").write_text("daemon boom\n")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdout.write('cli out')"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    proc.wait()
+    with pytest.raises(pytest.fail.Exception) as exc:
+        _skip_or_fail_unpaused(quest_dir, {"status": "running"}, proc)
+    msg = str(exc.value)
+    assert "expected state 'paused', got 'running'" in msg
+    assert "events.jsonl tail:" in msg
+    assert '{"type": "workflow_started"}' in msg
+    assert "daemon.stderr tail:" in msg
+    assert "daemon boom" in msg
+    assert "cli out" in msg
+
+
+def test_skip_or_fail_unpaused_call_sites_pass_quest_dir():
+    import tests.test_mid_step_resume_live as mid
+    src = Path(mid.__file__).read_text()
+    assert src.count("_skip_or_fail_unpaused(quest_dir, state, proc)") == 3
+
+
+class _NoPipeProc:
+    """Stands in for the client on the skip path, which never reads its pipes."""
+    stdout = None
+    stderr = None
+
+
+def test_skip_or_fail_unpaused_skips_on_overlay_mount_precondition(tmp_path):
+    from tests.test_mid_step_resume_live import _skip_or_fail_unpaused
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    # The helper must derive events.jsonl from quest_dir: handed the directory
+    # itself, sandbox_sleep_precondition_failed swallows the IsADirectoryError in
+    # its `except OSError: return None` guard, silently killing this skip and
+    # turning a sandbox precondition miss into a hard failure.
+    _write_events(quest_dir / "events.jsonl", [
+        _bash_call(),
+        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
+    ])
+    with pytest.raises(pytest.skip.Exception) as exc:
+        _skip_or_fail_unpaused(quest_dir, {"status": "running"}, _NoPipeProc())
+    assert str(exc.value) == _EXPECTED_REASON

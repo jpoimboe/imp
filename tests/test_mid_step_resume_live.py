@@ -67,22 +67,18 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
 
 
 def _skip_or_fail_unpaused(
-    events: Path, state: dict[str, object], proc: subprocess.Popen
+    quest_dir: Path, state: dict[str, object], proc: subprocess.Popen
 ) -> NoReturn:
     """Skip on the overlay-mount precondition failure, else fail with diagnostics."""
-    reason = sandbox_sleep_precondition_failed(events)
+    reason = sandbox_sleep_precondition_failed(quest_dir / "events.jsonl")
     if reason is not None:
         pytest.skip(reason)
     out = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
     err = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
-    tail = (
-        "\n".join(events.read_text().splitlines()[-40:])
-        if events.exists() else "<no events.jsonl>"
-    )
     pytest.fail(
         f"expected state 'paused', got {state.get('status')!r}\n"
         f"state.json: {state}\n"
-        f"events.jsonl tail:\n{tail}\n"
+        f"{evidence(quest_dir)}\n"
         f"subprocess stdout:\n{out}\n"
         f"subprocess stderr:\n{err}"
     )
@@ -139,7 +135,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
 
         state = _wait_for_paused(state_path, timeout=30.0)
         if state.get("status") != "paused":
-            _skip_or_fail_unpaused(events, state, proc)
+            _skip_or_fail_unpaused(quest_dir, state, proc)
         assert state["step"] == "w"
     finally:
         if proc.poll() is None:
@@ -233,7 +229,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
 
     state = _wait_for_paused(state_path, timeout=30.0)
     if state.get("status") != "paused":
-        _skip_or_fail_unpaused(events, state, proc)
+        _skip_or_fail_unpaused(quest_dir, state, proc)
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
@@ -311,7 +307,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
 
     state = _wait_for_paused(state_path, timeout=30.0)
     if state.get("status") != "paused":
-        _skip_or_fail_unpaused(events, state, proc)
+        _skip_or_fail_unpaused(quest_dir, state, proc)
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
