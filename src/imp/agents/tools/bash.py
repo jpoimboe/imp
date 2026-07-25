@@ -102,6 +102,26 @@ def _clip_cap_notice_clause(clipped_lines: int, over_cap: bool) -> str | None:
     return f"{clip}."
 
 
+def _cap_combined(out: str, err: str) -> tuple[str, str, bool]:
+    """Cut stdout/stderr to a COMBINED BASH_OUTPUT_CAP_BYTES and report whether
+    anything was cut — one function, so the reported flag cannot drift from the
+    slice. Fair share with reallocation: each stream may take half the budget,
+    and a stream at or under its half is returned whole and yields its remainder
+    to the other. Byte-accurate at a character boundary: errors="ignore" drops
+    only the trailing partial sequence (a prefix of valid UTF-8 is invalid solely
+    in its final incomplete sequence), so no U+FFFD is ever introduced."""
+    out_bytes = out.encode("utf-8")
+    err_bytes = err.encode("utf-8")
+    if len(out_bytes) + len(err_bytes) <= BASH_OUTPUT_CAP_BYTES:
+        return out, err, False
+    half = BASH_OUTPUT_CAP_BYTES // 2
+    out_budget = min(len(out_bytes), BASH_OUTPUT_CAP_BYTES - min(len(err_bytes), half))
+    err_budget = min(len(err_bytes), BASH_OUTPUT_CAP_BYTES - min(len(out_bytes), half))
+    return (out_bytes[:out_budget].decode("utf-8", "ignore"),
+            err_bytes[:err_budget].decode("utf-8", "ignore"),
+            True)
+
+
 @imp_tool(
     name="bash",
     description=(

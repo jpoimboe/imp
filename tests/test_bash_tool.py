@@ -1020,3 +1020,71 @@ def test_bash_clips_long_line_on_stderr_and_sums_cross_stream_count(
     assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
     assert out["stderr"].split("\n")[0] == "E" * MATCH_LINE_CAP_BYTES + "…[truncated]"
     assert out["notice"].startswith("2 long lines clipped at 2000 chars. [")
+
+
+def test_cap_combined_under_cap_returns_inputs_untouched() -> None:
+    from imp.agents.tools.bash import _cap_combined
+    out, err, over = _cap_combined("a" * 20_000, "b" * 9_999)
+    assert (out, err, over) == ("a" * 20_000, "b" * 9_999, False)
+
+
+def test_cap_combined_exact_cap_is_inside_the_inclusive_boundary() -> None:
+    # 20 000 + 10 000 == BASH_OUTPUT_CAP_BYTES: at the cap is UNDER the cap
+    # (today's `>` comparison), and one byte more trips it.
+    from imp.agents.tools.bash import _cap_combined
+    out, err, over = _cap_combined("a" * 20_000, "b" * 10_000)
+    assert over is False
+    assert len(out) == 20_000
+    assert len(err) == 10_000
+    _, _, over_one_more = _cap_combined("a" * 20_001, "b" * 10_000)
+    assert over_one_more is True
+
+
+def test_cap_combined_both_over_half_splits_the_budget() -> None:
+    from imp.agents.tools.bash import _cap_combined
+    out, err, over = _cap_combined("a" * 40_000, "b" * 40_000)
+    assert over is True
+    assert len(out.encode("utf-8")) == 15_000
+    assert len(err.encode("utf-8")) == 15_000
+
+
+def test_cap_combined_small_stream_yields_its_remainder() -> None:
+    # Fair share WITH reallocation: a stream at or under its half is returned
+    # whole and the other one gets 30 000 minus that stream's byte length.
+    from imp.agents.tools.bash import _cap_combined
+    out, err, over = _cap_combined("boom\n", "b" * 40_000)
+    assert over is True
+    assert out == "boom\n"
+    assert len(err.encode("utf-8")) == 29_995
+    # The lone flooder still gets the WHOLE budget when the other is empty.
+    out2, err2, over2 = _cap_combined("a" * 40_000, "")
+    assert over2 is True
+    assert len(out2) == 30_000
+    assert err2 == ""
+
+
+def test_cap_combined_multibyte_cut_lands_at_a_character_boundary() -> None:
+    # 3 ASCII bytes beside a U+00E9 flood: the flooder's allocation is
+    # 30 000 - 3 == 29 997, an ODD budget over 2-byte characters, so the cut
+    # falls MID-SEQUENCE. errors="ignore" drops the one dangling byte, adds no
+    # U+FFFD, and lands the stream 1 byte under its allocation.
+    from imp.agents.tools.bash import _cap_combined
+    out, err, over = _cap_combined("AAA", "é" * 20_000)
+    assert over is True
+    assert out == "AAA"
+    assert len(err.encode("utf-8")) == 29_996
+    assert "�" not in err
+    assert err == "é" * 14_998
+
+
+def test_cap_combined_cuts_multibyte_under_the_char_count_but_over_in_bytes() -> None:
+    # 20 000 CHARACTERS (under 30 000) but 40 000 BYTES (over) — the case the old
+    # per-stream character slice let through untouched.
+    from imp.agents.tools.bash import _cap_combined
+    src = "é" * 20_000
+    out, err, over = _cap_combined(src, "")
+    assert over is True
+    assert out != src
+    assert len(out.encode("utf-8")) == 30_000
+    assert out == "é" * 15_000
+    assert err == ""
