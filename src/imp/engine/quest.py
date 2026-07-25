@@ -452,6 +452,12 @@ class Quest:
         meta["orig_base_head"] = head
         _write_quest_json(meta_path, meta)
 
+    def reload_base(self) -> None:
+        """Re-read the base from quest.json: the daemon may have changed it since load."""
+        meta = json.loads((self.quest_dir / "quest.json").read_text())
+        self.base_branch = meta["base_branch"]
+        self.orig_base_head = meta.get("orig_base_head", "")
+
     def set_seed_opening(self, text: str | None) -> None:
         self.seed_opening = text
         meta_path = self.quest_dir / "quest.json"
@@ -478,6 +484,7 @@ class Quest:
             raise ValueError(
                 f"quest {self.id} has no title; call rename_quest to name it "
                 "before going live")
+        self.reload_base()
         current_tip = worktree.head_of(self.control_root, self.base_branch)
         head_changed = current_tip != self.orig_base_head
         wt_path = worktree.create_worktree(self.control_root, self.id, self.base_branch)
