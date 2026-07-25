@@ -25,6 +25,7 @@ from tests._live import (
     _await_change_dir,
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
+    wait_for_bash_tool_call,
 )
 from tests.conftest import _init_repo
 
@@ -95,17 +96,6 @@ def _iter_events(events_path: Path):
             yield json.loads(line)
         except json.JSONDecodeError:
             continue
-
-
-def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        for rec in _iter_events(events_path):
-            if (rec.get("type") == "tool_call"
-                    and rec.get("payload", {}).get("name") == "bash"):
-                return True
-        time.sleep(0.2)
-    return False
 
 
 def _wait_for_status(state_path: Path, want: str, timeout: float) -> str:
@@ -196,7 +186,7 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=120.0):
+        if not wait_for_bash_tool_call(events, timeout=120.0):
             stdout, stderr = proc.communicate(timeout=10)
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
         # Give the model time to actually enter `sleep 30` before the interrupt.

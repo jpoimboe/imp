@@ -32,41 +32,9 @@ from tests._live import (
     openai_key,
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
+    wait_for_bash_tool_call,
 )
 from tests.conftest import _WORKTREE_SRC, _seed_project
-
-
-def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
-    """Re-scan events.jsonl from the start until a tool_call(name=bash) event
-    appears. Returns True on found, False on timeout.
-
-    Re-scanning each tick (instead of tracking an offset) sidesteps the
-    partial-line read race: EventLog.append issues two `write()` calls
-    (`f.write(json); f.write("\\n"); f.flush(); fsync()`), so a reader can
-    in theory catch the file between them. events.jsonl during a single
-    step is tens of lines at most — cheap to re-read."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not events_path.exists():
-            time.sleep(0.2)
-            continue
-        try:
-            text = events_path.read_text()
-        except OSError:
-            time.sleep(0.2)
-            continue
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue  # partial write; next tick picks it up
-            if (rec.get("type") == "tool_call"
-                    and rec.get("payload", {}).get("name") == "bash"):
-                return True
-        time.sleep(0.2)
-    return False
 
 
 def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
@@ -155,7 +123,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=60.0):
+        if not wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
             pytest.fail(
                 f"never saw bash tool_call event; stdout={stdout!r} stderr={stderr!r}"
@@ -247,7 +215,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=60.0):
+        if not wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
         time.sleep(1.0)
@@ -323,7 +291,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         events = quest_dir / "events.jsonl"
         state_path = quest_dir / "state" / "state.json"
 
-        if not _wait_for_bash_tool_call(events, timeout=120.0):
+        if not wait_for_bash_tool_call(events, timeout=120.0):
             stdout, stderr = proc.communicate(timeout=10)
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
         time.sleep(2.0)  # CC subprocess startup is slower; extra grace

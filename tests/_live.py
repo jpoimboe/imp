@@ -370,3 +370,36 @@ def fail_no_bash_tool_call(
         f"client stdout:\n{out.decode(errors='replace')}\n"
         f"client stderr:\n{err.decode(errors='replace')}"
     )
+
+
+def wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
+    """Re-scan events.jsonl from the start until a tool_call(name=bash) event
+    appears. Returns True on found, False on timeout.
+
+    Re-scanning each tick (instead of tracking an offset) sidesteps the
+    partial-line read race: EventLog.append issues two `write()` calls
+    (`f.write(json); f.write("\\n"); f.flush(); fsync()`), so a reader can
+    in theory catch the file between them. events.jsonl during a single
+    step is tens of lines at most — cheap to re-read."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not events_path.exists():
+            time.sleep(0.2)
+            continue
+        try:
+            text = events_path.read_text()
+        except OSError:
+            time.sleep(0.2)
+            continue
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # partial write; next tick picks it up
+            if (rec.get("type") == "tool_call"
+                    and rec.get("payload", {}).get("name") == "bash"):
+                return True
+        time.sleep(0.2)
+    return False

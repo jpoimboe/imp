@@ -26,7 +26,11 @@ from pathlib import Path
 import pytest
 
 from impty import TerminalSession
-from tests._live import _await_change_dir, sandbox_sleep_precondition_failed
+from tests._live import (
+    _await_change_dir,
+    sandbox_sleep_precondition_failed,
+    wait_for_bash_tool_call,
+)
 from tests.conftest import _init_repo
 from tests.impty.e2e_support import (
     E2E_POLL_TIMEOUT,
@@ -80,28 +84,6 @@ def _seed_cc_project(root: Path) -> None:
          "commit", "-qm", "imp setup"],
         cwd=root, check=True,
     )
-
-
-def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if events_path.exists():
-            try:
-                text = events_path.read_text()
-            except OSError:
-                text = ""
-            for line in text.splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if (rec.get("type") == "tool_call"
-                        and rec.get("payload", {}).get("name") == "bash"):
-                    return True
-        time.sleep(0.2)
-    return False
 
 
 def _interrupt_gate_engaged(events_path: Path) -> bool:
@@ -196,7 +178,7 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         state_path = quest_dir / "state" / "state.json"
         lock_path = quest_dir / "lock"
 
-        assert _wait_for_bash_tool_call(events, timeout=120.0), "never saw bash tool_call"
+        assert wait_for_bash_tool_call(events, timeout=120.0), "never saw bash tool_call"
         time.sleep(_CC_STARTUP_GRACE)
 
         # The daemon holds the flock throughout the live turn; capture its pid now
