@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,7 @@ from imp.cli.verify_detect import (
 from imp.engine import worktree
 from imp.engine.loader import parse_agent_file
 from imp.engine.sandbox import SandboxConfig, sandbox_available
+from imp.engine.types import OutputField
 from imp.remote.drivers import REGISTRY
 
 _DEFAULT_WORKFLOW = "default"
@@ -555,6 +556,17 @@ def _run_init_conversation(
     """Default conversation seam: run the read-only init-conversation agent in the
     foreground host and return its InteractiveResult. Tests monkeypatch this."""
     agent_def = parse_agent_file(workflow_dir / "agents" / "init-conversation.md")
+    # Pinned at runtime: the per-project valid set (bundled plus committed
+    # imp/workflows/*) can't be declared statically in the agent's frontmatter.
+    schema = agent_def.output_schema
+    fields = tuple(
+        OutputField(name="default_workflow", type="enum",
+                    values=tuple(selectable_workflow_names(project_root)),
+                    required=True)
+        if f.name == "default_workflow" else f
+        for f in schema.fields
+    )
+    agent_def = replace(agent_def, output_schema=replace(schema, fields=fields))
     kickoff = _build_init_kickoff(
         workflows=_workflow_choices(project_root),
         base_hint=worktree.origin_head_branch(project_root),
