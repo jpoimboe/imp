@@ -754,3 +754,33 @@ def test_cmd_init_tolerates_a_namespace_without_the_workflow_attr(
     monkeypatch.setattr(m, "run_init_noninteractive", lambda project, **kw: None)
     # No `workflow` attribute at all — the shape existing _cmd_init tests build.
     assert m._cmd_init(argparse.Namespace(non_interactive=True)) == 0
+
+
+def test_cmd_init_use_defaults_writes_the_selected_workflow(tmp_path, monkeypatch, capsys):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    rc = m._cmd_init(_init_args(workflow="minimal"))
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.err == ""
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["default-workflow"] == "minimal"
+    assert (tmp_path / "imp" / "memory" / "minimal" / "all.md").is_file()
+
+
+def test_cmd_init_use_defaults_without_flag_keeps_the_default_workflow(
+    tmp_path, monkeypatch, capsys
+):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    rc = m._cmd_init(_init_args())
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.err == ""
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["default-workflow"] == "default"
+    assert (tmp_path / "imp" / "memory" / "default" / "all.md").is_file()
