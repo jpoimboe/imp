@@ -164,3 +164,12 @@ def test_run_init_conversation_ignores_a_project_local_default_workflow(
     assert isinstance(result, InteractiveSuccess)
     assert captured["agent_def"].name == "init"
     assert captured["asset_dir"] == bundled_assets_dir()
+
+
+def test_build_init_kickoff_header_labels_the_lines_as_internal_step_names() -> None:
+    from imp.cli.init import _build_init_kickoff
+    msg = _build_init_kickoff(
+        workflows=[("minimal", "front-door -> review")],
+        base_hint=None, git_exists=True)
+    assert "Available workflows (name — internal pipeline summary, in step names):" in msg
+    assert "  minimal — front-door -> review" in msg

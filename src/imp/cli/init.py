@@ -518,7 +518,7 @@ def _build_init_kickoff(
 ) -> str:
     """The setup-context kickoff message handed to the setup agent."""
     lines = ["Repository setup context for this conversation:", ""]
-    lines.append("Available workflows (name — description):")
+    lines.append("Available workflows (name — internal pipeline summary, in step names):")
     for name, desc in workflows:
         lines.append(f"  {name} — {desc}" if desc else f"  {name}")
     lines.append("")
