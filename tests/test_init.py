@@ -3,6 +3,7 @@ user config (spec §4)."""
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -265,6 +266,7 @@ def test_init_help_describes_what_it_does(capsys: pytest.CaptureFixture[str]) ->
     assert "default workflow" in help_text
     assert "never makes a git commit" not in help_text
     assert "initial commit" in help_text.lower()
+    assert "selectable workflows" in help_text
 
 
 def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
@@ -673,3 +675,82 @@ def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
     args.func(args)
     assert called["project"] == tmp_path
     assert called["kw"]["pythonpath"] == ["src", "lib"]   # comma-split, blanks dropped
+
+
+def _init_args(**over: object) -> argparse.Namespace:
+    """A parser-shaped Namespace for _cmd_init: --use-defaults => non_interactive."""
+    fields: dict[str, object] = {
+        "non_interactive": True, "workflow": None, "base": None, "pythonpath": None}
+    fields.update(over)
+    return argparse.Namespace(**fields)
+
+
+def _expected_unknown_workflow_line(project_root: Path, name: str) -> str:
+    from imp.assets import selectable_workflow_names
+    names = ", ".join(selectable_workflow_names(project_root))
+    return f"imp: unknown workflow {name!r}; available: {names}"
+
+
+def test_cmd_init_rejects_unknown_workflow_before_writing(tmp_path, monkeypatch, capsys):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_init_noninteractive",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("a typo'd --workflow must not reach the writer")))
+    rc = m._cmd_init(_init_args(workflow="minimial"))
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert captured.err.splitlines() == [
+        _expected_unknown_workflow_line(tmp_path, "minimial")]
+    assert captured.out == ""
+    assert not (tmp_path / "imp").exists()          # no project.yaml, no memory scaffold
+
+
+def test_cmd_init_rejects_internal_memory_workflow(tmp_path, monkeypatch, capsys):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_init_noninteractive",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("memory is not selectable as a project default")))
+    rc = m._cmd_init(_init_args(workflow="memory"))
+    err = capsys.readouterr().err
+
+    assert rc == 2
+    assert err.splitlines() == [_expected_unknown_workflow_line(tmp_path, "memory")]
+    assert "memory" not in err.split("available: ")[1]
+    assert not (tmp_path / "imp").exists()
+
+
+def test_cmd_init_rejects_bad_workflow_on_the_interactive_path(
+    tmp_path, monkeypatch, capsys
+):
+    # No --use-defaults and both streams a tty => the interactive branch. The flag
+    # used to be silently ignored here; it must now be rejected before any prompt.
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(m, "run_init",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("setup must not start with a bad --workflow")))
+    rc = m._cmd_init(_init_args(non_interactive=False, workflow="minimial"))
+
+    assert rc == 2
+    assert capsys.readouterr().err.splitlines() == [
+        _expected_unknown_workflow_line(tmp_path, "minimial")]
+    assert not (tmp_path / "imp").exists()
+
+
+def test_cmd_init_tolerates_a_namespace_without_the_workflow_attr(
+    tmp_path, monkeypatch
+):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_init_noninteractive", lambda project, **kw: None)
+    # No `workflow` attribute at all — the shape existing _cmd_init tests build.
+    assert m._cmd_init(argparse.Namespace(non_interactive=True)) == 0
