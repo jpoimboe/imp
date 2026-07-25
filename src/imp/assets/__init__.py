@@ -99,6 +99,20 @@ def available_workflow_names(project_root: Path) -> list[str]:
     return sorted(names)
 
 
+INTERNAL_WORKFLOWS = frozenset({"memory"})
+
+
+def selectable_workflow_names(project_root: Path) -> list[str]:
+    """Available names minus imp's internal lanes — the set offered as a project
+    default. `memory` exists and runs (`imp new --workflow memory --background`)
+    but is never a sensible project default."""
+    return [
+        name
+        for name in available_workflow_names(project_root)
+        if name not in INTERNAL_WORKFLOWS
+    ]
+
+
 def resolve_workflow_dir(project_root: Path, name: str) -> Path:
     """Resolve a workflow name to a real dir: a committed imp/workflows/<name>
     (a fork, or the imp-repo dogfood symlink) wins; else the bundled workflow;

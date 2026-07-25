@@ -159,3 +159,29 @@ def test_available_workflow_names_unions_bundled_and_committed(tmp_path: Path) -
     names = available_workflow_names(tmp_path)
     assert {"default", "patent", "mine"} <= set(names)
     assert names == sorted(names)
+
+
+def test_selectable_workflow_names_drops_internal_workflows(tmp_path: Path) -> None:
+    from imp.assets import (
+        INTERNAL_WORKFLOWS,
+        available_workflow_names,
+        bundled_workflow_names,
+        resolve_workflow_dir,
+        selectable_workflow_names,
+    )
+    names = selectable_workflow_names(tmp_path)
+    assert names == sorted(set(bundled_workflow_names()) - INTERNAL_WORKFLOWS)
+    assert "memory" not in names
+    # the full set is deliberately unchanged: memory-tree validation and quest
+    # creation (`imp new --workflow memory --background`) both need it
+    assert "memory" in available_workflow_names(tmp_path)
+    assert resolve_workflow_dir(tmp_path, "memory").is_dir()
+
+
+def test_selectable_workflow_names_include_committed_fork(tmp_path: Path) -> None:
+    from imp.assets import selectable_workflow_names
+    (tmp_path / "imp" / "workflows" / "mine").mkdir(parents=True)
+    names = selectable_workflow_names(tmp_path)
+    assert "mine" in names
+    assert "memory" not in names
+    assert names == sorted(names)
