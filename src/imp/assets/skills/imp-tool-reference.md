@@ -93,7 +93,9 @@ anyway.
   `…[truncated]` marker, then the 30 KB head of each stream is shown. When
   either fired, the full unmodified output spills to a file and a `notice` says
   which happened and carries a `read_file`-able path; no `notice` means the
-  output is byte-exact. Runaway output is killed at 5 MB.
+  output is byte-exact — bar two standing exceptions: an `errors="replace"`
+  decode, and the sandbox entry marker stripped from stderr. Runaway output
+  is killed at 5 MB.
   Foreground commands are interruptible (SIGTERM to the process group, 4 s
   grace, then SIGKILL). A foreground command that exceeds its deadline (120 s by
   default — pass `timeout`, positive seconds, capped at 600, to extend) is
