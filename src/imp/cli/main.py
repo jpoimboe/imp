@@ -3190,7 +3190,10 @@ def apply_edit(
     elif (clear_deps or (depends_on is not None and not depends_on)) and prior_deps:
         fragments.append("cleared dependencies")
     if new_base is not None:
-        fragments.append(f"base → {new_base}")
+        checkout = worktree.checked_out_branch(control)
+        diverged = (f" (main checkout is on {checkout})"
+                    if checkout is not None and checkout != new_base else "")
+        fragments.append(f"base → {new_base}{diverged}")
     if append_intent is not None:
         fragments.append("appended to intent")
 

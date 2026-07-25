@@ -599,3 +599,29 @@ def test_apply_edit_base_noop_preserves_orig_base_head(
         depends_on=None, clear_deps=False, append_intent=None, base="main")
     assert (rc, msg) == (0, "edited 2026-06-24-edit55 · no changes")
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit55"))["orig_base_head"] == original
+
+
+def test_apply_edit_base_fragment_notes_diverged_checkout(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit56")
+    _branch_with_commit(tmp_path, "release-2.0")  # leaves the checkout on main
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit56", title=None, backlog=False, active=False,
+        depends_on=None, clear_deps=False, append_intent=None, base="release-2.0")
+    assert (rc, msg) == (
+        0, "edited 2026-06-24-edit56 · base → release-2.0 (main checkout is on main)")
+
+
+def test_apply_edit_base_fragment_omits_parenthetical_on_detached_head(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit57")
+    _branch_with_commit(tmp_path, "release-2.0")
+    _git(tmp_path, "checkout", "-q", "--detach")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit57", title=None, backlog=False, active=False,
+        depends_on=None, clear_deps=False, append_intent=None, base="release-2.0")
+    assert (rc, msg) == (0, "edited 2026-06-24-edit57 · base → release-2.0")
