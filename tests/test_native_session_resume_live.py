@@ -23,6 +23,7 @@ import pytest
 
 from tests._live import (
     _await_change_dir,
+    evidence,
     fail_no_bash_tool_call,
     sandbox_sleep_precondition_failed,
     wait_for_archived_status,
@@ -172,8 +173,11 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
         os.killpg(proc.pid, signal.SIGINT)
         # Generous: under `-n` concurrency the post-SIGINT exit stretches; this
         # only bites on a real hang.
-        rc = proc.wait(timeout=60)
-        assert rc == 130
+        try:
+            rc = proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"client never exited within 60s of SIGINT\n{evidence(quest_dir)}")
+        assert rc == 130, f"expected exit 130, got {rc}\n{evidence(quest_dir)}"
     finally:
         if proc.poll() is None:
             proc.kill()

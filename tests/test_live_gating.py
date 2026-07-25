@@ -769,3 +769,17 @@ def test_group_a_sites_route_failures_through_the_evidence_helper():
     assert mid_src.count("wait_for_bash_tool_call(events, timeout=60.0)") == 2
     assert mid_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
     assert native_src.count("wait_for_bash_tool_call(events, timeout=120.0)") == 1
+
+
+def test_group_b_post_sigint_waits_report_evidence():
+    import tests.test_mid_step_resume_live as mid
+    import tests.test_native_session_resume_live as native
+    for mod, waits in ((mid, 3), (native, 1)):
+        src = Path(mod.__file__).read_text()
+        assert src.count("proc.wait(timeout=") == waits
+        assert src.count("proc.wait(timeout=60)") == waits
+        assert src.count("client never exited within") == waits
+        rc_lines = [ln for ln in src.splitlines() if "assert rc == 130" in ln]
+        assert len(rc_lines) == waits
+        for ln in rc_lines:
+            assert "evidence(" in ln, ln
