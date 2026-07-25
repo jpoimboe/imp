@@ -1199,3 +1199,13 @@ def test_setup_conversation_prompt_uses_the_cancel_setup_hint(
     # The host gets the Prompt itself, not a bound read function: the shared
     # framing composes each read.
     assert isinstance(seen["handed_to_host"], _SpyPrompt)
+
+
+def test_read_user_config_treats_malformed_yaml_as_empty(tmp_path: Path) -> None:
+    # The clause must catch ruamel's YAMLError, not PyYAML's: init falls back to
+    # asking rather than dying on a hand-broken machine config.
+    from imp.cli.init import _read_user_config
+
+    p = tmp_path / "config.yaml"
+    p.write_text("providers: [anthropic\n")
+    assert _read_user_config(p) == {}

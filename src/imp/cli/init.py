@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from ruamel.yaml.error import YAMLError
 
 from imp.agents.interactive import (
     InteractiveFailure,
@@ -54,6 +55,7 @@ from imp.cli.verify_detect import (
     format_test_cmd_fast_yaml,
 )
 from imp.engine import worktree
+from imp.engine._yaml import load_config_yaml
 from imp.engine.loader import parse_agent_file
 from imp.engine.sandbox import SandboxConfig, sandbox_available
 from imp.engine.types import OutputField
@@ -283,8 +285,8 @@ def _read_user_config(user_path: Path) -> dict[str, Any] | None:
     if not user_path.exists():
         return None
     try:
-        return yaml.safe_load(user_path.read_text()) or {}
-    except yaml.YAMLError:
+        return load_config_yaml(user_path.read_text()) or {}
+    except YAMLError:
         return {}
 
 
