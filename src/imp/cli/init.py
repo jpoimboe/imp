@@ -34,7 +34,11 @@ from imp.agents.interactive import (
     InteractiveResult,
     run_interactive_agent_sync,
 )
-from imp.assets import resolve_workflow_dir, selectable_workflow_names
+from imp.assets import (
+    bundled_assets_dir,
+    resolve_workflow_dir,
+    selectable_workflow_names,
+)
 from imp.cli.prompt import Prompt
 from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
@@ -512,7 +516,7 @@ def _build_init_kickoff(
     base_hint: str | None,
     git_exists: bool,
 ) -> str:
-    """The setup-context kickoff message handed to the init-conversation agent."""
+    """The setup-context kickoff message handed to the setup agent."""
     lines = ["Repository setup context for this conversation:", ""]
     lines.append("Available workflows (name — description):")
     for name, desc in workflows:
@@ -546,16 +550,17 @@ def _conversation_failure_message(
 def _run_init_conversation(
     *,
     project_root: Path,
-    workflow_dir: Path,
     provider_name: str,
     model_name: str,
     allow_unsandboxed: bool,
     color: bool,
     output_fn: Callable[[str], None],
 ) -> InteractiveResult:
-    """Default conversation seam: run the read-only init-conversation agent in the
-    foreground host and return its InteractiveResult. Tests monkeypatch this."""
-    agent_def = parse_agent_file(workflow_dir / "agents" / "init-conversation.md")
+    """Default conversation seam: run the read-only setup agent — bundled outside
+    every workflow, so a project-local imp/workflows/default cannot shadow it — in
+    the foreground host and return its InteractiveResult. Tests monkeypatch this."""
+    assets = bundled_assets_dir()
+    agent_def = parse_agent_file(assets / "init.md")
     # Pinned at runtime: the per-project valid set (bundled plus committed
     # imp/workflows/*) can't be declared statically in the agent's frontmatter.
     schema = agent_def.output_schema
@@ -575,7 +580,7 @@ def _run_init_conversation(
     return run_interactive_agent_sync(
         agent_def=agent_def, provider_name=provider_name, model_name=model_name,
         initial_message=kickoff, project_root=project_root,
-        asset_dir=workflow_dir,
+        asset_dir=assets,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=allow_unsandboxed),
         read_line=reader, output_fn=output_fn, color=color, title="imp setup")
 
@@ -694,9 +699,8 @@ def run_init(
 
     # --- hand off to the setup conversation ---
     output_fn("Now let's finish setting up this project.")
-    workflow_dir = resolve_workflow_dir(project_root, _DEFAULT_WORKFLOW)
     result = _run_init_conversation(
-        project_root=project_root, workflow_dir=workflow_dir,
+        project_root=project_root,
         provider_name=provider_name, model_name=model_name,
         allow_unsandboxed=allow_unsandboxed,
         color=theme in ("dark", "light"), output_fn=output_fn)

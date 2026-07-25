@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from imp.agents.interactive import InteractiveSuccess
-from imp.assets import bundled_workflow_dir
 
 
 def _run_capturing_init_conversation(tmp_path, monkeypatch):
@@ -27,7 +26,7 @@ def _run_capturing_init_conversation(tmp_path, monkeypatch):
     monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_sync)
     monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
     result = initmod._run_init_conversation(
-        project_root=tmp_path, workflow_dir=bundled_workflow_dir("default"),
+        project_root=tmp_path,
         provider_name="anthropic", model_name="m",
         allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
     return result, captured
@@ -62,7 +61,7 @@ def test_run_init_conversation_loads_agent_and_passes_kickoff(tmp_path, monkeypa
     result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
 
     assert isinstance(result, InteractiveSuccess)
-    assert captured["agent_def"].name == "init-conversation"      # real file loaded
+    assert captured["agent_def"].name == "init"                   # real file loaded
     assert captured["provider_name"] == "anthropic"
     assert "minimal" in captured["initial_message"]               # workflow context embedded
 
@@ -82,14 +81,12 @@ def test_workflow_choices_exclude_internal_memory(tmp_path) -> None:
 
 
 def test_run_init_conversation_pins_default_workflow_enum(tmp_path, monkeypatch):
-    from imp.assets import selectable_workflow_names
+    from imp.assets import bundled_assets_dir, selectable_workflow_names
     from imp.engine.loader import parse_agent_file
 
     _result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
     schema = captured["agent_def"].output_schema
-    original = parse_agent_file(
-        bundled_workflow_dir("default") / "agents" / "init-conversation.md"
-    ).output_schema
+    original = parse_agent_file(bundled_assets_dir() / "init.md").output_schema
 
     # same fields, same order — the enum takes the original field's slot
     assert [f.name for f in schema.fields] == [f.name for f in original.fields]
@@ -125,3 +122,10 @@ def test_pinned_enum_bounces_offlist_workflow(tmp_path, monkeypatch):
         + ")"
     )
     assert expected in completion_instruction(schema)
+
+
+def test_run_init_resolves_no_workflow_dir() -> None:
+    import inspect
+
+    from imp.cli import init as initmod
+    assert "resolve_workflow_dir" not in inspect.getsource(initmod.run_init)
