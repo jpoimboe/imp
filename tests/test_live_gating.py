@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -621,3 +622,65 @@ def test_tail_replaces_undecodable_bytes(tmp_path):
     log = tmp_path / "daemon.stderr"
     log.write_bytes(b"ok \xff\xfe bad\n")
     assert "ok " in _tail(log)  # no UnicodeDecodeError
+
+
+from tests._live import fail_no_bash_tool_call  # noqa: E402
+
+# Still-running client with non-empty pipes, signalling readiness via argv[1].
+# The escaped byte literal keeps the -c source pure ASCII (no locale dependency)
+# while the child's stdout stays byte-identical to UTF-8 "héllo".
+_STUCK_CHILD = (
+    "import pathlib, sys, time; "
+    "sys.stdout.buffer.write(b'h\\xc3\\xa9llo\\n'); sys.stdout.buffer.flush(); "
+    "pathlib.Path(sys.argv[1]).write_text('1'); time.sleep(600)"
+)
+
+
+def test_fail_no_bash_tool_call_reports_evidence_not_timeout_expired(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    (quest_dir / "events.jsonl").write_text('{"type": "turn_started"}\n')
+    marker = tmp_path / "child-ready"
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _STUCK_CHILD, str(marker)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        # The helper's first act is SIGKILL, which lands mid-interpreter-startup
+        # without this sync (measured 0/10 stdout captures, 10/10 with it); a
+        # marker file syncs without consuming the pipe the assertions read.
+        while not marker.exists() and proc.poll() is None:
+            time.sleep(0.05)
+        assert marker.exists(), f"stuck child exited early rc={proc.returncode}"
+        # A pre-kill communicate() raises TimeoutExpired, which pytest.raises
+        # re-raises -> this test errors; the Failed proves the drain returned.
+        with pytest.raises(pytest.fail.Exception) as exc:
+            fail_no_bash_tool_call(proc, quest_dir, 60.0)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    msg = str(exc.value)
+    assert "never saw bash tool_call within 60.0s" in msg
+    assert "events.jsonl tail:" in msg
+    assert '{"type": "turn_started"}' in msg
+    assert "daemon.stderr tail:" in msg
+    assert "<no daemon.stderr>" in msg
+    assert "client stdout:" in msg
+    assert "client stderr:" in msg
+    assert "héllo" in msg  # captured bytes are decoded, not repr'd as mojibake
+
+
+def test_fail_no_bash_tool_call_drains_an_already_exited_client(tmp_path):
+    quest_dir = tmp_path / "q"
+    quest_dir.mkdir()
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stderr.buffer.write(b'done\\n')"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    proc.wait()
+    with pytest.raises(pytest.fail.Exception) as exc:
+        fail_no_bash_tool_call(proc, quest_dir, 120.0)
+    msg = str(exc.value)
+    assert "never saw bash tool_call within 120.0s" in msg
+    assert "done" in msg  # the exited client's stderr is still reported

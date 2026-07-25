@@ -16,8 +16,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
+
+from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT
 
 KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude_code", "codex")
 
@@ -348,4 +351,22 @@ def evidence(quest_dir: Path) -> str:
     return (
         f"events.jsonl tail:\n{_tail(quest_dir / 'events.jsonl')}\n"
         f"daemon.stderr tail:\n{_tail(quest_dir / 'daemon.stderr')}"
+    )
+
+
+def fail_no_bash_tool_call(
+    proc: subprocess.Popen, quest_dir: Path, waited: float
+) -> NoReturn:
+    """Kill the client BEFORE draining: on this path `imp new` has not exited, so a
+    bare communicate() only ever raises TimeoutExpired and buries the diagnostic.
+    The detached daemon holds neither pipe, so the drain returns once the client
+    dies (measured 0.004s)."""
+    if proc.poll() is None:
+        proc.kill()
+    out, err = proc.communicate(timeout=E2E_EXIT_POLL_TIMEOUT)
+    pytest.fail(
+        f"never saw bash tool_call within {waited}s\n"
+        f"{evidence(quest_dir)}\n"
+        f"client stdout:\n{out.decode(errors='replace')}\n"
+        f"client stderr:\n{err.decode(errors='replace')}"
     )
