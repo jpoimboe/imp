@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from imp.agents.interactive import InteractiveSuccess
-from imp.assets import bundled_workflow_dir
+from imp.assets import bundled_assets_dir
 
 
 def _run_capturing_init_conversation(tmp_path, monkeypatch):
@@ -27,7 +27,7 @@ def _run_capturing_init_conversation(tmp_path, monkeypatch):
     monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_sync)
     monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
     result = initmod._run_init_conversation(
-        project_root=tmp_path, workflow_dir=bundled_workflow_dir("default"),
+        project_root=tmp_path,
         provider_name="anthropic", model_name="m",
         allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
     return result, captured
@@ -62,7 +62,7 @@ def test_run_init_conversation_loads_agent_and_passes_kickoff(tmp_path, monkeypa
     result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
 
     assert isinstance(result, InteractiveSuccess)
-    assert captured["agent_def"].name == "init-conversation"      # real file loaded
+    assert captured["agent_def"].name == "init"                   # real file loaded
     assert captured["provider_name"] == "anthropic"
     assert "minimal" in captured["initial_message"]               # workflow context embedded
 
@@ -72,7 +72,7 @@ def test_workflow_choices_exclude_internal_memory(tmp_path) -> None:
     choices = _workflow_choices(tmp_path)
     names = [name for name, _desc in choices]
     assert "memory" not in names
-    assert {"default", "minimal"} <= set(names)
+    assert {"default", "minimal", "patent"} <= set(names)
     # descriptions still come from each workflow.yaml
     assert all(desc.strip() for _name, desc in choices)
     kickoff = _build_init_kickoff(
@@ -87,9 +87,7 @@ def test_run_init_conversation_pins_default_workflow_enum(tmp_path, monkeypatch)
 
     _result, captured = _run_capturing_init_conversation(tmp_path, monkeypatch)
     schema = captured["agent_def"].output_schema
-    original = parse_agent_file(
-        bundled_workflow_dir("default") / "agents" / "init-conversation.md"
-    ).output_schema
+    original = parse_agent_file(bundled_assets_dir() / "init.md").output_schema
 
     # same fields, same order — the enum takes the original field's slot
     assert [f.name for f in schema.fields] == [f.name for f in original.fields]
@@ -125,3 +123,53 @@ def test_pinned_enum_bounces_offlist_workflow(tmp_path, monkeypatch):
         + ")"
     )
     assert expected in completion_instruction(schema)
+
+
+def test_run_init_resolves_no_workflow_dir() -> None:
+    import inspect
+
+    from imp.cli import init as initmod
+    assert "resolve_workflow_dir" not in inspect.getsource(initmod.run_init)
+
+
+def test_run_init_conversation_ignores_a_project_local_default_workflow(
+    tmp_path, monkeypatch,
+):
+    """A committed imp/workflows/default/ used to shadow and break setup."""
+    import imp.cli.init as initmod
+
+    (tmp_path / "imp" / "workflows" / "default").mkdir(parents=True)
+
+    captured: dict[str, object] = {}
+
+    def _fake_sync(**kw):
+        captured.update(kw)
+        return InteractiveSuccess({"status": "Success"})
+
+    class _FakePrompt:
+        def __init__(self, **kw) -> None:
+            pass
+
+        async def ask_async(self, *a, **k) -> str:
+            return ""
+
+    monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_sync)
+    monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
+
+    result = initmod._run_init_conversation(
+        project_root=tmp_path,
+        provider_name="anthropic", model_name="m",
+        allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
+
+    assert isinstance(result, InteractiveSuccess)
+    assert captured["agent_def"].name == "init"
+    assert captured["asset_dir"] == bundled_assets_dir()
+
+
+def test_build_init_kickoff_header_labels_the_lines_as_internal_step_names() -> None:
+    from imp.cli.init import _build_init_kickoff
+    msg = _build_init_kickoff(
+        workflows=[("minimal", "front-door -> review")],
+        base_hint=None, git_exists=True)
+    assert "Available workflows (name — internal pipeline summary, in step names):" in msg
+    assert "  minimal — front-door -> review" in msg

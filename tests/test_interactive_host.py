@@ -32,18 +32,18 @@ def _skills_dir(tmp_path: Path) -> Path:
 def test_setup_slash_help_reprompts(tmp_path):
     out: list[str] = []
     result = handle_setup_slash(
-        "/help", workflow_dir=tmp_path, output_fn=out.append, unsandboxed=False)
+        "/help", asset_dir=tmp_path, output_fn=out.append, unsandboxed=False)
     assert result is REPROMPT
     assert any("Setup commands:" in line for line in out)
 
 
 def test_setup_slash_sandbox_status_reflects_flag(tmp_path):
     on: list[str] = []
-    handle_setup_slash("/sandbox", workflow_dir=tmp_path,
+    handle_setup_slash("/sandbox", asset_dir=tmp_path,
                        output_fn=on.append, unsandboxed=False)
     assert on == [SANDBOX_SETUP_ON]
     off: list[str] = []
-    handle_setup_slash("/sandbox", workflow_dir=tmp_path,
+    handle_setup_slash("/sandbox", asset_dir=tmp_path,
                        output_fn=off.append, unsandboxed=True)
     assert off == [SANDBOX_SETUP_OFF]
 
@@ -53,7 +53,7 @@ def test_setup_slash_sandbox_status_reflects_flag(tmp_path):
 def test_setup_slash_lifecycle_not_available(tmp_path, cmd):
     out: list[str] = []
     result = handle_setup_slash(
-        f"/{cmd}", workflow_dir=tmp_path, output_fn=out.append, unsandboxed=False)
+        f"/{cmd}", asset_dir=tmp_path, output_fn=out.append, unsandboxed=False)
     assert result is REPROMPT
     assert out == [f"/{cmd} is not available during setup."]
 
@@ -62,7 +62,7 @@ def test_setup_slash_lists_user_skills(tmp_path):
     wd = _skills_dir(tmp_path)
     out: list[str] = []
     result = handle_setup_slash(
-        "/skills", workflow_dir=wd, output_fn=out.append, unsandboxed=False)
+        "/skills", asset_dir=wd, output_fn=out.append, unsandboxed=False)
     assert result is REPROMPT
     assert any("greet" in line for line in out)
 
@@ -71,7 +71,7 @@ def test_setup_slash_loads_user_skill_body(tmp_path):
     wd = _skills_dir(tmp_path)
     out: list[str] = []
     result = handle_setup_slash(
-        "/greet", workflow_dir=wd, output_fn=out.append, unsandboxed=False)
+        "/greet", asset_dir=wd, output_fn=out.append, unsandboxed=False)
     assert isinstance(result, SkillReply)
     assert result.name == "greet"
     assert "Greet the user warmly." in result.body   # frontmatter stripped
@@ -81,7 +81,7 @@ def test_setup_slash_loads_user_skill_body_with_args(tmp_path):
     wd = _skills_dir(tmp_path)
     out: list[str] = []
     result = handle_setup_slash(
-        "/greet in Spanish", workflow_dir=wd, output_fn=out.append, unsandboxed=False)
+        "/greet in Spanish", asset_dir=wd, output_fn=out.append, unsandboxed=False)
     assert isinstance(result, SkillReply)
     assert result.name == "greet"
     assert "Greet the user warmly." in result.body
@@ -91,7 +91,7 @@ def test_setup_slash_loads_user_skill_body_with_args(tmp_path):
 def test_setup_slash_unknown_reprompts(tmp_path):
     out: list[str] = []
     result = handle_setup_slash(
-        "/bogus", workflow_dir=tmp_path, output_fn=out.append, unsandboxed=False)
+        "/bogus", asset_dir=tmp_path, output_fn=out.append, unsandboxed=False)
     assert result is REPROMPT
     assert any("Unknown command: /bogus" in line for line in out)
 
@@ -99,7 +99,7 @@ def test_setup_slash_unknown_reprompts(tmp_path):
 def test_setup_slash_passes_path_shaped_verbatim(tmp_path):
     out: list[str] = []
     result = handle_setup_slash(
-        "/usr/local/bin/py", workflow_dir=tmp_path,
+        "/usr/local/bin/py", asset_dir=tmp_path,
         output_fn=out.append, unsandboxed=False)
     assert result == "/usr/local/bin/py"   # path-shaped answer submitted verbatim
     assert out == []                        # not treated as an unknown command
@@ -113,7 +113,7 @@ async def test_setup_input_returns_plain_text(tmp_path):
         return next(lines)
 
     fn = build_setup_input_fn(
-        read_line=read_line, workflow_dir=tmp_path,
+        read_line=read_line, asset_dir=tmp_path,
         output_fn=lambda _m: None, unsandboxed=False)
     assert await fn("") == "light please"
 
@@ -127,7 +127,7 @@ async def test_setup_input_loops_past_slash_then_returns(tmp_path):
 
     out: list[str] = []
     fn = build_setup_input_fn(
-        read_line=read_line, workflow_dir=tmp_path,
+        read_line=read_line, asset_dir=tmp_path,
         output_fn=out.append, unsandboxed=False)
     assert await fn("") == "the real answer"     # slash consumed, next line returned
     assert any("Setup commands:" in line for line in out)
@@ -142,7 +142,7 @@ async def test_setup_input_returns_skill_reply(tmp_path):
         return next(lines)
 
     fn = build_setup_input_fn(
-        read_line=read_line, workflow_dir=wd,
+        read_line=read_line, asset_dir=wd,
         output_fn=lambda _m: None, unsandboxed=False)
     result = await fn("")
     assert isinstance(result, SkillReply)
@@ -248,7 +248,7 @@ async def test_host_returns_agent_output(tmp_path, provider_registry):
     ]))
     result = await run_interactive_agent(
         agent_def=_agent_def(), provider_name="fake", model_name="m",
-        initial_message="go", project_root=tmp_path, workflow_dir=tmp_path,
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
         read_line=_noop_read_line, stream=_NonTTY())
     assert isinstance(result, InteractiveSuccess)
@@ -274,7 +274,7 @@ async def test_host_builds_attended_invocation(tmp_path, provider_registry):
                       factory=lambda model: _Capturing())
     await run_interactive_agent(
         agent_def=_agent_def(), provider_name="fake", model_name="m",
-        initial_message="go", project_root=tmp_path, workflow_dir=tmp_path,
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
         read_line=_noop_read_line, stream=_NonTTY())
     assert captured, "create_runner never called"
@@ -292,7 +292,7 @@ async def test_host_fans_events_to_terminal(tmp_path, provider_registry):
     _register_runner(provider_registry, _RenderingRunner())
     await run_interactive_agent(
         agent_def=_agent_def(), provider_name="fake", model_name="m",
-        initial_message="go", project_root=tmp_path, workflow_dir=tmp_path,
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
         read_line=_noop_read_line, stream=out)
     assert "RENDER-MARKER" in out.getvalue()
@@ -306,7 +306,7 @@ async def test_host_auth_error_is_failure(tmp_path, provider_registry):
     ]))
     result = await run_interactive_agent(
         agent_def=_agent_def(), provider_name="fake", model_name="m",
-        initial_message="go", project_root=tmp_path, workflow_dir=tmp_path,
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
         read_line=_noop_read_line, stream=_NonTTY())
     assert isinstance(result, InteractiveFailure)
@@ -321,8 +321,29 @@ def test_host_sync_wrapper_runs(tmp_path, provider_registry):
     ]))
     result = run_interactive_agent_sync(
         agent_def=_agent_def(), provider_name="fake", model_name="m",
-        initial_message="go", project_root=tmp_path, workflow_dir=tmp_path,
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
         read_line=_noop_read_line, stream=_NonTTY())
     assert isinstance(result, InteractiveSuccess)
     assert result.output["default_workflow"] == "default"
+
+
+def test_setup_host_api_takes_asset_dir_not_workflow_dir() -> None:
+    import inspect
+
+    from imp.agents import interactive
+    for fn in (interactive.handle_setup_slash, interactive.build_setup_input_fn,
+               interactive.run_interactive_agent):
+        params = inspect.signature(fn).parameters
+        assert "asset_dir" in params, fn.__name__
+        assert "workflow_dir" not in params, fn.__name__
+
+
+def test_setup_slash_skills_empty_under_the_assets_root() -> None:
+    from imp.assets import bundled_assets_dir
+    out: list[str] = []
+    result = handle_setup_slash(
+        "/skills", asset_dir=bundled_assets_dir(),
+        output_fn=out.append, unsandboxed=False)
+    assert result is REPROMPT
+    assert out == ["No skills available."]

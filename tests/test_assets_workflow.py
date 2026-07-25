@@ -1242,3 +1242,18 @@ def test_loop_budget_prose_is_de_hardcoded() -> None:
         text = (base / fname).read_text()
         assert "capped at 5 fix laps" not in text, fname
         assert "5 fix laps" not in text, fname
+
+
+def test_bundled_assets_dir_is_the_root_of_the_asset_pools() -> None:
+    from imp.assets import (
+        bundled_assets_dir,
+        bundled_partials_dir,
+        bundled_skills_dir,
+    )
+    root = bundled_assets_dir()
+    assert root.is_dir()
+    assert root.name == "assets"
+    for sub in ("skills", "partials", "engine-prompts", "workflows"):
+        assert (root / sub).is_dir(), sub
+    assert bundled_skills_dir().parent == root
+    assert bundled_partials_dir().parent == root
