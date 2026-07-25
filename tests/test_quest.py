@@ -776,3 +776,28 @@ def test_create_writes_create_mode_new(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="X", quest_id="cmode3", base_branch="main")
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["create_mode"] == "new"
+
+
+def test_set_base_branch_rewrites_base_and_recomputes_orig_base_head(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="sbb1", base_branch="main")
+    main_tip = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    _git(tmp_path, "checkout", "-q", "-b", "release-2.0")
+    (tmp_path / "release.txt").write_text("x\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "release commit")
+    release_tip = _git(tmp_path, "rev-parse", "release-2.0").stdout.strip()
+    assert release_tip != main_tip
+
+    ch.set_base_branch("release-2.0")
+
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["base_branch"] == "release-2.0"
+    assert meta["orig_base_head"] == release_tip
+    assert ch.base_branch == "release-2.0"
+    assert ch.orig_base_head == release_tip
+    # No event is emitted (mirrors set_depends_on).
+    events = [json.loads(line)
+              for line in (ch.quest_dir / "events.jsonl").read_text().splitlines()
+              if line]
+    assert [e["type"] for e in events] == ["quest_created"]

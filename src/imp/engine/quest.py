@@ -441,6 +441,17 @@ class Quest:
         meta["depends_on"] = list(depends_on)
         _write_quest_json(meta_path, meta)
 
+    def set_base_branch(self, branch: str) -> None:
+        """Re-point the fork and re-record orig_base_head, keeping head_changed coherent."""
+        head = worktree.head_of(self.control_root, branch)
+        self.base_branch = branch
+        self.orig_base_head = head
+        meta_path = self.quest_dir / "quest.json"
+        meta = json.loads(meta_path.read_text())
+        meta["base_branch"] = branch
+        meta["orig_base_head"] = head
+        _write_quest_json(meta_path, meta)
+
     def set_seed_opening(self, text: str | None) -> None:
         self.seed_opening = text
         meta_path = self.quest_dir / "quest.json"
