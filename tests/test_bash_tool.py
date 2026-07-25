@@ -983,3 +983,25 @@ def test_bash_cap_killed_runaway_reports_clipped_output(
     # that the kill needs > 50 KB on disk, hence at least one over-long line.
     assert "clipped at 2000 chars" in out["notice"]
     assert ctx.running_processes == []
+
+
+def test_bash_sandbox_setup_failure_clips_and_discloses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 5b: the sandbox-setup-failure branch returns the same clipped text with the
+    # same notice + spill as any other branch — no branch returns altered output
+    # without disclosing it. AC 5c: the four RETRIED attempts (whose output is
+    # discarded) write no spill file, so exactly one file exists.
+    import imp.agents.tools.bash as bashmod
+    monkeypatch.setattr(bashmod, "build_sandbox_argv", lambda command, **kw: [
+        "sh", "-c", "python3 -c 'print(\"L\" * 28000)'; exit 3"])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
+    assert out["status"] == "sandbox_setup_failed"
+    assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
+    assert out["notice"].startswith("1 long line clipped at 2000 chars. [")
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert spilled[0].read_bytes() == b"L" * 28_000 + b"\n"

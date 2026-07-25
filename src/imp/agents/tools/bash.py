@@ -307,17 +307,6 @@ async def bash(
             # The sandbox never entered the command, so re-spawning is provably safe
             # (the command never ran). Signal the outer loop to retry after backoff.
             return None
-        if spawn_failed:
-            # Retries exhausted: report distinctly. Such a failure exits immediately,
-            # so it never reaches promotion.
-            _emit_overlay_setup_warning(ctx, command)
-            return json.dumps({
-                "stdout": stdout,
-                "stderr": stderr,
-                "status": "sandbox_setup_failed",
-                "error": SANDBOX_SPAWN_FAILED_MESSAGE,
-                "returncode": proc.returncode,
-            }, ensure_ascii=False)
         # Clip-then-cap, decided ONCE for every branch below: clipping first is what
         # keeps a pathological line from eating the whole 30 KB budget, and routing
         # every return through _finish is what makes the advertised invariant
@@ -347,6 +336,13 @@ async def bash(
                 result["notice"] = notice
             return json.dumps(result, ensure_ascii=False)
 
+        if spawn_failed:
+            # Retries exhausted: report distinctly. Such a failure exits immediately,
+            # so it never reaches promotion.
+            _emit_overlay_setup_warning(ctx, command)
+            return _finish(status="sandbox_setup_failed",
+                           error=SANDBOX_SPAWN_FAILED_MESSAGE,
+                           returncode=proc.returncode)
         if paused:
             # A pause landed mid-command: the poller SIGKILL'd the group. Return the
             # terminated-by-pause tombstone (the same shape
