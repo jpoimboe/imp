@@ -575,7 +575,7 @@ def _run_init_conversation(
     return run_interactive_agent_sync(
         agent_def=agent_def, provider_name=provider_name, model_name=model_name,
         initial_message=kickoff, project_root=project_root,
-        workflow_dir=workflow_dir,
+        asset_dir=workflow_dir,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=allow_unsandboxed),
         read_line=reader, output_fn=output_fn, color=color, title="imp setup")
 

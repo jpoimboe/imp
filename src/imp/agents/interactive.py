@@ -86,7 +86,7 @@ InteractiveResult = InteractiveSuccess | InteractiveFailure
 def handle_setup_slash(
     line: str,
     *,
-    workflow_dir: Path,
+    asset_dir: Path,
     output_fn: Callable[[str], None],
     unsandboxed: bool,
 ) -> object | str | SkillReply:
@@ -106,7 +106,7 @@ def handle_setup_slash(
             output_fn(text)
         return REPROMPT
     if cmd == "skills":
-        skills = list_user_skills(workflow_dir / "skills")
+        skills = list_user_skills(asset_dir / "skills")
         if not skills:
             output_fn("No skills available.")
         for name, description in skills:
@@ -118,9 +118,9 @@ def handle_setup_slash(
     if cmd in _LIFECYCLE_COMMANDS:
         output_fn(f"/{cmd} is not available during setup.")
         return REPROMPT
-    known = {name for name, _ in list_user_skills(workflow_dir / "skills")}
+    known = {name for name, _ in list_user_skills(asset_dir / "skills")}
     if cmd in known:
-        body = load_user_skill(workflow_dir / "skills", cmd)
+        body = load_user_skill(asset_dir / "skills", cmd)
         body = f"{body.rstrip()}\n\n{args}\n" if args else body
         return SkillReply(command=f"/{cmd}", name=cmd, body=body)
     if _COMMAND_SHAPED.match(cmd):
@@ -133,7 +133,7 @@ def handle_setup_slash(
 def build_setup_input_fn(
     *,
     read_line: Callable[[str], Awaitable[str]],
-    workflow_dir: Path,
+    asset_dir: Path,
     output_fn: Callable[[str], None],
     unsandboxed: bool,
 ) -> Callable[[str], Awaitable[str | SkillReply]]:
@@ -149,7 +149,7 @@ def build_setup_input_fn(
             if not is_slash_command(line):
                 return line
             result = handle_setup_slash(
-                line, workflow_dir=workflow_dir,
+                line, asset_dir=asset_dir,
                 output_fn=output_fn, unsandboxed=unsandboxed)
             if result is REPROMPT:
                 continue
@@ -166,7 +166,7 @@ async def run_interactive_agent(
     model_name: str,
     initial_message: str,
     project_root: Path,
-    workflow_dir: Path,
+    asset_dir: Path,
     sandbox_cfg: SandboxConfig,
     read_line: Callable[[str], Awaitable[str]],
     stream: Any = None,
@@ -202,7 +202,7 @@ async def run_interactive_agent(
     rendered = render_prompt(
         agent_def.prompt_template_source,
         build_context(quest_title=title, event_log=InMemoryEventLog()),
-        workflow_dir=workflow_dir,
+        workflow_dir=asset_dir,
     )
     rendered_with_kickoff = (
         f"{rendered}\n\n{initial_message}" if initial_message else rendered
@@ -216,7 +216,7 @@ async def run_interactive_agent(
     event_log = InMemoryEventLog(on_event=driver.on_event)
     coord = InterruptCoordinator()
     input_fn = build_setup_input_fn(
-        read_line=read_line, workflow_dir=workflow_dir,
+        read_line=read_line, asset_dir=asset_dir,
         output_fn=output_fn, unsandboxed=unsandboxed)
 
     with tempfile.TemporaryDirectory() as td:
@@ -229,7 +229,7 @@ async def run_interactive_agent(
             initial_messages=(),
             quest_context=QuestContext(
                 id=_SETUP_QUEST_ID, title=title, project_root=project_root,
-                workflow_dir=workflow_dir),
+                workflow_dir=asset_dir),
             user_chat_input_fn=input_fn,
             transcript_dir=tmp / "transcript",
             events_path=tmp / "events.jsonl",
