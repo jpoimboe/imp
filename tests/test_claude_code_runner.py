@@ -4999,3 +4999,128 @@ async def test_coincidental_count_deficit_drops_the_error_turn(tmp_path: Path) -
     assert body[-1]["type"] == "assistant"
     assert body[-1]["message"]["content"][0]["text"] == "done early"
     assert "API Error: 401" not in json.dumps(body)
+
+
+@pytest.mark.anyio
+async def test_vipu54_drifted_store_keeps_the_complete_step_trio(
+        tmp_path: Path) -> None:
+    """The vipu54 shape: a +3 store drift, a 401, a rolled-back turn, a retry.
+    Counting truncates from the front, so the surplus CLI records survive and the
+    closing complete_step / result / summary trio is deleted instead."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="r0", name="mcp__imp__read_file",
+                         input={"path": "spec.md"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="r0", content="SPECBODY", is_error=False),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="c0", name="complete_step",
+                         input={"status": "Success"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="c0", content="recorded", is_error=False),)),
+        Message(role="assistant", content=(
+            TextBlock(text="Wrote the plan; here is the summary."),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+
+    real = message_to_session_records(
+        msgs, parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
+    await store.append(
+        skey, real[:3] + _cli_resume_artifacts(skey["session_id"], 3) + real[3:])
+
+    drive1 = [assistant(text("Failed to authenticate. API Error: 401")),
+              result(is_error=True, api_error_status=401)]
+    runner1 = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive1))
+    ev1 = [ev async for ev in runner1.run(inv)]
+    assert any(e["type"] == "error" for e in ev1), ev1
+
+    drive2 = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+              result()]
+    runner2 = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive2))
+    [ev async for ev in runner2.run(inv)]
+
+    body = await store.load(skey)
+    assert [r["type"] for r in body] == [
+        "user", "assistant", "user", "assistant", "user", "assistant"]
+    assert body[3]["message"]["content"][0]["id"] == "c0"
+    assert body[4]["message"]["content"][0]["tool_use_id"] == "c0"
+    assert body[5]["message"]["content"][0]["text"] == (
+        "Wrote the plan; here is the summary.")
+
+
+@pytest.mark.anyio
+async def test_lido99_reply_retry_keeps_the_preceding_assistant_turn(
+        tmp_path: Path) -> None:
+    """The lido99 shape: an attended step at AWAITING_USER takes a human reply, the
+    provider returns a 401, the turn is rolled back and the step retried. The
+    assistant turn that preceded the reply must be in the rebuilt body — its
+    absence is what made the agent regenerate its answer."""
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    design = "Design: OPTION A keeps the store, OPTION B rebuilds it."
+    msgs = [
+        Message(role="user", content=(TextBlock(text="which option?"),)),
+        Message(role="assistant", content=(TextBlock(text=design),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+
+    # Deficit body: the design turn was never flushed, and the CLI's own continue
+    # record takes its place in the count.
+    seeded = message_to_session_records(
+        msgs[:1], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
+    await store.append(skey, seeded + _cli_resume_artifacts(skey["session_id"], 1))
+
+    drive1 = [assistant(text("Failed to authenticate. API Error: 401")),
+              result(is_error=True, api_error_status=401)]
+    runner1 = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive1),
+        user_input_fn=lambda _p: "Option A please")
+    ev1 = [ev async for ev in runner1.run(inv)]
+    assert any(e["type"] == "error" for e in ev1), ev1
+
+    drive2 = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+              result()]
+    runner2 = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive2))
+    [ev async for ev in runner2.run(inv)]
+
+    body = await store.load(skey)
+    assert [r["type"] for r in body] == ["user", "assistant"]
+    assert body[1]["message"]["content"][0]["text"] == design
+    assert "Continue from where you left off." not in json.dumps(body)
