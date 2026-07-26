@@ -334,12 +334,15 @@ async def test_drive_invocation_pause_in_flight_wins_over_retryable_error(
     from imp.engine.agent_run import drive_invocation
 
     coord = InterruptCoordinator()
-    coord._should_pause = True   # pause already requested (signal_pause fired)
-    coord._interrupted = True    # signal_pause sets the durable latch too
+
+    def _trip():
+        coord._should_pause = True   # the gesture lands mid-turn (signal_pause fired)
+        coord._interrupted = True    # signal_pause sets the durable latch too
+
     # A retryable network error — would normally return a backoff delay.
     runner = _Runner([{"type": "error", "payload": {
         "category": "network", "kind": "no_result_message",
-        "message": "SDK closed without yielding a ResultMessage"}}])
+        "message": "SDK closed without yielding a ResultMessage"}}], on_run=_trip)
     res = await drive_invocation(_inv(tmp_path), runner,
                                  coordinator=coord, log=None, emit_events=False)
     assert res.paused is True

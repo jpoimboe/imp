@@ -48,6 +48,7 @@ class LiveStatus:
         if self._enabled:
             atexit.register(self._show_cursor)
         self._compose: Callable[[int], list[str] | None] | None = None
+        self._stop_ack: str | None = None   # sticky: while set it IS the footer
         self._visible = False
         self._suspended = False
         self._frame = 0
@@ -68,10 +69,15 @@ class LiveStatus:
         self._erase()
 
     def reset(self) -> None:
-        """Erase the footer and clear the compose fn."""
+        """Erase the footer and clear the compose fn — but a sticky stop ack outlives the
+        compose fn, so while one is set the ack stays drawn (erasing and redrawing it here
+        would blink it, and land it a row high on the status-owned blank)."""
+        self._compose = None
+        if self._stop_ack is not None:
+            self._draw()
+            return
         self._erase()
         self._show_cursor()
-        self._compose = None
 
     def end_run(self) -> None:
         """Terminal teardown: erase the footer and clear the compose fn like
@@ -99,6 +105,7 @@ class LiveStatus:
     def suspend(self) -> Iterator[None]:
         """Clear the footer and suppress drawing around terminal I/O (a prompt)."""
         self._suspended = True
+        self._stop_ack = None       # the prompt takes the screen: the gesture round is over
         self._erase()
         self._show_cursor()
         try:
@@ -108,13 +115,24 @@ class LiveStatus:
             self._draw()
 
     def show_stop_ack(self, text: str) -> None:
-        """Render a transient dim stop-acknowledgment line in the status area.
+        """Show the dim stop-acknowledgment line as STICKY status: while it is set every
+        _draw() repaints it in place of the composed footer, so the 100ms tick cannot
+        clobber it. Only suspend() and clear_stop_ack() end it.
 
         No-op on non-TTY or while suspended."""
         if not self._enabled or self._suspended:
             return
         if len(text) > _ACK_MAX_WIDTH:
             text = text[:_ACK_MAX_WIDTH]
+        self._stop_ack = text
+        self._draw_ack(text)
+
+    def clear_stop_ack(self) -> None:
+        """End the ack's round; the next draw composes the footer again."""
+        self._stop_ack = None
+
+    def _draw_ack(self, text: str) -> None:
+        text = pal.clip_display(text, self._width_fn() - 1)
         # Erase the WHOLE current footer block first (it may be multi-row) before drawing
         # the single-row ack, so the upper rows never leak into scroll-back. _erase() lands
         # the cursor on the status-owned blank and is a strict no-op when nothing is visible.
@@ -133,6 +151,10 @@ class LiveStatus:
         self._visible = True
         self._rows = 1
         self._drawn_widths = [_display_width(text)]
+        self._prev_width = _display_width(text)
+        # Only when a lead was pushed does the ack own the blank above it; without this
+        # a later _erase() would climb onto committed scrollback and clear it.
+        self._owns_lead_blank = bool(lead)
 
     def skip_leading_blank(self) -> None:
         """Prime the next first-draw to own NO leading blank: a committed blank
@@ -172,7 +194,25 @@ class LiveStatus:
         return sum(1 if dw <= 0 else -(-dw // w) for dw in self._drawn_widths)
 
     def _draw(self) -> None:
-        if not self._enabled or self._compose is None or self._suspended:
+        if not self._enabled or self._suspended:
+            return
+        ack = self._stop_ack
+        if ack is not None:
+            width = self._width_fn()
+            narrowed = (self._visible and self._prev_width is not None
+                        and (width - 1) < self._prev_width)
+            if self._visible and not narrowed:
+                # In-place repaint: one atomic write, clipped every frame to stay in one line.
+                row = pal.clip_display(ack, width - 1)
+                self._stream.write(f"{_HIDE}{_ERASE}{_DIM}{row}{_RESET_SGR}")
+                self._stream.flush()
+                self._cursor_hidden = True
+                self._drawn_widths = [_display_width(row)]
+                self._prev_width = _display_width(row)
+            else:
+                self._draw_ack(ack)
+            return
+        if self._compose is None:
             return
         block = self._compose(self._frame)
         if not block:

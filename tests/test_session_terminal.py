@@ -2851,3 +2851,149 @@ async def test_terminal_client_threads_interrupt_and_skips_empty_echo(
     assert seen_interrupt == [True]      # the gate's interrupt flag reached solicit
     assert got["reply"] == ""            # empty reply delivered to the daemon
     assert echoed == []                  # no blank "> " line echoed for an empty reply
+
+
+@pytest.mark.anyio
+async def test_interrupt_record_after_gate_leaves_title_idle(
+    tmp_path: Path,
+) -> None:
+    # Delivery can land after the gate on a mid-run Ctrl-C: the record is
+    # observational and must not re-mark the run busy while the user is prompted.
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input",
+                  "payload": {"steer_hint": "steer?", "interrupt": True}})
+        on_event({"type": "interrupt_delivered",
+                  "payload": {"tier": "cooperative", "outcome": "ok"}})
+        await user_chat_input_fn("steer?")
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
+        return "imp"
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "My Quest")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(30):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+
+            tg.start_soon(_client)
+
+    out = s.getvalue()
+    busy = f"\x1b]2;{GLYPH_BUSY} term1 · My Quest\x07"
+    idle = f"\x1b]2;{GLYPH_IDLE} term1 · My Quest\x07"
+    assert idle in out                            # the gate marked it idle
+    post_gate = out[out.index(idle) + len(idle):]
+    assert busy not in post_gate                  # the interrupt record did not undo it
+    assert out.endswith("\x1b]2;\x07")            # reset last, on teardown
+
+
+@pytest.mark.anyio
+async def test_only_a_live_interrupt_delivered_arms_the_force_quit_offer(
+    tmp_path: Path,
+) -> None:
+    """AC13: the second-gesture force-quit offer is gated on a NON-replayed
+    interrupt_delivered observed for this round. A replayed copy (an earlier
+    round's, re-sent on attach) must not arm it; the live record must."""
+    from imp.cli.signals import _FORCE_FORWARD
+
+    events_path = tmp_path / "events.jsonl"
+    # An earlier round's delivery, already on disk: replay re-sends it on attach.
+    events_path.write_text(json.dumps(
+        {"id": "d0", "type": "interrupt_delivered",
+         "payload": {"tier": "cooperative", "outcome": "ok"}}) + "\n")
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False, events_path=events_path)
+    deliver = anyio.Event()
+    done = anyio.Event()
+    seen: list[tuple[str | None, bool]] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        await deliver.wait()
+        on_event({"id": "d1", "type": "interrupt_delivered",
+                  "payload": {"tier": "cooperative", "outcome": "ok"}})
+        await done.wait()
+        return "ok"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            seen.append((event.get("type"), bool(event.get("_replay"))))
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    acks: list[str] = []
+    coord.set_ack_hook(acks.append)
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    with anyio.fail_after(30):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, leave_mode="new")
+
+            tg.start_soon(_client)
+            await wait_until(lambda: ("replay_complete", False) in seen)
+            assert ("interrupt_delivered", True) in seen   # the replayed copy arrived
+
+            # A stop is unwinding; the only delivery seen so far is the replayed one.
+            coord._should_pause = True
+            coord._first_gesture_at = 100.0
+            t["now"] = 101.5
+            coord._dispatch_signal(signal.SIGINT)
+            assert sent == []                    # nothing in flight → no FORCE frame
+            assert acks == ["stopping…"]         # ...and no force-quit promise
+
+            deliver.set()
+            await wait_until(lambda: ("interrupt_delivered", False) in seen)
+
+            t["now"] = 102.5
+            coord._dispatch_signal(signal.SIGINT)
+            assert sent == [_FORCE_FORWARD]
+            assert acks == [
+                "stopping…", "stopping… (interrupt again to force-quit)"]
+
+            done.set()

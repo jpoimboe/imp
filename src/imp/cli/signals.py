@@ -46,7 +46,7 @@ _suppress = contextlib.suppress
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 _READ_TIMEOUT_S = 0.05  # cbreak select() poll window: lets the loop see quiesce state
 _COOPERATIVE_DEADLINE_S = 2.0   # per-runner cooperative interrupt() budget
-_YIELD_DEADLINE_S = 5.0         # gesture -> run-actually-yields watchdog
+_YIELD_DEADLINE_S = 5.0         # arming -> run-actually-yields watchdog
 _FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
                       # CONTROL_INTERRUPT_FORCE (signal numbers are always > 0)
 
@@ -240,6 +240,9 @@ class InterruptCoordinator:
         self._save_hook: Any = None
         self._forward_force: Any = None   # client force-forward hook (SessionControls)
         self._force_forwarded = False     # one-shot: a FORCE was forwarded this round
+        # Client-side: a non-replayed interrupt_delivered was observed this round, so a
+        # FORCE has a live runner to hard-kill. Until then the offer would be a lie.
+        self._delivery_observed = False
         self._forward_retry_now: Any = None   # client retry-now forward hook (SessionControls)
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
@@ -261,6 +264,9 @@ class InterruptCoordinator:
         self._event_log: Any = None
         self._spawn: Any = None       # fire-and-forget task spawner (start_soon shape)
         self._yielded: Any = None     # anyio.Event set when the run yields (watchdog)
+        # Daemon-only (set only when _spawn is not None): a genuine gesture that found
+        # the runner stack empty. The next attach delivers it instead of dropping it.
+        self._delivery_pending = False
         self._activity_listeners: list[Any] = []
         # Suspend-during-solicit (this quest): True ONLY while an attended agent
         # is blocked awaiting a human reply at the bare-turn-end gate.
@@ -451,6 +457,11 @@ class InterruptCoordinator:
             text += " (interrupt again to force-quit)"
         fn(text)
 
+    def note_interrupt_delivered(self) -> None:
+        """A live interrupt_delivered arrived for this round: an interrupt really is in
+        flight against a runner, so a second gesture's force-quit has something to kill."""
+        self._delivery_observed = True
+
     def enqueue_interject(self, text: str) -> None:
         """Queue a human-typed line for delivery at the next agent turn boundary."""
         self._interjects.append(text)
@@ -489,8 +500,10 @@ class InterruptCoordinator:
         self.leave_reason = None
         self._first_gesture_at = None
         self._force_forwarded = False
+        self._delivery_observed = False
         self.escalated = False
         self._yielded = None
+        self._delivery_pending = False
         self._backoff_wait_depth = 0
         self._retry_now = False
 
@@ -503,19 +516,23 @@ class InterruptCoordinator:
         self._should_pause = False
         self._interrupted = False
         self.pause_reason = None
+        # No pause is pending any more, so a held gesture must not be delivered later.
+        self._delivery_pending = False
 
     def end_gesture_round(self) -> None:
         """Client round-over reset: the run yielded and the paused prompt is up,
         so the ctrl-c round is done. Clear the gesture latch (should_pause /
-        pause_reason / first-gesture window) so the NEXT ctrl-c starts a fresh
-        round and forwards a new CONTROL_INTERRUPT. Distinct from the daemon's
-        brake (which holds until the reply is accepted, §3) and narrower than
+        pause_reason / first-gesture window / observed delivery) so the NEXT
+        ctrl-c starts a fresh round and forwards a new CONTROL_INTERRUPT.
+        Distinct from the daemon's brake (which holds until the reply is
+        accepted, §3) and narrower than
         reset() — leave_reason / escalated / _yielded AND the durable _interrupted
         flag (the 130 exit-code signal) are left untouched."""
         self._should_pause = False
         self.pause_reason = None
         self._first_gesture_at = None
         self._force_forwarded = False
+        self._delivery_observed = False
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
@@ -655,23 +672,26 @@ class InterruptCoordinator:
                    {"reason": "second_gesture", "killed": killed})
         self.note_yield()
 
-    async def _yield_watchdog(self) -> None:
-        """Hard-kill the whole attach stack if the run doesn't yield within 5s of the gesture."""
+    def _arm_delivery(self, spawn: Any) -> None:
+        """Fire-and-forget delivery plus the yield watchdog, whose window starts at this
+        arming — on a deferred delivery that is seconds after the gesture."""
         import anyio
 
-        started = self._first_gesture_at if self._first_gesture_at is not None else self._now()
-        remaining = (started + _YIELD_DEADLINE_S) - self._now()
+        self._yielded = anyio.Event()
+        spawn(self._deliver_interrupt)
+        spawn(self._yield_watchdog)
+
+    async def _yield_watchdog(self) -> None:
+        """Hard-kill the whole attach stack if the run doesn't yield within 5s of the ARMING.
+        The window starts here, not at the gesture: a delivery deferred to a later attach is
+        armed seconds after the keypress and must still get that runner a full window."""
+        import anyio
+
         evt = self._yielded
-        yielded = False
         if evt is not None:
-            if remaining > 0:
-                with anyio.move_on_after(remaining):
-                    await evt.wait()
-                    yielded = True
-            else:
-                yielded = evt.is_set()
-        if yielded:
-            return
+            with anyio.move_on_after(_YIELD_DEADLINE_S):
+                await evt.wait()
+                return
         # Sweep the whole stack (order-independent: a hard kill of any runner
         # unblocks a parked run); list only agents whose force_kill succeeded.
         killed: list[str | None] = []
@@ -719,6 +739,10 @@ class InterruptCoordinator:
         att = _Attached(interrupt_fn, force_kill, agent_id)
         self._runner_stack.append(att)
         try:
+            spawn = self._spawn
+            if self._delivery_pending and spawn is not None:
+                self._delivery_pending = False
+                self._arm_delivery(spawn)
             yield
         finally:
             with _suppress(ValueError):
@@ -741,6 +765,9 @@ class InterruptCoordinator:
         first = self.pause_reason is None
         if first:
             self.pause_reason = reason
+            # A delivery can land after its own round's gate, i.e. after
+            # end_gesture_round already ran; a new round must not inherit it.
+            self._delivery_observed = False
             self._note_gesture_ack(force_quit_available=False)
             if self._first_gesture_at is None:
                 self._first_gesture_at = self._now()
@@ -752,8 +779,6 @@ class InterruptCoordinator:
             self._interrupted = True
         if not first:
             return
-        import anyio
-
         self._emit("interrupt_requested", {"source": reason, "via": via})
         if not self._runner_stack or reason == "model-override":
             # No interrupt is delivered in two cases:
@@ -767,16 +792,17 @@ class InterruptCoordinator:
             # The pause flags above are the whole effect — do NOT arm the watchdog:
             # nothing would post a yield to disarm it, so it would false-fire
             # interrupt_escalated after the window AND stall the pump task group's
-            # close for the window.
+            # close for the window. A genuine gesture is instead HELD (daemon only,
+            # where delivery is fire-and-forget) so the next attach delivers it.
+            if (self._spawn is not None and not self._runner_stack
+                    and reason not in SIDE_EFFECT_REASONS):
+                self._delivery_pending = True
             return
         spawn = self._spawn
         if spawn is not None:
             # Owning task group present (the daemon): deliver fire-and-forget so the
-            # control loop proceeds to the next frame. The yield watchdog is armed
-            # from the gesture time recorded above.
-            self._yielded = anyio.Event()
-            spawn(self._deliver_interrupt)
-            spawn(self._yield_watchdog)
+            # control loop proceeds to the next frame.
+            self._arm_delivery(spawn)
         else:
             # No spawner => client/local coordinator: only an INSTANT interrupt fn is
             # ever attached here (SessionControls._forward_interrupt, a network frame
@@ -842,17 +868,23 @@ class InterruptCoordinator:
             # client to bash (ctrl-c never exits) — it enqueues a FORCE forward so
             # the daemon skips the cooperative tier and hard-kills now, while the
             # client stays attached. Gate synchronously; forward only past the
-            # suppression window, and AT MOST ONCE per round — extra presses on an
-            # already-forwarded round are no-ops (no redundant hard-kills of an
-            # already-dead runner). The leave path above keeps _trigger_escalation.
+            # suppression window, only once an interrupt has actually reached a runner
+            # (before that a FORCE kills nothing), and AT MOST ONCE per round — extra
+            # presses on an already-forwarded round are no-ops (no redundant hard-kills
+            # of an already-dead runner). The leave path above keeps _trigger_escalation.
             if not self._force_forwarded and self._register_gesture(kind="ctrl-c"):
-                self._force_forwarded = True
-                self._note_gesture_ack(force_quit_available=True)
-                send = self._sig_send
-                if send is not None:
-                    with _suppress(Exception):  # WouldBlock / closed stream
-                        send.send_nowait(_FORCE_FORWARD)
-            return  # suppressed or force-forwarded — never re-enter interrupt()
+                if self._delivery_observed:
+                    self._force_forwarded = True
+                    self._note_gesture_ack(force_quit_available=True)
+                    send = self._sig_send
+                    if send is not None:
+                        with _suppress(Exception):  # WouldBlock / closed stream
+                            send.send_nowait(_FORCE_FORWARD)
+                else:
+                    # Nothing delivered yet: ack plainly and leave the one-shot latch
+                    # unspent, so a later press — once a delivery lands — still escalates.
+                    self._note_gesture_ack(force_quit_available=False)
+            return  # suppressed, promised nothing, or force-forwarded
         if self._at_prompt:
             # At an interactive prompt, prompt_toolkit no longer owns SIGINT
             # (handle_sigint=False), so an out-of-band SIGINT lands here. Ctrl-c

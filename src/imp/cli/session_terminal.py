@@ -29,7 +29,11 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE, SkillRequest
+from imp.remote.session.protocol import (
+    CONTROL_INTERRUPT_LEAVE,
+    INTERRUPT_EVENT_TYPES,
+    SkillRequest,
+)
 
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
 
@@ -74,6 +78,10 @@ async def run_terminal_client(
                 title.set_hold_glyph((event.get("payload") or {}).get("glyph"))
             elif etype in ("lane_released", "lane_evicted"):
                 title.set_hold_glyph(None)
+        if etype == "interrupt_delivered" and not replay:
+            # An interrupt really reached a runner, so a second gesture's force-quit
+            # has something to kill. A replayed copy is an earlier round's.
+            coord.note_interrupt_delivered()
         if etype == "awaiting_user_input" and not replay:
             # The run yielded to the paused prompt: the ctrl-c round is over.
             # Reset the client gesture latch so the next ctrl-c is a fresh round.
@@ -86,7 +94,8 @@ async def run_terminal_client(
         elif etype == "quest_renamed" and not replay:
             if title is not None:
                 title.update_name((event.get("payload") or {})["new_title"])
-        elif title is not None and not replay:
+        elif (title is not None and not replay
+                and etype not in INTERRUPT_EVENT_TYPES):
             title.busy()
 
     coord.escalation_event = anyio.Event()

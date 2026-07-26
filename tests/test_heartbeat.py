@@ -207,6 +207,22 @@ class _PauseCoordinator:
         return None
 
 
+class _PauseOnAttachCoordinator(_PauseCoordinator):
+    """The gesture lands as the turn starts: should_pause is False at the drive's entry
+    check and True from the moment the runner is attached (the in-loop pause path)."""
+    should_pause = False
+
+    def runner_attached(self, fn, *, force_kill=None, agent_id=None):
+        import contextlib
+
+        @contextlib.contextmanager
+        def _attached():
+            self.should_pause = True
+            yield
+
+        return _attached()
+
+
 @pytest.mark.anyio
 async def test_heartbeat_is_not_a_pause_point(tmp_path: Path) -> None:
     """A set pause flag + arriving heartbeats does NOT end the drive at the
@@ -215,7 +231,7 @@ async def test_heartbeat_is_not_a_pause_point(tmp_path: Path) -> None:
     runner = _ScriptedRunner([(0, _heartbeat()), (0, _heartbeat()), (0, _output())])
     result = await drive_invocation(
         _inv(tmp_path, {"complete_step"}), runner,
-        coordinator=_PauseCoordinator(), log=None, emit_events=False)
+        coordinator=_PauseOnAttachCoordinator(), log=None, emit_events=False)
     assert runner.consumed == 3      # fully drained — did not stop at a heartbeat
     assert result.paused is True     # pause detected at the real event, as today
 

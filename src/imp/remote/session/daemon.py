@@ -27,7 +27,14 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.model_override import apply_model_override
 from imp.engine.quest import Quest
-from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
+from imp.engine.state import (
+    EventLog,
+    JsonlEventLog,
+    LockHeld,
+    ProjectLock,
+    State,
+    lock_is_live,
+)
 from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
@@ -138,7 +145,6 @@ async def serve_quest_session(
     coordinator = InterruptCoordinator()
     socket_path = str(session_socket_path(quest.id))
     attach_log = quest.event_log()
-    coordinator.set_event_log(attach_log)
 
     def _on_first_attach() -> None:
         attach_log.append(agent_id=None, type="cli_attached", payload={})
@@ -155,6 +161,10 @@ async def serve_quest_session(
             quest.workflow_dir / "skills", name),
         on_query=build_session_handler(quest.control_root, parent_id=quest.id),
     )
+    # Raw broadcast, not the liveness fan-out: interrupt records must not pulse
+    # note_activity().
+    coordinator.set_event_log(
+        JsonlEventLog(quest.events_path, on_event=server._emit))
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.engine.awaiting_user_input import AwaitingUserInput

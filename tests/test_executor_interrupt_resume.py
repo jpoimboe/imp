@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import anyio
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
@@ -656,3 +657,51 @@ async def test_compact_side_effect_pause_arms_solicit(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step   # side-effect park keeps the transcript
     assert state.resume_should_continue is False  # returns to prompt, no stray turn
+
+
+@pytest.mark.anyio
+async def test_pre_attach_gesture_pauses_before_the_turn_starts(tmp_path: Path) -> None:
+    """The pre-attach window: the gesture lands while the daemon's runner stack is empty,
+    before the step's runner is built. The step must pause where the first turn would have
+    begun — no provider turn is burned, and the gesture is not left half-resolved."""
+    quest = _seed_single_agent(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+    coord.set_event_log(quest.event_log())
+    pumped: list[str] = []
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            pumped.append(inv.agent_id)
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    async with anyio.create_task_group() as tg:
+        coord.set_delivery_spawner(tg.start_soon)     # daemon-shaped coordinator
+        # The gesture lands with an empty stack, before the step builds its runner.
+        await coord.signal_pause(reason="ctrl-c", via="frame")
+        result = await run_quest(quest, coordinator=coord)
+
+    assert result is RunResult.PAUSED
+    assert State.load(quest.state_dir).status == "paused"
+    assert pumped == []                          # the turn never started
+    types = [json.loads(line)["type"]
+             for line in quest.events_path.read_text().splitlines() if line.strip()]
+    assert "agent_result" not in types           # no output reached the journal
+    assert "interrupt_requested" in types        # the gesture was recorded...
+    assert "interrupt_delivered" not in types    # ...and resolved at the entry check:
+    assert "interrupt_escalated" not in types    # nothing delivered, no watchdog armed

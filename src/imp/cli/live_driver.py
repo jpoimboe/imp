@@ -417,6 +417,7 @@ class LiveDriver:
 
     def finish(self, *, exit_block: bool = True) -> None:
         """Flush the block; exit_block descends past the owned blank (end_run) else resets."""
+        self._status.clear_stop_ack()      # the ack never outlives the run
         self._builder.finalize()
         self._walk(force=True)
         if exit_block:

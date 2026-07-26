@@ -245,7 +245,8 @@ def test_ack_over_block_then_redraw_climbs_one_row_and_preserves_blank() -> None
     s.show_stop_ack("stopping…")
     out.truncate(0)
     out.seek(0)
-    s.update(lambda f: ["a2", "", "bar2"])        # block redraws over the ack
+    s.clear_stop_ack()                            # the sticky ack's round ends...
+    s.update(lambda f: ["a2", "", "bar2"])        # ...so the block redraws over it
     v = out.getvalue()
     assert v.count("\x1b[1A") == 1
     assert v.startswith("\r\x1b[K\x1b[1A")
@@ -524,3 +525,135 @@ def test_tick_advances_frame_only() -> None:
     s._frame += 1
     s._draw()
     assert out.getvalue().endswith("\r\x1b[Kf1")   # spinner frame still advances (AC8)
+
+
+def test_sticky_ack_survives_the_spinner_redraw() -> None:
+    """The 100ms tick redraws through _draw(): while the ack is set it must repaint the
+    ack, not the composed footer that clobbered it before."""
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["thinking · 2s"])
+    s.show_stop_ack("stopping…")
+    out.truncate(0)
+    out.seek(0)
+    s._frame += 1
+    s._draw()                                     # one spinner tick
+    v = out.getvalue()
+    assert "stopping…" in v
+    assert "thinking" not in v
+    assert v.startswith("\x1b[?25l")              # the cursor hide is reasserted per frame
+
+
+def test_footer_refresh_paths_repaint_the_ack_in_place_rather_than_ending_it() -> None:
+    """_refresh_status runs after EVERY live event: update() when an activity is current,
+    reset() when none is. Neither may end the ack (the original clobber) NOR move it: an
+    erase-and-redraw would land it a row high, on the status-owned blank."""
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["thinking · 2s"])
+    s.show_stop_ack("stopping…")
+    out.truncate(0)
+    out.seek(0)
+    s.update(lambda f: ["thinking · 3s"])         # an event arrives, activity current
+    s.reset()                                     # ...and one with no activity
+    v = out.getvalue()
+    assert "thinking" not in v
+    assert v.count("stopping…") == 2              # repainted by both, never composed
+    assert v.endswith("\x1b[0m")
+    assert "\x1b[1A" not in v                     # never climbs off its own row
+    assert s._owns_lead_blank is True             # ...so it still owns its separator blank
+    assert s._stop_ack == "stopping…"
+
+
+def test_ack_is_repainted_below_a_block_printed_while_it_shows() -> None:
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["thinking · 2s"])
+    s.show_stop_ack("stopping…")
+    s.hide()                                      # _emit_now hides before a block
+    out.write("• narrative\n")                    # the block prints
+    s._draw()                                     # the next tick
+    v = out.getvalue()
+    assert v.index("• narrative") < v.rindex("stopping…")
+
+
+def test_ack_drawn_in_place_owns_no_blank_so_a_later_erase_never_climbs() -> None:
+    """An ack drawn where no footer was visible owns no leading blank; a later erase
+    that climbed anyway would clear the last committed row of the block above it."""
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["thinking · 2s"])         # a footer that DOES own its blank
+    s.hide()
+    s.show_stop_ack("stopping…")                  # redrawn in place, owning no blank
+    assert s._owns_lead_blank is False
+    out.truncate(0)
+    out.seek(0)
+    s._erase()
+    assert "\x1b[1A" not in out.getvalue()
+
+
+def test_ack_is_clipped_to_the_terminal_width_so_a_repaint_cannot_wrap() -> None:
+    """A row wider than the terminal soft-wraps, and the repaint's \\r\\x1b[K then clears
+    only its last physical line — at 10Hz that stacks copies down the screen."""
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 24
+    s.update(lambda f: ["thinking · 2s"])
+    s.show_stop_ack("stopping… (interrupt again to force-quit)")
+    out.truncate(0)
+    out.seek(0)
+    s._draw()
+    assert "force-quit" not in out.getvalue()
+    assert s._drawn_widths == [23]
+
+
+def test_suspend_ends_the_ack_and_hands_the_footer_back() -> None:
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["thinking · 2s"])
+    s.show_stop_ack("stopping…")
+    out.truncate(0)
+    out.seek(0)
+    with s.suspend():
+        s.show_stop_ack("stopping…")              # inert while the prompt owns the screen
+        assert "stopping…" not in out.getvalue()
+    assert s._stop_ack is None
+    assert "thinking · 2s" in out.getvalue()      # the footer returns on the way out
+
+
+def test_clear_stop_ack_hands_the_footer_back() -> None:
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["thinking · 2s"])
+    s.show_stop_ack("stopping…")
+    s.clear_stop_ack()
+    out.truncate(0)
+    out.seek(0)
+    s._draw()
+    assert "thinking · 2s" in out.getvalue()
+
+
+def test_narrowing_during_ack_climbs_reflowed_lines_and_preserves_blank() -> None:
+    # Pins: when the terminal narrows while the sticky ack is shown the next
+    # _draw() must climb all reflowed physical lines (not just \r\x1b[K the last)
+    # and redraw below the preserved owned blank.
+    out = _TTY()
+    s = LiveStatus(out)
+    w = [20]
+    s._width_fn = lambda: w[0]
+    s.update(lambda f: ["footer"])            # draw a footer that owns its blank
+    s.show_stop_ack("a" * 16)                # 16-col ack drawn at width 20
+    out.truncate(0)
+    out.seek(0)
+    w[0] = 4                                  # terminal narrows to 4 cols
+    s._draw()                                 # next 100ms tick
+    v = out.getvalue()
+    # 16 cols at width 4 → ceil(16/4)=4 reflowed physical lines; all must be climbed.
+    assert v.count("\x1b[1A") == 4
+    assert s._owns_lead_blank is True        # redrawn below the preserved blank

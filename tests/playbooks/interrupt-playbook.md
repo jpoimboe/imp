@@ -462,7 +462,12 @@ These don't need to run at every point — fire each **at least once** somewhere
   *past* the ~1s suppress window escalates to the leave path (the ack gains
   `(interrupt again to force-quit)`): expect a clean detach (`alive=False`), quest paused and
   resumable, orphan check clean — never a traceback or hang. (Contrast with the mashed-Ctrl-C
-  check above, which stays *within* the window and must be suppressed.)
+  check above, which stays *within* the window and must be suppressed.) The offer follows the
+  *delivery*, not the clock: until an `interrupt_delivered` is journaled for the round the
+  repeat press keeps the plain `stopping…` ack and forwards nothing, because a FORCE would
+  hard-kill nothing. A slow tool can hold the cooperative interrupt for the full 2s deadline,
+  so a press landing before the record is a no-op by design — press once more after it lands.
+  Such a press costs nothing: it does not spend the once-per-round force latch.
 - **Ctrl-\ deliberate detach (once).** Mid-run, deliver SIGQUIT — `send_signal(3)` for
   determinism (keystroke `send("\x1c", wait=False)` as a bonus check; same impty fidelity
   caveat as mid-run Ctrl-C). imp traps SIGQUIT (replacing the core-dump default): expect the
@@ -539,7 +544,7 @@ per point, headline defects (or "none"), report path.
 | **Ctrl-C** (mid-run) | unreliable | `send_signal(2)` | `SIGINT` → cooperative steer → stay attached (`alive=True`), never exit, **no** `⏸ paused (ctrl-c)` glyph; placeholder `interrupted · enter to continue · type to redirect · Ctrl-D to leave` (both regimes). No `⏸ paused (ctrl-c)` glyph renders in any regime; the daemon hold prompt is what marks a workflow pause (verify gate / `SubagentSuspended` unwind — *not* a human Ctrl-C during a subagent, which steers to the inline gate; see Point E) |
 | **Ctrl-D** (at prompt / steer gate) | `"\x04"` | — | `EOFError` → phase-0 leave (`cancelled` / backlog / archive); **materialized at inline steer gate → detach** (rc 130, resume-to-prompt) |
 | **Ctrl-D** (mid-run) | `"\x04"` | — | cbreak `/dev/tty` reader reads byte directly — no `send_signal` needed; suspend & detach (rc 130, `interrupt_reason == "ctrl-d"`, resume-to-agent). On-exit print: three-part `_pause_lines` block — `paused · Ctrl-D` head, `<id> · <name>` identity line, `resume: imp resume <id>` (no `⏸ paused (ctrl-d)` glyph line renders in the scrollback or `imp log`) |
-| **Ctrl-C ×2** (>1s apart, mid-teardown) | — | `send_signal(2)` ×2 | escalation → force-quit detach; ack shows `stopping… (interrupt again to force-quit)` |
+| **Ctrl-C ×2** (>1s apart, mid-teardown) | — | `send_signal(2)` ×2 | escalation → force-quit detach; ack shows `stopping… (interrupt again to force-quit)` — but only once an `interrupt_delivered` is journaled for the round (a slow tool holds the cooperative tier up to its 2s deadline); before that the repeat press keeps the plain `stopping…` ack, forwards nothing, and spends no latch |
 | **Ctrl-\** (mid-run) | `"\x1c"` (bonus) | `send_signal(3)` | SIGQUIT trap → deliberate detach; same teardown as force-quit (paused, resumable) |
 | **SIGTERM** | — | `send_signal(15)` | Intent-B leave → detach; on-exit three-part `_pause_lines` block — `paused · SIGTERM` head, `<id> · <name>` identity line, `resume: imp resume <id>` (no `⏸ paused (sigterm)` glyph line renders in the scrollback or `imp log`) |
 | **SIGHUP** | — | `send_signal(1)` | Intent-B leave (terminal closed) → detach; daemon lease rule pauses |
