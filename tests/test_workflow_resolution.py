@@ -10,6 +10,7 @@ from imp.assets import bundled_workflow_dir, is_bundled_workflow
 from imp.engine.errors import LoadError
 from imp.engine.quest import Quest
 from imp.providers.config import parse_default_base, parse_default_workflow
+from imp.providers.effective import resolve_default_workflow
 from tests.conftest import _git, _seed_control
 
 
@@ -195,3 +196,54 @@ def test_selectable_workflow_names_include_committed_fork(tmp_path: Path) -> Non
     assert "mine" in names
     assert "memory" not in names
     assert names == sorted(names)
+
+
+def test_resolve_default_workflow_defaults_when_no_layer_sets_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "config.yaml").write_text("theme: dark\n")
+    assert resolve_default_workflow(project_root=proj, control_root=None) == "default"
+
+
+def test_resolve_default_workflow_reads_the_project_layer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "config.yaml").write_text("default-workflow: mine\n")
+    assert resolve_default_workflow(project_root=proj, control_root=None) == "mine"
+
+
+def test_resolve_default_workflow_global_beats_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("default-workflow: fromglobal\n")
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "config.yaml").write_text("default-workflow: fromproject\n")
+    assert resolve_default_workflow(
+        project_root=proj, control_root=None) == "fromglobal"
+
+
+def test_resolve_default_workflow_local_layer_needs_a_control_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """control_root=None (the subagents.py fallback) drops the local layer and
+    keeps everything below it."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "config.yaml").write_text("default-workflow: fromproject\n")
+    (proj / ".imp").mkdir()
+    (proj / ".imp" / "config.yaml").write_text("default-workflow: fromlocal\n")
+    assert resolve_default_workflow(
+        project_root=proj, control_root=None) == "fromproject"
+    assert resolve_default_workflow(
+        project_root=proj, control_root=proj) == "fromlocal"

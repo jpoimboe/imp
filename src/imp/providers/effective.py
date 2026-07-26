@@ -119,6 +119,7 @@ def _to_config(
         max_parallel_test_runs=merged.get("max_parallel_test_runs", 1),
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),
+        default_workflow=merged.get("default-workflow", "default"),
         sandbox=merged.get("sandbox", {}),
         remote=merged.get("remote", {}),
         context=merged.get("context", {}),
@@ -165,6 +166,16 @@ def load_effective_config(
             layers.append(local)
     merged, prov = merge_layers(layers)
     return EffectiveConfig(config=_to_config(merged, project_facts, memory), provenance=prov)
+
+
+def resolve_default_workflow(
+    *, project_root: Path, control_root: Path | None,
+) -> str:
+    """The layered `default-workflow` for one root pair. Keyword-only: swapping
+    the roots would silently read the wrong checkout's project layer."""
+    return load_effective_config(
+        project_root=project_root, control_root=control_root,
+    ).config.default_workflow
 
 
 def memory_validation_scopes(

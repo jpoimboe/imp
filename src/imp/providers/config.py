@@ -13,6 +13,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
     pythonpath: [src]                     # import roots prepended to PYTHONPATH; off if unset
+    default-workflow: default             # workflow new quests use (default "default")
     max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
@@ -60,6 +61,7 @@ class Config:
     max_parallel_test_runs: int = field(hash=False, default=1)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
+    default_workflow: str = field(hash=False, default="default")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
     context: dict[str, Any] = field(hash=False, default_factory=dict)
@@ -221,6 +223,13 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         out["provider_envs"] = _parse_provider_envs(raw["provider_envs"], src)
     if raw.get("vars") is not None:
         out["vars"] = _parse_var_overrides(raw["vars"], src)
+    if "default-workflow" in raw:
+        v = raw["default-workflow"]
+        if not isinstance(v, str) or not validate_workflow_name(v):
+            raise LoadError(
+                "'default-workflow' must be a single workflow name "
+                "(no path separators)", src)
+        out["default-workflow"] = v
     for cmd_key in ("test_cmd_fast", "test_cmd_slow"):
         if cmd_key in raw:
             v = raw[cmd_key]

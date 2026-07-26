@@ -298,3 +298,32 @@ def test_config_exposes_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     # With no config files, accessors fall back to documented defaults.
     assert eff.config.context_checkpoint_threshold() == 0.8
     assert eff.config.context_max_reincarnations() == 2
+
+
+def test_default_workflow_is_a_layer_key(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("default-workflow: mine\n")
+    layer, _src = parse_config_layer(p)  # type: ignore[misc]
+    assert layer["default-workflow"] == "mine"
+
+
+def test_default_workflow_absent_key_omitted(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("theme: dark\n")
+    layer, _src = parse_config_layer(p)  # type: ignore[misc]
+    assert "default-workflow" not in layer
+
+
+def test_default_workflow_path_separator_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("default-workflow: ../escape\n")
+    with pytest.raises(LoadError) as exc:
+        parse_config_layer(p)
+    assert "single workflow name" in str(exc.value)
+
+
+def test_default_workflow_non_string_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("default-workflow: 3\n")
+    with pytest.raises(LoadError):
+        parse_config_layer(p)
