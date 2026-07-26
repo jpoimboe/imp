@@ -139,7 +139,7 @@ def build_setup_input_fn(
     status: Any,
     driver: Any,
     coord: Any,
-    width: int = 80,
+    width: int,
 ) -> Callable[[str], Awaitable[str | SkillReply]]:
     """Return the user_chat_input_fn for the setup conversation.
 

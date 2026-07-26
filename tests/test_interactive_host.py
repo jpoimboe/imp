@@ -159,7 +159,7 @@ async def test_setup_input_returns_plain_text(tmp_path):
     fn = build_setup_input_fn(
         prompt=_FakePrompt(["light please"]), asset_dir=tmp_path,
         output_fn=lambda _m: None, unsandboxed=False,
-        status=None, driver=_StubDriver(), coord=None)
+        status=None, driver=_StubDriver(), coord=None, width=80)
     assert await fn("") == "light please"
 
 
@@ -169,7 +169,7 @@ async def test_setup_input_loops_past_slash_then_returns(tmp_path):
     fn = build_setup_input_fn(
         prompt=_FakePrompt(["/help", "the real answer"]), asset_dir=tmp_path,
         output_fn=out.append, unsandboxed=False,
-        status=None, driver=_StubDriver(), coord=None)
+        status=None, driver=_StubDriver(), coord=None, width=80)
     assert await fn("") == "the real answer"     # slash consumed, next line returned
     assert any("Setup commands:" in line for line in out)
 
@@ -180,7 +180,7 @@ async def test_setup_input_returns_skill_reply(tmp_path):
     fn = build_setup_input_fn(
         prompt=_FakePrompt(["/greet"]), asset_dir=wd,
         output_fn=lambda _m: None, unsandboxed=False,
-        status=None, driver=_StubDriver(), coord=None)
+        status=None, driver=_StubDriver(), coord=None, width=80)
     result = await fn("")
     assert isinstance(result, SkillReply)
     assert result.name == "greet"
@@ -388,7 +388,7 @@ async def test_setup_read_uses_the_default_caret_and_placeholder(tmp_path):
     prompt = _FakePrompt(["dark"])
     fn = build_setup_input_fn(
         prompt=prompt, asset_dir=tmp_path, output_fn=lambda _m: None,
-        unsandboxed=False, status=None, driver=_StubDriver(), coord=None)
+        unsandboxed=False, status=None, driver=_StubDriver(), coord=None, width=80)
     assert await fn("") == "dark"
     # None — not the "" the setup loop used to pass — is what makes
     # Prompt._message render the gold `> ` caret; hint=None leaves the
@@ -408,7 +408,7 @@ async def test_setup_field_carries_the_drivers_static_toolbar(tmp_path):
     prompt = _FakePrompt(["dark"])
     fn = build_setup_input_fn(
         prompt=prompt, asset_dir=tmp_path, output_fn=lambda _m: None,
-        unsandboxed=False, status=None, driver=driver, coord=None)
+        unsandboxed=False, status=None, driver=driver, coord=None, width=80)
     assert await fn("") == "dark"
     assert prompt.bottom_toolbars == ["imp setup"]   # title-only identity band
 
@@ -421,7 +421,7 @@ async def test_setup_slash_output_is_followed_by_one_blank_and_a_reprompt(tmp_pa
     out: list[str] = []
     fn = build_setup_input_fn(
         prompt=prompt, asset_dir=tmp_path, output_fn=out.append,
-        unsandboxed=False, status=status, driver=driver, coord=None)
+        unsandboxed=False, status=status, driver=driver, coord=None, width=80)
     assert await fn("") == "the real answer"
     assert any("Setup commands:" in line for line in out)
     assert out[-1] == ""                          # one blank before the reprompt
@@ -434,7 +434,7 @@ async def test_setup_reprompts_on_a_bare_enter(tmp_path):
     prompt = _FakePrompt(["", "the real answer"])
     fn = build_setup_input_fn(
         prompt=prompt, asset_dir=tmp_path, output_fn=lambda _m: None,
-        unsandboxed=False, status=None, driver=_StubDriver(), coord=None)
+        unsandboxed=False, status=None, driver=_StubDriver(), coord=None, width=80)
     # An empty answer used to be handed to the agent verbatim; the shared loop
     # re-reads instead, so the agent only ever sees a real line.
     assert await fn("") == "the real answer"
@@ -457,7 +457,7 @@ async def test_setup_input_routes_through_the_shared_framing_helper(
     driver = _StubDriver()
     fn = build_setup_input_fn(
         prompt=_FakePrompt([]), asset_dir=tmp_path, output_fn=lambda _m: None,
-        unsandboxed=False, status=None, driver=driver, coord=None)
+        unsandboxed=False, status=None, driver=driver, coord=None, width=80)
     assert await fn("") == "framed"
     assert seen[0]["driver"] is driver
     assert callable(seen[0]["dispatch"])
