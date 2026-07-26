@@ -93,6 +93,10 @@ When a design turns on how a terminal surface actually looks, load `imp-driving-
 (`load_skill(name="imp-driving-terminal-uis")`) and snapshot the *current* appearance with
 your impty tools, so your mockups are grounded in the real rendering, not a guess.
 
+**Revise, don't restate.** When the user corrects a design you have already presented,
+present the delta — what changes and what it changes to. Re-present a full surface
+inventory only for the parts the correction actually moves.
+
 **Enumerated values are spec content.** Once the user confirms them, the actual values go
 into the spec verbatim — the label table, the color assignments, the per-element
 after-states. Plans implement pinned values; they never re-derive them.
