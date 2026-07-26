@@ -13,7 +13,12 @@ import itertools
 from typing import Any
 
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.providers.claude_code import _merge_assistant_fragments, _stream_history
+from imp.providers.claude_code import (
+    _merge_assistant_fragments,
+    _project_for_cli,
+    _stream_history,
+)
+from imp.providers.claude_code_session_store import message_to_session_records
 
 
 async def _drain(async_iter: Any) -> list[dict[str, Any]]:
@@ -118,3 +123,131 @@ def test_merge_still_drops_empty_assistant_and_folds_assistant_fragments() -> No
     assert [m.role for m in out] == ["user", "assistant"]
     kinds = [type(b).__name__ for b in out[1].content]
     assert kinds == ["TextBlock", "ToolUseBlock"], kinds
+
+
+def _post_conditions(projected: list[Message]) -> None:
+    """The three shape rules claude's loader and the Anthropic API both require."""
+    roles = [m.role for m in projected]
+    assert all(a != b for a, b in itertools.pairwise(roles)), roles
+    assert all(m.content for m in projected), projected
+    for m in projected:
+        if m.role == "user" and any(isinstance(b, ToolResultBlock) for b in m.content):
+            assert isinstance(m.content[0], ToolResultBlock), m
+
+
+def test_project_pairs_parallel_tool_results_behind_their_tool_use() -> None:
+    """Parallel tool_use whose results land in separate later user turns: the CLI's
+    loader only pairs the record immediately after the assistant one, so the
+    projection must regroup both results into that one turn, in tool_use order."""
+    messages = [
+        Message(role="user", content=(TextBlock(text="read both"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="read_file", input={"path": "a"}),
+            ToolUseBlock(id="t1", name="read_file", input={"path": "b"}),
+        )),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="t0", content="ALPHA"),)),
+        Message(role="assistant", content=(TextBlock(text="one down"),)),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="t1", content="BRAVO"),)),
+    ]
+    out = _project_for_cli(messages)
+    _post_conditions(out)
+    assert [m.role for m in out] == ["user", "assistant", "user", "assistant"]
+    assert [b.tool_use_id for b in out[2].content] == ["t0", "t1"]
+    assert [b.content for b in out[2].content] == ["ALPHA", "BRAVO"]
+    # The assistant turn that sat between the two results survives intact.
+    assert out[3].content == (TextBlock(text="one down"),)
+
+
+def test_project_folds_consecutive_user_turns_keeping_result_first() -> None:
+    """Regrouping splits a mixed [tool_result, text] user turn; the closing merge
+    folds it back, so no two adjacent turns share a role (the documented cause of
+    `400 ... tool use concurrency issues`) and the tool_result still leads."""
+    messages = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="bash", input={"command": "ls"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="a.txt"),
+            TextBlock(text="[Request interrupted by user]"),
+        )),
+        Message(role="user", content=(TextBlock(text="carry on"),)),
+    ]
+    out = _project_for_cli(messages)
+    _post_conditions(out)
+    assert [m.role for m in out] == ["assistant", "user"]
+    assert [type(b).__name__ for b in out[1].content] == [
+        "ToolResultBlock", "TextBlock", "TextBlock"]
+    assert [b.text for b in out[1].content[1:]] == [
+        "[Request interrupted by user]", "carry on"]
+
+
+def test_project_emits_no_empty_message_and_no_empty_record() -> None:
+    """A thinking-only (zero-block) assistant fragment is dropped, and a user turn
+    whose only blocks were relocated into the pairing turn emits nothing — a
+    zero-block leftover here is NOT role-adjacent, so the closing merge would keep
+    it and it would reach the store as a `content: []` record."""
+    messages = [
+        Message(role="assistant", content=()),  # thinking-only fragment
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="read_file", input={"path": "a"}),
+            ToolUseBlock(id="t1", name="read_file", input={"path": "b"}),
+        )),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="t0", content="ALPHA"),)),
+        Message(role="assistant", content=(TextBlock(text="half way"),)),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="t1", content="BRAVO"),)),
+    ]
+    out = _project_for_cli(messages)
+    _post_conditions(out)
+    assert [m.role for m in out] == ["assistant", "user", "assistant"]
+    records = message_to_session_records(
+        out, parent_uuid=None, session_id="s0", cwd="/tmp/p", model="m0")
+    assert all(r["message"]["content"] for r in records), records
+
+
+def test_project_leaves_a_dangling_tool_use_unanswered() -> None:
+    """A tool_use with no recorded result stays unanswered: the projection
+    fabricates nothing (`repair_dangling_tool_use_on_resume` owns that repair)."""
+    messages = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t9", name="read_file", input={"path": "b"}),)),
+    ]
+    out = _project_for_cli(messages)
+    _post_conditions(out)
+    assert [m.role for m in out] == ["user", "assistant"]
+    assert not any(isinstance(b, ToolResultBlock) for m in out for b in m.content)
+
+
+def test_project_preserves_boundary_tool_results_in_place() -> None:
+    """A tool_result whose tool_use is absent from the input list is paired across
+    the resume_base split (the CLI already loaded the tool_use from the store
+    body). It is preserved in original order — dropping it would stream an empty
+    delta and deadlock the DANGLING_TOOL_USE / handback resumes."""
+    messages = [
+        Message(role="user", content=(ToolResultBlock(
+            tool_use_id="c0", content="REVISE: confirm the work is done.",
+            is_error=True),)),
+        Message(role="assistant", content=(TextBlock(text="on it"),)),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="c1", content="second"),)),
+    ]
+    out = _project_for_cli(messages)
+    _post_conditions(out)
+    assert [m.role for m in out] == ["user", "assistant", "user"]
+    assert [b.tool_use_id for m in out for b in m.content
+            if isinstance(b, ToolResultBlock)] == ["c0", "c1"]
+    assert out[0].content[0].is_error is True
+
+
+def test_project_pairs_only_the_answered_tool_use() -> None:
+    """Half-answered parallel tool_use: the pairing turn carries the one recorded
+    result and nothing is fabricated for the other."""
+    messages = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="read_file", input={"path": "a"}),
+            ToolUseBlock(id="t1", name="read_file", input={"path": "b"}),
+        )),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="t1", content="BRAVO"),)),
+    ]
+    out = _project_for_cli(messages)
+    _post_conditions(out)
+    assert [m.role for m in out] == ["assistant", "user"]
+    assert [b.tool_use_id for b in out[1].content] == ["t1"]

@@ -838,6 +838,44 @@ def _merge_assistant_fragments(messages: list[Message]) -> list[Message]:
     return out
 
 
+def _project_for_cli(messages: list[Message]) -> list[Message]:
+    """Merge fragments, pair every tool_result behind its tool_use, merge again.
+
+    claude's loader pairs an assistant record's tool_use only with the record
+    immediately after it (extras dropped, gaps filled with an error stub), and
+    the closing merge undoes the split regrouping causes — consecutive same-role
+    turns are the 400 `_stream_history` documents. A tool_result whose tool_use
+    is absent is paired across the resume_base split; it is kept, never dropped.
+    """
+    merged = _merge_assistant_fragments(messages)
+    results: dict[str, ToolResultBlock] = {}
+    issued: set[str] = set()
+    for m in merged:
+        for b in m.content:
+            if isinstance(b, ToolResultBlock):
+                results.setdefault(b.tool_use_id, b)
+            elif isinstance(b, ToolUseBlock):
+                issued.add(b.id)
+    out: list[Message] = []
+    for m in merged:
+        if m.role == "assistant":
+            out.append(m)
+            paired = tuple(
+                results[b.id] for b in m.content
+                if isinstance(b, ToolUseBlock) and b.id in results)
+            if paired:
+                out.append(Message(role="user", content=paired))
+        elif m.role == "user":
+            kept = [b for b in m.content
+                    if not (isinstance(b, ToolResultBlock) and b.tool_use_id in issued)]
+            if kept:
+                kept.sort(key=lambda b: not isinstance(b, ToolResultBlock))
+                out.append(Message(role="user", content=tuple(kept)))
+        else:
+            out.append(m)
+    return _merge_assistant_fragments(out)
+
+
 def _history_dicts(messages: list[Message]) -> Any:
     """Yield one stream-json dict per message in transcript order.
 
