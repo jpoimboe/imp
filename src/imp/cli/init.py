@@ -22,6 +22,7 @@ model call.
 from __future__ import annotations
 
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -596,11 +597,13 @@ def run_init(
 ) -> None:
     from imp.providers.effective import user_config_path
 
+    color_on = pal.should_use_color(sys.stdout)
     imp_dir = project_root / "imp"
     project_file = imp_dir / "project.yaml"
     already_initialized = project_file.is_file()
 
-    output_fn(f"Setting up imp in {project_root}")
+    output_fn("Setting up imp in "
+              + pal.ansi(str(project_root), "wordmark", enabled=color_on))
 
     user_path = user_config_path()
     wrote_user_config = not user_path.exists()
@@ -622,13 +625,17 @@ def run_init(
         if pal.theme_override() is None:
             pal.set_theme(theme)
         picked_this_run = True
-    output_fn(f"Enabled: {', '.join(providers)}")
+    output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
     for prov in providers:
         if prov in _PROVIDERS_WITHOUT_ENV:
             continue
-        output_fn(f"  {prov} → {prov.upper()}_API_KEY (set this env var)")
+        output_fn(pal.ansi(
+            f"  {prov} → {prov.upper()}_API_KEY (set this env var)",
+            "dim", enabled=color_on))
     if picked_this_run and theme != "ansi":
-        output_fn(f"Detected a {theme} terminal — colors tuned to match.")
+        output_fn(pal.ansi(
+            f"Detected a {theme} terminal — colors tuned to match.",
+            "dim", enabled=color_on))
 
     # --- re-init idempotency: an already-committed project file means no
     #     conversation; just bootstrap a missing machine config and re-commit ---
@@ -703,7 +710,6 @@ def run_init(
             user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
 
     # --- hand off to the setup conversation ---
-    output_fn("Now let's finish setting up this project.")
     result = _run_init_conversation(
         project_root=project_root,
         provider_name=provider_name, model_name=model_name,
@@ -739,13 +745,15 @@ def run_init(
     committed = write_init_files(project_root, settings)
 
     output_fn("")
-    output_fn("Created:")
-    output_fn("  imp/project.yaml")
-    output_fn(f"  {user_path}  (your machine: providers, theme)")
+    output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
+    output_fn(pal.ansi("  imp/project.yaml", "dim", enabled=color_on))
+    output_fn(pal.ansi(
+        f"  {user_path}  (your machine: providers, theme)", "dim", enabled=color_on))
     if committed:
-        output_fn("Committed imp/project.yaml.")
+        output_fn(pal.ansi("Committed imp/project.yaml.", "dim", enabled=color_on))
     output_fn("")
-    output_fn('Try: imp new "Add a dark-mode toggle"')
+    output_fn("Try: " + pal.ansi(
+        'imp new "Add a dark-mode toggle"', "wordmark", enabled=color_on))
 
 
 def run_init_noninteractive(

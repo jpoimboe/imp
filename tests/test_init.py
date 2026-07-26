@@ -908,6 +908,119 @@ def test_provider_picker_runs_before_the_theme_is_applied(
     assert seen["theme"] == "ansi"
 
 
+GOLD_DARK = "\x1b[38;2;255;154;60m"
+GOLD_ANSI = "\x1b[33m"
+DIM = "\x1b[2m"
+RESET = "\x1b[0m"
+
+
+def _colored_fresh_init(tmp_path, monkeypatch, msgs: list[str]) -> None:
+    # conftest resets the palette but not the ambient color/theme env vars.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    _stub_conv(monkeypatch, _conv_result())
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+
+def test_host_success_lines_carry_engine_chrome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.providers.effective import user_config_path
+
+    msgs: list[str] = []
+    _colored_fresh_init(tmp_path, monkeypatch, msgs)
+    user_path = user_config_path()
+
+    # This one prints before the theme is applied, so its gold is the ansi gold.
+    assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
+    assert f"{DIM}Enabled: anthropic{RESET}" in msgs
+    assert f"{DIM}  anthropic → ANTHROPIC_API_KEY (set this env var){RESET}" in msgs
+    assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
+    assert f"{GOLD_DARK}Created:{RESET}" in msgs
+    assert f"{DIM}  imp/project.yaml{RESET}" in msgs
+    assert f"{DIM}  {user_path}  (your machine: providers, theme){RESET}" in msgs
+    assert f"{DIM}Committed imp/project.yaml.{RESET}" in msgs
+    assert f'Try: {GOLD_DARK}imp new "Add a dark-mode toggle"{RESET}' in msgs
+
+
+def test_host_success_lines_stay_bare_without_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    msgs: list[str] = []
+    _stub_conv(monkeypatch, _conv_result())
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert f"Setting up imp in {tmp_path}" in msgs
+    assert "Created:" in msgs
+    assert not any("\x1b" in m for m in msgs)
+
+
+def test_the_hand_off_line_is_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    msgs: list[str] = []
+    _stub_conv(monkeypatch, _conv_result())
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    assert not any("Now let's finish setting up this project." in m for m in msgs)
+
+
+def test_already_initialized_rerun_block_stays_bare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.providers.effective import user_config_path
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    cfg_dir = tmp_path / "xdg" / "imp"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    user_path = user_config_path()
+    assert "Project already initialized (imp/project.yaml is committed)." in msgs
+    # the same two strings the fresh path chromes — bare here
+    assert f"  {user_path}  (your machine: providers, theme)" in msgs
+    assert "Committed imp/project.yaml." in msgs
+
+
+def test_noninteractive_output_stays_bare_under_forced_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    assert "Created:" in msgs
+    assert "  imp/project.yaml" in msgs
+    assert not any("\x1b" in m for m in msgs)
+
+
 def test_already_initialized_rerun_leaves_the_palette_alone(tmp_path: Path) -> None:
     from imp.cli import palette as pal
 
