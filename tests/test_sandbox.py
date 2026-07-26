@@ -118,9 +118,30 @@ def test_prepare_spawn_policy_drops_vanished_sibling_paths(tmp_path):
     assert str(live_events) in argv
 
 
-def test_prepare_spawn_policy_noop_on_inactive_policy():
-    p = _policy(active=False)
+def test_prepare_spawn_policy_recreates_vanished_ref_reexpose_dir(tmp_path):
+    # git prunes a ref directory once its last loose ref is packed away, so
+    # .git/refs/heads/imp can vanish AFTER the policy froze it as a bind source —
+    # bwrap then dies in setup on every later spawn. The dir is imp's own, so the
+    # spawn-time fix is to re-create it, not to drop the bind (dropping it would
+    # leave refs/heads read-only and break commits on the quest branch).
+    imp_refs = tmp_path / ".git" / "refs" / "heads" / "imp"
+    imp_refs.mkdir(parents=True)      # created at policy-bake time
+    imp_refs.rmdir()                  # ...then pruned mid-run
+    p = _policy(git_ref_reexpose=(str(imp_refs),))
+
+    prepared = prepare_spawn_policy(p)
+
+    assert imp_refs.is_dir()
+    assert prepared.git_ref_reexpose == (str(imp_refs),)
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=prepared, engine_env={}))
+    assert f"--bind {imp_refs} {imp_refs}" in argv
+
+
+def test_prepare_spawn_policy_noop_on_inactive_policy(tmp_path):
+    never = tmp_path / ".git" / "refs" / "heads" / "imp"
+    p = _policy(active=False, git_ref_reexpose=(str(never),))
     assert prepare_spawn_policy(p) is p
+    assert not never.exists()
 
 
 def test_secret_masks_emitted_after_every_bind_even_overlapping_extra_writable():
@@ -322,9 +343,9 @@ def test_resolve_policy_unmaterialized_draft_masks_worktrees_without_self(tmp_pa
 
 def test_prepare_spawn_policy_keeps_worktrees_mask_even_if_absent(tmp_path):
     # The mask + self re-expose are retained unconditionally by prepare_spawn_policy
-    # (like control_imp / git_ref_reexpose), NOT existence-gated like git_ro_remask,
-    # so the mask cannot silently drop mid-run. Contrast a vanished git_ro_remask
-    # entry, which IS dropped.
+    # (like control_imp), NOT existence-gated like git_ro_remask, so the mask cannot
+    # silently drop mid-run. Contrast a vanished git_ro_remask entry, which IS
+    # dropped — and git_ref_reexpose, which is re-created instead.
     gone = tmp_path / "nope" / ".git" / "worktrees"
     gone_ro = tmp_path / "gone.worktree"
     p = _policy(
