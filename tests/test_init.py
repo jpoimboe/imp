@@ -36,6 +36,18 @@ def _stub_conv(monkeypatch, result) -> None:
                         lambda **kw: result, raising=False)
 
 
+def _stub_conv_recording_theme(monkeypatch, seen: dict) -> None:
+    """Stub the setup conversation and record the palette theme active while it runs."""
+    import imp.cli.init as initmod
+    from imp.cli import palette as pal
+
+    def _conv(**_kw):
+        seen["theme"] = pal.active_theme()
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_user_config(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
@@ -832,3 +844,82 @@ def test_run_init_declared_tier_follows_the_agent_file(tmp_path, monkeypatch):
     run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
              input_fn=_inputs(), output_fn=lambda _msg: None)
     assert seen["tier"] == "high"
+
+
+def test_fresh_init_applies_the_detected_theme_before_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    seen: dict[str, str] = {}
+    _stub_conv_recording_theme(monkeypatch, seen)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _m: None,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen["theme"] == "dark"
+    # the process palette really emits the dark truecolor gold, not 16-color yellow
+    assert pal.ansi("x", "wordmark", enabled=True) == "\x1b[38;2;255;154;60mx\x1b[0m"
+
+
+def test_init_does_not_clobber_an_imp_theme_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+
+    monkeypatch.setenv("IMP_THEME", "light")
+    pal.set_theme("light")  # as _apply_theme already did at startup
+    seen: dict[str, str] = {}
+    _stub_conv_recording_theme(monkeypatch, seen)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _m: None,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen["theme"] == "light"
+    assert pal.active_theme() == "light"
+
+
+def test_provider_picker_runs_before_the_theme_is_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    _stub_conv(monkeypatch, _conv_result())
+    seen: dict[str, str] = {}
+
+    def _pick(_available):
+        seen["theme"] = pal.active_theme()
+        return ["anthropic"]
+
+    run_init(
+        project_root=tmp_path, picker_fn=_pick,
+        input_fn=_inputs(), output_fn=lambda _m: None,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen["theme"] == "ansi"
+
+
+def test_already_initialized_rerun_leaves_the_palette_alone(tmp_path: Path) -> None:
+    from imp.cli import palette as pal
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    cfg_dir = tmp_path / "xdg" / "imp"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _m: None,
+    )
+
+    assert pal.active_theme() == "ansi"

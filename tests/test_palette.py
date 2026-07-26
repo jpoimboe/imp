@@ -302,3 +302,17 @@ def test_user_bg_open_reverse_under_ansi_band_under_truecolor() -> None:
     pal.set_theme("dark")
     assert pal.user_bg_open(enabled=True) == "\x1b[48;2;67;56;40m"   # warm band kept
     assert pal.user_bg_open(enabled=False) == ""               # color off, any theme
+
+
+def test_theme_override_reads_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMP_THEME", " Light ")
+    assert pal.theme_override() == "light"
+
+
+def test_theme_override_is_none_when_absent_or_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    assert pal.theme_override() is None
+    monkeypatch.setenv("IMP_THEME", "solarized")
+    assert pal.theme_override() is None

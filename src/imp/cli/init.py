@@ -39,6 +39,7 @@ from imp.assets import (
     resolve_workflow_dir,
     selectable_workflow_names,
 )
+from imp.cli import palette as pal
 from imp.cli.prompt import Prompt
 from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
@@ -617,6 +618,9 @@ def run_init(
         if not providers:
             raise ValueError("at least one provider must be selected")
         theme = (detect_theme_fn or _default_detect_theme)()
+        # Everything below renders in the detected theme; IMP_THEME still wins.
+        if pal.theme_override() is None:
+            pal.set_theme(theme)
         picked_this_run = True
     output_fn(f"Enabled: {', '.join(providers)}")
     for prov in providers:
