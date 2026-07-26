@@ -230,11 +230,10 @@ def _termination_from_result(
 def _roll_back_error_turn(
     messages: list[Message], transcript: Transcript,
 ) -> None:
-    """Drop the trailing assistant error turn so a backoff re-drive re-queries."""
-    for i in range(len(messages) - 1, -1, -1):
-        if messages[i].role == "assistant":
-            del messages[i]
-            break
+    """Drop the trailing assistant error turn; an earlier one is delivered history."""
+    if not messages or messages[-1].role != "assistant":
+        return
+    del messages[-1]
     transcript.rewrite(messages)
 
 
