@@ -731,6 +731,10 @@ class CodexSession(ObserveSession):
     def _last_text(self) -> str:
         return self._proc_state.get("last_agent_text", "") or ""
 
+    def _trailing_text(self) -> str:
+        # The capture is already per-turn: _reset_capture clears it each turn.
+        return self._last_text()
+
     def subagent_deliverable(self) -> str:
         return self._last_text()
 

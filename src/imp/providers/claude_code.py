@@ -1847,6 +1847,12 @@ class ClaudeCodeSession(ObserveSession):
                 return _text_of(prev)
         return ""
 
+    def _trailing_text(self) -> str:
+        last = self.messages[-1] if self.messages else None
+        if last is None or last.role != "assistant":
+            return ""
+        return _text_of(last)
+
     def _requery(self, text: Any, *, human: bool) -> None:
         self._next_query = deliver_continuation_reply(
             self.messages, self.transcript, self.elog, self.aid, text,
