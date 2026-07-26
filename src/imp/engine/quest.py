@@ -508,18 +508,18 @@ class Quest:
     @property
     def live_workflow_dir(self) -> Path:
         from imp.assets import resolve_workflow_dir
-        from imp.providers.config import parse_default_workflow
-        name = self.workflow or parse_default_workflow(
-            self.project_root / "imp" / "config.yaml")
+        from imp.providers.effective import resolve_default_workflow
+        name = self.workflow or resolve_default_workflow(
+            project_root=self.project_root, control_root=self.control_root)
         return resolve_workflow_dir(self.project_root, name)
 
     @property
     def control_workflow_dir(self) -> Path:
         """Mirror of live_workflow_dir rooted at the control root, not the worktree."""
         from imp.assets import resolve_workflow_dir
-        from imp.providers.config import parse_default_workflow
-        name = self.workflow or parse_default_workflow(
-            self.control_root / "imp" / "config.yaml")
+        from imp.providers.effective import resolve_default_workflow
+        name = self.workflow or resolve_default_workflow(
+            project_root=self.control_root, control_root=self.control_root)
         return resolve_workflow_dir(self.control_root, name)
 
     @property
@@ -583,15 +583,13 @@ class Quest:
             validate_project_memory,
         )
 
-        config = load_effective_config(
-            project_root=wt_path, control_root=control_root,
-        ).config
         try:
+            config = load_effective_config(
+                project_root=wt_path, control_root=control_root,
+            ).config
             validate_project_memory(wt_path, config.memory, config.project_facts)
             from imp.assets import resolve_workflow_dir
-            from imp.providers.config import parse_default_workflow
-            wf_name = workflow or parse_default_workflow(
-                wt_path / "imp" / "config.yaml")
+            wf_name = workflow or config.default_workflow
             loaded_workflow = load_workflow(
                 resolve_workflow_dir(wt_path, wf_name),
                 configured_tiers=config.tier_names(),
@@ -667,21 +665,19 @@ class Quest:
             ).save(quest_dir / "state")
         else:
             from imp.engine.loader import load_workflow
-            from imp.providers.config import parse_default_workflow
             from imp.providers.effective import (
                 load_effective_config,
                 validate_project_memory,
             )
 
-            config = load_effective_config(
-                project_root=control_root, control_root=control_root,
-            ).config
             try:
+                config = load_effective_config(
+                    project_root=control_root, control_root=control_root,
+                ).config
                 validate_project_memory(
                     control_root, config.memory, config.project_facts)
                 from imp.assets import resolve_workflow_dir
-                wf_name = workflow or parse_default_workflow(
-                    control_root / "imp" / "config.yaml")
+                wf_name = workflow or config.default_workflow
                 loaded_workflow = load_workflow(
                     resolve_workflow_dir(control_root, wf_name),
                     configured_tiers=config.tier_names(),

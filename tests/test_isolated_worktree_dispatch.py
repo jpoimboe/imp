@@ -504,7 +504,8 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "imp.providers.effective.load_effective_config",
         lambda **kw: SimpleNamespace(
-            config=SimpleNamespace(sandbox={"network": False}, pythonpath=())),
+            config=SimpleNamespace(sandbox={"network": False}, pythonpath=(),
+                                   default_workflow="default")),
     )
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),

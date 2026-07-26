@@ -162,10 +162,11 @@ def test_refresh_unresolvable_live_source_keeps_snapshot(tmp_path: Path) -> None
     _refresh_workflow_snapshot(quest)
     snapshot = quest.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
-    # Malformed config.yaml makes parse_default_workflow RAISE LoadError,
-    # which propagates through live_workflow_dir and is caught by the helper's
-    # best-effort except → snapshot kept, returns False. (A MISSING config.yaml
-    # would NOT raise: parse_default_workflow returns "default" for an absent file.)
+    # A malformed config.yaml makes the layered resolver RAISE LoadError — the
+    # whole project layer fails to parse, not just this key — which propagates
+    # through control_workflow_dir and is caught by the helper's best-effort
+    # except → snapshot kept, returns False. (A MISSING config.yaml would NOT
+    # raise: no layer sets default-workflow, so the resolver returns "default".)
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: [bad yaml\n")
     assert _refresh_workflow_snapshot(quest) is False
     assert (snapshot / "workflow.yaml").read_bytes() == before

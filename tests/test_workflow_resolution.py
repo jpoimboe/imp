@@ -9,7 +9,8 @@ import pytest
 from imp.assets import bundled_workflow_dir, is_bundled_workflow
 from imp.engine.errors import LoadError
 from imp.engine.quest import Quest
-from imp.providers.config import parse_default_base, parse_default_workflow
+from imp.providers import config as config_module
+from imp.providers.config import parse_default_base
 from imp.providers.effective import resolve_default_workflow
 from tests.conftest import _git, _seed_control
 
@@ -30,24 +31,43 @@ def test_is_bundled_workflow_predicate() -> None:
     assert is_bundled_workflow("does-not-exist") is False
 
 
-def test_parse_default_workflow_defaults_to_default(tmp_path: Path) -> None:
-    assert parse_default_workflow(tmp_path / "absent.yaml") == "default"
-    p = tmp_path / "config.yaml"
-    p.write_text("vars: {}\n")
-    assert parse_default_workflow(p) == "default"
+def test_parse_default_workflow_is_gone() -> None:
+    """The project-file-only reader is replaced by the layered resolver; a
+    lingering copy would let a call site silently skip the global layer."""
+    assert not hasattr(config_module, "parse_default_workflow")
 
 
-def test_parse_default_workflow_reads_field(tmp_path: Path) -> None:
-    p = tmp_path / "config.yaml"
-    p.write_text("default-workflow: mine\n")
-    assert parse_default_workflow(p) == "mine"
+def test_control_workflow_dir_reads_the_control_root_not_the_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    control = tmp_path / "control"
+    worktree = tmp_path / "wt"
+    for root, name in ((control, "patent"), (worktree, "default")):
+        (root / "imp").mkdir(parents=True)
+        (root / "imp" / "config.yaml").write_text(f"default-workflow: {name}\n")
+    quest = Quest(
+        id="2026-06-15-roots1", title="X", base_branch="main",
+        control_root=control, project_root=worktree,
+        quest_dir=control / ".imp" / "quests" / "2026-06-15-roots1",
+    )
+    assert quest.live_workflow_dir == bundled_workflow_dir("default")
+    assert quest.control_workflow_dir == bundled_workflow_dir("patent")
 
 
-def test_parse_default_workflow_rejects_path_traversal(tmp_path: Path) -> None:
-    p = tmp_path / "config.yaml"
-    p.write_text("default-workflow: ../escape\n")
+def test_change_create_tears_down_on_an_invalid_default_workflow(
+    tmp_path: Path,
+) -> None:
+    """The layered read raises from load_effective_config, so that load must sit
+    inside create's teardown try — otherwise a quest.json-only dir survives."""
+    _seed_control(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: bad/name\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "invalid workflow name")
     with pytest.raises(LoadError):
-        parse_default_workflow(p)
+        Quest.create(tmp_path, title="X", quest_id="2026-06-15-tear01",
+                     base_branch="main")
+    assert not (tmp_path / ".imp" / "quests" / "2026-06-15-tear01").exists()
 
 
 def test_change_resolves_fork_workflow_dir(tmp_path: Path) -> None:

@@ -73,11 +73,7 @@ from imp.engine.project_root import find_project_root
 from imp.engine.quest import Quest, live_quest_ids, live_stems
 from imp.engine.quest_id import new_quest_id
 from imp.engine.state import LockHeld, State, lock_is_live
-from imp.providers.config import (
-    parse_default_base,
-    parse_default_workflow,
-    validate_workflow_name,
-)
+from imp.providers.config import parse_default_base, validate_workflow_name
 from imp.remote.daemon.directory import session_is_resident
 from imp.remote.session.attach import DaemonStartupError
 from imp.remote.session.protocol import SkillRequest
@@ -2496,9 +2492,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
             render_summary,
             summary_total,
         )
+        from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = parse_default_workflow(control / "imp" / "config.yaml")
+        workflow = resolve_default_workflow(
+            project_root=control, control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         lines = render_summary(build_summary(events), header=header,
@@ -2525,9 +2523,11 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
             build_summary,
             summary_total,
         )
+        from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = parse_default_workflow(control / "imp" / "config.yaml")
+        workflow = resolve_default_workflow(
+            project_root=control, control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         document = render_summary_markdown(build_summary(events), header=header)

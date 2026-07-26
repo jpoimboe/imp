@@ -2016,8 +2016,9 @@ async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
 async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
     tmp_path: Path,
 ) -> None:
-    # A bare _make_quest quest resolves its workflow to the bundled `imp`
-    # workflow (parse_default_workflow -> "imp"), where "verify" is a script step.
+    # A bare _make_quest quest writes no config file, so no layer sets
+    # default-workflow: the resolver returns "default", the bundled workflow
+    # whose "verify" is a script step.
     quest = _make_quest(tmp_path, "2026-06-15-scr")
     _seed_step(quest, "verify")
     sock = str(session_socket_path(quest.id))

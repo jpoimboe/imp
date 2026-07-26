@@ -141,32 +141,6 @@ def validate_workflow_name(name: str) -> bool:
     )
 
 
-def parse_default_workflow(path: Path) -> str:
-    """Read imp/config.yaml `default-workflow:` field. Absent → 'default'. Read
-    directly from the project layer, not merged into the layered Config.
-    The value is a single path segment (no separators / parent escapes)."""
-    if not path.exists():
-        return "default"
-    try:
-        raw: Any = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
-        raise LoadError(
-            f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)
-        ) from e
-    if not isinstance(raw, dict):
-        raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
-    name = raw.get("default-workflow")
-    if name is None:
-        return "default"
-    if not isinstance(name, str) or not validate_workflow_name(name):
-        raise LoadError(
-            "'default-workflow' must be a single workflow name "
-            "(no path separators)",
-            SourceLoc(file=path, line=1),
-        )
-    return name
-
-
 def parse_default_base(path: Path) -> str | None:
     """Read imp/config.yaml `default-base:` field — the integration branch a
     quest is based on. Absent file or missing key → None; `imp new` treats that
