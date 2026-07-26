@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from imp.cli import main
 from imp.engine.executor import RunResult
 
@@ -579,3 +581,31 @@ def test_merged_run_with_warnings_renders_the_warnings_block_once(monkeypatch) -
     assert "- cache read failed (×2)" not in raw     # the deleted plain block's shape
     assert raw.endswith("\n\n")                      # exactly one trailing blank
     assert not raw.endswith("\n\n\n")
+
+
+def _screen_rows(raw: str, *, tty: bool) -> list[str]:
+    if not tty:
+        return raw.split("\n")
+    import pyte
+
+    from impty.screen import TerminalScreen
+    from impty.view import lines as screen_lines
+    screen = TerminalScreen(80, 24, history=200, ratio=0.5)
+    # a real tty's ONLCR turns every \n into \r\n; a StringIO capture does not
+    pyte.ByteStream(screen).feed(raw.replace("\n", "\r\n").encode())
+    return screen_lines(screen)
+
+
+@pytest.mark.parametrize("tty", [True, False], ids=["pty", "pipe"])
+@pytest.mark.parametrize("warnings", [_END_OF_RUN_WARNINGS, []],
+                         ids=["warnings", "no-warnings"])
+def test_exactly_one_blank_between_narrative_and_headline(
+    monkeypatch, warnings, tty,
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    rows = _screen_rows(_end_of_run_output(warnings, tty=tty), tty=tty)
+    h = next(i for i, r in enumerate(rows) if r.strip() == "merged into master")
+    assert rows[h - 1].strip() == ""      # exactly one blank directly above the headline
+    assert rows[h - 2].strip() != ""      # …and not two
+    last = "• retrying after API 529" if warnings else "merging · complete"
+    assert last in rows[h - 2]            # …and it follows the LAST narrative line
