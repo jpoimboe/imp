@@ -165,6 +165,9 @@ async def test_classified_auth_text_wins_over_no_complete_step(
     events = [ev async for ev in runner.run(inv)]
     err = next(e for e in events if e.get("type") == "error")
     assert err["payload"]["category"] == "auth"
+    # Without this key the breadcrumb/error node carry only "claude CLI: Invalid API key".
+    assert err["payload"]["detail"]["last_agent_text"] == (
+        "Invalid API key — please check your credentials")
 
 
 @pytest.mark.anyio

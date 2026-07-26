@@ -724,6 +724,7 @@ class CodexSession(ObserveSession):
     def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
         classified = _classify_agent_text(last_text)
         if classified is not None:
+            classified.detail["last_agent_text"] = last_text[:500]
             return cast(dict[str, Any], perr.make_error_event(
                 classified, kind=getattr(classified, "kind", ""))["payload"])
         return None
