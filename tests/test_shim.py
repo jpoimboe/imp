@@ -34,11 +34,11 @@ def test_write_imp_shim_embeds_outer_src_root(tmp_path: Path) -> None:
     assert f"sys.path.insert(0, {outer_root!r})" in body  # outer imp's src dir, not worktree
 
 
-def _run_shim(shim: Path, *args: str, cwd: Path | None = None,
+def _run_shim(shim: Path, *args: str, cwd: Path,
               env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(shim), *args],
-        cwd=str(cwd) if cwd is not None else None,
+        cwd=str(cwd),
         env=env,
         capture_output=True,
         text=True,
@@ -49,7 +49,7 @@ def _run_shim(shim: Path, *args: str, cwd: Path | None = None,
 def test_shim_execution_runs_outer_imp(tmp_path: Path) -> None:
     """Executing the shim file invokes the running imp's CLI (baseline)."""
     shim = write_imp_shim(tmp_path) / "imp"
-    result = _run_shim(shim, "--version")
+    result = _run_shim(shim, "--version", cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == f"imp {__version__}"
 
@@ -68,7 +68,7 @@ def test_shim_resolves_outer_imp_over_pythonpath_shadow(tmp_path: Path) -> None:
 
     shim = write_imp_shim(tmp_path) / "imp"
     env = {**os.environ, "PYTHONPATH": str(fake_root)}
-    result = _run_shim(shim, "--version", env=env)
+    result = _run_shim(shim, "--version", cwd=tmp_path, env=env)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == f"imp {__version__}"
     assert "SHADOW" not in result.stdout

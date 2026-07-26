@@ -12,7 +12,7 @@ def test_imp_status_runs(tmp_path: Path, monkeypatch) -> None:
     # Run via -m so we exercise the entrypoint
     r = subprocess.run(
         [sys.executable, "-m", "imp", "list"],
-        capture_output=True, text=True, check=False,
+        cwd=tmp_path, capture_output=True, text=True, check=False,
     )
     # Either prints empty status or an "no changes" message — either is fine
     assert r.returncode == 0 or "no changes" in (r.stdout + r.stderr).lower()

@@ -54,7 +54,8 @@ def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
 def test_write_imp_shim_is_executable_and_runs_imp(tmp_path: Path) -> None:
     shim = write_imp_shim(tmp_path)
     assert os.access(shim, os.X_OK)
-    out = subprocess.run([shim, "--help"], capture_output=True, text=True, timeout=60)
+    out = subprocess.run([shim, "--help"], cwd=tmp_path,
+                         capture_output=True, text=True, timeout=60)
     assert out.returncode == 0
     assert "usage: imp" in (out.stdout + out.stderr)
 
