@@ -1,10 +1,12 @@
-"""One-shot startup migrations, run by the console-script entrypoint
-(`imp.__main__:main`) and never by `imp.cli.main:main` — the suite drives the
-latter in-process, where a migration would rearrange the developer's own files."""
+"""One-shot startup migrations: the global config file's move into $IMP_HOME and
+the project config file's staged rename. Run by the console-script entrypoint
+(`imp.__main__:main`), never by `imp.cli.main:main` — the suite drives the latter
+in-process, where a migration would rearrange the developer's own files."""
 
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -30,14 +32,43 @@ def migrate_global_config(legacy: Path, new: Path) -> None:
           file=sys.stderr)
 
 
+def _git_toplevel(cwd: Path) -> Path | None:
+    proc = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                          cwd=cwd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    return Path(proc.stdout.strip()).resolve()
+
+
+def migrate_project_config(cwd: Path) -> None:
+    """Stage `imp/project.yaml` -> `imp/config.yaml` in the main checkout, once."""
+    from imp.engine.worktree import find_control_root
+
+    control = find_control_root(cwd)
+    # Cheap filesystem checks first: an already-migrated repo is the permanent
+    # steady state, and this spares it the second git spawn on every command.
+    if not (control / "imp" / "project.yaml").is_file():
+        return
+    if (control / "imp" / "config.yaml").exists():
+        return
+    # In a linked worktree the toplevel is the worktree and the control root the
+    # main checkout, so this inequality IS the mid-run guard.
+    if _git_toplevel(cwd) != control:
+        return
+    subprocess.run(["git", "mv", "imp/project.yaml", "imp/config.yaml"],
+                   cwd=control, capture_output=True, text=True, check=True)
+    print("imp: renamed imp/project.yaml to imp/config.yaml (staged) — "
+          "commit it to finish the move", file=sys.stderr)
+
+
 def run_startup_migrations() -> None:
-    """Best-effort: a migration that cannot run is retried on the next
+    """Best-effort per step: a migration that cannot run is retried on the next
     invocation and must never be the reason a command dies."""
-    try:
+    with suppress(Exception):
         from imp.providers.effective import (
             global_config_path,
             legacy_global_config_path,
         )
         migrate_global_config(legacy_global_config_path(), global_config_path())
-    except Exception:
-        pass
+    with suppress(Exception):
+        migrate_project_config(Path.cwd())
