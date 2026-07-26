@@ -252,31 +252,32 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
     return result["line"]
 
 
-async def ask_line_with_slash(
-    prompt: Any, status: Any | None, quest: Any, *, color: bool = False, width: int = 80,
-    coord: Any = None, driver: Any = None, hint: str | None = None,
-    pre_session: bool = False, toolbar_override: str | None = None,
-    allow_empty: bool = False,
-    sandbox_sink: dict[str, bool] | None = None,
-) -> str | SkillRequest:
-    """Read one interactive line, intercepting slash commands. /help, /skills,
-    unknown, and not-found commands print and re-prompt; /<name> that matches a
-    known skill returns a SkillRequest marker; anything else returns as-is.
+async def solicit_line(
+    prompt: Any, status: Any | None, *,
+    dispatch: Callable[[str], object],
+    toolbar_fn: Callable[[], str | None],
+    coord: Any = None, driver: Any = None, width: int = 80,
+    hint: str | None = None, allow_empty: bool = False,
+    output_fn: Callable[[str], None] = print,
+) -> object:
+    """Frame ONE interactive solicit turn and return what the user's line meant.
 
-    Framing: no chrome around the field. While the user types, the slate input
-    field marks the turn; on submit prompt_toolkit erases its region
-    (erase_when_done) and the live driver reprints the entered line with the
-    bright-blue `> ` caret. The gray bracketing rules are gone — the caret is
-    the marker now.
+    The single implementation of the solicit framing, shared by the run loop
+    (ask_line_with_slash) and the setup conversation. Per TURN, around the loop:
+    the at-prompt mark, the tty quiesce, one status.suspend(), and
+    flush_deferred / at-prompt reset / signal re-arm on every exit path. Per
+    READ, inside it: driver.prepare_for_prompt(), the composed bottom toolbar
+    (toolbar_fn), and the exit-event-raced read.
+
+    `dispatch` handles one slash line, so each path keeps its own command set:
+    REPROMPT prints a blank and re-prompts, any other value is returned as-is.
 
     `coord` (the run's InterruptCoordinator) marks the prompt turn via
     `set_at_prompt` so an out-of-band SIGINT routes through the exit path;
     None (tests / non-interactive) = no-op.
 
-    `driver` (the run's LiveDriver) is called for prepare_for_prompt before each
-    prompt iteration and flush_deferred once in the finally on solicit exit.
-
-    Shared by the run and resume paths so the slash/skills logic exists once."""
+    `driver` (the LiveDriver) is called for prepare_for_prompt before each
+    prompt iteration and flush_deferred once in the finally on solicit exit."""
 
     # RE-ARM the coordinator's SIGINT/SIGTERM handlers on exit: prompt_toolkit's
     # prompt_async(handle_sigint=True) calls loop.remove_signal_handler(SIGINT)
@@ -302,9 +303,9 @@ async def ask_line_with_slash(
         async with quiesce_cm:
             # Hoist status.suspend() across the WHOLE solicit loop — one suspend
             # entry/exit per user turn, not per iteration. /help, /skills, and
-            # not-found messages print via handle_slash_line, and the live status
-            # display must stay suspended while they do, or it interleaves/clobbers
-            # them before the loop re-prompts.
+            # not-found messages print from dispatch, and the live status display
+            # must stay suspended while they do, or it interleaves/clobbers them
+            # before the loop re-prompts.
             suspend_cm = (
                 status.suspend() if status is not None
                 else contextlib.nullcontext())
@@ -314,12 +315,7 @@ async def ask_line_with_slash(
                     while True:
                         if driver is not None:
                             driver.prepare_for_prompt()
-                        toolbar = (
-                            driver.compose_toolbar_static() if driver is not None
-                            else toolbar_override if toolbar_override is not None
-                            else compose_identity_toolbar(
-                                quest_id=quest.id, title=quest.title,
-                                color=color, width=width))
+                        toolbar = toolbar_fn()
                         # _exit_event is None until C4 wires it; getattr is defensive
                         # for pre-C4 builds, where the read takes the unraced path.
                         exit_evt = getattr(coord, "_exit_event", None) if coord else None
@@ -346,30 +342,16 @@ async def ask_line_with_slash(
                             if coord is not None:
                                 coord.request_exit("ctrl-c")
                             raise
-                        if line.strip().lower() in ("exit", "quit"):
-                            # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
-                            # run loop's existing EOFError handler (cli/main.py) pauses.
-                            raise EOFError
                         if not is_slash_command(line):
                             if not line.strip():
                                 if allow_empty:
                                     return ""
                                 continue
                             return line
-                        if pre_session and sandbox_sink is not None:
-                            current_unsandboxed = bool(sandbox_sink.get("unsandboxed"))
-                        else:
-                            current_unsandboxed = bool(
-                                getattr(driver, "unsandboxed", False))
-                        result = handle_slash_line(
-                            line, quest=quest, output_fn=print, color=color,
-                            unsandboxed=current_unsandboxed, pre_session=pre_session)
+                        result = dispatch(line)
                         if result is REPROMPT:
-                            print("")  # one blank between slash output and the reprompt
+                            output_fn("")  # one blank between slash output and the reprompt
                             continue
-                        if isinstance(result, SkillRequest):
-                            return result
-                        assert isinstance(result, str)  # a literal command line
                         return result
                 finally:
                     # Flush deferred live-driver blocks exactly once on solicit exit
@@ -387,3 +369,56 @@ async def ask_line_with_slash(
             # no-op — kept so a future provider that re-enables handle_sigint, or a
             # nested prompt that does, still re-arms (see ask_async rationale).
             coord.rearm_signal_handlers()
+
+
+async def ask_line_with_slash(
+    prompt: Any, status: Any | None, quest: Any, *, color: bool = False, width: int = 80,
+    coord: Any = None, driver: Any = None, hint: str | None = None,
+    pre_session: bool = False, toolbar_override: str | None = None,
+    allow_empty: bool = False,
+    sandbox_sink: dict[str, bool] | None = None,
+) -> str | SkillRequest:
+    """Read one interactive line for the RUN path, intercepting slash commands.
+    /help, /skills, unknown, and not-found commands print and re-prompt; /<name>
+    that matches a known skill returns a SkillRequest marker; anything else
+    returns as-is. The turn framing itself lives in solicit_line; this wrapper
+    supplies the run path's toolbar, its slash dispatch, and the exit/quit verbs.
+
+    Framing: no chrome around the field. While the user types, the slate input
+    field marks the turn; on submit prompt_toolkit erases its region
+    (erase_when_done) and the live driver reprints the entered line with the
+    bright-blue `> ` caret. The gray bracketing rules are gone — the caret is
+    the marker now.
+
+    Shared by the run and resume paths so the slash/skills logic exists once."""
+
+    def _toolbar() -> str | None:
+        if driver is not None:
+            static: str | None = driver.compose_toolbar_static()
+            return static
+        if toolbar_override is not None:
+            return toolbar_override
+        return compose_identity_toolbar(
+            quest_id=quest.id, title=quest.title, color=color, width=width)
+
+    def _dispatch(line: str) -> object:
+        if pre_session and sandbox_sink is not None:
+            current_unsandboxed = bool(sandbox_sink.get("unsandboxed"))
+        else:
+            current_unsandboxed = bool(getattr(driver, "unsandboxed", False))
+        return handle_slash_line(
+            line, quest=quest, output_fn=print, color=color,
+            unsandboxed=current_unsandboxed, pre_session=pre_session)
+
+    result = await solicit_line(
+        prompt, status, dispatch=_dispatch, toolbar_fn=_toolbar, coord=coord,
+        driver=driver, width=width, hint=hint, allow_empty=allow_empty)
+    if isinstance(result, SkillRequest):
+        return result
+    assert isinstance(result, str)  # a user line or a literal command line
+    if result.strip().lower() in ("exit", "quit"):
+        # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the run loop's
+        # existing EOFError handler (cli/main.py) pauses. Run path only — a setup
+        # answer of "exit" stays an ordinary answer.
+        raise EOFError
+    return result

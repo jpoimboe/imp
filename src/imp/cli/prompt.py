@@ -272,7 +272,7 @@ class Prompt:
         (identical to SIGTERM). This also means prompt_toolkit never calls
         loop.remove_signal_handler(SIGINT) on prompt exit, so the handler-deletion
         problem (a88e96e) cannot recur — the rearm_signal_handlers call in
-        ask_line_with_slash becomes a harmless defensive no-op (kept)."""
+        solicit_line becomes a harmless defensive no-op (kept)."""
         from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 
         from imp.cli import palette as pal
