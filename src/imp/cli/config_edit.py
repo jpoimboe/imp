@@ -29,6 +29,20 @@ class SetResult:
     previous: Any = None
 
 
+class UnsetOutcome(Enum):
+    COMMENTED = "commented"
+    ABSENT = "absent"
+    SHARED_LINE = "shared_line"
+    FLOW_BLOCKED = "flow_blocked"
+
+
+@dataclass(frozen=True, slots=True)
+class UnsetResult:
+    text: str
+    outcome: UnsetOutcome
+    previous: Any = None
+
+
 def _rt() -> YAML:
     yaml = YAML(typ="rt")
     yaml.preserve_quotes = True
@@ -142,6 +156,86 @@ def _insert(text: str, path: tuple[str, ...], value: Any) -> str:
 
 def _is_live(line: str) -> bool:
     return bool(line.strip()) and not line.lstrip().startswith("#")
+
+
+def _navigate(doc: Any, segs: tuple[str, ...]) -> Any:
+    node = doc
+    for seg in segs:
+        if not isinstance(node, dict) or seg not in node:
+            return None
+        node = node[seg]
+    return node if isinstance(node, dict) else None
+
+
+def _region_end(doc: Any, path: tuple[str, ...], total: int) -> int:
+    """First line past the key's own region: the next key at its own level or at
+    any shallower one, else EOF. Indentation cannot answer this — a block
+    sequence (`providers:` / `- anthropic`) and a wrapped flow sequence's closing
+    bracket both sit at the key's own column."""
+    end = total
+    node: Any = doc
+    for depth in range(len(path)):
+        keys = list(node)
+        index = keys.index(path[depth])
+        if index + 1 < len(keys):
+            end = min(end, node.lc.key(keys[index + 1])[0])
+        node = node[path[depth]]
+    return end
+
+
+def _comment_out(text: str, doc: Any, path: tuple[str, ...]) -> str:
+    """Prefix every line of the key's region with `# `, releasing trailing blank
+    and comment lines back to the next key."""
+    lines = text.splitlines(keepends=True)
+    parent = _navigate(doc, path[:-1])
+    start = parent.lc.key(path[-1])[0]
+    end = _region_end(doc, path, len(lines))
+    while end - 1 > start and not _is_live(lines[end - 1]):
+        end -= 1
+    for index in range(start, end):
+        if lines[index].strip():
+            lines[index] = "# " + lines[index]
+    return "".join(lines)
+
+
+def _shares_its_line(parent: Any, key: str) -> bool:
+    line = parent.lc.key(key)[0]
+    return any(parent.lc.key(other)[0] == line for other in parent if other != key)
+
+
+def _flow_spans_other_lines(parent: Any, key: str) -> bool:
+    """A flow mapping commented line-wise only survives when the whole `{ … }`
+    sits on the key's own line: anything else strands a brace or a sibling."""
+    if not parent.fa.flow_style():
+        return False
+    line = parent.lc.key(key)[0]
+    return (parent.lc.line != line
+            or any(parent.lc.key(other)[0] != line for other in parent))
+
+
+def apply_unset(text: str, path: tuple[str, ...]) -> UnsetResult:
+    doc = _rt().load(text)
+    parent = _navigate(doc, path[:-1])
+    if parent is None or path[-1] not in parent:
+        return UnsetResult(text, UnsetOutcome.ABSENT)
+    if _shares_its_line(parent, path[-1]):
+        return UnsetResult(text, UnsetOutcome.SHARED_LINE)
+    if _flow_spans_other_lines(parent, path[-1]):
+        return UnsetResult(text, UnsetOutcome.FLOW_BLOCKED)
+    previous = parent[path[-1]]
+    out = _comment_out(text, doc, path)
+    # _parse_tiers rejects an empty tier mapping, so a parent left with no live
+    # children must go too, or the file no longer loads.
+    for depth in range(len(path) - 1, 0, -1):
+        parent_path = path[:depth]
+        reloaded = _rt().load(out)
+        holder = _navigate(reloaded, parent_path[:-1])
+        if holder is None or parent_path[-1] not in holder:
+            continue      # that level went with the span; keep climbing
+        if holder[parent_path[-1]]:
+            break
+        out = _comment_out(out, reloaded, parent_path)
+    return UnsetResult(out, UnsetOutcome.COMMENTED, previous)
 
 
 def apply_set(text: str, path: tuple[str, ...], value: Any) -> SetResult:
