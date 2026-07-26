@@ -368,3 +368,139 @@ async def test_yield_watchdog_window_starts_at_arming_not_at_the_gesture(
 
     assert killed == []             # no zero-grace hard kill
     assert [r for r in log.records if r["type"] == "interrupt_escalated"] == []
+
+
+async def _drain(tg: Any) -> None:
+    """Let every task spawned before this one reach its first checkpoint: the spawner
+    is FIFO, so a sentinel that has run proves any earlier task already started."""
+    done = anyio.Event()
+
+    async def _sentinel() -> None:
+        done.set()
+
+    tg.start_soon(_sentinel)
+    await done.wait()
+
+
+@pytest.mark.anyio
+async def test_pending_gesture_is_delivered_at_the_next_attach(
+    monkeypatch: Any,
+) -> None:
+    """A genuine gesture that finds the daemon's stack empty is held, then delivered
+    when a runner attaches — with a full watchdog window measured from that attach,
+    not an instant hard kill of a runner that never had a chance to yield."""
+    # As above: a window the poll below cannot lose a race against under load.
+    monkeypatch.setattr(_signals, "_YIELD_DEADLINE_S", 60.0)
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]     # inject the clock (no real sleeping)
+    interrupted: list[str] = []
+    killed: list[str] = []
+
+    async def _interrupt() -> None:
+        interrupted.append("r")
+
+    async def _force_kill() -> None:
+        killed.append("r")
+
+    async with anyio.create_task_group() as tg:
+        coord.set_delivery_spawner(tg.start_soon)     # daemon-shaped coordinator
+        await coord.signal_pause(reason="ctrl-c", via="frame")   # empty runner stack
+        assert [r["type"] for r in log.records] == ["interrupt_requested"]
+        assert interrupted == []                      # nothing to deliver to yet
+        # Push the injected clock past the gesture's whole (patched) window. Inert
+        # under the fixed watchdog, which no longer reads _now — it is a guard that
+        # fails loudly if the deadline is ever re-derived from the gesture again.
+        t["now"] = 161.0
+        with coord.runner_attached(_interrupt, force_kill=_force_kill,
+                                   agent_id="step:p/s"):
+            await wait_until(lambda: any(
+                r["type"] == "interrupt_delivered" for r in log.records))
+            coord.note_yield()          # the run yields inside the window
+
+    assert interrupted == ["r"]
+    delivered = [(r["payload"]["agent_id"], r["payload"]["tier"], r["payload"]["outcome"])
+                 for r in log.records if r["type"] == "interrupt_delivered"]
+    assert delivered == [("step:p/s", "cooperative", "ok")]
+    assert killed == []             # the fresh runner is not hard-killed
+    assert [r for r in log.records if r["type"] == "interrupt_escalated"] == []
+
+
+@pytest.mark.anyio
+async def test_client_coordinator_holds_no_pending_delivery() -> None:
+    """A spawner-less (client) coordinator behaves exactly as today: a gesture over an
+    empty stack delivers nothing, and a later attach delivers nothing either."""
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    interrupted: list[str] = []
+
+    async def _interrupt() -> None:
+        interrupted.append("r")
+
+    await coord.signal_pause(reason="ctrl-c", via="frame")   # empty stack, no spawner
+    with coord.runner_attached(_interrupt, agent_id="r"):
+        pass          # no spawner => any delivery would have been inline and observable
+
+    assert interrupted == []
+    assert [r["type"] for r in log.records] == ["interrupt_requested"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reason", ["compact", "model-override"])
+async def test_side_effect_reasons_hold_no_pending_delivery(reason: str) -> None:
+    """compact / model-override are side-effect pauses, not gestures: the empty-stack
+    branch holds nothing for them, so a later attach is never interrupted."""
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    interrupted: list[str] = []
+    killed: list[str] = []
+
+    async def _interrupt() -> None:
+        interrupted.append("r")
+
+    async def _force_kill() -> None:
+        killed.append("r")
+
+    async with anyio.create_task_group() as tg:
+        coord.set_delivery_spawner(tg.start_soon)
+        await coord.signal_pause(reason=reason, via="frame")   # empty stack
+        with coord.runner_attached(_interrupt, force_kill=_force_kill, agent_id="r"):
+            await _drain(tg)
+
+    assert interrupted == []
+    assert killed == []
+    assert [r["type"] for r in log.records] == ["interrupt_requested"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("drop", ["reset", "clear_pause"])
+async def test_reset_and_clear_pause_drop_a_pending_delivery(drop: str) -> None:
+    """A held gesture must not outlive its round. The daemon's between-rounds reset()
+    and the inline-resolved steer's clear_pause() (which clears should_pause, so no
+    pause is pending any more) both drop it: the next attach is not interrupted."""
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    interrupted: list[str] = []
+    killed: list[str] = []
+
+    async def _interrupt() -> None:
+        interrupted.append("r")
+
+    async def _force_kill() -> None:
+        killed.append("r")
+
+    async with anyio.create_task_group() as tg:
+        coord.set_delivery_spawner(tg.start_soon)
+        await coord.signal_pause(reason="ctrl-c", via="frame")   # empty stack
+        getattr(coord, drop)()
+        with coord.runner_attached(_interrupt, force_kill=_force_kill, agent_id="r"):
+            await _drain(tg)
+
+    assert interrupted == []
+    assert killed == []
+    assert [r["type"] for r in log.records] == ["interrupt_requested"]

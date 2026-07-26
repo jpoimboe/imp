@@ -261,6 +261,9 @@ class InterruptCoordinator:
         self._event_log: Any = None
         self._spawn: Any = None       # fire-and-forget task spawner (start_soon shape)
         self._yielded: Any = None     # anyio.Event set when the run yields (watchdog)
+        # Daemon-only (set only when _spawn is not None): a genuine gesture that found
+        # the runner stack empty. The next attach delivers it instead of dropping it.
+        self._delivery_pending = False
         self._activity_listeners: list[Any] = []
         # Suspend-during-solicit (this quest): True ONLY while an attended agent
         # is blocked awaiting a human reply at the bare-turn-end gate.
@@ -491,6 +494,7 @@ class InterruptCoordinator:
         self._force_forwarded = False
         self.escalated = False
         self._yielded = None
+        self._delivery_pending = False
         self._backoff_wait_depth = 0
         self._retry_now = False
 
@@ -503,6 +507,8 @@ class InterruptCoordinator:
         self._should_pause = False
         self._interrupted = False
         self.pause_reason = None
+        # No pause is pending any more, so a held gesture must not be delivered later.
+        self._delivery_pending = False
 
     def end_gesture_round(self) -> None:
         """Client round-over reset: the run yielded and the paused prompt is up,
@@ -655,6 +661,15 @@ class InterruptCoordinator:
                    {"reason": "second_gesture", "killed": killed})
         self.note_yield()
 
+    def _arm_delivery(self, spawn: Any) -> None:
+        """Fire-and-forget delivery plus the yield watchdog, whose window starts at this
+        arming — on a deferred delivery that is seconds after the gesture."""
+        import anyio
+
+        self._yielded = anyio.Event()
+        spawn(self._deliver_interrupt)
+        spawn(self._yield_watchdog)
+
     async def _yield_watchdog(self) -> None:
         """Hard-kill the whole attach stack if the run doesn't yield within 5s of the ARMING.
         The window starts here, not at the gesture: a delivery deferred to a later attach is
@@ -713,6 +728,10 @@ class InterruptCoordinator:
         att = _Attached(interrupt_fn, force_kill, agent_id)
         self._runner_stack.append(att)
         try:
+            spawn = self._spawn
+            if self._delivery_pending and spawn is not None:
+                self._delivery_pending = False
+                self._arm_delivery(spawn)
             yield
         finally:
             with _suppress(ValueError):
@@ -746,8 +765,6 @@ class InterruptCoordinator:
             self._interrupted = True
         if not first:
             return
-        import anyio
-
         self._emit("interrupt_requested", {"source": reason, "via": via})
         if not self._runner_stack or reason == "model-override":
             # No interrupt is delivered in two cases:
@@ -761,16 +778,17 @@ class InterruptCoordinator:
             # The pause flags above are the whole effect — do NOT arm the watchdog:
             # nothing would post a yield to disarm it, so it would false-fire
             # interrupt_escalated after the window AND stall the pump task group's
-            # close for the window.
+            # close for the window. A genuine gesture is instead HELD (daemon only,
+            # where delivery is fire-and-forget) so the next attach delivers it.
+            if (self._spawn is not None and not self._runner_stack
+                    and reason not in SIDE_EFFECT_REASONS):
+                self._delivery_pending = True
             return
         spawn = self._spawn
         if spawn is not None:
             # Owning task group present (the daemon): deliver fire-and-forget so the
-            # control loop proceeds to the next frame. The yield watchdog is armed
-            # from the gesture time recorded above.
-            self._yielded = anyio.Event()
-            spawn(self._deliver_interrupt)
-            spawn(self._yield_watchdog)
+            # control loop proceeds to the next frame.
+            self._arm_delivery(spawn)
         else:
             # No spawner => client/local coordinator: only an INSTANT interrupt fn is
             # ever attached here (SessionControls._forward_interrupt, a network frame
