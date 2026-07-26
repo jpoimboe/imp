@@ -157,14 +157,6 @@ def session_store_for(transcript_dir: Path) -> ImpSessionStore:
     return ImpSessionStore(transcript_dir / "claude_session")
 
 
-def store_has_conversation_body(entries: list[dict[str, Any]] | None) -> bool:
-    """True iff the store holds a resumable body — any entry that is not the CC ai-title stub."""
-    return any(
-        isinstance(e, dict) and e.get("type") != "ai-title"
-        for e in (entries or [])
-    )
-
-
 _RECORD_UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session-record")
 
 
@@ -183,104 +175,6 @@ def _session_block_to_dict(block: Any) -> dict[str, Any]:
         return {"type": "tool_result", "tool_use_id": block.tool_use_id,
                 "content": block.content, "is_error": block.is_error}
     raise TypeError(f"unexpected content block: {type(block).__name__}")
-
-
-# Usage-limit wording backstop: matches both "session limit" and "weekly limit"
-# phrasings, plus the bare-time reset announcement. Spans both usage-limit kinds.
-_USAGE_LIMIT_RE = re.compile(
-    r"hit (?:your|a|the) (?:session|weekly) limit"
-    r"|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/",
-    re.IGNORECASE)
-
-
-def session_record_is_error_turn(entry: Any) -> bool:
-    """True for a synthetic API-error / usage-limit turn (isApiErrorMessage flag or text)."""
-    if not isinstance(entry, dict):
-        return False
-    if entry.get("isApiErrorMessage") is True:
-        return True
-    message = entry.get("message")
-    if not isinstance(message, dict):
-        return False
-    if message.get("isApiErrorMessage") is True:
-        return True
-    content = message.get("content")
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text = " ".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text")
-    else:
-        text = ""
-    return bool(_USAGE_LIMIT_RE.search(text))
-
-
-def strip_trailing_error_turn(
-    entries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Drop a single trailing synthetic error turn; return entries unchanged otherwise."""
-    if entries and session_record_is_error_turn(entries[-1]):
-        return list(entries[:-1])
-    return list(entries)
-
-
-def _store_body_turn_count(entries: list[dict[str, Any]]) -> int:
-    """Count conversation turns (user/assistant with a message) in a store body."""
-    return sum(
-        1 for e in entries
-        if isinstance(e, dict)
-        and e.get("type") in ("user", "assistant")
-        and "message" in e
-    )
-
-
-def _truncate_store_body_to_turns(
-    entries: list[dict[str, Any]], turn_limit: int,
-) -> list[dict[str, Any]]:
-    if turn_limit <= 0:
-        return []
-    count = 0
-    for i, e in enumerate(entries):
-        if (isinstance(e, dict) and e.get("type") in ("user", "assistant")
-                and "message" in e):
-            count += 1
-            if count == turn_limit:
-                return entries[:i + 1]
-    return list(entries)
-
-
-def reconcile_store_tail(
-    messages: list[Message], store_entries: list[dict[str, Any]], *,
-    session_id: str, cwd: str, model: str,
-) -> list[dict[str, Any]]:
-    """Pure reconcile: strip a trailing synthetic error turn, TRUNCATE the store
-    body to exactly len(messages) conversation turns (dropping surplus turns left
-    by a rolled-back transcript), then append session records for the transcript
-    messages the store is still missing.
-
-    Returns the full desired store entry list (kept body + synthesized tail).
-    The turn-count -> message-index mapping assumes the store body's conversation
-    turns are 1:1 with imp transcript messages (the common case at a result
-    boundary). The caller persists the returned list before native resume.
-
-    Persistence note: a stripped trailing error turn and the real tail entry that
-    replaces it can share a deterministic uuid, so the caller must OVERWRITE the
-    store file with the returned list — appending would let the store's uuid dedup
-    drop the real tail.
-    """
-    kept = strip_trailing_error_turn(store_entries)
-    kept = _truncate_store_body_to_turns(kept, len(messages))
-    body_count = _store_body_turn_count(kept)
-    missing = messages[body_count:]
-    if not missing:
-        return kept
-    parent = next((e["uuid"] for e in reversed(kept)
-                   if isinstance(e, dict) and e.get("uuid")), None)
-    tail = message_to_session_records(
-        missing, parent_uuid=parent, session_id=session_id, cwd=cwd,
-        model=model, start_index=body_count)
-    return kept + tail
 
 
 def message_to_session_records(

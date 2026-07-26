@@ -439,9 +439,9 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     for m in msgs:
         t.append(m)
-    # The store flushed only through the complete_step result (msgs[:3]); the
-    # trailing prose (msgs[3]) is the unflushed deficit reconcile_store_tail
-    # appends before claude-p loads its native session.
+    # The store has only msgs[:3]; the production resume code rebuilds the
+    # full store from _project_for_cli(messages[:resume_base]) before
+    # claude-p loads its native session, so the partial state here is overwritten.
     await store.append(skey, message_to_session_records(
         msgs[:3], parent_uuid=None, session_id=skey["session_id"],
         cwd=str(tmp_path), model=_MODEL, start_index=0))
