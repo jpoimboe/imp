@@ -3547,3 +3547,22 @@ def test_setup_footer_is_inert_on_a_non_tty() -> None:
     drv.on_event(ev("1", "tool_call", agent_id="a", id="c1", name="read_file",
                     input={"path": "app.py"}))
     assert out.getvalue() == ""                        # piped output stays clean
+
+
+def test_finish_clears_the_stop_ack_so_it_cannot_outlive_the_run() -> None:
+    """The ack is sticky, so teardown must end it explicitly — otherwise a tick landing
+    after finish() repaints `stopping…` onto the exit block."""
+    out = _TTYPipe()
+    status = LiveStatus(out)
+    status._width_fn = lambda: 80
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="spec",
+                    model="m", provider="anthropic"))
+    drv.show_stop_ack("stopping…")
+    drv.finish()
+    assert status._stop_ack is None
+    out.truncate(0)
+    out.seek(0)
+    status._draw()                       # a stray spinner tick after teardown
+    assert out.getvalue() == ""
