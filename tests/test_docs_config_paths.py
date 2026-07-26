@@ -1,4 +1,4 @@
-"""No doc, README, skill, workflow prompt, or playbook may name the pre-IMP_HOME
+"""No doc, README, bundled asset prompt, or playbook may name the pre-IMP_HOME
 global config location, the XDG knob that used to locate it, or the project
 config file's pre-rename name."""
 from __future__ import annotations
@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-_ROOTS = ("docs", "src/imp/assets/skills", "src/imp/assets/workflows",
-          "tests/playbooks")
+_ROOTS = ("docs", "src/imp/assets", "tests/playbooks")
 
 
 def _corpus() -> list[Path]:
