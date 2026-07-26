@@ -143,8 +143,8 @@ to score).
   headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at
   (snapshot list — the live `--help` wins; flag drift):
   - `imp init` — first-run bootstrap. A clone of an already-init'd imp repo (or a machine
-    that already has `~/.config/imp/config.yaml`) short-circuits to "already set up"; to see
-    the real interactive path, run in a **fresh non-imp git repo** with `XDG_CONFIG_HOME`
+    that already has `~/.imp/config.yaml`) short-circuits to "already set up"; to see
+    the real interactive path, run in a **fresh non-imp git repo** with `IMP_HOME`
     pointed at an empty dir. Only the **provider multi-select** is interactive — theme is
     **auto-detected silently** (no prompt; under a non-truecolor pty it picks `ansi`).
   - `imp new -h` — the flag surface (`--backlog`, `--background`, `--depends-on`,
@@ -160,7 +160,7 @@ to score).
   - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`,
     `imp events search`): expert-oriented, but read its `-h` and a bare invocation.
   - `imp search <query>` — both a hit and a miss: is the no-match wording helpful?
-  - `imp config` / `imp config --explain high` — layer/source arrows legible? precedence clear?
+  - `imp config` / `imp config --explain high` — layer/source labels legible? precedence clear?
   - `imp abandon <id>` — teardown wording clear? confirmation/affordance?
   - `imp edit <id> --title "…"` — is the confirmation clear about what changed?
   - `imp remote-control -h` — purpose clear from help alone? (The full chat UX has its own

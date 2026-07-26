@@ -71,7 +71,7 @@ def _seed_cc_project(root: Path) -> None:
             steps:
               - {name: w, file: agents/writer.md, tier: low}
     """))
-    (root / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+    (root / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main
         providers: [claude_code]

@@ -52,7 +52,7 @@ def _seed_render(root: Path) -> object:
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root)
@@ -71,7 +71,7 @@ def _seed_two_step(root: Path) -> object:
         "      - {name: a, file: agents/writer.md, tier: low}\n"
         "      - {name: b, file: agents/writer.md, tier: low}\n"
     )
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root)
@@ -91,7 +91,7 @@ def _seed(root: Path) -> object:
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root)

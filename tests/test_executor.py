@@ -214,10 +214,10 @@ _FAKE_CONFIG = (
 
 def _write_fake_config(root: Path) -> None:
     """Write the `fake`-provider config in the layered layout that
-    load_effective_config reads: imp/project.yaml marker + .imp/config.yaml
+    load_effective_config reads: imp/config.yaml marker + .imp/config.yaml
     local layer."""
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
 
@@ -2152,7 +2152,7 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
     )
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\nfacts:\n  test_command: make check\n"
     )
     quest = _make_quest(tmp_path)
@@ -3179,7 +3179,7 @@ async def test_run_quest_persists_configured_max_reincarnations(tmp_path):
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     # Overwrite the project layer with a NON-default cap so the assertion is
     # falsifiable (5 != the default 2).
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 5\n")
     _register_fake({"status": "Success"})
 
@@ -3198,7 +3198,7 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
     from imp.providers import resolve
 
     quest, phase, step = _seed_minimal_workflow(tmp_path)
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
     class _CtxWindowRunner:
@@ -3243,7 +3243,7 @@ async def test_resume_resets_reincarnation_budget(tmp_path):
     from imp.providers import resolve
 
     quest, phase, step = _seed_minimal_workflow(tmp_path)
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
     key = f"step:{phase}/{step}"
@@ -3300,7 +3300,7 @@ async def test_reincarnation_cap_still_fires_without_resume(tmp_path):
     from imp.providers import resolve
 
     quest, phase, step = _seed_minimal_workflow(tmp_path)
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
     key = f"step:{phase}/{step}"
 
@@ -3375,7 +3375,7 @@ async def test_resume_reincarnation_reset_is_single_shot(tmp_path):
         "  - name: done\n"
         "    steps: []\n"
     )
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n"
@@ -3517,7 +3517,7 @@ async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
     AgentInvocation, so the runner's Tier A watch sees the configured value."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     # Non-default threshold so the assertion is falsifiable (0.65 != default 0.8).
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  checkpoint_threshold: 0.65\n")
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
@@ -3536,7 +3536,7 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
     from imp.providers import resolve
 
     quest, phase, step = _seed_minimal_workflow(tmp_path)
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
     class _HandoffRunner:
@@ -3586,7 +3586,7 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     from imp.providers import resolve
 
     quest, phase, step = _seed_minimal_workflow(tmp_path)
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
     class _HandoffNoNoteRunner:

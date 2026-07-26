@@ -36,7 +36,7 @@ def _seed(root: Path, *, persona: str | None) -> object:
     )
     if persona is not None:
         (wf / "persona.md").write_text(persona)
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root, title="My Quest")

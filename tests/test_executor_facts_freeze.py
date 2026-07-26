@@ -36,7 +36,7 @@ def _seed(root: Path, *, facts_yaml: str, memory: str | None = None):
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    (root / "imp" / "project.yaml").write_text(facts_yaml)
+    (root / "imp" / "config.yaml").write_text(facts_yaml)
     if memory is not None:
         (root / "imp" / "memory").mkdir(parents=True, exist_ok=True)
         (root / "imp" / "memory" / "all.md").write_text(memory)
@@ -88,8 +88,8 @@ async def test_first_run_raises_on_invalid_memory_and_leaves_state_unfrozen(
 
 
 @pytest.mark.anyio
-async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> None:
-    # project.yaml says greeting=hi and memory=live, but state was frozen earlier
+async def test_run_uses_frozen_state_not_live_config_yaml(tmp_path: Path) -> None:
+    # config.yaml says greeting=hi and memory=live, but state was frozen earlier
     # with different values. The executor must render from the FROZEN state.
     quest = _seed(
         tmp_path,
@@ -108,7 +108,7 @@ async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> No
     from imp.engine.archive import read as archive_read
     archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     body = sink[0].initial_messages[0].content[0].text
-    assert "hello FROZEN" in body                 # frozen fact, not live project.yaml
+    assert "hello FROZEN" in body                 # frozen fact, not live config.yaml
     assert "## Project memory" in body
     assert "FROZEN-MEMO" in body                  # frozen memory, injected
     assert "hello hi" not in body                 # live greeting never used

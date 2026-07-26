@@ -68,7 +68,7 @@ def _setup(root: Path, writer_prompt: str) -> Change:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\n"
         "providers: [claude_code]\n"
         "tiers:\n"

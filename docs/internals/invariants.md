@@ -27,9 +27,9 @@ Read this when editing imp's engine/renderer or workflow prompts.
   snapshots or branch-tied state — they rot fast.
 - **User-level memory channel (P1):** `imp/memory/` is project-only today —
   read from the repo's `imp/` config dir and frozen per run into quest state,
-  never merged through the floor → project → user → local config layers. A
+  never merged through the floor → project → global → local config layers. A
   maintainer's cross-project preferences have no home but per-repo `imp/memory/`.
-  Candidate feature: a user-level memory dir (e.g. under `~/.config/imp/`) whose
+  Candidate feature: a user-level memory dir (e.g. under `~/.imp/`) whose
   `all.md` layers into every agent's `## Project memory` section alongside the
   project's.
 

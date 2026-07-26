@@ -7,34 +7,31 @@ from pathlib import Path
 from typing import TextIO
 
 from imp.cli import palette as pal
-from imp.providers.effective import FLOOR_SRC, EffectiveConfig
+from imp.providers.effective import FLOOR_SRC, EffectiveConfig, global_config_path
 from imp.providers.resolve import iter_provider_defaults
 from imp.remote.drivers import REGISTRY
 
 
-def _elide(src_file: Path) -> str:
-    parts = src_file.parts
-    if len(parts) <= 2:
-        return str(src_file)
-    return "…/" + "/".join(parts[-2:])
-
-
-def _label(src_file: Path) -> str:
-    """Human label for a leaf's source file (the right-hand side of `←`)."""
+def layer_label(src_file: Path) -> str:
+    """Short display name for a config layer's file, shared with `imp config set` output."""
     if src_file == FLOOR_SRC.file:
         return "provider default"
-    return _elide(src_file)
+    if src_file == global_config_path():
+        home = Path.home()
+        if src_file.is_relative_to(home):
+            return f"~/{src_file.relative_to(home)}"
+        return str(src_file)
+    return f"{src_file.parent.name}/{src_file.name}"
 
 
 def _annotation(label: str, *, color: bool) -> str:
-    """The `← <source>` provenance annotation, dimmed when color is on."""
-    text = f"← {label}"
+    """The bracketed provenance marker, dimmed when color is on."""
+    text = f"[{label}]"
     return pal.ansi(text, "dim") if color else text
 
 
-def _emit_section(out: TextIO, rows: list[tuple[str, str, str]], *, color: bool = False) -> None:
-    """Emit rows with the value column sized to the section's widest value so arrows align."""
-    width = max([24, *(len(value) for _, value, _ in rows)])
+def _emit_section(out: TextIO, rows: list[tuple[str, str, str]], *, width: int,
+                  color: bool = False) -> None:
     for key, value, label in rows:
         out.write(f"  {key:<28} {value:<{width}} {_annotation(label, color=color)}\n")
 
@@ -42,7 +39,6 @@ def _emit_section(out: TextIO, rows: list[tuple[str, str, str]], *, color: bool 
 def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
                   show_all: bool = False) -> None:
     cfg, prov = eff.config, eff.provenance
-    out.write("tiers:\n")
     configured = set(cfg.providers)
     tier_rows: list[tuple[str, str, str]] = []
     for tier in sorted(cfg.tiers):
@@ -51,11 +47,10 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
                 continue
             src = prov.get(("tiers", tier, vendor), FLOOR_SRC)
             tier_rows.append(
-                (f"{tier} {vendor}", cfg.tiers[tier][vendor], _label(src.file)))
-    _emit_section(out, tier_rows, color=color)
-    out.write("\nsettings:\n")
+                (f"{tier} {vendor}", cfg.tiers[tier][vendor], layer_label(src.file)))
     setting_rows: list[tuple[str, str, str]] = []
     for key, val in (
+        ("default-workflow", cfg.default_workflow),
         ("providers", ", ".join(cfg.providers) or "(none)"),
         ("theme", cfg.theme),
         ("editing_mode", cfg.editing_mode),
@@ -70,9 +65,13 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
          else f"{cfg.test_cmd_slow_timeout}s"),
     ):
         leaf_src = prov.get((key,))
-        label = _label(leaf_src.file) if leaf_src is not None else "default"
+        label = layer_label(leaf_src.file) if leaf_src is not None else "default"
         setting_rows.append((key, val, label))
-    _emit_section(out, setting_rows, color=color)
+    width = max([24, *(len(v) for _, v, _ in (*tier_rows, *setting_rows))])
+    out.write("tiers:\n")
+    _emit_section(out, tier_rows, width=width, color=color)
+    out.write("\nsettings:\n")
+    _emit_section(out, setting_rows, width=width, color=color)
 
     out.write("\nprovider keys (local check):\n")
     defaults = iter_provider_defaults()
@@ -117,7 +116,5 @@ def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool 
         value_cell = f"{value:<24}"
         if color:
             value_cell = pal.ansi(value_cell, "bold")
-        annotation = f"← {_label(src_file)}"
-        if color:
-            annotation = pal.ansi(annotation, "dim")
-        out.write(f"  {vendor:<28} {value_cell} {annotation}\n")
+        out.write(f"  {vendor:<28} {value_cell} "
+                  f"{_annotation(layer_label(src_file), color=color)}\n")

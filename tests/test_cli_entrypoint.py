@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -45,10 +46,10 @@ def test_tui_flag_removed_from_new_chat_resume() -> None:
             parser.parse_args([cmd, "--tui"])
 
 
-def test_version_flag_prints_version_rc0() -> None:
+def test_version_flag_prints_version_rc0(tmp_path: Path) -> None:
     r = subprocess.run(
         [sys.executable, "-m", "imp", "--version"],
-        capture_output=True, text=True, check=False,
+        cwd=tmp_path, capture_output=True, text=True, check=False,
     )
     assert r.returncode == 0
     assert r.stdout.strip() == f"imp {__version__}"
@@ -64,14 +65,14 @@ def test_imp_help_prints_overview_rc0(capsys) -> None:
     assert "error:" not in out.lower()
 
 
-def test_imp_help_command_equals_command_dash_h() -> None:
+def test_imp_help_command_equals_command_dash_h(tmp_path: Path) -> None:
     helped = subprocess.run(
         [sys.executable, "-m", "imp", "help", "resume"],
-        capture_output=True, text=True, check=False,
+        cwd=tmp_path, capture_output=True, text=True, check=False,
     )
     direct = subprocess.run(
         [sys.executable, "-m", "imp", "resume", "-h"],
-        capture_output=True, text=True, check=False,
+        cwd=tmp_path, capture_output=True, text=True, check=False,
     )
     assert helped.returncode == 0
     assert direct.returncode == 0

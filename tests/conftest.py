@@ -216,7 +216,7 @@ def _reset_theme() -> Generator[None, None, None]:
     which leaks the resolved theme into the next test. A test that asserts the
     ansi-named SGR codes (e.g. gray `\\x1b[90m`) then fails under random ordering
     if a prior test resolved a dark/light theme — most visibly when a non-ansi
-    `theme:` lives in the merged config (a real `~/.config/imp/config.yaml`, or
+    `theme:` lives in the merged config (a real `~/.imp/config.yaml`, or
     the dogfood's bootstrapped user config). Resetting on both sides makes the
     SGR-literal tests order-independent. (test_palette.py defines an identically
     named fixture; that local one overrides this for its own module — same
@@ -228,10 +228,14 @@ def _reset_theme() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_user_config(
+def _isolate_global_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Redirect XDG_CONFIG_HOME to an absent per-test dir so no test reads the real user config."""
+    """Point IMP_HOME at an absent per-test dir so no test reads the real global
+    config. XDG_CONFIG_HOME stays set for one reason only — it is the startup
+    migration's legacy source, and a test that shells out to a real `imp`
+    inherits both."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / ".imp-isolated"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg-isolated"))
 
 
@@ -367,7 +371,7 @@ def _seed_project(tmp_path: Path) -> None:
     imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
     (Quest.create copies imp/workflows/imp; the runtime reads the merged
-    config from imp/project.yaml — the project layer of load_effective_config).
+    config from imp/config.yaml — the project layer of load_effective_config).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
     an extra gitignore commit.
@@ -396,7 +400,7 @@ def _seed_project(tmp_path: Path) -> None:
             steps:
               - {name: w, file: agents/writer.md, tier: low}
     """))
-    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main
         providers: [anthropic]
@@ -414,7 +418,7 @@ def _seed_project(tmp_path: Path) -> None:
 
 
 def _seed_control(root: Path) -> None:
-    """A git repo with committed imp/project.yaml marker + imp/workflows/imp
+    """A git repo with committed imp/config.yaml marker + imp/workflows/imp
     and a gitignored .imp/config.yaml local layer (read by load_effective_config)."""
     _init_repo(root)
     src = root / "imp" / "workflows" / "imp"
@@ -429,7 +433,7 @@ def _seed_control(root: Path) -> None:
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     # Config layers: committed marker + gitignored local layer.
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(

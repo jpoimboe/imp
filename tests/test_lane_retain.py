@@ -75,7 +75,7 @@ def _seed_wf(root: Path, workflow_yaml: str, *, sandbox_disabled: bool = False) 
     (src / "agents").mkdir(parents=True)
     (src / "agents" / "a.md").write_text(_AGENT)
     (src / "workflow.yaml").write_text(workflow_yaml)
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     cfg = ("providers: [fake]\n"

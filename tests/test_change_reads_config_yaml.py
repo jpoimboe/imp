@@ -1,4 +1,4 @@
-"""Quest.create reads the project layer from imp/project.yaml in the worktree
+"""Quest.create reads the project layer from imp/config.yaml in the worktree
 (spec §7 step 3)."""
 import shutil
 import subprocess
@@ -24,7 +24,7 @@ def _registry() -> None:
 def test_change_create_uses_floor_tiers_without_a_tiers_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     monkeypatch.setenv("OPENAI_API_KEY", "x")  # an env-available vendor
     root = tmp_path / "repo"
     root.mkdir()
@@ -32,12 +32,12 @@ def test_change_create_uses_floor_tiers_without_a_tiers_block(
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
     (root / "imp").mkdir()
-    # project.yaml carries NO tiers — the floor must supply them.
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
-    # user config supplies the providers list (user-homed).
-    xdg = tmp_path / "xdg" / "imp"
-    xdg.mkdir(parents=True)
-    (xdg / "config.yaml").write_text("providers: [openai]\n")
+    # config.yaml carries NO tiers — the floor must supply them.
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    # global config supplies the providers list (global-homed).
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [openai]\n")
     # Minimal default workflow so load_workflow succeeds.
     (root / "imp" / "workflows").mkdir()
     shutil.copytree(bundled_workflow_dir("default"), root / "imp" / "workflows" / "imp")

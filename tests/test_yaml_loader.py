@@ -5,6 +5,8 @@ test_loader.py exceeds 500 lines; Norway-problem coverage lives here.
 
 from __future__ import annotations
 
+import pytest
+
 # --- Bug F: YAML 1.1 Norway problem ---
 
 
@@ -69,3 +71,54 @@ def test_items_skips_key_lines_marker() -> None:
     parsed = yaml.load("alpha: 1\n", Loader=LineLoader)
     assert "__key_lines__" in parsed
     assert [k for k, _ in items(parsed)] == ["alpha"]
+
+
+# --- config-layer loader: YAML 1.2 via ruamel ---
+
+
+def test_config_loader_reads_yaml_1_2_numeric_forms_literally() -> None:
+    """YAML 1.1 reads `0777` as octal 511 and `1:30` as the sexagesimal int 90.
+    Config layers are YAML 1.2, so both stay literal."""
+    from imp.engine._yaml import load_config_yaml
+
+    parsed = load_config_yaml(
+        "test_cmd_fast_timeout: 0777\nvars:\n  window: 1:30\n"
+    )
+    assert parsed["test_cmd_fast_timeout"] == 777
+    assert parsed["vars"]["window"] == "1:30"
+
+
+def test_config_loader_empty_document_is_none() -> None:
+    """Call sites rely on `load_config_yaml(text) or {}`, so an empty document
+    must come back falsy rather than as a mapping."""
+    from imp.engine._yaml import load_config_yaml
+
+    assert load_config_yaml("") is None
+
+
+def test_config_loader_rejects_duplicate_keys() -> None:
+    """PyYAML silently keeps the last value; ruamel raises a YAMLError subclass,
+    which is what lets the readers dress it as imp's `invalid YAML` message."""
+    from ruamel.yaml.error import YAMLError
+
+    from imp.engine._yaml import load_config_yaml
+
+    with pytest.raises(YAMLError):
+        load_config_yaml("theme: dark\ntheme: light\n")
+
+
+def test_config_yaml_error_strips_ruamel_opt_out_paragraph() -> None:
+    """config_yaml_error keeps the duplicate-key detail but drops ruamel's
+    'To suppress this check see: <url>' trailer."""
+    import pytest
+    from ruamel.yaml.error import YAMLError
+
+    from imp.engine._yaml import config_yaml_error, load_config_yaml
+
+    with pytest.raises(YAMLError) as exc:
+        load_config_yaml("theme: dark\ntheme: light\n")
+    msg = config_yaml_error(exc.value)
+    assert "found duplicate key" in msg
+    assert "To suppress this check" not in msg
+    assert "yaml.dev" not in msg
+    assert not msg.endswith("\n")

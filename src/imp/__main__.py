@@ -16,6 +16,12 @@ signal.signal(signal.SIGINT, _exit_130_on_sigint)
 
 def main() -> int:
     try:
+        # Lazily, inside the function: the module-level SIGINT guard above must
+        # be installed ahead of any heavy import.
+        from imp.cli.config_migrate import run_startup_migrations
+
+        run_startup_migrations()
+
         from imp.cli.main import main as _cli_main
 
         return _cli_main()

@@ -266,7 +266,7 @@ async def dispatch_task(
     invocation_id, target_dir = _allocate_subagent_dir(ctx, subagent_name)
 
     from imp.assets import resolve_workflow_dir
-    from imp.providers.config import parse_default_workflow  # lazy: breaks import cycle
+    from imp.providers.effective import resolve_default_workflow  # lazy: breaks import cycle
 
     isolated = subagent_def.isolated_worktree
     spike_worktree: Path | None = None
@@ -305,7 +305,10 @@ async def dispatch_task(
             # No quest context -> no quest_dir, no snapshot; live dir is the only option.
             workflow_dir=resolve_workflow_dir(
                 ctx.project_root,
-                parse_default_workflow(ctx.project_root / "imp" / "project.yaml"),
+                # ToolContext carries no control root, and this fallback can run
+                # on a spike worktree that is not a git repo.
+                resolve_default_workflow(
+                    project_root=ctx.project_root, control_root=None),
             ),
         )
         if isolated:

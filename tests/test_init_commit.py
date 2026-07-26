@@ -10,7 +10,7 @@ from imp.cli.init import run_init
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
@@ -43,7 +43,7 @@ def test_creates_scoped_initial_commit(tmp_path: Path) -> None:
     assert _git(tmp_path, "log", "-1", "--format=%s").strip() == (
         "imp: initialize project")
     tracked = _git(tmp_path, "ls-tree", "-r", "--name-only", "HEAD").split()
-    assert "imp/project.yaml" in tracked
+    assert "imp/config.yaml" in tracked
     assert ".gitignore" in tracked
 
 

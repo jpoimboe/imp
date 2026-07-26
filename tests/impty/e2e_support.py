@@ -72,8 +72,11 @@ def can_pty() -> bool:
 
 def clean_env(**overrides: str) -> dict[str, str]:
     """Inherited env with outer ``IMP_*`` stripped (so an imp-on-imp run can't leak
-    its engine vars into the spawned child), plus the given overrides."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("IMP_")}
+    its engine vars into the spawned child), plus the given overrides. ``IMP_HOME``
+    is the exception: it locates the per-test global config layer, so stripping it
+    would make the child read the developer's real ~/.imp/config.yaml."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("IMP_") or k == "IMP_HOME"}
     # Baked before overrides so an explicit caller override still wins.
     env["IMP_SESSION_CONNECT_TIMEOUT"] = "240"
     env.update(overrides)
@@ -120,7 +123,7 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: work\n    steps:\n"
         "      - name: coder\n        file: agents/coder.md\n")
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "default-workflow: default\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
@@ -210,7 +213,7 @@ def seed_default_repo(root: Path, *, script: dict[str, Any]) -> Path:
     (root / "imp" / "workflows").mkdir(parents=True)
     shutil.copytree(bundled_workflow_dir("default"),
                     root / "imp" / "workflows" / "default")
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "default-workflow: default\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)

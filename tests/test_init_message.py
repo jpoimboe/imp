@@ -9,7 +9,7 @@ def _run(project: Path, monkeypatch, lines: list[str]) -> None:
     # Pin the user-config path into a tmp dir so the test never touches a real
     # machine config; pick the providers non-interactively.
     user_cfg = project / "userhome" / "config.yaml"
-    monkeypatch.setattr("imp.providers.effective.user_config_path",
+    monkeypatch.setattr("imp.providers.effective.global_config_path",
                         lambda: user_cfg)
     import imp.cli.init as initmod
     from imp.agents.interactive import InteractiveSuccess
@@ -36,11 +36,11 @@ def _run(project: Path, monkeypatch, lines: list[str]) -> None:
 def test_fresh_machine_already_initialized_project(
     tmp_path: Path, monkeypatch
 ) -> None:
-    # "Fresh workstation, project already in git": project.yaml exists but no
+    # "Fresh workstation, project already in git": config.yaml exists but no
     # machine config yet → wrote_user_config=True path.
     imp_dir = tmp_path / "imp"
     imp_dir.mkdir()
-    (imp_dir / "project.yaml").write_text("default-workflow: imp\nvars: {}\n")
+    (imp_dir / "config.yaml").write_text("default-workflow: imp\nvars: {}\n")
     (imp_dir / "workflows").mkdir()
     (imp_dir / "workflows" / "imp").mkdir()
 

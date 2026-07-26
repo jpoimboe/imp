@@ -112,7 +112,7 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
         "          - {if: {exit: 0}, continue: true}\n"
         "          - {else: true, resume: w}\n"
     )
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\n"
         "providers: [openai]\n"
         "tiers:\n"

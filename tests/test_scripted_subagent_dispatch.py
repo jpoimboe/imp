@@ -51,7 +51,7 @@ def _seed_repo(root: Path) -> None:
         "phases:\n  - name: p\n    steps:\n"
         "      - {name: s, file: agents/driver.md}\n"
     )
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [scripted]\n"

@@ -1,4 +1,4 @@
-"""Parse a single config layer (imp/project.yaml, user, or local config.yaml).
+"""Parse a single config layer: the project, global, or local config file.
 Schema (post 2026-06-04-roles-to-tiers):
 
     providers: [claude_code, openai]      # ordered preference list
@@ -13,6 +13,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
     pythonpath: [src]                     # import roots prepended to PYTHONPATH; off if unset
+    default-workflow: default             # workflow new quests use (default "default")
     max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
@@ -26,8 +27,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from ruamel.yaml.error import YAMLError
 
-from imp.engine._yaml import LineLoader, items, key_loc, loc
+from imp.engine._yaml import LineLoader, config_yaml_error, items, key_loc, load_config_yaml, loc
 from imp.engine.errors import LoadError
 from imp.engine.expr import ExprType
 from imp.engine.types import SourceLoc, Vars
@@ -59,6 +61,7 @@ class Config:
     max_parallel_test_runs: int = field(hash=False, default=1)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
+    default_workflow: str = field(hash=False, default="default")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
     context: dict[str, Any] = field(hash=False, default_factory=dict)
@@ -88,7 +91,7 @@ _FACT_SCALARS = (str, int, float, bool)
 
 
 def parse_project_facts(path: Path) -> dict[str, str]:
-    """Read imp/project.yaml `facts:` into a name->string mapping. Absent file
+    """Read imp/config.yaml `facts:` into a name->string mapping. Absent file
     or missing `facts:` -> empty mapping."""
     if not path.exists():
         return {}
@@ -138,34 +141,8 @@ def validate_workflow_name(name: str) -> bool:
     )
 
 
-def parse_default_workflow(path: Path) -> str:
-    """Read imp/project.yaml `default-workflow:` field. Absent → 'default'. Read
-    directly from the project layer, not merged into the layered Config.
-    The value is a single path segment (no separators / parent escapes)."""
-    if not path.exists():
-        return "default"
-    try:
-        raw: Any = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
-        raise LoadError(
-            f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)
-        ) from e
-    if not isinstance(raw, dict):
-        raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
-    name = raw.get("default-workflow")
-    if name is None:
-        return "default"
-    if not isinstance(name, str) or not validate_workflow_name(name):
-        raise LoadError(
-            "'default-workflow' must be a single workflow name "
-            "(no path separators)",
-            SourceLoc(file=path, line=1),
-        )
-    return name
-
-
 def parse_default_base(path: Path) -> str | None:
-    """Read imp/project.yaml `default-base:` field — the integration branch a
+    """Read imp/config.yaml `default-base:` field — the integration branch a
     quest is based on. Absent file or missing key → None; `imp new` treats that
     as a hard error (there is no runtime auto-detect fallback). Read directly
     from the project layer, not merged into the layered Config. A branch name may
@@ -174,10 +151,10 @@ def parse_default_base(path: Path) -> str | None:
     if not path.exists():
         return None
     try:
-        raw: Any = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
+        raw: Any = load_config_yaml(path.read_text()) or {}
+    except YAMLError as e:
         raise LoadError(
-            f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)
+            f"invalid YAML in {path.name}: {config_yaml_error(e)}", SourceLoc(file=path, line=1)
         ) from e
     if not isinstance(raw, dict):
         raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
@@ -200,9 +177,11 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
     if not path.exists():
         return None
     try:
-        raw: Any = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
-        raise LoadError(f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)) from e
+        raw: Any = load_config_yaml(path.read_text()) or {}
+    except YAMLError as e:
+        raise LoadError(
+            f"invalid YAML in {path.name}: {config_yaml_error(e)}", SourceLoc(file=path, line=1)
+        ) from e
     if not isinstance(raw, dict):
         raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
     src = SourceLoc(file=path, line=1)
@@ -211,7 +190,7 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
     # (`providers:` on its own line) parses to key-present/value-None. Treat that
     # as absent — the floor/merge fills it — instead of passing None down to
     # _parse_providers, which would raise the misleading "must define a
-    # 'providers:' list" message from a project.yaml/local-layer file (M1).
+    # 'providers:' list" message from a project- or local-layer file (M1).
     if raw.get("providers") is not None:
         out["providers"] = _parse_providers(raw["providers"], src)
     if raw.get("tiers") is not None:
@@ -220,6 +199,13 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         out["provider_envs"] = _parse_provider_envs(raw["provider_envs"], src)
     if raw.get("vars") is not None:
         out["vars"] = _parse_var_overrides(raw["vars"], src)
+    if "default-workflow" in raw:
+        v = raw["default-workflow"]
+        if not isinstance(v, str) or not validate_workflow_name(v):
+            raise LoadError(
+                "'default-workflow' must be a single workflow name "
+                "(no path separators)", src)
+        out["default-workflow"] = v
     for cmd_key in ("test_cmd_fast", "test_cmd_slow"):
         if cmd_key in raw:
             v = raw[cmd_key]

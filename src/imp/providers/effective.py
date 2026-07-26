@@ -2,7 +2,7 @@
 2026-06-08-config-file-split §2).
 
 Precedence (later wins):
-    provider code (floor) ← imp/project.yaml ← ~/.config/imp/config.yaml
+    provider code (floor) ← imp/config.yaml ← ~/.imp/config.yaml
                           ← .imp/config.yaml (control root, gitignored)
 
 The merged `Config.tiers` is always fully populated (floor + overrides), so
@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
 from imp.providers.config import Config, parse_config_layer, parse_project_facts
 from imp.providers.memory import load_memory_snapshot, validate_memory_tree
@@ -36,10 +37,28 @@ class EffectiveConfig:
     provenance: Provenance
 
 
-def user_config_path() -> Path:
-    """$XDG_CONFIG_HOME/imp/config.yaml, default ~/.config/imp/config.yaml."""
+def imp_home() -> Path:
+    """$IMP_HOME, default ~/.imp — imp's per-machine directory."""
+    base = os.environ.get("IMP_HOME") or str(Path.home() / ".imp")
+    return Path(base)
+
+
+def global_config_path() -> Path:
+    """$IMP_HOME/config.yaml, default ~/.imp/config.yaml."""
+    return imp_home() / "config.yaml"
+
+
+def legacy_global_config_path() -> Path:
+    """The pre-IMP_HOME location: $XDG_CONFIG_HOME/imp/config.yaml, default
+    ~/.config/imp/config.yaml. Read only by the startup migration."""
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     return Path(base) / "imp" / "config.yaml"
+
+
+PROJECT_RENAME_HINT = (
+    "imp/project.yaml found but imp now reads imp/config.yaml — "
+    "rename it on this branch with `git mv imp/project.yaml imp/config.yaml`"
+)
 
 
 def _floor_layer() -> tuple[dict[str, Any], SourceLoc]:
@@ -106,6 +125,7 @@ def _to_config(
         max_parallel_test_runs=merged.get("max_parallel_test_runs", 1),
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),
+        default_workflow=merged.get("default-workflow", "default"),
         sandbox=merged.get("sandbox", {}),
         remote=merged.get("remote", {}),
         context=merged.get("context", {}),
@@ -117,12 +137,13 @@ def _to_config(
 def load_effective_config(
     *, project_root: Path | None = None, control_root: Path | None = None,
 ) -> EffectiveConfig:
-    """Build the floor, then merge project ← user ← local on top.
+    """Build the floor, then merge project ← global ← local on top.
 
-    - project layer: `project_root/imp/project.yaml` (the worktree for a quest;
+    - project layer: `project_root/imp/config.yaml` (the worktree for a quest;
       the control-root checkout for quest-less commands). Skipped when
-      project_root is None.
-    - user layer: `user_config_path()` (live).
+      project_root is None; raises when only the pre-rename `imp/project.yaml`
+      is present.
+    - global layer: `global_config_path()` (live).
     - local layer: `control_root/.imp/config.yaml` (live, gitignored). Skipped
       when control_root is None.
     """
@@ -130,21 +151,33 @@ def load_effective_config(
     project_facts: dict[str, str] = {}
     memory: dict[str, str] = {}
     if project_root is not None:
-        proj_path = project_root / "imp" / "project.yaml"
+        proj_path = project_root / "imp" / "config.yaml"
+        if not proj_path.is_file() and (project_root / "imp" / "project.yaml").is_file():
+            raise LoadError(PROJECT_RENAME_HINT)
         p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)
         project_facts = parse_project_facts(proj_path)
         memory = load_memory_snapshot(project_root / "imp" / "memory")
-    u = parse_config_layer(user_config_path())
-    if u is not None:
-        layers.append(u)
+    g = parse_config_layer(global_config_path())
+    if g is not None:
+        layers.append(g)
     if control_root is not None:
         local = parse_config_layer(control_root / ".imp" / "config.yaml")
         if local is not None:
             layers.append(local)
     merged, prov = merge_layers(layers)
     return EffectiveConfig(config=_to_config(merged, project_facts, memory), provenance=prov)
+
+
+def resolve_default_workflow(
+    *, project_root: Path, control_root: Path | None,
+) -> str:
+    """The layered `default-workflow` for one root pair. Keyword-only: swapping
+    the roots would silently read the wrong checkout's project layer."""
+    return load_effective_config(
+        project_root=project_root, control_root=control_root,
+    ).config.default_workflow
 
 
 def memory_validation_scopes(
@@ -191,8 +224,6 @@ def validate_project_memory(
     error can fire here."""
     if not memory:
         return
-    from imp.engine.errors import LoadError
-
     valid, workflow_steps = memory_validation_scopes(
         project_root, memory.keys(), project_facts
     )

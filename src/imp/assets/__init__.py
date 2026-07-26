@@ -129,7 +129,7 @@ def resolve_workflow_dir(project_root: Path, name: str) -> Path:
         from imp.engine.types import SourceLoc
         raise LoadError(
             f"invalid workflow name {name!r}",
-            SourceLoc(file=project_root / "imp" / "project.yaml", line=1),
+            SourceLoc(file=project_root / "imp" / "config.yaml", line=1),
         )
     committed = project_root / "imp" / "workflows" / name
     if committed.is_dir():
@@ -141,5 +141,5 @@ def resolve_workflow_dir(project_root: Path, name: str) -> Path:
     raise LoadError(
         f"unknown workflow {name!r}; available: "
         f"{', '.join(available_workflow_names(project_root))}",
-        SourceLoc(file=project_root / "imp" / "project.yaml", line=1),
+        SourceLoc(file=project_root / "imp" / "config.yaml", line=1),
     )

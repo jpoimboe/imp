@@ -82,6 +82,10 @@ bookkeeping. Ask the CLI instead:
   conversed with); `--depends-on <id>` adds a dependency edge (only before go-live —
   rejected once materialized). `--base <branch>` re-points the fork at another existing
   branch (also before go-live only).
+- `imp config` — the effective settings and the layer each came from;
+  `imp config set <key> <value>` / `unset <key>` edits the setting's own layer
+  (`imp/config.yaml` or `~/.imp/config.yaml`; `--project` / `--global` forces one),
+  preserving comments.
 - `imp help`, `imp <cmd> --help` — the command list, or one command's flags.
 
 The event log is unbounded — filter (`--step`, `--agent`, `--limit`) rather than

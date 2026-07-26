@@ -1,7 +1,7 @@
 """Validation and formatting helpers for a project's import roots.
 
 The module validates and formats a project's import roots for the `pythonpath`
-shadow written to `imp/project.yaml` (worktree-relative dirs prepended to
+shadow written to `imp/config.yaml` (worktree-relative dirs prepended to
 gate/agent subprocess PYTHONPATH so an editable-installed package resolves to
 the worktree under test, not a stale main checkout), and offers the offline
 provider-credential readiness check (`resolve_detection_provider`).

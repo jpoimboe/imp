@@ -52,7 +52,7 @@ async def test_live_minimal_change_completes_one_step(
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\n"
         "providers: [anthropic]\n"
         "tiers:\n"

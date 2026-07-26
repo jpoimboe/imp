@@ -65,9 +65,9 @@ def _seed_multiread_project(tmp_path: Path) -> None:
             steps:
               - {name: w, file: agents/writer.md, tier: low}
     """))
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\ndefault-base: main\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\ndefault-base: main\n")
     # providers/tiers go in the gitignored .imp/config.yaml local layer (highest
-    # precedence) so a developer's ~/.config/imp/config.yaml cannot shadow them
+    # precedence) so a developer's ~/.imp/config.yaml cannot shadow them
     # and skip/fail this gated test — mirrors conftest._seed_control.
     (tmp_path / ".imp").mkdir(exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\

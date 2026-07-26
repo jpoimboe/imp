@@ -11,7 +11,7 @@ from imp.providers.effective import load_effective_config
 
 
 def _write(tmp_path: Path, body: str) -> Path:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text(body)
     return p
 
@@ -75,9 +75,9 @@ def test_error_carries_file_and_line(tmp_path: Path) -> None:
 def test_facts_reach_config_from_project_layer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\nfacts:\n  test_command: make test\n"
     )
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
@@ -87,14 +87,14 @@ def test_facts_reach_config_from_project_layer(
 def test_user_layer_facts_not_contributed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    xdg = tmp_path / "xdg"
-    (xdg / "imp").mkdir(parents=True)
-    (xdg / "imp" / "config.yaml").write_text(
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text(
         "providers: [claude_code]\nfacts:\n  leaked: nope\n"
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
     assert cfg.project_facts == {}
 

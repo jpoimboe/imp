@@ -32,7 +32,7 @@ def _repo(root: Path, branch: str) -> None:
 
 def _write_default_base(root: Path, value: str) -> None:
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         f"default-workflow: imp\ndefault-base: {value}\n")
 
 
@@ -87,7 +87,7 @@ def test_cmd_new_missing_default_base_exits_2_and_creates_no_draft(
     _seed_control(tmp_path)
     # Drop the seed's default-base and re-commit so the tree stays clean
     # (check_preconditions runs before base resolution).
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     _git(tmp_path, "commit", "-aqm", "drop default-base")
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
@@ -99,7 +99,7 @@ def test_cmd_new_missing_default_base_exits_2_and_creates_no_draft(
 def test_cmd_new_nonexistent_default_base_exits_2_and_creates_no_draft(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: ghost\n")
     _git(tmp_path, "commit", "-aqm", "point default-base at a missing branch")
     monkeypatch.chdir(tmp_path)

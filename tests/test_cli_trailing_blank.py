@@ -455,12 +455,12 @@ def test_cmd_init_appends_trailing_blank_on_tty(
 
     def fake_run_init(project, *, input_fn, output_fn):
         output_fn("Created:")
-        output_fn("  imp/project.yaml")
+        output_fn("  imp/config.yaml")
 
     monkeypatch.setattr(m, "run_init", fake_run_init)
     rc = m._cmd_init(argparse.Namespace(non_interactive=False))
     assert rc == 0
-    assert capsys.readouterr().out == "Created:\n  imp/project.yaml\n\n"
+    assert capsys.readouterr().out == "Created:\n  imp/config.yaml\n\n"
 
 
 def test_cmd_init_unchanged_when_piped(

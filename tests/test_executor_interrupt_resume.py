@@ -72,7 +72,7 @@ def _seed_single_agent(root: Path) -> Quest:
     )
     # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
@@ -128,7 +128,7 @@ async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Pat
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: s1, file: agents/a.md, tier: low}\n"
         "      - {name: s2, file: agents/a.md, tier: low}\n")
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
@@ -194,7 +194,7 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
         "        rules:\n"
         "          - {if: {verdict: rework}, resume: code}\n"
         "          - {else: true, continue: true}\n")
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
@@ -414,7 +414,7 @@ async def test_interrupt_after_complete_clears_resume_pair(tmp_path: Path) -> No
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: s1, file: agents/a.md, tier: low}\n"
         "      - {name: s2, file: agents/a.md, tier: low}\n")
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
@@ -480,7 +480,7 @@ async def test_interrupt_on_resume_goto_arms_solicit(tmp_path: Path) -> None:
         "        rules:\n"
         "          - {if: {verdict: rework}, resume: review}\n"
         "          - {else: true, continue: true}\n")
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
