@@ -104,7 +104,7 @@ def _seed_single_agent(root: Path) -> Quest:
     )
     # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
@@ -186,7 +186,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     )
     # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"

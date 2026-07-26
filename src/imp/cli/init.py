@@ -1,9 +1,9 @@
 """`imp init`: scaffold imp/ in a project.
 
-Spec §4: split output. A committed imp/project.yaml (workflow ref + empty
+Spec §4: split output. A committed imp/config.yaml (workflow ref + empty
 vars — NO bindings, NO theme) and a bootstrapped ~/.imp/config.yaml
 (providers + theme + editing_mode). On a clone that already carries the
-committed imp/project.yaml, init is idempotent: it never overwrites the
+committed imp/config.yaml, init is idempotent: it never overwrites the
 project file and only bootstraps the machine's global config if absent.
 
 Committed config+workflows live under imp/ (tracked by git).
@@ -64,7 +64,7 @@ from imp.remote.drivers import REGISTRY
 _DEFAULT_WORKFLOW = "default"
 
 _INIT_COMMIT_PATHS: tuple[str, ...] = (
-    "imp/project.yaml",
+    "imp/config.yaml",
     ".gitignore",
     "imp/memory/all.md",
 )
@@ -110,7 +110,7 @@ class IntegrationBranchUnresolved(Exception):
 
 @dataclass(frozen=True, slots=True)
 class InitSettings:
-    """The settings the shared writer serializes into imp/project.yaml."""
+    """The settings the shared writer serializes into imp/config.yaml."""
     default_workflow: str
     default_base: str
     test_cmd_fast: str | None  # None omits the block; "" writes an explicit opt-out
@@ -176,7 +176,7 @@ def _resolve_init_base(
         raise IntegrationBranchUnresolved(
             "imp init needs an integration branch but can't read input "
             "(non-interactive terminal). Re-run `imp init` interactively, or add "
-            "`default-base: <branch>` to imp/project.yaml."
+            "`default-base: <branch>` to imp/config.yaml."
         ) from e
     resolved = answer or current
     if not resolved:
@@ -242,9 +242,9 @@ def _ensure_imp_gitignore(project_root: Path) -> None:
 
 
 def _build_project_config(default_workflow: str, default_base: str) -> dict[str, Any]:
-    """The committed imp/project.yaml body: chosen workflow + resolved integration
+    """The committed imp/config.yaml body: chosen workflow + resolved integration
     branch + empty vars. No bindings (the provider-code floor supplies tiers);
-    no theme (user-homed)."""
+    no theme (global-homed)."""
     return {
         "default-workflow": default_workflow,
         "default-base": default_base,
@@ -293,7 +293,7 @@ def _read_user_config(user_path: Path) -> dict[str, Any] | None:
 def _bootstrap_user_config(
     user_path: Path, providers: list[str], theme: str, *, allow_unsandboxed: bool,
 ) -> None:
-    """Write the machine user config once; no-op if it exists, never clobbering a hand-edit."""
+    """Write the machine's global config once; no-op if it exists, never clobbering a hand-edit."""
     if user_path.exists():
         return
     user_path.parent.mkdir(parents=True, exist_ok=True)
@@ -472,7 +472,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
 
 
 def write_init_files(project_root: Path, settings: InitSettings) -> bool:
-    """Write imp/project.yaml + the memory scaffold from `settings`, ensure `.imp/`
+    """Write imp/config.yaml + the memory scaffold from `settings`, ensure `.imp/`
     is gitignored, and commit the init files. Returns True iff a commit was created.
     Callers ensure the git repo exists first (base resolution needs it)."""
     imp_dir = project_root / "imp"
@@ -490,7 +490,7 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
             _PYTHONPATH_BLOCK_COMMENT + format_pythonpath_yaml(settings.pythonpath))
     else:
         pythonpath_block = _pythonpath_hint()
-    (imp_dir / "project.yaml").write_text(
+    (imp_dir / "config.yaml").write_text(
         body + test_block + pythonpath_block + _facts_hint())
     _write_memory_scaffold(imp_dir, settings.default_workflow)
     _ensure_imp_gitignore(project_root)
@@ -605,7 +605,7 @@ def run_init(
 
     color_on = pal.should_use_color(sys.stdout)
     imp_dir = project_root / "imp"
-    project_file = imp_dir / "project.yaml"
+    project_file = imp_dir / "config.yaml"
     already_initialized = project_file.is_file()
 
     output_fn("Setting up imp in "
@@ -614,7 +614,7 @@ def run_init(
     user_path = global_config_path()
     wrote_user_config = not user_path.exists()
 
-    # --- providers + theme: skip the picker when the user config already
+    # --- providers + theme: skip the picker when the global config already
     #     declares providers (a re-run must not re-ask) ---
     existing_cfg = _read_user_config(user_path)
     if existing_cfg and existing_cfg.get("providers"):
@@ -653,14 +653,14 @@ def run_init(
         _ensure_imp_gitignore(project_root)
         committed = _commit_init_files(project_root)
         output_fn("")
-        output_fn("Project already initialized (imp/project.yaml is committed).")
+        output_fn("Project already initialized (imp/config.yaml is committed).")
         if wrote_user_config:
             output_fn("Bootstrapped your machine config (providers, theme).")
         else:
             output_fn("Your machine config is already set up — nothing to do.")
         output_fn(f"  {user_path}  (your machine: providers, theme)")
         if committed:
-            output_fn("Committed imp/project.yaml.")
+            output_fn("Committed imp/config.yaml.")
         return
 
     # --- fresh init: credential + sandbox gate (a working provider is required
@@ -758,11 +758,11 @@ def run_init(
 
     output_fn("")
     output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
-    output_fn(pal.ansi("  imp/project.yaml", "dim", enabled=color_on))
+    output_fn(pal.ansi("  imp/config.yaml", "dim", enabled=color_on))
     output_fn(pal.ansi(
         f"  {user_path}  (your machine: providers, theme)", "dim", enabled=color_on))
     if committed:
-        output_fn(pal.ansi("Committed imp/project.yaml.", "dim", enabled=color_on))
+        output_fn(pal.ansi("Committed imp/config.yaml.", "dim", enabled=color_on))
     output_fn("")
     output_fn("Try: " + pal.ansi(
         'imp new "Add a dark-mode toggle"', "wordmark", enabled=color_on))
@@ -777,7 +777,7 @@ def run_init_noninteractive(
     pythonpath: list[str] | None = None,
     detect_verify_fn: Callable[[Path], str | None] | None = None,
 ) -> None:
-    """Provider-free, non-interactive `imp init`: write imp/project.yaml from
+    """Provider-free, non-interactive `imp init`: write imp/config.yaml from
     defaults (+ overrides) with no model call. Both `--use-defaults` and the
     no-TTY auto-headless fallback land here. Never prompts — resolves the
     integration branch from git or raises IntegrationBranchUnresolved."""
@@ -785,17 +785,17 @@ def run_init_noninteractive(
 
     workflow = workflow or _DEFAULT_WORKFLOW
     imp_dir = project_root / "imp"
-    already_initialized = (imp_dir / "project.yaml").is_file()
+    already_initialized = (imp_dir / "config.yaml").is_file()
     user_path = global_config_path()
     wrote_user_config = not user_path.exists()
 
     if already_initialized:
-        _ensure_git_repo_silent(project_root)  # a copied project.yaml may sit in a non-git dir
+        _ensure_git_repo_silent(project_root)  # a copied config.yaml may sit in a non-git dir
         if wrote_user_config:
             _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
         _ensure_imp_gitignore(project_root)
         _commit_init_files(project_root)
-        output_fn("Project already initialized (imp/project.yaml is committed).")
+        output_fn("Project already initialized (imp/config.yaml is committed).")
         return
 
     git_created = _ensure_git_repo_silent(project_root)
@@ -819,6 +819,6 @@ def run_init_noninteractive(
         _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
 
     output_fn("Created:")
-    output_fn("  imp/project.yaml")
+    output_fn("  imp/config.yaml")
     if committed:
-        output_fn("Committed imp/project.yaml.")
+        output_fn("Committed imp/config.yaml.")

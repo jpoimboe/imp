@@ -188,7 +188,7 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     # per-quest records tier
     assert ".imp/quests/" in body
     # project-config tier
-    assert "imp/project.yaml" in body
+    assert "imp/config.yaml" in body
     assert "imp/memory/" in body
     assert "guidance" not in low
     assert "facts" in low
@@ -196,7 +196,7 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     assert "test_cmd_fast" in body
     assert "test_cmd_slow" in body
     # the concrete config layering chain
-    assert "floor ← imp/project.yaml ← ~/.imp/config.yaml ← .imp/config.yaml" in body
+    assert "floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml" in body
     # how to read what is active, incl. imp config's blind spots
     assert "imp config" in body
     assert "blind spots" in body

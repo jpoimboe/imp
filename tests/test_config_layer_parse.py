@@ -15,7 +15,7 @@ def test_absent_file_returns_none(tmp_path: Path) -> None:
 
 
 def test_tiers_less_layer_is_valid(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-workflow: imp\ntest_cmd_fast: make check\n")
     layer, src = parse_config_layer(p)  # type: ignore[misc]
     assert "tiers" not in layer
@@ -25,7 +25,7 @@ def test_tiers_less_layer_is_valid(tmp_path: Path) -> None:
 
 
 def test_partial_tiers_override_keeps_only_present_leaves(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("tiers:\n  high: {anthropic: opus-4-9}\n")
     layer, _src = parse_config_layer(p)  # type: ignore[misc]
     assert layer["tiers"] == {"high": {"anthropic": "opus-4-9"}}
@@ -40,9 +40,9 @@ def test_present_providers_must_be_non_empty_list(tmp_path: Path) -> None:
 
 def test_valueless_providers_treated_as_absent(tmp_path: Path) -> None:
     # `providers:` on its own line parses to key-present/value-None; the layer
-    # must treat it as absent (floor fills it), NOT raise a config.yaml message
-    # from a project.yaml file (finding M1).
-    p = tmp_path / "project.yaml"
+    # must treat it as absent (floor fills it), NOT raise the misleading
+    # "'providers:' list" message from a project- or local-layer file (finding M1).
+    p = tmp_path / "config.yaml"
     p.write_text("providers:\ntiers:\ndefault-workflow: imp\n")
     layer, _src = parse_config_layer(p)  # type: ignore[misc]
     assert "providers" not in layer
@@ -60,7 +60,7 @@ def test_vars_key_normalized_to_present_dict(tmp_path: Path) -> None:
 
 
 def test_parse_sandbox_block(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text(
         "default-workflow: imp\n"
         "sandbox:\n"
@@ -122,7 +122,7 @@ def test_sandbox_non_mapping_rejected(tmp_path: Path) -> None:
 
 
 def test_parse_context_block(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text(
         "default-workflow: imp\n"
         "context:\n"
@@ -237,14 +237,14 @@ def test_duplicate_key_raises_load_error(tmp_path: Path) -> None:
 
 
 def test_pythonpath_list_parsed(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("pythonpath: [src, .]\n")
     out, _ = parse_config_layer(p)  # type: ignore[misc]
     assert out["pythonpath"] == ["src", "."]
 
 
 def test_pythonpath_absent_key_omitted(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-workflow: imp\n")
     out, _ = parse_config_layer(p)  # type: ignore[misc]
     assert "pythonpath" not in out
@@ -253,28 +253,28 @@ def test_pythonpath_absent_key_omitted(tmp_path: Path) -> None:
 def test_valueless_pythonpath_treated_as_absent(tmp_path: Path) -> None:
     # A bare `pythonpath:` (YAML null) => feature off, following the
     # `.get(...) is not None` guard idiom (not the `key in raw` idiom).
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("pythonpath:\n")
     out, _ = parse_config_layer(p)  # type: ignore[misc]
     assert "pythonpath" not in out
 
 
 def test_pythonpath_non_list_raises(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("pythonpath: src\n")
     with pytest.raises(LoadError):
         parse_config_layer(p)
 
 
 def test_pythonpath_non_string_entry_raises(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("pythonpath: [src, 3]\n")
     with pytest.raises(LoadError):
         parse_config_layer(p)
 
 
 def test_test_cmd_fast_in_tiers_less_layer(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-workflow: imp\ntest_cmd_fast: make check\n")
     layer, src = parse_config_layer(p)  # type: ignore[misc]
     assert layer["test_cmd_fast"] == "make check"

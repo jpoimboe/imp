@@ -14,7 +14,7 @@ def _registry() -> None:
 
 def _project(tmp_path: Path, body: str) -> Path:
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text(body)
+    (tmp_path / "imp" / "config.yaml").write_text(body)
     return tmp_path
 
 
@@ -35,7 +35,7 @@ def test_non_interactive_warns_and_does_not_write(
         detect_fn=lambda _r: "make check",
     )
     assert any("make check" in e for e in errs)
-    assert "test_cmd_fast" not in (root / "imp" / "project.yaml").read_text()
+    assert "test_cmd_fast" not in (root / "imp" / "config.yaml").read_text()
 
 
 def test_interactive_yes_appends_command(
@@ -48,7 +48,7 @@ def test_interactive_yes_appends_command(
         input_fn=_seq("y"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: "make check",
     )
-    assert 'test_cmd_fast: "make check"' in (root / "imp" / "project.yaml").read_text()
+    assert 'test_cmd_fast: "make check"' in (root / "imp" / "config.yaml").read_text()
 
 
 def test_no_nudge_when_already_configured(
@@ -89,7 +89,7 @@ def test_interactive_skip_writes_optout(
         input_fn=_seq("skip"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: "make check",
     )
-    assert 'test_cmd_fast: ""' in (root / "imp" / "project.yaml").read_text()
+    assert 'test_cmd_fast: ""' in (root / "imp" / "config.yaml").read_text()
 
 
 def test_interactive_edit_writes_custom_command(
@@ -102,7 +102,7 @@ def test_interactive_edit_writes_custom_command(
         input_fn=_seq("edit", "make ci"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: "make check",
     )
-    assert 'test_cmd_fast: "make ci"' in (root / "imp" / "project.yaml").read_text()
+    assert 'test_cmd_fast: "make ci"' in (root / "imp" / "config.yaml").read_text()
 
 
 def test_no_nudge_when_nothing_detected(

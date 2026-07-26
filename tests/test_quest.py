@@ -11,11 +11,11 @@ from tests.conftest import _branch_with_commit, _git, _init_repo, _seed_control
 
 
 def _seed_control_without_workflow(root: Path) -> None:
-    """Seeds the control root with project.yaml and tier config but NO
+    """Seeds the control root with config.yaml and tier config but NO
     imp/workflows/imp, so resolution falls back to the bundled workflow."""
     _init_repo(root)
     (root / "imp").mkdir()
-    (root / "imp" / "project.yaml").write_text("default-workflow: default\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: default\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
@@ -632,7 +632,7 @@ def test_control_workflow_dir_resolves_against_control_root(tmp_path: Path) -> N
         wf = root / "imp" / "workflows" / "imp"
         (wf / "agents").mkdir(parents=True)
         (wf / "workflow.yaml").write_text(f"name: {marker}\n")
-        (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+        (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     ch = Quest(
         id="c", title="t", base_branch="main",
         control_root=ctl, project_root=wt, quest_dir=tmp_path / "cd",
@@ -647,7 +647,7 @@ def test_control_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
     from imp.assets import bundled_workflow_dir
     ctl = tmp_path / "ctl"
     (ctl / "imp").mkdir(parents=True)
-    (ctl / "imp" / "project.yaml").write_text("default-workflow: default\n")
+    (ctl / "imp" / "config.yaml").write_text("default-workflow: default\n")
     ch = Quest(
         id="c", title="t", base_branch="main",
         control_root=ctl, project_root=tmp_path / "wt", quest_dir=tmp_path / "cd",

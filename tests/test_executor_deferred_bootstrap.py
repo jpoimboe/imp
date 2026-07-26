@@ -43,7 +43,7 @@ def _seed_var_workflow(root: Path) -> object:
         "phases:\n  - name: only\n    label: P\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG_WITH_VAR)
     return _make_quest(root)

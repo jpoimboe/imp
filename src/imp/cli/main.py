@@ -763,7 +763,7 @@ def _test_cmd_fast_nudge(
     suggested = detect(project_root)
     if suggested is None:
         return
-    project_file = project_root / "imp" / "project.yaml"
+    project_file = project_root / "imp" / "config.yaml"
     if non_interactive:
         err_fn(
             f"imp: no test_cmd_fast configured; detected `{suggested}`. Set "
@@ -810,7 +810,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
             if auto_headless:
                 print(
                     "No interactive terminal detected — writing defaults to "
-                    "imp/project.yaml. Override with --workflow / --base / "
+                    "imp/config.yaml. Override with --workflow / --base / "
                     "--pythonpath.",
                     file=sys.stderr,
                 )
@@ -1170,14 +1170,14 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
             raise BaseResolutionError(
                 f"--base {base_flag!r} does not name an existing branch.")
         return base_flag
-    base = parse_default_base(control / "imp" / "project.yaml")
+    base = parse_default_base(control / "imp" / "config.yaml")
     if base is None:
         raise BaseResolutionError(
-            "no `default-base` in imp/project.yaml — run `imp init` to set the "
+            "no `default-base` in imp/config.yaml — run `imp init` to set the "
             "branch quests integrate into.")
     if not worktree.branch_exists(control, base):
         raise BaseResolutionError(
-            f"default-base {base!r} (imp/project.yaml) does not name an existing "
+            f"default-base {base!r} (imp/config.yaml) does not name an existing "
             "branch — update it or re-run `imp init`.")
     return base
 
@@ -2498,7 +2498,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         )
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = parse_default_workflow(control / "imp" / "project.yaml")
+        workflow = parse_default_workflow(control / "imp" / "config.yaml")
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         lines = render_summary(build_summary(events), header=header,
@@ -2527,7 +2527,7 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         )
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = parse_default_workflow(control / "imp" / "project.yaml")
+        workflow = parse_default_workflow(control / "imp" / "config.yaml")
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         document = render_summary_markdown(build_summary(events), header=header)
@@ -4043,18 +4043,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Set up imp here (initializes git if needed).",
         description=(
             "Set up imp in this directory: optionally initialize a git\n"
-            "repository, write imp/project.yaml (the version-controlled\n"
+            "repository, write imp/config.yaml (the version-controlled\n"
             "workflow + project settings) with the default workflow, detect\n"
             "your terminal theme, and bootstrap your machine-local config\n"
             "(providers and theme). Makes an initial commit of\n"
-            "imp/project.yaml and .gitignore."
+            "imp/config.yaml and .gitignore."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_init.set_defaults(func=_cmd_init)
     p_init.add_argument(
         "--use-defaults", action="store_true", dest="non_interactive",
-        help="Non-interactive, provider-free setup: write imp/project.yaml with "
+        help="Non-interactive, provider-free setup: write imp/config.yaml with "
              "the default workflow, resolved integration branch, and teaching "
              "hints — no model call, works in CI with no credentials.")
     p_init.add_argument(

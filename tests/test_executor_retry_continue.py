@@ -46,7 +46,7 @@ def _make_quest(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Qu
     (wf / "workflow.yaml").write_text(workflow_yaml)
 
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n"

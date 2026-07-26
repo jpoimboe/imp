@@ -1,4 +1,4 @@
-"""Walk-up project root discovery (marker: imp/project.yaml)."""
+"""Walk-up project root discovery (marker: imp/config.yaml)."""
 
 from __future__ import annotations
 
@@ -9,20 +9,20 @@ from imp.engine.project_root import find_project_root
 
 def test_finds_imp_dir_in_cwd(tmp_path: Path) -> None:
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     assert find_project_root(start=tmp_path) == tmp_path
 
 
 def test_walks_up_from_subdir(tmp_path: Path) -> None:
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     deep = tmp_path / "a" / "b" / "c"
     deep.mkdir(parents=True)
     assert find_project_root(start=deep) == tmp_path
 
 
 def test_returns_cwd_when_no_imp_dir(tmp_path: Path) -> None:
-    # `imp init` is expected to run before any imp/project.yaml exists.
+    # `imp init` is expected to run before any imp/config.yaml exists.
     assert find_project_root(start=tmp_path) == tmp_path
 
 
@@ -30,7 +30,7 @@ def test_terminates_at_filesystem_root() -> None:
     """Walking up from / must return / without looping. Verifies the
     cur.parent == cur termination."""
     root = Path("/")
-    # In practice / has no imp/project.yaml, but even if it did the test
+    # In practice / has no imp/config.yaml, but even if it did the test
     # would still validate termination. We just need this call to return,
     # not hang.
     result = find_project_root(start=root)
@@ -39,12 +39,13 @@ def test_terminates_at_filesystem_root() -> None:
     assert isinstance(result, Path)
 
 
-def test_old_config_yaml_marker_no_longer_matches(tmp_path: Path) -> None:
+def test_old_project_yaml_marker_no_longer_matches(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     (root / "imp").mkdir(parents=True)
-    (root / "imp" / "config.yaml").write_text("providers: [openai]\n")
+    (root / "imp" / "project.yaml").write_text("providers: [openai]\n")
     sub = root / "sub"
     sub.mkdir()
-    # No project.yaml anywhere → "no project yet": returns the start dir (sub),
-    # NOT root. (Old code, treating config.yaml as a marker, would return root.)
+    # No config.yaml anywhere → "no project yet": returns the start dir (sub),
+    # NOT root. A repo still on the retired name is not yet an imp project to
+    # this binary — the same signal the transition guard gives.
     assert find_project_root(sub) == sub

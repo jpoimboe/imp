@@ -371,7 +371,7 @@ def _seed_project(tmp_path: Path) -> None:
     imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
     (Quest.create copies imp/workflows/imp; the runtime reads the merged
-    config from imp/project.yaml — the project layer of load_effective_config).
+    config from imp/config.yaml — the project layer of load_effective_config).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
     an extra gitignore commit.
@@ -400,7 +400,7 @@ def _seed_project(tmp_path: Path) -> None:
             steps:
               - {name: w, file: agents/writer.md, tier: low}
     """))
-    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main
         providers: [anthropic]
@@ -418,7 +418,7 @@ def _seed_project(tmp_path: Path) -> None:
 
 
 def _seed_control(root: Path) -> None:
-    """A git repo with committed imp/project.yaml marker + imp/workflows/imp
+    """A git repo with committed imp/config.yaml marker + imp/workflows/imp
     and a gitignored .imp/config.yaml local layer (read by load_effective_config)."""
     _init_repo(root)
     src = root / "imp" / "workflows" / "imp"
@@ -433,7 +433,7 @@ def _seed_control(root: Path) -> None:
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     # Config layers: committed marker + gitignored local layer.
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(

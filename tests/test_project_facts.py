@@ -11,7 +11,7 @@ from imp.providers.effective import load_effective_config
 
 
 def _write(tmp_path: Path, body: str) -> Path:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text(body)
     return p
 
@@ -77,7 +77,7 @@ def test_facts_reach_config_from_project_layer(
 ) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\nfacts:\n  test_command: make test\n"
     )
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
@@ -94,7 +94,7 @@ def test_user_layer_facts_not_contributed(
     )
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
     assert cfg.project_facts == {}
 

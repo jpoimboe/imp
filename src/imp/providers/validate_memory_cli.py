@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         memory = load_memory_snapshot(root / "imp" / "memory")
-        project_facts = parse_project_facts(root / "imp" / "project.yaml")
+        project_facts = parse_project_facts(root / "imp" / "config.yaml")
         validate_project_memory(root, memory, project_facts)
     except (LoadError, LoadErrors) as exc:
         print(str(exc), file=sys.stderr)

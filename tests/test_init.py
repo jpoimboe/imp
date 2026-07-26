@@ -1,4 +1,4 @@
-"""`imp init` scaffolding: split committed imp/project.yaml + bootstrapped
+"""`imp init` scaffolding: split committed imp/config.yaml + bootstrapped
 global config (spec §4)."""
 
 from __future__ import annotations
@@ -85,14 +85,14 @@ def _stub_setup_gate(monkeypatch):
                         lambda **kw: _conv_result(), raising=False)
 
 
-def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
+def test_writes_config_yaml_workflows_gitignore(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
         picker_fn=_picks("anthropic"),
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
-    proj = tmp_path / "imp" / "project.yaml"
+    proj = tmp_path / "imp" / "config.yaml"
     assert proj.is_file()
     data = yaml.safe_load(proj.read_text())
     # The committed project file carries the workflow ref + project settings —
@@ -162,14 +162,14 @@ def test_init_idempotent_on_existing_clone(tmp_path: Path) -> None:
     # A clone that already carries the committed project file must NOT raise —
     # init just bootstraps the machine's global config.
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
     # Project file untouched; global config bootstrapped.
-    assert (tmp_path / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
+    assert (tmp_path / "imp" / "config.yaml").read_text() == "default-workflow: imp\n"
     assert (tmp_path / "imphome" / "config.yaml").exists()
 
 
@@ -183,7 +183,7 @@ def test_supports_two_providers_recorded_in_user_config(tmp_path: Path) -> None:
     data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
     assert data["providers"] == ["claude_code", "openai"]
     # Bindings are NOT scaffolded — the provider-code floor owns tiers.
-    proj = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    proj = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert "tiers" not in proj
 
 
@@ -226,7 +226,7 @@ def test_init_writes_test_cmd_fast_from_conversation(tmp_path, monkeypatch):
     _stub_conv(monkeypatch, _conv_result(test_cmd_fast="make check"))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] == "make check"
 
 
@@ -234,7 +234,7 @@ def test_init_writes_optout_when_conversation_opts_out(tmp_path, monkeypatch):
     _stub_conv(monkeypatch, _conv_result(test_cmd_fast=""))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] == ""
 
 
@@ -242,7 +242,7 @@ def test_init_comment_names_timeout_defaults(tmp_path, monkeypatch):
     _stub_conv(monkeypatch, _conv_result(test_cmd_fast="make check"))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
-    text = (tmp_path / "imp" / "project.yaml").read_text()
+    text = (tmp_path / "imp" / "config.yaml").read_text()
     assert "120s" in text and "300s" in text
     assert "test_cmd_fast_timeout" in text
     assert "test_cmd_slow" in text and "test_cmd_slow_timeout" in text
@@ -307,7 +307,7 @@ def test_post_init_manifest_notes_the_commit(tmp_path: Path) -> None:
         output_fn=lines.append,
     )
     manifest = "\n".join(lines)
-    assert "Committed imp/project.yaml." in manifest
+    assert "Committed imp/config.yaml." in manifest
     assert "track in git" not in manifest
 
 
@@ -316,7 +316,7 @@ def test_already_initialized_with_existing_user_config_claims_no_write(
 ) -> None:
     # Both the committed project file AND the machine global config already exist.
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     imp_config_dir = tmp_path / "imphome"
     imp_config_dir.mkdir(parents=True)
     (imp_config_dir / "config.yaml").write_text("providers: [anthropic]\n")
@@ -358,14 +358,14 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
     assert inactive.startswith("  ")
 
 
-def test_no_usable_credential_stops_without_project_yaml(tmp_path, monkeypatch):
+def test_no_usable_credential_stops_without_config_yaml(tmp_path, monkeypatch):
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "resolve_detection_provider",
                         lambda _p, **_kw: None, raising=False)
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=msgs.append)
-    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert not (tmp_path / "imp" / "config.yaml").exists()
     assert "usable credential" in "\n".join(msgs)
     user = tmp_path / "imphome" / "config.yaml"
     assert yaml.safe_load(user.read_text())["providers"] == ["anthropic"]
@@ -383,7 +383,7 @@ def test_configured_providers_skip_picker(tmp_path, monkeypatch):
 
     run_init(tmp_path, picker_fn=_boom, input_fn=_inputs(), output_fn=lambda _m: None)
     assert yaml.safe_load(
-        (tmp_path / "imp" / "project.yaml").read_text())["pythonpath"] == ["src"]
+        (tmp_path / "imp" / "config.yaml").read_text())["pythonpath"] == ["src"]
 
 
 def test_bwrap_missing_offer_accept_continues(tmp_path, monkeypatch):
@@ -395,7 +395,7 @@ def test_bwrap_missing_offer_accept_continues(tmp_path, monkeypatch):
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs("y"),
              output_fn=msgs.append)
     assert yaml.safe_load(
-        (tmp_path / "imp" / "project.yaml").read_text())["pythonpath"] == ["src"]
+        (tmp_path / "imp" / "config.yaml").read_text())["pythonpath"] == ["src"]
     assert "Running without an OS sandbox." in "\n".join(msgs)
     user = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
     assert user["sandbox"]["allow_unsandboxed"] is True
@@ -407,7 +407,7 @@ def test_bwrap_missing_offer_decline_stops(tmp_path, monkeypatch):
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs("n"),
              output_fn=msgs.append)
-    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert not (tmp_path / "imp" / "config.yaml").exists()
     assert "Install bubblewrap for a real filesystem boundary" in "\n".join(msgs)
 
 
@@ -418,7 +418,7 @@ def test_conversation_writes_chosen_workflow_and_pythonpath(tmp_path, monkeypatc
         test_cmd_fast="make check", roots=["src"]))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["default-workflow"] == "minimal"      # agent's choice, not hardcoded
     assert data["default-base"] == "develop"
     assert data["test_cmd_fast"] == "make check"
@@ -430,7 +430,7 @@ def test_conversation_pythonpath_validated_against_disk(tmp_path, monkeypatch):
     _stub_conv(monkeypatch, _conv_result(roots=["real", "ghost"]))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["pythonpath"] == ["real"]              # ghost dropped: not on disk
 
 
@@ -438,7 +438,7 @@ def test_conversation_empty_roots_writes_hint(tmp_path, monkeypatch):
     _stub_conv(monkeypatch, _conv_result(roots=[]))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
-    text = (tmp_path / "imp" / "project.yaml").read_text()
+    text = (tmp_path / "imp" / "config.yaml").read_text()
     assert yaml.safe_load(text).get("pythonpath") is None
     assert "# pythonpath:" in text
 
@@ -455,7 +455,7 @@ def test_conversation_git_init_true_initializes_repo(tmp_path_factory, monkeypat
     run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
     assert (fresh / ".git").exists()
-    assert (fresh / "imp" / "project.yaml").is_file()
+    assert (fresh / "imp" / "config.yaml").is_file()
     import subprocess
     count = subprocess.run(
         ["git", "rev-list", "--count", "HEAD"], cwd=fresh,
@@ -475,16 +475,16 @@ def test_conversation_git_declined_in_non_repo_stops_cleanly(
     msgs: list[str] = []
     run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=msgs.append)
-    assert not (fresh / "imp" / "project.yaml").exists()
+    assert not (fresh / "imp" / "config.yaml").exists()
     assert "git repository" in "\n".join(msgs).lower()
 
 
-def test_conversation_failure_stops_without_project_yaml(tmp_path, monkeypatch):
+def test_conversation_failure_stops_without_config_yaml(tmp_path, monkeypatch):
     _stub_conv(monkeypatch, InteractiveFailure("auth", "bad_key"))
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=msgs.append)
-    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert not (tmp_path / "imp" / "config.yaml").exists()
     assert "re-run `imp init`" in "\n".join(msgs).lower()
 
 
@@ -493,11 +493,11 @@ def test_conversation_status_error_stops(tmp_path, monkeypatch):
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=msgs.append)
-    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert not (tmp_path / "imp" / "config.yaml").exists()
     assert "didn't finish" in "\n".join(msgs).lower()
 
 
-def test_write_init_files_renders_project_yaml_from_settings(tmp_path: Path) -> None:
+def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> None:
     from imp.cli.init import InitSettings, write_init_files
     (tmp_path / "src").mkdir()
     settings = InitSettings(
@@ -507,7 +507,7 @@ def test_write_init_files_renders_project_yaml_from_settings(tmp_path: Path) -> 
         pythonpath=["src"],
     )
     committed = write_init_files(tmp_path, settings)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["default-workflow"] == "light"
     assert data["default-base"] == "develop"
     assert data["vars"] == {}
@@ -531,7 +531,7 @@ def test_write_init_files_omits_test_block_when_none(tmp_path: Path) -> None:
         InitSettings(default_workflow="default", default_base="main",
                      test_cmd_fast=None, pythonpath=[]),
     )
-    text = (tmp_path / "imp" / "project.yaml").read_text()
+    text = (tmp_path / "imp" / "config.yaml").read_text()
     assert "test_cmd_fast" not in text          # None => block omitted entirely
     assert "# pythonpath:" in text              # empty roots => teaching hint
     assert ".imp/" in (tmp_path / ".gitignore").read_text()
@@ -544,11 +544,11 @@ def test_write_init_files_writes_optout_block_for_empty_string(tmp_path: Path) -
         InitSettings(default_workflow="default", default_base="main",
                      test_cmd_fast="", pythonpath=[]),
     )
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] == ""          # "" => explicit opt-out block written
 
 
-def test_use_defaults_writes_project_yaml_no_model_call(tmp_path, monkeypatch):
+def test_use_defaults_writes_config_yaml_no_model_call(tmp_path, monkeypatch):
     import imp.cli.init as initmod
     from imp.cli.init import run_init_noninteractive
 
@@ -558,7 +558,7 @@ def test_use_defaults_writes_project_yaml_no_model_call(tmp_path, monkeypatch):
     monkeypatch.setattr(initmod, "resolve_detection_provider", _boom, raising=False)
     run_init_noninteractive(
         tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["default-workflow"] == "default"
     assert data["default-base"]            # resolved from the repo's current branch
     assert data.get("pythonpath") is None  # no --pythonpath => teaching hint only
@@ -571,7 +571,7 @@ def test_use_defaults_override_flags(tmp_path):
         tmp_path, output_fn=lambda _m: None,
         workflow="light", base="develop", pythonpath=["pkg"],
         detect_verify_fn=lambda _r: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["default-workflow"] == "light"
     assert data["default-base"] == "develop"
     assert data["pythonpath"] == ["pkg"]
@@ -583,7 +583,7 @@ def test_use_defaults_pythonpath_drops_absent_dirs(tmp_path):
     run_init_noninteractive(
         tmp_path, output_fn=lambda _m: None,
         pythonpath=["real", "ghost"], detect_verify_fn=lambda _r: None)
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["pythonpath"] == ["real"]   # validated against disk
 
 
@@ -592,7 +592,7 @@ def test_use_defaults_fills_offline_test_command(tmp_path):
     run_init_noninteractive(
         tmp_path, output_fn=lambda _m: None,
         detect_verify_fn=lambda _r: "make check")   # heuristic hit, no prompt
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] == "make check"
 
 
@@ -607,31 +607,31 @@ def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch
     run_init_noninteractive(fresh, output_fn=lambda _m: None,
                             detect_verify_fn=lambda _r: None)
     assert (fresh / ".git").exists()
-    assert (fresh / "imp" / "project.yaml").is_file()
+    assert (fresh / "imp" / "config.yaml").is_file()
 
 
 def test_use_defaults_idempotent_on_existing_clone(tmp_path):
     from imp.cli.init import run_init_noninteractive
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     msgs: list[str] = []
     run_init_noninteractive(tmp_path, output_fn=msgs.append,
                             detect_verify_fn=lambda _r: None)
-    assert (tmp_path / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
+    assert (tmp_path / "imp" / "config.yaml").read_text() == "default-workflow: imp\n"
     assert "already initialized" in "\n".join(msgs).lower()
 
 
 def test_use_defaults_idempotent_in_non_git_dir(tmp_path_factory, monkeypatch):
-    # Re-init on a copied imp/project.yaml sitting in a dir with NO git repo must
+    # Re-init on a copied imp/config.yaml sitting in a dir with NO git repo must
     # not raise: the already-initialized branch ensures a repo before committing.
     from imp.cli.init import run_init_noninteractive
     fresh = tmp_path_factory.mktemp("copied")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
     (fresh / "imp").mkdir()
-    (fresh / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (fresh / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     run_init_noninteractive(fresh, output_fn=lambda _m: None,
                             detect_verify_fn=lambda _r: None)
-    assert (fresh / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
+    assert (fresh / "imp" / "config.yaml").read_text() == "default-workflow: imp\n"
     assert (fresh / ".git").exists()
 
 
@@ -722,7 +722,7 @@ def test_cmd_init_rejects_unknown_workflow_before_writing(tmp_path, monkeypatch,
     assert captured.err.splitlines() == [
         _expected_unknown_workflow_line(tmp_path, "minimial")]
     assert captured.out == ""
-    assert not (tmp_path / "imp").exists()          # no project.yaml, no memory scaffold
+    assert not (tmp_path / "imp").exists()          # no config.yaml, no memory scaffold
 
 
 def test_cmd_init_rejects_internal_memory_workflow(tmp_path, monkeypatch, capsys):
@@ -782,7 +782,7 @@ def test_cmd_init_use_defaults_writes_the_selected_workflow(tmp_path, monkeypatc
 
     assert rc == 0
     assert captured.err == ""
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["default-workflow"] == "minimal"
     assert (tmp_path / "imp" / "memory" / "minimal" / "all.md").is_file()
 
@@ -798,7 +798,7 @@ def test_cmd_init_use_defaults_without_flag_keeps_the_default_workflow(
 
     assert rc == 0
     assert captured.err == ""
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["default-workflow"] == "default"
     assert (tmp_path / "imp" / "memory" / "default" / "all.md").is_file()
 
@@ -934,11 +934,11 @@ def _colored_fresh_init(tmp_path, monkeypatch, msgs: list[str]) -> None:
 def test_host_success_lines_carry_engine_chrome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.providers.effective import user_config_path
+    from imp.providers.effective import global_config_path
 
     msgs: list[str] = []
     _colored_fresh_init(tmp_path, monkeypatch, msgs)
-    user_path = user_config_path()
+    user_path = global_config_path()
 
     # This one prints before the theme is applied, so its gold is the ansi gold.
     assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
@@ -946,9 +946,9 @@ def test_host_success_lines_carry_engine_chrome(
     assert f"{DIM}  anthropic → ANTHROPIC_API_KEY (set this env var){RESET}" in msgs
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
-    assert f"{DIM}  imp/project.yaml{RESET}" in msgs
+    assert f"{DIM}  imp/config.yaml{RESET}" in msgs
     assert f"{DIM}  {user_path}  (your machine: providers, theme){RESET}" in msgs
-    assert f"{DIM}Committed imp/project.yaml.{RESET}" in msgs
+    assert f"{DIM}Committed imp/config.yaml.{RESET}" in msgs
     assert f'Try: {GOLD_DARK}imp new "Add a dark-mode toggle"{RESET}' in msgs
 
 
@@ -988,14 +988,14 @@ def test_the_hand_off_line_is_gone(
 def test_already_initialized_rerun_block_stays_bare(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.providers.effective import user_config_path
+    from imp.providers.effective import global_config_path
 
     monkeypatch.setenv("FORCE_COLOR", "1")
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
-    cfg_dir = tmp_path / "xdg" / "imp"
-    cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    cfg = global_config_path()
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("providers: [anthropic]\ntheme: dark\n")
 
     msgs: list[str] = []
     run_init(
@@ -1003,11 +1003,11 @@ def test_already_initialized_rerun_block_stays_bare(
         input_fn=_inputs(), output_fn=msgs.append,
     )
 
-    user_path = user_config_path()
-    assert "Project already initialized (imp/project.yaml is committed)." in msgs
+    user_path = global_config_path()
+    assert "Project already initialized (imp/config.yaml is committed)." in msgs
     # the same two strings the fresh path chromes — bare here
     assert f"  {user_path}  (your machine: providers, theme)" in msgs
-    assert "Committed imp/project.yaml." in msgs
+    assert "Committed imp/config.yaml." in msgs
 
 
 def test_noninteractive_output_stays_bare_under_forced_color(
@@ -1021,18 +1021,19 @@ def test_noninteractive_output_stays_bare_under_forced_color(
         tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
 
     assert "Created:" in msgs
-    assert "  imp/project.yaml" in msgs
+    assert "  imp/config.yaml" in msgs
     assert not any("\x1b" in m for m in msgs)
 
 
 def test_already_initialized_rerun_leaves_the_palette_alone(tmp_path: Path) -> None:
     from imp.cli import palette as pal
+    from imp.providers.effective import global_config_path
 
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
-    cfg_dir = tmp_path / "xdg" / "imp"
-    cfg_dir.mkdir(parents=True)
-    (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    cfg = global_config_path()
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("providers: [anthropic]\ntheme: dark\n")
 
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -1129,7 +1130,7 @@ def test_already_initialized_rerun_prints_no_splash(
     seen: dict[str, object] = {}
     _stub_splash(monkeypatch, seen)
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
 
     msgs: list[str] = []
     run_init(

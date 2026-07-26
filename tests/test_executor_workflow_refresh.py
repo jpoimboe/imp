@@ -152,7 +152,7 @@ def test_refresh_missing_live_source_keeps_snapshot(tmp_path: Path) -> None:
     # unavailable and refresh is a best-effort no-op. (Removing the committed
     # imp/workflows/imp does NOT do this — the bundled "default" workflow is a live
     # fallback, so live_workflow_dir always resolves to an existing dir.)
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: nosuch\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: nosuch\n")
     assert _refresh_workflow_snapshot(quest) is False
     assert (snapshot / "workflow.yaml").read_bytes() == before
 
@@ -162,11 +162,11 @@ def test_refresh_unresolvable_live_source_keeps_snapshot(tmp_path: Path) -> None
     _refresh_workflow_snapshot(quest)
     snapshot = quest.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
-    # Malformed project.yaml makes parse_default_workflow RAISE LoadError,
+    # Malformed config.yaml makes parse_default_workflow RAISE LoadError,
     # which propagates through live_workflow_dir and is caught by the helper's
-    # best-effort except → snapshot kept, returns False. (A MISSING project.yaml
+    # best-effort except → snapshot kept, returns False. (A MISSING config.yaml
     # would NOT raise: parse_default_workflow returns "default" for an absent file.)
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: [bad yaml\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: [bad yaml\n")
     assert _refresh_workflow_snapshot(quest) is False
     assert (snapshot / "workflow.yaml").read_bytes() == before
 
@@ -192,7 +192,7 @@ def test_refresh_recovers_workflow_old_when_workflow_missing(tmp_path: Path) -> 
     # snapshot can ONLY reappear if workflow.old was renamed back — never via a
     # fresh copy. (rmtree of imp/workflows/imp would fall back to the bundled
     # "default" workflow, which is a live source, defeating the point.)
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: nosuch\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: nosuch\n")
     assert not snapshot.exists()
     assert _refresh_workflow_snapshot(quest) is False
     assert snapshot.is_dir()

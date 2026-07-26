@@ -205,7 +205,7 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
         shell.chmod(0o755)
 
     # config: a single role for every tier used by the workflow. run_quest reads
-    # via load_effective_config (project layer from imp/project.yaml + local layer
+    # via load_effective_config (project layer from imp/config.yaml + local layer
     # from .imp/config.yaml). Tests 2/3 swap the provider via _rewrite_config.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     cfg_content = (
@@ -215,7 +215,7 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
         "  medium: {anthropic: claude-sonnet-4-6}\n"
         "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
 

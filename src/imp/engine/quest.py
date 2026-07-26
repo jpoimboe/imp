@@ -510,7 +510,7 @@ class Quest:
         from imp.assets import resolve_workflow_dir
         from imp.providers.config import parse_default_workflow
         name = self.workflow or parse_default_workflow(
-            self.project_root / "imp" / "project.yaml")
+            self.project_root / "imp" / "config.yaml")
         return resolve_workflow_dir(self.project_root, name)
 
     @property
@@ -519,7 +519,7 @@ class Quest:
         from imp.assets import resolve_workflow_dir
         from imp.providers.config import parse_default_workflow
         name = self.workflow or parse_default_workflow(
-            self.control_root / "imp" / "project.yaml")
+            self.control_root / "imp" / "config.yaml")
         return resolve_workflow_dir(self.control_root, name)
 
     @property
@@ -591,7 +591,7 @@ class Quest:
             from imp.assets import resolve_workflow_dir
             from imp.providers.config import parse_default_workflow
             wf_name = workflow or parse_default_workflow(
-                wt_path / "imp" / "project.yaml")
+                wt_path / "imp" / "config.yaml")
             loaded_workflow = load_workflow(
                 resolve_workflow_dir(wt_path, wf_name),
                 configured_tiers=config.tier_names(),
@@ -681,7 +681,7 @@ class Quest:
                     control_root, config.memory, config.project_facts)
                 from imp.assets import resolve_workflow_dir
                 wf_name = workflow or parse_default_workflow(
-                    control_root / "imp" / "project.yaml")
+                    control_root / "imp" / "config.yaml")
                 loaded_workflow = load_workflow(
                     resolve_workflow_dir(control_root, wf_name),
                     configured_tiers=config.tier_names(),

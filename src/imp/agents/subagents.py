@@ -305,7 +305,7 @@ async def dispatch_task(
             # No quest context -> no quest_dir, no snapshot; live dir is the only option.
             workflow_dir=resolve_workflow_dir(
                 ctx.project_root,
-                parse_default_workflow(ctx.project_root / "imp" / "project.yaml"),
+                parse_default_workflow(ctx.project_root / "imp" / "config.yaml"),
             ),
         )
         if isolated:

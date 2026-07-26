@@ -101,7 +101,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
     env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
 
     # cwd=tmp_path is what makes imp find the project root — find_project_root
-    # walks up from cwd looking for the imp/project.yaml marker. No
+    # walks up from cwd looking for the imp/config.yaml marker. No
     # IMP_PROJECT_ROOT env var needed
     # (the engine sets that internally for script gates, but it's not read at
     # CLI startup).
@@ -164,7 +164,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     tmp_path: Path,
 ) -> None:
     _seed_project(tmp_path)
-    # Override the anthropic project.yaml _seed_project committed; re-commit so
+    # Override the anthropic config.yaml _seed_project committed; re-commit so
     # the subprocess `imp new` worktree (project layer read from the committed
     # tree) carries the openai pin.
     # gpt-5.4-mini, not gpt-4o-mini: the model isn't under test here (the
@@ -173,7 +173,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     # skipped the bash call and completed the step immediately, so the test saw no
     # bash tool_call and failed. gpt-5.4-mini (the project's openai `low` pin)
     # follows the bash-then-complete sequence reliably.
-    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main
         providers: [openai]
@@ -247,10 +247,10 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     tmp_path: Path,
 ) -> None:
     _seed_project(tmp_path)
-    # Override the anthropic project.yaml _seed_project committed; re-commit so
+    # Override the anthropic config.yaml _seed_project committed; re-commit so
     # the subprocess `imp new` worktree (project layer read from the committed
     # tree) carries the claude_code pin.
-    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         default-base: main
         providers: [claude_code]

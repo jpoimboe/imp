@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from imp.providers import register_builtin_providers, resolve
+from imp.providers.config import parse_config_layer
 from imp.providers.effective import global_config_path, load_effective_config
+from tests._repo_config import repo_config_file
 
 
 @pytest.fixture(autouse=True)
@@ -29,12 +31,12 @@ def test_project_leaf_override_is_additive_over_floor(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
-    (proj / "imp" / "project.yaml").write_text("tiers:\n  high: {anthropic: opus-pinned}\n")
+    (proj / "imp" / "config.yaml").write_text("tiers:\n  high: {anthropic: opus-pinned}\n")
     eff = load_effective_config(project_root=proj, control_root=None)
     # Overridden leaf comes from project; sibling vendor stays at the floor.
     assert eff.config.tiers["high"]["anthropic"] == "opus-pinned"
     assert eff.config.tiers["high"]["openai"] == "gpt-5.5"
-    assert eff.provenance[("tiers", "high", "anthropic")].file.name == "project.yaml"
+    assert eff.provenance[("tiers", "high", "anthropic")].file == proj / "imp" / "config.yaml"
     assert "provider code" in str(eff.provenance[("tiers", "high", "openai")].file)
 
 
@@ -47,14 +49,14 @@ def test_local_beats_global_beats_project(
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
-    (proj / "imp" / "project.yaml").write_text("theme: dark\n")
+    (proj / "imp" / "config.yaml").write_text("theme: dark\n")
     control = tmp_path / "control"
     (control / ".imp").mkdir(parents=True)
     (control / ".imp" / "config.yaml").write_text("theme: ansi\n")
     eff = load_effective_config(project_root=proj, control_root=control)
     assert eff.config.theme == "ansi"  # local wins
     assert eff.config.providers == ("openai",)  # from global
-    assert eff.provenance[("theme",)].file.name == "config.yaml"
+    assert eff.provenance[("theme",)].file == control / ".imp" / "config.yaml"
 
 
 def test_global_config_path_respects_imp_home(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,12 +74,12 @@ def test_global_config_path_defaults_under_the_home_dir(
 def test_test_cmd_fields_flow_from_project_to_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # End-to-end: project.yaml test_cmd_* land on Config, which the engine bundles
+    # End-to-end: config.yaml test_cmd_* land on Config, which the engine bundles
     # into TestGates / IMP_TEST_CMD_* for the gate subprocesses.
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
-    (proj / "imp" / "project.yaml").write_text(
+    (proj / "imp" / "config.yaml").write_text(
         "test_cmd_fast: make check\n"
         "test_cmd_slow: make check && make test-live\n"
         "test_cmd_fast_timeout: 120\n"
@@ -106,7 +108,7 @@ def test_pythonpath_flows_from_project_to_config(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
-    (proj / "imp" / "project.yaml").write_text("pythonpath: [src, vendor]\n")
+    (proj / "imp" / "config.yaml").write_text("pythonpath: [src, vendor]\n")
     eff = load_effective_config(project_root=proj, control_root=None)
     assert eff.config.pythonpath == ("src", "vendor")
 
@@ -119,29 +121,23 @@ def test_pythonpath_defaults_to_empty_tuple_when_unset(
     assert eff.config.pythonpath == ()
 
 
-def test_repo_project_yaml_uses_tiered_test_cmds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The shipped imp/project.yaml is migrated to the tiered keys; guard against a
-    # regression to the removed verify_command/verify_timeout surface.
-    repo_root = Path(__file__).resolve().parents[1]
-    monkeypatch.setenv("IMP_HOME", str(repo_root / "nonexistent-imp-home"))
-    eff = load_effective_config(project_root=repo_root, control_root=None)
-    assert eff.config.test_cmd_fast == "make check"
-    assert eff.config.test_cmd_slow == "make check && make test-live"
-    assert eff.config.test_cmd_fast_timeout == 240
-    assert eff.config.test_cmd_slow_timeout == 600
-    raw = (repo_root / "imp" / "project.yaml").read_text()
+def test_repo_config_uses_tiered_test_cmds() -> None:
+    # imp's own shipped config layer, read directly: the effective-config stack
+    # is not what this asserts, and imp's file keeps its old name until the
+    # migration's staged rename is committed.
+    layer, _src = parse_config_layer(repo_config_file())
+    assert layer["test_cmd_fast"] == "make check"
+    assert layer["test_cmd_slow"] == "make check && make test-live"
+    assert layer["test_cmd_fast_timeout"] == 240
+    assert layer["test_cmd_slow_timeout"] == 600
+    # Guard against a regression to the removed verify_command/verify_timeout surface.
+    raw = repo_config_file().read_text()
     assert "verify_command" not in raw and "verify_timeout" not in raw
 
 
-def test_repo_project_yaml_declares_pythonpath_src(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_repo_config_declares_pythonpath_src() -> None:
     # imp is the first consumer of the general knob: src-layout, one `src` root
     # covers both src/imp and src/impty. Must be declared since the env-level
     # auto-shadow branch was deleted.
-    repo_root = Path(__file__).resolve().parents[1]
-    monkeypatch.setenv("IMP_HOME", str(repo_root / "nonexistent-imp-home"))
-    eff = load_effective_config(project_root=repo_root, control_root=None)
-    assert eff.config.pythonpath == ("src",)
+    layer, _src = parse_config_layer(repo_config_file())
+    assert layer["pythonpath"] == ["src"]

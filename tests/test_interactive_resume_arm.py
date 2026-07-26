@@ -43,7 +43,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: chat, file: agents/chat.md, tier: low, interactive: true,\n"
         "         rules: [{else: true, continue: true}]}\n")
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n"

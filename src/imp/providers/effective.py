@@ -2,7 +2,7 @@
 2026-06-08-config-file-split §2).
 
 Precedence (later wins):
-    provider code (floor) ← imp/project.yaml ← ~/.imp/config.yaml
+    provider code (floor) ← imp/config.yaml ← ~/.imp/config.yaml
                           ← .imp/config.yaml (control root, gitignored)
 
 The merged `Config.tiers` is always fully populated (floor + overrides), so
@@ -131,7 +131,7 @@ def load_effective_config(
 ) -> EffectiveConfig:
     """Build the floor, then merge project ← global ← local on top.
 
-    - project layer: `project_root/imp/project.yaml` (the worktree for a quest;
+    - project layer: `project_root/imp/config.yaml` (the worktree for a quest;
       the control-root checkout for quest-less commands). Skipped when
       project_root is None.
     - global layer: `global_config_path()` (live).
@@ -142,7 +142,7 @@ def load_effective_config(
     project_facts: dict[str, str] = {}
     memory: dict[str, str] = {}
     if project_root is not None:
-        proj_path = project_root / "imp" / "project.yaml"
+        proj_path = project_root / "imp" / "config.yaml"
         p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)

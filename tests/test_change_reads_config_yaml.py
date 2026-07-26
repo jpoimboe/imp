@@ -1,4 +1,4 @@
-"""Quest.create reads the project layer from imp/project.yaml in the worktree
+"""Quest.create reads the project layer from imp/config.yaml in the worktree
 (spec §7 step 3)."""
 import shutil
 import subprocess
@@ -32,8 +32,8 @@ def test_change_create_uses_floor_tiers_without_a_tiers_block(
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
     (root / "imp").mkdir()
-    # project.yaml carries NO tiers — the floor must supply them.
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    # config.yaml carries NO tiers — the floor must supply them.
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     # global config supplies the providers list (global-homed).
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)

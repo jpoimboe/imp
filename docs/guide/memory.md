@@ -10,7 +10,7 @@ its own). Pair with `imp-knowledge` for the stable picture.
   summary, the event log (the ordered provenance of what each agent and review
   did), and `state/`. Persistent and per-quest: a left draft resumes with
   `imp resume <id>`, and finished quests stay findable with `imp search`.
-- **Project-level config** — the repo's `imp/` config dir (`imp/project.yaml`
+- **Project-level config** — the repo's `imp/` config dir (`imp/config.yaml`
   plus `imp/memory/`), the home of standing, human-authored project memory
   applied to every quest:
   - `imp/memory/` — human-authored markdown standing instructions, layered onto
@@ -27,11 +27,11 @@ its own). Pair with `imp-knowledge` for the stable picture.
     gates run.
 
   Other config (providers, tiers, sandbox, …) layers across
-  `floor ← imp/project.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`;
+  `floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`;
   `facts` and the workflow/base defaults live only in the project layer;
   `imp/memory/` files live in the repo's `imp/` config dir, not the merged config;
   change them by editing the markdown files under `imp/memory/` directly. Changing
-  `facts` or defaults means editing `imp/project.yaml` by hand — there is no
+  `facts` or defaults means editing `imp/config.yaml` by hand — there is no
   `imp config set`; `imp init` scaffolds the file — its interactive setup picks the
   default workflow and base (use `imp init --use-defaults` to skip the conversation
   in CI).
@@ -40,7 +40,7 @@ its own). Pair with `imp-knowledge` for the stable picture.
 
 - **Memory and facts** — read the repo's `imp/` config dir directly: markdown
   under `imp/memory/` is the standing prose injected into agents (as a
-  `## Project memory` section), and `imp/project.yaml`'s `facts:` is the
+  `## Project memory` section), and `imp/config.yaml`'s `facts:` is the
   `{{ project.<key> }}` map. Both are project-only and are **not** shown by
   `imp config`.
 - **Merged effective config** — run `imp config` for the resolved providers,

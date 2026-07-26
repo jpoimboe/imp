@@ -43,7 +43,7 @@ def test_creates_scoped_initial_commit(tmp_path: Path) -> None:
     assert _git(tmp_path, "log", "-1", "--format=%s").strip() == (
         "imp: initialize project")
     tracked = _git(tmp_path, "ls-tree", "-r", "--name-only", "HEAD").split()
-    assert "imp/project.yaml" in tracked
+    assert "imp/config.yaml" in tracked
     assert ".gitignore" in tracked
 
 

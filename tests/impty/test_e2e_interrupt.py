@@ -80,7 +80,7 @@ def _seed_subagent_repo(root: Path, *, script: dict) -> Path:
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: work\n    steps:\n"
         "      - name: driver\n        file: agents/driver.md\n")
-    (root / "imp" / "project.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)

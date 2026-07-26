@@ -31,19 +31,19 @@ def test_is_bundled_workflow_predicate() -> None:
 
 def test_parse_default_workflow_defaults_to_default(tmp_path: Path) -> None:
     assert parse_default_workflow(tmp_path / "absent.yaml") == "default"
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("vars: {}\n")
     assert parse_default_workflow(p) == "default"
 
 
 def test_parse_default_workflow_reads_field(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-workflow: mine\n")
     assert parse_default_workflow(p) == "mine"
 
 
 def test_parse_default_workflow_rejects_path_traversal(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-workflow: ../escape\n")
     with pytest.raises(LoadError):
         parse_default_workflow(p)
@@ -53,7 +53,7 @@ def test_change_resolves_fork_workflow_dir(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     shutil.copytree(tmp_path / "imp" / "workflows" / "imp",
                     tmp_path / "imp" / "workflows" / "mine")
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: mine\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: mine\n")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "fork workflow")
     ch = Quest.create(tmp_path, title="X", quest_id="2026-06-15-fork01",
@@ -63,7 +63,7 @@ def test_change_resolves_fork_workflow_dir(tmp_path: Path) -> None:
 
 def test_change_missing_workflow_dir_raises_naming_path(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: ghost\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: ghost\n")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "point at missing")
     with pytest.raises(LoadError) as exc:
@@ -122,32 +122,32 @@ def test_parse_default_base_absent_file_is_none(tmp_path: Path) -> None:
 
 
 def test_parse_default_base_missing_key_is_none(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-workflow: imp\n")
     assert parse_default_base(p) is None
 
 
 def test_parse_default_base_reads_field(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-base: master\n")
     assert parse_default_base(p) == "master"
 
 
 def test_parse_default_base_allows_slashes(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-base: release/2026\n")
     assert parse_default_base(p) == "release/2026"
 
 
 def test_parse_default_base_blank_value_raises(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-base: '   '\n")
     with pytest.raises(LoadError):
         parse_default_base(p)
 
 
 def test_parse_default_base_non_string_raises(tmp_path: Path) -> None:
-    p = tmp_path / "project.yaml"
+    p = tmp_path / "config.yaml"
     p.write_text("default-base: [a, b]\n")
     with pytest.raises(LoadError):
         parse_default_base(p)

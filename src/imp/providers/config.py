@@ -1,4 +1,4 @@
-"""Parse a single config layer (imp/project.yaml, user, or local config.yaml).
+"""Parse a single config layer: the project, global, or local config file.
 Schema (post 2026-06-04-roles-to-tiers):
 
     providers: [claude_code, openai]      # ordered preference list
@@ -89,7 +89,7 @@ _FACT_SCALARS = (str, int, float, bool)
 
 
 def parse_project_facts(path: Path) -> dict[str, str]:
-    """Read imp/project.yaml `facts:` into a name->string mapping. Absent file
+    """Read imp/config.yaml `facts:` into a name->string mapping. Absent file
     or missing `facts:` -> empty mapping."""
     if not path.exists():
         return {}
@@ -140,7 +140,7 @@ def validate_workflow_name(name: str) -> bool:
 
 
 def parse_default_workflow(path: Path) -> str:
-    """Read imp/project.yaml `default-workflow:` field. Absent → 'default'. Read
+    """Read imp/config.yaml `default-workflow:` field. Absent → 'default'. Read
     directly from the project layer, not merged into the layered Config.
     The value is a single path segment (no separators / parent escapes)."""
     if not path.exists():
@@ -166,7 +166,7 @@ def parse_default_workflow(path: Path) -> str:
 
 
 def parse_default_base(path: Path) -> str | None:
-    """Read imp/project.yaml `default-base:` field — the integration branch a
+    """Read imp/config.yaml `default-base:` field — the integration branch a
     quest is based on. Absent file or missing key → None; `imp new` treats that
     as a hard error (there is no runtime auto-detect fallback). Read directly
     from the project layer, not merged into the layered Config. A branch name may
@@ -212,7 +212,7 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
     # (`providers:` on its own line) parses to key-present/value-None. Treat that
     # as absent — the floor/merge fills it — instead of passing None down to
     # _parse_providers, which would raise the misleading "must define a
-    # 'providers:' list" message from a project.yaml/local-layer file (M1).
+    # 'providers:' list" message from a project- or local-layer file (M1).
     if raw.get("providers") is not None:
         out["providers"] = _parse_providers(raw["providers"], src)
     if raw.get("tiers") is not None:
