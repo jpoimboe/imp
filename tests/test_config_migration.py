@@ -317,6 +317,20 @@ def test_a_failing_global_step_does_not_block_the_project_step(
     assert capsys.readouterr().err == _RENAME_NOTICE
 
 
+def test_project_rename_spawns_no_subprocess_once_migrated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _old_name_git_repo(tmp_path / "repo")
+    migrate_project_config(repo)
+    assert (repo / "imp" / "config.yaml").is_file()
+    # All git-based setup is done; now block every subprocess.run so that a
+    # stray git spawn causes a hard failure.
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError("unexpected subprocess.run after migration")))
+    migrate_project_config(repo)  # must return without spawning git
+
+
 def test_cli_main_does_not_stage_the_project_rename(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
