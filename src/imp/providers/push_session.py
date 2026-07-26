@@ -36,8 +36,8 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
-    _CONTINUATION_NUDGE,
     _resolve_wait_reply,
+    continuation_nudge,
     deliver_interject,
     drain_all_interjects_at_resume,
     last_assistant_text,
@@ -179,6 +179,7 @@ class PushSession:
                     invocation.coordinator, ctx.user_input_fn,
                     invocation.resume_should_continue,
                     elog=elog, agent_id=aid,
+                    resume_cause=invocation.resume_cause,
                     last_agent_message=last_assistant_text(messages),
                     halt_writer=invocation.halt_writer,
                     halt_clearer=invocation.halt_clearer)
@@ -211,7 +212,7 @@ class PushSession:
                         and not pending_human_tail):
                     deliver_engine_continuation(
                         messages, transcript, elog, aid,
-                        _CONTINUATION_NUDGE)
+                        continuation_nudge(invocation.resume_cause))
         else:
             messages = []
             for m in invocation.initial_messages:

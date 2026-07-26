@@ -94,7 +94,7 @@ def _seed_text_user_tail_transcript(inv_dir: Path) -> None:
 
 async def _run_anthropic(
     tmp_path: Path, *, resume_should_continue: bool, queued: list[str] | None,
-    seed: Any = _seed_send_to_llm_transcript,
+    seed: Any = _seed_send_to_llm_transcript, resume_cause: str = "human",
 ) -> list[str]:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
@@ -128,6 +128,7 @@ async def _run_anthropic(
         event_log=InMemoryEventLog(),
         coordinator=_Coord(queued),
         resume_should_continue=resume_should_continue,
+        resume_cause=resume_cause,
     )
 
     events = [e async for e in runner.run(inv)]
@@ -352,7 +353,7 @@ async def test_anthropic_pending_human_tail_suppresses_nudge(
 
 async def _run_openai(
     tmp_path: Path, *, resume_should_continue: bool,
-    seed: Any = _seed_send_to_llm_transcript,
+    seed: Any = _seed_send_to_llm_transcript, resume_cause: str = "human",
 ) -> tuple[list[str], Any]:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
@@ -395,6 +396,7 @@ async def _run_openai(
         event_log=log,
         coordinator=_Coord(),
         resume_should_continue=resume_should_continue,
+        resume_cause=resume_cause,
     )
 
     events = [e async for e in runner.run(inv)]
@@ -432,3 +434,76 @@ async def test_openai_pending_human_tail_suppresses_nudge(
         for e in log.read())
     assert RESUME_CONTINUE_NUDGE not in texts, texts
     assert "ignore" in texts, texts
+
+
+@pytest.mark.anyio
+async def test_anthropic_provider_retry_resume_injects_the_retry_note(
+    tmp_path: Path,
+) -> None:
+    """push_session's direct resume-continue site — the base class behind both
+    registered push providers — selects the note from the cause."""
+    from imp.agents.transcript import RESUME_RETRY_NUDGE
+    texts = await _run_anthropic(
+        tmp_path, resume_should_continue=True, queued=None,
+        resume_cause="provider_retry")
+    assert texts.count(RESUME_RETRY_NUDGE) == 1, texts
+    assert RESUME_CONTINUE_NUDGE not in texts, texts
+
+
+@pytest.mark.anyio
+async def test_openai_provider_retry_resume_injects_the_retry_note(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.transcript import RESUME_RETRY_NUDGE
+    texts, _log = await _run_openai(
+        tmp_path, resume_should_continue=True, resume_cause="provider_retry")
+    assert texts.count(RESUME_RETRY_NUDGE) == 1, texts
+    assert RESUME_CONTINUE_NUDGE not in texts, texts
+
+
+@pytest.mark.anyio
+async def test_claude_code_provider_retry_resume_journals_the_retry_note(
+    tmp_path: Path,
+) -> None:
+    """claude_code's resume-continue condition: the note is journaled as an
+    engine_message/continuation and selected from the cause."""
+    from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
+    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
+    from imp.agents.transcript import RESUME_RETRY_NUDGE
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
+    from tests.cc_fakes import text as cc_text
+    from tests.cc_fakes import tool_use as cc_tool_use
+
+    inv_dir = tmp_path / "step"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+    _seed_send_to_llm_transcript(inv_dir)
+    log = InMemoryEventLog()
+    scripted = [
+        assistant(cc_text("done"),
+                  cc_tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(
+            opts, scripted_messages=scripted))
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="claude_code",
+        model_name="claude-sonnet-4-5", system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        quest_context=QuestContext(
+            title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+        transcript_dir=inv_dir, events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=log, coordinator=_Coord(),
+        resume_should_continue=True, resume_cause="provider_retry")
+
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_result"
+    conts = [e for e in log.read()
+             if e["type"] == "engine_message"
+             and e["payload"].get("subtype") == "continuation"]
+    assert len(conts) == 1, log.read()
+    assert conts[0]["payload"]["content"][0]["text"] == RESUME_RETRY_NUDGE

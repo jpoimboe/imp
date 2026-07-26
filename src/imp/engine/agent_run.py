@@ -39,7 +39,7 @@ from imp.agents.tools.limits import (
     PROCESS_KILL_GRACE_S,
     PROVIDER_REQUEST_SILENCE_CEILING_S,
 )
-from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
 from imp.assets import engine_prompt
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
@@ -320,7 +320,9 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-_CONTINUATION_NUDGE = RESUME_CONTINUE_NUDGE
+def continuation_nudge(cause: ResumeCause) -> str:
+    """The resume-continuation copy for `cause`: a provider retry is not a pause."""
+    return RESUME_RETRY_NUDGE if cause == "provider_retry" else RESUME_CONTINUE_NUDGE
 
 
 async def _resolve_wait_reply(
@@ -330,6 +332,7 @@ async def _resolve_wait_reply(
     *,
     elog: Any,
     agent_id: str,
+    resume_cause: ResumeCause = "human",
     pending_reply: str | None = None,
     last_agent_message: str = "",
     halt_writer: Callable[[], None] | None = None,
@@ -346,7 +349,8 @@ async def _resolve_wait_reply(
        retry, which must supersede the continuation nudge. Only codex passes
        this; the message-list providers surface their pending tail via
        messages[-1] and leave it None.
-    3. else if resume_should_continue → return the continuation nudge as ('nudge')
+    3. else if resume_should_continue → return the continuation nudge for
+       resume_cause as ('nudge')
        so a headless resume continues the step instead of soliciting.
     4. else → emit the sole awaiting_user_input gate and solicit empty via
        user_input_fn (a genuine yield → park), returning ('solicited').
@@ -365,7 +369,7 @@ async def _resolve_wait_reply(
     elif resume_should_continue:
         # Internal continuation, not a human reply: a fresh-process resume already
         # cleared halt on entry, so leave the flag untouched.
-        return _CONTINUATION_NUDGE, "nudge"
+        return continuation_nudge(resume_cause), "nudge"
     else:
         if halt_writer is not None:
             halt_writer()

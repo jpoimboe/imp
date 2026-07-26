@@ -82,6 +82,7 @@ from imp.agents.tools.context import (
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
+    RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
     Transcript,
     captured_result_key,
@@ -91,10 +92,10 @@ from imp.agents.transcript import (
     synthesize_native_success_on_resume,
 )
 from imp.engine.agent_run import (
-    _CONTINUATION_NUDGE,
     INTERRUPT_STEER_HINT,
     _resolve_wait_reply,
     build_inline_solicit,
+    continuation_nudge,
     drain_all_interjects_at_resume,
     last_assistant_text,
     most_recent_assistant_text,
@@ -1329,6 +1330,7 @@ class ClaudeCodeSession(ObserveSession):
                     invocation.coordinator, ctx.user_input_fn,
                     invocation.resume_should_continue,
                     elog=elog, agent_id=aid,
+                    resume_cause=invocation.resume_cause,
                     last_agent_message=last_assistant_text(messages),
                     halt_writer=invocation.halt_writer,
                     halt_clearer=invocation.halt_clearer)
@@ -1353,10 +1355,11 @@ class ClaudeCodeSession(ObserveSession):
                     and not pending_human_tail):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
-                    _CONTINUATION_NUDGE)
+                    continuation_nudge(invocation.resume_cause))
             if len(messages) == resume_base:
                 deliver_engine_continuation(
-                    messages, transcript, elog, aid, _CONTINUATION_NUDGE)
+                    messages, transcript, elog, aid,
+                    continuation_nudge(invocation.resume_cause))
         else:
             messages = []
             for m in invocation.initial_messages:
@@ -1795,8 +1798,8 @@ class ClaudeCodeSession(ObserveSession):
             if isinstance(reply, str) and not reply.strip():
                 deliver_engine_continuation(
                     self.messages, self.transcript, elog, aid,
-                    _CONTINUATION_NUDGE)
-                self._next_query = _CONTINUATION_NUDGE
+                    RESUME_CONTINUE_NUDGE)
+                self._next_query = RESUME_CONTINUE_NUDGE
             else:
                 self._next_query = deliver_continuation_reply(
                     self.messages, self.transcript, elog, aid, reply, human=True)

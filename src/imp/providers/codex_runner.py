@@ -44,7 +44,7 @@ from imp.agents.tools.context import (
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import deliver_continuation_reply
-from imp.engine.agent_run import _resolve_wait_reply
+from imp.engine.agent_run import _resolve_wait_reply, continuation_nudge
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.env import quest_scratch_root
 from imp.engine.state import JsonlEventLog
@@ -491,7 +491,9 @@ class CodexSession(ObserveSession):
                 reply, source = await _resolve_wait_reply(
                     invocation.coordinator, invocation.user_input_fn,
                     invocation.resume_should_continue,
-                    elog=elog, agent_id=aid, pending_reply=pending,
+                    elog=elog, agent_id=aid,
+                    resume_cause=invocation.resume_cause,
+                    pending_reply=pending,
                     last_agent_message=last_agent_text,
                     halt_writer=invocation.halt_writer,
                     halt_clearer=invocation.halt_clearer)
@@ -514,11 +516,10 @@ class CodexSession(ObserveSession):
                         None, None, elog, aid, reply, human=True)
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
                 # Replay-and-continue: nudge is the resumed prompt; journal for audit.
-                from imp.agents.transcript import RESUME_CONTINUE_NUDGE
-                nudge_msg = Message(
-                    role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
+                nudge = continuation_nudge(invocation.resume_cause)
+                nudge_msg = Message(role="user", content=(TextBlock(text=nudge),))
                 elog.append_engine_message(agent_id=aid, message=nudge_msg, subtype="continuation")
-                next_prompt = RESUME_CONTINUE_NUDGE
+                next_prompt = nudge
         # §2 resume-entry drain: fold pending interject texts into the first
         # resumed prompt (codex re-prompts with a string). AWAITING_USER already
         # folded the reply above, so skip it here. Only runs on resume

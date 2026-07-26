@@ -1974,3 +1974,22 @@ def test_build_agent_invocation_halt_clearer_none_without_state(
         resolved_tiers=None, coordinator=None)
 
     assert inv.halt_clearer is None
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_retry_cause_returns_the_retry_note() -> None:
+    import imp.engine.agent_run as ar
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
+    from imp.engine.state import InMemoryEventLog
+    coord = _RecordingCoord()
+    log = InMemoryEventLog()
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when resume_should_continue")
+
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, True, elog=log, agent_id="step:p/s",
+        resume_cause="provider_retry")
+    assert (reply, source) == (RESUME_RETRY_NUDGE, "nudge")
+    assert reply != RESUME_CONTINUE_NUDGE
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
