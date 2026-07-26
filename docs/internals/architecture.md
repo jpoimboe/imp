@@ -43,7 +43,7 @@ flowchart TB
 
 ### Zoom 2 — agent & provider lane
 
-`agent_run.drive_invocation()` resolves the step's tier to a concrete `(provider, model)`, drives the provider's `AgentRunner`, and dispatches tools. Tools can spawn subagents (implementer, reviewers), which re-enter the same drive loop one level down.
+`agent_run.drive_invocation()` resolves the step's tier to a concrete `(provider, model)`, drives the provider's `AgentRunner`, and dispatches tools. A step's tier itself is fixed at load time by `loader._parse_step`: the step's own `tier:` in `workflow.yaml`, else the referenced agent file's frontmatter `tier:`, else `medium`. Tools can spawn subagents (implementer, reviewers), which re-enter the same drive loop one level down.
 
 ```mermaid
 flowchart TB

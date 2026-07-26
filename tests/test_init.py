@@ -64,7 +64,7 @@ def _stub_setup_gate(monkeypatch):
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
     monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _providers: ("anthropic", "m"), raising=False)
+                        lambda _providers, **_kw: ("anthropic", "m"), raising=False)
     monkeypatch.setattr(initmod, "_run_init_conversation",
                         lambda **kw: _conv_result(), raising=False)
 
@@ -345,7 +345,7 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
 def test_no_usable_credential_stops_without_project_yaml(tmp_path, monkeypatch):
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p: None, raising=False)
+                        lambda _p, **_kw: None, raising=False)
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=msgs.append)
@@ -785,3 +785,50 @@ def test_cmd_init_use_defaults_without_flag_keeps_the_default_workflow(
     data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
     assert data["default-workflow"] == "default"
     assert (tmp_path / "imp" / "memory" / "default" / "all.md").is_file()
+
+
+def test_run_init_passes_the_setup_agents_declared_tier(tmp_path, monkeypatch):
+    """run_init resolves the detection provider at the tier init.md declares."""
+    import imp.cli.init as initmod
+    from imp.assets import bundled_assets_dir
+    from imp.engine.loader import parse_agent_file
+
+    seen: dict[str, object] = {}
+
+    def _capture(_providers, *, tier):
+        seen["tier"] = tier
+        return ("anthropic", "m")
+
+    monkeypatch.setattr(initmod, "resolve_detection_provider", _capture,
+                        raising=False)
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=lambda _msg: None)
+    declared = parse_agent_file(bundled_assets_dir() / "init.md").tier
+    assert seen["tier"] == declared
+
+
+def test_run_init_declared_tier_follows_the_agent_file(tmp_path, monkeypatch):
+    """The tier is read from init.md's frontmatter, not hardcoded: move the
+    declaration and the tier run_init resolves at moves with it."""
+    from dataclasses import replace
+
+    import imp.cli.init as initmod
+
+    real_parse = initmod.parse_agent_file
+
+    def _declare_high(path):
+        agent = real_parse(path)
+        return replace(agent, tier="high") if path.name == "init.md" else agent
+
+    seen: dict[str, object] = {}
+
+    def _capture(_providers, *, tier):
+        seen["tier"] = tier
+        return ("anthropic", "m")
+
+    monkeypatch.setattr(initmod, "parse_agent_file", _declare_high, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider", _capture,
+                        raising=False)
+    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
+             input_fn=_inputs(), output_fn=lambda _msg: None)
+    assert seen["tier"] == "high"

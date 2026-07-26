@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from imp.cli.pythonpath_detect import format_pythonpath_yaml
 
 # --- format_pythonpath_yaml serializer ---
@@ -53,7 +55,8 @@ def test_resolve_detection_provider_picks_first_usable(
         pp, "load_effective_config",
         lambda: EffectiveConfig(config=cfg, provenance={}))
     # Both pass env_check; the first listed provider must win over the second.
-    assert resolve_detection_provider(["first", "second"]) == ("first", "m-first")
+    assert resolve_detection_provider(["first", "second"], tier="medium") == (
+        "first", "m-first")
 
 
 def test_resolve_detection_provider_none_when_no_usable(
@@ -65,8 +68,14 @@ def test_resolve_detection_provider_none_when_no_usable(
     monkeypatch.setattr(
         pp, "load_effective_config",
         lambda: EffectiveConfig(config=cfg, provenance={}))
-    assert resolve_detection_provider(["nocred"]) is None
+    assert resolve_detection_provider(["nocred"], tier="medium") is None
 
+
+def test_resolve_detection_provider_requires_an_explicit_tier() -> None:
+    """No default tier: a caller must name the one it means, so init's
+    declared tier can never silently drift back to medium."""
+    with pytest.raises(TypeError, match="tier"):
+        resolve_detection_provider(["first"])
 
 
 def test_validate_keeps_existing_dirs_and_normalizes(tmp_path: Path) -> None:

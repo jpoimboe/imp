@@ -654,19 +654,45 @@ def test_load_workflow_rejects_differ_from_cycle(tmp_path):
         load_workflow(wf_dir)
 
 
-def test_load_workflow_step_tier_defaults_to_medium(tmp_path):
-    from imp.engine.loader import load_workflow
+@pytest.mark.parametrize(
+    ("step_tier_line", "frontmatter_tier_line", "expected"),
+    [
+        ("", "tier: high\n", "high"),                # frontmatter is the step default
+        ("tier: low\n", "tier: high\n", "low"),      # explicit step tier wins
+        ("", "", "medium"),                          # neither level declares one
+        ('tier: ""\n', "tier: high\n", "high"),      # falsy step tier falls through
+        ('tier: ""\n', 'tier: ""\n', "medium"),      # falsy at both levels
+    ],
+)
+def test_load_workflow_step_tier_precedence(
+    tmp_path: Path, step_tier_line: str, frontmatter_tier_line: str, expected: str,
+) -> None:
+    """step `tier:` > agent frontmatter `tier:` > "medium"; falsy never wins."""
     wf_dir = tmp_path / "wf"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "a.md").write_text(
-        "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
+        f"---\nname: a\n{frontmatter_tier_line}"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nbody\n")
+    step_lines = "      - name: s\n        file: agents/a.md\n"
+    if step_tier_line:
+        step_lines += f"        {step_tier_line}"
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\nphases:\n  - name: p\n    steps:\n" + step_lines)
+    assert load_workflow(wf_dir).flat_steps()[0].tier == expected
+
+
+def test_load_workflow_non_agent_step_tier_is_medium(tmp_path: Path) -> None:
+    """A step with no file: at all keeps the "medium" default."""
+    wf_dir = tmp_path / "wf"
+    wf_dir.mkdir(parents=True)
     (wf_dir / "workflow.yaml").write_text(
         "name: w\n"
         "phases:\n  - name: p\n    steps:\n"
-        "      - {name: s, file: agents/a.md}\n")    # no tier:
-    wf = load_workflow(wf_dir)
-    assert wf.flat_steps()[0].tier == "medium"
+        "      - {name: gate, rules: [{else: true, continue: true}]}\n")
+    by = {s.name: s for s in load_workflow(wf_dir).flat_steps()}
+    assert by["gate"].kind == "branch"
+    assert by["gate"].tier == "medium"
 
 
 def test_feedback_string_parsed_and_bool_rejected(tmp_path: Path) -> None:

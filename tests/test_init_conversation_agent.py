@@ -3,6 +3,7 @@ from __future__ import annotations
 from imp.assets import bundled_assets_dir, bundled_workflow_dir
 from imp.engine.loader import parse_agent_file
 from imp.engine.types import AgentDef
+from imp.providers.config import _REQUIRED_TIERS
 
 
 def _agent() -> AgentDef:
@@ -66,3 +67,9 @@ def test_setup_agent_declares_only_real_tools() -> None:
     reserved = {"complete_step", "sub_agent", "load_skill", "web_search", "web_fetch"}
     allowed = set(get_registry()) | reserved
     assert not set(_agent().tools) - allowed
+
+
+def test_setup_agent_declares_a_configurable_tier() -> None:
+    """run_init resolves the setup model at this tier, so a typo here would
+    KeyError mid-setup instead of failing the suite."""
+    assert _agent().tier in _REQUIRED_TIERS

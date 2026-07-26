@@ -27,11 +27,12 @@ def is_python_packaging_project(project_root: Path) -> bool:
 
 
 def resolve_detection_provider(
-    providers: list[str], *, tier: str = "medium",
+    providers: list[str], *, tier: str,
 ) -> tuple[str, str] | None:
     """The first provider in `providers` (pick order) with a usable credential,
     paired with its `tier` model. None when no picked provider is usable — the
-    offline credential check for init's readiness gate."""
+    offline credential check for init's readiness gate. `tier` is required: a
+    default here would silently outrank the caller's declared tier."""
     cfg = load_effective_config().config
     usable = available_providers(replace(cfg, providers=tuple(providers)))
     if not usable:

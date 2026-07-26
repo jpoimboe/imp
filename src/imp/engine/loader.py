@@ -684,10 +684,10 @@ def _parse_step(
     label = raw.get("label")
     if label is not None and not isinstance(label, str):
         raise LoadError("a step's `label:` must be a string", source)
-    if label is None and kind == "agent" and raw.get("file"):
-        agent_def = agents.get(Path(raw["file"]).stem)
-        if agent_def is not None:
-            label = agent_def.label
+    agent_def = (agents.get(Path(raw["file"]).stem)
+                 if kind == "agent" and raw.get("file") else None)
+    if label is None and agent_def is not None:
+        label = agent_def.label
 
     acquire = _parse_lane_attr(raw, "acquire", source,
                                allowed=("merge-lane", "test-lane"))
@@ -726,11 +726,12 @@ def _parse_step(
 
     if kind == "agent":
         file = (workflow_dir / raw["file"]) if raw.get("file") else None
+        frontmatter_tier = agent_def.tier if agent_def is not None else None
         step = Step(
             name=name, phase=phase_name, kind="agent", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
             file=file, prompt=(str(raw["prompt"]) if raw.get("prompt") else None),
-            tier=str(raw.get("tier") or "medium"),
+            tier=str(raw.get("tier") or frontmatter_tier or "medium"),
             differ_from=(str(raw["differ_from"])
                          if raw.get("differ_from") is not None else None),
             read_only=tuple(str(p) for p in (raw.get("read_only") or [])),

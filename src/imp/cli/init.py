@@ -648,7 +648,8 @@ def run_init(
 
     # --- fresh init: credential + sandbox gate (a working provider is required
     #     for the setup conversation) ---
-    resolved = resolve_detection_provider(providers)
+    setup_tier = parse_agent_file(bundled_assets_dir() / "init.md").tier or "medium"
+    resolved = resolve_detection_provider(providers, tier=setup_tier)
     if resolved is None:
         if wrote_user_config:
             _bootstrap_user_config(

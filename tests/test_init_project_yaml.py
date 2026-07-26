@@ -20,7 +20,7 @@ def _git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     from imp.agents.interactive import InteractiveSuccess
     monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
     monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p: ("anthropic", "m"), raising=False)
+                        lambda _p, **_kw: ("anthropic", "m"), raising=False)
     monkeypatch.setattr(initmod, "_run_init_conversation", lambda **kw: InteractiveSuccess({
         "status": "Success", "git_init": True, "default_workflow": "default",
         "default_base": "main", "test_cmd_fast": "", "pythonpath": {"roots": []}}),
