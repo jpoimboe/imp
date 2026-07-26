@@ -26,9 +26,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
   - `test_cmd_fast` / `test_cmd_slow` (and timeouts) — the commands the verify
     gates run.
 
-  Other config (providers, tiers, sandbox, …) layers across
+  Other config (providers, tiers, sandbox, `default-workflow`, …) layers across
   `floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`;
-  `facts` and the workflow/base defaults live only in the project layer;
+  `facts` and `default-base` live only in the project layer;
   `imp/memory/` files live in the repo's `imp/` config dir, not the merged config;
   change them by editing the markdown files under `imp/memory/` directly. Changing
   `facts` or defaults means editing `imp/config.yaml` by hand — there is no
@@ -44,9 +44,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
   `{{ project.<key> }}` map. Both are project-only and are **not** shown by
   `imp config`.
 - **Merged effective config** — run `imp config` for the resolved providers,
-  tiers, and test/lint commands with per-setting provenance. Mind its blind spots:
-  it omits `imp/memory/`, `facts`, and the `default-workflow` / `default-base`
-  defaults — read those from the files.
+  tiers, `default-workflow`, and test/lint commands, each tagged in brackets with
+  the layer it came from. Mind its blind spots: it omits `imp/memory/`, `facts`,
+  and `default-base` — read those from the files.
 
 When the user asks what the standing instructions say, read the applicable
 `imp/memory/` files and quote them verbatim rather than paraphrasing.

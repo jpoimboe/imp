@@ -43,9 +43,9 @@ cat > "$WT/.imp/config.yaml" <<'YAML'
 providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
 theme: ansi
 YAML
-cd "$WT" && imp config      # the `providers` row must resolve to your provider, ending in
-                            # `…/.imp/config.yaml (local)` — NOT `(global)`. If it ends in `(global)`,
-                            # your file landed at the wrong path; fix it before driving.
+cd "$WT" && imp config      # the `providers` row must resolve to your provider, its label reading
+                            # `[.imp/config.yaml]`. If it reads `[~/.imp/config.yaml]`, your file
+                            # landed at the wrong path; fix it before driving.
 ```
 
 **Seed a deterministic feature intent that requests a unique sentinel.** Generate the sentinel and

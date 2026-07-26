@@ -160,7 +160,7 @@ to score).
   - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`,
     `imp events search`): expert-oriented, but read its `-h` and a bare invocation.
   - `imp search <query>` — both a hit and a miss: is the no-match wording helpful?
-  - `imp config` / `imp config --explain high` — layer/source arrows legible? precedence clear?
+  - `imp config` / `imp config --explain high` — layer/source labels legible? precedence clear?
   - `imp abandon <id>` — teardown wording clear? confirmation/affordance?
   - `imp edit <id> --title "…"` — is the confirmation clear about what changed?
   - `imp remote-control -h` — purpose clear from help alone? (The full chat UX has its own

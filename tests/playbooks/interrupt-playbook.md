@@ -291,11 +291,11 @@ floor** (current models, shipped with imp). Confirm the override won — and on 
 before testing:
 ```bash
 cd "$WT" && imp config                  # the `providers` row must resolve to the provider under test,
-                                        # its arrow ending in `…/.imp/config.yaml (local)` — NOT `(global)`
+                                        # its label reading `[.imp/config.yaml]`
 cd "$WT" && imp config --explain high   # the high-tier model the forced provider will use
 ```
-`imp config`'s arrow prints the leaf's **full source path** + a `(layer)` tag. If the
-`providers` arrow ends in `(global)`, your file landed at the wrong path (`$WT/imp/config.yaml`,
+`imp config` tags each leaf with its source layer in brackets. If the
+`providers` row reads `[~/.imp/config.yaml]`, your file landed at the wrong path (`$WT/imp/config.yaml`,
 not `$WT/.imp/config.yaml`) and the global layer silently won — fix it before recording anything.
 The `--explain` line shows the floor model **before** you spend a billable call.
 

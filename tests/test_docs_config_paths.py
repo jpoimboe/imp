@@ -26,3 +26,13 @@ def _corpus() -> list[Path]:
 def test_no_retired_config_name_reference(needle: str) -> None:
     offenders = sorted(str(p) for p in _corpus() if needle in p.read_text())
     assert offenders == []
+
+
+def test_playbooks_verify_against_the_bracketed_layer_label() -> None:
+    """`imp config` tags each leaf with a bracketed short label; the retired
+    `…/<path> (layer)` form must not survive in the verification steps."""
+    for name in ("interrupt-playbook.md", "dogfood-playbook.md"):
+        body = (Path("tests/playbooks") / name).read_text()
+        assert "[.imp/config.yaml]" in body, name
+        assert "(local)" not in body, name
+        assert "(global)" not in body, name
