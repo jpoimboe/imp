@@ -1136,3 +1136,34 @@ def test_already_initialized_rerun_prints_no_splash(
 
     assert seen == {}
     assert "SPLASH-BLOCK" not in msgs
+
+
+def test_picker_cursor_row_is_gold_not_cyan() -> None:
+    from imp.cli.init import _picker_rows
+
+    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    assert rows[1][0] == "ansiyellow bold"
+    assert rows[2][0] == ""
+
+
+def test_picker_block_has_a_blank_line_around_the_options() -> None:
+    from imp.cli.init import _picker_rows
+
+    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    text = "".join(t for _style, t in rows)
+    assert text.splitlines() == [
+        "Which providers do you want to enable?",
+        "",
+        "> [x] claude_code",
+        "  [ ] anthropic",
+        "",
+        "↑↓ move · space toggle · enter confirm · esc cancel",
+    ]
+
+
+def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
+    from imp.cli.init import _interactive_provider_picker
+
+    doc = _interactive_provider_picker.__doc__ or ""
+    assert "ansicyan" not in doc
+    assert "ansiyellow" in doc

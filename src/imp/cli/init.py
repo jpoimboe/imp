@@ -379,16 +379,16 @@ def _picker_rows(
     available: list[str], cursor: int, selected: set[int],
 ) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = [
-        ("bold", "Which providers do you want to enable?\n"),
+        ("bold", "Which providers do you want to enable?\n\n"),
     ]
     for i, name in enumerate(available):
         arrow = "> " if i == cursor else "  "
         box = "[x] " if i in selected else "[ ] "
-        style = "ansicyan bold" if i == cursor else ""
+        style = "ansiyellow bold" if i == cursor else ""
         out.append((style, f"{arrow}{box}{name}\n"))
     out.append((
         "ansibrightblack",
-        "↑↓ move · space toggle · enter confirm · esc cancel",
+        "\n↑↓ move · space toggle · enter confirm · esc cancel",
     ))
     return out
 
@@ -398,17 +398,20 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
 
     Renders in place (not a full-screen dialog):
         Which providers do you want to enable?
+
         > [ ] claude_code
           [ ] anthropic
           [ ] openai
-        up/down move | space toggle | enter confirm | esc cancel
+
+        ↑↓ move · space toggle · enter confirm · esc cancel
 
     Keys: ↑↓ move cursor, space toggles, enter confirms (≥1 required),
     ctrl-c / esc raise KeyboardInterrupt.
 
     Style names match `imp log`'s palette via prompt_toolkit's ANSI aliases:
-    bold for the header, ansicyan for the active row, ansibrightblack
-    (= our `gray`/`dim`) for the help line.
+    bold for the header, ansiyellow for the active row — the hue `pal.caret()`
+    emits under the `ansi` theme, which is still the active one this early in
+    init — and ansibrightblack (= our `gray`/`dim`) for the help line.
     """
     from prompt_toolkit import Application
     from prompt_toolkit.key_binding import KeyBindings
@@ -454,10 +457,9 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
         event.app.exit(exception=KeyboardInterrupt)
 
     control = FormattedTextControl(text=_render, focusable=True, show_cursor=False)
-    body = Window(
-        content=control,
-        height=Dimension(min=len(available) + 2, max=len(available) + 2),
-    )
+    # Derived from the rows themselves so the layout can't drift from the render.
+    height = sum(text.count("\n") for _style, text in _render()) + 1
+    body = Window(content=control, height=Dimension(min=height, max=height))
     app: Any = Application(
         layout=Layout(HSplit([body])),
         key_bindings=kb,
