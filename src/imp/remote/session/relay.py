@@ -9,6 +9,7 @@ import anyio
 
 from imp.remote.curate import EventCurator
 from imp.remote.session.client import SessionClient
+from imp.remote.session.protocol import INTERRUPT_EVENT_TYPES
 
 
 class SessionRelay:
@@ -69,6 +70,6 @@ class SessionRelay:
         if curated is not None:
             self._sink(curated)
         # A live (non-replay) event moves awaiting-ness: a gate sets it, anything
-        # else clears it. Replayed frames never touch _awaiting.
-        if not event.get("_replay"):
+        # else clears it. Replayed frames and interrupt records never touch it.
+        if not event.get("_replay") and event.get("type") not in INTERRUPT_EVENT_TYPES:
             self._awaiting = event.get("type") == "awaiting_user_input"
