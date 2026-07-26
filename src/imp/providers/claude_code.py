@@ -106,7 +106,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
-    reconcile_store_tail,
+    message_to_session_records,
     resume_session_id,
     session_key,
     session_store_for,
@@ -1241,7 +1241,6 @@ class ClaudeCodeSession(ObserveSession):
             return
         store = session_store_for(invocation.transcript_dir)
         skey = session_key(invocation.quest_context.project_root, aid)
-        store_body = await store.load(skey)
         shape_native_eligible = (
             (not is_fresh)
             and classify_resume(existing) in (
@@ -1393,13 +1392,13 @@ class ClaudeCodeSession(ObserveSession):
         self._web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
 
         if native_resume:
-            reconciled = reconcile_store_tail(
-                messages[:resume_base], store_body or [],
+            await store.overwrite(skey, message_to_session_records(
+                _project_for_cli(messages[:resume_base]),
+                parent_uuid=None,
                 session_id=skey["session_id"],
                 cwd=str(invocation.quest_context.project_root),
                 model=runner.model,
-            )
-            await store.overwrite(skey, reconciled)
+            ))
 
         self._llm_group_open = False
         self._llm_group_key: str | None = None

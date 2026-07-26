@@ -4853,3 +4853,149 @@ async def test_cc_run_aclose_cascades_to_run_loop(
     assert first == {"type": "a"}
     await gen.aclose()
     assert closed == [True]
+
+
+def _cli_resume_artifacts(session_id: str, records: int) -> list[dict[str, Any]]:
+    """The records claude-p itself writes at a resume boundary and imp never
+    mirrors: the isMeta continue prompt and its synthetic no-response reply."""
+    out: list[dict[str, Any]] = []
+    for i in range(records):
+        if i % 2 == 0:
+            out.append({
+                "parentUuid": None, "uuid": f"cli-{i}", "sessionId": session_id,
+                "type": "user", "isMeta": True,
+                "message": {"role": "user",
+                            "content": "Continue from where you left off."}})
+        else:
+            out.append({
+                "parentUuid": None, "uuid": f"cli-{i}", "sessionId": session_id,
+                "type": "assistant",
+                "message": {"id": f"msg_synth{i}", "type": "message",
+                            "role": "assistant", "model": "<synthetic>",
+                            "content": [{"type": "text",
+                                         "text": "No response requested."}]}})
+    return out
+
+
+def _no_ts(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{k: v for k, v in r.items() if k != "timestamp"} for r in records]
+
+
+@pytest.mark.anyio
+async def test_native_resume_store_body_is_pure_projection(tmp_path: Path) -> None:
+    """The body after _enter() is exactly the projection of messages[:resume_base],
+    whatever the store held before: CLI resume artifacts and uuid-less metadata are
+    replaced, not counted as turns and not allowed to displace real ones."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code import _project_for_cli
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                         input={"path": "a.txt"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                         input={"path": "b.txt"}),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+
+    # Drifted body: two CLI-written resume artifacts wedged between real turns,
+    # plus a trailing uuid-less metadata record.
+    real = message_to_session_records(
+        msgs, parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
+    await store.append(skey, real[:2] + _cli_resume_artifacts(skey["session_id"], 2)
+                       + real[2:]
+                       + [{"type": "file-history-snapshot", "messageId": "fh1"}])
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+                result()]
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=scripted))
+    [ev async for ev in runner.run(inv)]
+
+    body = await store.load(skey)
+    expected = message_to_session_records(
+        _project_for_cli(msgs), parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
+    assert _no_ts(body) == _no_ts(expected)
+    blob = json.dumps(body)
+    assert "Continue from where you left off." not in blob
+    assert "No response requested." not in blob
+    assert "file-history-snapshot" not in blob
+
+
+@pytest.mark.anyio
+async def test_coincidental_count_deficit_drops_the_error_turn(tmp_path: Path) -> None:
+    """A deficit body whose turn count coincidentally equals len(messages) and
+    whose last record is a rolled-back 401 turn: counting sees "complete" and
+    resumes from the error turn, so the real closing turn never lands."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                         input={"path": "a.txt"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)),
+        Message(role="assistant", content=(TextBlock(text="done early"),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+
+    seeded = message_to_session_records(
+        msgs[:3], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
+    err_turn = {
+        "parentUuid": seeded[-1]["uuid"], "uuid": "rolled-back-401",
+        "sessionId": skey["session_id"], "type": "assistant",
+        "message": {"id": "msg_err", "type": "message", "role": "assistant",
+                    "model": "claude-sonnet-4-5",
+                    "content": [{"type": "text", "text":
+                                 "Failed to authenticate. API Error: 401"}]},
+    }
+    await store.append(skey, [*seeded, err_turn])
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+                result()]
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=scripted),
+        user_input_fn=lambda _p: "keep going")
+    [ev async for ev in runner.run(inv)]
+
+    body = await store.load(skey)
+    assert len(body) == 4
+    assert body[-1]["type"] == "assistant"
+    assert body[-1]["message"]["content"][0]["text"] == "done early"
+    assert "API Error: 401" not in json.dumps(body)
