@@ -8,7 +8,7 @@ import os
 import shutil
 import stat
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -59,12 +59,21 @@ def reads_back_as(got: Any, expected: Any) -> bool:
 @contextmanager
 def scratch_seam(scratch_dir: Path, name: str) -> Iterator[Path]:
     """A real file under the target's own basename, so validator messages already
-    name `config.yaml` and `os.replace` lands from the same filesystem."""
-    scratch_dir.mkdir(parents=True, exist_ok=True)
+    name `config.yaml` and `os.replace` lands from the same filesystem. Any
+    directory this had to create goes away again unless a write landed in it."""
+    created: list[Path] = []
+    for path in (scratch_dir, *scratch_dir.parents):
+        if path.exists():
+            break
+        created.append(path)
     try:
+        scratch_dir.mkdir(parents=True, exist_ok=True)
         yield scratch_dir / name
     finally:
         shutil.rmtree(scratch_dir, ignore_errors=True)
+        for path in created:
+            with suppress(OSError):
+                path.rmdir()
 
 
 def verify_readable(scratch_file: Path, text: str) -> None:
@@ -193,8 +202,6 @@ def run_set(*, key: str, value: str, scope: Layer | None,
         layer, target = _target(settable, scope, project_root)
         if layer == "project":
             _require_project_file(target, project_root)
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
         current = target.read_text() if target.is_file() else ""
         parsed = settable.parse(value)
         try:

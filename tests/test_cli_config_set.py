@@ -244,6 +244,8 @@ def test_invalid_value_reports_the_validator_message_alone(
     assert "config-verify" not in err
     assert not (imp_home / "config.yaml").exists()
 
+    assert not imp_home.exists()
+
     assert main(["config", "set", "test_cmd_fast_timeout", "abc"]) == 2
     assert capsys.readouterr().err == (
         "imp: 'test_cmd_fast_timeout' must be a positive integer "
@@ -384,6 +386,20 @@ def test_bare_config_and_explain_are_unchanged(
     assert "tier high:" in capsys.readouterr().out
     assert main(["config", "--all"]) == 0
     assert "tiers:" in capsys.readouterr().out
+
+
+def test_rejected_global_set_leaves_no_imp_home_and_accepted_set_leaves_no_scratch(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "--global", "theme", "purple"]) == 2
+    assert capsys.readouterr().err == "imp: 'theme' must be 'dark', 'light', or 'ansi'\n"
+    assert not imp_home.exists()
+
+    assert main(["config", "set", "--global", "theme", "light"]) == 0
+    capsys.readouterr()
+    assert imp_home.is_dir()
+    assert (imp_home / "config.yaml").read_text() == "theme: light\n"
+    assert [p.name for p in imp_home.iterdir()] == ["config.yaml"]
 
 
 def _config_action_parser(name: str) -> argparse.ArgumentParser:
