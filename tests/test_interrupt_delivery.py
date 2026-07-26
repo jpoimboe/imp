@@ -218,7 +218,6 @@ async def test_yield_watchdog_escalates_when_no_yield(monkeypatch: Any) -> None:
         coord.runner_attached(lambda: None, force_kill=fk_parent, agent_id="parent"),
         coord.runner_attached(lambda: None, force_kill=fk_child, agent_id="child"),
     ):
-        coord._first_gesture_at = coord._now()
         coord._yielded = anyio.Event()  # never set -> no yield
         with anyio.fail_after(30):  # deadlock backstop only
             await coord._yield_watchdog()
@@ -242,7 +241,6 @@ async def test_note_yield_disarms_watchdog(monkeypatch: Any) -> None:
         killed.append("x")
 
     with coord.runner_attached(lambda: None, force_kill=fk_x, agent_id="x"):
-        coord._first_gesture_at = coord._now()
         coord._yielded = anyio.Event()
         coord.note_yield()  # run yielded before the deadline
         with anyio.fail_after(30):  # deadlock backstop only
@@ -305,7 +303,6 @@ async def test_signal_force_disarms_the_yield_watchdog(monkeypatch: Any) -> None
 
     with coord.runner_attached(lambda: None, force_kill=fk, agent_id="a1"):
         # Arm the watchdog exactly as the first gesture would.
-        coord._first_gesture_at = coord._now()
         coord._yielded = anyio.Event()
         await coord.signal_force()          # calls note_yield() -> disarms watchdog
         with anyio.fail_after(30):  # deadlock backstop only
