@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
 from imp.providers.config import Config, parse_config_layer, parse_project_facts
 from imp.providers.memory import load_memory_snapshot, validate_memory_tree
@@ -133,7 +134,8 @@ def load_effective_config(
 
     - project layer: `project_root/imp/config.yaml` (the worktree for a quest;
       the control-root checkout for quest-less commands). Skipped when
-      project_root is None.
+      project_root is None; raises when only the pre-rename `imp/project.yaml`
+      is present.
     - global layer: `global_config_path()` (live).
     - local layer: `control_root/.imp/config.yaml` (live, gitignored). Skipped
       when control_root is None.
@@ -143,6 +145,12 @@ def load_effective_config(
     memory: dict[str, str] = {}
     if project_root is not None:
         proj_path = project_root / "imp" / "config.yaml"
+        if not proj_path.is_file() and (project_root / "imp" / "project.yaml").is_file():
+            raise LoadError(
+                "imp/project.yaml found but imp now reads imp/config.yaml — "
+                "rename it on this branch with "
+                "`git mv imp/project.yaml imp/config.yaml`"
+            )
         p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)
@@ -203,8 +211,6 @@ def validate_project_memory(
     error can fire here."""
     if not memory:
         return
-    from imp.engine.errors import LoadError
-
     valid, workflow_steps = memory_validation_scopes(
         project_root, memory.keys(), project_facts
     )
