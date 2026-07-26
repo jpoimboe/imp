@@ -27,7 +27,7 @@ from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import (
     _COMMAND_SHAPED,
     REPROMPT,
-    is_slash_command,
+    solicit_line,
 )
 from imp.engine.agent_run import (
     AgentRunResult,
@@ -132,29 +132,33 @@ def handle_setup_slash(
 
 def build_setup_input_fn(
     *,
-    read_line: Callable[[str], Awaitable[str]],
+    prompt: Any,
     asset_dir: Path,
     output_fn: Callable[[str], None],
     unsandboxed: bool,
+    status: Any,
+    driver: Any,
+    coord: Any,
+    width: int = 80,
 ) -> Callable[[str], Awaitable[str | SkillReply]]:
     """Return the user_chat_input_fn for the setup conversation.
 
-    Reads one terminal line via the injected read_line seam, transparently
-    handling slash commands, and returns the first real user line or loaded skill.
-    Called as fn("") on every bare turn-end."""
+    One shared solicit turn per read (slash.solicit_line) with setup's own slash
+    dispatch injected, so the field gets the run path's caret, bottom toolbar,
+    and spacing. Called as fn("") on every bare turn-end."""
+
+    def _dispatch(line: str) -> object:
+        return handle_setup_slash(
+            line, asset_dir=asset_dir, output_fn=output_fn,
+            unsandboxed=unsandboxed)
 
     async def _input(_prompt: str) -> str | SkillReply:
-        while True:
-            line = await read_line("")
-            if not is_slash_command(line):
-                return line
-            result = handle_setup_slash(
-                line, asset_dir=asset_dir,
-                output_fn=output_fn, unsandboxed=unsandboxed)
-            if result is REPROMPT:
-                continue
-            assert isinstance(result, (str, SkillReply))
-            return result
+        result = await solicit_line(
+            prompt, status, dispatch=_dispatch,
+            toolbar_fn=driver.compose_toolbar_static, coord=coord,
+            driver=driver, width=width, output_fn=output_fn)
+        assert isinstance(result, (str, SkillReply))
+        return result
 
     return _input
 
@@ -168,7 +172,7 @@ async def run_interactive_agent(
     project_root: Path,
     asset_dir: Path,
     sandbox_cfg: SandboxConfig,
-    read_line: Callable[[str], Awaitable[str]],
+    prompt: Any,
     stream: Any = None,
     output_fn: Callable[[str], None] | None = None,
     color: bool = False,
@@ -216,8 +220,9 @@ async def run_interactive_agent(
     event_log = InMemoryEventLog(on_event=driver.on_event)
     coord = InterruptCoordinator()
     input_fn = build_setup_input_fn(
-        read_line=read_line, asset_dir=asset_dir,
-        output_fn=output_fn, unsandboxed=unsandboxed)
+        prompt=prompt, asset_dir=asset_dir, output_fn=output_fn,
+        unsandboxed=unsandboxed, status=status, driver=driver, coord=coord,
+        width=width)
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)

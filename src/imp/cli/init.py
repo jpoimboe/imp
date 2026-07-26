@@ -43,7 +43,7 @@ from imp.assets import (
 )
 from imp.cli import palette as pal
 from imp.cli import splash
-from imp.cli.prompt import Prompt
+from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT, Prompt
 from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
     resolve_detection_provider,
@@ -582,13 +582,13 @@ def _run_init_conversation(
         workflows=_workflow_choices(project_root),
         base_hint=worktree.origin_head_branch(project_root),
         git_exists=_in_git_repo(project_root))
-    reader = Prompt(color=color).ask_async
+    prompt = Prompt(color=color, empty_hint=SETUP_EMPTY_PROMPT_HINT)
     return run_interactive_agent_sync(
         agent_def=agent_def, provider_name=provider_name, model_name=model_name,
         initial_message=kickoff, project_root=project_root,
         asset_dir=assets,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=allow_unsandboxed),
-        read_line=reader, output_fn=output_fn, color=color, title="imp setup")
+        prompt=prompt, output_fn=output_fn, color=color, title="imp setup")
 
 
 def run_init(

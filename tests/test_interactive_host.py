@@ -29,6 +29,55 @@ def _skills_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
+class _FakePrompt:
+    """Stand-in for cli.prompt.Prompt: hands out queued lines and records how
+    each read was framed."""
+
+    def __init__(self, lines: list[str] | None = None) -> None:
+        self._lines = list(lines or [])
+        self.prompt_texts: list[str | None] = []
+        self.bottom_toolbars: list[Any] = []
+        self.hints: list[str | None] = []
+
+    async def ask_async(self, prompt_text: str | None = None, *,
+                        question: str = "", width: int = 80, indent: str = "",
+                        bottom_toolbar: Any = None,
+                        hint: str | None = None) -> str:
+        self.prompt_texts.append(prompt_text)
+        self.bottom_toolbars.append(bottom_toolbar)
+        self.hints.append(hint)
+        assert self._lines, "unexpected prompt read"
+        return self._lines.pop(0)
+
+
+class _StubDriver:
+    def __init__(self, toolbar: str | None = None) -> None:
+        self.events: list[str] = []
+        self._toolbar = toolbar
+
+    def prepare_for_prompt(self) -> None:
+        self.events.append("prepare")
+
+    def flush_deferred(self) -> None:
+        self.events.append("flush")
+
+    def prompt_indent(self) -> str:
+        return ""
+
+    def compose_toolbar_static(self) -> str | None:
+        return self._toolbar
+
+
+class _CountStatus:
+    def __init__(self) -> None:
+        self.suspend_calls = 0
+
+    def suspend(self) -> object:
+        import contextlib
+        self.suspend_calls += 1
+        return contextlib.nullcontext()
+
+
 def test_setup_slash_help_reprompts(tmp_path):
     out: list[str] = []
     result = handle_setup_slash(
@@ -107,28 +156,20 @@ def test_setup_slash_passes_path_shaped_verbatim(tmp_path):
 
 @pytest.mark.anyio
 async def test_setup_input_returns_plain_text(tmp_path):
-    lines = iter(["light please"])
-
-    async def read_line(_prompt: str) -> str:
-        return next(lines)
-
     fn = build_setup_input_fn(
-        read_line=read_line, asset_dir=tmp_path,
-        output_fn=lambda _m: None, unsandboxed=False)
+        prompt=_FakePrompt(["light please"]), asset_dir=tmp_path,
+        output_fn=lambda _m: None, unsandboxed=False,
+        status=None, driver=_StubDriver(), coord=None)
     assert await fn("") == "light please"
 
 
 @pytest.mark.anyio
 async def test_setup_input_loops_past_slash_then_returns(tmp_path):
-    lines = iter(["/help", "the real answer"])
-
-    async def read_line(_prompt: str) -> str:
-        return next(lines)
-
     out: list[str] = []
     fn = build_setup_input_fn(
-        read_line=read_line, asset_dir=tmp_path,
-        output_fn=out.append, unsandboxed=False)
+        prompt=_FakePrompt(["/help", "the real answer"]), asset_dir=tmp_path,
+        output_fn=out.append, unsandboxed=False,
+        status=None, driver=_StubDriver(), coord=None)
     assert await fn("") == "the real answer"     # slash consumed, next line returned
     assert any("Setup commands:" in line for line in out)
 
@@ -136,14 +177,10 @@ async def test_setup_input_loops_past_slash_then_returns(tmp_path):
 @pytest.mark.anyio
 async def test_setup_input_returns_skill_reply(tmp_path):
     wd = _skills_dir(tmp_path)
-    lines = iter(["/greet"])
-
-    async def read_line(_prompt: str) -> str:
-        return next(lines)
-
     fn = build_setup_input_fn(
-        read_line=read_line, asset_dir=wd,
-        output_fn=lambda _m: None, unsandboxed=False)
+        prompt=_FakePrompt(["/greet"]), asset_dir=wd,
+        output_fn=lambda _m: None, unsandboxed=False,
+        status=None, driver=_StubDriver(), coord=None)
     result = await fn("")
     assert isinstance(result, SkillReply)
     assert result.name == "greet"
@@ -222,10 +259,6 @@ class _RenderingRunner:
         pass
 
 
-async def _noop_read_line(_prompt: str) -> str:
-    return ""
-
-
 def _register_runner(provider_registry, runner) -> None:
     class _Provider:
         name = "fake"
@@ -250,7 +283,7 @@ async def test_host_returns_agent_output(tmp_path, provider_registry):
         agent_def=_agent_def(), provider_name="fake", model_name="m",
         initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
-        read_line=_noop_read_line, stream=_NonTTY())
+        prompt=_FakePrompt(), stream=_NonTTY())
     assert isinstance(result, InteractiveSuccess)
     assert result.output["default_workflow"] == "light"
 
@@ -276,7 +309,7 @@ async def test_host_builds_attended_invocation(tmp_path, provider_registry):
         agent_def=_agent_def(), provider_name="fake", model_name="m",
         initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
-        read_line=_noop_read_line, stream=_NonTTY())
+        prompt=_FakePrompt(), stream=_NonTTY())
     assert captured, "create_runner never called"
     inv = captured[0]
     assert inv.interactive is True
@@ -294,7 +327,7 @@ async def test_host_fans_events_to_terminal(tmp_path, provider_registry):
         agent_def=_agent_def(), provider_name="fake", model_name="m",
         initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
-        read_line=_noop_read_line, stream=out)
+        prompt=_FakePrompt(), stream=out)
     assert "RENDER-MARKER" in out.getvalue()
 
 
@@ -308,7 +341,7 @@ async def test_host_auth_error_is_failure(tmp_path, provider_registry):
         agent_def=_agent_def(), provider_name="fake", model_name="m",
         initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
-        read_line=_noop_read_line, stream=_NonTTY())
+        prompt=_FakePrompt(), stream=_NonTTY())
     assert isinstance(result, InteractiveFailure)
     assert result.category == "auth"
     assert result.detail == "bad_key"
@@ -323,7 +356,7 @@ def test_host_sync_wrapper_runs(tmp_path, provider_registry):
         agent_def=_agent_def(), provider_name="fake", model_name="m",
         initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
-        read_line=_noop_read_line, stream=_NonTTY())
+        prompt=_FakePrompt(), stream=_NonTTY())
     assert isinstance(result, InteractiveSuccess)
     assert result.output["default_workflow"] == "default"
 
@@ -347,3 +380,83 @@ def test_setup_slash_skills_empty_under_the_assets_root() -> None:
         output_fn=out.append, unsandboxed=False)
     assert result is REPROMPT
     assert out == ["No skills available."]
+
+
+@pytest.mark.anyio
+async def test_setup_read_uses_the_default_caret_and_placeholder(tmp_path):
+    prompt = _FakePrompt(["dark"])
+    fn = build_setup_input_fn(
+        prompt=prompt, asset_dir=tmp_path, output_fn=lambda _m: None,
+        unsandboxed=False, status=None, driver=_StubDriver(), coord=None)
+    assert await fn("") == "dark"
+    # None — not the "" the setup loop used to pass — is what makes
+    # Prompt._message render the gold `> ` caret; hint=None leaves the
+    # `type a message, or /help` placeholder in place.
+    assert prompt.prompt_texts == [None]
+    assert prompt.hints == [None]
+
+
+@pytest.mark.anyio
+async def test_setup_field_carries_the_drivers_static_toolbar(tmp_path):
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+
+    out = _NonTTY()
+    driver = LiveDriver(stream=out, color=False, width=80,
+                        status=LiveStatus(out), title="imp setup")
+    prompt = _FakePrompt(["dark"])
+    fn = build_setup_input_fn(
+        prompt=prompt, asset_dir=tmp_path, output_fn=lambda _m: None,
+        unsandboxed=False, status=None, driver=driver, coord=None)
+    assert await fn("") == "dark"
+    assert prompt.bottom_toolbars == ["imp setup"]   # title-only identity band
+
+
+@pytest.mark.anyio
+async def test_setup_slash_output_is_followed_by_one_blank_and_a_reprompt(tmp_path):
+    prompt = _FakePrompt(["/help", "the real answer"])
+    driver = _StubDriver()
+    status = _CountStatus()
+    out: list[str] = []
+    fn = build_setup_input_fn(
+        prompt=prompt, asset_dir=tmp_path, output_fn=out.append,
+        unsandboxed=False, status=status, driver=driver, coord=None)
+    assert await fn("") == "the real answer"
+    assert any("Setup commands:" in line for line in out)
+    assert out[-1] == ""                          # one blank before the reprompt
+    assert driver.events == ["prepare", "prepare", "flush"]
+    assert status.suspend_calls == 1              # one hoisted suspend per turn
+
+
+@pytest.mark.anyio
+async def test_setup_reprompts_on_a_bare_enter(tmp_path):
+    prompt = _FakePrompt(["", "the real answer"])
+    fn = build_setup_input_fn(
+        prompt=prompt, asset_dir=tmp_path, output_fn=lambda _m: None,
+        unsandboxed=False, status=None, driver=_StubDriver(), coord=None)
+    # An empty answer used to be handed to the agent verbatim; the shared loop
+    # re-reads instead, so the agent only ever sees a real line.
+    assert await fn("") == "the real answer"
+    assert len(prompt.hints) == 2                 # one entry per read
+
+
+@pytest.mark.anyio
+async def test_setup_input_routes_through_the_shared_framing_helper(
+    tmp_path, monkeypatch,
+):
+    from imp.agents import interactive as interactive_mod
+
+    seen: list[dict[str, Any]] = []
+
+    async def _fake_solicit(prompt: Any, status: Any, **kwargs: Any) -> object:
+        seen.append(kwargs)
+        return "framed"
+
+    monkeypatch.setattr(interactive_mod, "solicit_line", _fake_solicit)
+    driver = _StubDriver()
+    fn = build_setup_input_fn(
+        prompt=_FakePrompt([]), asset_dir=tmp_path, output_fn=lambda _m: None,
+        unsandboxed=False, status=None, driver=driver, coord=None)
+    assert await fn("") == "framed"
+    assert seen[0]["driver"] is driver
+    assert callable(seen[0]["dispatch"])

@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
+from imp.cli.init import _run_init_conversation as _real_run_init_conversation
 from imp.cli.init import run_init
 
 
@@ -1167,3 +1168,34 @@ def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
     doc = _interactive_provider_picker.__doc__ or ""
     assert "ansicyan" not in doc
     assert "ansiyellow" in doc
+
+
+def test_setup_conversation_prompt_uses_the_cancel_setup_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.init as initmod
+    from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT
+
+    seen: dict[str, object] = {}
+
+    class _SpyPrompt:
+        def __init__(self, **kwargs: object) -> None:
+            seen.update(kwargs)
+
+    def _fake_host(**kwargs: object) -> object:
+        seen["handed_to_host"] = kwargs["prompt"]
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _real_run_init_conversation)
+    monkeypatch.setattr(initmod, "Prompt", _SpyPrompt)
+    monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_host)
+
+    initmod._run_init_conversation(
+        project_root=tmp_path, provider_name="anthropic", model_name="m",
+        allow_unsandboxed=False, color=True, output_fn=lambda _m: None)
+
+    assert seen["empty_hint"] == SETUP_EMPTY_PROMPT_HINT
+    assert seen["empty_hint"] == "press ctrl-d to cancel setup"
+    # The host gets the Prompt itself, not a bound read function: the shared
+    # framing composes each read.
+    assert isinstance(seen["handed_to_host"], _SpyPrompt)
