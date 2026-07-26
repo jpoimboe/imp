@@ -2851,3 +2851,59 @@ async def test_terminal_client_threads_interrupt_and_skips_empty_echo(
     assert seen_interrupt == [True]      # the gate's interrupt flag reached solicit
     assert got["reply"] == ""            # empty reply delivered to the daemon
     assert echoed == []                  # no blank "> " line echoed for an empty reply
+
+
+@pytest.mark.anyio
+async def test_interrupt_record_after_gate_leaves_title_idle(
+    tmp_path: Path,
+) -> None:
+    # Delivery can land after the gate on a mid-run Ctrl-C: the record is
+    # observational and must not re-mark the run busy while the user is prompted.
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input",
+                  "payload": {"steer_hint": "steer?", "interrupt": True}})
+        on_event({"type": "interrupt_delivered",
+                  "payload": {"tier": "cooperative", "outcome": "ok"}})
+        await user_chat_input_fn("steer?")
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
+        return "imp"
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "My Quest")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(30):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title, leave_mode="new")
+
+            tg.start_soon(_client)
+
+    out = s.getvalue()
+    busy = f"\x1b]2;{GLYPH_BUSY} term1 · My Quest\x07"
+    idle = f"\x1b]2;{GLYPH_IDLE} term1 · My Quest\x07"
+    assert idle in out                            # the gate marked it idle
+    post_gate = out[out.index(idle) + len(idle):]
+    assert busy not in post_gate                  # the interrupt record did not undo it
+    assert out.endswith("\x1b]2;\x07")            # reset last, on teardown

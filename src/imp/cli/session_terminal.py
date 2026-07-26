@@ -29,7 +29,11 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE, SkillRequest
+from imp.remote.session.protocol import (
+    CONTROL_INTERRUPT_LEAVE,
+    INTERRUPT_EVENT_TYPES,
+    SkillRequest,
+)
 
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
 
@@ -86,7 +90,8 @@ async def run_terminal_client(
         elif etype == "quest_renamed" and not replay:
             if title is not None:
                 title.update_name((event.get("payload") or {})["new_title"])
-        elif title is not None and not replay:
+        elif (title is not None and not replay
+                and etype not in INTERRUPT_EVENT_TYPES):
             title.busy()
 
     coord.escalation_event = anyio.Event()
