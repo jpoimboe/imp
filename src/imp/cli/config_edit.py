@@ -120,7 +120,7 @@ def _reclaim_comment(text: str, path: tuple[str, ...], value: Any) -> str | None
     if len(path) != 1:
         return None
     key = path[0]
-    pattern = re.compile(rf"^#\s*{re.escape(key)}:")
+    pattern = re.compile(rf"^#[ ]?{re.escape(key)}:")
     lines = text.splitlines(keepends=True)
     target: int | None = None
     rendered = ""

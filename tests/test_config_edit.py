@@ -56,6 +56,13 @@ def test_setting_pythonpath_fills_the_placeholder_not_the_teaching_line(
     assert len(result.text.splitlines()) == len(before.splitlines())
 
 
+def test_commented_nested_key_is_not_hoisted_as_top_level(tmp_path: Path) -> None:
+    text = "# vars:\n#   theme: something\ndefault-base: main\n"
+    result = apply_set(text, ("theme",), "dark")
+    assert result.outcome is SetOutcome.NEW
+    assert result.text == "# vars:\n#   theme: something\ndefault-base: main\ntheme: dark\n"
+
+
 def test_commented_out_block_is_left_alone(tmp_path: Path) -> None:
     before = write_real_init_config(tmp_path)
 
