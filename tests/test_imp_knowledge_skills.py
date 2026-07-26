@@ -295,3 +295,17 @@ def test_knowledge_memory_line_uses_background_and_carries_imp_edit_bullet() -> 
     assert (body.index("imp events search <query>")
             < body.index("imp edit <id>")
             < body.index("the command list, or one command"))
+
+
+def test_memory_doc_documents_the_config_writer() -> None:
+    body = _memory_doc()
+    flat = " ".join(body.split())
+    assert "there is no `imp config set`" not in flat
+    assert "`imp config set <key> <value>`" in flat
+    assert "`imp config unset <key>`" in flat
+
+
+def test_knowledge_cheat_sheet_lists_the_config_writer() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    flat = " ".join(body.split())
+    assert "`imp config set <key> <value>` / `unset <key>`" in flat

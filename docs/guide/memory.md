@@ -30,11 +30,14 @@ its own). Pair with `imp-knowledge` for the stable picture.
   `floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`;
   `facts` and `default-base` live only in the project layer;
   `imp/memory/` files live in the repo's `imp/` config dir, not the merged config;
-  change them by editing the markdown files under `imp/memory/` directly. Changing
-  `facts` or defaults means editing `imp/config.yaml` by hand — there is no
-  `imp config set`; `imp init` scaffolds the file — its interactive setup picks the
-  default workflow and base (use `imp init --use-defaults` to skip the conversation
-  in CI).
+  change them by editing the markdown files under `imp/memory/` directly. Change
+  `facts` or defaults with `imp config set <key> <value>` / `imp config unset
+  <key>`, which keeps the file's comments and writes each setting to its own
+  layer — `imp/config.yaml` for these, `~/.imp/config.yaml` for machine-wide ones
+  like `theme`; `--project` / `--global` overrides that for anything that is not
+  project-only. `imp init` scaffolds the file — its interactive setup picks the
+  default workflow and base (use `imp init --use-defaults` to skip the
+  conversation in CI).
 
 ## Reading what is active
 
