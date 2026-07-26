@@ -343,7 +343,7 @@ async def test_awaiting_user_retry_continue_journals_continuation_not_user_messa
     events.jsonl): the resume branch emits NO awaiting_user_input, journals the
     nudge as an internal engine_message/continuation event (not a user_message), and
     still drives the resumed prompt with the nudge."""
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
 
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
@@ -397,16 +397,16 @@ async def test_awaiting_user_retry_continue_journals_continuation_not_user_messa
     # Defect B: the nudge is NOT journaled as a user_message.
     assert not any(
         e["type"] == "user_message"
-        and _CONTINUATION_NUDGE in json.dumps(e.get("payload", {}),
+        and RESUME_CONTINUE_NUDGE in json.dumps(e.get("payload", {}),
                                               ensure_ascii=False)
         for e in elog.read())
     cont = next(
         e for e in elog.read()
         if e["type"] == "engine_message"
         and e.get("payload", {}).get("subtype") == "continuation")
-    assert cont["payload"]["content"][0]["text"] == _CONTINUATION_NUDGE
+    assert cont["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
     # The resumed prompt is the nudge, so the run continues and completes.
-    assert _CONTINUATION_NUDGE in str(fake.thread.run_calls[0][0])
+    assert RESUME_CONTINUE_NUDGE in str(fake.thread.run_calls[0][0])
     assert any(e.get("type") == "agent_result" for e in events)
 
 
@@ -418,7 +418,7 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
     un-answered solicited reply: the resume drives the REPLY text (not the
     continuation nudge), emits no engine_message/continuation, and does NOT re-journal
     the reply's user_message (it is already durable in events.jsonl)."""
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
 
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
@@ -468,7 +468,7 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
     # The resumed prompt is the recovered reply, NOT the continuation nudge.
     driven = str(fake.thread.run_calls[0][0])
     assert "use config.py" in driven
-    assert _CONTINUATION_NUDGE not in driven
+    assert RESUME_CONTINUE_NUDGE not in driven
 
     types = [e["type"] for e in elog.read()]
     # Recovered-reply path journals nothing: no engine_message/continuation, and the

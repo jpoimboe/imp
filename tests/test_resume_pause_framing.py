@@ -8,7 +8,6 @@ from imp.agents.transcript import (
     RESUME_DURABILITY_NOTE,
     _synthetic_tool_result_content,
 )
-from imp.engine.agent_run import _CONTINUATION_NUDGE
 
 
 def test_synthetic_non_bash_reframes_pause_not_rejection() -> None:
@@ -55,19 +54,14 @@ def test_durability_note_prepends_pause_framing_and_keeps_durability_text() -> N
 
 
 def test_continuation_nudge_reframes_pause_and_discourages_solicit() -> None:
-    assert _CONTINUATION_NUDGE.startswith(
+    assert RESUME_CONTINUE_NUDGE.startswith(
         "The run was paused and is now resuming"
     )
-    assert "this is not a rejection and nothing failed" in _CONTINUATION_NUDGE
+    assert "this is not a rejection and nothing failed" in RESUME_CONTINUE_NUDGE
     # Cause-neutrality guards: no user attribution.
-    assert "by the user" not in _CONTINUATION_NUDGE
-    assert "The user paused" not in _CONTINUATION_NUDGE
-    assert "call complete_step when it is done" in _CONTINUATION_NUDGE
+    assert "by the user" not in RESUME_CONTINUE_NUDGE
+    assert "The user paused" not in RESUME_CONTINUE_NUDGE
+    assert "call complete_step when it is done" in RESUME_CONTINUE_NUDGE
     assert (
         "Do not ask the user how to proceed unless you genuinely need input"
-    ) in _CONTINUATION_NUDGE
-
-
-def test_codex_continue_nudge_matches_continuation_nudge() -> None:
-    # Codex mirrors the continuation copy for cross-provider parity.
-    assert RESUME_CONTINUE_NUDGE == _CONTINUATION_NUDGE
+    ) in RESUME_CONTINUE_NUDGE

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from imp.engine.agent_run import _CONTINUATION_NUDGE
+from imp.agents.transcript import RESUME_CONTINUE_NUDGE
 
 
 @pytest.fixture
@@ -153,7 +153,7 @@ async def test_anthropic_interrupt_resume_appends_continuation_nudge(
 ) -> None:
     texts = await _run_anthropic(
         tmp_path, resume_should_continue=True, queued=None)
-    assert texts.count(_CONTINUATION_NUDGE) == 1, texts
+    assert texts.count(RESUME_CONTINUE_NUDGE) == 1, texts
 
 
 @pytest.mark.anyio
@@ -162,7 +162,7 @@ async def test_anthropic_non_interrupt_resume_omits_nudge(
 ) -> None:
     texts = await _run_anthropic(
         tmp_path, resume_should_continue=False, queued=None)
-    assert _CONTINUATION_NUDGE not in texts, texts
+    assert RESUME_CONTINUE_NUDGE not in texts, texts
 
 
 @pytest.mark.anyio
@@ -172,7 +172,7 @@ async def test_anthropic_interject_wins_over_interrupt_nudge(
     texts = await _run_anthropic(
         tmp_path, resume_should_continue=True, queued=["human says continue"])
     assert "human says continue" in texts, texts
-    assert _CONTINUATION_NUDGE not in texts, texts
+    assert RESUME_CONTINUE_NUDGE not in texts, texts
 
 
 @pytest.mark.anyio
@@ -250,7 +250,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
             all_texts.extend(_texts_in_query(q))
         elif isinstance(q, str):
             all_texts.append(q)
-    assert all_texts.count(_CONTINUATION_NUDGE) == 1, all_texts
+    assert all_texts.count(RESUME_CONTINUE_NUDGE) == 1, all_texts
 
 
 @pytest.mark.anyio
@@ -335,7 +335,7 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
             all_texts.extend(_texts_in_query(q))
         elif isinstance(q, str):
             all_texts.append(q)
-    assert _CONTINUATION_NUDGE not in all_texts, all_texts
+    assert RESUME_CONTINUE_NUDGE not in all_texts, all_texts
     assert "ignore" in all_texts, all_texts
 
 
@@ -346,7 +346,7 @@ async def test_anthropic_pending_human_tail_suppresses_nudge(
     texts = await _run_anthropic(
         tmp_path, resume_should_continue=True, queued=None,
         seed=_seed_text_user_tail_transcript)
-    assert _CONTINUATION_NUDGE not in texts, texts
+    assert RESUME_CONTINUE_NUDGE not in texts, texts
     assert "ignore" in texts, texts
 
 
@@ -416,7 +416,7 @@ async def test_openai_interrupt_resume_appends_continuation_nudge(
     tmp_path: Path,
 ) -> None:
     texts, _log = await _run_openai(tmp_path, resume_should_continue=True)
-    assert _CONTINUATION_NUDGE in texts, texts
+    assert RESUME_CONTINUE_NUDGE in texts, texts
 
 
 @pytest.mark.anyio
@@ -430,5 +430,5 @@ async def test_openai_pending_human_tail_suppresses_nudge(
         e["type"] == "engine_message"
         and e["payload"].get("subtype") == "continuation"
         for e in log.read())
-    assert _CONTINUATION_NUDGE not in texts, texts
+    assert RESUME_CONTINUE_NUDGE not in texts, texts
     assert "ignore" in texts, texts

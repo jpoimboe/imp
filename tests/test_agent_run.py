@@ -1622,6 +1622,7 @@ async def test_resolve_wait_reply_interject_wins_over_interrupt_flag() -> None:
 @pytest.mark.anyio
 async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() -> None:
     import imp.engine.agent_run as ar
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()  # drains no interjects
     log = InMemoryEventLog()
@@ -1631,7 +1632,7 @@ async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() ->
 
     reply, source = await ar._resolve_wait_reply(
         coord, _ainput, True, elog=log, agent_id="step:p/s")
-    assert reply == ar._CONTINUATION_NUDGE
+    assert reply == RESUME_CONTINUE_NUDGE
     assert source == "nudge"
     assert "complete_step" in reply
     assert coord.events == []  # never entered the solicit watchdog bracket
@@ -1836,6 +1837,7 @@ async def test_resolve_wait_reply_pending_reply_wins_over_nudge() -> None:
 @pytest.mark.anyio
 async def test_resolve_wait_reply_pending_reply_none_still_nudges() -> None:
     import imp.engine.agent_run as ar
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()
     log = InMemoryEventLog()
@@ -1846,7 +1848,7 @@ async def test_resolve_wait_reply_pending_reply_none_still_nudges() -> None:
     reply, source = await ar._resolve_wait_reply(
         coord, _ainput, True, elog=log, agent_id="step:p/s",
         pending_reply=None)
-    assert (reply, source) == (ar._CONTINUATION_NUDGE, "nudge")
+    assert (reply, source) == (RESUME_CONTINUE_NUDGE, "nudge")
     assert "awaiting_user_input" not in [e["type"] for e in log.read()]
 
 

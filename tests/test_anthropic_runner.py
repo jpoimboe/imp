@@ -1309,8 +1309,7 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     delivered as an internal engine_message/continuation event and drives the next turn."""
     from dataclasses import replace
 
-    from imp.agents.transcript import Transcript
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
 
     (tmp_path / "art").mkdir()
@@ -1345,11 +1344,11 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     cont = next(e for e in log.read() if e["type"] == "engine_message")
     assert cont["payload"] == {
         "role": "user", "subtype": "continuation",
-        "content": [{"type": "text", "text": _CONTINUATION_NUDGE}]}
+        "content": [{"type": "text", "text": RESUME_CONTINUE_NUDGE}]}
     # The nudge drives the LLM as the transcript's trailing user turn.
     loaded = t.load()
     assert loaded[2].role == "user"
-    assert loaded[2].content[0].text == _CONTINUATION_NUDGE
+    assert loaded[2].content[0].text == RESUME_CONTINUE_NUDGE
 
 
 @pytest.mark.anyio
@@ -1361,8 +1360,7 @@ async def test_send_to_llm_retry_continue_delivers_nudge_via_engine_continuation
     is an internal engine_message/continuation event, not a user_message."""
     from dataclasses import replace
 
-    from imp.agents.transcript import Transcript
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
 
     (tmp_path / "art").mkdir()
@@ -1397,10 +1395,10 @@ async def test_send_to_llm_retry_continue_delivers_nudge_via_engine_continuation
     cont = next(e for e in log.read() if e["type"] == "engine_message")
     assert cont["payload"] == {
         "role": "user", "subtype": "continuation",
-        "content": [{"type": "text", "text": _CONTINUATION_NUDGE}]}
+        "content": [{"type": "text", "text": RESUME_CONTINUE_NUDGE}]}
     # Nudge sits at the STABLE leading index [3] (go[0], assistant read_file[1],
     # user tool_result[2], user nudge[3]); the assistant complete_step turn is
     # appended AFTER it, so the trailing message is not the nudge.
     loaded = t.load()
     assert loaded[3].role == "user"
-    assert loaded[3].content[0].text == _CONTINUATION_NUDGE
+    assert loaded[3].content[0].text == RESUME_CONTINUE_NUDGE

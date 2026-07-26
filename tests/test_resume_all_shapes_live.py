@@ -205,11 +205,11 @@ async def test_send_to_llm_store_backed_native_resume(
     # Native path ran: the first query streamed exactly the continuation-nudge
     # turn (the folded tool_result is NOT in the delta), not the whole transcript
     # (which a replay fallback would send).
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     assert len(streamed) >= 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
     assert not any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
-    assert any(isinstance(b, TextBlock) and b.text == _CONTINUATION_NUDGE
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
                for b in streamed[0][0].content)
 
 
@@ -534,7 +534,7 @@ async def test_midrun_interrupt_resume_continues_agent(
     runner = ClaudeCodeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)
     events = [ev async for ev in runner.run(inv)]
 
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     # Continued to completion — no deadlock, no 400, no abort.
     assert events[-1]["type"] == "agent_result", events[-1]
     assert not any(e["type"] == "error" for e in events), [
@@ -547,7 +547,7 @@ async def test_midrun_interrupt_resume_continues_agent(
     # the nudge user turn (not the whole-transcript replay, not an empty query).
     assert len(streamed) >= 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert any(isinstance(b, TextBlock) and b.text == _CONTINUATION_NUDGE
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
                for b in streamed[0][0].content), streamed[0][0]
     # Zero re-execution: a.txt was recalled from the loaded session, not re-read.
     assert _read_file_call_count(inv.event_log) == 0
