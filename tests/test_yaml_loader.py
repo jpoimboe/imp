@@ -105,3 +105,20 @@ def test_config_loader_rejects_duplicate_keys() -> None:
 
     with pytest.raises(YAMLError):
         load_config_yaml("theme: dark\ntheme: light\n")
+
+
+def test_config_yaml_error_strips_ruamel_opt_out_paragraph() -> None:
+    """config_yaml_error keeps the duplicate-key detail but drops ruamel's
+    'To suppress this check see: <url>' trailer."""
+    import pytest
+    from ruamel.yaml.error import YAMLError
+
+    from imp.engine._yaml import config_yaml_error, load_config_yaml
+
+    with pytest.raises(YAMLError) as exc:
+        load_config_yaml("theme: dark\ntheme: light\n")
+    msg = config_yaml_error(exc.value)
+    assert "found duplicate key" in msg
+    assert "To suppress this check" not in msg
+    assert "yaml.dev" not in msg
+    assert not msg.endswith("\n")

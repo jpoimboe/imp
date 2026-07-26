@@ -231,6 +231,8 @@ def test_duplicate_key_raises_load_error(tmp_path: Path) -> None:
     msg = str(exc.value)
     assert "invalid YAML in config.yaml" in msg
     assert "duplicate key" in msg
+    assert "To suppress this check" not in msg
+    assert "yaml.dev" not in msg
 
 
 # --- pythonpath tests ---

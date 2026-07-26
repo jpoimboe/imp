@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import yaml
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from imp.engine.types import SourceLoc
 
@@ -108,3 +109,8 @@ def items(d: dict[str, Any]) -> Iterator[tuple[str, Any]]:
 def load_config_yaml(text: str) -> Any:
     """Parse a config-layer YAML 1.2 doc — ruamel, so config reader and writer are one library."""
     return YAML(typ="safe").load(text)  # fresh instance: a YAML() is not thread-safe
+
+
+def config_yaml_error(error: YAMLError) -> str:
+    # ruamel appends a "To suppress this check see: <url>" paragraph to DuplicateKeyError
+    return str(error).split("\nTo suppress this check see:")[0].rstrip()

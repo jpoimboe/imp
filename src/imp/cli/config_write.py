@@ -24,6 +24,7 @@ from imp.cli.config_edit import (
     apply_unset,
 )
 from imp.cli.config_keys import Layer, SettableKey, resolve_key, unknown_key_message
+from imp.engine._yaml import config_yaml_error
 from imp.engine.errors import LoadError
 from imp.providers.config import (
     parse_config_layer,
@@ -200,7 +201,7 @@ def run_set(*, key: str, value: str, scope: Layer | None,
             result = apply_set(current, settable.path, parsed)
         except YAMLError as err:
             raise ConfigWriteError(
-                f"invalid YAML in {target.name}: {err}") from err
+                f"invalid YAML in {target.name}: {config_yaml_error(err)}") from err
         # Verify even when the text does not change: a fact is read back by a
         # different parser, so an unchanged `window: 1:30` still reads as "90".
         with scratch_seam(_scratch_dir(layer, target, project_root),
@@ -240,7 +241,7 @@ def run_unset(*, key: str, scope: Layer | None,
             result = apply_unset(target.read_text(), settable.path)
         except YAMLError as err:
             raise ConfigWriteError(
-                f"invalid YAML in {target.name}: {err}") from err
+                f"invalid YAML in {target.name}: {config_yaml_error(err)}") from err
         if result.outcome is UnsetOutcome.SHARED_LINE:
             raise ConfigWriteError(
                 f"refusing to write {layer_label(target)} — {settable.dotted!r} "
