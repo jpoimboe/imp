@@ -1036,3 +1036,103 @@ def test_already_initialized_rerun_leaves_the_palette_alone(tmp_path: Path) -> N
     )
 
     assert pal.active_theme() == "ansi"
+
+
+def _stub_splash(monkeypatch, seen: dict) -> None:
+    import imp.cli.init as initmod
+
+    def _fake(*, theme, width, color):
+        seen["theme"] = theme
+        seen["width"] = width
+        seen["color"] = color
+        return "SPLASH-BLOCK"
+
+    monkeypatch.setattr(initmod.splash, "splash_block", _fake)
+
+
+def test_splash_prints_once_in_the_resolved_theme_before_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.init as initmod
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    seen: dict[str, object] = {}
+    _stub_splash(monkeypatch, seen)
+    msgs: list[str] = []
+    at_conversation: dict[str, bool] = {}
+
+    def _conv(**kw):
+        at_conversation["splash_already_printed"] = "SPLASH-BLOCK" in msgs
+        # the real conversation prints the agent's opening prose here
+        kw["output_fn"]("Hi — which branch do you integrate into?")
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert msgs.count("SPLASH-BLOCK") == 1
+    assert seen["theme"] == "dark"
+    assert seen["color"] is True
+    assert at_conversation["splash_already_printed"] is True
+    i = msgs.index("SPLASH-BLOCK")
+    assert msgs[i - 1] == ""      # one blank above
+    assert msgs[i - 2] != ""      # never two
+    assert msgs[i + 1] == ""      # one blank below
+    # never two: the agent's first line follows the single blank
+    assert msgs[i + 2] == "Hi — which branch do you integrate into?"
+
+
+def test_no_splash_without_color_but_one_blank_before_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.init as initmod
+
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    seen: dict[str, object] = {}
+    _stub_splash(monkeypatch, seen)
+    msgs: list[str] = []
+    tail: dict[str, list[str]] = {}
+
+    def _conv(**_kw):
+        tail["msgs"] = list(msgs)
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen == {}                    # splash_block never called
+    assert tail["msgs"][-1] == ""        # exactly one blank …
+    assert tail["msgs"][-2] != ""        # … before the conversation opens
+
+
+def test_already_initialized_rerun_prints_no_splash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    seen: dict[str, object] = {}
+    _stub_splash(monkeypatch, seen)
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen == {}
+    assert "SPLASH-BLOCK" not in msgs

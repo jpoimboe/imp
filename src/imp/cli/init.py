@@ -21,6 +21,7 @@ model call.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -41,6 +42,7 @@ from imp.assets import (
     selectable_workflow_names,
 )
 from imp.cli import palette as pal
+from imp.cli import splash
 from imp.cli.prompt import Prompt
 from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
@@ -710,6 +712,12 @@ def run_init(
             user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
 
     # --- hand off to the setup conversation ---
+    output_fn("")
+    if color_on:
+        output_fn(splash.splash_block(
+            theme=pal.active_theme(),
+            width=shutil.get_terminal_size((80, 24)).columns, color=True))
+        output_fn("")
     result = _run_init_conversation(
         project_root=project_root,
         provider_name=provider_name, model_name=model_name,
