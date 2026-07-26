@@ -7,6 +7,7 @@ import pytest
 
 from imp.cli import signals as _signals
 from imp.cli.signals import InterruptCoordinator
+from tests.async_wait import wait_until
 from tests.test_interrupt_events import RecordingLog  # reuse the fake
 
 
@@ -313,3 +314,57 @@ async def test_signal_force_disarms_the_yield_watchdog(monkeypatch: Any) -> None
     reasons = [r["payload"]["reason"]
                for r in log.records if r["type"] == "interrupt_escalated"]
     assert reasons == ["second_gesture"]    # no no_yield escalation fired
+
+
+class _WatchedEvent:
+    """anyio.Event that records when a waiter actually blocks on it."""
+
+    def __init__(self) -> None:
+        self._evt = anyio.Event()
+        self.waited = anyio.Event()
+
+    def is_set(self) -> bool:
+        return self._evt.is_set()
+
+    def set(self) -> None:
+        self._evt.set()
+
+    async def wait(self) -> None:
+        self.waited.set()
+        await self._evt.wait()
+
+
+@pytest.mark.anyio
+async def test_yield_watchdog_window_starts_at_arming_not_at_the_gesture(
+    monkeypatch: Any,
+) -> None:
+    """A delivery deferred to a later attach is armed long after the keypress. The
+    watchdog must give that runner the full window from the arming — deriving the
+    deadline from the gesture hard-kills it instantly, with zero grace."""
+    # A window a saturated -n auto run cannot burn through before note_yield lands.
+    # The green path never waits it out; the red path is unaffected, since the gesture
+    # is already 100s stale on the injected clock.
+    monkeypatch.setattr(_signals, "_YIELD_DEADLINE_S", 60.0)
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    coord._now = lambda: 1000.0        # inject the clock: the gesture was 100s ago
+    coord._first_gesture_at = 900.0
+    killed: list[str] = []
+
+    async def fk() -> None:
+        killed.append("r")
+
+    evt = _WatchedEvent()
+    coord._yielded = evt
+    with coord.runner_attached(lambda: None, force_kill=fk, agent_id="r"):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(coord._yield_watchdog)
+            # Resolves fast in BOTH states: green -> the watchdog blocked on the
+            # yield event; red -> it escalated instead of ever waiting.
+            await wait_until(lambda: evt.waited.is_set() or any(
+                r["type"] == "interrupt_escalated" for r in log.records))
+            coord.note_yield()      # the run yields inside the window -> clean disarm
+
+    assert killed == []             # no zero-grace hard kill
+    assert [r for r in log.records if r["type"] == "interrupt_escalated"] == []

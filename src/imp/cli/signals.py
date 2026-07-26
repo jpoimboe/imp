@@ -46,7 +46,7 @@ _suppress = contextlib.suppress
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 _READ_TIMEOUT_S = 0.05  # cbreak select() poll window: lets the loop see quiesce state
 _COOPERATIVE_DEADLINE_S = 2.0   # per-runner cooperative interrupt() budget
-_YIELD_DEADLINE_S = 5.0         # gesture -> run-actually-yields watchdog
+_YIELD_DEADLINE_S = 5.0         # arming -> run-actually-yields watchdog
 _FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
                       # CONTROL_INTERRUPT_FORCE (signal numbers are always > 0)
 
@@ -656,22 +656,16 @@ class InterruptCoordinator:
         self.note_yield()
 
     async def _yield_watchdog(self) -> None:
-        """Hard-kill the whole attach stack if the run doesn't yield within 5s of the gesture."""
+        """Hard-kill the whole attach stack if the run doesn't yield within 5s of the ARMING.
+        The window starts here, not at the gesture: a delivery deferred to a later attach is
+        armed seconds after the keypress and must still get that runner a full window."""
         import anyio
 
-        started = self._first_gesture_at if self._first_gesture_at is not None else self._now()
-        remaining = (started + _YIELD_DEADLINE_S) - self._now()
         evt = self._yielded
-        yielded = False
         if evt is not None:
-            if remaining > 0:
-                with anyio.move_on_after(remaining):
-                    await evt.wait()
-                    yielded = True
-            else:
-                yielded = evt.is_set()
-        if yielded:
-            return
+            with anyio.move_on_after(_YIELD_DEADLINE_S):
+                await evt.wait()
+                return
         # Sweep the whole stack (order-independent: a hard kill of any runner
         # unblocks a parked run); list only agents whose force_kill succeeded.
         killed: list[str | None] = []
