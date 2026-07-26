@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.config_cmd import render_config, render_explain
+from imp.cli.config_cmd import layer_label, render_config, render_explain
 from imp.providers import register_builtin_providers, resolve
-from imp.providers.effective import load_effective_config
+from imp.providers.effective import FLOOR_SRC, global_config_path, load_effective_config
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +21,16 @@ def _eff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (imp_home / "config.yaml").write_text("providers: [openai]\ntheme: light\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     return load_effective_config(project_root=None, control_root=None)
+
+
+def _block(lines: list[str], header: str) -> list[str]:
+    """The rows of one `imp config` section, up to its blank separator line."""
+    rows: list[str] = []
+    for ln in lines[lines.index(header) + 1:]:
+        if ln == "":
+            break
+        rows.append(ln)
+    return rows
 
 
 def test_render_shows_floor_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,7 +234,7 @@ def test_explain_colors_even_when_layers_match(
     out = io.StringIO()
     render_explain(eff, "high", out, color=True)
     output = out.getvalue()
-    assert "\x1b[2m←" in output         # arrow + label colored dim, even all-default
+    assert "\x1b[2m[" in output
 
 
 def test_explain_never_colors_under_no_color(
@@ -255,7 +265,7 @@ def test_explain_bolds_value_and_dims_provenance(
     # The resolved value is emphasized (bold SGR \x1b[1m) and the provenance
     assert "\x1b[1m" in text   # bold value
     assert "\x1b[2m" in text   # dim provenance
-    assert "←" in text
+    assert "[provider default]" in text
 
 
 def test_explain_plain_unchanged_under_no_color(
@@ -266,7 +276,8 @@ def test_explain_plain_unchanged_under_no_color(
     render_explain(eff, "high", out, color=False)
     text = out.getvalue()
     assert "\x1b[" not in text          # no SGR escapes at all
-    assert "anthropic" in text and "←" in text
+    assert "anthropic" in text and "[provider default]" in text
+    assert "←" not in text
 
 
 def test_render_shows_configured_pythonpath(
@@ -284,31 +295,27 @@ def test_render_shows_configured_pythonpath(
     assert line is not None and "src, lib" in line
 
 
-def test_config_settings_arrows_align_with_a_long_value(
+def test_config_brackets_align_across_tiers_and_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text(
         "providers: [openai]\n"
-        "test_cmd_fast: make check\n"
         "test_cmd_slow: make check && make test-live\n"   # 28 chars, exceeds 24
     )
-    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
     eff = load_effective_config(project_root=None, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)
     lines = out.getvalue().splitlines()
-    start = lines.index("settings:")
-    section: list[str] = []
-    for ln in lines[start + 1:]:
-        if ln == "":
-            break
-        section.append(ln)
-    arrow_cols = [ln.index("←") for ln in section if "←" in ln]
-    assert len(arrow_cols) >= 2
-    assert len(set(arrow_cols)) == 1          # every ← aligned within the section
-    assert "make check && make test-live" in out.getvalue()   # not truncated
+    tiers = _block(lines, "tiers:")
+    settings = _block(lines, "settings:")
+    assert len(tiers) >= 2 and len(settings) >= 2
+    # One shared value width: the tiers block's short model names must not pull
+    # its brackets left of the settings block's long test command.
+    assert len({ln.rindex("[") for ln in [*tiers, *settings]}) == 1
+    assert "make check && make test-live" in out.getvalue()
 
 
 def test_render_shows_unset_pythonpath(
@@ -322,17 +329,65 @@ def test_render_shows_unset_pythonpath(
     assert line is not None and "(unset)" in line
 
 
-def test_provenance_path_is_elided_to_fit_80_cols(
+def test_layer_label_names_each_layer_in_its_short_form(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    eff = _eff(tmp_path, monkeypatch)   # global config at <IMP_HOME>/config.yaml sets theme
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "elsewhere"))
+    assert layer_label(FLOOR_SRC.file) == "provider default"
+    assert layer_label(tmp_path / "repo" / "imp" / "config.yaml") == "imp/config.yaml"
+    assert layer_label(tmp_path / "repo" / ".imp" / "config.yaml") == ".imp/config.yaml"
+
+
+def test_layer_label_renders_the_global_path_home_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # HOME is patched only to exercise the ~-relative rule on a pure string
+    # helper — no git, no credential lookup, and IMP_HOME still isolates the
+    # live global layer.
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("IMP_HOME", str(home / ".imp"))
+    assert layer_label(global_config_path()) == "~/.imp/config.yaml"
+
+
+def test_layer_label_renders_the_global_path_absolute_outside_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "elsewhere"))
+    assert layer_label(global_config_path()) == str(tmp_path / "elsewhere" / "config.yaml")
+
+
+def test_config_never_elides_a_provenance_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)   # global config at <IMP_HOME>/config.yaml
+    out = io.StringIO()
+    render_config(eff, out, color=False, show_all=True)
+    text = out.getvalue()
+    assert "…/" not in text                     # the two-segment elision is gone
+    theme_line = next(ln for ln in text.splitlines()
+                      if ln.strip().startswith("theme "))
+    assert theme_line.rstrip().endswith(f"[{global_config_path()}]")
+
+
+def test_settings_block_leads_with_default_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [openai]\n")
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "config.yaml").write_text("default-workflow: mine\n")
+    eff = load_effective_config(project_root=proj, control_root=None)
     out = io.StringIO()
     render_config(eff, out, color=False)
-    theme_line = next(ln for ln in out.getvalue().splitlines()
-                      if ln.strip().startswith("theme "))
-    assert "…/imphome/config.yaml" in theme_line   # elided to trailing dir/file
-    assert str(tmp_path) not in theme_line      # full absolute path is gone
-    assert len(theme_line) <= 80                 # fits an 80-col terminal, no wrap
+    settings = _block(out.getvalue().splitlines(), "settings:")
+    assert settings[0].split()[0] == "default-workflow"
+    assert "mine" in settings[0]
+    assert settings[0].rstrip().endswith("[imp/config.yaml]")
 
 
 def test_config_dims_tiers_block_provenance_when_color(
@@ -343,7 +398,7 @@ def test_config_dims_tiers_block_provenance_when_color(
     render_config(eff, out, color=True, show_all=True)
     tier_line = next(ln for ln in out.getvalue().splitlines()
                      if ln.lstrip().startswith("high openai"))
-    assert "\x1b[2m←" in tier_line       # provenance arrow+label dimmed
+    assert "\x1b[2m[" in tier_line
     assert tier_line.rstrip().endswith("\x1b[0m")   # dim closed with a reset
 
 
@@ -355,7 +410,7 @@ def test_config_dims_settings_block_provenance_when_color(
     render_config(eff, out, color=True)
     theme_line = next(ln for ln in out.getvalue().splitlines()
                       if ln.lstrip().startswith("theme "))
-    assert "\x1b[2m←" in theme_line      # settings-block provenance dimmed
+    assert "\x1b[2m[" in theme_line
 
 
 def test_config_leaves_marks_and_values_plain_when_color(
@@ -379,3 +434,4 @@ def test_config_no_color_is_byte_clean(
     out = io.StringIO()
     render_config(eff, out, color=False, show_all=True)
     assert "\x1b[" not in out.getvalue()   # piped/NO_COLOR output stays byte-clean
+    assert "←" not in out.getvalue()
