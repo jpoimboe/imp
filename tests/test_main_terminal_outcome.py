@@ -320,55 +320,6 @@ def test_emit_completed_non_merge_headline_is_imp_branch_gold(monkeypatch, capsy
     assert not out.endswith("\n\n\n")
 
 
-def test_emit_completed_warnings_render_plain_deduped_list(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(
-        _Change([]), merged=True,
-        warnings=["clamped to 4", "clamped to 4", "id reused"])
-    out = capsys.readouterr().out
-    assert "3 warnings this run" in out
-    assert "- clamped to 4 (×2)" in out
-    assert "- id reused" in out
-    assert "(3 warnings)" not in out            # the old count suffix is gone
-    assert out.index("2026-06-12-run-x") < out.index("3 warnings this run")  # identity first
-    assert out.index("- clamped to 4 (×2)") < out.index("- id reused")  # first-seen order
-
-
-def test_emit_completed_single_warning_header_is_singular(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged=False, warnings=["only one"])
-    out = capsys.readouterr().out
-    assert "1 warning this run" in out
-    assert "warnings this run" not in out
-    assert "- only one" in out
-    assert "(×" not in out                       # no count suffix at a single occurrence
-
-
-def test_emit_completed_no_warnings_prints_no_block(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), merged=False, warnings=[])
-    out = capsys.readouterr().out
-    assert "warning" not in out
-    assert "this run" not in out
-
-
-def test_handle_terminal_outcome_threads_runner_warning_messages(monkeypatch) -> None:
-    events = [
-        {"type": "runner_warning", "payload": {"message": "a"}},
-        {"type": "runner_warning", "payload": {"message": "a"}},
-        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
-    ]
-    quest = _Change(events)
-    quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
-    captured: dict = {}
-    monkeypatch.setattr(
-        main, "_emit_completed",
-        lambda ch, *, merged, warnings, intent: captured.update(warnings=warnings))
-    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
-    assert rc == 0
-    assert captured["warnings"] == ["a", "a"]    # ordered messages, not a count
-
-
 def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
     class _Evt:
         def is_set(self) -> bool:
@@ -388,7 +339,7 @@ def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
     assert ps.call_args.args[1] == "ctrl-d"   # the trigger reached the summary
 
 
-def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch) -> None:
+def test_handle_terminal_outcome_reads_intent_from_archive(monkeypatch) -> None:
     quest = _Change([])
     quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
     archive_blob = (
@@ -404,10 +355,9 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings, intent: captured.update(warnings=warnings, intent=intent))
+        lambda ch, *, merged, intent: captured.update(intent=intent))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
-    assert captured["warnings"] == ["a", "b"]
     assert captured["intent"] == "resolve me from archive"
 
 
@@ -486,7 +436,7 @@ def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings, intent: captured.update(intent=intent))
+        lambda ch, *, merged, intent: captured.update(intent=intent))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["intent"] == "add a dark mode toggle"
@@ -551,7 +501,7 @@ def test_handle_terminal_outcome_merged_event_yields_merged_true(
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings, intent: captured.update(merged=merged))
+        lambda ch, *, merged, intent: captured.update(merged=merged))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["merged"] is True
@@ -568,7 +518,64 @@ def test_handle_terminal_outcome_no_merged_event_yields_merged_false(
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings, intent: captured.update(merged=merged))
+        lambda ch, *, merged, intent: captured.update(merged=merged))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["merged"] is False
+
+
+_END_OF_RUN_WARNINGS = ["cache read failed", "cache read failed",
+                        "retrying after API 529"]
+
+
+def _merged_run_events(warnings: list[str]) -> list[dict]:
+    from tests._event_fixtures import ev
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="merging", kind="agent", phase="integration",
+           model="m", provider="anthropic"),
+        ev("3", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
+    ]
+    events += [ev(f"w{i}", "runner_warning", agent_id="a", message=m)
+               for i, m in enumerate(warnings)]
+    events += [
+        ev("4", "step_completed", step="merging", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "quest_merged", base="master"),
+    ]
+    return events
+
+
+def _end_of_run_output(warnings: list[str], *, tty: bool) -> str:
+    """The whole end-of-run sequence into ONE capture stream, as a real run does it:
+    the live walk over a merged run, the shared teardown, then the terminal outcome."""
+    import contextlib
+    import io
+
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from tests._event_fixtures import _TTY
+
+    events = _merged_run_events(warnings)
+    out = _TTY() if tty else io.StringIO()
+    status = LiveStatus(out)
+    status._width_fn = lambda: 80
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    with contextlib.redirect_stdout(out):
+        assert main._handle_terminal_outcome(
+            _Change(events), RunResult.COMPLETED, coord=None) == 0
+    return out.getvalue()
+
+
+def test_merged_run_with_warnings_renders_the_warnings_block_once(monkeypatch) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    raw = _end_of_run_output(_END_OF_RUN_WARNINGS, tty=False)
+    assert raw.count("3 warnings this run") == 1     # was twice: narrative + plain block
+    assert "  • cache read failed  (×2)" in raw      # the retained block, shape unchanged
+    assert "- cache read failed (×2)" not in raw     # the deleted plain block's shape
+    assert raw.endswith("\n\n")                      # exactly one trailing blank
+    assert not raw.endswith("\n\n\n")

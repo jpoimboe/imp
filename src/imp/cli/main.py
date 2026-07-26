@@ -254,37 +254,15 @@ def _resume_line(token: str, suffix: str = "") -> str:
     return f"resume: imp resume {token}{suffix}"
 
 
-def _print_warnings_block(messages: list[str]) -> None:
-    """A plain `N warnings this run` header + a plain dashed list of the distinct
-    messages in first-seen order, `(×N)` on repeats. No-op on an empty list."""
-    if not messages:
-        return
-    counts: dict[str, int] = {}
-    order: list[str] = []
-    for msg in messages:
-        if msg not in counts:
-            counts[msg] = 0
-            order.append(msg)
-        counts[msg] += 1
-    print()
-    noun = "warning" if len(messages) == 1 else "warnings"
-    print(f"{len(messages)} {noun} this run")
-    for msg in order:
-        suffix = f" (×{counts[msg]})" if counts[msg] > 1 else ""
-        print(f"- {msg}{suffix}")
-
-
 def _emit_completed(quest: Quest, *, merged: bool,
-                    warnings: list[str] | None = None,
                     intent: str | None = None) -> None:
     """The clean-finish block: a gold `merged into <base>` / `done · commits on imp/<id>`
-    headline on its own line, the identity line, then the warnings block; one trailing blank."""
+    headline on its own line, then the identity line; one trailing blank."""
     color = should_use_color(sys.stdout)
     head = (f"merged into {quest.base_branch}" if merged
             else f"done · commits on imp/{quest.id}")
     for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent):
         print(ln)
-    _print_warnings_block(warnings or [])
     print()
 
 
@@ -622,12 +600,8 @@ def _handle_terminal_outcome(
         if not events:
             raw = archive_read.read_events(quest.control_root, quest.id)
             events = _parse_jsonl(raw) if raw is not None else []
-        warning_msgs = [
-            str((ev.get("payload") or {}).get("message", "?"))
-            for ev in events if ev.get("type") == "runner_warning"]
         merged = any(ev.get("type") == "quest_merged" for ev in events)
-        _emit_completed(quest, merged=merged, warnings=warning_msgs,
-                        intent=_resolve_intent(events))
+        _emit_completed(quest, merged=merged, intent=_resolve_intent(events))
         return 0
     # PAUSED — surface merge_blocked; every other pause falls through to the summary.
     final_state = State.load(quest.state_dir)
