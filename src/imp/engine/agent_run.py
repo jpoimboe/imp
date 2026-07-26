@@ -53,7 +53,7 @@ from imp.engine.completion import (
     build_inline_solicit as build_inline_solicit,
 )
 from imp.engine.env import TestGates
-from imp.engine.types import AgentDef, OutputField
+from imp.engine.types import AgentDef, OutputField, ResumeCause
 
 if TYPE_CHECKING:
     from imp.agents.transcript import SkillReply
@@ -476,6 +476,7 @@ def build_agent_invocation(
     feedback_lead: str | None = None,
     balance_on_resume: bool = False,
     resume_should_continue: bool = False,
+    resume_cause: ResumeCause = "human",
     log: Any = None,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
@@ -593,6 +594,7 @@ def build_agent_invocation(
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
         resume_should_continue=resume_should_continue,
+        resume_cause=resume_cause,
         resolved_tiers=resolved_tiers,
         tiers=tiers,
         tier=tier,

@@ -160,6 +160,9 @@ class AgentDef:
 
 Kind = Literal["agent", "script", "branch", "merge_and_exit_worktree"]
 
+# Why a resume is continuing: a provider-error retry must not claim a human pause.
+ResumeCause = Literal["human", "provider_retry"]
+
 
 @dataclass(frozen=True, slots=True)
 class Step:

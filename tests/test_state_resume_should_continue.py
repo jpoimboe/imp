@@ -33,3 +33,14 @@ def test_save_payload_has_resume_should_continue_not_old_booleans(tmp_path: Path
     assert data["resume_pending"] == "s"
     assert "interrupt_pending" not in data
     assert "retry_continue_pending" not in data
+
+
+def test_save_payload_omits_the_transient_resume_cause(tmp_path: Path) -> None:
+    """In-memory only: a persisted cause could resurrect retry framing later."""
+    sd = tmp_path / "state"
+    s = State(id="c", step="s", step_attempt=0, status="new")
+    s.arm_step_resume(should_continue=True, cause="provider_retry")
+    s.save(sd)
+    data = json.loads((sd / "state.json").read_text())
+    assert "resume_cause" not in data
+    assert State.load(sd).resume_cause == "human"

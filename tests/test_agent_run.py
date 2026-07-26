@@ -1557,6 +1557,40 @@ def test_build_agent_invocation_resume_should_continue_defaults_false(
     assert inv.resume_should_continue is False
 
 
+def test_build_agent_invocation_threads_resume_cause(tmp_path: Path) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        resume_should_continue=True, resume_cause="provider_retry")
+
+    assert inv.resume_cause == "provider_retry"
+
+
+def test_build_agent_invocation_resume_cause_defaults_to_human(tmp_path: Path) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        resume_should_continue=True)
+
+    assert inv.resume_cause == "human"
+
+
 class _OneInterjectCoord:
     """Drains exactly one queued interject, then empties. No watchdog needed:
     the interject branch returns before any solicit."""
