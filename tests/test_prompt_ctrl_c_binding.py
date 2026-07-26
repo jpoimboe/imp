@@ -73,3 +73,49 @@ def test_ask_sync_passes_handle_sigint_false() -> None:
 def test_empty_prompt_hint_names_pause_and_exit() -> None:
     from imp.cli.prompt import EMPTY_PROMPT_HINT
     assert EMPTY_PROMPT_HINT == "press ctrl-d to pause & exit"
+
+
+@pytest.mark.anyio
+async def test_ctrl_c_on_empty_buffer_prints_the_sessions_hint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Run the hint print synchronously inside the key handler: prompt_toolkit
+    # would otherwise schedule it and this assertion would race the scheduler.
+    monkeypatch.setattr(
+        "prompt_toolkit.application.run_in_terminal", lambda fn: fn())
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        session = _build_session(empty_hint="press ctrl-d to cancel setup")
+        pipe.send_text("\x03")          # Ctrl-C on an empty buffer
+        pipe.send_text("world\r")
+        assert await session.prompt_async("> ") == "world"
+    assert "press ctrl-d to cancel setup" in capsys.readouterr().out
+
+
+@pytest.mark.anyio
+async def test_ctrl_c_hint_defaults_to_the_run_paths_wording(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "prompt_toolkit.application.run_in_terminal", lambda fn: fn())
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        session = _build_session()
+        pipe.send_text("\x03")
+        pipe.send_text("world\r")
+        assert await session.prompt_async("> ") == "world"
+    assert "press ctrl-d to pause & exit" in capsys.readouterr().out
+
+
+def test_prompt_threads_its_empty_hint_into_the_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import prompt as prompt_mod
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(skills_dir=None, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(prompt_mod, "_build_session", _fake_build)
+    Prompt(empty_hint="press ctrl-d to cancel setup")
+    assert captured["empty_hint"] == "press ctrl-d to cancel setup"
