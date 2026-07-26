@@ -12,7 +12,11 @@ from typing import Any
 import pytest
 
 from imp.engine.agent_run import drive_invocation
-from tests.test_heartbeat import _inv, _PauseCoordinator  # reuse helpers
+from tests.test_heartbeat import (  # reuse helpers
+    _inv,
+    _PauseCoordinator,
+    _PauseOnAttachCoordinator,
+)
 
 
 @pytest.fixture
@@ -30,6 +34,8 @@ class _ClosableRunner:
         self._raise_after = raise_after
         self.closed = False
         self.interrupted = False
+        self.consumed = 0
+        self.gen: Any = None
 
     async def interrupt(self) -> None:
         self.interrupted = True
@@ -38,12 +44,14 @@ class _ClosableRunner:
         async def gen():
             try:
                 for ev in self._events:
+                    self.consumed += 1
                     yield ev
                 if self._raise_after is not None:
                     raise self._raise_after
             finally:
                 self.closed = True
-        return gen()
+        self.gen = gen()
+        return self.gen
 
 
 @pytest.mark.anyio
@@ -69,7 +77,7 @@ async def test_gen_closed_on_pause_return(tmp_path: Path) -> None:
     ])
     result = await drive_invocation(
         _inv(tmp_path, {"complete_step"}), runner,
-        coordinator=_PauseCoordinator(), log=None, emit_events=False)
+        coordinator=_PauseOnAttachCoordinator(), log=None, emit_events=False)
     assert result.paused is True
     assert runner.closed is True
 
@@ -133,7 +141,7 @@ async def test_should_pause_error_pauses_with_interrupt_flag(
     }])
     result = await drive_invocation(
         _inv(tmp_path, {"complete_step"}), runner,
-        coordinator=_PauseCoordinator(), log=None, emit_events=False)
+        coordinator=_PauseOnAttachCoordinator(), log=None, emit_events=False)
     assert result.paused is True
     assert result.interrupt is True
     assert runner.closed is True
@@ -169,3 +177,21 @@ async def test_gen_closed_on_success(tmp_path: Path) -> None:
         coordinator=None, log=None, emit_events=False)
     assert result.output == {"status": "Success"}
     assert runner.closed is True
+
+
+@pytest.mark.anyio
+async def test_entry_pause_returns_before_the_turn_starts(tmp_path: Path) -> None:
+    """A gesture that landed before this runner attached resolves at the drive's entry:
+    no event is consumed from the generator, and the generator is still closed."""
+    runner = _ClosableRunner([
+        {"type": "agent_result", "payload": {"status": "Success"}},
+    ])
+    result = await drive_invocation(
+        _inv(tmp_path, {"complete_step"}), runner,
+        coordinator=_PauseCoordinator(), log=None, emit_events=False)
+    assert result.paused is True
+    assert result.interrupt is True
+    assert runner.consumed == 0           # the turn never started: no event consumed
+    assert runner.interrupted is False    # nothing was attached, nothing interrupted
+    assert runner.closed is False         # the body never ran, so its finally never did
+    assert runner.gen.ag_frame is None    # ...yet aclose() still closed the generator

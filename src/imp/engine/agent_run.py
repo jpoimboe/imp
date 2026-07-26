@@ -653,6 +653,10 @@ async def drive_invocation(
     gen = runner.run(invocation)
     try:
         try:
+            if coordinator is not None and coordinator.should_pause:
+                # Pre-attach gesture: resolve here — inside the try so the finally still closes gen.
+                return AgentRunResult(None, False, True, False, None,
+                                      interrupt=True)
             with attach:
                 async for event in _pull_with_inactivity_watchdog(
                         gen, runner=runner, stall=stall,
