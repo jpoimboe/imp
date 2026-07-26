@@ -78,6 +78,10 @@ async def run_terminal_client(
                 title.set_hold_glyph((event.get("payload") or {}).get("glyph"))
             elif etype in ("lane_released", "lane_evicted"):
                 title.set_hold_glyph(None)
+        if etype == "interrupt_delivered" and not replay:
+            # An interrupt really reached a runner, so a second gesture's force-quit
+            # has something to kill. A replayed copy is an earlier round's.
+            coord.note_interrupt_delivered()
         if etype == "awaiting_user_input" and not replay:
             # The run yielded to the paused prompt: the ctrl-c round is over.
             # Reset the client gesture latch so the next ctrl-c is a fresh round.

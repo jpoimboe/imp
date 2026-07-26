@@ -240,6 +240,9 @@ class InterruptCoordinator:
         self._save_hook: Any = None
         self._forward_force: Any = None   # client force-forward hook (SessionControls)
         self._force_forwarded = False     # one-shot: a FORCE was forwarded this round
+        # Client-side: a non-replayed interrupt_delivered was observed this round, so a
+        # FORCE has a live runner to hard-kill. Until then the offer would be a lie.
+        self._delivery_observed = False
         self._forward_retry_now: Any = None   # client retry-now forward hook (SessionControls)
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
@@ -454,6 +457,11 @@ class InterruptCoordinator:
             text += " (interrupt again to force-quit)"
         fn(text)
 
+    def note_interrupt_delivered(self) -> None:
+        """A live interrupt_delivered arrived for this round: an interrupt really is in
+        flight against a runner, so a second gesture's force-quit has something to kill."""
+        self._delivery_observed = True
+
     def enqueue_interject(self, text: str) -> None:
         """Queue a human-typed line for delivery at the next agent turn boundary."""
         self._interjects.append(text)
@@ -492,6 +500,7 @@ class InterruptCoordinator:
         self.leave_reason = None
         self._first_gesture_at = None
         self._force_forwarded = False
+        self._delivery_observed = False
         self.escalated = False
         self._yielded = None
         self._delivery_pending = False
@@ -513,15 +522,17 @@ class InterruptCoordinator:
     def end_gesture_round(self) -> None:
         """Client round-over reset: the run yielded and the paused prompt is up,
         so the ctrl-c round is done. Clear the gesture latch (should_pause /
-        pause_reason / first-gesture window) so the NEXT ctrl-c starts a fresh
-        round and forwards a new CONTROL_INTERRUPT. Distinct from the daemon's
-        brake (which holds until the reply is accepted, §3) and narrower than
+        pause_reason / first-gesture window / observed delivery) so the NEXT
+        ctrl-c starts a fresh round and forwards a new CONTROL_INTERRUPT.
+        Distinct from the daemon's brake (which holds until the reply is
+        accepted, §3) and narrower than
         reset() — leave_reason / escalated / _yielded AND the durable _interrupted
         flag (the 130 exit-code signal) are left untouched."""
         self._should_pause = False
         self.pause_reason = None
         self._first_gesture_at = None
         self._force_forwarded = False
+        self._delivery_observed = False
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
@@ -754,6 +765,9 @@ class InterruptCoordinator:
         first = self.pause_reason is None
         if first:
             self.pause_reason = reason
+            # A delivery can land after its own round's gate, i.e. after
+            # end_gesture_round already ran; a new round must not inherit it.
+            self._delivery_observed = False
             self._note_gesture_ack(force_quit_available=False)
             if self._first_gesture_at is None:
                 self._first_gesture_at = self._now()
@@ -854,17 +868,23 @@ class InterruptCoordinator:
             # client to bash (ctrl-c never exits) — it enqueues a FORCE forward so
             # the daemon skips the cooperative tier and hard-kills now, while the
             # client stays attached. Gate synchronously; forward only past the
-            # suppression window, and AT MOST ONCE per round — extra presses on an
-            # already-forwarded round are no-ops (no redundant hard-kills of an
-            # already-dead runner). The leave path above keeps _trigger_escalation.
+            # suppression window, only once an interrupt has actually reached a runner
+            # (before that a FORCE kills nothing), and AT MOST ONCE per round — extra
+            # presses on an already-forwarded round are no-ops (no redundant hard-kills
+            # of an already-dead runner). The leave path above keeps _trigger_escalation.
             if not self._force_forwarded and self._register_gesture(kind="ctrl-c"):
-                self._force_forwarded = True
-                self._note_gesture_ack(force_quit_available=True)
-                send = self._sig_send
-                if send is not None:
-                    with _suppress(Exception):  # WouldBlock / closed stream
-                        send.send_nowait(_FORCE_FORWARD)
-            return  # suppressed or force-forwarded — never re-enter interrupt()
+                if self._delivery_observed:
+                    self._force_forwarded = True
+                    self._note_gesture_ack(force_quit_available=True)
+                    send = self._sig_send
+                    if send is not None:
+                        with _suppress(Exception):  # WouldBlock / closed stream
+                            send.send_nowait(_FORCE_FORWARD)
+                else:
+                    # Nothing delivered yet: ack plainly and leave the one-shot latch
+                    # unspent, so a later press — once a delivery lands — still escalates.
+                    self._note_gesture_ack(force_quit_available=False)
+            return  # suppressed, promised nothing, or force-forwarded
         if self._at_prompt:
             # At an interactive prompt, prompt_toolkit no longer owns SIGINT
             # (handle_sigint=False), so an out-of-band SIGINT lands here. Ctrl-c

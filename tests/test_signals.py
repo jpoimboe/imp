@@ -150,6 +150,7 @@ def test_dispatch_second_ctrl_c_forwards_force_not_escalation_after_window() -> 
     # A stop is already unwinding (first gesture landed).
     coord._should_pause = True
     coord._first_gesture_at = 100.0
+    coord.note_interrupt_delivered()   # a real interrupt is in flight: FORCE has a target
     esc_fired = {"v": False}
     coord.set_escalation_hook(lambda: esc_fired.__setitem__("v", True))
 
@@ -570,9 +571,10 @@ def test_dispatch_force_forwarded_at_most_once_per_round() -> None:
     t = {"now": 100.0}
     coord._now = lambda: t["now"]
 
-    # A stop is already unwinding (first gesture landed).
+    # A stop is already unwinding (first gesture landed) and reached a runner.
     coord._should_pause = True
     coord._first_gesture_at = 100.0
+    coord.note_interrupt_delivered()
 
     sent: list = []
 
@@ -598,6 +600,7 @@ def test_dispatch_force_forwarded_at_most_once_per_round() -> None:
     coord.end_gesture_round()
     coord._should_pause = True
     coord._first_gesture_at = 200.0
+    coord.note_interrupt_delivered()
     t["now"] = 201.5
     coord._dispatch_signal(_sig.SIGINT)
     assert sent == [_FORCE_FORWARD, _FORCE_FORWARD]
@@ -615,6 +618,7 @@ def test_reset_rearms_force_forward_latch() -> None:
     coord._now = lambda: t["now"]
     coord._should_pause = True
     coord._first_gesture_at = 100.0
+    coord.note_interrupt_delivered()
 
     sent: list = []
 
@@ -633,4 +637,140 @@ def test_reset_rearms_force_forward_latch() -> None:
     coord._first_gesture_at = 200.0
     t["now"] = 201.5
     coord._dispatch_signal(_sig.SIGINT)
+    assert sent == [_FORCE_FORWARD]     # reset dropped the observed delivery too
+
+    coord.note_interrupt_delivered()
+    t["now"] = 202.5
+    coord._dispatch_signal(_sig.SIGINT)
     assert sent == [_FORCE_FORWARD, _FORCE_FORWARD]
+
+
+def test_repeat_press_before_any_delivery_promises_no_force_quit() -> None:
+    """AC13: until an interrupt has actually been delivered to a runner, a repeat
+    ctrl-c must show plain `stopping…` and forward no FORCE — over an empty daemon
+    stack a FORCE hard-kills nothing (observed interrupt_escalated{killed: []})."""
+    import signal as _sig
+
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    coord._should_pause = True
+    coord._first_gesture_at = 100.0
+    acks: list[str] = []
+    coord.set_ack_hook(acks.append)
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    t["now"] = 101.5                        # past the suppression window
+    coord._dispatch_signal(_sig.SIGINT)
+
+    assert sent == []                       # nothing to hard-kill → no FORCE frame
+    assert acks == ["stopping…"]            # ...and no force-quit promise
+    assert coord._force_forwarded is False  # the one-shot latch is unspent
+
+
+def test_press_after_an_observed_delivery_still_offers_the_force_quit() -> None:
+    """AC14: a press made with no force-quit available must not spend the one-shot
+    latch — a later press, once an interrupt_delivered has been observed, still
+    offers the escalation and forwards exactly one FORCE for the round."""
+    import signal as _sig
+
+    from imp.cli.signals import _FORCE_FORWARD
+
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    coord._should_pause = True
+    coord._first_gesture_at = 100.0
+    acks: list[str] = []
+    coord.set_ack_hook(acks.append)
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    t["now"] = 101.5
+    coord._dispatch_signal(_sig.SIGINT)     # nothing delivered yet → promises nothing
+
+    coord.note_interrupt_delivered()        # the daemon's record reaches the client
+
+    t["now"] = 102.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == [_FORCE_FORWARD]
+    assert acks == ["stopping…", "stopping… (interrupt again to force-quit)"]
+
+    t["now"] = 103.5
+    coord._dispatch_signal(_sig.SIGINT)     # still at most one FORCE per round
+    assert sent == [_FORCE_FORWARD]
+
+
+def test_end_gesture_round_drops_the_observed_delivery() -> None:
+    """The record is round-scoped: after the run yields to the paused prompt, an
+    earlier round's delivery must not make the next round's offer truthful."""
+    import signal as _sig
+
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    acks: list[str] = []
+    coord.set_ack_hook(acks.append)
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    coord.note_interrupt_delivered()
+    coord.end_gesture_round()
+
+    coord._should_pause = True              # the next round's gesture lands
+    coord._first_gesture_at = 200.0
+    t["now"] = 201.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == []
+    assert acks == ["stopping…"]
+
+
+def test_a_new_first_gesture_drops_a_delivery_observed_for_the_previous_round() -> None:
+    """A delivery can land AFTER its round's gate (tests/test_session_terminal.py's
+    test_interrupt_record_after_gate_leaves_title_idle), i.e. after
+    end_gesture_round already ran. The next round's first gesture drops it, so the
+    stale record cannot promise a force-quit that round has not earned."""
+    import signal as _sig
+
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    acks: list[str] = []
+    coord.set_ack_hook(acks.append)
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    coord.note_interrupt_delivered()        # straggler, after the previous gate
+    coord._first_gesture_at = 200.0
+    asyncio.run(coord.signal_pause(reason="ctrl-c"))   # the new round's first gesture
+
+    t["now"] = 201.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert sent == []
+    # The first gesture's ack, then the repeat press's — both plain, no promise.
+    assert acks == ["stopping…", "stopping…"]
