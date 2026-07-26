@@ -199,6 +199,7 @@ from imp.agents.interactive import (  # noqa: E402
 from imp.engine.sandbox import SandboxConfig  # noqa: E402
 from imp.engine.state import InMemoryEventLog  # noqa: E402
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc  # noqa: E402
+from tests._event_fixtures import _TTY  # noqa: E402
 
 
 class _NonTTY(io.StringIO):
@@ -460,3 +461,138 @@ async def test_setup_input_routes_through_the_shared_framing_helper(
     assert await fn("") == "framed"
     assert seen[0]["driver"] is driver
     assert callable(seen[0]["dispatch"])
+
+
+def _recording_driver(monkeypatch) -> list[Any]:
+    """Capture the LiveDriver the host builds, keeping the real behaviour."""
+    from imp.agents import interactive as interactive_mod
+    from imp.cli.live_driver import LiveDriver
+
+    made: list[Any] = []
+
+    class _Recording(LiveDriver):
+        def __init__(self, **kw: Any) -> None:
+            super().__init__(**kw)
+            made.append(self)
+
+    monkeypatch.setattr(interactive_mod, "LiveDriver", _Recording)
+    return made
+
+
+@pytest.mark.anyio
+async def test_host_arms_the_footer_for_the_whole_conversation(
+    tmp_path, provider_registry, monkeypatch,
+):
+    made = _recording_driver(monkeypatch)
+    _register_runner(provider_registry, _ScriptedHostRunner([
+        {"type": "agent_result",
+         "payload": {"status": "Success", "default_workflow": "light"}},
+    ]))
+    await run_interactive_agent(
+        agent_def=_agent_def(), provider_name="fake",
+        model_name="claude-sonnet-4-5",
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
+        sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
+        prompt=_FakePrompt(), stream=_NonTTY())
+    act = made[0]._builder.current_activity()
+    # Armed before the first model call, so the footer spins through the stretch
+    # that is blank today — not only while a tool runs.
+    assert act is not None
+    assert act.verb == "thinking"
+    assert act.kind == "agent"
+    assert act.model == "claude-sonnet-4-5"
+
+
+@pytest.mark.anyio
+async def test_host_footer_does_not_double_the_blank_above_the_conversation(
+    tmp_path, provider_registry, monkeypatch,
+):
+    made = _recording_driver(monkeypatch)
+    _register_runner(provider_registry, _ScriptedHostRunner([
+        {"type": "agent_result",
+         "payload": {"status": "Success", "default_workflow": "light"}},
+    ]))
+    await run_interactive_agent(
+        agent_def=_agent_def(), provider_name="fake", model_name="m",
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
+        sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
+        prompt=_FakePrompt(), stream=_NonTTY())
+    # A wiring check only — the behaviour it selects (the footer claiming no
+    # blank of its own) is pinned by test_setup_footer_reuses_the_blank_committed
+    # _above_it. init prints a blank (the splash gap) right before the
+    # conversation, so the footer must reuse it rather than own a second one.
+    assert made[0]._preceded_by_blank is True
+
+
+@pytest.mark.anyio
+async def test_host_band_reports_the_unsandboxed_conversation(
+    tmp_path, provider_registry, monkeypatch,
+):
+    made = _recording_driver(monkeypatch)
+    _register_runner(provider_registry, _ScriptedHostRunner([
+        {"type": "agent_result",
+         "payload": {"status": "Success", "default_workflow": "light"}},
+    ]))
+    # The host imported the symbol, so patch it in the host's namespace: with no
+    # bubblewrap and allow_unsandboxed the resolved policy is inactive.
+    monkeypatch.setattr("imp.agents.interactive.sandbox_available", lambda: False)
+    await run_interactive_agent(
+        agent_def=_agent_def(), provider_name="fake",
+        model_name="claude-sonnet-4-5",
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
+        sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
+        prompt=_FakePrompt(), stream=_NonTTY())
+    row = made[0].compose_toolbar_static()
+    assert row.index("imp setup") < row.index("unsandboxed") < row.index("claude-sonnet-4-5")
+
+
+class _ProseOnlyRunner:
+    """A setup-shaped conversation whose last event emits immediately, so the
+    footer is still lit when the host tears the driver down."""
+
+    async def run(self, invocation: Any):
+        invocation.event_log.append(
+            agent_id="a", type="agent_message",
+            payload={"raw": {"content": [
+                {"type": "text", "text": "SETUP-PROSE"}]}, "usage": {}})
+        yield {"type": "agent_result",
+               "payload": {"status": "Success", "default_workflow": "light"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_host_teardown_adds_no_blank_before_the_closing_block(
+    tmp_path, provider_registry,
+):
+    out = _TTY()
+    _register_runner(provider_registry, _ProseOnlyRunner())
+    await run_interactive_agent(
+        agent_def=_agent_def(), provider_name="fake", model_name="m",
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
+        sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
+        prompt=_FakePrompt(), stream=out)
+    # A lit footer at teardown makes LiveStatus.end_run descend past its owned
+    # blank — which init would then double with the blank it prints before
+    # `Created:`. The host tears down with exit_block=False, so the erase leaves
+    # the cursor on that blank and init's own blank is the only one.
+    assert "SETUP-PROSE" in out.getvalue()
+    assert not out.getvalue().endswith("\n")
+
+
+@pytest.mark.anyio
+async def test_host_writes_no_footer_escapes_to_a_pipe(
+    tmp_path, provider_registry,
+):
+    out = _NonTTY()
+    _register_runner(provider_registry, _RenderingRunner())
+    await run_interactive_agent(
+        agent_def=_agent_def(), provider_name="fake", model_name="m",
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
+        sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
+        prompt=_FakePrompt(), stream=out)
+    text = out.getvalue()
+    assert "RENDER-MARKER" in text          # the narrative still lands
+    assert "\x1b[" not in text              # no spinner/footer escapes
+    assert "thinking" not in text

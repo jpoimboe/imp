@@ -214,8 +214,9 @@ async def run_interactive_agent(
     provider = provider_from_model(ProviderModel(provider_name, model_name))
 
     status = LiveStatus(stream)
+    # init commits a blank (splash gap) before the conversation; footer reuses it, not a second.
     driver = LiveDriver(stream=stream, color=color, width=width, status=status,
-                        title=title)
+                        title=title, preceded_by_blank=True)
     driver.set_unsandboxed(unsandboxed)
     event_log = InMemoryEventLog(on_event=driver.on_event)
     coord = InterruptCoordinator()
@@ -259,7 +260,8 @@ async def run_interactive_agent(
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
                 tg.start_soon(status.tick)
-                driver.install_startup_status()
+                driver.begin_standing_activity(
+                    verb="thinking", model=provider.model)
                 try:
                     result = await drive_invocation(
                         invocation, runner, coordinator=coord, log=None,
@@ -267,7 +269,8 @@ async def run_interactive_agent(
                 finally:
                     tg.cancel_scope.cancel()
         finally:
-            driver.finish()
+            # init prints its own blank before Created:; end_run's descend would make it two.
+            driver.finish(exit_block=False)
 
     return _classify(result)
 
