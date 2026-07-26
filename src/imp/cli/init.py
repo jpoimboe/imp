@@ -21,7 +21,9 @@ model call.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -39,7 +41,9 @@ from imp.assets import (
     resolve_workflow_dir,
     selectable_workflow_names,
 )
-from imp.cli.prompt import Prompt
+from imp.cli import palette as pal
+from imp.cli import splash
+from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT, Prompt
 from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
     resolve_detection_provider,
@@ -375,16 +379,16 @@ def _picker_rows(
     available: list[str], cursor: int, selected: set[int],
 ) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = [
-        ("bold", "Which providers do you want to enable?\n"),
+        ("bold", "Which providers do you want to enable?\n\n"),
     ]
     for i, name in enumerate(available):
         arrow = "> " if i == cursor else "  "
         box = "[x] " if i in selected else "[ ] "
-        style = "ansicyan bold" if i == cursor else ""
+        style = "ansiyellow bold" if i == cursor else ""
         out.append((style, f"{arrow}{box}{name}\n"))
     out.append((
         "ansibrightblack",
-        "↑↓ move · space toggle · enter confirm · esc cancel",
+        "\n↑↓ move · space toggle · enter confirm · esc cancel",
     ))
     return out
 
@@ -394,17 +398,20 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
 
     Renders in place (not a full-screen dialog):
         Which providers do you want to enable?
+
         > [ ] claude_code
           [ ] anthropic
           [ ] openai
-        up/down move | space toggle | enter confirm | esc cancel
+
+        ↑↓ move · space toggle · enter confirm · esc cancel
 
     Keys: ↑↓ move cursor, space toggles, enter confirms (≥1 required),
     ctrl-c / esc raise KeyboardInterrupt.
 
     Style names match `imp log`'s palette via prompt_toolkit's ANSI aliases:
-    bold for the header, ansicyan for the active row, ansibrightblack
-    (= our `gray`/`dim`) for the help line.
+    bold for the header, ansiyellow for the active row — the hue `pal.caret()`
+    emits under the `ansi` theme, which is still the active one this early in
+    init — and ansibrightblack (= our `gray`/`dim`) for the help line.
     """
     from prompt_toolkit import Application
     from prompt_toolkit.key_binding import KeyBindings
@@ -450,10 +457,9 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
         event.app.exit(exception=KeyboardInterrupt)
 
     control = FormattedTextControl(text=_render, focusable=True, show_cursor=False)
-    body = Window(
-        content=control,
-        height=Dimension(min=len(available) + 2, max=len(available) + 2),
-    )
+    # Derived from the rows themselves so the layout can't drift from the render.
+    height = sum(text.count("\n") for _style, text in _render()) + 1
+    body = Window(content=control, height=Dimension(min=height, max=height))
     app: Any = Application(
         layout=Layout(HSplit([body])),
         key_bindings=kb,
@@ -576,13 +582,13 @@ def _run_init_conversation(
         workflows=_workflow_choices(project_root),
         base_hint=worktree.origin_head_branch(project_root),
         git_exists=_in_git_repo(project_root))
-    reader = Prompt(color=color).ask_async
+    prompt = Prompt(color=color, empty_hint=SETUP_EMPTY_PROMPT_HINT)
     return run_interactive_agent_sync(
         agent_def=agent_def, provider_name=provider_name, model_name=model_name,
         initial_message=kickoff, project_root=project_root,
         asset_dir=assets,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=allow_unsandboxed),
-        read_line=reader, output_fn=output_fn, color=color, title="imp setup")
+        prompt=prompt, output_fn=output_fn, color=color, title="imp setup")
 
 
 def run_init(
@@ -595,11 +601,13 @@ def run_init(
 ) -> None:
     from imp.providers.effective import user_config_path
 
+    color_on = pal.should_use_color(sys.stdout)
     imp_dir = project_root / "imp"
     project_file = imp_dir / "project.yaml"
     already_initialized = project_file.is_file()
 
-    output_fn(f"Setting up imp in {project_root}")
+    output_fn("Setting up imp in "
+              + pal.ansi(str(project_root), "wordmark", enabled=color_on))
 
     user_path = user_config_path()
     wrote_user_config = not user_path.exists()
@@ -617,14 +625,21 @@ def run_init(
         if not providers:
             raise ValueError("at least one provider must be selected")
         theme = (detect_theme_fn or _default_detect_theme)()
+        # Everything below renders in the detected theme; IMP_THEME still wins.
+        if pal.theme_override() is None:
+            pal.set_theme(theme)
         picked_this_run = True
-    output_fn(f"Enabled: {', '.join(providers)}")
+    output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
     for prov in providers:
         if prov in _PROVIDERS_WITHOUT_ENV:
             continue
-        output_fn(f"  {prov} → {prov.upper()}_API_KEY (set this env var)")
+        output_fn(pal.ansi(
+            f"  {prov} → {prov.upper()}_API_KEY (set this env var)",
+            "dim", enabled=color_on))
     if picked_this_run and theme != "ansi":
-        output_fn(f"Detected a {theme} terminal — colors tuned to match.")
+        output_fn(pal.ansi(
+            f"Detected a {theme} terminal — colors tuned to match.",
+            "dim", enabled=color_on))
 
     # --- re-init idempotency: an already-committed project file means no
     #     conversation; just bootstrap a missing machine config and re-commit ---
@@ -699,7 +714,12 @@ def run_init(
             user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
 
     # --- hand off to the setup conversation ---
-    output_fn("Now let's finish setting up this project.")
+    output_fn("")
+    if color_on:
+        output_fn(splash.splash_block(
+            theme=pal.active_theme(),
+            width=shutil.get_terminal_size((80, 24)).columns, color=True))
+        output_fn("")
     result = _run_init_conversation(
         project_root=project_root,
         provider_name=provider_name, model_name=model_name,
@@ -735,13 +755,15 @@ def run_init(
     committed = write_init_files(project_root, settings)
 
     output_fn("")
-    output_fn("Created:")
-    output_fn("  imp/project.yaml")
-    output_fn(f"  {user_path}  (your machine: providers, theme)")
+    output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
+    output_fn(pal.ansi("  imp/project.yaml", "dim", enabled=color_on))
+    output_fn(pal.ansi(
+        f"  {user_path}  (your machine: providers, theme)", "dim", enabled=color_on))
     if committed:
-        output_fn("Committed imp/project.yaml.")
+        output_fn(pal.ansi("Committed imp/project.yaml.", "dim", enabled=color_on))
     output_fn("")
-    output_fn('Try: imp new "Add a dark-mode toggle"')
+    output_fn("Try: " + pal.ansi(
+        'imp new "Add a dark-mode toggle"', "wordmark", enabled=color_on))
 
 
 def run_init_noninteractive(

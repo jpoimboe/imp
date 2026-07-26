@@ -112,6 +112,13 @@ def active_theme() -> str:
     return _active_theme
 
 
+def theme_override() -> str | None:
+    """The `IMP_THEME` env override, or None when unset or unknown. The single
+    expression of the override's precedence over any detected or persisted theme."""
+    name = os.environ.get("IMP_THEME", "").strip().lower()
+    return name if name in THEMES else None
+
+
 def theme_escapes(theme: str) -> dict[str, str]:
     """A theme's color-name→SGR escape map (unknown → ansi); does not mutate global state."""
     return _THEMES.get(theme, _THEMES["ansi"])

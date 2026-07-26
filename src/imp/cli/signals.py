@@ -244,7 +244,7 @@ class InterruptCoordinator:
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
         # True ONLY while an interactive prompt is being awaited (set/cleared by
-        # ask_line_with_slash). During a RUN (agent thinking) this is False so an
+        # solicit_line). During a RUN (agent thinking) this is False so an
         # in-band Ctrl-C → signal_pause → runner interrupt → pause-to-prompt is
         # unchanged. With handle_sigint=False on the prompt, an out-of-band SIGINT
         # at a prompt lands in _dispatch_signal (not as a prompt_toolkit KBI);
@@ -428,9 +428,10 @@ class InterruptCoordinator:
 
     def set_at_prompt(self, value: bool) -> None:
         """Mark whether an interactive prompt is currently being awaited. A plain
-        boolean, NOT depth-counted: prompts are serialized (single controlling
-        tty; `router.begin_solicit`/`end_solicit`; the resume prompt runs only
-        after the run loop returns), so `ask_line_with_slash` calls never nest.
+        boolean, NOT depth-counted: every caller goes through `solicit_line` (the
+        run loop and the init setup conversation), and prompts are serialized
+        (single controlling tty; `router.begin_solicit`/`end_solicit`; the resume
+        prompt runs only after the run loop returns), so those calls never nest.
         If a nested prompt site is ever added, make this depth-counted so the
         inner reset does not clear it early. Routes an out-of-band SIGINT through
         the exit path while True (see _dispatch_signal)."""
@@ -877,7 +878,7 @@ class InterruptCoordinator:
         """Re-install the loop SIGINT/SIGTERM/SIGHUP handlers after a prompt_toolkit
         prompt deleted SIGINT's on exit. Safe no-op before the receiver starts or
         after it stops (`_loop is None`). Called from the interactive-prompt choke
-        point (`ask_line_with_slash`) so mid-run Ctrl-C survives every prompt."""
+        point (`solicit_line`) so mid-run Ctrl-C survives every prompt."""
         self._install_loop_signal_handlers()
 
     async def _on_received_signal(self, sig: int) -> None:

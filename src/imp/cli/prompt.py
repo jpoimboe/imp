@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 EMPTY_PROMPT_HINT = "press ctrl-d to pause & exit"
+# Nothing is paused during `imp init`: the setup conversation is cancelled outright.
+SETUP_EMPTY_PROMPT_HINT = "press ctrl-d to cancel setup"
 DEFAULT_HINT = "type a message, or /help"
 
 
@@ -44,7 +46,8 @@ def _placeholder_text(*, color: bool, text: str = DEFAULT_HINT) -> str:
 
 def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs",
                    color: bool = False,
-                   roster_models: Callable[[], list[str]] | None = None) -> Any:
+                   roster_models: Callable[[], list[str]] | None = None,
+                   empty_hint: str = EMPTY_PROMPT_HINT) -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.enums import EditingMode
     from prompt_toolkit.filters import completion_is_selected
@@ -79,7 +82,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             from prompt_toolkit.application import run_in_terminal
             # Fire-and-forget: run_in_terminal schedules via ensure_future; the
             # returned Future is intentionally not awaited from this sync handler.
-            run_in_terminal(lambda: print(EMPTY_PROMPT_HINT))
+            run_in_terminal(lambda: print(empty_hint))
 
     @kb.add("c-m", filter=~completion_is_selected)
     def _(event: Any) -> None:
@@ -210,6 +213,7 @@ class Prompt:
         editing_mode: str = "emacs",
         color: bool = False,
         quest: Any | None = None,
+        empty_hint: str = EMPTY_PROMPT_HINT,
         _session_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._color = color
@@ -222,7 +226,7 @@ class Prompt:
         self._session_factory = _session_factory or (
             lambda: _build_session(
                 skills_dir, editing_mode=editing_mode, color=color,
-                roster_models=roster_models))
+                roster_models=roster_models, empty_hint=empty_hint))
         self._session = self._session_factory()
 
     def _message(self, prompt_text: str | None, indent: str = "") -> Any:
@@ -268,7 +272,7 @@ class Prompt:
         (identical to SIGTERM). This also means prompt_toolkit never calls
         loop.remove_signal_handler(SIGINT) on prompt exit, so the handler-deletion
         problem (a88e96e) cannot recur — the rearm_signal_handlers call in
-        ask_line_with_slash becomes a harmless defensive no-op (kept)."""
+        solicit_line becomes a harmless defensive no-op (kept)."""
         from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 
         from imp.cli import palette as pal

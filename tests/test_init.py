@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
+from imp.cli.init import _run_init_conversation as _real_run_init_conversation
 from imp.cli.init import run_init
 
 
@@ -34,6 +35,18 @@ def _stub_conv(monkeypatch, result) -> None:
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "_run_init_conversation",
                         lambda **kw: result, raising=False)
+
+
+def _stub_conv_recording_theme(monkeypatch, seen: dict) -> None:
+    """Stub the setup conversation and record the palette theme active while it runs."""
+    import imp.cli.init as initmod
+    from imp.cli import palette as pal
+
+    def _conv(**_kw):
+        seen["theme"] = pal.active_theme()
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -832,3 +845,357 @@ def test_run_init_declared_tier_follows_the_agent_file(tmp_path, monkeypatch):
     run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
              input_fn=_inputs(), output_fn=lambda _msg: None)
     assert seen["tier"] == "high"
+
+
+def test_fresh_init_applies_the_detected_theme_before_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    seen: dict[str, str] = {}
+    _stub_conv_recording_theme(monkeypatch, seen)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _m: None,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen["theme"] == "dark"
+    # the process palette really emits the dark truecolor gold, not 16-color yellow
+    assert pal.ansi("x", "wordmark", enabled=True) == "\x1b[38;2;255;154;60mx\x1b[0m"
+
+
+def test_init_does_not_clobber_an_imp_theme_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+
+    monkeypatch.setenv("IMP_THEME", "light")
+    pal.set_theme("light")  # as _apply_theme already did at startup
+    seen: dict[str, str] = {}
+    _stub_conv_recording_theme(monkeypatch, seen)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _m: None,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen["theme"] == "light"
+    assert pal.active_theme() == "light"
+
+
+def test_provider_picker_runs_before_the_theme_is_applied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    _stub_conv(monkeypatch, _conv_result())
+    seen: dict[str, str] = {}
+
+    def _pick(_available):
+        seen["theme"] = pal.active_theme()
+        return ["anthropic"]
+
+    run_init(
+        project_root=tmp_path, picker_fn=_pick,
+        input_fn=_inputs(), output_fn=lambda _m: None,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen["theme"] == "ansi"
+
+
+GOLD_DARK = "\x1b[38;2;255;154;60m"
+GOLD_ANSI = "\x1b[33m"
+DIM = "\x1b[2m"
+RESET = "\x1b[0m"
+
+
+def _colored_fresh_init(tmp_path, monkeypatch, msgs: list[str]) -> None:
+    # conftest resets the palette but not the ambient color/theme env vars.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    _stub_conv(monkeypatch, _conv_result())
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+
+def test_host_success_lines_carry_engine_chrome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.providers.effective import user_config_path
+
+    msgs: list[str] = []
+    _colored_fresh_init(tmp_path, monkeypatch, msgs)
+    user_path = user_config_path()
+
+    # This one prints before the theme is applied, so its gold is the ansi gold.
+    assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
+    assert f"{DIM}Enabled: anthropic{RESET}" in msgs
+    assert f"{DIM}  anthropic → ANTHROPIC_API_KEY (set this env var){RESET}" in msgs
+    assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
+    assert f"{GOLD_DARK}Created:{RESET}" in msgs
+    assert f"{DIM}  imp/project.yaml{RESET}" in msgs
+    assert f"{DIM}  {user_path}  (your machine: providers, theme){RESET}" in msgs
+    assert f"{DIM}Committed imp/project.yaml.{RESET}" in msgs
+    assert f'Try: {GOLD_DARK}imp new "Add a dark-mode toggle"{RESET}' in msgs
+
+
+def test_host_success_lines_stay_bare_without_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    msgs: list[str] = []
+    _stub_conv(monkeypatch, _conv_result())
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert f"Setting up imp in {tmp_path}" in msgs
+    assert "Created:" in msgs
+    assert not any("\x1b" in m for m in msgs)
+
+
+def test_the_hand_off_line_is_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    msgs: list[str] = []
+    _stub_conv(monkeypatch, _conv_result())
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    assert not any("Now let's finish setting up this project." in m for m in msgs)
+
+
+def test_already_initialized_rerun_block_stays_bare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.providers.effective import user_config_path
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    cfg_dir = tmp_path / "xdg" / "imp"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    user_path = user_config_path()
+    assert "Project already initialized (imp/project.yaml is committed)." in msgs
+    # the same two strings the fresh path chromes — bare here
+    assert f"  {user_path}  (your machine: providers, theme)" in msgs
+    assert "Committed imp/project.yaml." in msgs
+
+
+def test_noninteractive_output_stays_bare_under_forced_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    assert "Created:" in msgs
+    assert "  imp/project.yaml" in msgs
+    assert not any("\x1b" in m for m in msgs)
+
+
+def test_already_initialized_rerun_leaves_the_palette_alone(tmp_path: Path) -> None:
+    from imp.cli import palette as pal
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    cfg_dir = tmp_path / "xdg" / "imp"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _m: None,
+    )
+
+    assert pal.active_theme() == "ansi"
+
+
+def _stub_splash(monkeypatch, seen: dict) -> None:
+    import imp.cli.init as initmod
+
+    def _fake(*, theme, width, color):
+        seen["theme"] = theme
+        seen["width"] = width
+        seen["color"] = color
+        return "SPLASH-BLOCK"
+
+    monkeypatch.setattr(initmod.splash, "splash_block", _fake)
+
+
+def test_splash_prints_once_in_the_resolved_theme_before_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.init as initmod
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    seen: dict[str, object] = {}
+    _stub_splash(monkeypatch, seen)
+    msgs: list[str] = []
+    at_conversation: dict[str, bool] = {}
+
+    def _conv(**kw):
+        at_conversation["splash_already_printed"] = "SPLASH-BLOCK" in msgs
+        # the real conversation prints the agent's opening prose here
+        kw["output_fn"]("Hi — which branch do you integrate into?")
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert msgs.count("SPLASH-BLOCK") == 1
+    assert seen["theme"] == "dark"
+    assert seen["color"] is True
+    assert at_conversation["splash_already_printed"] is True
+    i = msgs.index("SPLASH-BLOCK")
+    assert msgs[i - 1] == ""      # one blank above
+    assert msgs[i - 2] != ""      # never two
+    assert msgs[i + 1] == ""      # one blank below
+    # never two: the agent's first line follows the single blank
+    assert msgs[i + 2] == "Hi — which branch do you integrate into?"
+
+
+def test_no_splash_without_color_but_one_blank_before_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.init as initmod
+
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    seen: dict[str, object] = {}
+    _stub_splash(monkeypatch, seen)
+    msgs: list[str] = []
+    tail: dict[str, list[str]] = {}
+
+    def _conv(**_kw):
+        tail["msgs"] = list(msgs)
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen == {}                    # splash_block never called
+    assert tail["msgs"][-1] == ""        # exactly one blank …
+    assert tail["msgs"][-2] != ""        # … before the conversation opens
+
+
+def test_already_initialized_rerun_prints_no_splash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    seen: dict[str, object] = {}
+    _stub_splash(monkeypatch, seen)
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "dark",
+    )
+
+    assert seen == {}
+    assert "SPLASH-BLOCK" not in msgs
+
+
+def test_picker_cursor_row_is_gold_not_cyan() -> None:
+    from imp.cli.init import _picker_rows
+
+    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    assert rows[1][0] == "ansiyellow bold"
+    assert rows[2][0] == ""
+
+
+def test_picker_block_has_a_blank_line_around_the_options() -> None:
+    from imp.cli.init import _picker_rows
+
+    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    text = "".join(t for _style, t in rows)
+    assert text.splitlines() == [
+        "Which providers do you want to enable?",
+        "",
+        "> [x] claude_code",
+        "  [ ] anthropic",
+        "",
+        "↑↓ move · space toggle · enter confirm · esc cancel",
+    ]
+
+
+def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
+    from imp.cli.init import _interactive_provider_picker
+
+    doc = _interactive_provider_picker.__doc__ or ""
+    assert "ansicyan" not in doc
+    assert "ansiyellow" in doc
+
+
+def test_setup_conversation_prompt_uses_the_cancel_setup_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.init as initmod
+    from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT
+
+    seen: dict[str, object] = {}
+
+    class _SpyPrompt:
+        def __init__(self, **kwargs: object) -> None:
+            seen.update(kwargs)
+
+    def _fake_host(**kwargs: object) -> object:
+        seen["handed_to_host"] = kwargs["prompt"]
+        return _conv_result()
+
+    monkeypatch.setattr(initmod, "_run_init_conversation", _real_run_init_conversation)
+    monkeypatch.setattr(initmod, "Prompt", _SpyPrompt)
+    monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_host)
+
+    initmod._run_init_conversation(
+        project_root=tmp_path, provider_name="anthropic", model_name="m",
+        allow_unsandboxed=False, color=True, output_fn=lambda _m: None)
+
+    assert seen["empty_hint"] == SETUP_EMPTY_PROMPT_HINT
+    assert seen["empty_hint"] == "press ctrl-d to cancel setup"
+    # The host gets the Prompt itself, not a bound read function: the shared
+    # framing composes each read.
+    assert isinstance(seen["handed_to_host"], _SpyPrompt)

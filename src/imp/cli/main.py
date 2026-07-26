@@ -782,8 +782,8 @@ def _apply_theme() -> None:
     overrides everything; otherwise the value detected and persisted at `imp init`
     (config.theme); otherwise the universal `ansi`. Best-effort — a missing or
     unreadable config must never fail a command over theming, it just stays ansi."""
-    override = os.environ.get("IMP_THEME", "").strip().lower()
-    if override in pal.THEMES:
+    override = pal.theme_override()
+    if override is not None:
         pal.set_theme(override)
         return
     from imp.providers.effective import load_effective_config

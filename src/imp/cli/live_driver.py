@@ -147,16 +147,19 @@ def _band_wrap(body: str, bg: str, width: int) -> str:
 
 def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
                              width: int, unsandboxed: bool = False) -> str | None:
-    """Minimal id · title identity bar for the opening prompt, before any activity exists."""
-    if not quest_id:
-        return None
+    """Minimal id · title identity bar for the opening prompt, before any activity
+    exists. None only when there is nothing to name: a title alone (the setup
+    conversation, which has no quest id) still gets a band."""
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
-    id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over)
+    id_seg = (_paint(quest_id, "wordmark", color=color, over_bg=over)
+              if quest_id else None)
     title_seg = title if title else None
     unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
                               color=color, over_bg=over) if unsandboxed else None)
     body = rt.compose_label([id_seg, title_seg, unsandboxed_seg])
+    if not body:
+        return None
     return _band_wrap(body, bg, width)
 
 
@@ -306,7 +309,7 @@ class LiveDriver:
                  startup_verb: str | None = None,
                  quest_id: str | None = None, title: str = "") -> None:
         self._builder = nv.NarrativeBuilder()
-        if quest_id is not None:
+        if quest_id is not None or title:
             self._builder.seed_identity(quest_id, title)
         self._stream = stream
         self._color = color
@@ -465,6 +468,17 @@ class LiveDriver:
         if self._preceded_by_blank:
             self._status.skip_leading_blank()
         self._status.update(self.compose_startup)
+
+    def begin_standing_activity(self, *, verb: str, model: str | None) -> None:
+        """Light the footer for a conversation that emits no step_started (the
+        setup host) and keep it lit: with a standing activity the builder never
+        reports idle, so _refresh_status stops darkening the footer between
+        tool bursts. The builder restarts its clock at each user turn."""
+        if self._preceded_by_blank:
+            self._status.skip_leading_blank()
+        self._builder.set_standing_activity(
+            verb=verb, model=model, start_ts=datetime.now(UTC).isoformat())
+        self._refresh_status()
 
     def compose_toolbar_static(self) -> str | None:
         # The flat position row under the interactive prompt (no spinner/elapsed).

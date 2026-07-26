@@ -303,6 +303,79 @@ def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
     assert status.suspend_calls == 1   # hoisted: still just one suspend
 
 
+def test_solicit_line_frames_the_turn_and_injects_dispatch() -> None:
+    """One hoisted suspend and one flush per turn; the injected dispatch owns the
+    slash line, and REPROMPT prints exactly one blank before the next read."""
+    from imp.cli.slash import REPROMPT, solicit_line
+
+    drv = _RecDriver()
+    status = _CountStatus()
+    prompt = _FakePrompt(["/anything", "the answer"])
+    seen: list[str] = []
+    out: list[str] = []
+
+    def _dispatch(line: str) -> object:
+        seen.append(line)
+        return REPROMPT
+
+    async def _run() -> object:
+        return await solicit_line(
+            prompt, status, dispatch=_dispatch, toolbar_fn=lambda: None,
+            driver=drv, output_fn=out.append)
+
+    assert anyio.run(_run) == "the answer"
+    assert seen == ["/anything"]              # only the slash line reached dispatch
+    assert out == [""]                        # one blank between output and reprompt
+    assert drv.events == ["prepare", "prepare", "flush"]
+    assert status.suspend_calls == 1
+
+
+def test_solicit_line_returns_the_dispatch_result() -> None:
+    from imp.cli.slash import solicit_line
+
+    marker = SkillRequest("refactor", "")
+    prompt = _FakePrompt(["/refactor"])
+
+    async def _run() -> object:
+        return await solicit_line(
+            prompt, _NullStatus(), dispatch=lambda _line: marker,
+            toolbar_fn=lambda: None)
+
+    assert anyio.run(_run) == marker
+
+
+def test_solicit_line_reprompts_on_an_empty_line() -> None:
+    from imp.cli.slash import solicit_line
+
+    def _unreachable(_line: str) -> object:
+        raise AssertionError("no slash line in this test")
+
+    prompt = _FakePrompt(["", "   ", "real"])
+
+    async def _run() -> object:
+        return await solicit_line(
+            prompt, _NullStatus(), dispatch=_unreachable,
+            toolbar_fn=lambda: None)
+
+    assert anyio.run(_run) == "real"
+    assert len(prompt.hints) == 3             # one entry per read: both blanks re-read
+
+
+def test_solicit_line_composes_the_toolbar_for_every_read() -> None:
+    from imp.cli.slash import REPROMPT, solicit_line
+
+    bands = iter(["band-1", "band-2"])
+    prompt = _FakePrompt(["/x", "done"])
+
+    async def _run() -> object:
+        return await solicit_line(
+            prompt, _NullStatus(), dispatch=lambda _line: REPROMPT,
+            toolbar_fn=lambda: next(bands), output_fn=lambda _m: None)
+
+    assert anyio.run(_run) == "done"
+    assert prompt.bottom_toolbars == ["band-1", "band-2"]
+
+
 def test_continue_is_no_longer_a_verb(tmp_path: Path) -> None:
     # /continue is removed: it falls through to the skill resolver, matches no
     # skill; now command-shaped so it returns REPROMPT with an unknown-command
