@@ -189,7 +189,7 @@ A correct imp does **all** of:
   Every `imp new` / `imp resume` runs with cwd inside the clone, so all quests (branches,
   nested worktrees, journals) are contained and discardable.
 - **Config layout:** the `config-file-split` layout — a provider **code floor** (tier→model
-  defaults) under three layers: committed `imp/project.yaml` (workflow/lint/test/vars, read
+  defaults) under three layers: committed `imp/config.yaml` (workflow/lint/test/vars, read
   from the worktree), global `~/.imp/config.yaml` (`providers`/`theme`, per machine), and
   gitignored `.imp/config.yaml` (local, control root, highest precedence). Precedence
   (low→high): `floor < project < global < local` — operator-wins among the config layers.
@@ -254,7 +254,7 @@ cd "$REPO"
 WT=/tmp/imp-interrupt-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"                 # standalone clone of HEAD → control root resolves to $WT itself
 echo "$WT"                              # your cwd for every imp run
-ls "$WT"/imp/project.yaml               # the committed project marker → confirms $WT is an imp project
+ls "$WT"/imp/config.yaml                # the committed project marker → confirms $WT is an imp project
 ```
 
 (`git clone .` copies committed state at the current branch tip. If you need uncommitted local

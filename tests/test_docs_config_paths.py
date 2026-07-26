@@ -1,5 +1,6 @@
 """No doc, README, skill, workflow prompt, or playbook may name the pre-IMP_HOME
-global config location or the XDG knob that used to locate it."""
+global config location, the XDG knob that used to locate it, or the project
+config file's pre-rename name."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +21,8 @@ def _corpus() -> list[Path]:
 
 
 @pytest.mark.parametrize(
-    "needle", ["~/.config/imp", "XDG_CONFIG_HOME", "(user)", "user config"])
-def test_no_legacy_global_config_reference(needle: str) -> None:
+    "needle",
+    ["~/.config/imp", "XDG_CONFIG_HOME", "(user)", "user config", "project.yaml"])
+def test_no_retired_config_name_reference(needle: str) -> None:
     offenders = sorted(str(p) for p in _corpus() if needle in p.read_text())
     assert offenders == []

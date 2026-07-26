@@ -31,7 +31,7 @@ REPO=$(git rev-parse --show-toplevel)        # main checkout — the report land
 cd "$REPO"
 WT=/tmp/imp-dogfood-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"                       # standalone clone of HEAD; control root resolves to $WT
-ls "$WT"/imp/project.yaml                     # confirms $WT is an imp project
+ls "$WT"/imp/config.yaml                      # confirms $WT is an imp project
 ```
 
 Force a single provider via the gitignored **local** layer (default `claude_code`; substitute
