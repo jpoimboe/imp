@@ -55,6 +55,12 @@ def legacy_global_config_path() -> Path:
     return Path(base) / "imp" / "config.yaml"
 
 
+PROJECT_RENAME_HINT = (
+    "imp/project.yaml found but imp now reads imp/config.yaml — "
+    "rename it on this branch with `git mv imp/project.yaml imp/config.yaml`"
+)
+
+
 def _floor_layer() -> tuple[dict[str, Any], SourceLoc]:
     """The bottom merge layer, materialized from registry metadata: every
     registered vendor's tier_defaults assembled into {tier: {vendor: model}},
@@ -147,11 +153,7 @@ def load_effective_config(
     if project_root is not None:
         proj_path = project_root / "imp" / "config.yaml"
         if not proj_path.is_file() and (project_root / "imp" / "project.yaml").is_file():
-            raise LoadError(
-                "imp/project.yaml found but imp now reads imp/config.yaml — "
-                "rename it on this branch with "
-                "`git mv imp/project.yaml imp/config.yaml`"
-            )
+            raise LoadError(PROJECT_RENAME_HINT)
         p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)

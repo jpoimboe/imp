@@ -3818,17 +3818,22 @@ def _cmd_events_search(
     return 0
 
 
+def _config_roots() -> tuple[Path, Path]:
+    """(project_root, control_root) for the config commands. _project_root()
+    never raises (it returns the resolved start dir when no marker is found);
+    only the git resolution can, and pointing control at the project root there
+    just skips the local `.imp/config.yaml` layer."""
+    root = _project_root()
+    try:
+        return root, _control_root()
+    except Exception:
+        return root, root
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
-    # _project_root() never raises (returns the resolved start dir when no marker
-    # is found); only _control_root()'s git resolution can fail (not in a work
-    # tree). Resolve project first, then guard only the control read.
-    root = _project_root()
-    try:
-        control = _control_root()
-    except Exception:
-        control = root  # no git work tree → local `.imp/config.yaml` layer is skipped
+    root, control = _config_roots()
     eff = load_effective_config(project_root=root, control_root=control)
     color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
@@ -3841,6 +3846,20 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_config_set(args: argparse.Namespace) -> int:
+    from imp.cli.config_write import run_set
+    project_root, control_root = _config_roots()
+    return run_set(key=args.key, value=args.value, scope=args.scope,
+                   project_root=project_root, control_root=control_root)
+
+
+def _cmd_config_unset(args: argparse.Namespace) -> int:
+    from imp.cli.config_write import run_unset
+    project_root, control_root = _config_roots()
+    return run_unset(key=args.key, scope=args.scope,
+                     project_root=project_root, control_root=control_root)
+
+
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "Open a conversation with imp — ask questions, scout work, or scope a quest."),
     ("new", "Scope a new quest in conversation (optional opening message)."),
@@ -3849,7 +3868,7 @@ _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("show", "Show one quest's detail or a named artifact (imp show <id>)."),
     ("log", "Show a quest's narrative as plain text."),
     ("abandon", "Tear down a quest's worktree, branch, and state."),
-    ("config", "Show the effective configuration."),
+    ("config", "Show or edit the effective configuration."),
 )
 
 
@@ -4031,6 +4050,22 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
                    help="Disable the pager even when stdout is a TTY.")
     p.set_defaults(func=_cmd_events_search, parser=p)
     return p
+
+
+_CONFIG_KEY_HELP = "Dotted setting name, e.g. theme or tiers.high.anthropic."
+
+
+def _add_config_scope(parser: argparse.ArgumentParser) -> None:
+    """--project / --global as a store_const into `scope` (`args.global` would
+    be a syntax error)."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--project", dest="scope", action="store_const",
+                       const="project",
+                       help="Write to imp/config.yaml (this repo).")
+    group.add_argument("--global", dest="scope", action="store_const",
+                       const="global",
+                       help="Write to ~/.imp/config.yaml (this machine).")
+    parser.set_defaults(scope=None)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -4407,12 +4442,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_config = sub.add_parser(
         "config",
-        help="Show the effective config and per-setting provenance.",
+        help="Show the effective config and per-setting provenance; set or "
+             "unset a value.",
         description=(
             "Show the effective configuration and where each setting came "
             "from (its provenance layer). --explain TIER traces one tier's "
             "model bindings through the layers; --all shows every "
-            "provider x tier row."
+            "provider x tier row. `imp config set` / `imp config unset` edit "
+            "the project or global config file."
         ),
     )
     p_config.add_argument("--explain", metavar="TIER", default=None,
@@ -4422,6 +4459,22 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="Show every provider x tier row "
                                "(default: only configured providers).")
     p_config.set_defaults(func=_cmd_config)
+    config_sub = p_config.add_subparsers(dest="config_action", required=False)
+    p_config_set = config_sub.add_parser(
+        "set",
+        help="Set a configuration value in the project or global config file.")
+    p_config_set.add_argument("key", help=_CONFIG_KEY_HELP)
+    p_config_set.add_argument(
+        "value", help="New value; list settings take a comma-separated value.")
+    _add_config_scope(p_config_set)
+    p_config_set.set_defaults(func=_cmd_config_set)
+    p_config_unset = config_sub.add_parser(
+        "unset",
+        help="Comment out a configuration value in the project or global "
+             "config file.")
+    p_config_unset.add_argument("key", help=_CONFIG_KEY_HELP)
+    _add_config_scope(p_config_unset)
+    p_config_unset.set_defaults(func=_cmd_config_unset)
 
     p_abandon = sub.add_parser(
         "abandon",
