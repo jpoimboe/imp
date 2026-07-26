@@ -151,6 +151,7 @@ class LiveStatus:
         self._visible = True
         self._rows = 1
         self._drawn_widths = [_display_width(text)]
+        self._prev_width = _display_width(text)
         # Only when a lead was pushed does the ack own the blank above it; without this
         # a later _erase() would climb onto committed scrollback and clear it.
         self._owns_lead_blank = bool(lead)
@@ -197,16 +198,17 @@ class LiveStatus:
             return
         ack = self._stop_ack
         if ack is not None:
-            # The ack is the only thing drawn while it is set, so a repaint rewrites the
-            # row in place: one atomic write, never a blank frame between an erase and
-            # the redraw for the screen to catch. Clipped to the width every frame, or a
-            # narrowed terminal would soft-wrap it and the repaint would stack copies.
-            if self._visible:
-                row = pal.clip_display(ack, self._width_fn() - 1)
+            width = self._width_fn()
+            narrowed = (self._visible and self._prev_width is not None
+                        and (width - 1) < self._prev_width)
+            if self._visible and not narrowed:
+                # In-place repaint: one atomic write, clipped every frame to stay in one line.
+                row = pal.clip_display(ack, width - 1)
                 self._stream.write(f"{_HIDE}{_ERASE}{_DIM}{row}{_RESET_SGR}")
                 self._stream.flush()
                 self._cursor_hidden = True
                 self._drawn_widths = [_display_width(row)]
+                self._prev_width = _display_width(row)
             else:
                 self._draw_ack(ack)
             return

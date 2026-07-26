@@ -637,3 +637,23 @@ def test_clear_stop_ack_hands_the_footer_back() -> None:
     out.seek(0)
     s._draw()
     assert "thinking · 2s" in out.getvalue()
+
+
+def test_narrowing_during_ack_climbs_reflowed_lines_and_preserves_blank() -> None:
+    # Pins: when the terminal narrows while the sticky ack is shown the next
+    # _draw() must climb all reflowed physical lines (not just \r\x1b[K the last)
+    # and redraw below the preserved owned blank.
+    out = _TTY()
+    s = LiveStatus(out)
+    w = [20]
+    s._width_fn = lambda: w[0]
+    s.update(lambda f: ["footer"])            # draw a footer that owns its blank
+    s.show_stop_ack("a" * 16)                # 16-col ack drawn at width 20
+    out.truncate(0)
+    out.seek(0)
+    w[0] = 4                                  # terminal narrows to 4 cols
+    s._draw()                                 # next 100ms tick
+    v = out.getvalue()
+    # 16 cols at width 4 → ceil(16/4)=4 reflowed physical lines; all must be climbed.
+    assert v.count("\x1b[1A") == 4
+    assert s._owns_lead_blank is True        # redrawn below the preserved blank
