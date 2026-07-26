@@ -251,3 +251,56 @@ def test_project_pairs_only_the_answered_tool_use() -> None:
     _post_conditions(out)
     assert [m.role for m in out] == ["assistant", "user"]
     assert [b.tool_use_id for b in out[1].content] == ["t1"]
+
+
+def test_stream_history_regroups_late_tool_results() -> None:
+    """The replayed tail goes through the projection, not the bare merge: a result
+    that arrives after an intervening assistant turn is regrouped into the pairing
+    turn, so the CLI never sees an unanswered tool_use it would fill with
+    "[Tool result missing due to internal error]"."""
+    messages = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="read_file", input={"path": "a"}),
+            ToolUseBlock(id="t1", name="read_file", input={"path": "b"}),
+        )),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="t0", content="ALPHA"),)),
+        Message(role="assistant", content=(TextBlock(text="one down"),)),
+        Message(role="user", content=(ToolResultBlock(tool_use_id="t1", content="BRAVO"),)),
+    ]
+    out = asyncio.run(_drain(_stream_history(messages)))
+    assert [d["type"] for d in out] == ["assistant", "user", "assistant"]
+    assert [b["tool_use_id"] for b in out[1]["message"]["content"]] == ["t0", "t1"]
+    assert [b["content"] for b in out[1]["message"]["content"]] == ["ALPHA", "BRAVO"]
+
+
+def test_stream_history_keeps_a_boundary_result_delta_intact() -> None:
+    """The DANGLING_TOOL_USE / handback delta is one user turn whose tool_use lives
+    in the loaded session. It must survive the projection: an empty delta
+    deadlocks (claude-p never self-starts a loaded session)."""
+    delta = [Message(role="user", content=(ToolResultBlock(
+        tool_use_id="c0", content="REVISE: fix the claim.", is_error=True),))]
+    out = asyncio.run(_drain(_stream_history(delta)))
+    assert len(out) == 1 and out[0]["type"] == "user"
+    block = out[0]["message"]["content"][0]
+    assert block["tool_use_id"] == "c0" and block["is_error"] is True
+
+
+def test_project_keeps_a_boundary_result_alongside_a_paired_one() -> None:
+    """A delta mixing a boundary result with an in-delta tool_use/result pair keeps
+    both, tool_results leading, with no adjacent same-role turns."""
+    messages = [
+        Message(role="user", content=(ToolResultBlock(tool_use_id="c0", content="EARLIER"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="bash", input={"command": "ls"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="a.txt"),
+            TextBlock(text="carry on"),
+        )),
+    ]
+    out = _project_for_cli(messages)
+    _post_conditions(out)
+    assert [m.role for m in out] == ["user", "assistant", "user"]
+    assert [b.tool_use_id for b in out[0].content] == ["c0"]
+    assert [type(b).__name__ for b in out[2].content] == [
+        "ToolResultBlock", "TextBlock"]
+    assert out[2].content[0].tool_use_id == "t0"

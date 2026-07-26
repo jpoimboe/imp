@@ -819,8 +819,11 @@ def _stream_history(messages: list[Message]) -> Any:
 
     Drop empty assistant content (thinking-only fragments after we extracted
     the thinking blocks) since "assistant with no content" is also invalid.
+
+    The fold plus the tool_result regrouping claude's loader needs are both in
+    `_project_for_cli`.
     """
-    return _AsyncIter(_history_dicts(_merge_assistant_fragments(messages)))
+    return _AsyncIter(_history_dicts(_project_for_cli(messages)))
 
 
 def _merge_assistant_fragments(messages: list[Message]) -> list[Message]:
