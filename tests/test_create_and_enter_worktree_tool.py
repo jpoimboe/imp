@@ -11,7 +11,7 @@ from imp.engine.sandbox import (
     SandboxConfig,
     SandboxPolicy,
     build_sandbox_argv,
-    prune_missing_masks,
+    prepare_spawn_policy,
     resolve_policy,
 )
 from imp.engine.state import State
@@ -168,7 +168,7 @@ async def test_bash_argv_chdirs_and_reexposes_new_worktree(tmp_path: Path) -> No
     wt = tmp_path / ".imp" / "worktrees" / "t8"
     argv = build_sandbox_argv(
         "cat app.py", cwd=str(ctx.project_root),
-        policy=prune_missing_masks(ctx.sandbox_policy), engine_env={})
+        policy=prepare_spawn_policy(ctx.sandbox_policy), engine_env={})
     # The shell cwd (ctx.project_root) is the new worktree...
     ci = argv.index("--chdir")
     assert argv[ci + 1] == str(wt)

@@ -14,7 +14,7 @@ from typing import Any
 
 from imp.engine.env import overlay_engine_env
 from imp.engine.expr import EvalEnv, evaluate
-from imp.engine.sandbox import SandboxPolicy, build_sandbox_argv, prune_missing_masks
+from imp.engine.sandbox import SandboxPolicy, build_sandbox_argv, prepare_spawn_policy
 from imp.engine.types import Action, Continue, Rule, Step
 
 GATE_KILL_GRACE_S = 2.0  # SIGTERM-to-SIGKILL grace window for a gate subprocess group
@@ -122,7 +122,7 @@ def run_script(
     # The policy's setenv was frozen at run start (possibly with an empty
     # name-on-intent slug), so the live engine_env (env_extra) is the authoritative
     # source that refreshes IMP_* inside the bwrap --clearenv jail.
-    argv = (build_sandbox_argv(cmd, cwd=run_cwd, policy=prune_missing_masks(policy),
+    argv = (build_sandbox_argv(cmd, cwd=run_cwd, policy=prepare_spawn_policy(policy),
                                engine_env=env_extra or {})
             if policy is not None else ["sh", "-c", cmd])
     proc = subprocess.Popen(

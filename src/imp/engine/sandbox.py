@@ -301,7 +301,7 @@ def build_sandbox_argv(
     return argv
 
 
-def prune_missing_masks(policy: SandboxPolicy) -> SandboxPolicy:
+def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     """Return a copy of `policy` with any mask/ro-bind path that has since vanished
     dropped, existence-gating the frozen spawn argv. After the fail-closed .imp
     allowlist, secret_dirs/secret_files name only self-owned never-vanishing paths —
