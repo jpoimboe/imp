@@ -258,12 +258,11 @@ def test_message_to_session_records_chains_and_shapes() -> None:
             ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
     ]
     recs = message_to_session_records(
-        messages, parent_uuid="P", session_id="sid", cwd="/proj",
-        model="claude-sonnet-4-5", start_index=2)
+        messages, session_id="sid", cwd="/proj", model="claude-sonnet-4-5")
 
     assert len(recs) == 2
     assert recs[0]["type"] == "assistant"
-    assert recs[0]["parentUuid"] == "P"
+    assert recs[0]["parentUuid"] is None
     assert recs[0]["sessionId"] == "sid"
     assert recs[0]["cwd"] == "/proj"
     assert recs[0]["message"]["role"] == "assistant"
@@ -283,16 +282,17 @@ def test_message_to_session_records_chains_and_shapes() -> None:
 
 def test_message_to_session_records_uuids_are_deterministic(tmp_path: Path) -> None:
     from imp.agents.runner import Message, TextBlock
-    from imp.providers.claude_code_session_store import message_to_session_records
+    from imp.providers.claude_code_session_store import (
+        _record_uuid,
+        message_to_session_records,
+    )
 
     messages = [Message(role="assistant", content=(TextBlock(text="hi"),))]
-    a = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=5)
-    b = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=5)
+    a = message_to_session_records(messages, session_id="sid", cwd="/p", model="m")
+    b = message_to_session_records(messages, session_id="sid", cwd="/p", model="m")
     assert [r["uuid"] for r in a] == [r["uuid"] for r in b]
+    # Still keyed on (session_id, index), with index now the position in the projection.
+    assert [r["uuid"] for r in a] == [_record_uuid("sid", 0)]
     store = ImpSessionStore(tmp_path)
     key = _main_key()
     anyio.run(store.append, key, a)

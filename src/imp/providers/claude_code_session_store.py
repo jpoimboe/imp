@@ -178,22 +178,18 @@ def _session_block_to_dict(block: Any) -> dict[str, Any]:
 
 
 def message_to_session_records(
-    messages: list[Message], *, parent_uuid: str | None, session_id: str,
-    cwd: str, model: str, start_index: int = 0,
+    messages: list[Message], *, session_id: str, cwd: str, model: str,
 ) -> list[dict[str, Any]]:
     """Convert imp transcript Messages into claude-p on-disk session records.
 
     Shape matches a real ~/.claude/projects/<key>/<session>.jsonl line: a
     parentUuid->uuid chain carrying sessionId, type, and an Anthropic message.
-    parent_uuid anchors the chain to the last record already in the store
-    (None for an empty store). start_index is the absolute turn index of
-    messages[0] so uuids stay stable across reconcile re-runs.
+    The body is a whole-transcript projection, so the chain roots at None.
     """
     records: list[dict[str, Any]] = []
-    parent = parent_uuid
+    parent: str | None = None
     timestamp = datetime.datetime.now(datetime.UTC).isoformat()
-    for offset, m in enumerate(messages):
-        index = start_index + offset
+    for index, m in enumerate(messages):
         rec_uuid = _record_uuid(session_id, index)
         content = [_session_block_to_dict(b) for b in m.content]
         if m.role == "assistant":

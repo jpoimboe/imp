@@ -124,8 +124,8 @@ def test_native_store_rebuilds_with_placeholder_bodies_after_compaction(
     store = session_store_for(tmp_path)
     key = {"project_key": "/p", "session_id": "s1"}
     pre = message_to_session_records(
-        t.load(), parent_uuid=None, session_id="s1",
-        cwd=str(tmp_path), model="m", start_index=0)
+        t.load(), session_id="s1",
+        cwd=str(tmp_path), model="m")
     anyio.run(store.overwrite, key, pre)
     assert "FILE BODY LINE 1" in json.dumps(anyio.run(store.load, key))
 
@@ -134,8 +134,8 @@ def test_native_store_rebuilds_with_placeholder_bodies_after_compaction(
     on_disk = anyio.run(store.load, key)
     assert on_disk is None   # stale store deleted, so resume rebuilds from scratch
     rebuilt = message_to_session_records(
-        _project_for_cli(t.load()), parent_uuid=None, session_id="s1",
-        cwd=str(tmp_path), model="m", start_index=0)
+        _project_for_cli(t.load()), session_id="s1",
+        cwd=str(tmp_path), model="m")
     blob = json.dumps(rebuilt)
     assert RESULT_PLACEHOLDER in blob        # live context now carries the stub
     assert "FILE BODY LINE 1" not in blob    # original tool output is gone

@@ -199,7 +199,7 @@ def test_project_emits_no_empty_message_and_no_empty_record() -> None:
     _post_conditions(out)
     assert [m.role for m in out] == ["assistant", "user", "assistant"]
     records = message_to_session_records(
-        out, parent_uuid=None, session_id="s0", cwd="/tmp/p", model="m0")
+        out, session_id="s0", cwd="/tmp/p", model="m0")
     assert all(r["message"]["content"] for r in records), records
 
 

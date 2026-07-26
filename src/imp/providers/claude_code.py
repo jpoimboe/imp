@@ -1394,7 +1394,6 @@ class ClaudeCodeSession(ObserveSession):
         if native_resume:
             await store.overwrite(skey, message_to_session_records(
                 _project_for_cli(messages[:resume_base]),
-                parent_uuid=None,
                 session_id=skey["session_id"],
                 cwd=str(invocation.quest_context.project_root),
                 model=runner.model,

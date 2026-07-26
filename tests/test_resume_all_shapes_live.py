@@ -177,8 +177,8 @@ async def test_send_to_llm_store_backed_native_resume(
     # guard kicks the turn with the continuation nudge — claude-p never generates
     # from a loaded session alone, so an empty delta would deadlock.
     await store.append(skey, message_to_session_records(
-        msgs[:2], parent_uuid=None, session_id=skey["session_id"],
-        cwd=str(tmp_path), model=_MODEL, start_index=0))
+        msgs[:2], session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL))
 
     # Spy on the first-query history stream to prove which path ran: native
     # resume folds the tool_result into the store and streams ONLY the
@@ -254,8 +254,8 @@ async def test_dangling_tool_use_store_backed_native_resume(
     # The batcher flushed only the first two turns at the prior result boundary;
     # the tool_result and the dangling t1 are the unflushed tail.
     await store.append(skey, message_to_session_records(
-        msgs[:2], parent_uuid=None, session_id=skey["session_id"],
-        cwd=str(tmp_path), model=_MODEL, start_index=0))
+        msgs[:2], session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL))
 
     # Spy on the first-query stream: native resume must STREAM the synthesized
     # placeholder tool_result for the dangling t1 (1 turn) to kick the next turn.
@@ -361,8 +361,8 @@ async def test_complete_step_handback_native_resume(
     # The store holds only the user turn the batcher flushed; the complete_step
     # assistant turn is the unflushed tail reconciled before native resume.
     await store.append(skey, message_to_session_records(
-        msgs[:1], parent_uuid=None, session_id=skey["session_id"],
-        cwd=str(tmp_path), model=_MODEL, start_index=0))
+        msgs[:1], session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL))
 
     # Spy on the first-query stream: the native path streams ONLY the handback
     # (1 user turn) — the is_error feedback result that pairs the dangling call.
@@ -443,8 +443,8 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     # full store from _project_for_cli(messages[:resume_base]) before
     # claude-p loads its native session, so the partial state here is overwritten.
     await store.append(skey, message_to_session_records(
-        msgs[:3], parent_uuid=None, session_id=skey["session_id"],
-        cwd=str(tmp_path), model=_MODEL, start_index=0))
+        msgs[:3], session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL))
 
     # Spy on the first-query history stream to prove the native path: native
     # resume streams ONLY the delivered feedback turn (1 turn); a stream-json
@@ -520,8 +520,8 @@ async def test_midrun_interrupt_resume_continues_agent(
     # The batcher flushed through the tool_result (msgs[:3]); the trailing assistant
     # prose is the unflushed tail reconciled before the native --resume load.
     await store.append(skey, message_to_session_records(
-        msgs[:3], parent_uuid=None, session_id=skey["session_id"],
-        cwd=str(tmp_path), model=_MODEL, start_index=0))
+        msgs[:3], session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL))
 
     # Spy on the first-query history stream: the native continue path streams ONLY
     # the continuation-nudge turn (1 turn); a solicit/replay would look different.
