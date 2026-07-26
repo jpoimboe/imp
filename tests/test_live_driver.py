@@ -1992,9 +1992,13 @@ def test_compose_identity_toolbar_title_is_unpainted_under_ansi_theme() -> None:
     assert "\x1b[" not in parts[1]               # title: unpainted default fg
 
 
-def test_compose_identity_toolbar_none_without_quest_id() -> None:
+def test_compose_identity_toolbar_bands_a_title_without_a_quest_id() -> None:
     from imp.cli.live_driver import compose_identity_toolbar
-    assert compose_identity_toolbar(quest_id=None, title="t",
+    # The setup conversation has a title and no quest id: the band names it.
+    assert compose_identity_toolbar(quest_id=None, title="imp setup",
+                                    color=False, width=80) == "imp setup"
+    # Nothing to name at all -> no band.
+    assert compose_identity_toolbar(quest_id=None, title="",
                                     color=False, width=80) is None
 
 
@@ -3413,3 +3417,12 @@ def test_stop_ack_cleared_when_prompt_gate_lands() -> None:
     drv.prepare_for_prompt()          # the interrupt steer gate lands
     assert drv._status._visible is False       # ack no longer owns the status line
     assert "\x1b[K" in out.getvalue()          # the ack row was erased
+
+
+def test_driver_titled_without_a_quest_id_shows_the_identity_band() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     title="imp setup")
+    # No quest_created event will ever arrive during setup, so the title is the
+    # whole identity — and it must reach the static toolbar under the field.
+    assert drv.compose_toolbar_static() == "imp setup"

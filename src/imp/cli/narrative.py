@@ -745,7 +745,7 @@ class NarrativeBuilder:
             return Activity(verb=self._seed_phrase)
         return None
 
-    def seed_identity(self, quest_id: str, title: str) -> None:
+    def seed_identity(self, quest_id: str | None, title: str) -> None:
         self._root.id = quest_id
         self._root.title = title
 
