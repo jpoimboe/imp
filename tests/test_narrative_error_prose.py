@@ -181,3 +181,98 @@ def test_a_backoff_error_with_no_retry_behind_it_still_shows_no_red_line() -> No
     tree = nv.build_tree(events)
     assert [n for n in _error_nodes(tree.root) if not n.is_warning] == []
     assert "error: [auth]" not in _render(events)
+
+
+def test_a_closing_fold_releases_its_subagents_pending_tag() -> None:
+    b = nv.NarrativeBuilder()
+    for e in _step(
+        _ev("tk1", "tool_call", agent_id=AID, id="b1", name="sub_agent",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _msg("su1", PROSE, tagged=True, agent_id="sub:tk1"),
+    ):
+        b.add(e)
+    fold = next(c for c in b.tree.root.children[0].children[0].children
+                if isinstance(c, nv.SubagentFold))
+    node = next(c for c in fold.tree.root.children if isinstance(c, nv.AgentTextNode))
+    assert node.error_pending is True                    # withheld while the fold runs
+
+    b.add(_ev("r1", "tool_result", agent_id=AID, id="b1",
+              content='{"status":"Success"}', error=False))
+    assert node.error_pending is False                   # released by the fold close
+    assert PROSE in _texts(fold.tree.root)
+    b.finalize()
+    assert PROSE in "\n".join(
+        render_tree(b.tree, full=True, color=False, width=100))
+
+
+def test_finalize_releases_a_tag_no_event_ever_resolved() -> None:
+    b = nv.NarrativeBuilder()
+    for e in _step(_msg("a1", PROSE, tagged=True)):
+        b.add(e)
+    node = next(c for c in b.tree.root.children[0].children[0].children
+                if isinstance(c, nv.AgentTextNode))
+    assert node.error_pending is True
+
+    b.finalize()
+    assert node.error_pending is False
+    # The flag is not the point: the prose must still be there to render.
+    assert PROSE in "\n".join(render_tree(b.tree, full=False, color=False, width=100))
+
+
+def test_finalize_releases_a_tag_inside_a_fold_that_never_closed() -> None:
+    b = nv.NarrativeBuilder()
+    for e in _step(
+        _ev("tk1", "tool_call", agent_id=AID, id="b1", name="sub_agent",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _msg("su1", PROSE, tagged=True, agent_id="sub:tk1"),
+    ):
+        b.add(e)
+    fold = next(c for c in b.tree.root.children[0].children[0].children
+                if isinstance(c, nv.SubagentFold))
+    node = next(c for c in fold.tree.root.children if isinstance(c, nv.AgentTextNode))
+
+    b.finalize()
+    assert node.error_pending is False
+    # A running fold still expands under --full, so the prose is reachable there.
+    assert PROSE in "\n".join(render_tree(b.tree, full=True, color=False, width=100))
+
+
+def test_workflow_resumed_releases_a_tag_in_a_dangling_fold() -> None:
+    b = nv.NarrativeBuilder()
+    for e in _step(
+        _ev("tk1", "tool_call", agent_id=AID, id="b1", name="sub_agent",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _msg("su1", PROSE, tagged=True, agent_id="sub:tk1"),
+    ):
+        b.add(e)
+    fold = next(c for c in b.tree.root.children[0].children[0].children
+                if isinstance(c, nv.SubagentFold))
+    node = next(c for c in fold.tree.root.children if isinstance(c, nv.AgentTextNode))
+
+    # The resume finalizes the fold as interrupted and drops its membership entry,
+    # so this is the last chance to release its tag.
+    b.add(_ev("w1", "workflow_resumed"))
+    assert node.error_pending is False
+    # Flag alone can't distinguish release (node stays) from drop (node gone); check render.
+    assert PROSE in "\n".join(render_tree(b.tree, full=True, color=False, width=100))
+
+
+def test_a_failing_subagents_audit_error_leaves_its_closing_prose_rendered() -> None:
+    # subagents.py appends `audit` rows for a fatal/budget-exhausted subagent; they
+    # paint nothing, so they must not delete prose that paints.
+    events = _step(
+        _ev("tk1", "tool_call", agent_id=AID, id="b1", name="sub_agent",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _msg("su1", PROSE, tagged=True, agent_id="sub:tk1"),
+        _ev("se1", "error", agent_id="sub:tk1", category="terminated", kind="terminated",
+            message="subagent 'reviewer' failed (terminated)", audit=True),
+        _ev("r1", "tool_result", agent_id=AID, id="b1",
+            content='{"status":"Error"}', error=True))
+    tree = nv.build_tree(events)
+    # A fold is a LEAF in the top-level tree (SubagentFold has no `children`), so
+    # the subagent's prose is reachable only through its own nested tree.
+    fold = next(c for c in tree.root.children[0].children[0].children
+                if isinstance(c, nv.SubagentFold))
+    assert PROSE in _texts(fold.tree.root)
+    assert PROSE in "\n".join(
+        render_tree(tree, full=True, color=False, width=100))

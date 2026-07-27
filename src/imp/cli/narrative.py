@@ -1001,6 +1001,11 @@ class NarrativeBuilder:
     def finalize(self) -> None:
         """End-of-stream flush of a deferred rename and the warnings summary on a pause."""
         self._flush_pending_rename()
+        # A tag never outlives its stream: still pending at the end means released.
+        self._release_pending_error_prose()
+        # One level deep because subagent routing is single-level (no sub-sub-agents).
+        for fold in self._sub_by_agent_id.values():
+            fold.nested._release_pending_error_prose()
         if self._root.status == "paused" and self._pause_outcome_shown:
             self._flush_warnings_summary()
 
@@ -1478,6 +1483,7 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     # siblings already closed via their logged tool_results) as interrupted so
     # they stop accumulating events and stop shadowing current_activity().
     for fold in self._open_sub_by_event.values():
+        fold.nested._release_pending_error_prose()
         fold.running = False
         fold.terminal_state = "interrupted"
         # Drop the interrupted fold's membership entry too — otherwise a late
@@ -1850,6 +1856,7 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
 
 def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
                          end_ts: str | None = None) -> None:
+    fold.nested._release_pending_error_prose()
     fold.running = False
     fold.end_ts = end_ts
     fold.is_error = bool(p.get("error", False))
