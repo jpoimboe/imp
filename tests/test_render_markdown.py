@@ -500,3 +500,13 @@ def test_markdown_lean_hides_engine_message():
     ], full=False)
     assert "keep going" not in out
     assert "continuation" not in out
+
+
+def test_markdown_pause_keeps_the_raw_reason() -> None:
+    out = _md([
+        _ev("1", "step_started", step="verify", kind="agent", phase="implement",
+            model="m", provider="anthropic"),
+        _ev("2", "workflow_paused", reason="max_loops"),
+    ])
+    assert "**paused (max_loops)**" in out
+    assert "loop limit" not in out

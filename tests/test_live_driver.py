@@ -2275,7 +2275,7 @@ def test_terminal_nested_pause_renders_live_and_matches_render_tree() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("paused (max_loops)" in ln for ln in body)
+    assert any("paused — a step kept sending work back" in ln for ln in body)
     assert body == _render_body(events)
 
 
@@ -2296,7 +2296,7 @@ def test_terminal_pause_flushes_warnings_summary_in_live() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("paused (max_loops)" in ln for ln in body)
+    assert any("paused — a step kept sending work back" in ln for ln in body)
     assert any("1 warning this run" in ln for ln in body)
 
 
