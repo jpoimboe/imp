@@ -69,7 +69,10 @@ from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
 )
-from imp.providers.observe_classify import _classify_agent_text
+from imp.providers.observe_classify import (
+    _classify_agent_text,
+    classifies_as_provider_error,
+)
 from imp.providers.observe_session import ObserveSession
 from imp.providers.stderr_sink import current_stderr_sink
 from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
@@ -1122,7 +1125,8 @@ def _flush_codex_prose(
     elog.append_agent_message(
         agent_id=agent_id, provider=provider, model=model,
         raw={"content": [{"type": "text", "text": t} for t in parts]},
-        usage={}, stop_reason=None, auth_mode=state.get("auth_mode"))
+        usage={}, stop_reason=None, auth_mode=state.get("auth_mode"),
+        provider_error=classifies_as_provider_error(parts[-1]))
     state["turn_had_llm"] = True
 
 

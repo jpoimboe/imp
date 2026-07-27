@@ -116,7 +116,10 @@ from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
 )
-from imp.providers.observe_classify import _classify_agent_text
+from imp.providers.observe_classify import (
+    _classify_agent_text,
+    classifies_as_provider_error,
+)
 from imp.providers.observe_session import ObserveSession
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
@@ -1404,6 +1407,7 @@ class ClaudeCodeSession(ObserveSession):
         self._llm_group_open = False
         self._llm_group_key: str | None = None
         self._llm_blocks: list[dict[str, Any]] = []
+        self._llm_tail_text: str = ""
         self._llm_model: str | None = None
         self._llm_stop_reason: Any = None
         self._llm_usage: dict[str, Any] = {}
@@ -1462,6 +1466,7 @@ class ClaudeCodeSession(ObserveSession):
                 raw={"content": self._llm_blocks, "stop_reason": stop,
                      "usage": usage},
                 usage=usage, stop_reason=stop,
+                provider_error=classifies_as_provider_error(self._llm_tail_text),
                 message_id=self._llm_group_key,
                 context_window=cu_fields.get("context_window"),
                 context_pct=cu_fields.get("context_pct"),
@@ -1469,6 +1474,7 @@ class ClaudeCodeSession(ObserveSession):
             self._llm_group_open = False
             self._llm_group_key = None
             self._llm_blocks = []
+            self._llm_tail_text = ""
             self._llm_model = None
             self._llm_stop_reason = None
             self._llm_usage = {}
@@ -1585,6 +1591,7 @@ class ClaudeCodeSession(ObserveSession):
                     elif self._llm_group_key is None and mid is not None:
                         self._llm_group_key = mid
                     self._llm_blocks.extend(frag["content"])
+                    self._llm_tail_text = _text_of(imp_msg)
                     served = getattr(raw, "model", None)
                     if served is not None and self._llm_model is None:
                         self._llm_model = served

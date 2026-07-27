@@ -416,6 +416,7 @@ class EventLog(Protocol):
                              model: str, raw: Any, usage: dict[str, Any],
                              stop_reason: Any,
                              auth_mode: str | None = None,
+                             provider_error: bool = False,
                              context_window: int | None = None,
                              context_pct: float | None = None,
                              context_tokens: int | None = None,
@@ -561,6 +562,7 @@ class _BaseEventLog:
                              model: str, raw: Any, usage: dict[str, Any],
                              stop_reason: Any,
                              auth_mode: str | None = None,
+                             provider_error: bool = False,
                              context_window: int | None = None,
                              context_pct: float | None = None,
                              context_tokens: int | None = None,
@@ -573,6 +575,8 @@ class _BaseEventLog:
         }
         if auth_mode is not None:
             payload["auth_mode"] = auth_mode
+        if provider_error:
+            payload["provider_error"] = True
         if context_window is not None:
             payload["context_window"] = context_window
         if context_pct is not None:
