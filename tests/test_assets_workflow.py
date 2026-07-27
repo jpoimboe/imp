@@ -1079,8 +1079,9 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
     spiker = wf.agents["spiker"]
     # opts into the Part-1 isolation primitive
     assert spiker.isolated_worktree is True
-    # dispatchable by threshold, task-lead, and the finalize gate
+    # dispatchable by threshold, spec-finalizer, task-lead, and the finalize gate
     assert "spiker" in wf.agents["threshold"].subagents
+    assert "spiker" in wf.agents["spec-finalizer"].subagents
     assert "spiker" in wf.agents["task-lead"].subagents
     assert "spiker" in wf.agents["finalize"].subagents
     # full default grant: write + exec + network, but no dispatch/rename caps
@@ -1282,3 +1283,38 @@ def test_bundled_agent_steps_resolve_to_their_declared_tier() -> None:
                 f"{name}/{step.name} omits tier: — shipped steps declare theirs "
                 "explicitly; if that is deliberately changing, update this test")
             assert step.tier == declared[step.name], f"{name}/{step.name}"
+
+
+_SPIKER_PARAGRAPH = (
+    "Dispatch a **`spiker`** when a claim can only be settled by running code rather "
+    "than reading it — runtime ordering, what a provider actually emits, whether a "
+    "seam carries the value you assume. It works in a disposable worktree and parks "
+    "its script and output under `{{ quest.home }}/artifacts/spike/`; cite that "
+    "evidence in the spec so the reviewer checks it instead of re-deriving it."
+)
+
+
+def test_spec_finalizer_spiker_paragraph_follows_the_delegate_include() -> None:
+    from imp.assets import bundled_workflow_dir
+    body = load_workflow(
+        bundled_workflow_dir("default")).agents["spec-finalizer"].prompt_template_source
+    include = '{% include "partials/delegate-exploration.md" %}'
+    assert _SPIKER_PARAGRAPH in body
+    assert body.index(include) < body.index(_SPIKER_PARAGRAPH)
+
+
+def test_spec_finalizer_prompt_renders_clean_in_any_lap_context(tmp_path: Path) -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.state import JsonlEventLog
+    body = load_workflow(
+        bundled_workflow_dir("default")).agents["spec-finalizer"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    for laps in (None, [{"lap": 1, "outcome": "reworked", "head": "aaa1111"}]):
+        out = render_prompt(body, build_context(
+            quest_title="t", event_log=log, quest_id="abc",
+            quest_home=".imp/quests/abc",
+            vars={"fast_path": False, "task_total": 0}, prior_laps=laps),
+            workflow_dir=bundled_workflow_dir("default"))
+        assert ".imp/quests/abc/artifacts/spike/" in out
+        assert "{{" not in out

@@ -12,6 +12,11 @@ from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
 from tests._event_fixtures import ev
 
+_MAX_LOOPS_COPY = (
+    "a step kept sending work back and hit its loop limit; the quest is "
+    "paused and resumable — resume to continue with a fresh loop budget"
+)
+
 
 class _FakeRendered:
     def __init__(self, texts): self.texts = texts
@@ -1488,7 +1493,7 @@ def test_non_interrupt_pause_reason_still_renders_line() -> None:
         _ev("2", "workflow_paused", reason="max_loops"),
     ])
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    assert "paused (max_loops)" in out
+    assert f"paused — {_MAX_LOOPS_COPY}" in out
 
 
 def test_intentional_pause_still_renders_complete_pause() -> None:
@@ -2133,9 +2138,10 @@ def test_route_label_header_suffix_renders_lifecycle_yellow() -> None:
 def test_pause_node_renders_lifecycle_yellow_with_glyph() -> None:
     node = nv.PauseNode(reason="max_loops")
     plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
-    assert plain == "paused (max_loops)"          # no glyph when color is off
+    assert plain == f"paused — {_MAX_LOOPS_COPY}"   # no glyph when color is off
+    assert "max_loops" not in plain                 # raw token never reaches the user
     colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
-    assert "⏸ paused (max_loops)" in colored
+    assert f"⏸ paused — {_MAX_LOOPS_COPY}" in colored
     assert pal._ANSI["yellow"] in colored
     assert pal._ANSI["dim"] not in colored     # was dim metadata; no longer
 
@@ -3011,3 +3017,18 @@ def test_header_line_drops_route_suffix_when_equal_to_label() -> None:
                          route_label=reason)
     assert rt.header_line(phased, depth=0, color=False) == \
         f"spec phase · {reason} · claude-opus"
+
+
+def test_other_pause_reasons_render_exactly_as_before() -> None:
+    def line(reason: str) -> str:
+        node = nv.PauseNode(reason=reason)
+        return "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+
+    assert line("reauth_needed") == (
+        "paused — authentication kept failing; the quest is paused and resumable; "
+        "re-authenticate to Claude (e.g. re-login), then resume")
+    assert line("sandbox_spawn_failed") == (
+        "paused — the OS sandbox could not start the step (a transient setup "
+        "failure, not a gate result); the quest is paused and resumable — resume "
+        "to retry")
+    assert line("script_blocked") == "paused (script_blocked)"

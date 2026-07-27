@@ -47,7 +47,7 @@ def test_plan_writer_declares_research_subagents() -> None:
 def test_spec_writer_declares_research_subagents() -> None:
     a = _wf().agents["spec-finalizer"]
     assert "sub_agent" in a.tools
-    assert set(a.subagents) == {"explorer", "researcher"}
+    assert set(a.subagents) == {"explorer", "researcher", "spiker"}
 
 
 def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
@@ -92,6 +92,15 @@ def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
     assert "read inline only what you will edit" in text.lower()
     assert 'sub_agent(subagent_name="explorer"' in text
     assert "researcher" in text
+
+
+def test_delegate_exploration_partial_names_no_spiker() -> None:
+    from pathlib import Path
+    shared = Path("src/imp/assets/partials/delegate-exploration.md").read_text()
+    assert "spiker" not in shared
+    # plan-writer includes the same partial and must stay spiker-less.
+    body = _wf().agents["plan-writer"].prompt_template_source
+    assert "spiker" not in body
 
 
 def test_brainstorm_dialogue_includes_partial_and_drops_inline_duplication() -> None:

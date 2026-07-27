@@ -675,3 +675,40 @@ def test_pause_reason_burst_final_error_cleared_by_step_started_renders_bare() -
         ev("6", "workflow_paused", reason="retry_ceiling"),
     ])
     assert reason == _PauseInfo("retry_ceiling", None)
+
+
+def test_pause_lines_max_loops_reads_as_loop_limit() -> None:
+    from imp.cli.main import _PauseInfo
+    lines = _pause_lines("dufa26", "dufa26", title="Add version flag",
+                         info=_PauseInfo("max_loops", None), color=False)
+    assert lines == [
+        "paused · loop limit",
+        "dufa26 · Add version flag",
+        "resume: imp resume dufa26",
+    ]
+    assert "max_loops" not in "\n".join(lines)
+
+
+def test_pause_lines_max_loops_head_is_gold_paused_dim_qualifier() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.main import _PauseInfo
+    lines = _pause_lines("dufa26", "dufa26", title="T",
+                         info=_PauseInfo("max_loops", None), color=True)
+    assert lines[0] == (pal.ansi("paused", "wordmark")
+                        + pal.ansi(" · loop limit", "dim"))
+    assert lines[1] == f'{pal.ansi("dufa26", "wordmark")} · T'
+    assert lines[2] == "resume: imp resume dufa26"
+
+
+def test_leave_display_keeps_exactly_its_four_triggers() -> None:
+    from imp.cli.main import _LEAVE_DISPLAY, _PauseInfo
+    assert _LEAVE_DISPLAY == {
+        "ctrl-d": "Ctrl-D",
+        "sigterm": "SIGTERM",
+        "sighup": "SIGHUP",
+        "sigquit": "SIGQUIT",
+    }
+    for trigger, display in _LEAVE_DISPLAY.items():
+        lines = _pause_lines("dufa26", "dufa26", title="T",
+                             info=_PauseInfo(trigger, None), color=False)
+        assert lines[0] == f"paused · {display}"

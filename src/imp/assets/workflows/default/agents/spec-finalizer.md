@@ -2,7 +2,7 @@
 name: spec-finalizer
 label: spec · finalizing
 description: Adopt the threshold draft spec — already grounded against the current base at go-live — commit the final spec, and service the review loop.
-subagents: [explorer, researcher]
+subagents: [explorer, researcher, spiker]
 output:
   status: {type: enum, values: [Success, Error]}
   phase: {type: enum, values: [written]}
@@ -31,6 +31,8 @@ at the threshold.
 {% include "partials/spec-design-principles.md" %}
 
 {% include "partials/delegate-exploration.md" %}
+
+Dispatch a **`spiker`** when a claim can only be settled by running code rather than reading it — runtime ordering, what a provider actually emits, whether a seam carries the value you assume. It works in a disposable worktree and parks its script and output under `{{ quest.home }}/artifacts/spike/`; cite that evidence in the spec so the reviewer checks it instead of re-deriving it.
 
 ## Threshold handoff (phase 1 adopt)
 

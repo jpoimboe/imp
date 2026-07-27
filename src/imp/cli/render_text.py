@@ -41,6 +41,9 @@ _PAUSE_REASON_COPY: dict[str, str] = {
     "sandbox_spawn_failed":
         "the OS sandbox could not start the step (a transient setup failure, "
         "not a gate result); the quest is paused and resumable — resume to retry",
+    "max_loops":
+        "a step kept sending work back and hit its loop limit; the quest is "
+        "paused and resumable — resume to continue with a fresh loop budget",
 }
 
 
