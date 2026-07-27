@@ -464,20 +464,21 @@ def _imp_in_exclude(control_root: Path) -> bool:
     return ex.exists() and ".imp/" in {ln.strip() for ln in ex.read_text().splitlines()}
 
 
-def _imp_in_committed_gitignore(control_root: Path) -> bool:
-    show = _git(control_root, "cat-file", "-p", "HEAD:.gitignore")
+def _imp_in_committed_gitignore(control_root: Path, ref: str) -> bool:
+    show = _git(control_root, "cat-file", "-p", f"{ref}:.gitignore")
     return show.returncode == 0 and ".imp/" in {
         ln.strip() for ln in show.stdout.splitlines()
     }
 
 
-def _imp_ignored_durably(control_root: Path) -> bool:
+def _imp_ignored_durably(control_root: Path, base: str) -> bool:
     """True only when the ignore reaches a freshly checked-out worktree: it is
-    either committed in .gitignore or present in the shared info/exclude (spec
-    §8). A working-tree-only (uncommitted) .gitignore rule does NOT count — a new
-    worktree checks out base HEAD's committed .gitignore, not the control root's
-    working copy."""
-    return _imp_in_exclude(control_root) or _imp_in_committed_gitignore(control_root)
+    either committed in base's .gitignore or present in the shared info/exclude
+    (spec §8). A working-tree-only (uncommitted) .gitignore rule does NOT count —
+    a new worktree checks out base's committed .gitignore, not the control
+    root's working copy."""
+    return _imp_in_exclude(control_root) or _imp_in_committed_gitignore(
+        control_root, base)
 
 
 def _write_exclude(control_root: Path) -> None:
@@ -489,14 +490,14 @@ def _write_exclude(control_root: Path) -> None:
         ex.write_text(text + sep + ".imp/\n")
 
 
-def ensure_imp_ignored(control_root: Path) -> None:
+def ensure_imp_ignored(control_root: Path, base: str) -> None:
     """Guarantee .imp/ is ignored in a way fresh worktrees inherit (spec §8).
     Correctness depends on it: nested worktrees must not show as untracked, and
     the inner .imp/quests/ state must never be captured by `git add -A`."""
-    if _imp_ignored_durably(control_root):
+    if _imp_ignored_durably(control_root, base):
         return
     with RepoGitLock(control_root).acquire():
-        if _imp_ignored_durably(control_root):  # someone else repaired it
+        if _imp_ignored_durably(control_root, base):  # someone else repaired it
             return
         # Preferred: commit ONLY .gitignore so the rule travels into every
         # worktree checkout and is shared with collaborators.
@@ -507,11 +508,11 @@ def ensure_imp_ignored(control_root: Path) -> None:
             gi.write_text(text + sep + "# imp internal state\n.imp/\n")
         _git(control_root, "add", "--", ".gitignore")
         _git(control_root, "commit", "-m", "chore: gitignore .imp/", "--", ".gitignore")
-        if _imp_in_committed_gitignore(control_root):
+        if _imp_in_committed_gitignore(control_root, base):
             return
         # Fallback: shared info/exclude (no commit, no ref move).
         _write_exclude(control_root)
-        if not _imp_ignored_durably(control_root):
+        if not _imp_ignored_durably(control_root, base):
             raise PreconditionError(
                 "could not ensure .imp/ is git-ignored; add `.imp/` to .gitignore "
                 "and commit it, then re-run"

@@ -1169,12 +1169,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     control = _control_root()
     worktree.check_preconditions(control)
-    worktree.ensure_imp_ignored(control)
     try:
         base = _resolve_new_base(control, getattr(args, "base", None))
     except BaseResolutionError as e:
         _emit_cli_error(f"{e}")
         return 2
+    worktree.ensure_imp_ignored(control, base)
 
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None and not validate_workflow_name(wf_arg):

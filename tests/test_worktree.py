@@ -257,7 +257,7 @@ def _make_worktree_and_check(root, slug="probe") -> bool:
 def test_ensure_imp_ignored_committed_rule_noop(tmp_path: Path) -> None:
     _init_repo(tmp_path)  # .gitignore with .imp/ is COMMITTED -> durable
     before = (tmp_path / ".gitignore").read_text()
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     assert (tmp_path / ".gitignore").read_text() == before          # no new commit
     assert _make_worktree_and_check(tmp_path)
 
@@ -272,7 +272,7 @@ def test_ensure_imp_ignored_uncommitted_rule_is_made_durable(tmp_path: Path) -> 
     _git(tmp_path, "commit", "-qm", "seed")
     (tmp_path / ".gitignore").write_text(".imp/\n")  # uncommitted
 
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     # Now durable AND the worktree actually ignores .imp/ (the real invariant).
     assert _make_worktree_and_check(tmp_path)
 
@@ -286,8 +286,28 @@ def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> No
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
 
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     assert _make_worktree_and_check(tmp_path)
+
+
+def test_ensure_imp_ignored_reads_base_gitignore_not_head(tmp_path: Path) -> None:
+    # The rule is committed on the base (`main`) but absent from the current
+    # checkout's tree: the quest forks from base, so nothing needs repairing.
+    _init_repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "side")
+    (tmp_path / ".gitignore").unlink()
+    _git(tmp_path, "commit", "-aqm", "drop gitignore on side")
+    side_before = _git(tmp_path, "rev-parse", "side").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    exclude_before = exclude.read_text() if exclude.exists() else None
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "side").stdout.strip() == side_before
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == main_before
+    assert (exclude.read_text() if exclude.exists() else None) == exclude_before
+    assert not (tmp_path / ".gitignore").exists()  # working tree untouched too
 
 
 def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
@@ -374,7 +394,7 @@ def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path)
     hook.write_text("#!/bin/sh\nexit 1\n")
     hook.chmod(0o755)
 
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
     assert ".imp/" in exclude.read_text()
     assert _make_worktree_and_check(tmp_path)
