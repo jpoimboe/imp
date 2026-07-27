@@ -103,6 +103,8 @@ anyway.
   same `{id, pid, command, status, out_path, err_path}` descriptor plus a
   `note`, and the task is thereafter read via `bash_output(id)` and stopped via
   `bash_kill(id)`.
+- A denied write (a sandbox-masked path) surfaces the raw OS error plus a
+  `sandbox_note` naming the boundary — foreground only; retrying never helps.
 - Background (`run_in_background=true`): returns `{id, pid, command, status,
   out_path, err_path}` immediately while the process keeps running.
   `out_path`/`err_path` are relative to the project root (bash's default cwd)
