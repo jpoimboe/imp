@@ -865,6 +865,43 @@ def test_control_root_shared_ref_mutation_blocked() -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
+def test_denied_ref_write_carries_sandbox_note() -> None:
+    """A real masked-ref refusal explains itself: nonzero exit, the raw git error
+    on stderr, and the sandbox_note beside it.
+
+    stderr is deliberately NOT redirected into stdout here (unlike the sibling
+    ref-mutation tests): the note is derived from stderr, so a `2>&1` would test
+    nothing. git's message under the mask is `cannot lock ref … Read-only file
+    system`, which is exactly what the marker set keys on.
+
+    Falsifiability: with the masks removed the write would succeed (rc 0) and the
+    note would be absent; with the note keyed on the wrong stream or on
+    proc.returncode the field would be missing and the membership assertion would
+    fail.
+    """
+    control, wt_path = _refprot_repo("imp-test-refnote-")
+    try:
+        head = _git(control, "rev-parse", "HEAD").stdout.strip()
+        ctx, _pol = _refprot_ctx(control, wt_path)
+
+        r = _bash(ctx, f"git -C {control} update-ref refs/heads/probe {head}")
+
+        assert r["returncode"] != 0, (
+            f"masked ref write succeeded — refs/heads mask NOT enforced: {r}")
+        assert "sandbox_note" in r, (
+            f"denied ref write carried no sandbox_note: {r}")
+        assert str(r["sandbox_note"]).startswith(
+            "a write was refused by imp's sandbox"), r
+        assert "Read-only file system" in str(r["stderr"]), (
+            f"raw OS error was swallowed instead of supplemented: {r}")
+        assert not (control / ".git" / "refs" / "heads" / "probe").exists(), (
+            "the probe ref was actually created on the host")
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
+
+
 def test_change_and_spike_branch_writes_succeed() -> None:
     """The finalize-flow guard: commits + autosquash rebase on the change branch
     imp/esc1 succeed, and a commit on a spike branch imp/spike-esc1-1 succeeds —
