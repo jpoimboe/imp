@@ -1,6 +1,9 @@
 # tests/test_worktree.py
 import inspect
+import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -671,4 +674,43 @@ def test_checked_out_branch_detached_is_none(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     _git(tmp_path, "checkout", "--detach", "-q")
     assert wt.checked_out_branch(tmp_path) is None
+
+
+def test_ensure_imp_ignored_mid_rebase_leaves_user_history_intact(
+        tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    (tmp_path / "a.txt").write_text("a\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit A")
+    (tmp_path / "b.txt").write_text("b\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit B")
+
+    # Stop `git rebase -i` at an `edit` step without an interactive editor.
+    edit_first = (
+        f"{shlex.quote(sys.executable)} -c "
+        "\"import pathlib, re, sys; p = pathlib.Path(sys.argv[1]); "
+        "p.write_text(re.sub(r'^(?:pick|p)\\b', 'edit', p.read_text(), count=1, flags=re.M))\""
+    )
+    env = {**os.environ, "GIT_SEQUENCE_EDITOR": edit_first, "GIT_EDITOR": "true"}
+    started = subprocess.run(
+        ["git", "rebase", "-i", "HEAD~2"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert started.returncode == 0, started.stderr
+    assert (tmp_path / ".git" / "rebase-merge").is_dir()
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert (tmp_path / ".git" / "rebase-merge").is_dir()  # rebase state intact
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" in exclude.read_text()
+
+    resumed = subprocess.run(
+        ["git", "rebase", "--continue"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert resumed.returncode == 0, resumed.stderr
+    assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
+        "user commit B", "user commit A", "seed"]
 
