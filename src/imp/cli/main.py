@@ -302,6 +302,8 @@ _LEAVE_DISPLAY: dict[str, str] = {
 }
 # The single keystroke leave; signals get no caret shadow (nothing was typed).
 _LEAVE_KEYSTROKES: frozenset[str] = frozenset({"ctrl-d"})
+# Adds the machine-triggered loop ceiling; _LEAVE_DISPLAY stays leave-only for its second consumer.
+_PAUSE_QUALIFIER: dict[str, str] = {**_LEAVE_DISPLAY, "max_loops": "loop limit"}
 
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
@@ -430,8 +432,8 @@ def _pause_lines(
             head = f"{label}: {first}" if first else label
             body = rest
         return _error_block(head, body, name, title, color=color, intent=intent)
-    if info is not None and info.base in _LEAVE_DISPLAY:
-        display = _LEAVE_DISPLAY[info.base]
+    if info is not None and info.base in _PAUSE_QUALIFIER:
+        display = _PAUSE_QUALIFIER[info.base]
         head_line = (ansi("paused", "wordmark", enabled=color)
                      + ansi(f" · {display}", "dim", enabled=color))
         return [
