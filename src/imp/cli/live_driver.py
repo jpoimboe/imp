@@ -602,10 +602,8 @@ class LiveDriver:
             # bursts reach the live walk, so the owning builder is always the main
             # one — no reliance on the A2 drop.
             return node is not self._builder.current_burst
-        # A held AgentTextNode is settled narration: it emits immediately and is
-        # never withheld behind an in-flight tool call. `held` still drives
-        # `imp log`'s static fold rendering; only the live cursor ignores it.
-        return True
+        # Tagged provider-error prose is withheld until turn resolves; `held` drives `imp log` only.
+        return not (isinstance(node, nv.AgentTextNode) and node.error_pending)
 
     def _gutters(self) -> tuple[int, ...]:
         """Subagent boundary columns for the shared render helpers.
