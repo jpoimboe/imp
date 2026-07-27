@@ -985,6 +985,72 @@ def test_imp_own_git_writes_unaffected_by_ref_masks() -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
+def test_vanished_ref_reexpose_dir_recreated_at_spawn() -> None:
+    """.git/refs/heads/imp deleted between policy bake and spawn must not wedge the
+    sandbox: prepare_spawn_policy re-creates it before bwrap binds it, and the
+    command runs normally.
+
+    Falsifiability: without the spawn-time mkdir, bwrap dies in setup on the missing
+    bind source for all 5 attempts, so the tool returns status=sandbox_setup_failed
+    with no REFDIR_OK in stdout and the directory is still absent on the host.
+    """
+    control, wt_path = _refprot_repo("imp-test-refdir-")
+    try:
+        ctx, pol = _refprot_ctx(control, wt_path)
+        imp_refs = control / ".git" / "refs" / "heads" / "imp"
+        assert str(imp_refs) in pol.git_ref_reexpose
+        shutil.rmtree(imp_refs)
+
+        r = _bash(ctx, "echo REFDIR_OK")
+
+        assert r.get("status") != "sandbox_setup_failed", r
+        assert "REFDIR_OK" in r["stdout"], r
+        assert imp_refs.is_dir(), "the re-exposed ref dir was not re-created at spawn"
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
+
+
+def test_pack_refs_pruning_ref_dir_leaves_spawn_and_quest_commit_working() -> None:
+    """The production trigger at the ref level: `git pack-refs --all` packs
+    refs/heads/imp/* into packed-refs and prunes the emptied refs/heads/imp
+    directory. The next spawn must still enter the sandbox AND still write the quest
+    branch's loose ref — the reason the directory is re-created rather than dropped
+    from the bind plan.
+
+    Falsifiability: without the spawn-time mkdir the tool returns
+    status=sandbox_setup_failed and imp/esc1 never advances; were the bind dropped
+    instead of re-created, refs/heads would stay read-only and the commit would fail
+    with no PACKED_OK.
+    """
+    control, wt_path = _refprot_repo("imp-test-packrefs-")
+    try:
+        ctx, _pol = _refprot_ctx(control, wt_path)
+        imp_refs = control / ".git" / "refs" / "heads" / "imp"
+        before = _git(control, "rev-parse", "refs/heads/imp/esc1").stdout.strip()
+        assert before, "quest branch ref missing — the trigger would be untested"
+
+        _git(control, "pack-refs", "--all")
+        assert not imp_refs.exists(), "pack-refs did not prune the empty ref dir"
+
+        r = _bash(
+            ctx,
+            "echo p > p.txt && git add p.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm packed && echo PACKED_OK")
+
+        assert r.get("status") != "sandbox_setup_failed", r
+        assert "PACKED_OK" in r["stdout"], r
+        after = _git(control, "rev-parse", "refs/heads/imp/esc1").stdout.strip()
+        assert after != before, "quest branch did not advance after the packed spawn"
+        assert (imp_refs / "esc1").is_file(), (
+            "loose quest ref not written — refs/heads/imp is not writable")
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # Overlay-home behavioral tests (AC 1-5)
 # ---------------------------------------------------------------------------

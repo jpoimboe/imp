@@ -16,7 +16,7 @@ from imp.engine.sandbox import (
     SandboxUnavailable,
     build_sandbox_argv,
     make_home_layer,
-    prune_missing_masks,
+    prepare_spawn_policy,
     resolve_policy,
     sandbox_available,
 )
@@ -84,7 +84,7 @@ def test_git_escape_vectors_are_remasked_ro():
     assert "--ro-bind /ctl/.git/config /ctl/.git/config" in argv
 
 
-def test_prune_missing_masks_drops_vanished_sibling_paths(tmp_path):
+def test_prepare_spawn_policy_drops_vanished_sibling_paths(tmp_path):
     # A long-running quest outlives a sibling: existence-gated paths captured at run
     # start (steps/ in secret_dirs, events.jsonl in secret_files, a stale path in
     # git_ro_remask) can vanish mid-run. bwrap would fail creating each over the ro
@@ -104,7 +104,7 @@ def test_prune_missing_masks_drops_vanished_sibling_paths(tmp_path):
         secret_files=(str(live_events), str(gone_events)),
         git_ro_remask=(str(live_cfg), str(gone_cfg)),
     )
-    pruned = prune_missing_masks(p)
+    pruned = prepare_spawn_policy(p)
 
     assert pruned.secret_dirs == (str(live_steps),)
     assert pruned.secret_files == (str(live_events),)
@@ -118,9 +118,30 @@ def test_prune_missing_masks_drops_vanished_sibling_paths(tmp_path):
     assert str(live_events) in argv
 
 
-def test_prune_missing_masks_noop_on_inactive_policy():
-    p = _policy(active=False)
-    assert prune_missing_masks(p) is p
+def test_prepare_spawn_policy_recreates_vanished_ref_reexpose_dir(tmp_path):
+    # git prunes a ref directory once its last loose ref is packed away, so
+    # .git/refs/heads/imp can vanish AFTER the policy froze it as a bind source —
+    # bwrap then dies in setup on every later spawn. The dir is imp's own, so the
+    # spawn-time fix is to re-create it, not to drop the bind (dropping it would
+    # leave refs/heads read-only and break commits on the quest branch).
+    imp_refs = tmp_path / ".git" / "refs" / "heads" / "imp"
+    imp_refs.mkdir(parents=True)      # created at policy-bake time
+    imp_refs.rmdir()                  # ...then pruned mid-run
+    p = _policy(git_ref_reexpose=(str(imp_refs),))
+
+    prepared = prepare_spawn_policy(p)
+
+    assert imp_refs.is_dir()
+    assert prepared.git_ref_reexpose == (str(imp_refs),)
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=prepared, engine_env={}))
+    assert f"--bind {imp_refs} {imp_refs}" in argv
+
+
+def test_prepare_spawn_policy_noop_on_inactive_policy(tmp_path):
+    never = tmp_path / ".git" / "refs" / "heads" / "imp"
+    p = _policy(active=False, git_ref_reexpose=(str(never),))
+    assert prepare_spawn_policy(p) is p
+    assert not never.exists()
 
 
 def test_secret_masks_emitted_after_every_bind_even_overlapping_extra_writable():
@@ -320,11 +341,11 @@ def test_resolve_policy_unmaterialized_draft_masks_worktrees_without_self(tmp_pa
     assert pol.allows_read(git / "worktrees" / "abc" / "HEAD") is False
 
 
-def test_prune_missing_masks_keeps_worktrees_mask_even_if_absent(tmp_path):
-    # The mask + self re-expose are retained unconditionally by prune_missing_masks
-    # (like control_imp / git_ref_reexpose), NOT existence-gated like git_ro_remask,
-    # so the mask cannot silently drop mid-run. Contrast a vanished git_ro_remask
-    # entry, which IS dropped.
+def test_prepare_spawn_policy_keeps_worktrees_mask_even_if_absent(tmp_path):
+    # The mask + self re-expose are retained unconditionally by prepare_spawn_policy
+    # (like control_imp), NOT existence-gated like git_ro_remask, so the mask cannot
+    # silently drop mid-run. Contrast a vanished git_ro_remask entry, which IS
+    # dropped — and git_ref_reexpose, which is re-created instead.
     gone = tmp_path / "nope" / ".git" / "worktrees"
     gone_ro = tmp_path / "gone.worktree"
     p = _policy(
@@ -332,7 +353,7 @@ def test_prune_missing_masks_keeps_worktrees_mask_even_if_absent(tmp_path):
         git_worktree_self=str(gone / "self"),
         git_ro_remask=(str(gone_ro),),
     )
-    pruned = prune_missing_masks(p)
+    pruned = prepare_spawn_policy(p)
     assert pruned.git_ro_remask == ()
     assert pruned.git_worktrees_mask == str(gone)
     assert pruned.git_worktree_self == str(gone / "self")

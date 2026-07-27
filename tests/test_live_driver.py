@@ -2202,13 +2202,17 @@ def test_compose_position_bar_forwards_checkpoint_threshold() -> None:
 def test_completed_node_suppressed_in_live_leaf() -> None:
     drv, out = _driver()
     drv._emit_leaf(nv.CompletedNode(quest_id="abc123"), 0)
-    assert out.getvalue() == ""  # main.py _emit_completed owns the live line
+    # main.py _emit_completed owns the friendly line; only its blank-above is emitted here
+    assert out.getvalue() == "\n"
+    assert "abc123" not in out.getvalue()
 
 
 def test_merged_node_still_suppressed_in_live_leaf() -> None:
     drv, out = _driver()
     drv._emit_leaf(nv.MergedNode(quest_id="abc123", base="master"), 0)
-    assert out.getvalue() == ""
+    assert out.getvalue() == "\n"
+    assert "abc123" not in out.getvalue()
+    assert "master" not in out.getvalue()
 
 
 def test_show_label_false_script_silent_live_and_matches_log() -> None:

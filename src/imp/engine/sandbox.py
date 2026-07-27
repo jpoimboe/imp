@@ -301,24 +301,38 @@ def build_sandbox_argv(
     return argv
 
 
-def prune_missing_masks(policy: SandboxPolicy) -> SandboxPolicy:
-    """Return a copy of `policy` with any mask/ro-bind path that has since vanished
-    dropped, existence-gating the frozen spawn argv. After the fail-closed .imp
-    allowlist, secret_dirs/secret_files name only self-owned never-vanishing paths —
-    the current quest's own steps/ + events.jsonl, the home secret dirs/files, and
-    /run/user/$UID — so the prune over those two sets is effectively a no-op. Its
-    remaining job is git_ro_remask: its existence-gated refs/index masks
-    (refs/heads, refs/stash, index) can vanish mid-run — e.g. a branch or the
-    stash ref is deleted after policy creation;
-    bwrap must still bind each ro path over the read-only floor, so a spawn carrying
-    a vanished path dies in sandbox SETUP ("Read-only file system") before the
-    command runs. A mask over a gone path protects nothing, so existence-gating at
-    spawn is always safe. Own binds (worktree, quest_home, refs) and stable config
-    (caches, extra_*) never churn and are left untouched. Scoped to the spawn argv
-    only; the in-process allows_read/allows_write mirrors keep the unpruned policy
-    (a gone path is denied either way)."""
+def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
+    """Ready a frozen policy for THIS spawn: re-create imp's own re-exposed ref
+    directories, and drop any mask/ro-bind path that has since vanished.
+
+    git_ref_reexpose (.git/refs/heads/imp) is created once, at policy-bake time in
+    resolve_policy — but git prunes a ref directory the moment its last loose ref
+    goes, so a mid-run `git pack-refs` (auto-gc) packs every refs/heads/imp/* ref
+    into packed-refs and takes the now-empty directory with it. bwrap must bind
+    every path in the plan, so from then on EVERY spawn dies in sandbox setup for
+    the life of the policy — permanent, not transient, so the retry loop cannot
+    clear it. It is re-created here rather than pruned like the mask categories
+    below: pruning would leave refs/heads read-only, so a git commit on the quest
+    branch inside the sandbox could not write its loose ref. The directory is
+    imp's own and always safe to create.
+
+    After the fail-closed .imp allowlist, secret_dirs/secret_files name only
+    self-owned never-vanishing paths — the current quest's own steps/ +
+    events.jsonl, the home secret dirs/files, and /run/user/$UID — so the prune
+    over those two sets is effectively a no-op. Its remaining job is
+    git_ro_remask: its existence-gated refs/index masks (refs/heads, refs/stash,
+    index) can vanish mid-run — e.g. a branch or the stash ref is deleted after
+    policy creation; bwrap must still bind each ro path over the read-only floor,
+    so a spawn carrying a vanished path dies in sandbox SETUP ("Read-only file
+    system") before the command runs. A mask over a gone path protects nothing, so
+    existence-gating at spawn is always safe. Own binds (worktree, quest_home) and
+    stable config (caches, extra_*) never churn and are left untouched. Scoped to
+    the spawn argv only; the in-process allows_read/allows_write mirrors keep the
+    unpruned policy (a gone path is denied either way)."""
     if not policy.active:
         return policy
+    for ref_dir in policy.git_ref_reexpose:
+        Path(ref_dir).mkdir(parents=True, exist_ok=True)
     return replace(
         policy,
         git_ro_remask=_existing(list(policy.git_ro_remask)),

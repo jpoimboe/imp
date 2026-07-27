@@ -31,7 +31,7 @@ from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.sandbox import (
     SandboxConfig,
     build_sandbox_argv,
-    prune_missing_masks,
+    prepare_spawn_policy,
     resolve_policy,
     sandbox_available,
 )
@@ -211,7 +211,7 @@ async def _serve_and_run(
     # (e.g. /run/user/$UID when there is no live user session) doesn't die in sandbox
     # setup. The masks under test (events.jsonl, archive blobs, index.db) all exist
     # and survive the prune, so the asserted behavior is unchanged.
-    policy = prune_missing_masks(policy)
+    policy = prepare_spawn_policy(policy)
     argv = build_sandbox_argv(
         command, cwd=str(control), policy=policy, engine_env=engine_env)
 

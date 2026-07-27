@@ -621,7 +621,10 @@ class LiveDriver:
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:
         if isinstance(node, (nv.MergedNode, nv.CompletedNode)):
-            # suppressed in live path — main.py _emit_completed owns the friendly line
+            # Only the node's spaces_before blank is ours (main.py owns the line): hide()
+            # climbs onto the footer's blank so this replaces it; a set _prev_prose doubles it.
+            self._prev_prose = False
+            self._print_lines([""])
             return
         if rt.spaces_before(node):
             # A leaf that wants a blank line above it (an error) gets one even when

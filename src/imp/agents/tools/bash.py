@@ -36,7 +36,7 @@ from imp.engine.sandbox import (
     SANDBOX_SPAWN_FAILED_MESSAGE,
     SANDBOX_SPAWN_MAX_ATTEMPTS,
     build_sandbox_argv,
-    prune_missing_masks,
+    prepare_spawn_policy,
     sandbox_spawn_backoff_delay,
     sandbox_spawn_failed,
     strip_sandbox_marker,
@@ -162,7 +162,7 @@ async def bash(
         env["PATH"] = f"{imp_shim_dir(qdir)}{os.pathsep}{env.get('PATH', '')}"
     policy = ctx.sandbox_policy
     argv = (build_sandbox_argv(command, cwd=cwd_path,
-                               policy=prune_missing_masks(policy), engine_env=eng)
+                               policy=prepare_spawn_policy(policy), engine_env=eng)
             if policy is not None else ["sh", "-c", command])
     if run_in_background:
         if not ctx.background_enabled:
