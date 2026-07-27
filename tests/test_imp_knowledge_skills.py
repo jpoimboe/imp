@@ -250,7 +250,7 @@ def test_memory_teaches_the_authoring_affordance() -> None:
 def test_knowledge_list_bullet_names_done_completions() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
     # imp list now surfaces done (no-merge) completions alongside merged ones
-    assert "finished quests (merged or done)" in body
+    assert "completed quests (merged or done)" in body
     # the stale merged-only framing of the imp list bullet is gone
     assert "the backlog, and merged\n  quests;" not in body
 

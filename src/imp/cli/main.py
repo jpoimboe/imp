@@ -3361,7 +3361,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                             live_ids={r[0] for r in status_rows})
     if not inflight and not backlog_rows and not history:
         return [_NO_QUESTS_MESSAGE]
-    label = "history:" if show_all else "finished:"
+    label = "history:" if show_all else "completed:"
     intents = {d.quest_id: d.intent_title for d in scanned}
     for r in history:
         if not r[4].strip() and r[0] not in intents:
