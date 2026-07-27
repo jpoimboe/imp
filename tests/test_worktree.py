@@ -1,14 +1,12 @@
 # tests/test_worktree.py
 import inspect
-import os
-import shlex
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from imp.engine import worktree as wt
+from tests.conftest import _stop_at_rebase_edit
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -36,22 +34,6 @@ def _init_repo_no_ignore(root: Path) -> None:
     (root / "README.md").write_text("x")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
-
-
-def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
-    """Park `root` mid `rebase -i HEAD~2` at an edit step; returns env for `--continue`."""
-    edit_first = (
-        f"{shlex.quote(sys.executable)} -c "
-        "\"import pathlib, re, sys; p = pathlib.Path(sys.argv[1]); "
-        "p.write_text(re.sub(r'^(?:pick|p)\\b', 'edit', p.read_text(), count=1, flags=re.M))\""
-    )
-    env = {**os.environ, "GIT_SEQUENCE_EDITOR": edit_first, "GIT_EDITOR": "true"}
-    started = subprocess.run(
-        ["git", "rebase", "-i", "HEAD~2"], cwd=root,
-        env=env, capture_output=True, text=True)
-    assert started.returncode == 0, started.stderr
-    assert (root / ".git" / "rebase-merge").is_dir()
-    return env
 
 
 def test_find_control_root_from_subdir(tmp_path: Path) -> None:

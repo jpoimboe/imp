@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import multiprocessing as mp
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -341,6 +343,22 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
     )
+
+
+def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
+    """Park `root` mid `rebase -i HEAD~2` at an edit step; returns env for `--continue`."""
+    edit_first = (
+        f"{shlex.quote(sys.executable)} -c "
+        "\"import pathlib, re, sys; p = pathlib.Path(sys.argv[1]); "
+        "p.write_text(re.sub(r'^(?:pick|p)\\b', 'edit', p.read_text(), count=1, flags=re.M))\""
+    )
+    env = {**os.environ, "GIT_SEQUENCE_EDITOR": edit_first, "GIT_EDITOR": "true"}
+    started = subprocess.run(
+        ["git", "rebase", "-i", "HEAD~2"], cwd=root,
+        env=env, capture_output=True, text=True)
+    assert started.returncode == 0, started.stderr
+    assert (root / ".git" / "rebase-merge").is_dir()
+    return env
 
 
 def _init_repo(root: Path) -> None:
