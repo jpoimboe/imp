@@ -18,6 +18,8 @@ directly, and complete the run once they are satisfied.
 
 {% include "partials/action-care.md" %}
 
+{% include "partials/sandbox-limits.md" %}
+
 {% if run.autonomous %}
 **Autonomous run — no human at the gate.** The commits are already reviewer-approved and
 the minimal workflow has nothing deferred to seed, so there is nothing to review
