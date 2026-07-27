@@ -6,7 +6,8 @@ import pytest
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.config import parse_config_layer
 from imp.providers.effective import global_config_path, load_effective_config
-from tests._repo_config import repo_config_file
+
+_REPO_CONFIG = Path(__file__).resolve().parents[1] / "imp" / "config.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -123,15 +124,14 @@ def test_pythonpath_defaults_to_empty_tuple_when_unset(
 
 def test_repo_config_uses_tiered_test_cmds() -> None:
     # imp's own shipped config layer, read directly: the effective-config stack
-    # is not what this asserts, and imp's file keeps its old name until the
-    # migration's staged rename is committed.
-    layer, _src = parse_config_layer(repo_config_file())
+    # is not what this asserts.
+    layer, _src = parse_config_layer(_REPO_CONFIG)
     assert layer["test_cmd_fast"] == "make check"
     assert layer["test_cmd_slow"] == "make check && make test-live"
     assert layer["test_cmd_fast_timeout"] == 240
     assert layer["test_cmd_slow_timeout"] == 600
     # Guard against a regression to the removed verify_command/verify_timeout surface.
-    raw = repo_config_file().read_text()
+    raw = _REPO_CONFIG.read_text()
     assert "verify_command" not in raw and "verify_timeout" not in raw
 
 
@@ -139,5 +139,5 @@ def test_repo_config_declares_pythonpath_src() -> None:
     # imp is the first consumer of the general knob: src-layout, one `src` root
     # covers both src/imp and src/impty. Must be declared since the env-level
     # auto-shadow branch was deleted.
-    layer, _src = parse_config_layer(repo_config_file())
+    layer, _src = parse_config_layer(_REPO_CONFIG)
     assert layer["pythonpath"] == ["src"]
