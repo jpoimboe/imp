@@ -1,5 +1,5 @@
 """The threshold and finalize personas name only the imp-knowledge hub and
-include the shared grounding, memory-authoring, and sandbox-debugging partials."""
+include the shared grounding, memory-authoring, and sandbox-limits partials."""
 
 from __future__ import annotations
 
@@ -106,15 +106,15 @@ def test_threshold_has_lazy_orientation_cue() -> None:
     assert "speak plainly" in section
 
 
-def test_threshold_includes_sandbox_debugging_partial() -> None:
-    assert '{% include "partials/sandbox-debugging.md" %}' in FRONT_DOOR.read_text()
+def test_threshold_includes_sandbox_limits_partial() -> None:
+    assert '{% include "partials/sandbox-limits.md" %}' in FRONT_DOOR.read_text()
 
 
-def test_finalize_includes_sandbox_debugging_partial() -> None:
-    assert '{% include "partials/sandbox-debugging.md" %}' in _finalize()
+def test_finalize_includes_sandbox_limits_partial() -> None:
+    assert '{% include "partials/sandbox-limits.md" %}' in _finalize()
 
 
-def test_threshold_and_finalize_render_sandbox_debugging_partial(tmp_path) -> None:
+def test_threshold_and_finalize_render_sandbox_limits_partial(tmp_path) -> None:
     # A within-line sentinel from the partial: proves the include actually
     # resolves into each rendered prompt, not merely that the directive text is
     # present in the source.
@@ -147,8 +147,8 @@ def test_threshold_concierge_routes_to_corpus_not_removed_spokes() -> None:
     assert "the skills it maps to" not in concierge
 
 
-def test_sandbox_debugging_partial_documents_both_hatches() -> None:
-    text = (PARTIALS / "sandbox-debugging.md").read_text()
+def test_sandbox_limits_partial_documents_both_hatches() -> None:
+    text = (PARTIALS / "sandbox-limits.md").read_text()
     # Self-contained section header.
     assert "## Debugging live processes" in text
     # (a) the /sandbox off escape hatch and its human-only property.

@@ -152,7 +152,7 @@ def test_front_door_carries_the_workflow_agnostic_body() -> None:
     fd = FRONT_DOOR.read_text()
     for inc in ("coding-stance", "action-care", "imp-grounding",
                 "spec-design-principles", "brainstorm-dialogue",
-                "memory-authoring", "sandbox-debugging"):
+                "memory-authoring", "sandbox-limits"):
         assert f'{{% include "partials/{inc}.md" %}}' in fd, inc
     for heading in ("## Orienting before you offer", "## Acting on imp",
                     "## Speak plainly", "## Naming the quest early",
