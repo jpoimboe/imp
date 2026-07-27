@@ -128,6 +128,24 @@ def test_a_tool_call_releases_the_tag_and_a_later_error_keeps_the_prose() -> Non
     assert PROSE in _texts(tree.root)       # released, and never retro-deleted
 
 
+def test_with_mixed_flush_only_the_tagged_node_drops_and_ordinary_prose_still_renders() -> None:
+    # The split fix: ordinary node (untagged) + error node (tagged); on error only
+    # the tagged node is dropped — ordinary prose must survive in both views.
+    events = _step(
+        _msg("a1", ORDINARY, tagged=False),
+        _msg("a2", PROSE, tagged=True),
+        _ev("q1", "query_result", agent_id=AID, usage={}, total_cost_usd=0.0),
+        _ev("e1", "error", agent_id=AID, category="auth", kind="http_401",
+            message="claude CLI: 401", detail={"last_agent_text": "claude CLI: 401"}),
+        _ev("r1", "agent_retry", category="auth", attempt=2, backoff_seconds=2.0))
+    tree = nv.build_tree(events)
+    assert ORDINARY in _texts(tree.root)
+    assert PROSE not in _texts(tree.root)
+    out = _render(events)
+    assert ORDINARY in out
+    assert PROSE not in out
+
+
 def test_a_second_prose_group_releases_the_first_and_only_the_trailing_one_drops() -> None:
     events = _step(
         _msg("a1", ORDINARY, tagged=True),

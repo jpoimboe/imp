@@ -1229,6 +1229,10 @@ def process_event(
             # text-only prose). tool_use lives only in the standalone tool_call
             # events, so a turn's prose can lead its tool_calls.
             if text:
+                # Split at the classifying boundary so error prose gets its own node.
+                if classifies_as_provider_error(text) and state.get("prose_buffer"):
+                    _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
+                                       model=model, state=state)
                 state.setdefault("prose_buffer", []).append(text)
             return
         if itype == "mcp_tool_call":

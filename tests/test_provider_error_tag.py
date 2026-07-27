@@ -67,11 +67,11 @@ async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
 
 
 @pytest.mark.anyio
-async def test_claude_code_tags_off_the_trailing_fragment_of_a_coalesced_group(
+async def test_claude_code_splits_the_group_at_the_error_fragment(
     tmp_path: Path,
 ) -> None:
-    # Two raw assistant fragments coalesce into one agent_message; the error is
-    # classified off the trailing fragment, so the tag must be too.
+    # A classifying fragment triggers a flush so it gets its own tagged node;
+    # the preceding ordinary fragment must keep its own untagged node.
     (tmp_path / "art").mkdir()
     elog = JsonlEventLog(tmp_path / "e.jsonl")
     scripted = [assistant(text(ORDINARY)), assistant(text(AUTH_PROSE)),
@@ -84,9 +84,11 @@ async def test_claude_code_tags_off_the_trailing_fragment_of_a_coalesced_group(
     events = [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     msgs = [r for r in _rows(tmp_path) if r["type"] == "agent_message"]
-    assert len(msgs) == 1                        # both fragments ride one group
-    assert [b["text"] for b in msgs[0]["payload"]["raw"]["content"]] == [ORDINARY, AUTH_PROSE]
-    assert msgs[0]["payload"]["provider_error"] is True
+    assert len(msgs) == 2                        # split at the classifying boundary
+    assert [b["text"] for b in msgs[0]["payload"]["raw"]["content"]] == [ORDINARY]
+    assert "provider_error" not in msgs[0]["payload"]
+    assert [b["text"] for b in msgs[1]["payload"]["raw"]["content"]] == [AUTH_PROSE]
+    assert msgs[1]["payload"]["provider_error"] is True
     assert [e["payload"]["category"] for e in events if e.get("type") == "error"] == ["auth"]
 
 
@@ -133,11 +135,11 @@ async def test_codex_tags_the_failing_turn_and_pins_the_row_order(tmp_path: Path
 
 
 @pytest.mark.anyio
-async def test_codex_tags_off_the_trailing_item_of_a_multi_part_flush(
+async def test_codex_splits_the_flush_so_ordinary_prose_keeps_its_own_node(
     tmp_path: Path,
 ) -> None:
-    # One flush, two buffered items: the error is classified off the last one, so
-    # the tag must be too.
+    # A classifying item triggers a flush before being buffered; the preceding
+    # ordinary item must keep its own untagged node.
     auth = _seed_git_and_auth(tmp_path)
     elog = JsonlEventLog(tmp_path / "e.jsonl")
     scripted = [[thread_started("t"), agent_message(ORDINARY), agent_message(AUTH_PROSE),
@@ -150,9 +152,11 @@ async def test_codex_tags_off_the_trailing_item_of_a_multi_part_flush(
     events = [e async for e in runner.run(_invocation(tmp_path, event_log=elog))]
 
     msgs = [r for r in _rows(tmp_path) if r["type"] == "agent_message"]
-    assert len(msgs) == 1                        # both items ride one flush
-    assert [b["text"] for b in msgs[0]["payload"]["raw"]["content"]] == [ORDINARY, AUTH_PROSE]
-    assert msgs[0]["payload"]["provider_error"] is True
+    assert len(msgs) == 2                        # split at the classifying boundary
+    assert [b["text"] for b in msgs[0]["payload"]["raw"]["content"]] == [ORDINARY]
+    assert "provider_error" not in msgs[0]["payload"]
+    assert [b["text"] for b in msgs[1]["payload"]["raw"]["content"]] == [AUTH_PROSE]
+    assert msgs[1]["payload"]["provider_error"] is True
     assert [e["payload"]["category"] for e in events if e.get("type") == "error"] == ["auth"]
 
 

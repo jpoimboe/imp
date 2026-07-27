@@ -1584,6 +1584,9 @@ class ClaudeCodeSession(ObserveSession):
                             and self._llm_group_key is not None
                             and mid != self._llm_group_key):
                         await self._flush_llm_group()
+                    # Split at the classifying boundary so error prose gets its own node.
+                    if classifies_as_provider_error(_text_of(imp_msg)) and self._llm_blocks:
+                        await self._flush_llm_group()
                     frag = _serialize_claude_code_message(raw)
                     if not self._llm_group_open:
                         self._llm_group_open = True
