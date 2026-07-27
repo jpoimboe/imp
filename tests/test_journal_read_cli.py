@@ -300,7 +300,7 @@ def test_overview_default_shows_merged_disposition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Default overview: completed changes appear under `finished:` with
+    """Default overview: completed changes appear under `completed:` with
     disposition `merged` (not the raw `completed`); abandoned are excluded."""
     import imp.cli.main as m
 
@@ -318,12 +318,13 @@ def test_overview_default_shows_merged_disposition(
     rc = m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     assert rc == 0
     out = capsys.readouterr().out
+    # Section headers are the only lines ending in `:`; every quest row ends in its age.
+    quest_rows = [ln for ln in out.splitlines() if ln and not ln.endswith(":")]
     assert "live" in out
-    assert "finished:" in out
+    assert "completed:" in out
     assert "history:" not in out
-    assert "done" in out
-    assert "merged" in out
-    assert "completed" not in out      # disposition is shown, not raw status
+    assert any(ln.startswith("done") and "merged" in ln for ln in quest_rows)
+    assert not any("completed" in ln for ln in quest_rows)
     assert "dead" not in out           # abandoned excluded by default
     assert "abandoned" not in out
 
@@ -421,7 +422,7 @@ def test_overview_empty_history_omits_block(
     m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     out = capsys.readouterr().out
     assert "live" in out
-    assert "merged:" not in out
+    assert "completed:" not in out
     assert "history:" not in out
 
 
