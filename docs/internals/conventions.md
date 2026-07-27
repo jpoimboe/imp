@@ -52,7 +52,8 @@ styles its own line.
 
 Carved out (unchanged): rc-conditional proxy-response relays that print a
 pre-formatted `imp: …` message routed by return code (`_emit_mutation_result`,
-`_cmd_edit`, the `_async_cmd_new` background path, `_abandon`); the SIGTERM
+`_cmd_edit`, the `_async_cmd_new` background path, `_abandon`); the detached-HEAD
+notice `imp new` / `imp chat` print on stdout via `_emit_human`; the SIGTERM
 success line; and daemon-subprocess-internal diagnostics (executor traceback,
 `daemon.py`, `warmup.py`, the archive progress indicator, `loader.py` warnings,
 `validate_memory_cli.py`, `daemon_connector.py`) — a raw Python traceback stays

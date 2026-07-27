@@ -1182,6 +1182,10 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return 2
     worktree.ensure_imp_ignored(control, base)
 
+    if worktree.head_detached(control):
+        _emit_human([f"imp: main checkout is at a detached HEAD — this quest "
+                     f"still forks from {base}."])
+
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None and not validate_workflow_name(wf_arg):
         _emit_cli_error(f"invalid workflow name {wf_arg!r}")

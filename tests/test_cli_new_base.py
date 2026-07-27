@@ -333,3 +333,41 @@ def test_record_idea_defers_seed(tmp_path: Path, monkeypatch) -> None:
     ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
     quest = Quest.load(tmp_path, ids[0])
     assert State.load(quest.quest_dir / "state").step is None
+
+
+def _seed_detachable_control(tmp_path: Path) -> None:
+    """A seeded control root whose default-base is `release/9`, tree clean."""
+    _seed_control(tmp_path)
+    _git(tmp_path, "branch", "release/9")
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ndefault-base: release/9\n")
+    _git(tmp_path, "commit", "-aqm", "point default-base at release/9")
+
+
+@pytest.mark.parametrize("leave_mode", ["new", "chat"])
+def test_cmd_new_detached_control_root_announces_the_base(
+        tmp_path: Path, monkeypatch, capsys, leave_mode) -> None:
+    _seed_detachable_control(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    monkeypatch.chdir(tmp_path)
+
+    # An invalid workflow name aborts right AFTER the notice, so it is
+    # observable without starting a session.
+    rc = asyncio.run(_async_cmd_new(
+        argparse.Namespace(base=None, workflow="a/b"), leave_mode=leave_mode))
+
+    assert rc == 2
+    assert capsys.readouterr().out.splitlines() == [
+        "imp: main checkout is at a detached HEAD — this quest still forks "
+        "from release/9."]
+
+
+def test_cmd_new_on_a_branch_prints_no_detached_notice(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_detachable_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None, workflow="a/b")))
+
+    assert rc == 2
+    assert capsys.readouterr().out == ""
