@@ -73,6 +73,12 @@ def checked_out_branch(control_root: Path) -> str | None:
     return proc.stdout.strip() or None
 
 
+def head_detached(root: Path) -> bool:
+    """HEAD points at a commit, not a branch; false for an unborn branch or a non-repo."""
+    return (checked_out_branch(root) is None
+            and _git(root, "rev-parse", "HEAD").returncode == 0)
+
+
 def head_of(control_root: Path, ref: str) -> str:
     """The commit sha `ref` resolves to (e.g. a branch tip)."""
     return _git_ok(control_root, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()

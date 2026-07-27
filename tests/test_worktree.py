@@ -755,3 +755,23 @@ def test_ensure_imp_ignored_mid_rebase_leaves_user_history_intact(
     assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
         "user commit B", "user commit A", "seed"]
 
+
+def test_head_detached_true_on_detached_checkout(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    assert wt.head_detached(tmp_path) is True
+
+
+def test_head_detached_false_on_a_branch(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    assert wt.head_detached(tmp_path) is False
+
+
+def test_head_detached_false_on_an_unborn_branch(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q", "-b", "main")   # no commits yet
+    assert wt.head_detached(tmp_path) is False
+
+
+def test_head_detached_false_outside_a_repo(tmp_path: Path) -> None:
+    assert wt.head_detached(tmp_path) is False
+

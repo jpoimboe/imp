@@ -12,6 +12,7 @@ import yaml
 from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
 from imp.cli.init import _run_init_conversation as _real_run_init_conversation
 from imp.cli.init import run_init
+from tests.conftest import _git, _init_repo
 
 
 def _inputs(*answers: str) -> object:
@@ -1213,3 +1214,63 @@ def test_read_user_config_treats_malformed_yaml_as_empty(tmp_path: Path) -> None
     p = tmp_path / "config.yaml"
     p.write_text("providers: [anthropic\n")
     assert _read_user_config(p) == {}
+
+
+def test_cmd_init_refuses_on_detached_head(tmp_path, monkeypatch, capsys):
+    import imp.cli.main as m
+    from imp.engine.worktree import checked_out_branch
+
+    _init_repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_init_noninteractive",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("a detached HEAD must not reach the writer")))
+
+    # A bad --workflow too: the detached check must be the one that reports.
+    rc = m._cmd_init(_init_args(workflow="minimial"))
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert captured.err.splitlines() == [
+        "imp: HEAD is detached; check out a branch before `imp init` "
+        "(it commits imp's config)."]
+    assert captured.out == ""
+    assert not (tmp_path / "imp").exists()                    # wrote nothing
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert checked_out_branch(tmp_path) is None               # still detached
+
+
+def test_cmd_init_runs_on_an_unborn_branch(tmp_path, monkeypatch, capsys):
+    import imp.cli.main as m
+
+    _git(tmp_path, "init", "-q", "-b", "main")   # repo, no commits
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+
+    rc = m._cmd_init(_init_args(workflow="minimal"))
+
+    assert rc == 0
+    assert capsys.readouterr().err == ""
+    assert (tmp_path / "imp" / "config.yaml").is_file()
+    assert _git(tmp_path, "log", "--format=%s").stdout.splitlines() == [
+        "imp: initialize project"]
+
+
+def test_cmd_init_runs_in_a_fresh_directory(tmp_path_factory, monkeypatch, capsys):
+    # A repo-less dir OUTSIDE the autouse _git_repo fixture's repo; git's upward
+    # discovery is capped so no ancestor repo is found.
+    import imp.cli.main as m
+
+    fresh = tmp_path_factory.mktemp("fresh")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
+    monkeypatch.setattr(m, "_project_root", lambda: fresh)
+
+    rc = m._cmd_init(_init_args(workflow="minimal"))
+
+    assert rc == 0
+    assert capsys.readouterr().err == ""
+    assert (fresh / ".git").exists()
+    assert (fresh / "imp" / "config.yaml").is_file()

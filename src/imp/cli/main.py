@@ -769,6 +769,11 @@ def _apply_theme() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
+    if worktree.head_detached(project):
+        _emit_cli_error(
+            "HEAD is detached; check out a branch before `imp init` "
+            "(it commits imp's config).")
+        return 2
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None:
         names = selectable_workflow_names(project)
