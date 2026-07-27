@@ -192,7 +192,7 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
         captured.update(kw)
         return 0
 
-    async def _fake_clear_loop(control: object, *, first: object) -> int:
+    async def _fake_clear_loop(control: object, base: str, *, first: object) -> int:
         return await first({})
 
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
@@ -203,7 +203,7 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
     args = m._build_parser().parse_args(["new", "--autonomous"])
     rc = await m._run_fresh_session(
         SimpleNamespace(id="x", title="t", control_root=None, seed_opening=None,
-                        create_mode="new"),
+                        create_mode="new", base_branch="main"),
         args=args)
     assert rc == 0
     assert captured.get("autonomous") is True

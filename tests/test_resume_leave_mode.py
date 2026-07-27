@@ -82,14 +82,14 @@ async def test_run_fresh_session_interactive_threads_create_mode(
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
     monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
 
-    async def _fake_loop(control: object, *, first: object) -> int:
+    async def _fake_loop(control: object, base: str, *, first: object) -> int:
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
     captured = _capture_leave_mode(monkeypatch)
     args = m._build_parser().parse_args(["resume"])
     quest = SimpleNamespace(
-        id="x", title="t", create_mode=create_mode,
+        id="x", title="t", create_mode=create_mode, base_branch="main",
         control_root=tmp_path, seed_opening=None)
     rc = await m._run_fresh_session(quest, args=args)
     assert rc == 0
@@ -110,7 +110,7 @@ def test_interactive_resume_threads_create_mode(
     monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True)
     captured = _capture_leave_mode(monkeypatch)
 
-    async def _fake_loop(control: object, *, first: object) -> int:
+    async def _fake_loop(control: object, base: str, *, first: object) -> int:
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -155,7 +155,7 @@ async def test_inert_resume_threads_create_mode(
     async def _fake_run_inert(*, question: object, ask_line: object, launch: object) -> int:
         return await launch("my answer")
 
-    async def _fake_loop(control: object, *, first: object) -> int:
+    async def _fake_loop(control: object, base: str, *, first: object) -> int:
         return await first({})
 
     monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)

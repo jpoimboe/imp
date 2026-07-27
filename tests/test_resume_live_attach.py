@@ -161,7 +161,7 @@ def test_interactive_live_resume_marks_already_running_and_notice(
     monkeypatch.setattr(m, "_select_headless", lambda args: (False, False))
     monkeypatch.setattr(m, "_print_splash_banner", lambda *a, **k: False)
 
-    async def _ok_loop(control_root, *, first):
+    async def _ok_loop(control_root, base, *, first):
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _ok_loop)
