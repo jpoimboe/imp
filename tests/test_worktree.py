@@ -79,12 +79,12 @@ def test_preconditions_no_commits(tmp_path: Path) -> None:
         wt.check_preconditions(tmp_path)
 
 
-def test_preconditions_detached_head(tmp_path: Path) -> None:
+def test_preconditions_allows_detached_head(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     _git(tmp_path, "checkout", "-q", head)  # detach
-    with pytest.raises(wt.PreconditionError, match="detached"):
-        wt.check_preconditions(tmp_path)
+    assert wt.checked_out_branch(tmp_path) is None   # really detached
+    wt.check_preconditions(tmp_path)                 # does not raise
 
 
 def test_repo_git_lock_serializes(tmp_path: Path) -> None:

@@ -368,7 +368,7 @@ def _branch_with_commit(root: Path, name: str) -> str:
 def _seed_project(tmp_path: Path) -> None:
     """Produce the committed imp/ layout the worktree model requires.
 
-    imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
+    imp new needs >=1 commit (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
     (Quest.create copies imp/workflows/imp; the runtime reads the merged
     config from imp/config.yaml — the project layer of load_effective_config).

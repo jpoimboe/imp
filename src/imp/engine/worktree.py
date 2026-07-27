@@ -63,11 +63,6 @@ def check_preconditions(root: Path) -> None:
         raise PreconditionError(
             "repository has no commits yet; make an initial commit first"
         )
-    head = _git_ok(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
-    if head == "HEAD":
-        raise PreconditionError(
-            "HEAD is detached; check out a branch before `imp new`"
-        )
 
 
 def checked_out_branch(control_root: Path) -> str | None:
