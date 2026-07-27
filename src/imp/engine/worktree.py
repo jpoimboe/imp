@@ -341,7 +341,13 @@ def _merge_in_place(worktree: Path, branch: str, title: str, quest_id: str,
 def _merge_detached(control_root: Path, quest_id: str, branch: str, base: str,
                     title: str, body: str | None = None) -> MergeResult:
     """Branch 3: <base> checked out nowhere. Merge in a detached scratch worktree,
-    update-ref, remove the scratch."""
+    advance <base>, remove the scratch.
+
+    The ref move is porcelain `git branch -f`, not plumbing `update-ref`: it
+    refuses when the branch is in use by a worktree or is being rebased. Moving
+    the ref under a rebase of <base> wedges it — the user's `git rebase
+    --continue` then fails forever on a ref lock — so we surface git's refusal as
+    REFUSED and let the human resolve it."""
     scratch_rel = Path(".imp") / "worktrees" / f".merge-{quest_id}"
     scratch = control_root / scratch_rel
     _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
@@ -354,7 +360,10 @@ def _merge_detached(control_root: Path, quest_id: str, branch: str, base: str,
             _git(scratch, "merge", "--abort")
             return MergeResult("CONFLICT")
         commit = _git_ok(scratch, "rev-parse", "HEAD").strip()
-        _git_ok(control_root, "update-ref", f"refs/heads/{base}", commit)
+        moved = _git(control_root, "branch", "-f", base, commit)
+        if moved.returncode != 0:
+            detail = (moved.stderr or moved.stdout).strip() or None
+            return MergeResult("REFUSED", detail=detail)
         return MergeResult("MERGED", commit)
     finally:
         _git(control_root, "worktree", "remove", "--force", str(scratch_rel))

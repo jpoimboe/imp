@@ -260,6 +260,42 @@ def test_merge_detached_body_threads_into_commit(tmp_path: Path) -> None:
     assert "(imp/feat)" in msg
 
 
+def test_merge_detached_refuses_while_base_is_being_rebased(tmp_path: Path) -> None:
+    # Mid `git rebase -i` the control root's HEAD is detached, so `main` is
+    # checked out NOWHERE and merge_to_base takes the _merge_detached path —
+    # while the rebase still owns the branch. Moving the ref underneath it makes
+    # the user's `git rebase --continue` fail forever on a ref-lock error.
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    (tmp_path / "a.txt").write_text("a\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit A")
+    (tmp_path / "b.txt").write_text("b\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit B")
+    env = _stop_at_rebase_edit(tmp_path)
+    base_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+
+    assert result.status == "REFUSED"
+    # git names the branch it refused to move; asserting the name (never
+    # translated) rather than the sentence keeps a localized git from false-firing.
+    assert result.detail is not None and "main" in result.detail
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == base_before
+    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()
+    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
+    assert _git(tmp_path, "rev-parse", "--verify", "imp/feat").returncode == 0
+
+    resumed = subprocess.run(
+        ["git", "rebase", "--continue"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert resumed.returncode == 0, resumed.stderr
+    assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
+        "user commit B", "user commit A", "seed"]
+
+
 def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     # Conflict: both base and branch edit README.md differently.
