@@ -38,6 +38,22 @@ def _init_repo_no_ignore(root: Path) -> None:
     _git(root, "commit", "-qm", "seed")
 
 
+def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
+    """Park `root` mid `rebase -i HEAD~2` at an edit step; returns env for `--continue`."""
+    edit_first = (
+        f"{shlex.quote(sys.executable)} -c "
+        "\"import pathlib, re, sys; p = pathlib.Path(sys.argv[1]); "
+        "p.write_text(re.sub(r'^(?:pick|p)\\b', 'edit', p.read_text(), count=1, flags=re.M))\""
+    )
+    env = {**os.environ, "GIT_SEQUENCE_EDITOR": edit_first, "GIT_EDITOR": "true"}
+    started = subprocess.run(
+        ["git", "rebase", "-i", "HEAD~2"], cwd=root,
+        env=env, capture_output=True, text=True)
+    assert started.returncode == 0, started.stderr
+    assert (root / ".git" / "rebase-merge").is_dir()
+    return env
+
+
 def test_find_control_root_from_subdir(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     sub = tmp_path / "a" / "b"
@@ -686,18 +702,7 @@ def test_ensure_imp_ignored_mid_rebase_leaves_user_history_intact(
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "user commit B")
 
-    # Stop `git rebase -i` at an `edit` step without an interactive editor.
-    edit_first = (
-        f"{shlex.quote(sys.executable)} -c "
-        "\"import pathlib, re, sys; p = pathlib.Path(sys.argv[1]); "
-        "p.write_text(re.sub(r'^(?:pick|p)\\b', 'edit', p.read_text(), count=1, flags=re.M))\""
-    )
-    env = {**os.environ, "GIT_SEQUENCE_EDITOR": edit_first, "GIT_EDITOR": "true"}
-    started = subprocess.run(
-        ["git", "rebase", "-i", "HEAD~2"], cwd=tmp_path,
-        env=env, capture_output=True, text=True)
-    assert started.returncode == 0, started.stderr
-    assert (tmp_path / ".git" / "rebase-merge").is_dir()
+    env = _stop_at_rebase_edit(tmp_path)
     head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
 
     wt.ensure_imp_ignored(tmp_path, "main")
