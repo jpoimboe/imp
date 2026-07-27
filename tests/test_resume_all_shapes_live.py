@@ -439,6 +439,7 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     for m in msgs:
         t.append(m)
+    # The store is seeded only through the complete_step result (msgs[:3]); the
     # trailing prose (msgs[3]) is the unflushed deficit the projection overwrite
     # writes before claude-p loads its native session.
     await store.append(skey, message_to_session_records(
