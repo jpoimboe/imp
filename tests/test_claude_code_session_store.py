@@ -14,7 +14,6 @@ from imp.providers.claude_code_session_store import (
     session_key,
     session_project_key,
     session_store_for,
-    store_has_conversation_body,
 )
 
 
@@ -227,26 +226,6 @@ def test_session_project_key_is_the_sdk_helper(tmp_path: Path) -> None:
     assert session_project_key(tmp_path) == project_key_for_directory(tmp_path)
 
 
-def test_store_has_conversation_body_distinguishes_stub_from_body() -> None:
-    # Empty / missing store → no resumable body.
-    assert store_has_conversation_body(None) is False
-    assert store_has_conversation_body([]) is False
-
-    # ai-title stub only (CC 2.x writes this even under suppression) → no body.
-    assert store_has_conversation_body([{"type": "ai-title", "title": "x"}]) is False
-
-    # A real conversation entry alongside the stub → resumable body present.
-    assert store_has_conversation_body(
-        [{"type": "ai-title", "title": "x"}, {"type": "assistant", "uuid": "a"}]
-    ) is True
-
-    # Body-only with no ai-title at all → still a healthy real session.
-    assert store_has_conversation_body([{"type": "assistant", "uuid": "a"}]) is True
-
-    # Non-dict elements are tolerated by the isinstance guard; alone they yield False.
-    assert store_has_conversation_body([None, "string", 42]) is False
-
-
 def test_session_store_for_writes_under_claude_session_subdir(
     tmp_path: Path,
 ) -> None:
@@ -279,12 +258,11 @@ def test_message_to_session_records_chains_and_shapes() -> None:
             ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
     ]
     recs = message_to_session_records(
-        messages, parent_uuid="P", session_id="sid", cwd="/proj",
-        model="claude-sonnet-4-5", start_index=2)
+        messages, session_id="sid", cwd="/proj", model="claude-sonnet-4-5")
 
     assert len(recs) == 2
     assert recs[0]["type"] == "assistant"
-    assert recs[0]["parentUuid"] == "P"
+    assert recs[0]["parentUuid"] is None
     assert recs[0]["sessionId"] == "sid"
     assert recs[0]["cwd"] == "/proj"
     assert recs[0]["message"]["role"] == "assistant"
@@ -304,159 +282,22 @@ def test_message_to_session_records_chains_and_shapes() -> None:
 
 def test_message_to_session_records_uuids_are_deterministic(tmp_path: Path) -> None:
     from imp.agents.runner import Message, TextBlock
-    from imp.providers.claude_code_session_store import message_to_session_records
+    from imp.providers.claude_code_session_store import (
+        _record_uuid,
+        message_to_session_records,
+    )
 
     messages = [Message(role="assistant", content=(TextBlock(text="hi"),))]
-    a = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=5)
-    b = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=5)
+    a = message_to_session_records(messages, session_id="sid", cwd="/p", model="m")
+    b = message_to_session_records(messages, session_id="sid", cwd="/p", model="m")
     assert [r["uuid"] for r in a] == [r["uuid"] for r in b]
+    # Still keyed on (session_id, index), with index now the position in the projection.
+    assert [r["uuid"] for r in a] == [_record_uuid("sid", 0)]
     store = ImpSessionStore(tmp_path)
     key = _main_key()
     anyio.run(store.append, key, a)
     anyio.run(store.append, key, b)
     assert len(anyio.run(store.load, key)) == 1
-
-
-def test_strip_trailing_error_turn_drops_session_limit_turn() -> None:
-    from imp.agents.runner import Message, TextBlock
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        strip_trailing_error_turn,
-    )
-
-    good = message_to_session_records(
-        [Message(role="assistant", content=(TextBlock(text="done"),))],
-        parent_uuid=None, session_id="sid", cwd="/p", model="m", start_index=0)
-    bad = message_to_session_records(
-        [Message(role="assistant", content=(
-            TextBlock(text="You've hit your session limit · resets 1am (America/Los_Angeles)"),))],
-        parent_uuid=good[-1]["uuid"], session_id="sid", cwd="/p", model="m",
-        start_index=1)
-    entries = good + bad
-
-    assert strip_trailing_error_turn(entries) == good
-
-
-def test_strip_trailing_error_turn_drops_is_api_error_flag() -> None:
-    from imp.providers.claude_code_session_store import strip_trailing_error_turn
-
-    entries = [
-        {"type": "assistant", "uuid": "a", "message": {"role": "assistant"}},
-        {"type": "assistant", "uuid": "b", "isApiErrorMessage": True,
-         "message": {"role": "assistant", "content": []}},
-    ]
-    assert strip_trailing_error_turn(entries) == entries[:1]
-
-
-def test_strip_trailing_error_turn_drops_nested_message_api_error_flag() -> None:
-    from imp.providers.claude_code_session_store import strip_trailing_error_turn
-
-    entries = [
-        {"type": "assistant", "uuid": "a", "message": {"role": "assistant"}},
-        {"type": "assistant", "uuid": "b",
-         "message": {"role": "assistant", "isApiErrorMessage": True, "content": []}},
-    ]
-    assert strip_trailing_error_turn(entries) == entries[:1]
-
-
-def test_strip_trailing_error_turn_drops_string_content_session_limit() -> None:
-    from imp.providers.claude_code_session_store import strip_trailing_error_turn
-
-    entries = [
-        {"type": "assistant", "uuid": "a",
-         "message": {"role": "assistant", "content": "all good"}},
-        {"type": "assistant", "uuid": "b",
-         "message": {"role": "assistant",
-                     "content": "You've hit your session limit, try later"}},
-    ]
-    assert strip_trailing_error_turn(entries) == entries[:1]
-
-
-def test_strip_trailing_error_turn_keeps_normal_tail() -> None:
-    from imp.providers.claude_code_session_store import strip_trailing_error_turn
-
-    entries = [{"type": "assistant", "uuid": "a",
-                "message": {"role": "assistant", "content": [
-                    {"type": "text", "text": "all good"}]}}]
-    assert strip_trailing_error_turn(entries) == entries
-    assert strip_trailing_error_turn([]) == []
-
-
-def test_session_record_is_error_turn_benign_session_limit_prose() -> None:
-    from imp.providers.claude_code_session_store import session_record_is_error_turn
-
-    assert not session_record_is_error_turn({
-        "type": "assistant", "uuid": "x",
-        "message": {"role": "assistant",
-                    "content": [{"type": "text",
-                                 "text": "I'm working on session limit handling."}]}})
-
-
-def _three_message_transcript() -> list:
-    from imp.agents.runner import (
-        Message,
-        TextBlock,
-        ToolResultBlock,
-        ToolUseBlock,
-    )
-    return [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=(
-            ToolUseBlock(id="t0", name="mcp__imp__read_file", input={"path": "s"}),)),
-        Message(role="user", content=(
-            ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
-    ]
-
-
-def test_reconcile_store_tail_appends_missing_trailing_turn() -> None:
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        reconcile_store_tail,
-    )
-
-    messages = _three_message_transcript()
-    store_body = message_to_session_records(
-        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-
-    out = reconcile_store_tail(
-        messages, store_body, session_id="sid", cwd="/p", model="m")
-
-    assert len(out) == 3
-    assert out[:2] == store_body
-    assert out[2]["type"] == "user"
-    assert out[2]["parentUuid"] == store_body[-1]["uuid"]
-    assert out[2]["message"]["content"][0]["type"] == "tool_result"
-
-
-def test_reconcile_store_tail_strips_error_turn_then_resynthesizes() -> None:
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        reconcile_store_tail,
-    )
-
-    messages = _three_message_transcript()
-    store_body = message_to_session_records(
-        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-    from imp.agents.runner import Message, TextBlock
-    err = message_to_session_records(
-        [Message(role="assistant", content=(
-            TextBlock(text="You've hit your session limit (America/Los_Angeles)"),))],
-        parent_uuid=store_body[-1]["uuid"], session_id="sid", cwd="/p",
-        model="m", start_index=2)
-    store_with_error = store_body + err
-
-    out = reconcile_store_tail(
-        messages, store_with_error, session_id="sid", cwd="/p", model="m")
-
-    assert len(out) == 3
-    assert out[:2] == store_body
-    assert out[2]["message"]["content"][0]["type"] == "tool_result"
 
 
 def test_overwrite_replaces_existing_entries(tmp_path: Path) -> None:
@@ -495,85 +336,6 @@ def test_overwrite_preserves_duplicate_uuid_replacement(tmp_path: Path) -> None:
         {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "fresh"}]
 
 
-def test_reconcile_store_tail_is_idempotent_when_complete() -> None:
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        reconcile_store_tail,
-    )
-
-    messages = _three_message_transcript()
-    full = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-    out = reconcile_store_tail(
-        messages, full, session_id="sid", cwd="/p", model="m")
-    assert [r["uuid"] for r in out] == [r["uuid"] for r in full]
-    assert len(out) == 3
-
-
-def test_reconcile_store_tail_truncates_surplus_turns() -> None:
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        reconcile_store_tail,
-    )
-
-    messages = _three_message_transcript()
-    # The store has accumulated ALL 3 turns, but the rolled-back message prefix
-    # holds only the first 2 — reconcile must drop the surplus 3rd turn.
-    store_body = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-
-    out = reconcile_store_tail(
-        messages[:2], store_body, session_id="sid", cwd="/p", model="m")
-
-    assert len(out) == 2
-    assert out == store_body[:2]
-    # exclude timestamp: it is stamped once per call, so two calls differ on it
-    expected = message_to_session_records(
-        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-    assert (
-        [{k: v for k, v in r.items() if k != "timestamp"} for r in out]
-        == [{k: v for k, v in r.items() if k != "timestamp"} for r in expected]
-    )
-
-
-def test_strip_trailing_error_turn_drops_weekly_limit_turn() -> None:
-    from imp.providers.claude_code_session_store import strip_trailing_error_turn
-
-    entries = [
-        {"type": "assistant", "uuid": "a",
-         "message": {"role": "assistant", "content": [
-             {"type": "text", "text": "all good"}]}},
-        {"type": "assistant", "uuid": "b",
-         "message": {"role": "assistant", "content": [
-             {"type": "text",
-              "text": "You've hit your weekly limit · resets Jul 16, 8pm "
-                      "(America/Los_Angeles)"}]}},
-    ]
-    assert strip_trailing_error_turn(entries) == entries[:1]
-
-
-def test_reconcile_store_tail_empty_messages_returns_empty() -> None:
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        reconcile_store_tail,
-    )
-
-    messages = _three_message_transcript()
-    store_body = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-
-    # A dispatch-only tail rewinds resume_base to 0, so the message prefix is
-    # empty: the reconciled store must be empty too (store.overwrite unlinks it).
-    out = reconcile_store_tail(
-        [], store_body, session_id="sid", cwd="/p", model="m")
-
-    assert out == []
-
-
 def test_clear_removes_the_entire_store_tree(tmp_path: Path) -> None:
     store = ImpSessionStore(tmp_path / "claude_session")
     key = _main_key()
@@ -583,8 +345,8 @@ def test_clear_removes_the_entire_store_tree(tmp_path: Path) -> None:
     store.clear()
 
     assert not (tmp_path / "claude_session").exists()
-    # An absent store body reads back as None, which reconcile treats as "rebuild
-    # the whole body from the transcript".
+    # An absent store body reads back as None; the next native resume just writes
+    # the transcript projection over it.
     assert anyio.run(store.load, key) is None
 
 
@@ -597,61 +359,3 @@ def test_clear_is_a_noop_when_the_store_is_absent(tmp_path: Path) -> None:
     store.clear()
 
     assert not (tmp_path / "claude_session").exists()
-
-
-def test_reconcile_store_tail_strips_error_then_truncates_surplus() -> None:
-    from imp.agents.runner import Message, TextBlock
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        reconcile_store_tail,
-    )
-
-    messages = _three_message_transcript()
-    store_body = message_to_session_records(
-        messages, parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-    err = message_to_session_records(
-        [Message(role="assistant", content=(
-            TextBlock(text="You've hit your session limit (America/Los_Angeles)"),))],
-        parent_uuid=store_body[-1]["uuid"], session_id="sid", cwd="/p",
-        model="m", start_index=3)
-    store_with_error = store_body + err
-
-    out = reconcile_store_tail(
-        messages[:1], store_with_error, session_id="sid", cwd="/p", model="m")
-
-    assert len(out) == 1
-    assert out == store_body[:1]
-
-
-def test_reconcile_store_tail_anchors_past_trailing_metadata_records() -> None:
-    from imp.providers.claude_code_session_store import (
-        message_to_session_records,
-        reconcile_store_tail,
-    )
-
-    messages = _three_message_transcript()
-    store_body = message_to_session_records(
-        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
-        model="m", start_index=0)
-    # The real CLI ends its session transcript with uuid-less metadata records;
-    # the appended tail must skip past them and anchor to the last real turn.
-    metadata = [
-        {"type": "last-prompt", "prompt": "go", "sessionId": "sid"},
-        {"type": "ai-title", "title": "x", "sessionId": "sid"},
-    ]
-    store_with_metadata = store_body + metadata
-
-    out = reconcile_store_tail(
-        messages, store_with_metadata, session_id="sid", cwd="/p", model="m")
-
-    tail = out[-1]
-    assert tail["type"] == "user"
-    assert tail["message"]["content"][0]["type"] == "tool_result"
-    # The crux: anchored to the last uuid-bearing turn, never None.
-    assert tail["parentUuid"] == store_body[-1]["uuid"]
-    assert tail["parentUuid"] is not None
-    # Trailing metadata records are preserved, not dropped.
-    assert metadata[0] in out and metadata[1] in out
-
-

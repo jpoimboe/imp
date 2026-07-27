@@ -18,6 +18,11 @@ Read this when editing imp's engine/renderer or workflow prompts.
   *derived* from each step's declared `phase` string. No hardcoded step, phase,
   or var names and no routing live in engine or renderer code — all specifics
   live in `workflow.yaml`, scripts, and prompts.
+- **Claude session store.** The store body handed to native resume is a pure
+  projection of imp's transcript — `message_to_session_records(_project_for_cli(
+  messages[:resume_base]))`, overwritten wholesale. Records the CLI wrote are
+  never merged in or counted; imp's transcript is the only source of truth for
+  resumed context.
 
 ## Future / unbuilt
 

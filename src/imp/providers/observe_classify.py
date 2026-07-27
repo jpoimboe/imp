@@ -8,7 +8,6 @@ import zoneinfo
 from datetime import datetime, timedelta
 
 from imp.providers import errors as perr
-from imp.providers.claude_code_session_store import _USAGE_LIMIT_RE
 
 _AUTH_PATTERNS = (
     "Invalid API key",
@@ -22,6 +21,13 @@ _QUOTA_PATTERNS = (
     "You have reached your usage limit",
     "Credit balance is too low",
 )
+
+# Usage-limit wording backstop: matches both "session limit" and "weekly limit"
+# phrasings, plus the bare-time reset announcement. Spans both usage-limit kinds.
+_USAGE_LIMIT_RE = re.compile(
+    r"hit (?:your|a|the) (?:session|weekly) limit"
+    r"|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/",
+    re.IGNORECASE)
 
 # Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
 # the underlying Anthropic API returns a non-2xx. 401/403 → AuthError; 408 and

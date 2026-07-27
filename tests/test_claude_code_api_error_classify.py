@@ -204,6 +204,11 @@ def test_session_limit_phrase_classifies_rate_limit() -> None:
         _classify_agent_text("You have hit a session limit."), perr.RateLimitError)
 
 
+def test_weekly_limit_phrase_classifies_rate_limit() -> None:
+    assert isinstance(
+        _classify_agent_text("You have hit a weekly limit."), perr.RateLimitError)
+
+
 def test_ordinary_prose_stays_unclassified_after_backstop() -> None:
     assert _classify_agent_text("Reading the spec and editing files.") is None
 

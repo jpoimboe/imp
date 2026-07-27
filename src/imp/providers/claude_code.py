@@ -106,7 +106,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
-    reconcile_store_tail,
+    message_to_session_records,
     resume_session_id,
     session_key,
     session_store_for,
@@ -819,8 +819,11 @@ def _stream_history(messages: list[Message]) -> Any:
 
     Drop empty assistant content (thinking-only fragments after we extracted
     the thinking blocks) since "assistant with no content" is also invalid.
+
+    The fold plus the tool_result regrouping claude's loader needs are both in
+    `_project_for_cli`.
     """
-    return _AsyncIter(_history_dicts(_merge_assistant_fragments(messages)))
+    return _AsyncIter(_history_dicts(_project_for_cli(messages)))
 
 
 def _merge_assistant_fragments(messages: list[Message]) -> list[Message]:
@@ -836,6 +839,44 @@ def _merge_assistant_fragments(messages: list[Message]) -> list[Message]:
         else:
             out.append(m)
     return out
+
+
+def _project_for_cli(messages: list[Message]) -> list[Message]:
+    """Merge fragments, pair every tool_result behind its tool_use, merge again.
+
+    claude's loader pairs an assistant record's tool_use only with the record
+    immediately after it (extras dropped, gaps filled with an error stub), and
+    the closing merge undoes the split regrouping causes — consecutive same-role
+    turns are the 400 `_stream_history` documents. A tool_result whose tool_use
+    is absent is paired across the resume_base split; it is kept, never dropped.
+    """
+    merged = _merge_assistant_fragments(messages)
+    results: dict[str, ToolResultBlock] = {}
+    issued: set[str] = set()
+    for m in merged:
+        for b in m.content:
+            if isinstance(b, ToolResultBlock):
+                results.setdefault(b.tool_use_id, b)
+            elif isinstance(b, ToolUseBlock):
+                issued.add(b.id)
+    out: list[Message] = []
+    for m in merged:
+        if m.role == "assistant":
+            out.append(m)
+            paired = tuple(
+                results[b.id] for b in m.content
+                if isinstance(b, ToolUseBlock) and b.id in results)
+            if paired:
+                out.append(Message(role="user", content=paired))
+        elif m.role == "user":
+            kept = [b for b in m.content
+                    if not (isinstance(b, ToolResultBlock) and b.tool_use_id in issued)]
+            if kept:
+                kept.sort(key=lambda b: not isinstance(b, ToolResultBlock))
+                out.append(Message(role="user", content=tuple(kept)))
+        else:
+            out.append(m)
+    return _merge_assistant_fragments(out)
 
 
 def _history_dicts(messages: list[Message]) -> Any:
@@ -1200,7 +1241,6 @@ class ClaudeCodeSession(ObserveSession):
             return
         store = session_store_for(invocation.transcript_dir)
         skey = session_key(invocation.quest_context.project_root, aid)
-        store_body = await store.load(skey)
         shape_native_eligible = (
             (not is_fresh)
             and classify_resume(existing) in (
@@ -1352,13 +1392,12 @@ class ClaudeCodeSession(ObserveSession):
         self._web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
 
         if native_resume:
-            reconciled = reconcile_store_tail(
-                messages[:resume_base], store_body or [],
+            await store.overwrite(skey, message_to_session_records(
+                _project_for_cli(messages[:resume_base]),
                 session_id=skey["session_id"],
                 cwd=str(invocation.quest_context.project_root),
                 model=runner.model,
-            )
-            await store.overwrite(skey, reconciled)
+            ))
 
         self._llm_group_open = False
         self._llm_group_key: str | None = None
