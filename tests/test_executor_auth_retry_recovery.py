@@ -127,10 +127,39 @@ async def test_auth_retry_recovers_through_backoff_loop(
     assert State.load(quest.state_dir).status == "done"
     assert calls["n"] == 2
 
-    log_types = [e["type"] for e in quest.event_log().read()]
+    events = list(quest.event_log().read())
+    log_types = [e["type"] for e in events]
     assert "agent_retry" in log_types
     assert "awaiting_user_input" not in log_types
     assert "agent_message" in log_types
+
+    prose = ("Failed to authenticate. API Error: 401 "
+             "Invalid authentication credentials")
+    retries = [e for e in events if e["type"] == "agent_retry"]
+    assert retries[0]["payload"]["message"] == prose
+
+    # Verify from journaled rows: prose on the breadcrumb is engine chrome, not agent narration.
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import render_tree
+    # `fake` has no parser so build_tree raises; provider_error driving suppression is in the rows.
+    rendered = [
+        {**e, "payload": {**e["payload"], "provider": "claude_code"}}
+        if e["type"] == "agent_message" else e
+        for e in events
+    ]
+    tree = nv.build_tree(rendered)
+
+    def _texts(node: Any) -> list[str]:
+        found: list[str] = []
+        if isinstance(node, nv.AgentTextNode):
+            found.append(node.text)
+        for c in getattr(node, "children", []):
+            found.extend(_texts(c))
+        return found
+
+    assert prose not in _texts(tree.root)
+    out = "\n".join(render_tree(tree, full=False, color=False, width=160))
+    assert f"[auth] retry 1 (1.0s) — {prose}" in out
 
 
 @pytest.mark.anyio

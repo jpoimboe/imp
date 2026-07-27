@@ -1993,3 +1993,48 @@ async def test_resolve_wait_reply_retry_cause_returns_the_retry_note() -> None:
     assert (reply, source) == (RESUME_RETRY_NUDGE, "nudge")
     assert reply != RESUME_CONTINUE_NUDGE
     assert "awaiting_user_input" not in [e["type"] for e in log.read()]
+
+
+@pytest.mark.anyio
+async def test_error_info_message_is_the_first_line_of_the_agents_prose(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "auth", "kind": "http_401", "message": "claude CLI: 401",
+        "detail": {"last_agent_text": "Failed to authenticate. API Error: 401\nmore prose"}}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.error is not None
+    assert res.error.message == "Failed to authenticate. API Error: 401"
+
+
+@pytest.mark.anyio
+async def test_error_info_message_falls_back_to_the_payload_message(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "network", "kind": "network", "message": "claude CLI: EOF",
+        "detail": {}}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.error is not None and res.error.message == "claude CLI: EOF"
+
+
+@pytest.mark.anyio
+async def test_error_info_message_is_absent_when_the_payload_carries_none(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "network", "kind": "network"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.error is not None and res.error.message is None

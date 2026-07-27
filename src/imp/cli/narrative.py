@@ -2153,6 +2153,16 @@ def _retry_verb(category: str) -> str:
     return _RETRY_VERB.get(category, "waiting to retry")
 
 
+def _retry_message(message: Any) -> str:
+    """The breadcrumb suffix: cut to 159 plus `…` so the message is exactly 160."""
+    if not message:
+        return ""
+    text = str(message)
+    if len(text) > 160:
+        text = text[:159] + "…"
+    return f" — {text}"
+
+
 def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Non-terminal: a transient error was retried with backoff. Render inline so
     # a self-healed network/rate_limit blip doesn't look like a failure.
@@ -2192,7 +2202,8 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
             category=cat, is_warning=True))
         return
     self._append(ErrorNode(
-        message=f"[{cat}] retry {attempt} ({secs}s)", category=cat, is_warning=True))
+        message=f"[{cat}] retry {attempt} ({secs}s){_retry_message(p.get('message'))}",
+        category=cat, is_warning=True))
 
 
 def _h_output_validation_nudge(

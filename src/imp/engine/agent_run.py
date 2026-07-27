@@ -107,11 +107,19 @@ _USER_FACING_NOTE = engine_prompt("user-facing.md")
 
 @dataclass(frozen=True)
 class ErrorInfo:
-    """The classified error that drove a fatal/backoff/retry decision, plumbed
-    out of drive_invocation so the caller can record it on Pause and on the
-    agent_retry event. None on the success path."""
+    """Classified error plumbed out of drive_invocation for Pause and agent_retry recording."""
     category: str
     kind: str | None
+    message: str | None = None
+
+
+def _breadcrumb_message(payload: dict[str, Any]) -> str | None:
+    """The provider's own first line of prose, else its error message."""
+    detail = payload.get("detail")
+    text = str((detail or {}).get("last_agent_text") or "").strip()
+    if not text:
+        text = str(payload.get("message") or "").strip()
+    return text.split("\n", 1)[0].strip() or None
 
 
 @dataclass(frozen=True)
@@ -721,6 +729,7 @@ async def drive_invocation(
                         if interrupting:
                             return AgentRunResult(None, False, True, False, None,
                                                   interrupt=True)
+                        message = _breadcrumb_message(payload)
                         retry_after = (payload.get("detail") or {}).get(
                             "retry_after_seconds")
                         decision = error_policy.decide(
@@ -728,15 +737,15 @@ async def drive_invocation(
                             hint_delay_seconds=retry_after)
                         if isinstance(decision, error_policy.Pause):
                             return AgentRunResult(None, True, False, True, None,
-                                                  ErrorInfo(category, kind))
+                                                  ErrorInfo(category, kind, message))
                         if isinstance(decision, error_policy.RetryWithBackoff):
                             return AgentRunResult(None, True, False, False,
                                                   decision.delay_seconds,
-                                                  ErrorInfo(category, kind),
+                                                  ErrorInfo(category, kind, message),
                                                   delay_hinted=decision.hinted)
                         # RetryNow (agent_output_missing today)
                         return AgentRunResult(None, True, False, False, None,
-                                              ErrorInfo(category, kind))
+                                              ErrorInfo(category, kind, message))
                     if coordinator is not None and coordinator.should_pause:
                         return AgentRunResult(None, False, True, False, None,
                                               interrupt=True)

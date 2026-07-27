@@ -110,3 +110,18 @@ def test_untagged_prose_under_a_backoff_error_renders_the_same_in_both_views() -
     body = _live(events)
     assert any(ordinary in ln for ln in body)
     assert body == _log(events)
+
+
+def test_the_breadcrumb_message_renders_identically_in_both_views() -> None:
+    events = _step(
+        _msg("a1", PROSE, tagged=True),
+        _ev("q1", "query_result", agent_id=AID, usage={}, total_cost_usd=0.0),
+        _ev("e1", "error", agent_id=AID, category="auth", kind="http_401",
+            message="claude CLI: 401", detail={"last_agent_text": PROSE}),
+        _ev("r1", "agent_retry", category="auth", attempt=2, backoff_seconds=2.0,
+            message=PROSE))
+    body = _live(events)
+    assert body == _log(events)
+    assert any(f"[auth] retry 2 (2.0s) — {PROSE}" in ln for ln in body)
+    # The text survives exactly once, as engine chrome — never also as agent prose.
+    assert sum(PROSE in ln for ln in body) == 1
