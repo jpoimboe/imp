@@ -493,7 +493,10 @@ def _write_exclude(control_root: Path) -> None:
 def ensure_imp_ignored(control_root: Path, base: str) -> None:
     """Guarantee .imp/ is ignored in a way fresh worktrees inherit (spec §8).
     Correctness depends on it: nested worktrees must not show as untracked, and
-    the inner .imp/quests/ state must never be captured by `git add -A`."""
+    the inner .imp/quests/ state must never be captured by `git add -A`. The
+    rule is committed only when the checkout stands on `base`; any other state
+    (detached, mid-rebase, another branch) gets the shared info/exclude, because
+    a commit there never reaches the quest's fork point."""
     if _imp_ignored_durably(control_root, base):
         return
     with RepoGitLock(control_root).acquire():
@@ -501,15 +504,17 @@ def ensure_imp_ignored(control_root: Path, base: str) -> None:
             return
         # Preferred: commit ONLY .gitignore so the rule travels into every
         # worktree checkout and is shared with collaborators.
-        gi = control_root / ".gitignore"
-        text = gi.read_text() if gi.exists() else ""
-        if ".imp/" not in {ln.strip() for ln in text.splitlines()}:
-            sep = "" if text.endswith("\n") or not text else "\n"
-            gi.write_text(text + sep + "# imp internal state\n.imp/\n")
-        _git(control_root, "add", "--", ".gitignore")
-        _git(control_root, "commit", "-m", "chore: gitignore .imp/", "--", ".gitignore")
-        if _imp_in_committed_gitignore(control_root, base):
-            return
+        if checked_out_branch(control_root) == base:
+            gi = control_root / ".gitignore"
+            text = gi.read_text() if gi.exists() else ""
+            if ".imp/" not in {ln.strip() for ln in text.splitlines()}:
+                sep = "" if text.endswith("\n") or not text else "\n"
+                gi.write_text(text + sep + "# imp internal state\n.imp/\n")
+            _git(control_root, "add", "--", ".gitignore")
+            _git(control_root, "commit", "-m", "chore: gitignore .imp/",
+                 "--", ".gitignore")
+            if _imp_in_committed_gitignore(control_root, base):
+                return
         # Fallback: shared info/exclude (no commit, no ref move).
         _write_exclude(control_root)
         if not _imp_ignored_durably(control_root, base):

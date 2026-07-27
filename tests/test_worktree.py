@@ -25,6 +25,16 @@ def _init_repo(root: Path) -> None:
     _git(root, "commit", "-qm", "seed")
 
 
+def _init_repo_no_ignore(root: Path) -> None:
+    """A git repo with one commit on `main` and NO .imp/ ignore rule anywhere."""
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    (root / "README.md").write_text("x")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "seed")
+
+
 def test_find_control_root_from_subdir(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     sub = tmp_path / "a" / "b"
@@ -308,6 +318,53 @@ def test_ensure_imp_ignored_reads_base_gitignore_not_head(tmp_path: Path) -> Non
     assert _git(tmp_path, "rev-parse", "main").stdout.strip() == main_before
     assert (exclude.read_text() if exclude.exists() else None) == exclude_before
     assert not (tmp_path / ".gitignore").exists()  # working tree untouched too
+
+
+def test_ensure_imp_ignored_detached_writes_exclude_without_commit(
+        tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == main_before
+    assert wt.checked_out_branch(tmp_path) is None  # still detached
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" in exclude.read_text()
+    assert _make_worktree_and_check(tmp_path)  # the real invariant
+
+
+def test_ensure_imp_ignored_on_other_branch_writes_exclude_without_commit(
+        tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "side")
+    side_before = _git(tmp_path, "rev-parse", "side").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "side").stdout.strip() == side_before
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == main_before
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" in exclude.read_text()
+    assert _make_worktree_and_check(tmp_path)
+
+
+def test_ensure_imp_ignored_on_base_commits_the_rule(tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() != main_before
+    assert _git(tmp_path, "log", "-1", "--format=%s",
+                "main").stdout.strip() == "chore: gitignore .imp/"
+    assert ".imp/" in _git(tmp_path, "show", "main:.gitignore").stdout
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" not in (exclude.read_text() if exclude.exists() else "")
 
 
 def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
