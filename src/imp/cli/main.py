@@ -769,6 +769,11 @@ def _apply_theme() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
+    if worktree.head_detached(project):
+        _emit_cli_error(
+            "HEAD is detached; check out a branch before `imp init` "
+            "(it commits imp's config).")
+        return 2
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None:
         names = selectable_workflow_names(project)
@@ -959,16 +964,17 @@ async def _run_cleared_session(
 
 async def _clear_loop(
     control: Path,
+    base: str,
     *,
     first: Callable[[dict[str, str]], Awaitable[int]],
     leave_mode: str = "new",
 ) -> int:
-    """Run first, then loop only while /clear: open a fresh new-style chat."""
+    """Run first, then loop only while /clear: open a fresh new-style chat
+    forked from `base` — the caller's, never the checkout's current branch."""
     leave_state: dict[str, str] = {}
     rc = await first(leave_state)
     while leave_state.get("intent") == "clear":
         leave_state = {}
-        base = worktree.current_branch(control)
         rc = await _run_cleared_session(
             control, base, leave_state=leave_state, leave_mode=leave_mode)
     return rc
@@ -1109,7 +1115,7 @@ async def _run_fresh_session(
             leave_mode=quest.create_mode,
             autonomous=autonomous)
 
-    return await _clear_loop(quest.control_root, first=_first)
+    return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
@@ -1169,12 +1175,16 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     control = _control_root()
     worktree.check_preconditions(control)
-    worktree.ensure_imp_ignored(control)
     try:
         base = _resolve_new_base(control, getattr(args, "base", None))
     except BaseResolutionError as e:
         _emit_cli_error(f"{e}")
         return 2
+    worktree.ensure_imp_ignored(control, base)
+
+    if worktree.head_detached(control):
+        _emit_human([f"imp: main checkout is at a detached HEAD — this quest "
+                     f"still forks from {base}."])
 
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None and not validate_workflow_name(wf_arg):
@@ -1346,7 +1356,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             leave_state=leave_state, title=term_title, autonomous=autonomous,
             model=opening_model, opening_unsandboxed=opening_unsandboxed)
 
-    return await _clear_loop(control, first=_first, leave_mode=leave_mode)
+    return await _clear_loop(control, base, first=_first, leave_mode=leave_mode)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -1501,7 +1511,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             leave_mode=quest.create_mode,
             autonomous=autonomous)
 
-    return await _clear_loop(quest.control_root, first=_first)
+    return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
@@ -1579,7 +1589,7 @@ async def _resume_inert(
                 leave_mode=quest.create_mode,
                 title=term_title, autonomous=autonomous)
 
-        return await _clear_loop(quest.control_root, first=_first)
+        return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
     return await run_inert_resume(
         question=question,

@@ -777,3 +777,80 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
         assert not body[spec_rev_i + 1].strip().startswith("→"), (
             "unlabeled spec-reviewer goto must not produce a route line:\n" + "\n".join(body))
 
+
+def _register_step_aware_anthropic() -> None:
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake))
+
+
+def _commit_in_quest_worktree(root: Path) -> None:
+    """Real work on the quest branch, so the merge has something to advance base with."""
+    quest_wt = root / ".imp" / "worktrees" / "test-quest"
+    (quest_wt / "feature.txt").write_text("done\n")
+    _git(quest_wt, "add", "-A")
+    _git(quest_wt, "commit", "-qm", "quest work")
+
+
+@pytest.mark.anyio
+async def test_full_workflow_merges_from_a_detached_control_root(tmp_path: Path) -> None:
+    from imp.engine import worktree as wt
+
+    quest = _seed_default_workflow(tmp_path)
+    _commit_in_quest_worktree(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    _register_step_aware_anthropic()
+
+    result = await run_quest(quest, headless=True)
+
+    assert result is RunResult.COMPLETED
+    assert "quest_merged" in [e.get("type") for e in _run_events(quest)]
+    # The base advanced and carries the quest's work...
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() != main_before
+    assert "feature.txt" in _git(
+        tmp_path, "ls-tree", "-r", "--name-only", "main").stdout
+    # ...while the user's detached checkout is byte-identical.
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert wt.checked_out_branch(tmp_path) is None
+
+
+@pytest.mark.anyio
+async def test_full_workflow_merges_while_the_user_is_mid_rebase(tmp_path: Path) -> None:
+    from tests.conftest import _stop_at_rebase_edit
+
+    quest = _seed_default_workflow(tmp_path)
+    _commit_in_quest_worktree(tmp_path)
+    # The user rebases their own branch — not the base, which `git branch -f`
+    # deliberately refuses to move (covered by test_worktree.py).
+    _git(tmp_path, "checkout", "-q", "-b", "side")
+    (tmp_path / "a.txt").write_text("a\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit A")
+    (tmp_path / "b.txt").write_text("b\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit B")
+    env = _stop_at_rebase_edit(tmp_path)
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    _register_step_aware_anthropic()
+
+    result = await run_quest(quest, headless=True)
+
+    assert result is RunResult.COMPLETED
+    assert "quest_merged" in [e.get("type") for e in _run_events(quest)]
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() != main_before
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert (tmp_path / ".git" / "rebase-merge").is_dir()   # rebase state intact
+
+    resumed = subprocess.run(
+        ["git", "rebase", "--continue"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert resumed.returncode == 0, resumed.stderr
+    assert _git(tmp_path, "log", "--format=%s", "side").stdout.splitlines()[:2] == [
+        "user commit B", "user commit A"]
+

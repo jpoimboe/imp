@@ -109,6 +109,44 @@ def test_cmd_new_nonexistent_default_base_exits_2_and_creates_no_draft(
     assert "does not name an existing branch" in capsys.readouterr().err
 
 
+def test_cmd_new_passes_resolved_base_to_ensure_imp_ignored(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _git(tmp_path, "branch", "release/9")
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ndefault-base: release/9\n")
+    _git(tmp_path, "commit", "-aqm", "point default-base at release/9")
+    monkeypatch.chdir(tmp_path)
+    seen: list[tuple[Path, str]] = []
+    monkeypatch.setattr(
+        main.worktree, "ensure_imp_ignored",
+        lambda control, base: seen.append((control, base)))
+
+    # An invalid workflow name aborts right AFTER the ignore repair, so the
+    # call is observable without starting a session.
+    rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None, workflow="a/b")))
+
+    assert rc == 2
+    assert [base for _, base in seen] == ["release/9"]
+
+
+def test_cmd_new_skips_ignore_repair_when_base_unresolvable(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ndefault-base: ghost\n")
+    _git(tmp_path, "commit", "-aqm", "point default-base at a missing branch")
+    monkeypatch.chdir(tmp_path)
+    seen: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        main.worktree, "ensure_imp_ignored", lambda *a: seen.append(a))
+
+    rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
+
+    assert rc == 2
+    assert seen == []
+
+
 def test_new_parser_accepts_base_flag() -> None:
     args = _build_parser().parse_args(["new", "do a thing", "--base", "trunk"])
     assert args.base == "trunk"
@@ -295,3 +333,41 @@ def test_record_idea_defers_seed(tmp_path: Path, monkeypatch) -> None:
     ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
     quest = Quest.load(tmp_path, ids[0])
     assert State.load(quest.quest_dir / "state").step is None
+
+
+def _seed_detachable_control(tmp_path: Path) -> None:
+    """A seeded control root whose default-base is `release/9`, tree clean."""
+    _seed_control(tmp_path)
+    _git(tmp_path, "branch", "release/9")
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ndefault-base: release/9\n")
+    _git(tmp_path, "commit", "-aqm", "point default-base at release/9")
+
+
+@pytest.mark.parametrize("leave_mode", ["new", "chat"])
+def test_cmd_new_detached_control_root_announces_the_base(
+        tmp_path: Path, monkeypatch, capsys, leave_mode) -> None:
+    _seed_detachable_control(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    monkeypatch.chdir(tmp_path)
+
+    # An invalid workflow name aborts right AFTER the notice, so it is
+    # observable without starting a session.
+    rc = asyncio.run(_async_cmd_new(
+        argparse.Namespace(base=None, workflow="a/b"), leave_mode=leave_mode))
+
+    assert rc == 2
+    assert capsys.readouterr().out.splitlines() == [
+        "imp: main checkout is at a detached HEAD — this quest still forks "
+        "from release/9."]
+
+
+def test_cmd_new_on_a_branch_prints_no_detached_notice(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_detachable_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None, workflow="a/b")))
+
+    assert rc == 2
+    assert capsys.readouterr().out == ""

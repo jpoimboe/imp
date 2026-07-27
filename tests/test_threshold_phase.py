@@ -339,10 +339,20 @@ def test_threshold_base_line_names_both_branches_on_divergence(tmp_path) -> None
 
 
 def test_threshold_base_line_single_clause_when_checkout_branch_empty(tmp_path) -> None:
-    # Materialized quest, or a detached main checkout: no divergence clause.
+    # Materialized quest: no divergence clause.
     out = _render_threshold(tmp_path, base_branch="release-2.0")
     assert "This quest forks from **release-2.0** at go-live." in out
     assert "the main checkout is on" not in out
+
+
+def test_threshold_base_line_names_a_detached_main_checkout(tmp_path) -> None:
+    out = _render_threshold(
+        tmp_path, base_branch="master", checkout_branch="a detached HEAD")
+    assert (
+        "This quest forks from **master** at go-live, but the main checkout is on "
+        "**a detached HEAD** — what you read here may not match the fork point; check "
+        "against the base with `git show master:<path>` when it matters."
+    ) in out
 
 
 def test_threshold_base_line_absent_without_a_base(tmp_path) -> None:

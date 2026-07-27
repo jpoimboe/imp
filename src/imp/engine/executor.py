@@ -138,7 +138,7 @@ def _checkout_branch(quest: Quest) -> str:
     if quest.materialized:
         return ""
     from imp.engine import worktree
-    return worktree.checked_out_branch(quest.control_root) or ""
+    return worktree.checked_out_branch(quest.control_root) or "a detached HEAD"
 
 
 def _render_prior_attempts(step_name: str, entries: list[dict[str, Any]]) -> str:

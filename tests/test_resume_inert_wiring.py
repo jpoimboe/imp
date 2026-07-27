@@ -10,7 +10,7 @@ import imp.cli.main as m
 import imp.cli.signals as sig
 from imp.engine.quest import Quest
 from imp.engine.state import State
-from tests.conftest import _seed_control
+from tests.conftest import _branch_with_commit, _seed_control
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert)
 
-    async def fake_clear_loop(control_root, *, first):
+    async def fake_clear_loop(control_root, base, *, first):
         return 9
 
     monkeypatch.setattr(m, "_clear_loop", fake_clear_loop)
@@ -99,7 +99,7 @@ async def test_resume_skips_inert_when_message_supplied(
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert_msg)
 
-    async def fake_clear_loop(control_root, *, first):
+    async def fake_clear_loop(control_root, base, *, first):
         return 7
 
     monkeypatch.setattr(m, "_clear_loop", fake_clear_loop)
@@ -425,7 +425,7 @@ async def test_inert_resume_echoes_reply_before_session_boot(
 
     monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
 
-    async def _fake_loop(control, *, first):
+    async def _fake_loop(control, base, *, first):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -472,7 +472,7 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
 
     monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
 
-    async def _fake_loop(control, *, first):
+    async def _fake_loop(control, base, *, first):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -482,3 +482,35 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
     assert rc == 0
     assert isinstance(seen["title"], TerminalTitle)
     assert seen["title"]._idle is True        # created idle for the wait
+
+
+@pytest.mark.anyio
+async def test_inert_resume_hands_quest_base_to_clear_loop(
+        monkeypatch, tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _branch_with_commit(tmp_path, "topic")     # leaves the checkout on main
+    ch = Quest.create_draft(
+        tmp_path, title="C", quest_id="c2", base_branch="topic")
+    State(id="c2", step="s", step_attempt=0, status="paused").save(ch.state_dir)
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, base, *, first):
+        seen["base"] = base
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "_prelaunch_position_model", lambda *a, **k: None)
+    monkeypatch.setattr(m, "compose_prelaunch_position_row", lambda **k: "")
+    monkeypatch.setattr(m, "render_inert_question", lambda *a, **k: a[0])
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        return await launch("my answer")
+
+    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+
+    rc = await m._resume_inert(ch, "Which DB?", marker="resuming", notice=None)
+
+    assert rc == 0
+    assert seen["base"] == "topic"          # quest.base_branch, not the checkout

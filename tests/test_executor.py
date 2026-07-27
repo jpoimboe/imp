@@ -4990,7 +4990,7 @@ async def test_step_prompt_suppresses_checkout_branch_after_go_live(
 
 
 @pytest.mark.anyio
-async def test_step_prompt_suppresses_checkout_branch_on_detached_head(
+async def test_step_prompt_reports_a_detached_head_as_the_checkout_branch(
         tmp_path: Path) -> None:
     _seed_base_namespace_workflow(tmp_path)
     _git(tmp_path, "checkout", "-q", "--detach")
@@ -5001,4 +5001,4 @@ async def test_step_prompt_suppresses_checkout_branch_on_detached_head(
 
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
     body = sink[0].initial_messages[0].content[0].text
-    assert "base=main checkout=|" in body
+    assert "base=main checkout=a detached HEAD|" in body

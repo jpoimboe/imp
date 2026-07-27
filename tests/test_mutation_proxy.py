@@ -11,7 +11,6 @@ import pytest
 import imp.remote.daemon.spawn as spawn_mod
 from imp.cli import main
 from imp.cli.mutation_proxy import build_session_handler, proxy_mutation, run_mutation
-from imp.engine import worktree
 from imp.engine.quest import Quest
 from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _branch_with_commit, _seed_control
@@ -44,9 +43,8 @@ def test_run_mutation_unknown_op_raises() -> None:
 
 
 def _draft(control: Path, quest_id: str) -> Quest:
-    base = worktree.current_branch(control)
     return Quest.create_draft(
-        control, title="Original", quest_id=quest_id, base_branch=base,
+        control, title="Original", quest_id=quest_id, base_branch="main",
         origin="draft")
 
 

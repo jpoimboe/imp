@@ -8,15 +8,13 @@ from pathlib import Path
 import pytest
 
 from imp.cli import main
-from imp.engine import worktree
 from imp.engine.quest import Quest
 from tests.conftest import _branch_with_commit, _git, _seed_control
 
 
 def _make_draft(control: Path, quest_id: str, *, origin: str = "draft") -> Quest:
-    base = worktree.current_branch(control)
     return Quest.create_draft(
-        control, title="Original", quest_id=quest_id, base_branch=base,
+        control, title="Original", quest_id=quest_id, base_branch="main",
         origin=origin)
 
 

@@ -14,7 +14,7 @@ import imp.cli.main as m
 import imp.cli.signals as sig
 from imp.engine.quest import Quest
 from imp.engine.state import State
-from tests.conftest import _seed_control
+from tests.conftest import _branch_with_commit, _git, _seed_control
 
 
 class _TTY(io.StringIO):
@@ -145,14 +145,13 @@ async def test_clear_loop_reopens_only_on_clear(
         return {"clear": 0, "save": 5}[kind]
 
     monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
-    monkeypatch.setattr(m.worktree, "current_branch", lambda c: "main")
 
     async def _first(leave_state: dict[str, str]) -> int:
         calls.append("first")
         leave_state["intent"] = "clear"
         return 9
 
-    rc = await m._clear_loop(tmp_path, first=_first)
+    rc = await m._clear_loop(tmp_path, "main", first=_first)
 
     assert rc == 5                                        # the final non-clear rc
     assert calls == ["first", "cleared:clear", "cleared:save"]  # looped twice
@@ -170,7 +169,7 @@ async def test_clear_loop_returns_first_rc_without_clear(
     async def _first(leave_state: dict[str, str]) -> int:
         return 3
 
-    assert await m._clear_loop(tmp_path, first=_first) == 3
+    assert await m._clear_loop(tmp_path, "main", first=_first) == 3
 
 
 @pytest.mark.anyio
@@ -187,13 +186,12 @@ async def test_clear_loop_exits_when_cleared_session_sets_no_intent(
         return 7
 
     monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
-    monkeypatch.setattr(m.worktree, "current_branch", lambda c: "main")
 
     async def _first(leave_state: dict[str, str]) -> int:
         leave_state["intent"] = "clear"
         return 9
 
-    rc = await m._clear_loop(tmp_path, first=_first)
+    rc = await m._clear_loop(tmp_path, "main", first=_first)
 
     assert rc == 7
     assert call_count == 1
@@ -212,7 +210,7 @@ async def test_clear_loop_shelve_intent_does_not_reopen(
         leave_state["intent"] = "shelve"
         return 4
 
-    assert await m._clear_loop(tmp_path, first=_first) == 4
+    assert await m._clear_loop(tmp_path, "main", first=_first) == 4
 
 
 @pytest.mark.anyio
@@ -223,14 +221,13 @@ async def test_clear_loop_propagates_exception_from_cleared_session(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
-    monkeypatch.setattr(m.worktree, "current_branch", lambda c: "main")
 
     async def _first(leave_state: dict[str, str]) -> int:
         leave_state["intent"] = "clear"
         return 0
 
     with pytest.raises(RuntimeError, match="boom"):
-        await m._clear_loop(tmp_path, first=_first)
+        await m._clear_loop(tmp_path, "main", first=_first)
 
 
 def test_new_interactive_routes_through_clear_loop(
@@ -238,11 +235,12 @@ def test_new_interactive_routes_through_clear_loop(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-
+    _branch_with_commit(tmp_path, "trunk")      # exists, but is NOT the checkout
     seen: dict[str, object] = {}
 
-    async def _fake_loop(control, *, first, leave_mode="new"):
+    async def _fake_loop(control, base, *, first, leave_mode="new"):
         seen["leave_mode"] = leave_mode
+        seen["base"] = base
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -253,13 +251,14 @@ def test_new_interactive_routes_through_clear_loop(
     try:
         rc = anyio.run(m._async_cmd_new, argparse.Namespace(
             title=None, opening="add a thing", non_interactive=False,
-            message=None))
+            message=None, base="trunk"))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
     assert seen["leave_mode"] == "new"
+    assert seen["base"] == "trunk"          # the resolved base, not the checkout
 
 
 def test_fresh_session_line_routes_through_clear_loop(
@@ -267,9 +266,12 @@ def test_fresh_session_line_routes_through_clear_loop(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
+    _branch_with_commit(tmp_path, "topic")     # leaves the checkout on main
+    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="topic")
+    seen: dict[str, object] = {}
 
-    async def _fake_loop(control, *, first):
+    async def _fake_loop(control, base, *, first):
+        seen["base"] = base
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -288,6 +290,7 @@ def test_fresh_session_line_routes_through_clear_loop(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
+    assert seen["base"] == "topic"          # quest.base_branch, not the checkout
 
 
 @pytest.mark.anyio
@@ -331,12 +334,16 @@ def test_resume_interactive_routes_through_clear_loop(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
+    _branch_with_commit(tmp_path, "topic")     # leaves the checkout on main
+    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="topic")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
 
-    async def _fake_loop(control, *, first):
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, base, *, first):
+        seen["base"] = base
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -354,6 +361,7 @@ def test_resume_interactive_routes_through_clear_loop(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
+    assert seen["base"] == "topic"          # quest.base_branch, not the checkout
 
 
 def test_resume_interactive_leads_with_header_before_splash(
@@ -375,7 +383,7 @@ def test_resume_interactive_leads_with_header_before_splash(
     monkeypatch.setattr(m, "_is_interactive", lambda **k: True)
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
 
-    async def _fake_loop(control, *, first):
+    async def _fake_loop(control, base, *, first):
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -430,7 +438,7 @@ def test_resume_interactive_wires_preceded_by_blank_to_splash(
 
     monkeypatch.setattr(m, "run_session_client", _ok)
 
-    async def _fake_loop(control, *, first):
+    async def _fake_loop(control, base, *, first):
         return await first({})
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -627,6 +635,45 @@ async def test_clear_loop_forwards_leave_mode_to_cleared_session(
         leave_state["intent"] = "clear"          # trigger exactly one cleared session
         return 0
 
-    rc = await m._clear_loop(tmp_path, first=_first, leave_mode="chat")
+    rc = await m._clear_loop(tmp_path, "main", first=_first, leave_mode="chat")
     assert rc == 0
     assert seen["leave_mode"] == "chat"          # _clear_loop forwards the surface marker
+
+
+@pytest.mark.anyio
+async def test_clear_loop_records_caller_base_on_detached_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
+
+    class _FakePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    captured: dict[str, object] = {}
+
+    async def _fake_client(quest: object, **kwargs: object) -> int:
+        captured["quest"] = quest
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        leave_state["intent"] = "clear"
+        return 9
+
+    rc = await m._clear_loop(tmp_path, "main", first=_first)
+
+    assert rc == 0
+    quest = captured["quest"]
+    # The reopened draft forks from the caller's base, never from the string the
+    # detached checkout reports for its own HEAD.
+    assert Quest.load(tmp_path, quest.id).base_branch == "main"

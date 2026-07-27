@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine import worktree as wt
+from tests.conftest import _stop_at_rebase_edit
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -21,6 +22,16 @@ def _init_repo(root: Path) -> None:
     _git(root, "config", "user.name", "t")
     (root / ".gitignore").write_text(".imp/\n")
     (root / "README.md").write_text("seed\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "seed")
+
+
+def _init_repo_no_ignore(root: Path) -> None:
+    """A git repo with one commit on `main` and NO .imp/ ignore rule anywhere."""
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    (root / "README.md").write_text("x")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
 
@@ -50,12 +61,12 @@ def test_preconditions_no_commits(tmp_path: Path) -> None:
         wt.check_preconditions(tmp_path)
 
 
-def test_preconditions_detached_head(tmp_path: Path) -> None:
+def test_preconditions_allows_detached_head(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     _git(tmp_path, "checkout", "-q", head)  # detach
-    with pytest.raises(wt.PreconditionError, match="detached"):
-        wt.check_preconditions(tmp_path)
+    assert wt.checked_out_branch(tmp_path) is None   # really detached
+    wt.check_preconditions(tmp_path)                 # does not raise
 
 
 def test_repo_git_lock_serializes(tmp_path: Path) -> None:
@@ -231,6 +242,42 @@ def test_merge_detached_body_threads_into_commit(tmp_path: Path) -> None:
     assert "(imp/feat)" in msg
 
 
+def test_merge_detached_refuses_while_base_is_being_rebased(tmp_path: Path) -> None:
+    # Mid `git rebase -i` the control root's HEAD is detached, so `main` is
+    # checked out NOWHERE and merge_to_base takes the _merge_detached path —
+    # while the rebase still owns the branch. Moving the ref underneath it makes
+    # the user's `git rebase --continue` fail forever on a ref-lock error.
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    (tmp_path / "a.txt").write_text("a\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit A")
+    (tmp_path / "b.txt").write_text("b\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit B")
+    env = _stop_at_rebase_edit(tmp_path)
+    base_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+
+    assert result.status == "REFUSED"
+    # git names the branch it refused to move; asserting the name (never
+    # translated) rather than the sentence keeps a localized git from false-firing.
+    assert result.detail is not None and "main" in result.detail
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == base_before
+    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()
+    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
+    assert _git(tmp_path, "rev-parse", "--verify", "imp/feat").returncode == 0
+
+    resumed = subprocess.run(
+        ["git", "rebase", "--continue"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert resumed.returncode == 0, resumed.stderr
+    assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
+        "user commit B", "user commit A", "seed"]
+
+
 def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     # Conflict: both base and branch edit README.md differently.
@@ -257,7 +304,7 @@ def _make_worktree_and_check(root, slug="probe") -> bool:
 def test_ensure_imp_ignored_committed_rule_noop(tmp_path: Path) -> None:
     _init_repo(tmp_path)  # .gitignore with .imp/ is COMMITTED -> durable
     before = (tmp_path / ".gitignore").read_text()
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     assert (tmp_path / ".gitignore").read_text() == before          # no new commit
     assert _make_worktree_and_check(tmp_path)
 
@@ -272,7 +319,7 @@ def test_ensure_imp_ignored_uncommitted_rule_is_made_durable(tmp_path: Path) -> 
     _git(tmp_path, "commit", "-qm", "seed")
     (tmp_path / ".gitignore").write_text(".imp/\n")  # uncommitted
 
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     # Now durable AND the worktree actually ignores .imp/ (the real invariant).
     assert _make_worktree_and_check(tmp_path)
 
@@ -286,8 +333,75 @@ def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> No
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
 
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     assert _make_worktree_and_check(tmp_path)
+
+
+def test_ensure_imp_ignored_reads_base_gitignore_not_head(tmp_path: Path) -> None:
+    # The rule is committed on the base (`main`) but absent from the current
+    # checkout's tree: the quest forks from base, so nothing needs repairing.
+    _init_repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "side")
+    (tmp_path / ".gitignore").unlink()
+    _git(tmp_path, "commit", "-aqm", "drop gitignore on side")
+    side_before = _git(tmp_path, "rev-parse", "side").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    exclude_before = exclude.read_text() if exclude.exists() else None
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "side").stdout.strip() == side_before
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == main_before
+    assert (exclude.read_text() if exclude.exists() else None) == exclude_before
+    assert not (tmp_path / ".gitignore").exists()  # working tree untouched too
+
+
+def test_ensure_imp_ignored_detached_writes_exclude_without_commit(
+        tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == main_before
+    assert wt.checked_out_branch(tmp_path) is None  # still detached
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" in exclude.read_text()
+    assert _make_worktree_and_check(tmp_path)  # the real invariant
+
+
+def test_ensure_imp_ignored_on_other_branch_writes_exclude_without_commit(
+        tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "side")
+    side_before = _git(tmp_path, "rev-parse", "side").stdout.strip()
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "side").stdout.strip() == side_before
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() == main_before
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" in exclude.read_text()
+    assert _make_worktree_and_check(tmp_path)
+
+
+def test_ensure_imp_ignored_on_base_commits_the_rule(tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    main_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() != main_before
+    assert _git(tmp_path, "log", "-1", "--format=%s",
+                "main").stdout.strip() == "chore: gitignore .imp/"
+    assert ".imp/" in _git(tmp_path, "show", "main:.gitignore").stdout
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" not in (exclude.read_text() if exclude.exists() else "")
 
 
 def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
@@ -374,7 +488,7 @@ def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path)
     hook.write_text("#!/bin/sh\nexit 1\n")
     hook.chmod(0o755)
 
-    wt.ensure_imp_ignored(tmp_path)
+    wt.ensure_imp_ignored(tmp_path, "main")
     exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
     assert ".imp/" in exclude.read_text()
     assert _make_worktree_and_check(tmp_path)
@@ -594,4 +708,103 @@ def test_checked_out_branch_detached_is_none(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     _git(tmp_path, "checkout", "--detach", "-q")
     assert wt.checked_out_branch(tmp_path) is None
+
+
+def test_ensure_imp_ignored_mid_rebase_leaves_user_history_intact(
+        tmp_path: Path) -> None:
+    _init_repo_no_ignore(tmp_path)
+    (tmp_path / "a.txt").write_text("a\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit A")
+    (tmp_path / "b.txt").write_text("b\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit B")
+
+    env = _stop_at_rebase_edit(tmp_path)
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+
+    wt.ensure_imp_ignored(tmp_path, "main")
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert (tmp_path / ".git" / "rebase-merge").is_dir()  # rebase state intact
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" in exclude.read_text()
+
+    resumed = subprocess.run(
+        ["git", "rebase", "--continue"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert resumed.returncode == 0, resumed.stderr
+    assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
+        "user commit B", "user commit A", "seed"]
+
+
+def test_head_detached_true_on_detached_checkout(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    assert wt.head_detached(tmp_path) is True
+
+
+def test_head_detached_false_on_a_branch(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    assert wt.head_detached(tmp_path) is False
+
+
+def test_head_detached_false_on_an_unborn_branch(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q", "-b", "main")   # no commits yet
+    assert wt.head_detached(tmp_path) is False
+
+
+def test_head_detached_false_outside_a_repo(tmp_path: Path) -> None:
+    assert wt.head_detached(tmp_path) is False
+
+
+def test_create_and_teardown_from_detached_control_root(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    (tmp_path / "second.txt").write_text("second\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "second")
+    _git(tmp_path, "checkout", "-q", "--detach", "HEAD~1")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    # main is ahead of the detached HEAD; assert the worktree forks from main, not HEAD
+    main_sha = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    path = wt.create_worktree(tmp_path, "feat", "main")
+    assert _git(path, "rev-parse", "HEAD").stdout.strip() == main_sha
+    assert (path / "second.txt").exists()
+
+    wt.remove_worktree(tmp_path, "feat")
+    wt.delete_branch(tmp_path, "feat")
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+    assert _git(tmp_path, "rev-parse", "--verify", "imp/feat").returncode != 0
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert wt.checked_out_branch(tmp_path) is None
+
+
+def test_create_and_teardown_mid_rebase_control_root_stays_resumable(
+        tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("a\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit A")
+    (tmp_path / "b.txt").write_text("b\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit B")
+    env = _stop_at_rebase_edit(tmp_path)
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    main_sha = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    path = wt.create_worktree(tmp_path, "feat", "main")
+    assert _git(path, "rev-parse", "HEAD").stdout.strip() == main_sha
+    wt.remove_worktree(tmp_path, "feat")
+    wt.delete_branch(tmp_path, "feat")
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert (tmp_path / ".git" / "rebase-merge").is_dir()  # rebase state intact
+
+    resumed = subprocess.run(
+        ["git", "rebase", "--continue"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert resumed.returncode == 0, resumed.stderr
+    assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
+        "user commit B", "user commit A", "seed"]
 
