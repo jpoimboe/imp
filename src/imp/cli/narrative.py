@@ -158,6 +158,8 @@ class AgentTextNode:
     payload: dict[str, Any]            # the agent_message payload
     _cache: Any = field(default=None, repr=False)  # cached RenderedMessage (F5)
     held: bool = False  # True until agent_result, step_completed, or agent_message resolves it
+    # Provider-error prose, withheld until the turn's outcome resolves it.
+    error_pending: bool = False
     collapsible = False
 
     @property
@@ -557,6 +559,7 @@ class NarrativeBuilder:
         self._segment_had_work = False
         # Deferred rename: rendered after its narration, not at the quest_renamed position.
         self._pending_rename: RenameNode | None = None
+        self._pending_error_prose: AgentTextNode | None = None
 
     # -- public API -----------------------------------------------------------
     @property
@@ -943,6 +946,14 @@ class NarrativeBuilder:
             if not matched and not is_task_call and not is_parent_mid_turn:
                 self._resume_close_folds(agent_id, event)
 
+        # A bookkeeping row carries no render ordering, so it resolves nothing.
+        if (self._pending_error_prose is not None
+                and _resolves_error_prose(etype, payload)):
+            if etype == "error":
+                self._drop_pending_error_prose()
+            else:
+                self._release_pending_error_prose()
+
         # 2. dispatch by type.
         handler = self._HANDLERS.get(etype)
         if handler is None:
@@ -1002,6 +1013,26 @@ class NarrativeBuilder:
             return
         self._append(self._pending_rename)
         self._pending_rename = None
+
+    def _release_pending_error_prose(self) -> None:
+        node = self._pending_error_prose
+        if node is None:
+            return
+        node.error_pending = False
+        self._pending_error_prose = None
+
+    def _drop_pending_error_prose(self) -> None:
+        node = self._pending_error_prose
+        if node is None:
+            return
+        self._pending_error_prose = None
+        # Cleared before the search: an escaped node must not stay pending and block the cursor.
+        node.error_pending = False
+        children = self._container().children
+        for i, c in enumerate(children):
+            if c is node:
+                del children[i]
+                return
 
     def _pop_step(self, name: str | None) -> StepNode | None:
         """Pop the top open step. `name` is accepted for symmetry with the event
@@ -1563,6 +1594,15 @@ def is_prose_field(key: str, value: Any) -> bool:
 
 
 
+def _resolves_error_prose(etype: str, payload: dict[str, Any]) -> bool:
+    """True for an event that carries render ordering; a bookkeeping row does not."""
+    if etype == "query_result":
+        return False
+    if etype == "error":
+        return not payload.get("audit")
+    return etype in NarrativeBuilder._HANDLERS
+
+
 def _last_narration_index(children: list[Any]) -> int | None:
     """Trailing AgentTextNode index, scanning past any trailing ToolBurstFold nodes."""
     i = len(children) - 1
@@ -1733,6 +1773,9 @@ def _h_agent_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
             c.held = False
     node.held = True
     self._append(node)
+    if p.get("provider_error"):
+        node.error_pending = True
+        self._pending_error_prose = node
     # Re-attach the deferred rename after its narration; not in _flush_burst, which ran earlier.
     self._flush_pending_rename()
 
@@ -2035,24 +2078,7 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
         return
     from imp.engine.error_policy import is_retry_with_backoff
     if is_retry_with_backoff(str(p.get("category") or "")):
-        # Transient backoff-retry error: suppress the red line and drop the held auth
-        # prose via a stripped PREFIX match (last_agent_text is stored [:500]).
-        d = p.get("detail")
-        last = str(d["last_agent_text"]) if isinstance(d, dict) and d.get("last_agent_text") else ""
-        target = last.strip()
-        if target:
-            children = self._container().children
-            # A deferred rename flushed right after the held narration (see
-            # _flush_pending_rename in _h_agent_message) leaves a trailing
-            # RenameNode; skip it so the held-prose lookup still lands on the
-            # narration. Trimming only the tail keeps indices aligned for del.
-            end = len(children)
-            if end and isinstance(children[end - 1], RenameNode):
-                end -= 1
-            idx = _last_narration_index(children[:end])
-            if (idx is not None and children[idx].held
-                    and children[idx].text.strip().startswith(target)):
-                del children[idx]
+        # Transient backoff retry: the agent_retry breadcrumb is the only surface.
         return
     detail = ""
     d = p.get("detail")
