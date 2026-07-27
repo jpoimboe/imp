@@ -949,7 +949,8 @@ class NarrativeBuilder:
         # A bookkeeping row carries no render ordering, so it resolves nothing.
         if (self._pending_error_prose is not None
                 and _resolves_error_prose(etype, payload)):
-            if etype == "error":
+            # Only an error that carries the prose onward may drop it.
+            if etype == "error" and _error_carries_prose(payload):
                 self._drop_pending_error_prose()
             else:
                 self._release_pending_error_prose()
@@ -1607,6 +1608,12 @@ def _resolves_error_prose(etype: str, payload: dict[str, Any]) -> bool:
     if etype == "error":
         return not payload.get("audit")
     return etype in NarrativeBuilder._HANDLERS
+
+
+def _error_carries_prose(payload: dict[str, Any]) -> bool:
+    """True when the error payload holds the withheld prose; a text-less one has no carrier."""
+    detail = payload.get("detail")
+    return isinstance(detail, dict) and bool(detail.get("last_agent_text"))
 
 
 def _last_narration_index(children: list[Any]) -> int | None:

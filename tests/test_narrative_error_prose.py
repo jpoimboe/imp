@@ -1,6 +1,6 @@
 """A tagged provider-error node is withheld until the turn's outcome resolves it:
-an error drops it by identity, any other ordering-bearing event releases it, and
-bookkeeping rows pass through."""
+an error that carries the prose onward drops it by identity, any other resolving event
+— including a text-less error — releases it, and bookkeeping rows pass through."""
 from __future__ import annotations
 
 from typing import Any
@@ -175,17 +175,49 @@ def test_an_audit_error_passes_through_and_keeps_the_prose() -> None:
     assert PROSE in _texts(nv.build_tree(events).root)
 
 
-def test_an_interrupt_error_also_drops_the_tagged_node() -> None:
-    # Accepted consequence of keying on the error event rather than the category:
-    # a text-less category drops the node with no carrier. Pinned so a later reader
-    # sees intent rather than a bug.
+def test_an_interrupt_error_releases_the_tagged_node_because_nothing_carries_it() -> None:
+    # `config`/`interrupted` paints nothing, so it carries nothing: dropping here
+    # would be prose vanishing from both views with no carrier.
     events = _step(
         _msg("a1", PROSE, tagged=True),
         _ev("e1", "error", agent_id=AID, category="config", kind="interrupted",
             message="interrupted"))
     tree = nv.build_tree(events)
-    assert PROSE not in _texts(tree.root)
-    assert _error_nodes(tree.root) == []      # the interrupt paints nothing itself
+    assert PROSE in _texts(tree.root)
+    assert PROSE in _render(events)
+    assert _error_nodes(tree.root) == []      # the interrupt still paints nothing itself
+
+
+def test_a_stalled_error_releases_the_tagged_node_and_the_prose_still_renders() -> None:
+    # The 401-then-wedge shape: the provider printed a genuine 401 and hung, so the
+    # stall watchdog fires instead of the classified error. Its payload has no
+    # detail, so the user must still see the 401 and not only the stall warning.
+    events = _step(
+        _msg("a1", PROSE, tagged=True),
+        _ev("q1", "query_result", agent_id=AID, usage={}, total_cost_usd=0.0),
+        _ev("e1", "error", agent_id=AID, category="stalled", kind="stalled",
+            message="no events for 300s"),
+        _ev("r1", "agent_retry", category="stalled", attempt=1, backoff_seconds=1.0))
+    tree = nv.build_tree(events)
+    assert PROSE in _texts(tree.root)
+    out = _render(events)
+    assert PROSE in out
+    assert "no response for" in out           # the stall warning paints alongside it
+
+
+def test_one_category_both_drops_and_releases_by_whether_the_error_carries_the_text() -> None:
+    # The predicate reads the payload, not the category: agent_output_missing arrives both ways.
+    carried = _step(
+        _msg("a1", PROSE, tagged=True),
+        _ev("e1", "error", agent_id=AID, category="agent_output_missing",
+            kind="no_complete_step", message="agent finished without calling complete_step",
+            detail={"last_agent_text": PROSE}))
+    bare = _step(
+        _msg("a1", PROSE, tagged=True),
+        _ev("e1", "error", agent_id=AID, category="agent_output_missing",
+            kind="output_validation", message="output validation: missing status"))
+    assert PROSE not in _texts(nv.build_tree(carried).root)
+    assert PROSE in _texts(nv.build_tree(bare).root)
 
 
 def test_a_backoff_error_with_no_retry_behind_it_still_shows_no_red_line() -> None:

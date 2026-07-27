@@ -125,3 +125,17 @@ def test_the_breadcrumb_message_renders_identically_in_both_views() -> None:
     assert any(f"[auth] retry 2 (2.0s) — {PROSE}" in ln for ln in body)
     # The text survives exactly once, as engine chrome — never also as agent prose.
     assert sum(PROSE in ln for ln in body) == 1
+
+
+def test_a_stalled_error_keeps_the_prose_in_both_views() -> None:
+    # Nothing carries the text on a stall — no breadcrumb message, no ErrorNode detail —
+    # so live and `imp log` must both keep the prose itself.
+    events = _step(
+        _msg("a1", PROSE, tagged=True),
+        _ev("q1", "query_result", agent_id=AID, usage={}, total_cost_usd=0.0),
+        _ev("e1", "error", agent_id=AID, category="stalled", kind="stalled",
+            message="no events for 300s"),
+        _ev("r1", "agent_retry", category="stalled", attempt=1, backoff_seconds=1.0))
+    body = _live(events)
+    assert any(PROSE in ln for ln in body)
+    assert body == _log(events)
