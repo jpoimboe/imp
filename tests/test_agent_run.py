@@ -2064,6 +2064,7 @@ def test_readonly_note_injected_when_policy_denies_worktree_write(
 
     assert "This step is read-only." in inv.system_prompt
     assert "Inspect and report" in inv.system_prompt
+    assert "is unaffected" in inv.system_prompt       # carve-out for quest-home writes
     assert "{#" not in inv.system_prompt              # asset doc-header stripped
 
 
