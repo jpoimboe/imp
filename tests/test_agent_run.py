@@ -2038,3 +2038,79 @@ async def test_error_info_message_is_absent_when_the_payload_carries_none(
     res = await drive_invocation(_inv(tmp_path), runner,
                                  coordinator=coord, log=None, emit_events=False)
     assert res.error is not None and res.error.message is None
+
+
+def _ro_policy(tmp_path: Path, *, active: bool = True, readonly: bool = False):
+    """A policy whose worktree is `tmp_path`; `readonly=True` layers the same ro
+    overlay a `read_only: ["."]` step composes in _apply_readonly_overlay."""
+    from imp.engine.sandbox import SandboxPolicy
+    return SandboxPolicy(
+        active=active, worktree=str(tmp_path),
+        git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
+        writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        readonly_overlays=(str(tmp_path),) if readonly else ())
+
+
+@pytest.mark.parametrize("subagent_depth", [0, 1])
+def test_readonly_note_injected_when_policy_denies_worktree_write(
+    tmp_path: Path, subagent_depth: int,
+) -> None:
+    # AC 7: a read-only step's agent is told up front, top-level and subagent alike.
+    pol = _ro_policy(tmp_path, readonly=True)
+    assert not pol.allows_write(Path(pol.worktree))   # the fixture really denies
+
+    inv = _build_inv(tmp_path, sandbox_policy=pol, subagent_depth=subagent_depth)
+
+    assert "This step is read-only." in inv.system_prompt
+    assert "Inspect and report" in inv.system_prompt
+    assert "is unaffected" in inv.system_prompt       # carve-out for quest-home writes
+    assert "{#" not in inv.system_prompt              # asset doc-header stripped
+
+
+@pytest.mark.parametrize("subagent_depth", [0, 1])
+def test_readonly_note_absent_when_worktree_is_writable(
+    tmp_path: Path, subagent_depth: int,
+) -> None:
+    pol = _ro_policy(tmp_path)
+    assert pol.allows_write(Path(pol.worktree))
+
+    inv = _build_inv(tmp_path, sandbox_policy=pol, subagent_depth=subagent_depth)
+
+    assert "This step is read-only." not in inv.system_prompt
+    assert "IMP_PROJECT_ROOT" in inv.system_prompt    # the paths note still lands
+
+
+def test_readonly_note_absent_without_sandbox_policy(tmp_path: Path) -> None:
+    inv = _build_inv(tmp_path)                        # sandbox_policy defaults to None
+
+    assert "This step is read-only." not in inv.system_prompt
+
+
+def test_readonly_note_absent_when_policy_inactive(tmp_path: Path) -> None:
+    # An inactive policy binds nothing, so its allows_write verdict must not speak.
+    pol = _ro_policy(tmp_path, active=False, readonly=True)
+    assert not pol.allows_write(Path(pol.worktree))
+
+    inv = _build_inv(tmp_path, sandbox_policy=pol)
+
+    assert "This step is read-only." not in inv.system_prompt
+
+
+def test_readonly_note_absent_without_filesystem_tools(tmp_path: Path) -> None:
+    # No filesystem tool -> neither note; the read-only note rides the same gate.
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(),                           # tools = {complete_step}
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path, events_path=tmp_path / "e",
+        subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
+        event_log=None, quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        sandbox_policy=_ro_policy(tmp_path, readonly=True))
+
+    assert "This step is read-only." not in inv.system_prompt
+    assert "IMP_PROJECT_ROOT" not in inv.system_prompt

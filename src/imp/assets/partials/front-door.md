@@ -154,7 +154,7 @@ done; nothing to do.
 
 {% include "partials/memory-authoring.md" %}
 
-{% include "partials/sandbox-debugging.md" %}
+{% include "partials/sandbox-limits.md" %}
 
 ## Speak plainly
 

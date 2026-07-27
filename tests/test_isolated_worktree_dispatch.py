@@ -224,7 +224,7 @@ def test_isolated_dispatch_overlay_home_torn_down_on_error(
 def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path)
     capture: dict = {}
-    sentinel = object()
+    sentinel = _active_home_policy()
     ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
                spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
                             capture=capture))

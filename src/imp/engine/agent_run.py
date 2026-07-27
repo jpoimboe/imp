@@ -74,6 +74,10 @@ _FILESYSTEM_TOOLS = frozenset(
     {"read_file", "write_file", "edit_file", "grep", "glob", "bash"})
 
 
+# Gated on the live policy (allows_write mirrors the bind plan), never step.read_only.
+_READONLY_STEP_NOTE = engine_prompt("readonly-step.md")
+
+
 # Cribbed into the shared system prompt (non-resume only) so BOTH providers see
 # one identical date anchor — without it a model defaults to its training-cutoff
 # date and mis-handles relative->absolute dates, recency, and "latest version"
@@ -500,7 +504,7 @@ def build_agent_invocation(
 ) -> AgentInvocation:
     """Construct one AgentInvocation, owning the completion-contract invariant
     that drifted between the two creation paths. A top-level agent's system
-    prompt is role-only (core header plus optional bash note); its rendered body
+    prompt is role-only (core header plus any injected notes); its rendered body
     and `completion_instruction(schema)` go into the first user message, and it
     gets a continuation_fn (the completion handler — attended yields inline,
     headless top-level yields/parks). A subagent (subagent_depth > 0) instead
@@ -546,10 +550,15 @@ def build_agent_invocation(
         else:
             base = f"{_CORE_HEAD}\n\n{_CORE_TAIL}"
         date_note = _CURRENT_DATE_NOTE.format(date=date.today().isoformat())
+        readonly_step = (
+            sandbox_policy is not None and sandbox_policy.active
+            and not sandbox_policy.allows_write(Path(sandbox_policy.worktree)))
         if is_subagent:
             body = f"{base}\n\n{body_source}"
             if agent_def.tools & _FILESYSTEM_TOOLS:
                 body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+                if readonly_step:
+                    body = f"{body}\n\n{_READONLY_STEP_NOTE}"
             body = f"{body}\n\n{date_note}"
             body = reflow_markdown(body)
             system_prompt = f"{body}\n\n{SUBAGENT_DELIVERABLE_NOTE}"
@@ -557,6 +566,8 @@ def build_agent_invocation(
             header = f"{base}\n\n{_USER_FACING_NOTE}"
             if agent_def.tools & _FILESYSTEM_TOOLS:
                 header = f"{header}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+                if readonly_step:
+                    header = f"{header}\n\n{_READONLY_STEP_NOTE}"
             header = f"{header}\n\n{date_note}"
             system_prompt = reflow_markdown(header)
             task = f"{reflow_markdown(body_source)}\n\n{instruction}"

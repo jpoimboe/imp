@@ -1,3 +1,15 @@
+## What you cannot write
+
+The user's checkout is theirs. imp's sandbox binds all of `.git/refs/heads`,
+`.git/refs/stash`, and the main `.git/index` read-only, re-exposing only
+`refs/heads/imp/` — so you can commit and rebase on your own `imp/<id>` branch and
+nothing else. A commit, reset, checkout, or branch move aimed at the user's branch or
+index will fail, and git's own message often blames a write error rather than a
+permission.
+
+Base branches move only by imp's engine or by the user — never by you. Don't attempt
+one: give the user the exact command to run in their own shell.
+
 ## Debugging live processes
 
 imp's bash sandbox runs every shell command in a fresh user namespace, so an
