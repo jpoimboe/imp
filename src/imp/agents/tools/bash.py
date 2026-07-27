@@ -49,6 +49,14 @@ _FG_CAP_POLL_S = 1.0      # foreground own-cap stat cadence (~1 s, mirrors bg's
                           # _sweep_bg trigger; the file-size analogue of the old
                           # combined-byte kill ceiling)
 _EVENT_COMMAND_PREVIEW_LEN = 200
+_SANDBOX_DENIAL_MARKERS = (
+    "read-only file system", "cannot lock ref", "new index file")
+_SANDBOX_DENIAL_NOTE = (
+    "a write was refused by imp's sandbox, not by the OS at large: shared git "
+    "refs (all but `refs/heads/imp/`), the main `.git/index`, and paths outside "
+    "this quest's worktree are read-only. Retrying will not help — if the change "
+    "belongs in the user's checkout, hand the user the command to run themselves."
+)
 
 
 def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
@@ -86,6 +94,17 @@ def _effective_foreground_timeout(timeout: float | None) -> float:
     down. Only the foreground path consults this — run_in_background returns before
     the deadline is applied, so it is structurally exempt."""
     return min(timeout or BASH_FOREGROUND_TIMEOUT_S, BASH_FOREGROUND_TIMEOUT_MAX_S)
+
+
+def _sandbox_denied_write(
+    stderr: str, *, sandbox_active: bool, returncode: int,
+) -> bool:
+    """Whether a nonzero exit under an active sandbox looks like a masked-path
+    write refusal. Reads the FULL stderr, never the capped display copy."""
+    if not sandbox_active or returncode == 0:
+        return False
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _SANDBOX_DENIAL_MARKERS)
 
 
 def _clip_cap_notice_clause(clipped_lines: int, over_cap: bool) -> str | None:
@@ -374,6 +393,11 @@ async def bash(
         # provider keys that on returncode < 0).
         returncode = 0 if capped else (
             proc.returncode if proc.returncode is not None else -signal.SIGKILL)
+        if _sandbox_denied_write(
+                stderr, sandbox_active=policy is not None and policy.active,
+                returncode=returncode):
+            return _finish(returncode=returncode,
+                           sandbox_note=_SANDBOX_DENIAL_NOTE)
         return _finish(returncode=returncode)
 
     for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):

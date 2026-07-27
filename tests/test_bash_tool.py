@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 from pathlib import Path
 
 import anyio
@@ -99,6 +100,152 @@ def _active_policy(tmp_path: Path):
         git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(), setenv=(), network=True, note="")
+
+
+_SANDBOX_NOTE_TEXT = (
+    "a write was refused by imp's sandbox, not by the OS at large: shared git "
+    "refs (all but `refs/heads/imp/`), the main `.git/index`, and paths outside "
+    "this quest's worktree are read-only. Retrying will not help — if the change "
+    "belongs in the user's checkout, hand the user the command to run themselves."
+)
+
+# Real refusal shapes a masked refs/heads or .git/index produces, plus case
+# variants: matching is case-insensitive.
+_DENIED_WRITE_STDERR = (
+    "fatal: update_ref failed for ref 'refs/heads/main': cannot lock ref "
+    "'refs/heads/main': Unable to create '/x/.git/refs/heads/main.lock': "
+    "Read-only file system",
+    "error: cannot lock ref 'refs/heads/main': unable to resolve reference",
+    "fatal: unable to write new index file",
+    "FATAL: COULD NOT WRITE NEW INDEX FILE",
+    "error: Cannot Lock Ref 'refs/heads/main'",
+    "cp: cannot create regular file '/x/y': READ-ONLY FILE SYSTEM",
+)
+
+
+def _sandboxed_sh(monkeypatch: pytest.MonkeyPatch, script: str) -> None:
+    """Run `script` under a plain shell while the tool believes the sandbox is
+    active: the entry marker is emitted first, so the spawn-failure guard (which
+    keys on that marker's ABSENCE) stays quiet and the call takes the normal path."""
+    import imp.agents.tools.bash as bashmod
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_argv",
+        lambda command, **kw: [
+            "sh", "-c",
+            f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; {script}"])
+
+
+@pytest.mark.parametrize("message", _DENIED_WRITE_STDERR)
+def test_bash_denied_write_carries_sandbox_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, message: str,
+) -> None:
+    # AC 3: active policy + nonzero exit + a mask-shaped stderr marker in any
+    # casing => the verbatim note BESIDE the untouched OS error.
+    _sandboxed_sh(monkeypatch, f"echo {shlex.quote(message)} >&2; exit 128")
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(
+        ctx, {"command": "git update-ref refs/heads/main HEAD"}))
+    assert out["returncode"] == 128
+    assert out["sandbox_note"] == _SANDBOX_NOTE_TEXT
+    assert message in out["stderr"]     # the raw OS error is still reported
+
+
+def test_bash_no_sandbox_note_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 4a: a marker on a command that SUCCEEDED is not a denial.
+    _sandboxed_sh(monkeypatch, "echo 'warning: Read-only file system' >&2; exit 0")
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
+    assert out["returncode"] == 0
+    assert "sandbox_note" not in out
+
+
+def test_bash_no_sandbox_note_without_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 4b: `Permission denied` is deliberately NOT a marker — it is common for
+    # unrelated reasons (non-executable file, missing tool).
+    _sandboxed_sh(monkeypatch, "echo 'sh: ./x: Permission denied' >&2; exit 126")
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "./x"}))
+    assert out["returncode"] == 126
+    assert "Permission denied" in out["stderr"]
+    assert "sandbox_note" not in out
+
+
+def test_bash_no_sandbox_note_when_policy_inactive(tmp_path: Path) -> None:
+    # AC 4c: policy present but inactive -> bare ["sh","-c",cmd] argv, no note.
+    import dataclasses
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = dataclasses.replace(
+        _active_policy(tmp_path), active=False)
+    out = json.loads(_run_bash(
+        ctx, {"command": "echo 'cannot lock ref refs/heads/main' >&2; exit 1"}))
+    assert out["returncode"] == 1
+    assert "cannot lock ref" in out["stderr"]
+    assert "sandbox_note" not in out
+
+
+def test_bash_no_sandbox_note_without_policy(tmp_path: Path) -> None:
+    # AC 4c: no policy at all — an unsandboxed EROFS is the OS's, not imp's.
+    out = json.loads(_run_bash(
+        _ctx(tmp_path),
+        {"command": "echo 'x: Read-only file system' >&2; exit 1"}))
+    assert out["returncode"] == 1
+    assert "sandbox_note" not in out
+
+
+def test_bash_cap_killed_command_carries_no_sandbox_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 4d: a cap-kill forces the EMITTED returncode to 0, so the note keys on
+    # that value and not on proc.returncode (-9). Bounded emitter (84 KB, then it
+    # blocks in sleep) so the poller kills deterministically, no write race.
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools import limits
+    monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+    monkeypatch.setattr(bash_mod, "_FG_CAP_POLL_S", 0.05)
+    _sandboxed_sh(
+        monkeypatch,
+        "echo 'fatal: cannot lock ref refs/heads/main' >&2; "
+        f"{_THREE_LONG_LINES}; sleep 30")
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    async def go() -> dict:
+        with anyio.fail_after(60):      # deadlock backstop only
+            raw = await get_registry()["bash"].async_invoke(ctx, {"command": "x"})
+            return json.loads(raw)
+
+    out = anyio.run(go)
+    assert out["returncode"] == 0       # cap-kill is a NORMAL result
+    assert "sandbox_note" not in out
+
+
+def test_bash_sandbox_note_fires_past_display_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 5: the note is derived from the FULL post-strip stderr. 40 KB of filler
+    # pushes the refusal past the 30 KB display cut, so the RETURNED stderr no
+    # longer carries it — the note must still fire.
+    _sandboxed_sh(
+        monkeypatch,
+        "python3 -c 'import sys; sys.stderr.write((\"E\" * 99 + chr(10)) * 400)'; "
+        "echo 'fatal: cannot lock ref refs/heads/main: Read-only file system' >&2; "
+        "exit 128")
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(
+        ctx, {"command": "git update-ref refs/heads/main HEAD"}))
+    assert out["returncode"] == 128
+    assert "cannot lock ref" not in out["stderr"]   # cut by the 30 KB cap
+    assert "30 KB cap" in out["notice"]
+    assert out["sandbox_note"] == _SANDBOX_NOTE_TEXT
 
 
 def test_bash_reports_sandbox_spawn_failure_distinctly(
