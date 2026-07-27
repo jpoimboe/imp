@@ -70,10 +70,6 @@ def check_preconditions(root: Path) -> None:
         )
 
 
-def current_branch(root: Path) -> str:
-    return _git_ok(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
-
-
 def checked_out_branch(control_root: Path) -> str | None:
     """Branch HEAD symbolically points at; None on detached HEAD or unresolvable ref."""
     proc = _git(control_root, "symbolic-ref", "--short", "HEAD")

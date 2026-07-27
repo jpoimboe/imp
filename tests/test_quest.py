@@ -524,15 +524,13 @@ def test_load_reads_origin_and_seed_opening(tmp_path: Path) -> None:
 def test_set_origin_rewrites_quest_json(tmp_path: Path) -> None:
     import json as _json
 
-    from imp.engine import worktree
     from imp.engine.quest import Quest
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    base = worktree.current_branch(tmp_path)
     quest = Quest.create_draft(
         tmp_path, title="X", quest_id="2026-06-24-orig01",
-        base_branch=base, origin="draft")
+        base_branch="main", origin="draft")
     quest.set_origin("idea")
     assert quest.origin == "idea"
     meta = _json.loads((quest.quest_dir / "quest.json").read_text())
@@ -542,15 +540,13 @@ def test_set_origin_rewrites_quest_json(tmp_path: Path) -> None:
 def test_set_seed_opening_rewrites_quest_json(tmp_path: Path) -> None:
     import json as _json
 
-    from imp.engine import worktree
     from imp.engine.quest import Quest
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    base = worktree.current_branch(tmp_path)
     quest = Quest.create_draft(
         tmp_path, title="X", quest_id="2026-06-24-seed01",
-        base_branch=base, origin="draft")
+        base_branch="main", origin="draft")
 
     quest.set_seed_opening("add a --json flag")
     assert quest.seed_opening == "add a --json flag"
@@ -567,15 +563,13 @@ def test_set_seed_opening_rewrites_quest_json(tmp_path: Path) -> None:
 def test_set_depends_on_rewrites_quest_json(tmp_path: Path) -> None:
     import json as _json
 
-    from imp.engine import worktree
     from imp.engine.quest import Quest
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    base = worktree.current_branch(tmp_path)
     quest = Quest.create_draft(
         tmp_path, title="X", quest_id="2026-06-24-deps01",
-        base_branch=base, origin="draft")
+        base_branch="main", origin="draft")
     quest.set_depends_on(["a", "b"])
     meta = _json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["depends_on"] == ["a", "b"]
