@@ -757,3 +757,54 @@ def test_head_detached_false_on_an_unborn_branch(tmp_path: Path) -> None:
 def test_head_detached_false_outside_a_repo(tmp_path: Path) -> None:
     assert wt.head_detached(tmp_path) is False
 
+
+def test_create_and_teardown_from_detached_control_root(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    (tmp_path / "second.txt").write_text("second\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "second")
+    _git(tmp_path, "checkout", "-q", "--detach", "HEAD~1")
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    # main is ahead of the detached HEAD; assert the worktree forks from main, not HEAD
+    main_sha = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    path = wt.create_worktree(tmp_path, "feat", "main")
+    assert _git(path, "rev-parse", "HEAD").stdout.strip() == main_sha
+    assert (path / "second.txt").exists()
+
+    wt.remove_worktree(tmp_path, "feat")
+    wt.delete_branch(tmp_path, "feat")
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+    assert _git(tmp_path, "rev-parse", "--verify", "imp/feat").returncode != 0
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert wt.checked_out_branch(tmp_path) is None
+
+
+def test_create_and_teardown_mid_rebase_control_root_stays_resumable(
+        tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("a\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit A")
+    (tmp_path / "b.txt").write_text("b\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "user commit B")
+    env = _stop_at_rebase_edit(tmp_path)
+    head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    main_sha = _git(tmp_path, "rev-parse", "main").stdout.strip()
+
+    path = wt.create_worktree(tmp_path, "feat", "main")
+    assert _git(path, "rev-parse", "HEAD").stdout.strip() == main_sha
+    wt.remove_worktree(tmp_path, "feat")
+    wt.delete_branch(tmp_path, "feat")
+
+    assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert (tmp_path / ".git" / "rebase-merge").is_dir()  # rebase state intact
+
+    resumed = subprocess.run(
+        ["git", "rebase", "--continue"], cwd=tmp_path,
+        env=env, capture_output=True, text=True)
+    assert resumed.returncode == 0, resumed.stderr
+    assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
+        "user commit B", "user commit A", "seed"]
+
