@@ -2409,7 +2409,7 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
     t.append(dispatch)
 
     # The store has ACCUMULATED from prior respawns: two stale copies of the
-    # dispatch. The truncating reconcile must empty it (no session to resume).
+    # dispatch. The whole-body overwrite must empty it (no session to resume).
     await store.append(skey, message_to_session_records(
         [dispatch, dispatch], session_id=skey["session_id"],
         cwd=str(tmp_path), model="claude-sonnet-4-5"))
@@ -2430,7 +2430,7 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
     # Fresh-stream disposition: no resume= handed to claude-p (unlike the native
     # elif branch, which sets resume=resume_session_id(aid)).
     assert opts.resume is None
-    # The truncating reconcile emptied the accumulated store — nothing to resume.
+    # The whole-body overwrite emptied the accumulated store — nothing to resume.
     assert await store.load(skey) is None
     # The full history streams ONCE as the fresh delta (one copy of the dispatch).
     streamed = created[0].queries[0]
@@ -2533,7 +2533,7 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
     for m in msgs:
         t.append(m)
     # Flushed at the prior result boundary: the first two turns. The rest is the
-    # unflushed tail reconcile must synthesize in.
+    # unflushed tail the projection rebuild writes in.
     await store.append(skey, message_to_session_records(
         msgs[:2], session_id=skey["session_id"],
         cwd=str(tmp_path), model="claude-sonnet-4-5"))
@@ -2563,7 +2563,7 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
     assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
     # The flushed prefix (through the dangling t1 turn) stays in the native
-    # session; only the interrupt marker is streamed, not reconciled in.
+    # session; only the interrupt marker is streamed, not written to the store.
     reconciled = await store.load(skey)
     assert len(reconciled) == 4
 
@@ -2690,8 +2690,8 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     # The synth tool_result turn was injected (4 original + 1 synth user turn +
     # 1 new assistant turn = 6).
     assert len(t.load()) == 6
-    # The dangling t1 turn stays in the native session as the trailing reconciled
-    # entry; the synth result is streamed, not reconciled in.
+    # The dangling t1 turn stays in the native session as the trailing projected
+    # record; the synth result is streamed, not written to the store.
     reconciled = await store.load(skey)
     assert len(reconciled) == 4
     assert reconciled[-1]["message"]["content"][0] == {
@@ -3206,7 +3206,7 @@ async def test_second_interrupt_during_steer_skips_requery(
 
 
 @pytest.mark.anyio
-async def test_native_resume_reconcile_idempotent_when_complete(tmp_path: Path) -> None:
+async def test_native_resume_rebuild_drops_a_stale_error_record(tmp_path: Path) -> None:
     from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import (
         message_to_session_records,
@@ -3226,7 +3226,7 @@ async def test_native_resume_reconcile_idempotent_when_complete(tmp_path: Path) 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     for m in msgs:
         t.append(m)
-    # Store is complete but carries a stale trailing error turn reconcile must strip.
+    # Store is complete but carries a stale trailing error record the rebuild must drop.
     full = message_to_session_records(
         msgs, session_id=skey["session_id"],
         cwd=str(tmp_path), model="claude-sonnet-4-5")
@@ -3241,14 +3241,14 @@ async def test_native_resume_reconcile_idempotent_when_complete(tmp_path: Path) 
         user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
 
-    # Reconcile-and-overwrite ran but changed nothing: same uuids, no duplication.
+    # The projection overwrite rewrote the body: same uuids, stale record gone, no duplication.
     reconciled = await store.load(skey)
     assert [r["uuid"] for r in reconciled] == [r["uuid"] for r in full]
     assert len(reconciled) == 2
 
 
 @pytest.mark.anyio
-async def test_native_resume_reconciles_partial_store(tmp_path: Path) -> None:
+async def test_native_resume_rebuilds_a_partial_store(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import (
@@ -3286,7 +3286,7 @@ async def test_native_resume_reconciles_partial_store(tmp_path: Path) -> None:
         user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
 
-    # The three trailing turns missing from the store were synthesized in; the
+    # The projection rewrote all four prefix turns over the single seeded one; the
     # streamed reply turn is NOT stored (it rides messages[resume_base:]).
     reconciled = await store.load(skey)
     assert len(reconciled) == 4
@@ -3433,8 +3433,8 @@ async def test_complete_step_tail_native_resumes_with_store_body(
 @pytest.mark.anyio
 async def test_drifted_store_native_resumes(tmp_path: Path) -> None:
     """A store body drifted AHEAD of the transcript (a mid-turn kill flushed a
-    partial post-kill turn imp never recorded) now reconciles by dropping that
-    stalled turn and NATIVE-resumes — it no longer falls back to stream-json
+    partial post-kill turn imp never recorded) is replaced by the transcript
+    projection and NATIVE-resumes — it no longer falls back to stream-json
     replay."""
     from imp.providers.claude_code_session_store import session_key, session_store_for
 
@@ -3442,7 +3442,7 @@ async def test_drifted_store_native_resumes(tmp_path: Path) -> None:
     inv = _seed_complete_step_resume(
         tmp_path, retry_feedback="REVISE: rewrite plan.md", log=log)
     # Seed a store body with MORE turns (4) than the transcript (2 msgs): the
-    # store-ahead drift this change makes reconcilable.
+    # store-ahead drift the projection overwrite simply replaces.
     store = session_store_for(inv.transcript_dir)
     body = [
         {"type": "user" if i % 2 == 0 else "assistant", "uuid": f"d{i}",
@@ -3463,7 +3463,7 @@ async def test_drifted_store_native_resumes(tmp_path: Path) -> None:
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    # Native disposition: claude-p loads its own reconciled session.
+    # Native disposition: claude-p loads the rebuilt session.
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
     assert opts.session_store is not None

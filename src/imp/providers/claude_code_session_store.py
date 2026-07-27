@@ -89,9 +89,9 @@ class ImpSessionStore:
         self, key: Mapping[str, Any], entries: list[dict[str, Any]],
     ) -> None:
         """Replace the key's file with `entries`, truncating. Unlike append (which
-        only dedups-and-adds), this drops entries no longer present — required when
-        reconcile strips a trailing synthetic error turn whose deterministic uuid
-        the real replacement tail reuses, which append's uuid dedup would drop."""
+        only dedups-and-adds), this drops entries no longer present — the resumed
+        body is a whole-transcript projection, so a record the CLI wrote must not
+        survive under a uuid the projection reuses."""
         path = self._path(key)
         if not entries:
             path.unlink(missing_ok=True)
@@ -161,7 +161,7 @@ _RECORD_UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session
 
 
 def _record_uuid(session_id: str, index: int) -> str:
-    """Deterministic uuid (session_id + turn index) so reconcile re-runs dedup idempotently."""
+    """Deterministic uuid (session_id + turn index) so a rebuilt body keeps stable record ids."""
     return str(uuid.uuid5(_RECORD_UUID_NAMESPACE, f"{session_id}:{index}"))
 
 

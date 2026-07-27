@@ -99,7 +99,7 @@ def test_compaction_removes_the_native_store_when_present(tmp_path: Path) -> Non
 
     compact_transcript(tmp_path)
 
-    # Deleted, so the next native resume reconciles from the slimmed transcript.
+    # Deleted, so the next native resume rebuilds from the slimmed transcript.
     assert not (tmp_path / "claude_session").exists()
 
 

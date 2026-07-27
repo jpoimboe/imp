@@ -345,7 +345,8 @@ def test_clear_removes_the_entire_store_tree(tmp_path: Path) -> None:
     store.clear()
 
     assert not (tmp_path / "claude_session").exists()
-    # An absent store body reads back as None, which the resume rebuilds from scratch.
+    # An absent store body reads back as None; the next native resume just writes
+    # the transcript projection over it.
     assert anyio.run(store.load, key) is None
 
 
