@@ -28,8 +28,10 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
    dialogue with `imp log {{ quest.id }} --step threshold` — the human-and-agent
    brainstorm prose (tool noise elided), the provenance record of what was
    decided, not current state.
-3. Evaluate against the checks below.
-4. Produce a severity-classified findings report and call `complete_step`.
+3. This is review lap {{ step.lap }}.{% if step.prior_laps %} Prior laps ended — {% for l in step.prior_laps %}{{ l.lap }}: {{ l.outcome }}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %} Outcomes only, not prior findings: judge the spec yourself, and use the laps only to notice an area that keeps returning.
+4. Read `{{ quest.home }}/artifacts/spike/` if it exists — empirical evidence a spiker captured. A recorded result is settled fact: don't re-derive it, don't flag a claim it supports.
+5. Evaluate against the checks below.
+6. Produce a severity-classified findings report and call `complete_step`.
 
 ## How to Review
 
@@ -107,6 +109,8 @@ The Decisions summary may carry review markers — "*(decided during review)*" a
 "*(user-confirmed during review)*". These are an **expected** part of the spec's
 format (the audit trail of decisions made during review), **not** placeholder or
 meta-commentary defects — do not flag them.
+
+An area that returns lap after lap means the design is unsettled, not the spec under-written: say so in `findings` — another Major buys another lap, not a decision — and don't manufacture minors to justify one more pass; on such a review `has_minor_findings = false` is the honest answer.
 
 ## Output
 

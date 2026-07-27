@@ -529,3 +529,73 @@ def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
     # Sanity: the autonomy-guarded section IS stripped in the same render, so a
     # surviving heading genuinely proves the new section is unwrapped.
     assert "## Keep discovered work here by default" not in rendered
+
+
+_CALIBRATION_SENTENCE = (
+    "An area that returns lap after lap means the design is unsettled, not the spec "
+    "under-written: say so in `findings` — another Major buys another lap, not a "
+    "decision — and don't manufacture minors to justify one more pass; on such a "
+    "review `has_minor_findings = false` is the honest answer."
+)
+
+
+def _render_spec_reviewer(tmp_path, prior_laps=None) -> str:
+    log = JsonlEventLog(tmp_path / "spec-reviewer-events.jsonl")
+    return render_prompt(
+        _agent_prompt("spec-reviewer"),
+        build_context(
+            quest_title="t", event_log=log, quest_id="abc",
+            quest_home=".imp/quests/abc",
+            vars={"fast_path": False, "task_total": 0},
+            prior_laps=prior_laps,
+        ),
+        workflow_dir=bundled_workflow_dir("default"),
+    )
+
+
+def test_spec_reviewer_first_lap_names_lap_one_and_omits_history(tmp_path) -> None:
+    out = _render_spec_reviewer(tmp_path)
+    assert "This is review lap 1." in out
+    assert "Prior laps ended" not in out          # no clause, no empty-list artifact
+    assert "This is review lap ." not in out
+
+
+def test_spec_reviewer_later_lap_lists_outcomes_and_no_findings(tmp_path) -> None:
+    out = _render_spec_reviewer(tmp_path, prior_laps=[
+        {"lap": 1, "outcome": "reworked", "head": "aaa1111",
+         "findings": "MUST-NOT-LEAK"},
+        {"lap": 2, "outcome": "minors integrated", "head": "bbb2222"},
+    ])
+    assert "This is review lap 3." in out
+    assert "Prior laps ended — 1: reworked; 2: minors integrated." in out
+    assert "MUST-NOT-LEAK" not in out
+
+
+def test_spec_reviewer_reads_the_quest_spike_dir(tmp_path) -> None:
+    out = _render_spec_reviewer(tmp_path)
+    assert ".imp/quests/abc/artifacts/spike/" in out
+    assert "{{ quest.home }}" not in out
+
+
+def test_spec_reviewer_calibration_carries_the_unsettled_design_sentence() -> None:
+    body = _agent_prompt("spec-reviewer")
+    assert _CALIBRATION_SENTENCE in body
+    assert body.index("## Calibration") < body.index(_CALIBRATION_SENTENCE)
+    assert body.index(_CALIBRATION_SENTENCE) < body.index("## Output")
+
+
+def test_spec_reviewer_output_schema_stays_the_four_fields() -> None:
+    wf = load_workflow(bundled_workflow_dir("default"))
+    fields = wf.agents["spec-reviewer"].output_schema.fields
+    assert [f.name for f in fields] == [
+        "status", "findings", "blocking", "has_minor_findings"]
+    text = (bundled_workflow_dir("default")
+            / "agents" / "spec-reviewer.md").read_text()
+    assert (
+        "output:\n"
+        "  status: {type: enum, values: [Success, Error]}\n"
+        "  findings: {type: string}\n"
+        "  blocking: {type: bool}\n"
+        "  has_minor_findings: {type: bool}\n"
+        "---\n"
+    ) in text
