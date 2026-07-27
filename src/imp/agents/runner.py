@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from imp.agents.transcript import SkillReply
 
 from imp.engine.env import TestGates
-from imp.engine.types import AgentDef
+from imp.engine.types import AgentDef, ResumeCause
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +199,8 @@ class AgentInvocation:
     # by the executor from State.resume_should_continue) rather than solicit
     # an empty reply and park.
     resume_should_continue: bool = False
+    # Why the continuation is happening: a provider retry is not a human pause.
+    resume_cause: ResumeCause = "human"
     # tier name → ProviderModel, the run's tier map. Threaded by the executor
     # into every AgentInvocation; copied onto ToolContext so dispatch_task can
     # place a subagent on its tier's resolved provider. Typed Any to avoid

@@ -1590,7 +1590,7 @@ async def _route_agent(
                 return pause, None, {}
         backoff += 1
         # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
-        state.arm_step_resume(should_continue=True)
+        state.arm_step_resume(should_continue=True, cause="provider_retry")
         state.save(quest.state_dir)
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
@@ -1600,6 +1600,8 @@ async def _route_agent(
             "attempt": backoff,
             "backoff_seconds": result.delay,
         }
+        if result.error is not None and result.error.message:
+            retry_payload["message"] = result.error.message
         if hinted:
             retry_payload["hinted"] = True
         _emit(log, "agent_retry", retry_payload, agent_id=None)
@@ -1894,6 +1896,7 @@ async def _run_agent_invocation(
         resume_should_continue=(
             state.resume_pending == state.step
             and state.resume_should_continue),
+        resume_cause=state.resume_cause,
         log=log,
         test_gates=test_gates,
         pythonpath=pythonpath,

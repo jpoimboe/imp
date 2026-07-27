@@ -1557,6 +1557,40 @@ def test_build_agent_invocation_resume_should_continue_defaults_false(
     assert inv.resume_should_continue is False
 
 
+def test_build_agent_invocation_threads_resume_cause(tmp_path: Path) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        resume_should_continue=True, resume_cause="provider_retry")
+
+    assert inv.resume_cause == "provider_retry"
+
+
+def test_build_agent_invocation_resume_cause_defaults_to_human(tmp_path: Path) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        resume_should_continue=True)
+
+    assert inv.resume_cause == "human"
+
+
 class _OneInterjectCoord:
     """Drains exactly one queued interject, then empties. No watchdog needed:
     the interject branch returns before any solicit."""
@@ -1588,6 +1622,7 @@ async def test_resolve_wait_reply_interject_wins_over_interrupt_flag() -> None:
 @pytest.mark.anyio
 async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() -> None:
     import imp.engine.agent_run as ar
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()  # drains no interjects
     log = InMemoryEventLog()
@@ -1597,7 +1632,7 @@ async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() ->
 
     reply, source = await ar._resolve_wait_reply(
         coord, _ainput, True, elog=log, agent_id="step:p/s")
-    assert reply == ar._CONTINUATION_NUDGE
+    assert reply == RESUME_CONTINUE_NUDGE
     assert source == "nudge"
     assert "complete_step" in reply
     assert coord.events == []  # never entered the solicit watchdog bracket
@@ -1802,6 +1837,7 @@ async def test_resolve_wait_reply_pending_reply_wins_over_nudge() -> None:
 @pytest.mark.anyio
 async def test_resolve_wait_reply_pending_reply_none_still_nudges() -> None:
     import imp.engine.agent_run as ar
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()
     log = InMemoryEventLog()
@@ -1812,7 +1848,7 @@ async def test_resolve_wait_reply_pending_reply_none_still_nudges() -> None:
     reply, source = await ar._resolve_wait_reply(
         coord, _ainput, True, elog=log, agent_id="step:p/s",
         pending_reply=None)
-    assert (reply, source) == (ar._CONTINUATION_NUDGE, "nudge")
+    assert (reply, source) == (RESUME_CONTINUE_NUDGE, "nudge")
     assert "awaiting_user_input" not in [e["type"] for e in log.read()]
 
 
@@ -1938,3 +1974,67 @@ def test_build_agent_invocation_halt_clearer_none_without_state(
         resolved_tiers=None, coordinator=None)
 
     assert inv.halt_clearer is None
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_retry_cause_returns_the_retry_note() -> None:
+    import imp.engine.agent_run as ar
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
+    from imp.engine.state import InMemoryEventLog
+    coord = _RecordingCoord()
+    log = InMemoryEventLog()
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when resume_should_continue")
+
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, True, elog=log, agent_id="step:p/s",
+        resume_cause="provider_retry")
+    assert (reply, source) == (RESUME_RETRY_NUDGE, "nudge")
+    assert reply != RESUME_CONTINUE_NUDGE
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
+
+
+@pytest.mark.anyio
+async def test_error_info_message_is_the_first_line_of_the_agents_prose(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "auth", "kind": "http_401", "message": "claude CLI: 401",
+        "detail": {"last_agent_text": "Failed to authenticate. API Error: 401\nmore prose"}}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.error is not None
+    assert res.error.message == "Failed to authenticate. API Error: 401"
+
+
+@pytest.mark.anyio
+async def test_error_info_message_falls_back_to_the_payload_message(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "network", "kind": "network", "message": "claude CLI: EOF",
+        "detail": {}}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.error is not None and res.error.message == "claude CLI: EOF"
+
+
+@pytest.mark.anyio
+async def test_error_info_message_is_absent_when_the_payload_carries_none(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "network", "kind": "network"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.error is not None and res.error.message is None

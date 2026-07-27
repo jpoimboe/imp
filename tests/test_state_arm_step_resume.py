@@ -33,3 +33,30 @@ def test_clear_step_resume_clears_both() -> None:
     s.clear_step_resume()
     assert s.resume_pending is None
     assert s.resume_should_continue is False
+
+
+def test_arm_defaults_the_cause_to_human() -> None:
+    s = _state("plan")
+    s.arm_step_resume(should_continue=True)
+    assert s.resume_cause == "human"
+
+
+def test_arm_carries_the_provider_retry_cause() -> None:
+    s = _state("plan")
+    s.arm_step_resume(should_continue=True, cause="provider_retry")
+    assert s.resume_cause == "provider_retry"
+
+
+def test_a_later_arm_resets_the_cause_to_human() -> None:
+    """A cause armed for one backoff retry must not survive into a human pause."""
+    s = _state("plan")
+    s.arm_step_resume(should_continue=True, cause="provider_retry")
+    s.arm_step_resume(should_continue=False)
+    assert s.resume_cause == "human"
+
+
+def test_clear_step_resume_clears_the_cause() -> None:
+    s = _state("plan")
+    s.arm_step_resume(should_continue=True, cause="provider_retry")
+    s.clear_step_resume()
+    assert s.resume_cause == "human"

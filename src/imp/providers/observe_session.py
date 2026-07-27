@@ -123,7 +123,7 @@ class ObserveSession:
                         self.guard.observe(rec)
                     yield EndOfTurn(last_text=self._last_text())
                     return
-                err = self._terminal_error(self._last_text())
+                err = self._terminal_error(self._trailing_text())
                 if err is not None:
                     yield Error(payload=err)
                     return
@@ -198,6 +198,8 @@ class ObserveSession:
     def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
         raise NotImplementedError
     def _last_text(self) -> str: raise NotImplementedError
+    # Error-path text: the trailing message only, never an earlier turn's prose.
+    def _trailing_text(self) -> str: raise NotImplementedError
     def _requery(self, text: Any, *, human: bool) -> None: raise NotImplementedError
     def _drain_interject(self) -> None: raise NotImplementedError
     def _reset_capture(self) -> None: raise NotImplementedError

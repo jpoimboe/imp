@@ -13,6 +13,11 @@ from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude_code import ClaudeCodeAgentRunner, _roll_back_error_turn
+from imp.providers.claude_code_session_store import (
+    resume_session_id,
+    session_key,
+    session_store_for,
+)
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
 
@@ -161,6 +166,8 @@ async def test_classified_text_branch_rolls_back(tmp_path: Path) -> None:
     errs = [e for e in events if e["type"] == "error"]
     assert len(errs) == 1, events
     assert errs[0]["payload"]["category"] == "auth"
+    assert errs[0]["payload"]["detail"]["last_agent_text"] == (
+        "Invalid authentication credentials")
 
     loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
     assert [m.role for m in loaded] == ["user"]
@@ -231,3 +238,166 @@ async def test_auth_fails_then_recovers_on_redrive(tmp_path: Path) -> None:
     # The bug's signature must be absent across the whole recovery.
     log_types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" not in log_types
+
+
+_TRAILING_AUTH_PROSE = (
+    "Failed to authenticate. API Error: 401 OAuth access token has been revoked")
+
+
+def _seed_three_turn_transcript(inv: AgentInvocation, design_text: str) -> Transcript:
+    """Persist the mada48 shape: [user, assistant DESIGN, user reply]."""
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in (
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text=design_text),)),
+        Message(role="user", content=(TextBlock(text="looks good, proceed"),)),
+    ):
+        t.append(m)
+    return t
+
+
+def test_roll_back_keeps_history_when_the_trailing_turn_is_a_user_turn(
+    tmp_path: Path,
+) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    messages = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="DESIGN: here is the plan"),)),
+        Message(role="user", content=(TextBlock(text="looks good, proceed"),)),
+    ]
+    for m in messages:
+        t.append(m)
+
+    _roll_back_error_turn(messages, t)
+
+    # No synthetic error turn exists, so nothing is deleted — in memory...
+    assert [m.role for m in messages] == ["user", "assistant", "user"]
+    design = messages[1].content[0]
+    assert isinstance(design, TextBlock)
+    assert design.text == "DESIGN: here is the plan"
+    # ...and on disk.
+    loaded = t.load()
+    assert [m.role for m in loaded] == ["user", "assistant", "user"]
+    loaded_design = loaded[1].content[0]
+    assert isinstance(loaded_design, TextBlock)
+    assert loaded_design.text == "DESIGN: here is the plan"
+
+
+@pytest.mark.anyio
+async def test_bare_error_turn_keeps_history_and_labels_terminated(
+    tmp_path: Path,
+) -> None:
+    """A failing turn with no trailing assistant message: nothing is deleted, and
+    the category comes from THIS turn's (absent) prose, not the stale auth turn."""
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+    t = _seed_three_turn_transcript(inv, f"DESIGN: {_TRAILING_AUTH_PROSE}")
+
+    scripted = [result(is_error=True)]
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=scripted))
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, events
+    assert errs[0]["payload"]["category"] == "terminated"
+    assert errs[0]["payload"]["detail"]["last_agent_text"] == ""
+
+    loaded = t.load()
+    assert [m.role for m in loaded] == ["user", "assistant", "user"]
+    design = loaded[1].content[0]
+    assert isinstance(design, TextBlock)
+    assert design.text == f"DESIGN: {_TRAILING_AUTH_PROSE}"
+
+
+@pytest.mark.anyio
+async def test_bare_error_turn_keeps_the_retry_warm(tmp_path: Path) -> None:
+    """The surviving assistant turn keeps resume_base > 0, so the retry is a native
+    resume and the session store is never emptied into an unlink."""
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+    _seed_three_turn_transcript(inv, "DESIGN: here is the plan")
+    store = session_store_for(inv.transcript_dir)
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
+
+    failing = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(
+            o, scripted_messages=[result(is_error=True)]))
+    [ev async for ev in failing.run(inv)]
+
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=[
+            assistant(text("ok"),
+                      tool_use("c1", "complete_step", {"status": "Success"})),
+            result(),
+        ])
+        created.append(c)
+        return c
+
+    retry = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    ev2 = [ev async for ev in retry.run(inv)]
+
+    opts = created[0].opts
+    # Native warm resume, NOT the fresh-stream respawn that resume_base == 0 picks.
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_id is None
+
+    # The store survives with the delivered assistant turn in it.
+    body = await store.load(skey)
+    assert body is not None
+    assert [r["message"]["role"] for r in body] == ["user", "assistant"]
+
+    # Only the unfolded tail streams as the delta — history is not replayed.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1
+    assert streamed[0]["message"]["content"] == "looks good, proceed"
+
+    assert ev2[-1]["type"] == "agent_result", ev2
+    assert ev2[-1]["payload"]["status"] == "Success"
+
+
+@pytest.mark.anyio
+async def test_repeated_trailing_failures_remove_only_their_own_error_turn(
+    tmp_path: Path,
+) -> None:
+    """N consecutive failures WITH trailing prose still delete exactly the turn each
+    produced: the delivered design turn survives every lap and keeps reaching the
+    model as role=assistant."""
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+    t = _seed_three_turn_transcript(inv, "DESIGN: here is the plan")
+    store = session_store_for(inv.transcript_dir)
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
+
+    for lap in range(3):
+        runner = ClaudeCodeAgentRunner(
+            model_name="claude-sonnet-4-5",
+            client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=[
+                assistant(text(_TRAILING_AUTH_PROSE)),
+                result(is_error=True),
+            ]))
+        events = [ev async for ev in runner.run(inv)]
+
+        errs = [e for e in events if e["type"] == "error"]
+        assert len(errs) == 1, (lap, events)
+        # Anchored trailing prose still labels the turn off that prose.
+        assert errs[0]["payload"]["category"] == "auth", lap
+        assert errs[0]["payload"]["detail"]["last_agent_text"] == (
+            _TRAILING_AUTH_PROSE), lap
+
+        loaded = t.load()
+        assert [m.role for m in loaded] == ["user", "assistant", "user"], lap
+        design = loaded[1].content[0]
+        assert isinstance(design, TextBlock)
+        assert design.text == "DESIGN: here is the plan", lap
+
+        body = await store.load(skey)
+        assert body is not None, lap
+        assert [r["message"]["role"] for r in body] == ["user", "assistant"], lap

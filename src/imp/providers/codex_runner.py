@@ -44,7 +44,7 @@ from imp.agents.tools.context import (
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import deliver_continuation_reply
-from imp.engine.agent_run import _resolve_wait_reply
+from imp.engine.agent_run import _resolve_wait_reply, continuation_nudge
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.env import quest_scratch_root
 from imp.engine.state import JsonlEventLog
@@ -69,7 +69,10 @@ from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
 )
-from imp.providers.observe_classify import _classify_agent_text
+from imp.providers.observe_classify import (
+    _classify_agent_text,
+    classifies_as_provider_error,
+)
 from imp.providers.observe_session import ObserveSession
 from imp.providers.stderr_sink import current_stderr_sink
 from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
@@ -491,7 +494,9 @@ class CodexSession(ObserveSession):
                 reply, source = await _resolve_wait_reply(
                     invocation.coordinator, invocation.user_input_fn,
                     invocation.resume_should_continue,
-                    elog=elog, agent_id=aid, pending_reply=pending,
+                    elog=elog, agent_id=aid,
+                    resume_cause=invocation.resume_cause,
+                    pending_reply=pending,
                     last_agent_message=last_agent_text,
                     halt_writer=invocation.halt_writer,
                     halt_clearer=invocation.halt_clearer)
@@ -514,11 +519,10 @@ class CodexSession(ObserveSession):
                         None, None, elog, aid, reply, human=True)
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
                 # Replay-and-continue: nudge is the resumed prompt; journal for audit.
-                from imp.agents.transcript import RESUME_CONTINUE_NUDGE
-                nudge_msg = Message(
-                    role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
+                nudge = continuation_nudge(invocation.resume_cause)
+                nudge_msg = Message(role="user", content=(TextBlock(text=nudge),))
                 elog.append_engine_message(agent_id=aid, message=nudge_msg, subtype="continuation")
-                next_prompt = RESUME_CONTINUE_NUDGE
+                next_prompt = nudge
         # §2 resume-entry drain: fold pending interject texts into the first
         # resumed prompt (codex re-prompts with a string). AWAITING_USER already
         # folded the reply above, so skip it here. Only runs on resume
@@ -724,12 +728,17 @@ class CodexSession(ObserveSession):
     def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
         classified = _classify_agent_text(last_text)
         if classified is not None:
+            classified.detail["last_agent_text"] = last_text[:500]
             return cast(dict[str, Any], perr.make_error_event(
                 classified, kind=getattr(classified, "kind", ""))["payload"])
         return None
 
     def _last_text(self) -> str:
         return self._proc_state.get("last_agent_text", "") or ""
+
+    def _trailing_text(self) -> str:
+        # The capture is already per-turn: _reset_capture clears it each turn.
+        return self._last_text()
 
     def subagent_deliverable(self) -> str:
         return self._last_text()
@@ -1116,7 +1125,8 @@ def _flush_codex_prose(
     elog.append_agent_message(
         agent_id=agent_id, provider=provider, model=model,
         raw={"content": [{"type": "text", "text": t} for t in parts]},
-        usage={}, stop_reason=None, auth_mode=state.get("auth_mode"))
+        usage={}, stop_reason=None, auth_mode=state.get("auth_mode"),
+        provider_error=classifies_as_provider_error(parts[-1]))
     state["turn_had_llm"] = True
 
 
@@ -1219,6 +1229,10 @@ def process_event(
             # text-only prose). tool_use lives only in the standalone tool_call
             # events, so a turn's prose can lead its tool_calls.
             if text:
+                # Split at the classifying boundary so error prose gets its own node.
+                if classifies_as_provider_error(text) and state.get("prose_buffer"):
+                    _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
+                                       model=model, state=state)
                 state.setdefault("prose_buffer", []).append(text)
             return
         if itype == "mcp_tool_call":

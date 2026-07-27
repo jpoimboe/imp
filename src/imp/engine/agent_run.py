@@ -39,7 +39,7 @@ from imp.agents.tools.limits import (
     PROCESS_KILL_GRACE_S,
     PROVIDER_REQUEST_SILENCE_CEILING_S,
 )
-from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
 from imp.assets import engine_prompt
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
@@ -53,7 +53,7 @@ from imp.engine.completion import (
     build_inline_solicit as build_inline_solicit,
 )
 from imp.engine.env import TestGates
-from imp.engine.types import AgentDef, OutputField
+from imp.engine.types import AgentDef, OutputField, ResumeCause
 
 if TYPE_CHECKING:
     from imp.agents.transcript import SkillReply
@@ -107,11 +107,19 @@ _USER_FACING_NOTE = engine_prompt("user-facing.md")
 
 @dataclass(frozen=True)
 class ErrorInfo:
-    """The classified error that drove a fatal/backoff/retry decision, plumbed
-    out of drive_invocation so the caller can record it on Pause and on the
-    agent_retry event. None on the success path."""
+    """Classified error plumbed out of drive_invocation for Pause and agent_retry recording."""
     category: str
     kind: str | None
+    message: str | None = None
+
+
+def _breadcrumb_message(payload: dict[str, Any]) -> str | None:
+    """The provider's own first line of prose, else its error message."""
+    detail = payload.get("detail")
+    text = str((detail or {}).get("last_agent_text") or "").strip()
+    if not text:
+        text = str(payload.get("message") or "").strip()
+    return text.split("\n", 1)[0].strip() or None
 
 
 @dataclass(frozen=True)
@@ -320,7 +328,9 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-_CONTINUATION_NUDGE = RESUME_CONTINUE_NUDGE
+def continuation_nudge(cause: ResumeCause) -> str:
+    """The resume-continuation copy for `cause`: a provider retry is not a pause."""
+    return RESUME_RETRY_NUDGE if cause == "provider_retry" else RESUME_CONTINUE_NUDGE
 
 
 async def _resolve_wait_reply(
@@ -330,6 +340,7 @@ async def _resolve_wait_reply(
     *,
     elog: Any,
     agent_id: str,
+    resume_cause: ResumeCause = "human",
     pending_reply: str | None = None,
     last_agent_message: str = "",
     halt_writer: Callable[[], None] | None = None,
@@ -346,7 +357,8 @@ async def _resolve_wait_reply(
        retry, which must supersede the continuation nudge. Only codex passes
        this; the message-list providers surface their pending tail via
        messages[-1] and leave it None.
-    3. else if resume_should_continue → return the continuation nudge as ('nudge')
+    3. else if resume_should_continue → return the continuation nudge for
+       resume_cause as ('nudge')
        so a headless resume continues the step instead of soliciting.
     4. else → emit the sole awaiting_user_input gate and solicit empty via
        user_input_fn (a genuine yield → park), returning ('solicited').
@@ -365,7 +377,7 @@ async def _resolve_wait_reply(
     elif resume_should_continue:
         # Internal continuation, not a human reply: a fresh-process resume already
         # cleared halt on entry, so leave the flag untouched.
-        return _CONTINUATION_NUDGE, "nudge"
+        return continuation_nudge(resume_cause), "nudge"
     else:
         if halt_writer is not None:
             halt_writer()
@@ -476,6 +488,7 @@ def build_agent_invocation(
     feedback_lead: str | None = None,
     balance_on_resume: bool = False,
     resume_should_continue: bool = False,
+    resume_cause: ResumeCause = "human",
     log: Any = None,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
@@ -593,6 +606,7 @@ def build_agent_invocation(
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
         resume_should_continue=resume_should_continue,
+        resume_cause=resume_cause,
         resolved_tiers=resolved_tiers,
         tiers=tiers,
         tier=tier,
@@ -715,6 +729,7 @@ async def drive_invocation(
                         if interrupting:
                             return AgentRunResult(None, False, True, False, None,
                                                   interrupt=True)
+                        message = _breadcrumb_message(payload)
                         retry_after = (payload.get("detail") or {}).get(
                             "retry_after_seconds")
                         decision = error_policy.decide(
@@ -722,15 +737,15 @@ async def drive_invocation(
                             hint_delay_seconds=retry_after)
                         if isinstance(decision, error_policy.Pause):
                             return AgentRunResult(None, True, False, True, None,
-                                                  ErrorInfo(category, kind))
+                                                  ErrorInfo(category, kind, message))
                         if isinstance(decision, error_policy.RetryWithBackoff):
                             return AgentRunResult(None, True, False, False,
                                                   decision.delay_seconds,
-                                                  ErrorInfo(category, kind),
+                                                  ErrorInfo(category, kind, message),
                                                   delay_hinted=decision.hinted)
                         # RetryNow (agent_output_missing today)
                         return AgentRunResult(None, True, False, False, None,
-                                              ErrorInfo(category, kind))
+                                              ErrorInfo(category, kind, message))
                     if coordinator is not None and coordinator.should_pause:
                         return AgentRunResult(None, False, True, False, None,
                                               interrupt=True)

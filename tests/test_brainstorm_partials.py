@@ -224,6 +224,20 @@ def test_brainstorm_dialogue_renders_seeded_vs_unseeded_branch() -> None:
     assert "Open by asking" in unseeded                # bare-open elicit branch
 
 
+def test_brainstorm_dialogue_carries_revise_dont_restate() -> None:
+    flat = " ".join((PARTIALS / "brainstorm-dialogue.md").read_text().split())
+    para = (
+        "**Revise, don't restate.** When the user corrects a design you have already "
+        "presented, present the delta — what changes and what it changes to. "
+        "Re-present a full surface inventory only for the parts the correction "
+        "actually moves."
+    )
+    assert para in flat
+    # Adjacent to the surface-inventory beat it qualifies, before the next beat.
+    assert flat.index("**Walk the whole surface.**") < flat.index(para)
+    assert flat.index(para) < flat.index("**Enumerated values are spec content.**")
+
+
 def test_delegate_exploration_carries_explorer_tier_discipline() -> None:
     text = (PARTIALS / "delegate-exploration.md").read_text()
     # The new tier-discipline paragraph, verbatim in its load-bearing parts.

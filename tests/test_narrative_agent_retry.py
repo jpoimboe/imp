@@ -110,3 +110,64 @@ def test_hinted_retry_with_missing_backoff_falls_through_to_plain_line() -> None
 
     assert "waiting for limit reset" not in out
     assert "[rate_limit] retry 1" in out
+
+
+def test_retry_breadcrumb_appends_the_provider_message() -> None:
+    from imp.cli.render_text import render_tree
+
+    tree = nv.build_tree([
+        {"id": "e1", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "auth", "attempt": 2, "backoff_seconds": 2.0,
+                     "message": "Failed to authenticate. API Error: 401"}},
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=120))
+
+    assert ("warning: [auth] retry 2 (2.0s) — "
+            "Failed to authenticate. API Error: 401") in out
+
+
+def test_long_retry_message_is_cut_to_159_plus_an_ellipsis() -> None:
+    tree = nv.build_tree([
+        {"id": "e1", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "auth", "attempt": 1, "backoff_seconds": 1.0,
+                     "message": "x" * 200}},
+    ])
+    node = next(c for c in tree.root.children if isinstance(c, nv.ErrorNode))
+    rendered_message = node.message.split(" — ", 1)[1]
+    assert rendered_message == "x" * 159 + "…"
+    assert len(rendered_message) == 160
+
+
+def test_retry_breadcrumb_without_a_message_is_unchanged() -> None:
+    from imp.cli.render_text import render_tree
+
+    tree = nv.build_tree([
+        {"id": "e1", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "stalled", "attempt": 2, "backoff_seconds": 4.0}},
+        {"id": "e2", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "network", "attempt": 1, "backoff_seconds": 1.0}},
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=120))
+
+    assert "warning: resuming — verifying prior work, not redoing it" in out
+    assert "warning: [network] retry 1 (1.0s)" in out
+    assert "—" not in out.split("[network]", 1)[1]
+
+
+def test_hinted_retry_breadcrumb_ignores_the_message() -> None:
+    from imp.cli.render_text import render_tree
+
+    tree = nv.build_tree([
+        {"id": "e1", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "rate_limit", "attempt": 2, "backoff_seconds": 1800.0,
+                     "hinted": True, "message": "claude CLI: usage limit reached"}},
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=120))
+
+    assert "[rate_limit] waiting for limit reset — retry 2 in 30m" in out
+    assert "claude CLI: usage limit reached" not in out

@@ -197,3 +197,8 @@ def _classify_agent_text(
         # it falls through to None (Pause) here.
         return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
+
+
+def classifies_as_provider_error(text: str) -> bool:
+    """Anchored classification as a predicate: is this prose provider chrome?"""
+    return _classify_agent_text(text) is not None

@@ -30,6 +30,7 @@ import filelock
 
 from imp.engine.errors import StateDecodeError
 from imp.engine.pagecache import drop_page_cache
+from imp.engine.types import ResumeCause
 
 Status = Literal[
     "new", "paused", "merge_blocked", "merged", "done", "shelved", "abandoned", "error"
@@ -171,6 +172,8 @@ class State:
     # resume_pending is set; armed and cleared with it via the two writers below,
     # so the pair can never tear (every read already guards on resume_pending).
     resume_should_continue: bool = False
+    # Transient: never persisted, and reset by every arming and clear.
+    resume_cause: ResumeCause = "human"
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
     project_facts: dict[str, str] | None = None
@@ -312,16 +315,19 @@ class State:
                 os.unlink(tmp_name)
             raise
 
-    def arm_step_resume(self, *, should_continue: bool) -> None:
-        """Sole arm writer for the (resume_pending, resume_should_continue) pair:
-        mark the current step resumable with an explicit continue disposition."""
+    def arm_step_resume(
+        self, *, should_continue: bool, cause: ResumeCause = "human",
+    ) -> None:
+        """Sole writer of the (pending, should_continue, cause) resume triple."""
         self.resume_pending = self.step
         self.resume_should_continue = should_continue
+        self.resume_cause = cause
 
     def clear_step_resume(self) -> None:
-        """Sole clear writer: drop the pair together so it can never tear."""
+        """Sole clear writer: drop the triple together so it can never tear."""
         self.resume_pending = None
         self.resume_should_continue = False
+        self.resume_cause = "human"
 
     def reincarnation_count(self, key: str) -> int:
         return self.reincarnations.get(key, 0)
@@ -410,6 +416,7 @@ class EventLog(Protocol):
                              model: str, raw: Any, usage: dict[str, Any],
                              stop_reason: Any,
                              auth_mode: str | None = None,
+                             provider_error: bool = False,
                              context_window: int | None = None,
                              context_pct: float | None = None,
                              context_tokens: int | None = None,
@@ -555,6 +562,7 @@ class _BaseEventLog:
                              model: str, raw: Any, usage: dict[str, Any],
                              stop_reason: Any,
                              auth_mode: str | None = None,
+                             provider_error: bool = False,
                              context_window: int | None = None,
                              context_pct: float | None = None,
                              context_tokens: int | None = None,
@@ -567,6 +575,8 @@ class _BaseEventLog:
         }
         if auth_mode is not None:
             payload["auth_mode"] = auth_mode
+        if provider_error:
+            payload["provider_error"] = True
         if context_window is not None:
             payload["context_window"] = context_window
         if context_pct is not None:

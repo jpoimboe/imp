@@ -82,6 +82,7 @@ from imp.agents.tools.context import (
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
+    RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
     Transcript,
     captured_result_key,
@@ -91,10 +92,10 @@ from imp.agents.transcript import (
     synthesize_native_success_on_resume,
 )
 from imp.engine.agent_run import (
-    _CONTINUATION_NUDGE,
     INTERRUPT_STEER_HINT,
     _resolve_wait_reply,
     build_inline_solicit,
+    continuation_nudge,
     drain_all_interjects_at_resume,
     last_assistant_text,
     most_recent_assistant_text,
@@ -115,7 +116,10 @@ from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
 )
-from imp.providers.observe_classify import _classify_agent_text
+from imp.providers.observe_classify import (
+    _classify_agent_text,
+    classifies_as_provider_error,
+)
 from imp.providers.observe_session import ObserveSession
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
@@ -230,11 +234,10 @@ def _termination_from_result(
 def _roll_back_error_turn(
     messages: list[Message], transcript: Transcript,
 ) -> None:
-    """Drop the trailing assistant error turn so a backoff re-drive re-queries."""
-    for i in range(len(messages) - 1, -1, -1):
-        if messages[i].role == "assistant":
-            del messages[i]
-            break
+    """Drop the trailing assistant error turn; an earlier one is delivered history."""
+    if not messages or messages[-1].role != "assistant":
+        return
+    del messages[-1]
     transcript.rewrite(messages)
 
 
@@ -1330,6 +1333,7 @@ class ClaudeCodeSession(ObserveSession):
                     invocation.coordinator, ctx.user_input_fn,
                     invocation.resume_should_continue,
                     elog=elog, agent_id=aid,
+                    resume_cause=invocation.resume_cause,
                     last_agent_message=last_assistant_text(messages),
                     halt_writer=invocation.halt_writer,
                     halt_clearer=invocation.halt_clearer)
@@ -1354,10 +1358,11 @@ class ClaudeCodeSession(ObserveSession):
                     and not pending_human_tail):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
-                    _CONTINUATION_NUDGE)
+                    continuation_nudge(invocation.resume_cause))
             if len(messages) == resume_base:
                 deliver_engine_continuation(
-                    messages, transcript, elog, aid, _CONTINUATION_NUDGE)
+                    messages, transcript, elog, aid,
+                    continuation_nudge(invocation.resume_cause))
         else:
             messages = []
             for m in invocation.initial_messages:
@@ -1402,6 +1407,7 @@ class ClaudeCodeSession(ObserveSession):
         self._llm_group_open = False
         self._llm_group_key: str | None = None
         self._llm_blocks: list[dict[str, Any]] = []
+        self._llm_tail_text: str = ""
         self._llm_model: str | None = None
         self._llm_stop_reason: Any = None
         self._llm_usage: dict[str, Any] = {}
@@ -1460,6 +1466,7 @@ class ClaudeCodeSession(ObserveSession):
                 raw={"content": self._llm_blocks, "stop_reason": stop,
                      "usage": usage},
                 usage=usage, stop_reason=stop,
+                provider_error=classifies_as_provider_error(self._llm_tail_text),
                 message_id=self._llm_group_key,
                 context_window=cu_fields.get("context_window"),
                 context_pct=cu_fields.get("context_pct"),
@@ -1467,6 +1474,7 @@ class ClaudeCodeSession(ObserveSession):
             self._llm_group_open = False
             self._llm_group_key = None
             self._llm_blocks = []
+            self._llm_tail_text = ""
             self._llm_model = None
             self._llm_stop_reason = None
             self._llm_usage = {}
@@ -1576,6 +1584,9 @@ class ClaudeCodeSession(ObserveSession):
                             and self._llm_group_key is not None
                             and mid != self._llm_group_key):
                         await self._flush_llm_group()
+                    # Split at the classifying boundary so error prose gets its own node.
+                    if classifies_as_provider_error(_text_of(imp_msg)) and self._llm_blocks:
+                        await self._flush_llm_group()
                     frag = _serialize_claude_code_message(raw)
                     if not self._llm_group_open:
                         self._llm_group_open = True
@@ -1583,6 +1594,7 @@ class ClaudeCodeSession(ObserveSession):
                     elif self._llm_group_key is None and mid is not None:
                         self._llm_group_key = mid
                     self._llm_blocks.extend(frag["content"])
+                    self._llm_tail_text = _text_of(imp_msg)
                     served = getattr(raw, "model", None)
                     if served is not None and self._llm_model is None:
                         self._llm_model = served
@@ -1796,8 +1808,8 @@ class ClaudeCodeSession(ObserveSession):
             if isinstance(reply, str) and not reply.strip():
                 deliver_engine_continuation(
                     self.messages, self.transcript, elog, aid,
-                    _CONTINUATION_NUDGE)
-                self._next_query = _CONTINUATION_NUDGE
+                    RESUME_CONTINUE_NUDGE)
+                self._next_query = RESUME_CONTINUE_NUDGE
             else:
                 self._next_query = deliver_continuation_reply(
                     self.messages, self.transcript, elog, aid, reply, human=True)
@@ -1846,6 +1858,12 @@ class ClaudeCodeSession(ObserveSession):
             if prev.role == "assistant":
                 return _text_of(prev)
         return ""
+
+    def _trailing_text(self) -> str:
+        last = self.messages[-1] if self.messages else None
+        if last is None or last.role != "assistant":
+            return ""
+        return _text_of(last)
 
     def _requery(self, text: Any, *, human: bool) -> None:
         self._next_query = deliver_continuation_reply(

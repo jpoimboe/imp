@@ -68,6 +68,7 @@ def _agent_def() -> AgentDef:
 
 def _build_invocation(
     tmp_path: Path, *, event_log: object, balance_on_resume: bool,
+    resume_cause: str = "human",
 ) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
@@ -78,6 +79,7 @@ def _build_invocation(
         transcript_dir=tmp_path / "tx",
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
         event_log=event_log, balance_on_resume=balance_on_resume,
+        resume_cause=resume_cause,
     )
 
 
@@ -343,7 +345,7 @@ async def test_awaiting_user_retry_continue_journals_continuation_not_user_messa
     events.jsonl): the resume branch emits NO awaiting_user_input, journals the
     nudge as an internal engine_message/continuation event (not a user_message), and
     still drives the resumed prompt with the nudge."""
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
 
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
@@ -397,16 +399,16 @@ async def test_awaiting_user_retry_continue_journals_continuation_not_user_messa
     # Defect B: the nudge is NOT journaled as a user_message.
     assert not any(
         e["type"] == "user_message"
-        and _CONTINUATION_NUDGE in json.dumps(e.get("payload", {}),
+        and RESUME_CONTINUE_NUDGE in json.dumps(e.get("payload", {}),
                                               ensure_ascii=False)
         for e in elog.read())
     cont = next(
         e for e in elog.read()
         if e["type"] == "engine_message"
         and e.get("payload", {}).get("subtype") == "continuation")
-    assert cont["payload"]["content"][0]["text"] == _CONTINUATION_NUDGE
+    assert cont["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
     # The resumed prompt is the nudge, so the run continues and completes.
-    assert _CONTINUATION_NUDGE in str(fake.thread.run_calls[0][0])
+    assert RESUME_CONTINUE_NUDGE in str(fake.thread.run_calls[0][0])
     assert any(e.get("type") == "agent_result" for e in events)
 
 
@@ -418,7 +420,7 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
     un-answered solicited reply: the resume drives the REPLY text (not the
     continuation nudge), emits no engine_message/continuation, and does NOT re-journal
     the reply's user_message (it is already durable in events.jsonl)."""
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
 
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
@@ -468,7 +470,7 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
     # The resumed prompt is the recovered reply, NOT the continuation nudge.
     driven = str(fake.thread.run_calls[0][0])
     assert "use config.py" in driven
-    assert _CONTINUATION_NUDGE not in driven
+    assert RESUME_CONTINUE_NUDGE not in driven
 
     types = [e["type"] for e in elog.read()]
     # Recovered-reply path journals nothing: no engine_message/continuation, and the
@@ -535,3 +537,52 @@ async def test_awaiting_user_solicit_emits_gate_with_last_agent_message(
     assert gate["payload"]["last_agent_message"] == "which file?"
     assert gate["payload"]["steer_hint"] == ""
     assert gate["payload"]["interrupt"] is False
+
+
+@pytest.mark.anyio
+async def test_resume_missing_complete_step_under_retry_uses_the_retry_note(
+    tmp_path: Path,
+) -> None:
+    """codex's replay-and-continue site selects by cause: a provider-error retry gets
+    the retry note as the resumed prompt, journaled as engine_message/continuation."""
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-cont-2.jsonl"
+    (tx / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-cont-2", "rollout_relpath": rel}))
+    saved = tx / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-cont-2"}\n')
+
+    _write_events(tmp_path / "events.jsonl", [
+        {"agent_id": "step:t", "type": "agent_message",
+         "payload": {"raw": {"content": [
+             {"type": "text", "text": "stopped before finishing"}]}}},
+    ])
+
+    elog = InMemoryEventLog()
+    scripted = [[
+        thread_started("thr-cont-2"),
+        agent_message("resumed; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "42"}, result="ok",
+                 item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=True,
+                            resume_cause="provider_retry")
+    events = [ev async for ev in runner.run(inv)]
+
+    assert any(e.get("type") == "agent_result" for e in events)
+    cont = next(e for e in elog.read()
+                if e["type"] == "engine_message"
+                and e.get("payload", {}).get("subtype") == "continuation")
+    assert cont["payload"]["content"][0]["text"] == RESUME_RETRY_NUDGE
+    driven = str(fake.thread.run_calls[0][0])
+    assert RESUME_RETRY_NUDGE in driven
+    assert RESUME_CONTINUE_NUDGE not in driven

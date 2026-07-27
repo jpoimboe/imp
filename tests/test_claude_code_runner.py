@@ -1828,10 +1828,9 @@ async def test_native_resume_folds_is_error_tool_result_tail(tmp_path: Path) -> 
 async def test_native_folded_tool_result_tail_gets_continuation_nudge(
     tmp_path: Path,
 ) -> None:
-    """Folded tool_result tail with no interject gets _CONTINUATION_NUDGE (delta non-empty)."""
+    """Folded tool_result tail with no interject gets RESUME_CONTINUE_NUDGE (delta non-empty)."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
 
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
@@ -1865,9 +1864,54 @@ async def test_native_folded_tool_result_tail_gets_continuation_nudge(
     # The nudge is journaled as an internal engine_message (not a user turn).
     conts = [e for e in log.read() if e["type"] == "engine_message"]
     assert len(conts) == 1
-    assert conts[0]["payload"]["content"][0]["text"] == _CONTINUATION_NUDGE
+    assert conts[0]["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
     # The streamed delta carries exactly that nudge (non-empty).
-    assert _user_text_blob(created[0].queries[0]) == _CONTINUATION_NUDGE
+    assert _user_text_blob(created[0].queries[0]) == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+async def test_native_empty_delta_guard_selects_the_note_by_cause(
+    tmp_path: Path,
+) -> None:
+    """The empty-delta guard must not emit the human pause copy under a retry."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import (
+        RESUME_RETRY_NUDGE,
+        Transcript,
+    )
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    inv = replace(_inv(tmp_path, agent_id="step:p/s", event_log=log),
+                  resume_cause="provider_retry")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="x"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    conts = [e for e in log.read() if e["type"] == "engine_message"]
+    assert len(conts) == 1
+    assert conts[0]["payload"]["content"][0]["text"] == RESUME_RETRY_NUDGE
+    assert _user_text_blob(created[0].queries[0]) == RESUME_RETRY_NUDGE
 
 
 def _user_text_blob(replayed: list[Any]) -> str:
@@ -2376,10 +2420,10 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     # and resume_should_continue=False the delta would be empty, so the native
     # empty-delta guard kicks the turn with the continuation nudge (claude-p never
     # self-starts a loaded --resume session — an empty slice would park it).
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert _user_text_blob(streamed) == _CONTINUATION_NUDGE
+    assert _user_text_blob(streamed) == RESUME_CONTINUE_NUDGE
     # The completed pair folded into the store: 3 turns, ending on the tool_result.
     reconciled = await store.load(skey)
     assert len(reconciled) == 3
@@ -4093,8 +4137,7 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     """claude_code retry-continue on a bare turn-end: no awaiting_user_input, no
     user_message; the nudge is an internal engine_message/continuation event."""
     from imp.agents.runner import Message, TextBlock
-    from imp.agents.transcript import Transcript
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
     (tmp_path / "art").mkdir()
@@ -4133,10 +4176,10 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     cont = next(e for e in log.read() if e["type"] == "engine_message")
     assert cont["payload"] == {
         "role": "user", "subtype": "continuation",
-        "content": [{"type": "text", "text": _CONTINUATION_NUDGE}]}
+        "content": [{"type": "text", "text": RESUME_CONTINUE_NUDGE}]}
     loaded = t.load()
     assert loaded[2].role == "user"
-    assert loaded[2].content[0].text == _CONTINUATION_NUDGE
+    assert loaded[2].content[0].text == RESUME_CONTINUE_NUDGE
 
 
 @pytest.mark.anyio
@@ -4780,8 +4823,8 @@ async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
     nudge — never an empty human user turn (which would risk a provider 400)."""
     import asyncio
 
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
     from imp.cli.signals import InterruptCoordinator
-    from imp.engine.agent_run import _CONTINUATION_NUDGE
     from tests.cc_fakes import CooperativeClient
 
     (tmp_path / "art").mkdir()
@@ -4801,7 +4844,10 @@ async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
         user_input_fn=lambda _prompt: "")      # empty Enter → continue
-    inv = replace(_inv(tmp_path), coordinator=coord)
+    # A backoff-retry attempt can itself be Ctrl-C'd: the steer site is reached only
+    # from a human steer prompt, so it keeps the pause copy whatever the cause.
+    inv = replace(_inv(tmp_path), coordinator=coord,
+                  resume_cause="provider_retry")
     coord.attach_runner(runner.interrupt)
 
     events: list[dict[str, Any]] = []
@@ -4826,7 +4872,8 @@ async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
                    for e in events if e["type"] == "error")
     assert holder["c"].disconnected is False
     # The empty reply became the engine continuation nudge, not an empty user turn.
-    assert holder["c"].queries[-1] == _CONTINUATION_NUDGE
+    assert holder["c"].queries[-1] == RESUME_CONTINUE_NUDGE
+    assert RESUME_RETRY_NUDGE not in holder["c"].queries
 
 
 @pytest.mark.anyio

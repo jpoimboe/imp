@@ -51,6 +51,15 @@ RESUME_CONTINUE_NUDGE = (
     "proceed unless you genuinely need input you do not already have."
 )
 
+RESUME_RETRY_NUDGE = (
+    "The previous provider call failed and the engine is retrying it — this is "
+    "not a rejection and nothing you did failed. Anything you already said above "
+    "has reached the user's screen; continue from there rather than repeating it. "
+    "Continue the step from where you left off and call complete_step when it is "
+    "done. Do not ask the user how to proceed unless you genuinely need input you "
+    "do not already have."
+)
+
 # Injected once onto every synthesized resume turn. On resume the transcript is
 # replayed to the provider, and reconstructed tool_results can surface to the
 # model as errors ("internal error") even when the original action succeeded —

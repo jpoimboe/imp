@@ -1,6 +1,6 @@
-"""A transient retry-with-backoff error (auth/network/rate_limit)
-renders quiet — no red `error:` line, and the held scary auth prose is dropped so
-the following agent_retry breadcrumb is the single surviving one-liner."""
+"""A transient retry-with-backoff error (auth/network/rate_limit) renders quiet —
+no red `error:` line, and a tagged provider-error node is dropped so the following
+agent_retry breadcrumb is the single surviving one-liner."""
 from __future__ import annotations
 
 from imp.cli import narrative as nv
@@ -32,7 +32,8 @@ def test_auth_error_drops_matching_held_prose_and_suppresses_line() -> None:
     # survives as the single line for the blip.
     events = [
         _ev("a1", "agent_message", agent_id=None,
-            raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={}),
+            raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={},
+            provider_error=True),
         _ev("e1", "error", agent_id=None,
             category="auth", kind="http_401", message="claude CLI: 401",
             detail={"last_agent_text": AUTH_PROSE}),
@@ -45,22 +46,6 @@ def test_auth_error_drops_matching_held_prose_and_suppresses_line() -> None:
     assert "error: [auth]" not in out                  # no red error line
     assert AUTH_PROSE not in out                        # prose never paints
     assert "warning: [auth] retry 1 (1.0s)" in out      # breadcrumb survives
-
-
-def test_auth_error_prefix_match_drops_prose_over_500_chars() -> None:
-    # detail.last_agent_text is stored truncated to [:500]; the held node holds the
-    # FULL prose. A stripped PREFIX compare (not equality) must still drop it.
-    full = (AUTH_PROSE + " ") * 12          # > 500 chars
-    assert len(full) > 500
-    events = [
-        _ev("a1", "agent_message", agent_id=None,
-            raw={"content": [{"type": "text", "text": full}]}, usage={}),
-        _ev("e1", "error", agent_id=None,
-            category="auth", message="claude CLI: 401",
-            detail={"last_agent_text": full[:500]}),
-    ]
-    tree = nv.build_tree(events)
-    assert _agent_texts(tree.root) == []    # dropped despite the truncated match value
 
 
 def test_network_error_keeps_unrelated_narration() -> None:
@@ -97,14 +82,12 @@ def test_network_error_without_last_agent_text_keeps_narration() -> None:
 
 
 def test_auth_error_drops_held_prose_even_behind_a_flushed_rename() -> None:
-    # A quest_renamed stashes a pending rename that _h_llm_response flushes as a
-    # RenameNode right AFTER the held auth narration, so the container tail is
-    # [held_auth_prose, RenameNode]. The held-prose lookup must skip that trailing
-    # RenameNode and still drop the prose; the rename line itself survives.
+    # A RenameNode follows the tagged prose; identity drop removes prose while the rename survives.
     events = [
         _ev("n1", "quest_renamed", agent_id=None, new_title="A better title"),
         _ev("a1", "agent_message", agent_id=None,
-            raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={}),
+            raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={},
+            provider_error=True),
         _ev("e1", "error", agent_id=None,
             category="auth", kind="http_401", message="claude CLI: 401",
             detail={"last_agent_text": AUTH_PROSE}),

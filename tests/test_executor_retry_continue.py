@@ -147,9 +147,11 @@ class _RecordingProvider:
         self.stalls = stalls
         self.drives = 0
         self.seen: list[bool] = []
+        self.causes: list[str] = []
 
     def create_runner(self, inv: Any) -> _StallNthRunner:
         self.seen.append(inv.resume_should_continue)
+        self.causes.append(inv.resume_cause)
         self.drives += 1
         return _StallNthRunner(self.drives <= self.stalls)
 
@@ -174,6 +176,9 @@ async def test_backoff_respawn_receives_resume_should_continue(
     # Second drive (respawn after backoff): the live read
     # resume_pending == state.step with resume_should_continue → True.
     assert provider.seen == [False, True]
+    # The backoff arming carries the cause through to the respawned invocation, so a
+    # provider selects the retry note rather than the human pause copy.
+    assert provider.causes == ["human", "provider_retry"]
 
 
 _A = (
