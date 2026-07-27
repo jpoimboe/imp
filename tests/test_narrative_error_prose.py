@@ -106,6 +106,22 @@ def test_fatal_quota_error_drops_the_node_across_a_codex_usage_patch() -> None:
     assert len(reds) == 1 and reds[0].detail == PROSE
 
 
+def test_a_fatal_error_with_a_stderr_tail_drops_the_node_and_the_red_line_shows_the_tail() -> None:
+    # `_termination_from_result` sets stderr_tail beside last_agent_text and `_h_error`
+    # prefers the tail, so the drop still fires and the prose itself is not the carrier.
+    events = _step(
+        _msg("a1", PROSE, tagged=True),
+        _ev("q1", "query_result", agent_id=AID, usage={}, total_cost_usd=0.0),
+        _ev("e1", "error", agent_id=AID, category="api", kind="ApiError",
+            message="claude CLI: API Error: 401",
+            detail={"last_agent_text": PROSE, "stderr_tail": "claude: exiting", "exit_code": 1}))
+    tree = nv.build_tree(events)
+    assert PROSE not in _texts(tree.root)
+    reds = [n for n in _error_nodes(tree.root) if not n.is_warning]
+    assert len(reds) == 1
+    assert reds[0].detail == "exit code 1\nclaude: exiting"
+
+
 def test_untagged_prose_survives_a_backoff_error_that_names_it() -> None:
     # AC 12: non-anchoring prose is the agent's own text — it renders in both views.
     events = _step(
