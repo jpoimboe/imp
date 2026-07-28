@@ -527,6 +527,33 @@ def _cycle_workflow(state: InitScreenState, workflows: list[str]) -> InitScreenS
         workflow=workflows[(workflows.index(state.workflow) + 1) % len(workflows)])
 
 
+def _confirm_rows(
+    state: InitScreenState, cursor: ScreenRow,
+) -> list[tuple[str, str]]:
+    """The confirmation screen's fragments — the sibling of `_picker_rows`.
+    Three columns, each padded to its widest entry."""
+    cells: dict[ScreenRow, tuple[str, str, str]] = {
+        ScreenRow.WORKFLOW: (
+            "workflow", state.workflow, _workflow_blurb(state.workflow)),
+        ScreenRow.BRANCH: ("branch", state.branch, state.branch_provenance),
+        ScreenRow.TESTS: (
+            "tests", state.test_cmd_fast or _NO_VALUE, state.tests_provenance),
+        ScreenRow.IMPORT_ROOT: (
+            "import root", ", ".join(state.pythonpath) or _NO_VALUE,
+            state.roots_provenance),
+    }
+    label_w = max(len(label) for label, _value, _note in cells.values())
+    value_w = max(len(value) for _label, value, _note in cells.values())
+    out: list[tuple[str, str]] = [("bold", f"{_CONFIRM_HEADER}\n\n")]
+    for row in ScreenRow:
+        label, value, note = cells[row]
+        arrow = "> " if row is cursor else "  "
+        style = "ansiyellow bold" if row is cursor else ""
+        out.append((style, f"{arrow}{label:<{label_w}}  {value:<{value_w}}  {note}\n"))
+    out.append(("ansibrightblack", f"\n{_CONFIRM_HINT}"))
+    return out
+
+
 def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     """Write imp/config.yaml + the memory scaffold from `settings`, ensure `.imp/`
     is gitignored, and commit the init files. Returns True iff a commit was created.
