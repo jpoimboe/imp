@@ -193,7 +193,6 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     assert "imp/config.yaml" in body
     assert "imp/memory/" in body
     assert "guidance" not in low
-    assert "facts" in low
     assert "default-workflow" in body
     assert "test_cmd_fast" in body
     assert "test_cmd_slow" in body
@@ -202,6 +201,23 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     # how to read what is active, incl. imp config's blind spots
     assert "imp config" in body
     assert "blind spots" in body
+
+
+def test_memory_doc_states_the_settings_memory_root_split() -> None:
+    body = _memory_doc()
+    flat = " ".join(body.split())
+    # the two REPO-SIDE settings layers are rooted in the main checkout, not the
+    # worktree (~/.imp/config.yaml is machine-wide, so it is not claimed here)
+    assert ("both repo-side layers (`imp/config.yaml` and `.imp/config.yaml`) are "
+            "read from the **main checkout** — never from a quest's worktree") in flat
+    assert "a branch cannot change the `test_cmd_*`, `pythonpath`, or gate" in flat
+    # imp/memory/ is the one deliberate exception, named on the tier bullet too
+    assert "it is read from the quest's own worktree" in flat
+    assert ("`imp/config.yaml` in the main checkout, `imp/memory/` in the quest's "
+            "own worktree") in flat
+    # the deleted facts channel leaves no trace
+    assert "facts" not in flat.lower()
+    assert "{{ project." not in flat
 
 
 def test_knowledge_no_longer_references_removed_guidance_key() -> None:
