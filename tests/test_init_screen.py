@@ -382,6 +382,14 @@ def test_down_wraps_from_the_last_row_back_to_the_first_landing_on_workflow(
     assert outcome.state.pythonpath == ["src"]
 
 
+def test_confirm_rows_show_none_when_no_branch_resolved() -> None:
+    state = _screen_state_from_detection(
+        workflow="default", base=None, tests=None,
+        roots=ImportRoots([], "not a Python project"))
+    body = _body(state, ScreenRow.WORKFLOW)
+    assert "(none)" in body[1] and body[1].endswith("nothing detected")
+
+
 def test_screen_accepted_equals_screen_talk_but_isinstance_still_discriminates_them() -> None:
     state = _detected_state()
     accepted = ScreenAccepted(state)

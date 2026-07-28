@@ -527,21 +527,28 @@ def _cycle_workflow(state: InitScreenState, workflows: list[str]) -> InitScreenS
         workflow=workflows[(workflows.index(state.workflow) + 1) % len(workflows)])
 
 
-def _confirm_rows(
-    state: InitScreenState, cursor: ScreenRow,
-) -> list[tuple[str, str]]:
-    """The confirmation screen's fragments — the sibling of `_picker_rows`.
-    Three columns, each padded to its widest entry."""
-    cells: dict[ScreenRow, tuple[str, str, str]] = {
+def _row_cells(state: InitScreenState) -> dict[ScreenRow, tuple[str, str, str]]:
+    """Each row's (label, value, provenance): the screen pads these into columns,
+    the setup-conversation kickoff reads them back to the agent."""
+    return {
         ScreenRow.WORKFLOW: (
             "workflow", state.workflow, _workflow_blurb(state.workflow)),
-        ScreenRow.BRANCH: ("branch", state.branch, state.branch_provenance),
+        ScreenRow.BRANCH: (
+            "branch", state.branch or _NO_VALUE, state.branch_provenance),
         ScreenRow.TESTS: (
             "tests", state.test_cmd_fast or _NO_VALUE, state.tests_provenance),
         ScreenRow.IMPORT_ROOT: (
             "import root", ", ".join(state.pythonpath) or _NO_VALUE,
             state.roots_provenance),
     }
+
+
+def _confirm_rows(
+    state: InitScreenState, cursor: ScreenRow,
+) -> list[tuple[str, str]]:
+    """The confirmation screen's fragments — the sibling of `_picker_rows`.
+    Three columns, each padded to its widest entry."""
+    cells = _row_cells(state)
     label_w = max(len(label) for label, _value, _note in cells.values())
     value_w = max(len(value) for _label, value, _note in cells.values())
     out: list[tuple[str, str]] = [("bold", f"{_CONFIRM_HEADER}\n\n")]
