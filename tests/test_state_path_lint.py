@@ -1,0 +1,21 @@
+"""Repo lint: state paths resolve through the seam, not through a literal
+`<control_root>/.imp` composition."""
+from __future__ import annotations
+
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+TESTS = Path(__file__).resolve().parent
+SELF = Path(__file__).resolve()
+
+
+def _hits(root: Path, needle: str) -> list[str]:
+    return [f"{p.relative_to(root.parent)}:{n}"
+            for p in sorted(root.rglob("*.py")) if p.resolve() != SELF
+            for n, line in enumerate(p.read_text().splitlines(), 1)
+            if needle in line]
+
+
+def test_no_control_imp_reference_remains() -> None:
+    assert _hits(SRC, "control_imp") == []
+    assert _hits(TESTS, "control_imp") == []

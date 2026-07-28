@@ -174,8 +174,8 @@ async def test_bash_argv_chdirs_and_reexposes_new_worktree(tmp_path: Path) -> No
     assert argv[ci + 1] == str(wt)
     # ...and the nested worktree is re-exposed AFTER the .imp tmpfs mask, so files
     # under it are readable. A stale control-root policy emits no such re-bind.
-    control_imp = str(tmp_path / ".imp")
-    ti = argv.index(control_imp)                    # the --tmpfs <.imp> operand
+    state_mask = str(tmp_path / ".imp")
+    ti = argv.index(state_mask)                     # the --tmpfs <state> operand
     binds = [i for i in range(len(argv) - 2)
              if argv[i] == "--bind" and argv[i + 1] == str(wt) and argv[i + 2] == str(wt)]
     assert binds and binds[0] > ti

@@ -343,7 +343,7 @@ def test_resolve_policy_unmaterialized_draft_masks_worktrees_without_self(tmp_pa
 
 def test_prepare_spawn_policy_keeps_worktrees_mask_even_if_absent(tmp_path):
     # The mask + self re-expose are retained unconditionally by prepare_spawn_policy
-    # (like control_imp), NOT existence-gated like git_ro_remask, so the mask cannot
+    # (like state_mask), NOT existence-gated like git_ro_remask, so the mask cannot
     # silently drop mid-run. Contrast a vanished git_ro_remask entry, which IS
     # dropped — and git_ref_reexpose, which is re-created instead.
     gone = tmp_path / "nope" / ".git" / "worktrees"
@@ -1647,13 +1647,13 @@ def test_resolve_policy_sibling_appearance_and_removal_are_noop(tmp_path):
     assert pol3 == pol1
 
 
-def test_resolve_policy_sets_control_imp_tmpfs(tmp_path):
+def test_resolve_policy_sets_the_state_mask_tmpfs(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
-    assert pol.control_imp == str(control / ".imp")
+    assert pol.state_mask == str(control / ".imp")
     assert (str(control / ".imp"), "mask_dir") in pol.bind_plan()
 
 
@@ -1661,7 +1661,7 @@ def test_bind_plan_imp_tmpfs_before_worktree_for_nested_worktree():
     # Normal quest: worktree nested at .imp/worktrees/abc, quest home at
     # .imp/quests/abc. The tmpfs must precede the worktree rw bind, and both the
     # worktree and quest_home rebinds must follow it (last-wins re-exposes them).
-    p = _policy(control_imp="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
+    p = _policy(state_mask="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
     paths = [b for b, _ in p.bind_plan()]
     i_tmpfs = paths.index("/ctl/.imp")
     i_wt = paths.index("/ctl/.imp/worktrees/abc")
@@ -1674,7 +1674,7 @@ def test_bind_plan_imp_tmpfs_after_worktree_for_draft():
     # Draft/degenerate agent: worktree == control_root (an ANCESTOR of .imp). The
     # control-root rw bind must precede the tmpfs (so the tmpfs re-masks .imp), the
     # quest_home rebind must follow it, and the worktree is NOT re-exposed after it.
-    p = _policy(control_imp="/ctl/.imp", worktree="/ctl",
+    p = _policy(state_mask="/ctl/.imp", worktree="/ctl",
                 quest_home="/ctl/.imp/quests/abc")
     paths = [b for b, _ in p.bind_plan()]
     i_wt = paths.index("/ctl")
@@ -1687,12 +1687,12 @@ def test_bind_plan_imp_tmpfs_after_worktree_for_draft():
 def test_argv_binds_match_bind_plan_with_imp_tmpfs():
     # Drift guard: the new tmpfs round-trips through the argv parser for BOTH the
     # nested and draft orderings.
-    p = _policy(control_imp="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
+    p = _policy(state_mask="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
     argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
     assert ("/ctl/.imp", "mask_dir") in p.bind_plan()
 
-    pd = _policy(control_imp="/ctl/.imp", worktree="/ctl",
+    pd = _policy(state_mask="/ctl/.imp", worktree="/ctl",
                  quest_home="/ctl/.imp/quests/abc")
     argvd = build_sandbox_argv("x", cwd="/ctl", policy=pd, engine_env={})
     assert _parse_argv_binds(argvd) == pd.bind_plan()
@@ -1704,7 +1704,7 @@ def test_allows_read_draft_tmpfs_supersedes_control_root_bind():
     # read as denied, while the re-exposed own home reads True and its own
     # steps/events masks still deny.
     p = _policy(
-        control_imp="/ctl/.imp", worktree="/ctl",
+        state_mask="/ctl/.imp", worktree="/ctl",
         quest_home="/ctl/.imp/quests/abc",
         secret_dirs=("/ctl/.imp/quests/abc/steps", "/run/user/1000"),
         secret_files=("/ctl/.imp/quests/abc/events.jsonl",),
@@ -1724,7 +1724,7 @@ def test_allows_read_nested_tmpfs_masks_siblings_and_archive():
     # sibling home and the archive read as denied; the re-exposed own home and the
     # nested worktree read True, while the own steps/events masks still deny.
     p = _policy(
-        control_imp="/ctl/.imp", worktree="/ctl/.imp/worktrees/abc",
+        state_mask="/ctl/.imp", worktree="/ctl/.imp/worktrees/abc",
         quest_home="/ctl/.imp/quests/abc",
         secret_dirs=("/ctl/.imp/quests/abc/steps", "/run/user/1000"),
         secret_files=("/ctl/.imp/quests/abc/events.jsonl",),
