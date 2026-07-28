@@ -31,7 +31,7 @@ from imp.providers.config import (
     parse_default_base,
     parse_project_facts,
 )
-from imp.providers.effective import PROJECT_RENAME_HINT, global_config_path
+from imp.providers.effective import global_config_path, project_rename_hint
 
 
 def read_back(file: Path, read_path: tuple[str, ...]) -> Any:
@@ -157,7 +157,7 @@ def _require_project_file(target: Path, project_root: Path) -> None:
     if target.is_file():
         return
     if (project_root / "imp" / "project.yaml").is_file():
-        raise ConfigWriteError(PROJECT_RENAME_HINT)
+        raise ConfigWriteError(project_rename_hint(project_root))
     raise ConfigWriteError(
         f"no imp/config.yaml in {project_root} — run 'imp init' first")
 

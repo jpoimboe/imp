@@ -169,13 +169,15 @@ def test_missing_project_config_and_the_transition_guard(
         f"imp: no imp/config.yaml in {root.resolve()} — run 'imp init' first\n")
     assert not (root / "imp" / "config.yaml").exists()
 
+    from imp.engine.worktree import checked_out_branch
+    assert checked_out_branch(root) is None  # so the hint omits the branch clause
     (root / "imp" / "project.yaml").write_text("default-base: main\n")
 
     assert main(["config", "unset", "test_cmd_fast"]) == 2
     assert capsys.readouterr().err == (
-        "imp: imp/project.yaml found but imp now reads imp/config.yaml — "
-        "rename it on this branch with "
-        "`git mv imp/project.yaml imp/config.yaml`\n")
+        f"imp: imp/project.yaml found in {root.resolve()} but imp now reads "
+        f"imp/config.yaml — rename it with "
+        f"`git -C {root.resolve()} mv imp/project.yaml imp/config.yaml`\n")
     assert not (root / "imp" / "config.yaml").exists()
 
 

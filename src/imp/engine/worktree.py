@@ -207,6 +207,26 @@ def destroy_spike_worktree(
         _git(control_root, "branch", "-D", branch)
 
 
+def heal_project_config_rename(worktree: Path, control_root: Path) -> bool:
+    """Commit the pending `imp/project.yaml` -> `imp/config.yaml` rename on a
+    quest's own branch, so a branch forked before the rename still loads its
+    project config. Never raises: a non-zero git call just returns False and
+    leaves the config load to render the verdict."""
+    from imp.providers.effective import project_rename_pending
+
+    if not project_rename_pending(worktree):
+        return False
+    with RepoGitLock(control_root).acquire():
+        if _git(worktree, "mv", "imp/project.yaml", "imp/config.yaml").returncode != 0:
+            return False
+        # Path-limited: a dormant worktree may legitimately be dirty.
+        return _git(
+            worktree, "commit", "-m",
+            "chore: rename imp/project.yaml to imp/config.yaml",
+            "--", "imp/project.yaml", "imp/config.yaml",
+        ).returncode == 0
+
+
 class RepoGitLock:
     """Short-held file lock in the control root, acquired around every
     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""
