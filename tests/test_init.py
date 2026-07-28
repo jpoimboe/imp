@@ -662,20 +662,39 @@ def test_use_defaults_idempotent_in_non_git_dir(tmp_path_factory, monkeypatch):
     assert (fresh / ".git").exists()
 
 
-def test_use_defaults_raises_when_base_unresolvable(tmp_path):
+def test_use_defaults_adopts_current_branch_without_origin_head(tmp_path):
+    import subprocess
+
+    from imp.cli.init import run_init_noninteractive
+
+    # A born repo with no origin remote and no --base override: base resolution
+    # is prompt-free now, so it adopts the checked-out branch instead of raising.
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "seed", "-q"],
+                   cwd=tmp_path, check=True)
+    current = subprocess.run(
+        ["git", "symbolic-ref", "--short", "HEAD"],
+        cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
+    run_init_noninteractive(tmp_path, output_fn=lambda _m: None,
+                            detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["default-base"] == current
+
+
+def test_use_defaults_raises_on_detached_head(tmp_path):
     import subprocess
 
     from imp.cli.init import IntegrationBranchUnresolved, run_init_noninteractive
 
-    # A born repo (has a commit, so not the unborn shortcut) with no origin
-    # remote and no --base override: base resolution reaches the prompt seam,
-    # which the non-interactive path wires to an EOF-raising stub, so it must
-    # raise IntegrationBranchUnresolved rather than block on input.
     subprocess.run(["git", "commit", "--allow-empty", "-m", "seed", "-q"],
                    cwd=tmp_path, check=True)
-    with pytest.raises(IntegrationBranchUnresolved):
+    subprocess.run(["git", "checkout", "--detach", "-q"], cwd=tmp_path, check=True)
+    with pytest.raises(IntegrationBranchUnresolved) as excinfo:
         run_init_noninteractive(tmp_path, output_fn=lambda _m: None,
                                 detect_verify_fn=lambda _r: None)
+    assert str(excinfo.value) == (
+        "imp init couldn't determine an integration branch (HEAD is detached). "
+        "Re-run with `--base <branch>`, or add `default-base: <branch>` to "
+        "imp/config.yaml.")
 
 
 def test_init_parser_maps_use_defaults_to_non_interactive() -> None:

@@ -27,7 +27,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 from ruamel.yaml.error import YAMLError
@@ -106,8 +106,7 @@ prefer a per-step file scoped to just the step that needs it.
 
 
 class IntegrationBranchUnresolved(Exception):
-    """imp init needs an integration branch but couldn't determine one — the
-    prompt couldn't read input (non-TTY / EOF), or no branch was resolvable."""
+    """imp init needs an integration branch but git offers none (detached HEAD)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,10 +135,6 @@ def _ensure_git_repo_silent(project_root: Path) -> bool:
     return True
 
 
-def _raise_eof(_prompt: str = "") -> str:
-    raise EOFError
-
-
 def _repo_is_unborn(project_root: Path) -> bool:
     """True when the repo has no commits yet — `git rev-parse --verify HEAD` fails."""
     return subprocess.run(
@@ -148,45 +143,35 @@ def _repo_is_unborn(project_root: Path) -> bool:
     ).returncode != 0
 
 
+class BaseDetection(NamedTuple):
+    """The integration branch git offers, with the label the confirmation screen
+    shows for where it came from. Absent branch means no BaseDetection at all,
+    so a provenance can never stand without a branch."""
+    branch: str
+    provenance: str
+
+
 def _resolve_init_base(
     project_root: Path, *, git_created: bool,
-    input_fn: Callable[[str], str],
-) -> str:
-    """The integration branch to record as `default-base` on a fresh init.
+) -> BaseDetection | None:
+    """The integration branch to record as `default-base` on a fresh init, with
+    where it came from. Never prompts — the confirmation screen owns correction.
 
-    1. origin/HEAD resolves -> use it, no prompt.
-    2. Fresh setup (git init this run) or an unborn repo -> use the current /
-       unborn branch, no prompt (no other candidate exists).
-    3. Otherwise (existing repo with commits, no remote default) -> prompt,
-       suggesting the current branch; Enter accepts it, a typed name overrides.
+    1. origin/HEAD resolves -> that branch.
+    2. Fresh setup (git init this run) or an unborn repo -> the current branch.
+    3. Otherwise -> the current branch, adopted as-is.
 
-    Raises IntegrationBranchUnresolved when the prompt cannot read input, or
-    when the user gives no branch and there is no current branch to fall back on.
+    None when git offers no branch at all (detached HEAD).
     """
     remote = worktree.origin_head_branch(project_root)
     if remote is not None:
-        return remote
+        return BaseDetection(remote, "from origin/HEAD")
     current = worktree.checked_out_branch(project_root)
-    if (git_created or _repo_is_unborn(project_root)) and current is not None:
-        return current
-    suffix = f" [{current}]" if current else ""
-    try:
-        answer = input_fn(
-            f"Which branch should quests integrate into?{suffix} "
-        ).strip()
-    except EOFError as e:
-        raise IntegrationBranchUnresolved(
-            "imp init needs an integration branch but can't read input "
-            "(non-interactive terminal). Re-run `imp init` interactively, or add "
-            "`default-base: <branch>` to imp/config.yaml."
-        ) from e
-    resolved = answer or current
-    if not resolved:
-        raise IntegrationBranchUnresolved(
-            "imp init needs an integration branch but none was given. Re-run "
-            "`imp init` and name the branch quests should integrate into."
-        )
-    return resolved
+    if current is None:
+        return None
+    if git_created or _repo_is_unborn(project_root):
+        return BaseDetection(current, "new repo")
+    return BaseDetection(current, "current branch")
 
 
 def _commit_init_files(project_root: Path, *, extra_paths: tuple[str, ...] = ()) -> bool:
@@ -782,7 +767,8 @@ def run_init_noninteractive(
     """Provider-free, non-interactive `imp init`: write imp/config.yaml from
     defaults (+ overrides) with no model call. Both `--use-defaults` and the
     no-TTY auto-headless fallback land here. Never prompts — resolves the
-    integration branch from git or raises IntegrationBranchUnresolved."""
+    integration branch from git, or raises IntegrationBranchUnresolved when git
+    offers none."""
     from imp.providers.effective import global_config_path
 
     workflow = workflow or _DEFAULT_WORKFLOW
@@ -804,8 +790,13 @@ def run_init_noninteractive(
     if base is not None:
         default_base = base
     else:
-        default_base = _resolve_init_base(
-            project_root, git_created=git_created, input_fn=_raise_eof)
+        detected_base = _resolve_init_base(project_root, git_created=git_created)
+        if detected_base is None:
+            raise IntegrationBranchUnresolved(
+                "imp init couldn't determine an integration branch (HEAD is "
+                "detached). Re-run with `--base <branch>`, or add "
+                "`default-base: <branch>` to imp/config.yaml.")
+        default_base = detected_base.branch
     output_fn(f"Integration branch: {default_base}")
 
     detect_cmd = detect_verify_fn or detect_test_command
