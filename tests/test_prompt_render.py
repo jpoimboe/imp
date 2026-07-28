@@ -1,4 +1,4 @@
-"""Tests for render_prompt / build_context (5 namespaces: quest, events, vars, project, run)."""
+"""Tests for render_prompt / build_context (namespaces: quest, events, vars, run, step, docs)."""
 
 from __future__ import annotations
 
@@ -152,61 +152,25 @@ def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
     ) == "Prev: good"
 
 
-def test_renders_project_facts(tmp_path: Path) -> None:
-    ctx = build_context(
-        quest_title="t",
-        event_log=_log(tmp_path / "events.jsonl", []),
-        project_facts={"test_command": "make test"},
-    )
-    assert render_prompt("{{ project.test_command }}", ctx) == "make test"
-
-
-def test_project_guidance_reference_raises(tmp_path: Path) -> None:
-    # guidance is no longer a template fact: a stale reference fails loudly at
-    # render (strict project namespace) instead of silently rendering empty.
+def test_project_namespace_is_gone(tmp_path: Path) -> None:
+    # No facts namespace: `project` is an ordinary undefined top-level name.
     ctx = build_context(
         quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
     )
-    with pytest.raises(PromptRenderError):
-        render_prompt("{{ project.guidance }}", ctx)
+    with pytest.raises(PromptRenderError) as ei:
+        render_prompt("{{ project.x }}", ctx)
+    assert "project" in str(ei.value)
+    assert "fact" not in str(ei.value)   # no facts-specific message survives
 
 
-def test_missing_fact_attr_raises(tmp_path: Path) -> None:
-    ctx = build_context(
-        quest_title="t",
-        event_log=_log(tmp_path / "events.jsonl", []),
-        project_facts={"a": "1"},
-    )
-    with pytest.raises(PromptRenderError):
-        render_prompt("{{ project.absent }}", ctx)
-
-
-def test_missing_fact_item_raises(tmp_path: Path) -> None:
-    ctx = build_context(
-        quest_title="t",
-        event_log=_log(tmp_path / "events.jsonl", []),
-        project_facts={"a": "1"},
-    )
-    with pytest.raises(PromptRenderError):
-        render_prompt('{{ project["absent"] }}', ctx)
-
-
-def test_default_filter_does_not_rescue_strict_namespace(tmp_path: Path) -> None:
-    ctx = build_context(
-        quest_title="t",
-        event_log=_log(tmp_path / "events.jsonl", []),
-        project_facts={"a": "1"},
-    )
-    with pytest.raises(PromptRenderError):
-        render_prompt("{{ project.absent | default('x') }}", ctx)
-
-
-def test_dunder_raises_attributeerror() -> None:
-    from imp.agents.prompts import _ProjectNamespace
-    ns = _ProjectNamespace({"a": "1", "guidance": ""})
-    with pytest.raises(AttributeError):
-        _ = ns.__html__
+def test_build_context_rejects_project_facts(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="project_facts"):
+        build_context(
+            quest_title="t",
+            event_log=_log(tmp_path / "events.jsonl", []),
+            project_facts={"a": "1"},   # type: ignore[call-arg]
+        )
 
 
 def test_renders_quest_home(tmp_path: Path) -> None:

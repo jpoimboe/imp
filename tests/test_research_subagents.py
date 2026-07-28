@@ -55,7 +55,7 @@ def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc", project_facts={}),
+        quest_home=".imp/quests/abc"),
         workflow_dir=bundled_workflow_dir("default"))
     assert "no more than 3 question rounds" not in out
     assert "Do not over-research a clear request" not in out
@@ -119,7 +119,7 @@ def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc", project_facts={}),
+        quest_home=".imp/quests/abc"),
         workflow_dir=bundled_workflow_dir("default"))
     assert "present it in sections" in out
     assert "do not propose unrelated refactoring" not in out

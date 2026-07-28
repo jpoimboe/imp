@@ -94,8 +94,7 @@ async def test_first_run_raises_on_invalid_memory_and_leaves_state_unfrozen(
 @pytest.mark.anyio
 async def test_run_uses_frozen_memory_not_the_live_tree(tmp_path: Path) -> None:
     # The live imp/memory/all.md differs from what state was frozen with. An
-    # already-frozen quest must render the FROZEN memory and must not re-freeze —
-    # even though project_facts was never set.
+    # already-frozen quest must render the FROZEN memory and must not re-freeze.
     quest = _seed(tmp_path, memory="LIVE-MEMO")
     state = State.load(quest.state_dir)
     state.memory = {"all.md": "FROZEN-MEMO"}

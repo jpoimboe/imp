@@ -71,8 +71,7 @@ def test_front_door_renders_full_include_closure() -> None:
     out = render_prompt(
         body,
         build_context(quest_title="t", event_log=InMemoryEventLog(),
-                      quest_id="abc", quest_home=".imp/quests/abc",
-                      project_facts={}),
+                      quest_id="abc", quest_home=".imp/quests/abc"),
         workflow_dir=MINIMAL)
     assert "{% include" not in out                      # every include resolved
     assert "Measure twice, cut once" in out             # action-care leaf
@@ -151,7 +150,7 @@ def test_finalize_body_guards_on_autonomous_with_both_branches() -> None:
             body,
             build_context(quest_title="t", event_log=InMemoryEventLog(),
                           quest_id="abc", quest_home=".imp/quests/abc",
-                          project_facts={}, autonomous=autonomous),
+                          autonomous=autonomous),
             workflow_dir=MINIMAL)
 
     attended = _render(False)

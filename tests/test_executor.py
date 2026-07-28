@@ -2132,40 +2132,10 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     assert result is RunResult.COMPLETED
 
 
-@pytest.mark.anyio
-async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
-    wf = tmp_path / "imp" / "workflows" / "imp"
-    (wf / "agents").mkdir(parents=True)
-    (wf / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "run {{ project.test_command }}\n"
-    )
-    (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\n"
-        "defaults: {max_retries: 1, max_loops: 6}\n"
-        "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: low}\n"
-    )
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "default-workflow: imp\nfacts:\n  test_command: make check\n"
-    )
-    quest = _make_quest(tmp_path)
-    sink: list = []
-    _register_invocation_capturing({"status": "Success"}, sink)
-
-    result = await run_quest(quest, on_event=lambda _e: None)
-    assert result is RunResult.COMPLETED
-    assert any("run make check" in i.initial_messages[0].content[0].text for i in sink)
-
-
-def test_quest_context_defaults_empty_facts() -> None:
+def test_quest_context_defaults_empty_memory() -> None:
     from imp.agents.runner import QuestContext
     cc = QuestContext(
         title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
-    assert cc.project_facts == {}
     assert cc.memory == {}
 
 

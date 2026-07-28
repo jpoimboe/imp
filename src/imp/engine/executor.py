@@ -434,7 +434,6 @@ async def run_quest(
         # Freeze once per quest: resume reuses the memory the first run saw.
         if state.memory is None:
             validate_project_memory(quest.project_root, config.memory)
-            state.project_facts = config.project_facts
             state.memory = config.memory
             state.save(quest.state_dir)
         workflow = load_workflow(quest.workflow_dir)
@@ -608,7 +607,6 @@ async def run_quest(
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
-                project_facts=state.project_facts or {},
                 memory=state.memory or {},
                 wait_for_turn_fn=wait_for_turn_fn,
                 max_parallel_test_runs=config.max_parallel_test_runs)
@@ -973,7 +971,6 @@ async def _dispatch_step(
     autonomous: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
-    project_facts: dict[str, str] | None = None,
     memory: dict[str, str] | None = None,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
     max_parallel_test_runs: int = 1,
@@ -1014,7 +1011,7 @@ async def _dispatch_step(
             headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed_opening,
-            project_facts=project_facts, memory=memory)
+            memory=memory)
     finally:
         _home_cleanup()
 
@@ -1493,7 +1490,6 @@ async def _route_agent(
     autonomous: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
-    project_facts: dict[str, str] | None = None,
     memory: dict[str, str] | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
@@ -1565,7 +1561,7 @@ async def _route_agent(
             interactive=step.interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
-            project_facts=project_facts, memory=memory,
+            memory=memory,
             opening=run_opening, feedback_lead=feedback_lead)
         if result.delay is None:
             break
@@ -1672,7 +1668,7 @@ async def _route_agent(
                 test_gates=test_gates, pythonpath=pythonpath, headless=headless,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy, seed_opening=seed,
-                project_facts=project_facts, memory=memory)
+                memory=memory)
         state.step_attempt = 0
         pause = Pause(reason="context_window", kind="reincarnation_cap")
         _emit(log, "step_completed",
@@ -1699,7 +1695,7 @@ async def _route_agent(
             test_gates=test_gates, pythonpath=pythonpath, headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed,
-            project_facts=project_facts, memory=memory)
+            memory=memory)
     if result.fatal:
         # Defense in depth: reset the retry count when pausing fatally, matching
         # the success/exhaustion resets. Runs once (at the pause), unlike the
@@ -1735,7 +1731,7 @@ async def _route_agent(
                                   autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
                                   seed_opening=seed_opening,
-                                  project_facts=project_facts, memory=memory)
+                                  memory=memory)
 
     state.step_attempt = 0
     _record_outcome(state, step.name, result.output, _worktree_head(quest))
@@ -1789,7 +1785,6 @@ async def _run_agent_invocation(
     interactive: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
-    project_facts: dict[str, str] | None = None,
     memory: dict[str, str] | None = None,
     opening: str = "",
     feedback_lead: str | None = None,
@@ -1827,7 +1822,6 @@ async def _run_agent_invocation(
             base_branch=quest.base_branch,
             checkout_branch=_checkout_branch(quest),
             event_log=log, vars=state.vars,
-            project_facts=project_facts,
             autonomous=autonomous, opening=opening,
             prior_laps=state.outcome_history.get(step_name, []),
             parent=parent_ref, depends_on=depends_refs,
@@ -1876,7 +1870,7 @@ async def _run_agent_invocation(
             id=quest.id, title=quest.title,
             quest_home=f".imp/quests/{quest.id}",
             project_root=quest.project_root, workflow_dir=quest.workflow_dir,
-            project_facts=project_facts or {}, memory=memory or {},
+            memory=memory or {},
             workflow_name=workflow.name, step_name=step_name,
             persona_source=workflow.persona_source,
         ),

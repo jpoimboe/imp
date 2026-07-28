@@ -63,8 +63,7 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
     from imp.providers.model_roster import ProviderRoster
 
     state = SimpleNamespace(
-        step="brainstorm", project_facts={},
-        resolved_steps=None, resolved_tiers=None)
+        step="brainstorm", resolved_steps=None, resolved_tiers=None)
     monkeypatch.setattr("imp.engine.state.State.load", lambda state_dir: state)
     monkeypatch.setattr(
         "imp.providers.effective.load_effective_config",

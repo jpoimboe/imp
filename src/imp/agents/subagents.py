@@ -322,7 +322,6 @@ async def dispatch_task(
             quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
             vars=ctx.quest_state.vars if ctx.quest_state is not None else {},
-            project_facts=cc.project_facts,
         )
         rendered_prompt = render_prompt(
             subagent_def.prompt_template_source, prompt_ctx,

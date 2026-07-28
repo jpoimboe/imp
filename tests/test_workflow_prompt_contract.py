@@ -108,7 +108,7 @@ def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
     # recital — never blankly re-ask.
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc", project_facts={},
+        quest_home=".imp/quests/abc",
         opening="pasted imp log for change abc"),
         workflow_dir=bundled_workflow_dir("default"))
     assert "Pasted material" in out
@@ -633,7 +633,7 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     attended = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc", project_facts={}),
+        quest_home=".imp/quests/abc"),
         workflow_dir=bundled_workflow_dir("default"))
     # Adoption is the unmarked default: discovered work folds into the current quest.
     assert "## Keep discovered work here by default" in attended
@@ -655,8 +655,7 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     # its absence proves the block was dropped.
     autonomous = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/quests/abc", autonomous=True,
-        project_facts={}),
+        quest_home=".imp/quests/abc", autonomous=True),
         workflow_dir=bundled_workflow_dir("default"))
     assert "## Keep discovered work here by default" not in autonomous
     assert "imp new --backlog" not in autonomous
@@ -712,7 +711,7 @@ def test_authoring_agent_renders_human_decision_partial(
             cur_base_head="X", orig_base_head="X",
             vars={"fast_path": False, "plan_index": 1, "plan_total": 1,
                   "task_total": 1, "integration_fork": "P"},
-            project_facts={}),
+            ),
         workflow_dir=bundled_workflow_dir("default"))
     # Sentinel lives entirely on one partial line (the canonical sentence wraps
     # across a newline, so assert a within-line substring that survives the wrap).
@@ -784,7 +783,7 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
             return render_prompt(body, build_context(
                 quest_title="t", event_log=log, quest_id="abc",
                 quest_home=".imp/quests/abc",
-                project_facts={}, autonomous=autonomous,
+                autonomous=autonomous,
                 vars={"auto_merge": True}),
                 workflow_dir=wdir).lower()
 
@@ -837,7 +836,7 @@ def test_finalize_tracked_check_merged_after_dimension_is_fork_point_gated(tmp_p
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc",
         cur_base_head="NEWTIP", orig_base_head="OLDTIP",
-        project_facts={}, vars={"auto_merge": True}),
+        vars={"auto_merge": True}),
         workflow_dir=bundled_workflow_dir("default")).lower()
     # With a fork point, §1a searches the merged-after-fork archive subset.
     assert "imp search --active --backlog --merged-after oldtip -l" in with_fork
@@ -846,7 +845,7 @@ def test_finalize_tracked_check_merged_after_dimension_is_fork_point_gated(tmp_p
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc",
         cur_base_head="X", orig_base_head="",
-        project_facts={}, vars={"auto_merge": True}),
+        vars={"auto_merge": True}),
         workflow_dir=bundled_workflow_dir("default")).lower()
     # No fork point → fall back to the plain active+backlog search, no merged-after dimension.
     assert "imp search --active --backlog -l" in without_fork

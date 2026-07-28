@@ -68,7 +68,7 @@ def test_interactive_git_writing_agents_render_the_write_bounds(
     out = render_prompt(
         body,
         build_context(quest_title="t", event_log=InMemoryEventLog(), quest_id="abc",
-                      quest_home=".imp/quests/abc", project_facts={}, vars=extra_vars),
+                      quest_home=".imp/quests/abc", vars=extra_vars),
         workflow_dir=wf_dir)
     # A sentence only the write-bounds section carries: the include resolved here.
     assert "Base branches move only by imp's engine" in out

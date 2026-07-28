@@ -82,8 +82,7 @@ def test_go_live_worktree_partial_shared_and_included_by_threshold() -> None:
     out = render_prompt(
         body,
         build_context(quest_title="t", event_log=InMemoryEventLog(),
-                      quest_id="abc", quest_home=".imp/quests/abc",
-                      project_facts={}),
+                      quest_id="abc", quest_home=".imp/quests/abc"),
         workflow_dir=bundled_workflow_dir("default"))
     assert "forks the branch and worktree from the base branch's current tip" in out
     assert "{% include" not in out
