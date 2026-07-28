@@ -12,11 +12,13 @@ import yaml
 from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
 from imp.cli.init import (
     InitScreenState,
+    InitSettings,
     ScreenAccepted,
     ScreenTalk,
     _confirm_init_settings,
     _row_cells,
     _screen_state_from_detection,
+    _settings_summary,
     run_init,
 )
 from imp.cli.pythonpath_detect import ImportRoots
@@ -250,6 +252,42 @@ def test_one_enter_writes_and_commits_the_detected_settings(
         ["git", "-C", str(root), "log", "-1", "--format=%s"],
         capture_output=True, text=True, check=True).stdout.strip()
     assert subject == "imp: initialize project"
+
+
+def test_one_enter_echoes_configured_block_above_created(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo_shaped_project(tmp_path)
+    _stub_screen(monkeypatch, ScreenAccepted)
+    msgs: list[str] = []
+    run_init(root, picker_fn=lambda _a: ["anthropic"], input_fn=lambda _p: "",
+             output_fn=msgs.append, detect_theme_fn=lambda: "ansi")
+    configured_idx = next(i for i, m in enumerate(msgs) if "Configured:" in m)
+    created_idx = next(i for i, m in enumerate(msgs) if "Created:" in m)
+    assert configured_idx < created_idx
+    assert "workflow" in msgs[configured_idx + 1] and "default" in msgs[configured_idx + 1]
+    assert "branch" in msgs[configured_idx + 2] and "master" in msgs[configured_idx + 2]
+    assert "tests" in msgs[configured_idx + 3] and "make check" in msgs[configured_idx + 3]
+    assert "import root" in msgs[configured_idx + 4] and "src" in msgs[configured_idx + 4]
+
+
+def test_settings_summary_empty_values_render_as_none() -> None:
+    settings = InitSettings(
+        default_workflow="default", default_base="main",
+        test_cmd_fast=None, pythonpath=[])
+    lines = _settings_summary(settings)
+    assert len(lines) == 4
+    tests_line = next(line for line in lines if "tests" in line)
+    roots_line = next(line for line in lines if "import root" in line)
+    assert "(none)" in tests_line
+    assert "(none)" in roots_line
+
+    settings_empty_base = InitSettings(
+        default_workflow="default", default_base="",
+        test_cmd_fast=None, pythonpath=[])
+    lines_empty_base = _settings_summary(settings_empty_base)
+    branch_line = next(line for line in lines_empty_base if "branch" in line)
+    assert "(none)" in branch_line
 
 
 def test_init_finishes_with_no_provider_credential_at_all(

@@ -486,6 +486,14 @@ class ScreenRow(IntEnum):
     IMPORT_ROOT = 3
 
 
+_ROW_LABELS: dict[ScreenRow, str] = {
+    ScreenRow.WORKFLOW: "workflow",
+    ScreenRow.BRANCH: "branch",
+    ScreenRow.TESTS: "tests",
+    ScreenRow.IMPORT_ROOT: "import root",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class InitScreenState:
     """What the confirmation screen shows and, on accept, writes. `test_cmd_fast`
@@ -532,17 +540,28 @@ def _cycle_workflow(state: InitScreenState, workflows: list[str]) -> InitScreenS
 def _row_cells(state: InitScreenState) -> dict[ScreenRow, tuple[str, str, str]]:
     """Each row's (label, value, provenance): the screen pads these into columns,
     the setup-conversation kickoff reads them back to the agent."""
-    return {
-        ScreenRow.WORKFLOW: (
-            "workflow", state.workflow, _workflow_blurb(state.workflow)),
-        ScreenRow.BRANCH: (
-            "branch", state.branch or _NO_VALUE, state.branch_provenance),
-        ScreenRow.TESTS: (
-            "tests", state.test_cmd_fast or _NO_VALUE, state.tests_provenance),
+    values: dict[ScreenRow, tuple[str, str]] = {
+        ScreenRow.WORKFLOW: (state.workflow, _workflow_blurb(state.workflow)),
+        ScreenRow.BRANCH: (state.branch or _NO_VALUE, state.branch_provenance),
+        ScreenRow.TESTS: (state.test_cmd_fast or _NO_VALUE, state.tests_provenance),
         ScreenRow.IMPORT_ROOT: (
-            "import root", ", ".join(state.pythonpath) or _NO_VALUE,
-            state.roots_provenance),
+            ", ".join(state.pythonpath) or _NO_VALUE, state.roots_provenance),
     }
+    return {row: (_ROW_LABELS[row], value, note)
+            for row, (value, note) in values.items()}
+
+
+def _settings_summary(settings: InitSettings) -> list[str]:
+    """The screen erases itself on accept, so scrollback would otherwise keep no
+    record of the settings the user confirmed."""
+    label_w = max(len(label) for label in _ROW_LABELS.values())
+    values: dict[ScreenRow, str] = {
+        ScreenRow.WORKFLOW: settings.default_workflow,
+        ScreenRow.BRANCH: settings.default_base or _NO_VALUE,
+        ScreenRow.TESTS: settings.test_cmd_fast or _NO_VALUE,
+        ScreenRow.IMPORT_ROOT: ", ".join(settings.pythonpath) or _NO_VALUE,
+    }
+    return [f"  {_ROW_LABELS[row]:<{label_w}}  {values[row]}" for row in ScreenRow]
 
 
 def _confirm_rows(
@@ -1019,6 +1038,10 @@ def run_init(
         return
     committed = write_init_files(project_root, settings)
 
+    output_fn("")
+    output_fn(pal.ansi("Configured:", "wordmark", enabled=color_on))
+    for line in _settings_summary(settings):
+        output_fn(pal.ansi(line, "dim", enabled=color_on))
     output_fn("")
     output_fn(pal.ansi("Created:", "wordmark", enabled=color_on))
     output_fn(pal.ansi("  imp/config.yaml", "dim", enabled=color_on))

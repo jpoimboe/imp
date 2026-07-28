@@ -1238,9 +1238,11 @@ def test_splash_prints_once_in_the_resolved_theme_before_the_screen(
     i = msgs.index("SPLASH-BLOCK")
     assert msgs[i - 1] == ""      # one blank above
     assert msgs[i - 2] != ""      # never two
-    # the screen draws and erases itself here; one blank, then the manifest
+    # the screen draws and erases itself here; one blank, then the settings block
     assert msgs[i + 1] == ""
-    assert "Created:" in msgs[i + 2]
+    assert "Configured:" in msgs[i + 2]
+    created_idx = next(j for j, m in enumerate(msgs) if "Created:" in m)
+    assert created_idx > i + 2
 
 
 def test_no_splash_without_color_but_one_blank_before_the_screen(
