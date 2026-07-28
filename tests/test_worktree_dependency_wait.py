@@ -12,6 +12,7 @@ from imp.engine import backlog
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -75,7 +76,7 @@ async def test_waits_for_unmerged_dep_then_materializes(
 
     await tool.async_invoke(ctx, {})
 
-    wt = tmp_path / ".imp" / "worktrees" / "dep1"
+    wt = project_state_dir(tmp_path) / "worktrees" / "dep1"
     assert ctx.project_root == wt and q.materialized is True
     assert slept["n"] == 1
     assert [t for t, _ in log.events] == ["dependency_waiting", "dependency_ready"]
@@ -162,7 +163,7 @@ async def test_headless_waits_for_unmerged_dep_then_materializes(
 
     await tool.async_invoke(ctx, {})
 
-    wt = tmp_path / ".imp" / "worktrees" / "dep5"
+    wt = project_state_dir(tmp_path) / "worktrees" / "dep5"
     assert ctx.project_root == wt and q.materialized is True
     assert slept["n"] == 1
     assert [t for t, _ in log.events] == ["dependency_waiting", "dependency_ready"]

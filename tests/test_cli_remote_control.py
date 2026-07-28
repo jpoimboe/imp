@@ -41,7 +41,6 @@ def test_start_daemon_rejects_a_second_live_daemon(tmp_path: Path) -> None:
 
 
 def test_stop_daemon_reports_when_none_running(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     assert runner.stop_daemon(tmp_path) == 1
 
 
@@ -50,7 +49,6 @@ def _pause_until_signalled() -> None:
 
 
 def test_stop_daemon_signals_the_recorded_pid(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     # Record a real, signalable child as the "daemon"; stop must SIGTERM it.
     p = mp.get_context("spawn").Process(target=_pause_until_signalled)
     p.start()
@@ -70,7 +68,6 @@ def test_start_daemon_refuses_without_remote_driver(
 ) -> None:
     # A control root with no remote.driver configured must refuse rc 2 and
     # never reach anyio.run (no socket bound, no blind spawns).
-    (tmp_path / ".imp").mkdir()
 
     def _must_not_run(*_a: object, **_kw: object) -> None:
         raise AssertionError("daemon started despite missing remote.driver")

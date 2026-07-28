@@ -8,6 +8,7 @@ import imp.cli.main as m
 from imp.cli.store import make_store
 from imp.engine import archive
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -32,7 +33,7 @@ def test_scan_quest_homes_parses_each_home_once(tmp_path: Path) -> None:
 def test_scan_quest_homes_missing_state_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="No State", quest_id="noState", base_branch="main")
-    state_file = tmp_path / ".imp" / "quests" / "noState" / "state" / "state.json"
+    state_file = project_state_dir(tmp_path) / "quests" / "noState" / "state" / "state.json"
     state_file.unlink()
 
     scan = {h.quest_id: h for h in make_store(tmp_path).scan_homes()}
@@ -43,7 +44,7 @@ def test_scan_quest_homes_missing_state_json(tmp_path: Path) -> None:
 def test_scan_quest_homes_drops_malformed_quest_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Bad JSON", quest_id="badJson", base_branch="main")
-    change_file = tmp_path / ".imp" / "quests" / "badJson" / "quest.json"
+    change_file = project_state_dir(tmp_path) / "quests" / "badJson" / "quest.json"
     change_file.write_bytes(b"bad json")
 
     ids = {h.quest_id for h in make_store(tmp_path).scan_homes()}

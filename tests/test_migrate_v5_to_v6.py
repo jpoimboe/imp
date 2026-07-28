@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from imp.engine.quest import LAYOUT_VERSION, Quest, _migrate_v5_to_v6
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 _OLD_EVENTS = [
@@ -22,7 +23,7 @@ _OLD_EVENTS = [
 
 
 def _quest_dir(control: Path, cid: str) -> Path:
-    return control / ".imp" / "quests" / cid
+    return project_state_dir(control) / "quests" / cid
 
 
 def _seed_old_quest(control: Path, cid: str) -> Quest:

@@ -336,13 +336,6 @@ def test_terminate_reaps_regrouped_descendant(tmp_path):
     anyio.run(go)
 
 
-def test_quest_home_path_maps_empty_to_none() -> None:
-    from imp.agents.tools.context import quest_home_path
-    assert quest_home_path("") is None
-    assert quest_home_path(None) is None
-    assert quest_home_path("/c/.imp/quests/abc") == Path("/c/.imp/quests/abc")
-
-
 def test_tool_context_quest_home_defaults_none(tmp_path: Path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")

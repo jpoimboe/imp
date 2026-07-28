@@ -7,7 +7,9 @@ committed imp/config.yaml, init is idempotent: it never overwrites the
 project file and only bootstraps the machine's global config if absent.
 
 Committed config+workflows live under imp/ (tracked by git).
-Runtime state (quests, locks, etc.) lives under .imp/ (gitignored wholesale).
+Runtime state (quests, worktrees, archive) lives outside the checkout, under
+~/.imp/projects/<name>/. The committed `.imp/` gitignore rule stays: each quest
+worktree holds a `.imp/quests/<id>` symlink to its out-of-tree home.
 
 Tier→model bindings come from the provider-code floor now, so init asks no
 model question — it just records the enabled providers + detected theme. A
@@ -223,7 +225,7 @@ def _default_detect_theme() -> str:
 
 
 def _ensure_imp_gitignore(project_root: Path) -> None:
-    """Ensure `.imp/` (runtime control-root state) is gitignored; idempotent."""
+    """Ensure `.imp/` (the per-worktree quest-home symlink dir) is gitignored; idempotent."""
     project_gi = project_root / ".gitignore"
     existing = project_gi.read_text() if project_gi.exists() else ""
     existing_lines = {ln.strip() for ln in existing.splitlines()}

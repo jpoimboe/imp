@@ -13,6 +13,7 @@ import pytest
 
 from imp.cli.main import main
 from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 
 # ── resume renders through LiveDriver (no replay) ────────────────────────────
 
@@ -30,7 +31,7 @@ def _make_quest_worktree(control: Path, quest_id: str, title: str,
     Quest.load only reads the permanent .imp/quests/<id>/ directory)."""
     from imp.engine.state import State
 
-    quest_dir = control / ".imp" / "quests" / quest_id
+    quest_dir = project_state_dir(control) / "quests" / quest_id
     quest_dir.mkdir(parents=True)
     (quest_dir / "state").mkdir()
     (quest_dir / "quest.json").write_text(
@@ -117,7 +118,7 @@ def test_cli_log_pipes_through_narrative(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir = project_state_dir(tmp_path) / "quests" / slug
     quest_dir.mkdir(parents=True)
     (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
@@ -166,7 +167,7 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir = project_state_dir(tmp_path) / "quests" / slug
     quest_dir.mkdir(parents=True)
     (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
@@ -220,7 +221,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 
     slug = "my-sub"
-    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir = project_state_dir(tmp_path) / "quests" / slug
     quest_dir.mkdir(parents=True)
     (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "sub", "base_branch": "main",
@@ -418,7 +419,7 @@ def test_log_uses_display_width_for_hr_and_term_width_for_wrap(
     import imp.cli.main as m
 
     slug = "wide-demo"
-    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir = project_state_dir(tmp_path) / "quests" / slug
     quest_dir.mkdir(parents=True)
     (quest_dir / "quest.json").write_text(json.dumps(
         {"id": slug, "title": "demo", "base_branch": "main",

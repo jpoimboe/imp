@@ -5,10 +5,11 @@ from pathlib import Path
 
 from imp.engine.archive import read as archive_read
 from imp.engine.quest import live_quest_ids, live_stems
+from imp.paths import project_state_dir
 
 
 def _live_home(control: Path, cid: str) -> None:
-    home = control / ".imp" / "quests" / cid
+    home = project_state_dir(control) / "quests" / cid
     home.mkdir(parents=True)
     (home / "quest.json").write_text(json.dumps({"id": cid, "title": cid}))
 
@@ -37,8 +38,8 @@ def test_live_quest_ids_lists_only_homes_with_quest_json(tmp_path: Path) -> None
     _live_home(tmp_path, "wibo10")
     _live_home(tmp_path, "kobe47")
     # A stray dir without quest.json and a hidden dir are both excluded.
-    (tmp_path / ".imp" / "quests" / "junk").mkdir(parents=True)
-    (tmp_path / ".imp" / "quests" / ".hidden").mkdir()
+    (project_state_dir(tmp_path) / "quests" / "junk").mkdir(parents=True)
+    (project_state_dir(tmp_path) / "quests" / ".hidden").mkdir()
     assert live_quest_ids(tmp_path) == ["kobe47", "wibo10"]
 
 

@@ -1,5 +1,5 @@
 """Quest lifecycle (spec §3, §5): immutable id identity, free-form title, worktree
-creation, permanent state home at <control_root>/.imp/quests/<id>/."""
+creation, permanent state home at project_state_dir(control_root)/quests/<id>/."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from imp.engine.state import (
     parse_events_jsonl,
 )
 from imp.engine.types import SourceLoc
+from imp.paths import project_state_dir
 
 LAYOUT_VERSION = 14  # bump in the SAME commit as any breaking quest-home layout/schema change
 
@@ -83,8 +84,9 @@ def _imp_commit(control_root: Path) -> str:
 
 
 def live_quest_ids(control_root: Path) -> list[str]:
-    """Live quest-home ids: dirs under .imp/quests/ holding a quest.json (archive excluded)."""
-    root = control_root / ".imp" / "quests"
+    """Live quest-home ids: dirs under <state dir>/quests/ holding a quest.json
+    (archive excluded)."""
+    root = project_state_dir(control_root) / "quests"
     if not root.is_dir():
         return []
     return sorted(p.name for p in root.iterdir()
@@ -419,7 +421,7 @@ class Quest:
     base_branch: str
     control_root: Path
     project_root: Path           # the worktree
-    quest_dir: Path             # permanent home <control_root>/.imp/quests/<id>
+    quest_dir: Path             # permanent home <state dir>/quests/<id>
     materialized: bool = True    # False only for an un-materialized draft (no worktree)
     orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
@@ -431,8 +433,8 @@ class Quest:
     depends_on: list[str] = field(default_factory=list)  # dependency quest ids (gates go-live)
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
-        """Content-only rename (no git): set title, rewrite quest.json under the
-        gitignored .imp/ (never dirties the tracked worktree), emit quest_renamed.
+        """Content-only rename (no git): set title, rewrite quest.json in the
+        out-of-tree state dir (never dirties the tracked worktree), emit quest_renamed.
         Returns the id. The id is immutable, so nothing else moves."""
         old_title = self.title
         self.title = name
@@ -531,6 +533,14 @@ class Quest:
         link_quest_home(self.project_root, self.quest_dir)
 
     @property
+    def agent_quest_home(self) -> str:
+        """The quest home as agents address it: worktree-relative through the
+        id-scoped symlink when the agent runs in a worktree, absolute when it runs
+        in the main checkout, where no symlink exists."""
+        return (str(self.quest_dir) if self.project_root == self.control_root
+                else f".imp/quests/{self.id}")
+
+    @property
     def live_workflow_dir(self) -> Path:
         from imp.assets import resolve_workflow_dir
         from imp.providers.effective import resolve_default_workflow
@@ -576,13 +586,13 @@ class Quest:
         cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
     ) -> Quest:
-        """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
-        internal state at the control root (.imp/quests/<id>). Raises
+        """Create branch imp/<id> + worktree <state dir>/worktrees/<id>, then seed
+        internal state at <state dir>/quests/<id>. Raises
         worktree.BranchExists on the (effectively impossible) id collision —
         the caller reports a clean error."""
         wt_path = worktree.create_worktree(control_root, quest_id, base_branch)
         cur_base_head = worktree.head_of(control_root, base_branch)
-        quest_dir = control_root / ".imp" / "quests" / quest_id
+        quest_dir = project_state_dir(control_root) / "quests" / quest_id
         quest_dir.mkdir(parents=True)
         (quest_dir / "state").mkdir()
         (quest_dir / "steps").mkdir()
@@ -653,7 +663,7 @@ class Quest:
         as orig_base_head for the later go-live head_changed check. Validates the
         workflow against the main checkout; with no branch/worktree to roll back,
         a bad/absent workflow drops the just-created home and re-raises."""
-        quest_dir = control_root / ".imp" / "quests" / quest_id
+        quest_dir = project_state_dir(control_root) / "quests" / quest_id
         quest_dir.mkdir(parents=True)
         (quest_dir / "state").mkdir()
         (quest_dir / "steps").mkdir()
@@ -728,7 +738,7 @@ class Quest:
     @classmethod
     def load(cls, control_root: Path, quest_id: str, *,
              migrate_if_lockable: bool = False) -> Quest:
-        quest_dir = control_root / ".imp" / "quests" / quest_id
+        quest_dir = project_state_dir(control_root) / "quests" / quest_id
         if not (quest_dir / "quest.json").is_file():
             raise LoadError(f"no such quest {quest_id!r}", SourceLoc(file=quest_dir, line=1))
         meta = json.loads((quest_dir / "quest.json").read_text())
@@ -745,7 +755,7 @@ class Quest:
             meta = json.loads((quest_dir / "quest.json").read_text())
         project_root = (
             Path(meta["project_root"]) if meta.get("project_root")
-            else (control_root / ".imp" / "worktrees" / quest_id).resolve()
+            else (project_state_dir(control_root) / "worktrees" / quest_id).resolve()
         )
         return cls(
             id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],

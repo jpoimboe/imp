@@ -27,7 +27,7 @@ from imp.agents.loop_items import (
 )
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.tools import bg as _bg
-from imp.agents.tools.context import ToolContext, quest_home_path
+from imp.agents.tools.context import ToolContext
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
@@ -93,7 +93,7 @@ class PushSession:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.quest_context.quest_home),
+            quest_home=invocation.quest_context.quest_dir,
         )
         ctx.quest_context = invocation.quest_context  # for subagent dispatch
         ctx.quest_state = invocation.quest_state

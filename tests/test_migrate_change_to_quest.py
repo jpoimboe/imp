@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from imp.engine.archive import index, index_path
 from imp.engine.archive.read import read_quest_json
 
@@ -44,7 +46,7 @@ def _seed_old_imp(root: Path) -> None:
         }))
     # A valid new-schema but EMPTY index.db: if the migration skips the rebuild
     # this stays empty (no quests rows), so the post-run assertion is falsifiable.
-    index.connect(index_path(root)).close()
+    index.connect(root / ".imp" / "archive" / "index.db").close()
     mq = root / ".git" / "imp" / "merge-queue.json"
     mq.parent.mkdir(parents=True)
     mq.write_text(json.dumps([
@@ -59,7 +61,9 @@ def _run(root: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         capture_output=True, text=True)
 
 
-def test_migration_converts_state_and_imp_can_read_it(tmp_path: Path) -> None:
+def test_migration_converts_state_and_imp_can_read_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _seed_old_imp(tmp_path)
     r = _run(tmp_path)
     assert r.returncode == 0, r.stderr
@@ -81,7 +85,9 @@ def test_migration_converts_state_and_imp_can_read_it(tmp_path: Path) -> None:
     mq = json.loads((tmp_path / ".git" / "imp" / "merge-queue.json").read_text())
     assert mq[0]["quest_id"] == "bbb222" and "change_id" not in mq[0]
 
-    # 4. index rebuilt under the quests/quest_id schema; imp read paths work
+    # 4. index rebuilt under the quests/quest_id schema; imp read paths work.
+    # The migrated state stays in the repo, so point the state seam at it.
+    monkeypatch.setenv("IMP_STATE_DIR", str(tmp_path / ".imp"))
     conn = index.connect(index_path(tmp_path))
     try:
         assert index.quest_ids(conn) == ["aaa111", "bbb222"]          # overview
@@ -98,7 +104,9 @@ def test_migration_converts_state_and_imp_can_read_it(tmp_path: Path) -> None:
     assert blob is not None and json.loads(blob)["title"] == "First Quest"
 
 
-def test_migration_is_idempotent(tmp_path: Path) -> None:
+def test_migration_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _seed_old_imp(tmp_path)
     assert _run(tmp_path).returncode == 0
     quest_json = (tmp_path / ".imp" / "quests" / "aaa111" / "quest.json").read_text()
@@ -113,6 +121,7 @@ def test_migration_is_idempotent(tmp_path: Path) -> None:
     # record already has quest_meta, so the second pass leaves it byte-identical
     assert (tmp_path / ".imp" / "archive" / "records"
             / "aaa111.json").read_text() == rec_before
+    monkeypatch.setenv("IMP_STATE_DIR", str(tmp_path / ".imp"))
     conn = index.connect(index_path(tmp_path))
     try:
         assert index.quest_ids(conn) == ["aaa111", "bbb222"]

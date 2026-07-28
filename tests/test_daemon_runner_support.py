@@ -123,7 +123,6 @@ def test_sender_worker_retries_alert_after_transient_send_failure(
 
 
 def test_pidfile_roundtrip(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     runner.write_pid(tmp_path)
     assert runner.read_pid(tmp_path) == os.getpid()
     runner.remove_pid(tmp_path)
@@ -131,7 +130,6 @@ def test_pidfile_roundtrip(tmp_path: Path) -> None:
 
 
 def test_read_pid_returns_none_for_corrupt_pidfile(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     runner.pid_path(tmp_path).write_text("not-a-number")
     assert runner.read_pid(tmp_path) is None
 
@@ -160,7 +158,6 @@ def test_check_not_running_raises_when_socket_is_live(tmp_path: Path) -> None:
 
 
 def test_check_not_running_passes_when_no_daemon(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     runner.check_not_running(tmp_path)   # no raise
 
 

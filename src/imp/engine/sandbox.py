@@ -32,6 +32,7 @@ from typing import Any
 
 from imp.engine.env import HEADLESS_ENV, quest_var_tmp_root
 from imp.engine.shim import imp_shim_dir
+from imp.paths import project_state_dir
 from imp.remote.session.discover import session_socket_path
 
 
@@ -65,7 +66,7 @@ class SandboxPolicy:
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
-    quest_home: str = ""                     # <control>/.imp/quests/<id> rw bind ("" → none)
+    quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
     state_mask: str = ""                     # fail-closed tmpfs mask ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
@@ -315,7 +316,7 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     branch inside the sandbox could not write its loose ref. The directory is
     imp's own and always safe to create.
 
-    After the fail-closed .imp allowlist, secret_dirs/secret_files name only
+    After the fail-closed state allowlist, secret_dirs/secret_files name only
     self-owned never-vanishing paths — the current quest's own steps/ +
     events.jsonl, the home secret dirs/files, and /run/user/$UID — so the prune
     over those two sets is effectively a no-op. Its remaining job is
@@ -402,7 +403,7 @@ def sandbox_available() -> bool:
 def _force_rmtree(path: Path) -> None:
     """rmtree that also clears the mode-000 `work/work` dir overlayfs leaves in
     its workdir (untraversable until chmod'd), so no overlay residue survives
-    under .imp/. Owner is the real uid, so the chmod always succeeds."""
+    under the state dir. Owner is the real uid, so the chmod always succeeds."""
     for root, dirs, _files in os.walk(path):
         for d in dirs:
             with contextlib.suppress(OSError):
@@ -415,7 +416,7 @@ def overlay_available(probe_base: Path, home: Path) -> bool:
     """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
     inside a user namespace succeeds using the agent's REAL home as lowerdir.
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
-    real dir under `.imp/`, NOT /tmp — some hosts refuse an overlay upperdir on
+    real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
     tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
     build_sandbox_argv uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
@@ -492,6 +493,20 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
     )
 
 
+def _state_mask(control_root: Path) -> Path:
+    """The fail-closed tmpfs root: every project's state under imp_home(), or the
+    pinned override directory itself. Created if absent — bwrap cannot mount a
+    tmpfs over a missing directory. Returned RESOLVED: bind_plan compares it
+    against the already-resolved worktree, and a symlinked $HOME would otherwise
+    make a real quest's worktree read as non-nested and mask it away."""
+    # os.environ, not resolve_policy's `environ` arg: the seam owns this variable
+    # and project_state_dir reads it the same way, so the two cannot disagree.
+    state = project_state_dir(control_root)
+    mask = state if os.environ.get("IMP_STATE_DIR") else state.parent
+    mask.mkdir(parents=True, exist_ok=True)
+    return mask.resolve()
+
+
 def resolve_policy(
     *, worktree: Path, control_root: Path, quest_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
@@ -514,6 +529,8 @@ def resolve_policy(
             "user/local config"
         )
 
+    if quest_dir is not None:
+        quest_dir = quest_dir.resolve()
     home = cfg.home or Path.home()
     uid = cfg.uid if cfg.uid is not None else os.getuid()
 
@@ -592,7 +609,7 @@ def resolve_policy(
         worktree=str(worktree),
         git_common_dir=str(git),
         quest_home=str(quest_dir) if quest_dir is not None else "",
-        state_mask=str(control_root / ".imp"),
+        state_mask=str(_state_mask(control_root)),
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         git_worktrees_mask=str(git / "worktrees"),

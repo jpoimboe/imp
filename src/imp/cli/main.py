@@ -31,6 +31,7 @@ from imp.cli import palette as pal
 from imp.cli import quest_row, splash
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
+from imp.paths import project_state_dir
 
 if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
@@ -454,7 +455,7 @@ def _pause_facts(
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
             info: _PauseInfo | None = _PauseInfo(
-                "crash", f"see .imp/quests/{quest.id}/daemon.stderr")
+                "crash", f"see {quest.quest_dir / 'daemon.stderr'}")
         else:
             # A resumed-without-pause segment with no crash traceback is a clean
             # deliberate detach — render the calm interrupt reason, no pointer.
@@ -508,7 +509,7 @@ def _emit_merge_blocked(
         summary = f"imp/{cid} doesn't auto-merge into {base}"
         body = [f"imp can't resolve conflicts in this version — merge `imp/{cid}` "
                 f"into `{base}` manually, then the quest is done (its worktree at "
-                f"`.imp/worktrees/{cid}` can be removed)."]
+                f"`{quest.project_root}` can be removed)."]
     else:
         summary = "couldn't merge"
         body = [f"Resolve, then `imp resume {cid}`."]
@@ -541,7 +542,7 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
     else:
         head = "startup failed: session daemon did not come up"
         body = [f"It may have crashed; see "
-                f"{quest.control_root}/.imp/remote-control.log"]
+                f"{project_state_dir(quest.control_root) / 'remote-control.log'}"]
     intent = _resolve_intent(list(quest.event_log().read()))
     for ln in _error_block(head, body, quest.id, quest.title,
                            color=color, intent=intent):
@@ -1692,19 +1693,19 @@ def _display_width() -> int:
 
 
 def _list_quest_homes(control: Path) -> list[str]:
-    """Ids of quests with a permanent root home under .imp/quests/."""
+    """Ids of quests with a permanent home under <state dir>/quests/."""
     from imp.engine.quest import live_quest_ids
     return live_quest_ids(control)
 
 
 def _quest_home(control: Path, quest_id: str) -> Path:
-    return control / ".imp" / "quests" / quest_id
+    return project_state_dir(control) / "quests" / quest_id
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
     """Live homes first, then archived ids not in the live set. Live-home ids come
-    through the store (scan_homes), not a raw .imp/quests/ disk scan, so an
-    in-sandbox CLI resolves them via the session daemon: the fail-closed .imp mask
+    through the store (scan_homes), not a raw state-dir disk scan, so an
+    in-sandbox CLI resolves them via the session daemon: the fail-closed state mask
     hides sibling homes on disk, and the daemon reads them unsandboxed."""
     from imp.cli.store import make_store
     store = make_store(control)
@@ -4724,7 +4725,8 @@ def main(argv: list[str] | None = None) -> int:
     _init_logging()
     with contextlib.suppress(Exception):
         install_stack_dumper(
-            _control_root() / ".imp" / f"cli.{os.getpid()}.stack-dump.txt")
+            project_state_dir(_control_root())
+            / f"cli.{os.getpid()}.stack-dump.txt")
     args = sys.argv[1:] if argv is None else argv
     parser = _build_parser()
     try:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
 from impty import TerminalSession
 from tests.impty.e2e_support import (
     E2E_SUBPROCESS_TIMEOUT,
@@ -48,7 +49,8 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
     assert rc == 0, "\n".join(s.lines())                  # completed + merged
 
     # The worktree is gone once the merge gate fired (completion finalized it).
-    assert not list(clone.glob(".imp/worktrees/*")), "worktree not torn down (no merge?)"
+    assert not list((project_state_dir(clone) / "worktrees").glob("*")), \
+        "worktree not torn down (no merge?)"
 
     # Fold the unmodified invariants checker into the result.
     shim = write_imp_shim(tmp_path)

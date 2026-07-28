@@ -301,7 +301,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     name, _title, token, reason, _opening = _pause_facts(quest)
     assert name == "mona44"
     assert token == "mona44"
-    assert reason == _PauseInfo("crash", "see .imp/quests/mona44/daemon.stderr")
+    assert reason == _PauseInfo("crash", f"see {quest_dir / 'daemon.stderr'}")
 
 
 def test_pause_facts_stale_clean_detach_renders_calm_interrupt(

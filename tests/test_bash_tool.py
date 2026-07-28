@@ -1320,3 +1320,18 @@ def test_bash_exactly_at_the_combined_cap_is_byte_exact_and_unannounced(
     assert len(out["stderr"]) == 10_000
     assert "notice" not in out
     assert not (tmp_path / "tool-results").exists()
+
+
+def test_subagent_quest_dir_makes_imp_quest_dir_absolute(tmp_path: Path) -> None:
+    # A subagent has no live ctx.quest, so bash falls back to the QuestContext
+    # snapshot. quest_dir is the host path; quest_home stays the render string.
+    home = tmp_path / "state" / "quests" / "test-quest"
+    home.mkdir(parents=True)
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
+    ctx.quest_context = QuestContext(
+        id="test01", title="Test Quest", project_root=tmp_path,
+        workflow_dir=home / "workflow",
+        quest_home=".imp/quests/test-quest", quest_dir=home,
+    )
+    out = json.loads(_run_bash(ctx, {"command": 'printf %s "$IMP_QUEST_DIR"'}))
+    assert out["stdout"] == str(home)

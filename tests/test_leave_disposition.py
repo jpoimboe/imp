@@ -9,6 +9,7 @@ from imp.engine.abandon import discard_conversation, save_as_draft
 from imp.engine.archive import record, records_root
 from imp.engine.quest import Quest
 from imp.engine.state import LockHeld, ProjectLock, State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -20,7 +21,7 @@ def test_save_as_draft_sets_paused_status_and_keeps_home(tmp_path: Path) -> None
     save_as_draft(ch)
 
     assert State.load(ch.state_dir).status == "paused"            # resting draft state
-    assert (tmp_path / ".imp" / "quests" / "d1").exists()       # live home KEPT
+    assert (project_state_dir(tmp_path) / "quests" / "d1").exists()       # live home KEPT
     assert record.read_record(records_root(tmp_path), "d1") is None  # NOT archived
     events = ch.event_log().read()
     assert any(e.get("type") == "conversation_saved" for e in events)
@@ -46,7 +47,7 @@ def test_discard_conversation_drops_home_and_leaves_no_record(tmp_path: Path) ->
 
     discard_conversation(ch)
 
-    assert not (tmp_path / ".imp" / "quests" / "d2").exists()   # home gone
+    assert not (project_state_dir(tmp_path) / "quests" / "d2").exists()   # home gone
     assert record.read_record(records_root(tmp_path), "d2") is None  # zero-exchange → no record
 
 
@@ -96,7 +97,7 @@ def test_print_leave_disposition_archive_is_lock_free(
     with ProjectLock(ch.quest_dir / "lock").acquire():
         rc = m._print_leave_disposition(ch, {"disposition": "archive"})
     assert rc == 0
-    assert (tmp_path / ".imp" / "quests" / "fast1").exists()
+    assert (project_state_dir(tmp_path) / "quests" / "fast1").exists()
     assert record.read_record(records_root(tmp_path), "fast1") is None
     out = capsys.readouterr().out
     assert "· shelved" in out

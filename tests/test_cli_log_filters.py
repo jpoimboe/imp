@@ -11,6 +11,7 @@ import pytest
 from imp.cli.main import _select_log_events, main
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.state import JsonlEventLog
+from imp.paths import project_state_dir
 
 # Two steps (spec@1-3, plan@4-6); agent_message authors carry step:<phase>/<name>
 # agent_ids so agent_display renders "spec" / "plan".
@@ -117,7 +118,7 @@ _MARKED_EVENTS = [
 
 
 def _make_live_quest(control: Path, cid: str, events: list[dict]) -> None:
-    d = control / ".imp" / "quests" / cid
+    d = project_state_dir(control) / "quests" / cid
     d.mkdir(parents=True, exist_ok=True)
     (d / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",

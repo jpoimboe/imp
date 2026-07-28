@@ -21,7 +21,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext, quest_home_path
+from imp.agents.tools.context import ToolContext
 from imp.agents.transcript import Transcript, deliver_continuation_reply
 from imp.engine.agent_run import last_assistant_text
 from imp.providers.base import Provider
@@ -86,7 +86,7 @@ class ScriptedAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,
-            quest_home=quest_home_path(invocation.quest_context.quest_home),
+            quest_home=invocation.quest_context.quest_dir,
         )
         ctx.quest_context = invocation.quest_context
         ctx.quest_state = invocation.quest_state

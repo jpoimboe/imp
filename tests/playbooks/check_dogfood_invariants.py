@@ -13,8 +13,15 @@ import argparse
 import os
 import sqlite3
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+
+# Make `imp` importable (the state-dir seam) when run from a checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+
+from imp.paths import project_state_dir
 
 
 @dataclass
@@ -112,7 +119,7 @@ def check_no_artifacts_on_code_branch(repo: str, base: str) -> Result:
 
 def archived_quest_ids(repo: str) -> list[str]:
     """Quest ids from the archive index (new primary store)."""
-    db = os.path.join(repo, ".imp", "archive", "index.db")
+    db = os.path.join(project_state_dir(Path(repo)), "archive", "index.db")
     if not os.path.exists(db):
         return []
     try:

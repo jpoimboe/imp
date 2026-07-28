@@ -7,6 +7,7 @@ from pathlib import Path
 from imp.cli.main import _sort_rows_started_first, _status_row
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -64,7 +65,7 @@ def test_sort_started_first_tiebreak_created_at_then_id() -> None:
 
 
 def _seed_inflight(control: Path, cid: str, *, created: str, started: str) -> None:
-    cdir = control / ".imp" / "quests" / cid
+    cdir = project_state_dir(control) / "quests" / cid
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid.upper(), "base_branch": "main",

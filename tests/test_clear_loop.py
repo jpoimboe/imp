@@ -14,6 +14,7 @@ import imp.cli.main as m
 import imp.cli.signals as sig
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _branch_with_commit, _git, _seed_control
 
 
@@ -71,7 +72,7 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     # The typed intent is persisted durably so the reopened chat's opening step
     # seeds from quest.json (survives resume), not via a transient run parameter.
     assert Quest.load(tmp_path, quest.id).seed_opening == "build a parser"
-    assert (tmp_path / ".imp" / "quests" / quest.id).exists()  # a brand-new draft home
+    assert (project_state_dir(tmp_path) / "quests" / quest.id).exists()  # a brand-new draft home
     assert quest.title == ""                          # imp new-style: unnamed draft
 
 
@@ -95,7 +96,7 @@ async def test_run_cleared_session_cancel_returns_130_no_draft(
     rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
 
     assert rc == 130
-    changes_dir = tmp_path / ".imp" / "quests"
+    changes_dir = project_state_dir(tmp_path) / "quests"
     entries = list(changes_dir.iterdir()) if changes_dir.exists() else []
     assert entries == []
 

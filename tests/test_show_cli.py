@@ -13,6 +13,7 @@ from imp.cli.main import main
 from imp.engine import archive, worktree
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 _ID = "feat01"
@@ -116,7 +117,7 @@ def test_show_spec_falls_back_after_archive(
     # The per-Quest artifact ref is RETAINED at archive (spec AC 3).
     assert _git_wip_present(tmp_path, _ID)
     worktree.remove_worktree(tmp_path, _ID)
-    assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / _ID).exists()
     # Worktree gone -> spec resolves from the archive.
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
 
@@ -426,7 +427,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
         seed_opening="Add OAuth",
     )
     tear_down_quest(quest)
-    assert not (tmp_path / ".imp" / "quests" / "2026-06-16-bkg111").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "2026-06-16-bkg111").exists()
     out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111")
     assert "id:" in out
     assert "readiness:" not in out  # detail card, not a queued Backlog brief
@@ -485,7 +486,7 @@ def test_show_default_card_renders_summary_after_archive(
     )
     assert _git_wip_present(tmp_path, _ID)
     worktree.remove_worktree(tmp_path, _ID)
-    assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / _ID).exists()
     assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID)
 
 
@@ -680,7 +681,7 @@ def test_show_json_includes_parent_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_control(tmp_path)
-    phome = tmp_path / ".imp" / "quests" / "prnt10"
+    phome = project_state_dir(tmp_path) / "quests" / "prnt10"
     phome.mkdir(parents=True)
     (phome / "quest.json").write_text(json.dumps(
         {"id": "prnt10", "title": "Parent Q", "base_branch": "main"}))

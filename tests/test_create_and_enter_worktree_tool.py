@@ -15,6 +15,7 @@ from imp.engine.sandbox import (
     resolve_policy,
 )
 from imp.engine.state import State
+from imp.paths import imp_home, project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -43,7 +44,7 @@ async def test_tool_flips_project_root_to_worktree(tmp_path: Path) -> None:
     assert ctx.project_root == tmp_path                   # main checkout before go-live
     tool = get_registry()["create_and_enter_worktree"]
     msg = await tool.async_invoke(ctx, {})
-    wt = tmp_path / ".imp" / "worktrees" / "t1"
+    wt = project_state_dir(tmp_path) / "worktrees" / "t1"
     assert ctx.project_root == wt                          # flipped live, same turn
     assert ch.project_root == wt and ch.materialized is True
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
@@ -118,7 +119,7 @@ async def test_tool_refreshes_sandbox_policy_worktree(tmp_path: Path) -> None:
         str(tmp_path), home_layer=layer, readonly_overlays=("/ro/sub",))
     tool = get_registry()["create_and_enter_worktree"]
     await tool.async_invoke(ctx, {})
-    wt = tmp_path / ".imp" / "worktrees" / "t5"
+    wt = project_state_dir(tmp_path) / "worktrees" / "t5"
     assert ctx.base_sandbox_policy.worktree == str(wt)          # repointed at the fork
     assert ctx.base_sandbox_policy.home_layer is layer          # carried over unchanged
     assert ctx.base_sandbox_policy.readonly_overlays == ("/ro/sub",)
@@ -147,7 +148,7 @@ async def test_read_file_succeeds_in_new_worktree_after_go_live(tmp_path: Path) 
     stale = ctx.base_sandbox_policy
     reg = get_registry()
     await reg["create_and_enter_worktree"].async_invoke(ctx, {})
-    wt = tmp_path / ".imp" / "worktrees" / "t7"
+    wt = project_state_dir(tmp_path) / "worktrees" / "t7"
     (wt / "app.py").write_text("hello from worktree\n")
     # Pre-fix the stale control-root policy would have denied this read.
     assert stale.allows_read(wt / "app.py") is False
@@ -165,17 +166,17 @@ async def test_bash_argv_chdirs_and_reexposes_new_worktree(tmp_path: Path) -> No
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, quest_dir=ch.quest_dir)
     await get_registry()["create_and_enter_worktree"].async_invoke(ctx, {})
-    wt = tmp_path / ".imp" / "worktrees" / "t8"
+    wt = project_state_dir(tmp_path) / "worktrees" / "t8"
     argv = build_sandbox_argv(
         "cat app.py", cwd=str(ctx.project_root),
         policy=prepare_spawn_policy(ctx.sandbox_policy), engine_env={})
     # The shell cwd (ctx.project_root) is the new worktree...
     ci = argv.index("--chdir")
     assert argv[ci + 1] == str(wt)
-    # ...and the nested worktree is re-exposed AFTER the .imp tmpfs mask, so files
+    # ...and the nested worktree is re-exposed AFTER the state tmpfs mask, so files
     # under it are readable. A stale control-root policy emits no such re-bind.
-    state_mask = str(tmp_path / ".imp")
-    ti = argv.index(state_mask)                     # the --tmpfs <state> operand
+    state_mask = str((imp_home() / "projects").resolve())
+    ti = argv.index(state_mask)                     # the --tmpfs <mask> operand
     binds = [i for i in range(len(argv) - 2)
              if argv[i] == "--bind" and argv[i + 1] == str(wt) and argv[i + 2] == str(wt)]
     assert binds and binds[0] > ti
@@ -195,7 +196,7 @@ async def test_tool_recomputes_git_worktree_self_after_go_live(tmp_path: Path) -
     assert ctx.base_sandbox_policy.git_worktrees_mask == str(tmp_path / ".git" / "worktrees")
     assert ctx.base_sandbox_policy.git_worktree_self == ""
     await get_registry()["create_and_enter_worktree"].async_invoke(ctx, {})
-    wt = tmp_path / ".imp" / "worktrees" / "t9"
+    wt = project_state_dir(tmp_path) / "worktrees" / "t9"
     pol = ctx.base_sandbox_policy
     assert pol.worktree == str(wt)
     assert pol.git_worktree_self == str(tmp_path / ".git" / "worktrees" / "t9")

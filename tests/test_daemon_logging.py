@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
 from imp.remote.daemon import runner
 
 
 def _log_text(control_root: Path) -> str:
-    return (control_root / ".imp" / "remote-control.log").read_text()
+    return (project_state_dir(control_root) / "remote-control.log").read_text()
 
 
 def test_install_writes_info_line_with_format(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     handlers = runner._install_file_logging(tmp_path, {})
     try:
         logging.getLogger("imp.daemon").info("hello-from-daemon")
@@ -27,7 +27,6 @@ def test_install_writes_info_line_with_format(tmp_path: Path) -> None:
 
 
 def test_imp_debug_enables_debug_lines(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     handlers = runner._install_file_logging(tmp_path, {"IMP_DEBUG": "1"})
     try:
         logging.getLogger("imp.remote").debug("debug-marker")
@@ -37,7 +36,6 @@ def test_imp_debug_enables_debug_lines(tmp_path: Path) -> None:
 
 
 def test_debug_lines_absent_without_imp_debug(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
     handlers = runner._install_file_logging(tmp_path, {})
     try:
         logging.getLogger("imp.remote").debug("debug-marker")
@@ -52,7 +50,6 @@ def test_debug_lines_absent_without_imp_debug(tmp_path: Path) -> None:
 def test_warning_reaches_stderr_info_does_not(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / ".imp").mkdir()
     err = io.StringIO()
     monkeypatch.setattr(sys, "stderr", err)
     handlers = runner._install_file_logging(tmp_path, {})
@@ -66,10 +63,13 @@ def test_warning_reaches_stderr_info_does_not(
     assert "stderr-info-marker" not in captured
 
 
-def test_unwritable_imp_falls_back_with_one_warning(
+def test_unwritable_state_dir_falls_back_with_one_warning(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / ".imp").write_text("not a dir")
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir")
+    monkeypatch.setenv("IMP_STATE_DIR", str(blocker / "state"))
     with caplog.at_level(logging.WARNING, logger="imp.daemon"):
         handlers = runner._install_file_logging(tmp_path, {})
     assert handlers == []

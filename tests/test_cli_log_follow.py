@@ -15,6 +15,7 @@ import pytest
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 from tests.conftest import FIXTURES
 
 
@@ -33,7 +34,7 @@ def _fake_tty(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
 def _make_live_home(control: Path, slug: str) -> Path:
     """Minimal live Quest home with a 2-event narrative so _cmd_log resolves
     the id to a live worktree (materialized default → not a backlog card)."""
-    d = control / ".imp" / "quests" / slug
+    d = project_state_dir(control) / "quests" / slug
     d.mkdir(parents=True)
     (d / "quest.json").write_text(json.dumps({
         "id": slug, "title": "follow", "base_branch": "main",
@@ -75,7 +76,7 @@ def test_follow_step_feeds_only_new_events(tmp_path: Path) -> None:
     one; a non-terminal status returns None and never finishes."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "s1"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     _write_events(home, [{"type": "a"}])
     _write_state(home, status="paused", slug=slug)
     driver, status = MagicMock(), MagicMock()
@@ -94,7 +95,7 @@ def test_follow_step_paused_footer(tmp_path: Path) -> None:
     finish() is called (pause is not terminal)."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "follow-me"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     _write_events(home, [{"type": "a"}])
     _write_state(home, status="paused", slug=slug)  # no lock file → not live
     driver, status = MagicMock(), MagicMock()
@@ -109,7 +110,7 @@ def test_follow_step_merge_blocked_is_non_terminal(tmp_path: Path) -> None:
     """merge_blocked is not terminal: returns None and finish() is not called."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "blocked-me"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     _write_events(home, [{"type": "a"}])
     _write_state(home, status="merge_blocked", slug=slug)
     driver, status = MagicMock(), MagicMock()
@@ -122,7 +123,7 @@ def test_follow_step_live_footer_uses_compose_status(tmp_path: Path) -> None:
     """A live lock → the footer is driven by driver.compose_status."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "s2"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     _write_events(home, [{"type": "a"}])
     _write_state(home, status="new", slug=slug)
     _write_live_lock(home)
@@ -140,7 +141,7 @@ def test_follow_step_terminal_drains_and_finishes(
     returns exit code 0."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "s3"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     _write_events(home, [{"type": "a"}, {"type": "b"}])
     _write_state(home, status=terminal, slug=slug)
     driver, status = MagicMock(), MagicMock()
@@ -158,7 +159,7 @@ def test_follow_step_home_vanished_drains_archive(
     the already-emitted count, then finish() and exit 0."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "gone"
-    home = tmp_path / ".imp" / "quests" / slug  # never created → not exists
+    home = project_state_dir(tmp_path) / "quests" / slug  # never created → not exists
     tail = _EventTail(home / "events.jsonl")
     tail.emitted = 1  # pretend one event was already shown before the vanish
     archived = [{"type": "a"}, {"type": "b"}, {"type": "c"}]
@@ -183,7 +184,7 @@ def test_follow_step_state_vanished_mid_poll_drains_archive(
     """
     from imp.cli.main import _EventTail, _follow_step
     slug = "race"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     # home dir + events.jsonl exist; state/state.json does NOT (race condition)
     _write_events(home, [{"type": "live"}])
     # Archive holds the complete sequence; drain skips what tail already emitted
@@ -206,7 +207,7 @@ def test_follow_step_unknown_after_vanish_finishes(
     """Home gone AND not in the archive → finish() and exit 0, nothing fed."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "poof"
-    home = tmp_path / ".imp" / "quests" / slug  # not exists
+    home = project_state_dir(tmp_path) / "quests" / slug  # not exists
     tail = _EventTail(home / "events.jsonl")
     monkeypatch.setattr("imp.engine.archive.read.read_events", lambda c, i: None)
     driver, status = MagicMock(), MagicMock()
@@ -357,7 +358,7 @@ def test_follow_step_second_drain_catches_late_append(
     status check is fed by the second drain, not the first."""
     from imp.cli.main import _EventTail, _follow_step
     slug = "late"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     _write_events(home, [{"type": "a"}])
     driver, status = MagicMock(), MagicMock()
     tail = _EventTail(home / "events.jsonl")
@@ -396,7 +397,7 @@ def test_cmd_log_follow_routes_live_home_to_follow_live(
     rc = m.main(["log", "-f", slug])
     assert rc == 7
     assert seen["cid"] == slug
-    assert seen["home"] == tmp_path / ".imp" / "quests" / slug
+    assert seen["home"] == project_state_dir(tmp_path) / "quests" / slug
 
 
 def test_cmd_log_follow_routes_archived_only_to_follow_log(
@@ -503,7 +504,7 @@ def test_follow_matches_live_session_capture(tmp_path: Path) -> None:
     capture = _live_capture(events)
 
     slug = "goldenrun"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     split = 500
     _write_events(home, events[:split])           # narrative present at start
     _write_state(home, status="new", slug=slug)   # not terminal yet
@@ -538,7 +539,7 @@ def test_follow_non_tty_footer_stays_inert(tmp_path: Path) -> None:
     from imp.cli.main import _EventTail, _follow_step
     events = _full_run_events()[:120]
     slug = "piped"
-    home = tmp_path / ".imp" / "quests" / slug
+    home = project_state_dir(tmp_path) / "quests" / slug
     _write_events(home, events)
     _write_state(home, status="new", slug=slug)
     _write_live_lock(home)                         # lock live → live-spinner branch
@@ -573,7 +574,7 @@ def test_cmd_log_follow_long_form_starts_follow(
     rc = m.main(["log", "--follow", slug])
     assert rc == 5
     assert seen["cid"] == slug
-    assert seen["home"] == tmp_path / ".imp" / "quests" / slug
+    assert seen["home"] == project_state_dir(tmp_path) / "quests" / slug
 
 
 def test_cmd_log_follow_backlog_id_prints_card_and_exits(

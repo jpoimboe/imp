@@ -68,7 +68,7 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "quests" / quest_id
+    quest_dir = project_state_dir(root) / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
 
@@ -1958,7 +1958,7 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
 @pytest.mark.anyio
 async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
     """The first run copies the live workflow dir into the gitignored per-Quest
-    snapshot at .imp/quests/test-quest/workflow/ (taken once, at run-start)."""
+    snapshot at <state dir>/quests/test-quest/workflow/ (taken once, at run-start)."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     snapshot = quest.quest_dir / "workflow"
@@ -2099,7 +2099,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
 async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     tmp_path: Path, _bare_sandbox: None,
 ) -> None:
-    """A script gate runs with cwd under .imp/quests/test-quest/workflow/ (the snapshot,
+    """A script gate runs with cwd under <state dir>/quests/test-quest/workflow/ (the snapshot,
     sandbox binding intact) while IMP_PROJECT_ROOT still points at the worktree, so
     git ops act on the change's real tree. Exit 0 -> continue -> COMPLETED."""
     import subprocess
@@ -2113,7 +2113,7 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
         "  - name: only\n"
         "    steps:\n"
         "      - name: probe\n"
-        "        command: 'case \"$(pwd)\" in */.imp/quests/test-quest/workflow)"
+        "        command: 'case \"$(pwd)\" in */quests/test-quest/workflow)"
         " ;; *) exit 9;; esac;"
         " cd \"$IMP_PROJECT_ROOT\"; git rev-parse --is-inside-work-tree'\n"
         "        rules:\n"
@@ -2747,7 +2747,7 @@ async def test_sandbox_policy_rebuilt_after_project_root_flip(
     monkeypatch.setattr(ex, "sandbox_available", lambda: True)
 
     quest = _seed_two_step_workflow(tmp_path)
-    wt = tmp_path / ".imp" / "worktrees" / quest.id
+    wt = project_state_dir(tmp_path) / "worktrees" / quest.id
     wt.mkdir(parents=True)
     sink: list[str] = []
     _register_flip(sink, wt)
@@ -2963,6 +2963,9 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     )
     _write_fake_config(tmp_path)
     quest = _make_quest(tmp_path)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    quest.set_project_root(wt)   # agent runs in a worktree, not the checkout
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
@@ -2971,10 +2974,44 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
 
     inv = sink[0]
     assert inv.quest_context.quest_home == ".imp/quests/test-quest"
+    assert inv.quest_context.quest_dir == quest.quest_dir
+    assert inv.quest_context.quest_dir.is_absolute()
     assert "home=.imp/quests/test-quest" in inv.initial_messages[0].content[0].text
     # worktree-anchored: relative, never absolute, never a parent escape.
     assert not inv.quest_context.quest_home.startswith("/")
     assert ".." not in inv.quest_context.quest_home
+
+
+@pytest.mark.anyio
+async def test_quest_home_renders_absolute_without_a_worktree(tmp_path: Path) -> None:
+    # Same workflow as above; _make_quest leaves project_root == control_root, the
+    # draft/post-merge shape where no <worktree>/.imp/quests/<id> symlink exists.
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "home={{ quest.home }}\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_quest(tmp_path)
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    inv = sink[0]
+    assert inv.quest_context.quest_home == str(quest.quest_dir)
+    assert f"home={quest.quest_dir}" in inv.initial_messages[0].content[0].text
 
 
 @pytest.mark.anyio

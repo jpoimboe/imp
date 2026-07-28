@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 from imp.remote.daemon import discover
 from imp.remote.drivers.telegram import event_body
 from tests.conftest import _seed_control
@@ -14,7 +15,7 @@ def _seed_change(tmp_path: Path) -> str:
     """Create a minimal live Quest worktree under tmp_path and return its id."""
     _seed_control(tmp_path)
     cid = "2026-06-14-aaaaaa"
-    cdir = tmp_path / ".imp" / "quests" / cid
+    cdir = project_state_dir(tmp_path) / "quests" / cid
     (cdir / "state").mkdir(parents=True)
     (cdir / "state" / "state.json").write_text(
         json.dumps({"status": "new", "step": "implement"}))
@@ -28,7 +29,7 @@ def _seed_change(tmp_path: Path) -> str:
 
 
 def _append_event(tmp_path: Path, cid: str, event: dict) -> None:
-    path = tmp_path / ".imp" / "quests" / cid / "events.jsonl"
+    path = project_state_dir(tmp_path) / "quests" / cid / "events.jsonl"
     with path.open("a") as f:
         f.write(json.dumps(event) + "\n")
 

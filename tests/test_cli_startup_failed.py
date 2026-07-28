@@ -13,6 +13,7 @@ import pytest
 from imp.cli import main as cli_main
 from imp.cli import palette as pal
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from imp.remote.session.attach import DaemonStartupError
 from tests.conftest import _seed_control
 
@@ -93,7 +94,8 @@ def test_backstop_plain(
     cli_main._emit_startup_failed(q, None)
     out = capsys.readouterr().out
     assert "startup failed: session daemon did not come up" in out
-    assert f"It may have crashed; see {q.control_root}/.imp/remote-control.log" in out
+    assert ("It may have crashed; see "
+            f"{project_state_dir(q.control_root) / 'remote-control.log'}") in out
     assert "feat" in out
     assert "\x1b[" not in out
     assert out.endswith("\n\n")

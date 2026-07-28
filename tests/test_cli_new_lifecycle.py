@@ -6,6 +6,7 @@ from pathlib import Path
 
 from imp.engine.quest import Quest
 from imp.engine.quest_id import new_quest_id
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 _ID_RE = re.compile(r"[a-z0-9]{6}")
@@ -18,7 +19,7 @@ def test_new_mints_unique_dateless_id(tmp_path: Path) -> None:
                            base_branch="main")
     assert quest.id == quest_id
     assert _ID_RE.fullmatch(quest.id)
-    worktrees = sorted((tmp_path / ".imp" / "worktrees").iterdir())
+    worktrees = sorted((project_state_dir(tmp_path) / "worktrees").iterdir())
     assert len(worktrees) == 1
     assert worktrees[0].name == quest_id
 
@@ -29,6 +30,6 @@ def test_two_new_calls_make_distinct_ids(tmp_path: Path) -> None:
     Quest.create(tmp_path, title="One", quest_id=id1, base_branch="main")
     id2 = new_quest_id()
     Quest.create(tmp_path, title="Two", quest_id=id2, base_branch="main")
-    ids = [p.name for p in (tmp_path / ".imp" / "worktrees").iterdir() if p.is_dir()]
+    ids = [p.name for p in (project_state_dir(tmp_path) / "worktrees").iterdir() if p.is_dir()]
     assert len(ids) == 2 and len(set(ids)) == 2
     assert all(_ID_RE.fullmatch(i) for i in ids)

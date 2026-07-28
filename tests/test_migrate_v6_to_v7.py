@@ -5,6 +5,7 @@ from pathlib import Path
 
 from imp.engine.quest import LAYOUT_VERSION, Quest, _migrate_v6_to_v7
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 _EVENTS = [
@@ -18,7 +19,7 @@ _EVENTS = [
 
 
 def _quest_dir(control: Path, cid: str) -> Path:
-    return control / ".imp" / "quests" / cid
+    return project_state_dir(control) / "quests" / cid
 
 
 def _seed_v6_quest(control: Path, cid: str, events: list[dict]) -> Quest:

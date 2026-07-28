@@ -5,10 +5,11 @@ from pathlib import Path
 
 from imp.engine import archive
 from imp.engine.archive.maintenance import reap_archived_homes
+from imp.paths import project_state_dir
 
 
 def _home(control: Path, cid: str, status: str) -> Path:
-    home = control / ".imp" / "quests" / cid
+    home = project_state_dir(control) / "quests" / cid
     (home / "state").mkdir(parents=True)
     (home / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid, "base_branch": "main",

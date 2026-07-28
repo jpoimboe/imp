@@ -4,6 +4,7 @@ from pathlib import Path
 
 from imp.engine import merge_queue as mq
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -175,7 +176,7 @@ def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
     Quest.create(tmp_path, title="b", quest_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")        # head
     mq.enqueue_if_absent(tmp_path, "b", "main")        # next
-    shutil.rmtree(tmp_path / ".imp" / "quests" / "b")   # next vanishes → load fails
+    shutil.rmtree(project_state_dir(tmp_path) / "quests" / "b")   # next vanishes → load fails
     spawned: list = []
     # Must not raise even though the next head can no longer be loaded.
     mq.pop_and_wake(
@@ -189,7 +190,7 @@ def test_ensure_head_driven_tolerates_vanished_head(tmp_path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="a", quest_id="a", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
-    shutil.rmtree(tmp_path / ".imp" / "quests" / "a")   # records gone → load fails
+    shutil.rmtree(project_state_dir(tmp_path) / "quests" / "a")   # records gone → load fails
     spawned: list = []
     # Must not raise; the unloadable head is skipped silently.
     mq.ensure_head_driven(

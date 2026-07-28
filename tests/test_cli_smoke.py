@@ -8,7 +8,6 @@ from pathlib import Path
 
 def test_imp_status_runs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".imp").mkdir()
     # Run via -m so we exercise the entrypoint
     r = subprocess.run(
         [sys.executable, "-m", "imp", "list"],

@@ -21,6 +21,7 @@ from imp.cli.main import main
 from imp.engine import archive, worktree
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 # A phase that renders through the narrative — the proof the archive was read.
@@ -69,7 +70,7 @@ def test_log_reads_from_archive_after_merge(
     _seed_marker_phase(tmp_path, "done-thing")
     _complete_and_archive(tmp_path, "done-thing")
     # Worktree is gone: Quest.load now raises; log must use the archive.
-    assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "done-thing").exists()
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -621,12 +622,12 @@ def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Meta One", quest_id="meta-one",
                   base_branch="main")
-    home = tmp_path / ".imp" / "quests" / "meta-one"
+    home = project_state_dir(tmp_path) / "quests" / "meta-one"
     assert (home / "quest.json").exists()
     _complete_and_archive(tmp_path, "meta-one")
     shutil.rmtree(home)                       # abandon path: permanent home gone
     assert not home.exists()
-    assert not (tmp_path / ".imp" / "worktrees" / "meta-one").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "meta-one").exists()
 
     meta = m._quest_meta(tmp_path, "meta-one")
     assert meta is not None
@@ -643,7 +644,7 @@ def test_events_reads_index_from_archive_after_merge(
     Quest.create(tmp_path, title="Done Thing", quest_id="done-thing", base_branch="main")
     _seed_marker_phase(tmp_path, "done-thing")
     _complete_and_archive(tmp_path, "done-thing")
-    assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "done-thing").exists()
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -661,7 +662,7 @@ def _archive_then_stale_empty_dir(control: Path, slug: str) -> None:
     """Post-archival state the fix targets: the quest is in the archive AND a
     stray empty .imp/quests/<slug>/ dir (no quest.json) sits on disk."""
     _complete_and_archive(control, slug)
-    home = control / ".imp" / "quests" / slug
+    home = project_state_dir(control) / "quests" / slug
     shutil.rmtree(home)                          # archival rmtree
     home.mkdir()                                 # stray empty dir reappears
     assert home.is_dir() and not (home / "quest.json").exists()

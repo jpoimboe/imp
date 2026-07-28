@@ -99,7 +99,6 @@ def test_unknown_command_friendly_rc2(capsys) -> None:
 def test_known_command_still_dispatches(tmp_path, monkeypatch) -> None:
     # A real command is not swallowed by the unknown-command guard.
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".imp").mkdir()
     rc = main(["list"])
     assert rc == 0
 

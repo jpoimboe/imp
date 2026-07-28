@@ -349,7 +349,6 @@ def _no_inprocess_setpgrp(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
     """An empty 'project' directory under tmp_path."""
-    (tmp_path / ".imp").mkdir()
     return tmp_path
 
 

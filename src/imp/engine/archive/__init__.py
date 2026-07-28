@@ -18,10 +18,11 @@ from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.event_migrations import migrate_events
 from imp.engine.state import derive_started_at
+from imp.paths import project_state_dir
 
 
 def archive_root(control_root: Path) -> Path:
-    return control_root / ".imp" / "archive"
+    return project_state_dir(control_root) / "archive"
 
 
 def blobs_root(control_root: Path) -> Path:

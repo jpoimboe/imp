@@ -1127,7 +1127,7 @@ async def _route_script(
     if "{{" in command:
         command = render_prompt(command, build_context(
             quest_title=quest.title, event_log=log,
-            quest_id=quest.id, quest_home=f".imp/quests/{quest.id}",
+            quest_id=quest.id, quest_home=quest.agent_quest_home,
             cur_base_head=quest.cur_base_head,
             orig_base_head=quest.orig_base_head,
             base_branch=quest.base_branch,
@@ -1808,7 +1808,7 @@ async def _run_agent_invocation(
         parent_ref, depends_refs = quest_refs.resolve_for_quest(quest)
         ctx = build_context(
             quest_id=quest.id, quest_title=quest.title,
-            quest_home=f".imp/quests/{quest.id}",
+            quest_home=quest.agent_quest_home,
             cur_base_head=quest.cur_base_head,
             orig_base_head=quest.orig_base_head,
             base_branch=quest.base_branch,
@@ -1860,7 +1860,7 @@ async def _run_agent_invocation(
         initial_messages=initial_messages,
         quest_context=QuestContext(
             id=quest.id, title=quest.title,
-            quest_home=f".imp/quests/{quest.id}",
+            quest_home=quest.agent_quest_home, quest_dir=quest.quest_dir,
             project_root=quest.project_root, workflow_dir=quest.workflow_dir,
             memory=memory or {},
             workflow_name=workflow.name, step_name=step_name,

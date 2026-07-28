@@ -11,6 +11,7 @@ from pathlib import Path
 import anyio
 import pytest
 
+from imp.paths import project_state_dir
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import RESTART_CONFIRMATION, Help, Notice, Restart
 from imp.remote.daemon.discover import socket_is_live, socket_path
@@ -54,7 +55,7 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
 ) -> None:
     _seed_control(tmp_path)
     cid = "2026-06-13-abc"
-    home = tmp_path / ".imp" / "quests" / cid
+    home = project_state_dir(tmp_path) / "quests" / cid
     home.mkdir(parents=True, exist_ok=True)
     (home / "quest.json").write_text("{}")
     monkeypatch.setattr(
@@ -113,7 +114,7 @@ class SubmitOnceAdapter:
 async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     shutdown = anyio.Event()
-    log_path = tmp_path / ".imp" / "remote-control.log"
+    log_path = project_state_dir(tmp_path) / "remote-control.log"
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
@@ -304,7 +305,7 @@ async def test_run_daemon_injects_home_backed_is_known_quest_into_the_adapter(
 ) -> None:
     _seed_control(tmp_path)
     cid = "2026-06-13-known"
-    home = tmp_path / ".imp" / "quests" / cid
+    home = project_state_dir(tmp_path) / "quests" / cid
     home.mkdir(parents=True, exist_ok=True)
     (home / "quest.json").write_text("{}")
     captured: dict = {}
@@ -332,7 +333,7 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
 
     _seed_control(tmp_path)
     cid = "archived-leftover"
-    home = tmp_path / ".imp" / "quests" / cid
+    home = project_state_dir(tmp_path) / "quests" / cid
     (home / "state").mkdir(parents=True)
     (home / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid, "base_branch": "main",
@@ -349,7 +350,7 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
         state_json_path=home / "state" / "state.json")
 
     shutdown = anyio.Event()
-    log_path = tmp_path / ".imp" / "remote-control.log"
+    log_path = project_state_dir(tmp_path) / "remote-control.log"
     spath = socket_path(tmp_path)
 
     async with anyio.create_task_group() as tg:
@@ -371,11 +372,11 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
 @pytest.mark.anyio
 async def test_run_daemon_reaps_stray_homes_at_startup(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    stray = tmp_path / ".imp" / "quests" / "empty-stray"
+    stray = project_state_dir(tmp_path) / "quests" / "empty-stray"
     stray.mkdir(parents=True)                       # empty stray, no quest.json
 
     shutdown = anyio.Event()
-    log_path = tmp_path / ".imp" / "remote-control.log"
+    log_path = project_state_dir(tmp_path) / "remote-control.log"
     spath = socket_path(tmp_path)
 
     async with anyio.create_task_group() as tg:
