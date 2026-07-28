@@ -18,9 +18,10 @@ Not-final children (the only things that block a cursor):
     nested burst the owner is the subagent's nested builder, not the main one).
 Everything else is final on append. A SubagentFold is a LEAF (Part D): it
 collapses to a single `↳ subagent({name}) · N events ⟨status⟩` status row emitted once the
-subagent stops running — its streamed children and structured return value are
-never rendered in the live/lean views (this structurally eliminates the SDK
-cancellation-sentinel leak).
+subagent stops running — in the lean view its streamed children and structured
+return value are never rendered (this structurally eliminates the SDK
+cancellation-sentinel leak); with the `subagents` category on they expand through
+the same render_text path `imp log --full` uses.
 """
 from __future__ import annotations
 
@@ -307,12 +308,16 @@ class LiveDriver:
                  suppress_replay: bool = False,
                  preceded_by_blank: bool = False,
                  startup_verb: str | None = None,
-                 quest_id: str | None = None, title: str = "") -> None:
+                 quest_id: str | None = None, title: str = "",
+                 cats: frozenset[str] = frozenset()) -> None:
         self._builder = nv.NarrativeBuilder()
         if quest_id is not None or title:
             self._builder.seed_identity(quest_id, title)
         self._stream = stream
         self._color = color
+        # Content categories (render_text.LOG_CATEGORIES). Empty is the lean view:
+        # _resolve_cats returns a non-None set unchanged, so it never means "full".
+        self._cats = cats
         # width/display_width may be a live callable (a real terminal, re-read
         # per emission so markdown reflows after a resize) or a fixed int (piped
         # capture, tests). The status footer already polls term_width() each tick;
@@ -612,8 +617,8 @@ class LiveDriver:
         pushed onto the frontier as a cursor. Only PhaseNode/StepNode containers
         are pushed (_is_container). Therefore there are no SubagentFold cursors
         in self._frontier during the live walk and this always returns (). The
-        magenta │ gutter appears only in the imp log --full expanded subagent
-        view (render_text), not in live/lean."""
+        magenta │ gutter is added internally by render_text's expanded subagent
+        fold, never by this indent."""
         return ()
 
     def _emit_leaf(self, node: Any, depth: int,
@@ -629,16 +634,6 @@ class LiveDriver:
             # its predecessor wasn't a spaced block — mirrors render_text's
             # spaces_before check in _render_children.
             self._prev_prose = True
-        if isinstance(node, nv.SubagentFold):
-            # Part D: a subagent collapses to a single resolved status row — no
-            # streamed children, no outcome. Shares render_text.subagent_status_row
-            # with the lean view so live and imp log stay byte-identical.
-            self._print_lines(
-                [rt.subagent_status_row(node, depth=depth, color=self._color,
-                                        gutters=gutters)],
-                prose=rt.spaces_after(node, full=False),
-                separator_indent=rt._gutter_indent(depth, gutters, self._color))
-            return
         if isinstance(node, nv.UserMessageNode):
             # The interactive prompt uses erase_when_done, so prompt_toolkit leaves
             # NO echo in scroll-back on a real terminal — we reprint the turn here
@@ -647,7 +642,7 @@ class LiveDriver:
             # spaced like a chat message. The same path serves a non-TTY sink
             # (offline capture / `imp run | tee` / the snap-ui mockup), so live and
             # `imp log` show the user's turn identically.
-            lines = rt._render(node, depth=depth, full=False, color=self._color,
+            lines = rt._render(node, depth=depth, cats=self._cats, color=self._color,
                                width=self._cur_width(),
                                display_width=self._cur_display_width(),
                                gutters=gutters)
@@ -655,11 +650,11 @@ class LiveDriver:
                 list(lines), prose=True,
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
-        lines = rt._render(node, depth=depth, full=False, color=self._color,
+        lines = rt._render(node, depth=depth, cats=self._cats, color=self._color,
                            width=self._cur_width(),
                            display_width=self._cur_display_width(),
                            gutters=gutters)
-        prose = rt.spaces_after(node, full=False)
+        prose = rt.spaces_after(node, full=self._cats >= rt._ALL_CATEGORIES)
         self._print_lines(
             list(lines), prose=prose,
             separator_indent=rt._gutter_indent(depth, gutters, self._color))
