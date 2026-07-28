@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import yaml
 
 from imp.assets import bundled_assets_dir
 from imp.cli.init import (
+    _EDIT_PROMPTS,
     BaseDetection,
     InitScreenState,
     ScreenRow,
+    _apply_row_edit,
     _confirm_rows,
     _cycle_workflow,
+    _edit_default,
     _screen_state_from_detection,
     _workflow_blurb,
 )
@@ -159,3 +163,59 @@ def test_confirm_rows_show_the_cycled_workflow_blurb_in_step() -> None:
     body = _body(cycled, ScreenRow.WORKFLOW)
     assert "minimal" in body[0]
     assert body[0].endswith(_workflow_blurb("minimal"))
+
+
+def test_editing_the_branch_marks_the_row_as_user_set(tmp_path: Path) -> None:
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.BRANCH, "  trunk  ")
+    assert state.branch == "trunk"
+    assert state.branch_provenance == "you set this"
+    assert _body(state, ScreenRow.BRANCH)[1].endswith("you set this")
+
+
+def test_editing_tests_to_a_command_replaces_the_detected_one(tmp_path: Path) -> None:
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.TESTS, "just check")
+    assert state.test_cmd_fast == "just check"
+    assert _body(state, ScreenRow.TESTS)[2].endswith("you set this")
+
+
+def test_editing_tests_to_empty_is_the_explicit_opt_out(tmp_path: Path) -> None:
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.TESTS, "   ")
+    # "" opts out explicitly; None would omit the key and print the teaching hint.
+    assert state.test_cmd_fast == ""
+    body = _body(state, ScreenRow.TESTS)[2]
+    assert "(none)" in body and body.endswith("you set this")
+
+
+def test_editing_import_roots_drops_entries_that_do_not_validate(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "lib").mkdir()
+    answer = f"src , {tmp_path / 'src'}, ../escape, missing, lib"
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, answer)
+    assert state.pythonpath == ["src", "lib"]
+    assert state.roots_provenance == "you set this"
+    assert "src, lib" in _body(state, ScreenRow.IMPORT_ROOT)[3]
+
+
+def test_editing_import_roots_to_empty_clears_them(tmp_path: Path) -> None:
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, "  ")
+    assert state.pythonpath == []
+    body = _body(state, ScreenRow.IMPORT_ROOT)[3]
+    assert "(none)" in body and body.endswith("you set this")
+
+
+def test_edit_prompts_prefill_the_current_row_value() -> None:
+    state = _detected_state()
+    assert _edit_default(state, ScreenRow.BRANCH) == "master"
+    assert _edit_default(state, ScreenRow.TESTS) == "make check"
+    assert _edit_default(state, ScreenRow.IMPORT_ROOT) == "src"
+    assert _edit_default(
+        replace(state, pythonpath=["src", "lib"]), ScreenRow.IMPORT_ROOT) == "src, lib"
+    assert _edit_default(
+        replace(state, test_cmd_fast=None), ScreenRow.TESTS) == ""
+
+
+def test_edit_prompt_labels_are_verbatim() -> None:
+    assert _EDIT_PROMPTS[ScreenRow.BRANCH] == "Integration branch: "
+    assert _EDIT_PROMPTS[ScreenRow.TESTS] == "Fast test command: "
+    assert _EDIT_PROMPTS[ScreenRow.IMPORT_ROOT] == "Import roots (comma-separated): "
+    assert ScreenRow.WORKFLOW not in _EDIT_PROMPTS

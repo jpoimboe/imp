@@ -554,6 +554,38 @@ def _confirm_rows(
     return out
 
 
+# The workflow row is absent by construction: `space` cycles it in place.
+_EDIT_PROMPTS: dict[ScreenRow, str] = {
+    ScreenRow.BRANCH: "Integration branch: ",
+    ScreenRow.TESTS: "Fast test command: ",
+    ScreenRow.IMPORT_ROOT: "Import roots (comma-separated): ",
+}
+
+
+def _edit_default(state: InitScreenState, row: ScreenRow) -> str:
+    if row is ScreenRow.BRANCH:
+        return state.branch
+    if row is ScreenRow.TESTS:
+        return state.test_cmd_fast or ""
+    return ", ".join(state.pythonpath)
+
+
+def _apply_row_edit(
+    project_root: Path, state: InitScreenState, row: ScreenRow, answer: str,
+) -> InitScreenState:
+    """The row's value replaced by what the user typed, its provenance rewritten."""
+    if row is ScreenRow.BRANCH:
+        return replace(
+            state, branch=answer.strip(), branch_provenance=_YOU_SET_THIS)
+    if row is ScreenRow.TESTS:
+        return replace(
+            state, test_cmd_fast=answer.strip(), tests_provenance=_YOU_SET_THIS)
+    entered = [part.strip() for part in answer.split(",") if part.strip()]
+    return replace(
+        state, pythonpath=validate_detected_roots(project_root, entered),
+        roots_provenance=_YOU_SET_THIS)
+
+
 def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     """Write imp/config.yaml + the memory scaffold from `settings`, ensure `.imp/`
     is gitignored, and commit the init files. Returns True iff a commit was created.
