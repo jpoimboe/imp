@@ -890,13 +890,11 @@ async def test_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> Non
 
 
 def test_claude_code_provider_registered_and_resolves() -> None:
-    """The claude_code provider is registered eagerly; resolve_run picks it up
-    when claude is on PATH."""
-    import importlib
+    """The claude_code provider registers on the first registry read; resolve_run
+    picks it up from a cleared registry when claude is on PATH."""
     import shutil
     from pathlib import Path
 
-    import imp.providers
     from imp.engine.types import (
         AgentDef,
         OutputField,
@@ -914,7 +912,6 @@ def test_claude_code_provider_registered_and_resolves() -> None:
     from imp.providers.config import Config
 
     resolve.reset_providers_for_tests()
-    importlib.reload(imp.providers)
 
     src = SourceLoc(file=Path("w.yaml"), line=1)
     cfg = Config(

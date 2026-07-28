@@ -1,6 +1,8 @@
 """Provider registry surface: each provider module declares a TIER_DEFAULTS table
 covering low/medium/high, and the builtins register lazily on first registry read."""
 import importlib
+import subprocess
+import sys
 from collections.abc import Callable, Generator
 from typing import ClassVar
 
@@ -107,3 +109,37 @@ def test_registry_reader_repopulates_an_empty_registry(read: Callable[[], object
     assert resolve._PROVIDERS == {}
     read()
     assert sorted(resolve._PROVIDERS) == _BUILTINS
+
+
+def test_importing_the_package_registers_nothing() -> None:
+    """Importing imp.providers must not register the builtins, and must not
+    import the five provider modules (which pull httpx -> rich/click/pygments).
+    Fresh interpreter: in-process, any earlier test in this worker has already
+    imported them."""
+    code = (
+        "import sys, imp.providers\n"
+        "from imp.providers import resolve\n"
+        "eager = sorted(n for n in sys.modules if n in {\n"
+        "    'imp.providers.anthropic', 'imp.providers.openai',\n"
+        "    'imp.providers.claude_code', 'imp.providers.codex',\n"
+        "    'imp.providers.scripted'})\n"
+        "if 'httpx' in sys.modules:\n"
+        "    eager.append('httpx')\n"
+        "print('EAGER:' + ','.join(eager))\n"
+        "print('BEFORE:' + ','.join(sorted(resolve._PROVIDERS)))\n"
+        "resolve.iter_provider_defaults()\n"
+        "print('AFTER:' + ','.join(sorted(resolve._PROVIDERS)))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    reported = {
+        key: value
+        for key, _, value in (ln.partition(":") for ln in proc.stdout.splitlines())
+        if key in {"EAGER", "BEFORE", "AFTER"}
+    }
+    assert reported.keys() == {"EAGER", "BEFORE", "AFTER"}, (
+        f"child did not report all three lines; stdout was {proc.stdout!r}"
+    )
+    assert reported["EAGER"] == "", f"import imp.providers eagerly loaded: {reported['EAGER']}"
+    assert reported["BEFORE"] == ""
+    assert reported["AFTER"] == ",".join(_BUILTINS)
