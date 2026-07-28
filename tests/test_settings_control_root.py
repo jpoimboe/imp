@@ -176,3 +176,33 @@ def test_workflow_dirs_resolve_default_workflow_from_the_control_root(
 
     assert quest.live_workflow_dir == work / "imp" / "workflows" / "default"
     assert quest.control_workflow_dir == tmp_path / "imp" / "workflows" / "default"
+
+
+@pytest.mark.anyio
+async def test_a_worktree_on_the_pre_rename_name_is_neither_healed_nor_read(
+    tmp_path: Path,
+) -> None:
+    """Spec §7 (AC 8a/8b): a branch forked before the imp/project.yaml ->
+    imp/config.yaml rename used to be rewritten and committed at run entry. The
+    project layer no longer comes from the worktree, so run entry leaves the
+    branch exactly as it found it and the control root's settings hold anyway."""
+    _seed_control_root(tmp_path)
+    _register_fake({"status": "Success"})
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    work = quest.project_root
+    _git(work, "mv", "imp/config.yaml", "imp/project.yaml")
+    _git(work, "commit", "-qm", "branch predates the config rename")
+    head_before = _git(work, "rev-parse", "HEAD").stdout
+
+    events: list[dict] = []
+    assert await run_quest(quest, on_event=events.append) is RunResult.PAUSED
+
+    # The branch's own files are untouched: no rename, no commit on imp/feat.
+    assert (work / "imp" / "project.yaml").is_file()
+    assert not (work / "imp" / "config.yaml").exists()
+    assert _git(work, "rev-parse", "HEAD").stdout == head_before
+    assert not [e for e in events if e["type"] == "project_config_renamed"]
+    # And the run was judged by the main checkout's settings regardless.
+    fast, pypath = _recorded(work)
+    assert fast == "control-fast"
+    assert str(work / "ctlsrc") in pypath
