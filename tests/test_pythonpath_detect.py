@@ -17,6 +17,8 @@ def test_format_multi_root() -> None:
 
 
 from imp.cli.pythonpath_detect import (  # noqa: E402
+    ImportRoots,
+    detect_import_roots,
     is_python_packaging_project,
     resolve_detection_provider,
     validate_detected_roots,
@@ -102,6 +104,40 @@ def test_validate_deduplicates(tmp_path: Path) -> None:
 
 def test_validate_empty_input_returns_empty(tmp_path: Path) -> None:
     assert validate_detected_roots(tmp_path, []) == []
+
+
+# --- detect_import_roots: gate + disk probe ---
+
+def test_import_roots_empty_for_non_python_project(tmp_path: Path) -> None:
+    (tmp_path / "app.js").write_text("// not python\n")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    # No pyproject/setup.cfg/setup.py: the packaging gate short-circuits even
+    # though a package dir sits right there.
+    assert detect_import_roots(tmp_path) == ImportRoots([], "not a Python project")
+
+
+def test_import_roots_probe_src_layout(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    (tmp_path / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__init__.py").write_text("")
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["src"], "from the layout on disk")
+
+
+def test_import_roots_probe_flat_layout(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["."], "from the layout on disk")
+
+
+def test_import_roots_empty_when_no_package_dir_anywhere(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    (tmp_path / "src").mkdir()          # exists, but holds no package
+    (tmp_path / "docs").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots([], "not a Python project")
 
 
 def test_detector_and_agent_are_retired() -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import NamedTuple
 
 from imp.providers.effective import load_effective_config
 from imp.providers.resolve import available_providers
@@ -75,3 +76,38 @@ def format_pythonpath_yaml(dirs: list[str]) -> str:
     """Serialize a `pythonpath:` YAML line matching `format_test_cmd_fast_yaml`'s
     json.dumps idiom, e.g. `["src"]` => `pythonpath: ["src"]\\n`."""
     return f"pythonpath: {json.dumps(dirs)}\n"
+
+
+class ImportRoots(NamedTuple):
+    """Detected import roots paired with the provenance label shown on the confirmation screen."""
+    roots: list[str]
+    provenance: str
+
+
+_NOT_PYTHON = "not a Python project"
+_FROM_LAYOUT = "from the layout on disk"
+
+
+def _probe_layout(project_root: Path) -> list[str]:
+    """`src` when it directly holds a package dir, else the repo root when it does —
+    empty when neither."""
+    for candidate in ("src", "."):
+        base = project_root / candidate
+        if not base.is_dir():
+            continue
+        if any((child / "__init__.py").is_file()
+               for child in base.iterdir() if child.is_dir()):
+            return [candidate]
+    return []
+
+
+def detect_import_roots(project_root: Path) -> ImportRoots:
+    """The worktree-relative import roots for `project_root` with their
+    provenance, for init's confirmation screen and `--use-defaults`. Every
+    empty outcome is reported as `not a Python project`."""
+    if not is_python_packaging_project(project_root):
+        return ImportRoots([], _NOT_PYTHON)
+    probed = validate_detected_roots(project_root, _probe_layout(project_root))
+    if probed:
+        return ImportRoots(probed, _FROM_LAYOUT)
+    return ImportRoots([], _NOT_PYTHON)
