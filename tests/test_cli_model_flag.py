@@ -76,7 +76,7 @@ async def test_async_cmd_new_rejects_unavailable_model_provider(
         started["ran"] = True
         return 0
 
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     rc = await main._async_cmd_new(_full_ns(model="openai:gpt-5.5"))
 
@@ -101,7 +101,7 @@ async def test_async_cmd_new_threads_flag_model_to_run(
         captured.update(kw)
         return 0
 
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     rc = await main._async_cmd_new(_full_ns(model="anthropic:claude-fable-5"))
 
@@ -130,7 +130,7 @@ async def test_typed_opening_model_overrides_flag_model(
         return 0
 
     monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
 
@@ -163,7 +163,7 @@ async def test_typed_sandbox_off_threads_opening_unsandboxed_to_run(
         return 0
 
     monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
 
@@ -194,7 +194,7 @@ async def test_typed_sandbox_off_threads_opening_unsandboxed_headless(
         return 0
 
     monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (True, False))
 
@@ -223,7 +223,7 @@ async def test_no_typed_sandbox_threads_opening_unsandboxed_false(
         return 0
 
     monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
 
@@ -248,7 +248,7 @@ async def test_cleared_session_threads_opening_unsandboxed_to_run(
 
     monkeypatch.setattr(main, "_read_intent_line", _fake_intent)
     monkeypatch.setattr(main, "_print_splash_banner", lambda *, interactive: False)
-    monkeypatch.setattr(main, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     class _StubPrompt:
@@ -264,7 +264,7 @@ async def test_cleared_session_threads_opening_unsandboxed_to_run(
         captured.update(kw)
         return 0
 
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     rc = await main._run_cleared_session(tmp_path, "main", leave_state={})
     assert rc == 0

@@ -49,7 +49,7 @@ async def test_abandon_picker_non_tty_refuses(
     async def boom(*a, **k):
         raise AssertionError("picker drawn on a non-tty")
 
-    monkeypatch.setattr(m.resume_select, "run_picker", boom)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", boom)
     rc = await m._pick_abandon_target(tmp_path)
     err = capsys.readouterr().err
     assert rc == 2
@@ -66,7 +66,7 @@ async def test_abandon_picker_tty_lone_auto_selects(
     async def boom(*a, **k):
         raise AssertionError("picker drawn for a lone candidate")
 
-    monkeypatch.setattr(m.resume_select, "run_picker", boom)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", boom)
     assert await m._pick_abandon_target(tmp_path) == "solo01"
 
 
@@ -83,7 +83,7 @@ async def test_abandon_picker_tty_multiple_uses_selection(
         assert "Abandon which quest?" in header
         return candidates[1].quest_id
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     assert await m._pick_abandon_target(tmp_path) == "bbb222"
 
 

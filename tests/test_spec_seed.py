@@ -104,7 +104,7 @@ def test_new_positional_delivers_verbatim_seed(
         captured["change"] = quest
         return 0
 
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     args = _new_args(opening="add a dark-mode toggle", non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
@@ -134,7 +134,7 @@ def test_new_title_flag_sets_quest_title(
         captured["change"] = quest
         return 0
 
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     args = _new_args(title="dark mode", non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
@@ -242,7 +242,7 @@ def test_opening_prompt_reply_wires_to_seed_opening(
         captured["change"] = quest
         return 0
 
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     async def _fake_ask(self: object, *, width: object = None,
                         hint: object = None, **kwargs: object) -> str:
@@ -284,7 +284,7 @@ def test_opening_prompt_empty_reply_reprompts(
         captured["change"] = quest
         return 0
 
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     replies = iter(["   ", "add a feature"])
 
@@ -327,7 +327,7 @@ def test_new_creates_unmaterialized_draft(
         captured["change"] = quest
         return 0
 
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     args = _new_args(opening="add a dark-mode toggle", non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)

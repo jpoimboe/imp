@@ -39,8 +39,7 @@ def test_new_non_interactive_routes_through_session_client(
         return _solicit
 
     monkeypatch.setattr(
-        cli_main, "make_headless_solicit", _fake_make_headless_solicit,
-        raising=False)
+        "imp.cli.session_run.make_headless_solicit", _fake_make_headless_solicit)
 
     captured: dict[str, object] = {}
 
@@ -59,7 +58,7 @@ def test_new_non_interactive_routes_through_session_client(
         return 7
 
     monkeypatch.setattr(
-        cli_main, "run_session_client", _fake_run_session_client)
+        "imp.cli.session_run.run_session_client", _fake_run_session_client)
 
     rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
         title="ni", non_interactive=True, message="do it"))
@@ -94,7 +93,7 @@ def test_new_interactive_routes_through_session_client(
         return _solicit
 
     monkeypatch.setattr(
-        cli_main, "make_interactive_solicit", _fake_make_interactive_solicit)
+        "imp.cli.session_run.make_interactive_solicit", _fake_make_interactive_solicit)
 
     captured: dict[str, object] = {}
 
@@ -112,7 +111,7 @@ def test_new_interactive_routes_through_session_client(
         return 5
 
     monkeypatch.setattr(
-        cli_main, "run_session_client", _fake_run_session_client)
+        "imp.cli.session_run.run_session_client", _fake_run_session_client)
 
     orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
     sys.stdin.isatty = lambda: True   # type: ignore[method-assign]

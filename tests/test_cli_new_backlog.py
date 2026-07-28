@@ -172,7 +172,7 @@ def test_non_backlog_non_interactive_runs_headless(
         captured["quest_id"] = quest.id
         return 0
 
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_run_session_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_run_session_client)
 
     rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
         idea=None, opening=None, title=None, depends_on=[],
@@ -210,7 +210,7 @@ def test_interactive_backlog_files_instantly_no_session(
     async def _no_session(*a, **k):
         raise AssertionError("backlog must not run a session")
 
-    monkeypatch.setattr(cli_main, "run_session_client", _no_session)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _no_session)
 
     orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
     sys.stdin.isatty = lambda: True   # type: ignore[method-assign]

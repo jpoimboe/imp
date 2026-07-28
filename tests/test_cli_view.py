@@ -62,8 +62,8 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
-        m, "make_interactive_solicit", lambda *a, **k: (lambda _p: None))
-    monkeypatch.setattr(m, "run_session_client", _fake_run_session_client)
+        "imp.cli.session_run.make_interactive_solicit", lambda *a, **k: (lambda _p: None))
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_run_session_client)
 
     args = argparse.Namespace(token="mb-test")
     rc = anyio.run(m._async_cmd_resume, args)
@@ -91,8 +91,8 @@ def test_resume_accepts_crashed_at_rest_status(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
-        m, "make_interactive_solicit", lambda *a, **k: (lambda _p: None))
-    monkeypatch.setattr(m, "run_session_client", _fake_run_session_client)
+        "imp.cli.session_run.make_interactive_solicit", lambda *a, **k: (lambda _p: None))
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_run_session_client)
 
     args = argparse.Namespace(token="crashed")
     rc = anyio.run(m._async_cmd_resume, args)

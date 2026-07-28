@@ -170,7 +170,7 @@ async def test_run_fresh_session_threads_autonomous(
         captured.update(kw)
         return 0
 
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     args = main._build_parser().parse_args(["new", "--headless", "--autonomous"])
     rc = await main._run_fresh_session(
         SimpleNamespace(id="x", title="t", create_mode="new"), args=args)
@@ -197,8 +197,10 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
 
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
     monkeypatch.setattr(m, "_clear_loop", _fake_clear_loop)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: (lambda _: None))
-    monkeypatch.setattr(m, "run_session_client", _fake_rsc)
+    monkeypatch.setattr(
+        "imp.cli.session_run.make_interactive_solicit", lambda *a, **k: (lambda _: None)
+    )
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     args = m._build_parser().parse_args(["new", "--autonomous"])
     rc = await m._run_fresh_session(

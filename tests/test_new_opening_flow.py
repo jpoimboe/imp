@@ -31,7 +31,7 @@ def _new_args() -> Namespace:
 def stub_new(monkeypatch, tmp_path):
     """Stub every boundary collaborator of _async_cmd_new so the test drives
     only its opening-flow control logic. Returns the patched main module."""
-    monkeypatch.setattr(main, "install_process_group", lambda: None)
+    monkeypatch.setattr("imp.cli.signals.install_process_group", lambda: None)
     monkeypatch.setattr(main, "_control_root", lambda: tmp_path)
     monkeypatch.setattr("imp.engine.worktree.check_preconditions", lambda *a, **k: None)
     monkeypatch.setattr("imp.engine.worktree.ensure_imp_ignored", lambda *a, **k: None)
@@ -87,10 +87,10 @@ async def test_new_persists_finalized_opening_intent(
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     args = _new_args()
     args.opening = opening_arg
@@ -124,11 +124,11 @@ async def test_run_header_emitted_exactly_once(stub_new, monkeypatch, route) -> 
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     if route == "headless":
         monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
@@ -225,10 +225,10 @@ async def test_seeded_interactive_leads_with_header_before_splash(
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     args = _new_args()
     args.opening = "build a parser"
@@ -264,10 +264,10 @@ async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> Non
         captured.update(kwargs)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _capture_client)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _capture_client)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
@@ -298,7 +298,7 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
         def reset(self) -> None:
             reset.append("reset")
 
-    monkeypatch.setattr(m, "TerminalTitle", _FakeTitle)
+    monkeypatch.setattr("imp.cli.terminal_title.TerminalTitle", _FakeTitle)
     monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
     monkeypatch.setattr("imp.engine.abandon.discard_conversation", lambda quest: None)
 
@@ -336,10 +336,10 @@ async def test_headless_path_threads_title(stub_new, monkeypatch) -> None:
         captured.update(kwargs)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _capture_client)
-    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _capture_client)
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
@@ -362,7 +362,7 @@ async def test_opening_prompt_wrapped_in_prompt_sigint_guard(stub_new, monkeypat
         entered["v"] = True
         yield
 
-    monkeypatch.setattr(m, "prompt_sigint_guard", _fake_guard)
+    monkeypatch.setattr("imp.cli.signals.prompt_sigint_guard", _fake_guard)
 
     prompt_ran = {"v": False}
 
@@ -379,10 +379,10 @@ async def test_opening_prompt_wrapped_in_prompt_sigint_guard(stub_new, monkeypat
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
@@ -412,10 +412,10 @@ async def test_new_run_now_forwards_depends_on(
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     args = Namespace(
         description=None, idea=None, workflow=None, non_interactive=False,
@@ -497,10 +497,10 @@ async def test_create_draft_receives_create_mode_from_leave_mode(
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     args = Namespace(
         description=None, idea=None, workflow=None, non_interactive=False,
@@ -520,9 +520,9 @@ async def test_headless_new_threads_leave_mode_to_run_session_client(
     m = stub_new
     monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
     monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
-    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
 
     captured: dict[str, object] = {}
 
@@ -530,7 +530,7 @@ async def test_headless_new_threads_leave_mode_to_run_session_client(
         captured.update(k)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _cap)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _cap)
 
     args = Namespace(
         description=None, idea=None, workflow=None, non_interactive=True,

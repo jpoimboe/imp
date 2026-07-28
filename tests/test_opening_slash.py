@@ -186,7 +186,7 @@ async def test_async_cmd_new_threads_model_to_run_session_client(
         return 0
 
     monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
 
@@ -218,7 +218,7 @@ async def test_async_cmd_new_threads_model_to_headless_session_client(
         return 0
 
     monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (True, False))
 
@@ -239,7 +239,7 @@ async def test_cleared_session_threads_model(tmp_path, monkeypatch) -> None:
         main, "_read_intent_line",
         _fake_intent_line(model="anthropic:claude-fable-5", reply="brainstorm"))
     monkeypatch.setattr(main, "_print_splash_banner", lambda *, interactive: False)
-    monkeypatch.setattr(main, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     class _StubPrompt:
@@ -255,7 +255,7 @@ async def test_cleared_session_threads_model(tmp_path, monkeypatch) -> None:
         captured.update(kw)
         return 0
 
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     rc = await main._run_cleared_session(
         tmp_path, "main", leave_state={})
@@ -372,7 +372,7 @@ async def test_async_cmd_new_threads_sandbox_sink_to_opening_message(
         return 0
 
     monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
 
@@ -399,7 +399,7 @@ async def test_cleared_session_threads_sandbox_sink(tmp_path, monkeypatch) -> No
 
     monkeypatch.setattr(main, "_read_intent_line", _fake_intent)
     monkeypatch.setattr(main, "_print_splash_banner", lambda *, interactive: False)
-    monkeypatch.setattr(main, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     class _StubPrompt:
@@ -412,7 +412,7 @@ async def test_cleared_session_threads_sandbox_sink(tmp_path, monkeypatch) -> No
     async def _fake_rsc(quest, **kw):
         return 0
 
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     rc = await main._run_cleared_session(tmp_path, "main", leave_state={})
     assert rc == 0

@@ -285,8 +285,8 @@ def test_follow_log_replays_all_events_then_finishes() -> None:
         {"type": "step_started", "payload": {"step": "s"}},
     ]
     driver = MagicMock()
-    with patch.object(m, "LiveDriver", return_value=driver), \
-         patch.object(m, "LiveStatus"):
+    with patch("imp.cli.live_driver.LiveDriver", return_value=driver), \
+         patch("imp.cli.live_status.LiveStatus"):
         rc = m._follow_log(events, cats=frozenset())
     assert rc == 0
     assert [c.args[0] for c in driver.on_event.call_args_list] == events
@@ -448,8 +448,8 @@ def test_follow_live_ctrl_c_clears_and_returns_130(
     import imp.cli.main as m
     status = MagicMock()
     driver = MagicMock()
-    monkeypatch.setattr(m, "LiveStatus", lambda stream: status)
-    monkeypatch.setattr(m, "LiveDriver", lambda **kw: driver)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda stream: status)
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda **kw: driver)
     monkeypatch.setattr(m.anyio, "run", MagicMock(side_effect=KeyboardInterrupt))
     rc = m._follow_live(tmp_path, "id", tmp_path / "home", cats=frozenset())
     assert rc == 130
@@ -650,7 +650,10 @@ def test_follow_log_threads_cats_into_the_driver() -> None:
         seen.update(kwargs)
         return MagicMock()
 
-    with patch.object(m, "LiveDriver", _fake_driver), patch.object(m, "LiveStatus"):
+    with (
+        patch("imp.cli.live_driver.LiveDriver", _fake_driver),
+        patch("imp.cli.live_status.LiveStatus"),
+    ):
         rc = m._follow_log([], cats=frozenset({"thinking", "tools"}))
     assert rc == 0
     assert seen["cats"] == frozenset({"thinking", "tools"})
@@ -667,8 +670,8 @@ def test_follow_live_threads_cats_into_the_driver(
         seen.update(kwargs)
         return MagicMock()
 
-    monkeypatch.setattr(m, "LiveDriver", _fake_driver)
-    monkeypatch.setattr(m, "LiveStatus", MagicMock())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _fake_driver)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", MagicMock())
     monkeypatch.setattr(m.anyio, "run", lambda *a, **kw: 0)
     rc = m._follow_live(tmp_path, "id", tmp_path / "home",
                         cats=frozenset({"prompts"}))

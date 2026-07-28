@@ -33,33 +33,9 @@ from imp.agents.random_status import random_status_phrase
 from imp.agents.skills import load_user_skill
 from imp.assets import selectable_workflow_names
 from imp.cli import palette as pal
-from imp.cli import quest_row, resume_select, splash
-from imp.cli.inert_resume import (
-    bare_turn_end_question,
-    make_buffered_solicit,
-    render_inert_question,
-    run_inert_resume,
-)
-from imp.cli.init import (
-    IntegrationBranchUnresolved,
-    run_init,
-    run_init_noninteractive,
-)
-from imp.cli.live_driver import LiveDriver, compose_prelaunch_position_row
-from imp.cli.live_status import LiveStatus
-from imp.cli.mutation_proxy import proxy_mutation, proxy_mutation_async
+from imp.cli import quest_row, splash
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
-from imp.cli.session_run import (
-    infer_session_result,
-    make_headless_solicit,
-    make_interactive_solicit,
-    run_session_client,
-)
-from imp.cli.signals import install_process_group, prompt_sigint_guard
-from imp.cli.slash import ask_line_with_slash
-from imp.cli.terminal_title import TerminalTitle
-from imp.cli.verify_detect import DetectedTestCommand
 from imp.diagnostics import install_stack_dumper
 from imp.providers.config import parse_default_base, validate_workflow_name
 from imp.remote.daemon.directory import session_is_resident
@@ -67,7 +43,10 @@ from imp.remote.session.attach import DaemonStartupError
 from imp.remote.session.protocol import SkillRequest
 
 if TYPE_CHECKING:
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
     from imp.cli.store import HomeDigest, SearchHit, Store
+    from imp.cli.verify_detect import DetectedTestCommand
     from imp.engine.executor import RunResult
     from imp.engine.quest import Quest
     from imp.engine.state import State
@@ -670,6 +649,7 @@ def _print_leave_disposition(
 
 
 def _session_exit_code(quest: Quest, coord: Any) -> int:
+    from imp.cli.session_run import infer_session_result
     from imp.engine.executor import RunResult
     result = infer_session_result(quest)
     outcome = _handle_terminal_outcome(quest, result, coord)
@@ -777,6 +757,7 @@ def _apply_theme() -> None:
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
+    from imp.cli.init import IntegrationBranchUnresolved, run_init, run_init_noninteractive
     from imp.engine import worktree
     project = _project_root()
     if worktree.head_detached(project):
@@ -866,6 +847,7 @@ async def _read_intent_line(
 ) -> str:
     """Read one pre-session intent line, capturing `/model` into `model_sink`
     and `/sandbox` into `sandbox_sink`."""
+    from imp.cli.slash import ask_line_with_slash
     while True:
         line = await ask_line_with_slash(
             prompt, None, quest, color=color, width=width, hint=hint,
@@ -917,7 +899,11 @@ async def _run_cleared_session(
     leave_mode: str = "new",
 ) -> int:
     """Open a fresh imp new-style draft in place after /clear."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.session_run import make_interactive_solicit, run_session_client
     from imp.cli.signals import InterruptCoordinator
+    from imp.cli.terminal_title import TerminalTitle
     from imp.engine.abandon import discard_conversation
     from imp.engine.quest import Quest, live_stems
     from imp.engine.quest_id import new_quest_id
@@ -1096,6 +1082,13 @@ async def _run_fresh_session(
 ) -> int:
     """Run a freshly-created quest (new / materialized backlog) through
     the per-quest session daemon, dispatching on headless / interactive."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.session_run import (
+        make_headless_solicit,
+        make_interactive_solicit,
+        run_session_client,
+    )
     from imp.cli.signals import InterruptCoordinator
 
     _print_run_header(
@@ -1184,6 +1177,16 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.mutation_proxy import proxy_mutation_async
+    from imp.cli.session_run import (
+        make_headless_solicit,
+        make_interactive_solicit,
+        run_session_client,
+    )
+    from imp.cli.signals import install_process_group, prompt_sigint_guard
+    from imp.cli.terminal_title import TerminalTitle
     from imp.engine import worktree
     from imp.engine.abandon import discard_conversation
     from imp.engine.errors import LoadError, LoadErrors
@@ -1425,6 +1428,7 @@ def _build_resume_driver(
     *, quest: Quest, state: State, status: LiveStatus,
     color: bool, preceded_by_blank: bool = False,
 ) -> LiveDriver:
+    from imp.cli.live_driver import LiveDriver
     # startup_verb is drawn once at construction — compose_startup stores it, never re-draws.
     return LiveDriver(
         stream=sys.stdout, color=color,
@@ -1462,6 +1466,15 @@ def _print_resume_opening(
 
 
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
+    from imp.cli.inert_resume import bare_turn_end_question
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.mutation_proxy import proxy_mutation_async
+    from imp.cli.session_run import (
+        make_headless_solicit,
+        make_interactive_solicit,
+        run_session_client,
+    )
+    from imp.cli.signals import install_process_group
     from imp.engine.state import State, lock_is_live
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(
@@ -1586,7 +1599,12 @@ async def _resume_inert(
     autonomous: bool = False,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
+    from imp.cli.inert_resume import make_buffered_solicit, render_inert_question, run_inert_resume
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.session_run import make_interactive_solicit, run_session_client
     from imp.cli.signals import InterruptCoordinator
+    from imp.cli.terminal_title import TerminalTitle
     from imp.engine.state import State
 
     color = should_use_color(sys.stdout)
@@ -2284,6 +2302,8 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
 
 def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str]) -> int:
     """Replay a quest's narrative through the live run view's renderer."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
@@ -2387,6 +2407,8 @@ def _follow_live(control: Path, quest_id: str, home: Path, *,
     """Replay a live quest's narrative through LiveDriver, then tail
     events.jsonl until a terminal status or the home is archived away. Ctrl-C
     clears the footer and exits 130."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
@@ -2951,6 +2973,7 @@ async def _pick_quest_target(
     selected_index: int = 0,
     non_interactive: bool = False,
 ) -> str | int:
+    from imp.cli import resume_select
     if not rows:
         return on_empty()
     if non_interactive or not _interactive():
@@ -3136,6 +3159,7 @@ async def _pick_abandon_matches(
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
+    from imp.cli.mutation_proxy import proxy_mutation
     from imp.engine.archive import read as archive_read
     token = args.token
     if os.environ.get("IMP_SESSION_SOCKET"):
@@ -3271,6 +3295,7 @@ def _emit_mutation_result(result: dict[str, Any]) -> int:
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
+    from imp.cli.mutation_proxy import proxy_mutation
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(proxy_mutation("edit", {
             "token": args.token, "title": args.title, "backlog": args.backlog,

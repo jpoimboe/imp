@@ -80,7 +80,7 @@ async def test_explicit_non_interactive_flag_skips_picker_even_on_a_tty(
     async def boom_picker(candidates, *, now, color, header, selected_index=0):
         raise AssertionError("picker drawn despite --non-interactive")
 
-    monkeypatch.setattr(m.resume_select, "run_picker", boom_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", boom_picker)
     rc = await m._pick_resume_target(tmp_path, non_interactive=True)
     err = capsys.readouterr().err
     assert rc == 2
@@ -99,7 +99,7 @@ async def test_multiple_interactive_uses_picker_selection(
     async def fake_picker(candidates, *, now, color, header, selected_index=0):
         return candidates[1].quest_id
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     assert await m._pick_resume_target(
         tmp_path, non_interactive=False) == "2026-06-10-bbb222"
 
@@ -116,5 +116,5 @@ async def test_multiple_interactive_cancel_returns_2(
     async def fake_picker(candidates, *, now, color, header, selected_index=0):
         return None
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     assert await m._pick_resume_target(tmp_path, non_interactive=False) == 2

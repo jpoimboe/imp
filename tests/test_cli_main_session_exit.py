@@ -11,7 +11,7 @@ from imp.engine.executor import RunResult
 def test_session_exit_code_emits_pause_summary_even_on_interrupt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(main, "infer_session_result", lambda _c: RunResult.PAUSED)
+    monkeypatch.setattr("imp.cli.session_run.infer_session_result", lambda _c: RunResult.PAUSED)
     summarized: list[RunResult] = []
     monkeypatch.setattr(
         main, "_handle_terminal_outcome",
@@ -25,7 +25,7 @@ def test_session_exit_code_emits_pause_summary_even_on_interrupt(
 def test_session_exit_code_returns_outcome_when_not_interrupted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(main, "infer_session_result", lambda _c: RunResult.COMPLETED)
+    monkeypatch.setattr("imp.cli.session_run.infer_session_result", lambda _c: RunResult.COMPLETED)
     summarized: list[RunResult] = []
     monkeypatch.setattr(
         main, "_handle_terminal_outcome",

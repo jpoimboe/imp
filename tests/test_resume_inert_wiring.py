@@ -35,7 +35,7 @@ def _seed(tmp_path: Path) -> Quest:
 
 
 def _patch_common(monkeypatch, tmp_path: Path, ch: Quest) -> None:
-    monkeypatch.setattr(m, "install_process_group", lambda: None)
+    monkeypatch.setattr("imp.cli.signals.install_process_group", lambda: None)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "c")
     monkeypatch.setattr(m, "_load_or_rehydrate", lambda control, cid: ch)
@@ -48,7 +48,7 @@ async def test_resume_routes_to_inert_for_bare_turn_end(
         monkeypatch, tmp_path: Path) -> None:
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
+    monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, str] = {}
 
     async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
@@ -69,7 +69,7 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: None)
+    monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: None)
 
     async def boom_inert(quest, question, *, marker=None, notice=None, autonomous=False):
         raise AssertionError("inert branch taken for a non-bare-turn-end resume")
@@ -92,7 +92,7 @@ async def test_resume_skips_inert_when_message_supplied(
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
+    monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
 
     async def boom_inert_msg(quest, question, *, marker=None, notice=None, autonomous=False):
         raise AssertionError("inert branch taken despite message being set")
@@ -203,14 +203,14 @@ async def test_resume_inert_composes_position_row_for_prompt(
 
     monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
     monkeypatch.setattr(m, "_term_width", lambda: 80)
-    monkeypatch.setattr(m, "compose_prelaunch_position_row", lambda **k: "POS-ROW")
+    monkeypatch.setattr("imp.cli.live_driver.compose_prelaunch_position_row", lambda **k: "POS-ROW")
     monkeypatch.setattr(m, "_inert_ask_line", _cap_ask)
 
     async def _fake_run_inert(*, question, ask_line, launch):
         await ask_line()
         return 0
 
-    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
     rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming", notice=None)
 
@@ -264,7 +264,7 @@ async def test_resume_inert_receives_autonomous(
         monkeypatch, tmp_path: Path) -> None:
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
+    monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, object] = {}
 
     async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
@@ -409,21 +409,21 @@ async def test_inert_resume_echoes_reply_before_session_boot(
 
     monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
     monkeypatch.setattr(m, "_build_resume_driver", lambda **k: _EchoDriver())
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "make_buffered_solicit", lambda line, inner: None)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.inert_resume.make_buffered_solicit", lambda line, inner: None)
 
     async def _client(*a: object, **k: object) -> int:
         seen_at_boot["echoed"] = list(echoed)      # snapshot when boot begins
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _client)
 
     async def _fake_run_inert(*, question, ask_line, launch):
         return await launch("my answer")
 
-    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
     async def _fake_loop(control, base, *, first):
         return await first({})
@@ -456,21 +456,21 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
 
     monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
     monkeypatch.setattr(m, "_build_resume_driver", lambda **k: _Drv())
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "make_buffered_solicit", lambda line, inner: None)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.inert_resume.make_buffered_solicit", lambda line, inner: None)
 
     async def _client(*a: object, title: object = None, **k: object) -> int:
         seen["title"] = title
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _client)
 
     async def _fake_run_inert(*, question, ask_line, launch):
         return await launch("my answer")
 
-    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
     async def _fake_loop(control, base, *, first):
         return await first({})
@@ -502,13 +502,13 @@ async def test_inert_resume_hands_quest_base_to_clear_loop(
     monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
     monkeypatch.setattr(m, "_term_width", lambda: 80)
     monkeypatch.setattr(m, "_prelaunch_position_model", lambda *a, **k: None)
-    monkeypatch.setattr(m, "compose_prelaunch_position_row", lambda **k: "")
-    monkeypatch.setattr(m, "render_inert_question", lambda *a, **k: a[0])
+    monkeypatch.setattr("imp.cli.live_driver.compose_prelaunch_position_row", lambda **k: "")
+    monkeypatch.setattr("imp.cli.inert_resume.render_inert_question", lambda *a, **k: a[0])
 
     async def _fake_run_inert(*, question, ask_line, launch):
         return await launch("my answer")
 
-    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
 
     rc = await m._resume_inert(ch, "Which DB?", marker="resuming", notice=None)
 

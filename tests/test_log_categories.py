@@ -67,7 +67,7 @@ def _follow_driver_kwargs(
         seen.update(kwargs)
         return MagicMock()
 
-    monkeypatch.setattr(m, "LiveDriver", _fake_driver)
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _fake_driver)
     monkeypatch.setattr(m.anyio, "run", lambda *a, **kw: 0)
     buf = io.StringIO()
     with redirect_stdout(buf):
