@@ -1696,42 +1696,6 @@ def test_parallel_same_name_subagents_not_marked_retrying() -> None:
     assert "retrying" not in out
 
 
-
-def test_live_viewer_suppresses_step_context_block_even_in_full() -> None:
-    events = [
-        _ev("2", "step_started", step="s", kind="agent", phase="p",
-            model="m", provider="anthropic"),
-        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
-            model="claude", tools_schema=[{"name": "bash"}],
-            params={}, max_tool_calls=50),
-        _ev("4", "engine_message", agent_id="step:p/s", role="system",
-            subtype="system_prompt",
-            content=[{"type": "text", "text": "SYSTEM PROMPT TEXT"}]),
-    ]
-    live = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
-                                 width=80, live_viewer=True))
-    assert "- bash" not in live
-    assert "context ·" not in live          # the whole fold (header included) is gone
-    assert "SYSTEM PROMPT TEXT" not in live  # engine turns hidden in live even under --full
-    log = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
-                                width=80))
-    assert "- bash" in log   # imp log --full shows tools
-    assert "SYSTEM PROMPT TEXT" in log       # imp log --full shows the system prompt
-
-
-def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
-    events = [
-        _ev("2", "step_started", step="s", kind="agent", phase="p", model="m"),
-        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
-            input={"command": "ls -la"}),
-        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
-            content="RAW-FILE-OUTPUT", error=False),
-    ]
-    live = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
-                                 width=80, live_viewer=True))
-    assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)
-
-
 def test_breadcrumb_with_label_has_no_route_line() -> None:
     lines = list(rt._render(
         nv.BreadcrumbLine(
