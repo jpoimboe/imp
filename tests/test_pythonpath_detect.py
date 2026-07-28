@@ -140,6 +140,98 @@ def test_import_roots_empty_when_no_package_dir_anywhere(tmp_path: Path) -> None
     assert detect_import_roots(tmp_path) == ImportRoots([], "not a Python project")
 
 
+# --- detect_import_roots: declared paths in pyproject.toml ---
+
+def test_import_roots_hatch_packages(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["lib/app", "lib/other"]\n')
+    (tmp_path / "lib" / "app").mkdir(parents=True)
+    (tmp_path / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__init__.py").write_text("")
+    # The declaration wins over the src-layout the probe would otherwise find,
+    # and the two declared packages collapse to their single parent dir.
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["lib"], "from pyproject.toml")
+
+
+def test_import_roots_setuptools_package_dir_root_key(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.setuptools]\npackage-dir = {"" = "source"}\n')
+    (tmp_path / "source").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["source"], "from pyproject.toml")
+
+
+def test_import_roots_setuptools_package_dir_named_package(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.setuptools]\npackage-dir = {mypkg = "lib/mypkg"}\n')
+    (tmp_path / "lib" / "mypkg").mkdir(parents=True)
+    # A named package maps to its OWN directory, so the import root is its
+    # parent — `lib`, never `lib/mypkg` (which would be unimportable).
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["lib"], "from pyproject.toml")
+
+
+def test_import_roots_setuptools_packages(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.setuptools]\npackages = ["lib/app"]\n')
+    (tmp_path / "lib").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["lib"], "from pyproject.toml")
+
+
+def test_import_roots_poetry_packages_from(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry]\npackages = [{include = "app", from = "lib"}]\n')
+    (tmp_path / "lib").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["lib"], "from pyproject.toml")
+
+
+def test_import_roots_pytest_pythonpath(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\npythonpath = ["stubs"]\n')
+    (tmp_path / "stubs").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["stubs"], "from pyproject.toml")
+
+
+def test_import_roots_empty_declaration_does_not_mask_a_later_key(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.hatch.build.targets.wheel]\npackages = []\n\n"
+        '[tool.pytest.ini_options]\npythonpath = ["stubs"]\n')
+    (tmp_path / "stubs").mkdir()
+    # An empty `packages` declares nothing, so the next key in the same file
+    # still gets its say.
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["stubs"], "from pyproject.toml")
+
+
+def test_import_roots_declared_missing_dir_falls_through_to_probe(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["ghost/app"]\n')
+    (tmp_path / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__init__.py").write_text("")
+    # `ghost` is not on disk, so validation empties the declaration and the
+    # probe answers instead — never a declared root that doesn't exist.
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["src"], "from the layout on disk")
+
+
+def test_import_roots_unparseable_pyproject_falls_through_to_probe(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.hatch\nthis is not = = toml\n")
+    (tmp_path / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__init__.py").write_text("")
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["src"], "from the layout on disk")
+
+
 def test_detector_and_agent_are_retired() -> None:
     import imp.cli.pythonpath_detect as ppd
     from imp.assets import bundled_workflow_dir

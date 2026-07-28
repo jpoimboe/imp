@@ -10,9 +10,10 @@ provider-credential readiness check (`resolve_detection_provider`).
 from __future__ import annotations
 
 import json
+import tomllib
 from dataclasses import replace
-from pathlib import Path
-from typing import NamedTuple
+from pathlib import Path, PurePosixPath
+from typing import Any, NamedTuple
 
 from imp.providers.effective import load_effective_config
 from imp.providers.resolve import available_providers
@@ -88,6 +89,67 @@ _NOT_PYTHON = "not a Python project"
 _FROM_LAYOUT = "from the layout on disk"
 
 
+def _dig(data: dict[str, Any], *keys: str) -> dict[str, Any]:
+    for key in keys:
+        node = data.get(key)
+        if not isinstance(node, dict):
+            return {}
+        data = node
+    return data
+
+
+def _string_list(value: object) -> list[str]:
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+def _parent_dirs(paths: object) -> list[str]:
+    return [str(PurePosixPath(p.replace("\\", "/")).parent)
+            for p in _string_list(paths) if p.strip()]
+
+
+def _package_dir_roots(value: object) -> list[str]:
+    """setuptools `package_dir`: the `""` key names the import root directly; a
+    named package maps to its own directory, whose PARENT is the import root."""
+    if not isinstance(value, dict):
+        return []
+    root = value.get("")
+    if isinstance(root, str):
+        return [root]
+    return _parent_dirs(list(value.values()))
+
+
+def _poetry_roots(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [entry["from"] for entry in value
+            if isinstance(entry, dict) and isinstance(entry.get("from"), str)]
+
+
+def _declared_in_pyproject(project_root: Path) -> list[str]:
+    """Import roots a packaging backend declares in pyproject.toml — a shallow
+    read of declared paths, not a reimplementation of the backends. Empty when
+    nothing is declared or the file doesn't parse."""
+    path = project_root / "pyproject.toml"
+    if not path.is_file():
+        return []
+    try:
+        data = tomllib.loads(path.read_text(errors="ignore"))
+    except tomllib.TOMLDecodeError:
+        return []
+    tool = _dig(data, "tool")
+    setuptools = _dig(tool, "setuptools")
+    for roots in (
+        _parent_dirs(_dig(tool, "hatch", "build", "targets", "wheel").get("packages")),
+        _package_dir_roots(setuptools.get("package-dir")),
+        _parent_dirs(setuptools.get("packages")),
+        _poetry_roots(_dig(tool, "poetry").get("packages")),
+        _string_list(_dig(tool, "pytest", "ini_options").get("pythonpath")),
+    ):
+        if roots:
+            return roots
+    return []
+
+
 def _probe_layout(project_root: Path) -> list[str]:
     """`src` when it directly holds a package dir, else the repo root when it does —
     empty when neither."""
@@ -103,10 +165,15 @@ def _probe_layout(project_root: Path) -> list[str]:
 
 def detect_import_roots(project_root: Path) -> ImportRoots:
     """The worktree-relative import roots for `project_root` with their
-    provenance, for init's confirmation screen and `--use-defaults`. Every
-    empty outcome is reported as `not a Python project`."""
+    provenance, for init's confirmation screen and `--use-defaults`. Declared
+    package paths win; the layout on disk answers when nothing is declared.
+    Every empty outcome is reported as `not a Python project`."""
     if not is_python_packaging_project(project_root):
         return ImportRoots([], _NOT_PYTHON)
+    declared = validate_detected_roots(
+        project_root, _declared_in_pyproject(project_root))
+    if declared:
+        return ImportRoots(declared, "from pyproject.toml")
     probed = validate_detected_roots(project_root, _probe_layout(project_root))
     if probed:
         return ImportRoots(probed, _FROM_LAYOUT)
