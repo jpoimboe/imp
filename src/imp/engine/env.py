@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from imp.paths import project_state_dir
+
 
 @dataclass(frozen=True, slots=True)
 class TestGates:
@@ -136,6 +138,7 @@ def quest_var_tmp_root() -> Path:
 def engine_env(
     *, project_root: Path, quest_id: str, quest_title: str,
     quest_dir: Path | None = None,
+    control_root: Path | None = None,
     output_path: Path | None = None,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
@@ -151,6 +154,11 @@ def engine_env(
                             injected only when quest_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/quests/
                             so the state directory survives worktree relocation.
+        IMP_STATE_DIR     — absolute host path of this project's state directory;
+                            injected only when control_root is provided. Under the
+                            sandbox mask the `repo` marker is unreadable, so an
+                            in-sandbox `imp` resolves through this override instead
+                            of the slug walk.
         IMP_OUTPUT        — path to the JSON file where a script writes its declared
                             typed output: fields; injected only when output_path is
                             provided (i.e. when an output: schema is in play).
@@ -182,6 +190,8 @@ def engine_env(
     }
     if quest_dir is not None:
         env["IMP_QUEST_DIR"] = str(quest_dir)
+    if control_root is not None:
+        env["IMP_STATE_DIR"] = str(project_state_dir(control_root))
     if output_path is not None:
         env["IMP_OUTPUT"] = str(output_path)
     if test_gates is not None:

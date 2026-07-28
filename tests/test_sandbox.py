@@ -2035,3 +2035,15 @@ def test_retired_overlay_symbols_are_gone():
     for name in ("OVERLAY_SETUP_FAILED_MARKER", "OVERLAY_SETUP_FAILED_CODE",
                  "OVERLAY_SETUP_FAILED_MESSAGE", "overlay_setup_failed"):
         assert not hasattr(sb, name), f"{name} should be deleted"
+
+
+def test_setenv_carries_the_state_dir_when_the_spawn_supplies_none():
+    # The bash tool passes no control root, so its live engine_env has no
+    # IMP_STATE_DIR — the value baked into policy.setenv at run start must still
+    # reach the sandbox argv.
+    p = _policy(setenv=(("PATH", "/usr/bin"),
+                        ("IMP_STATE_DIR", "/home/u/.imp/projects/widget")))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    i = argv.index("IMP_STATE_DIR")
+    assert argv[i - 1] == "--setenv"
+    assert argv[i + 1] == "/home/u/.imp/projects/widget"

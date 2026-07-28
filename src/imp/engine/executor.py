@@ -1171,6 +1171,7 @@ async def _route_script(
                                  quest_id=quest.id,
                                  quest_title=quest.title,
                                  quest_dir=quest.quest_dir,
+                                 control_root=quest.control_root,
                                  output_path=output_path,
                                  test_gates=test_gates,
                                  pythonpath=pythonpath),
@@ -1951,6 +1952,7 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
         engine_env(project_root=quest.project_root, quest_id=quest.id,
                    quest_title=quest.title,
                    quest_dir=quest.quest_dir,
+                   control_root=quest.control_root,
                    test_gates=TestGates.from_config(config),
                    pythonpath=config.pythonpath),
     )

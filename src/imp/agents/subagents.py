@@ -180,6 +180,7 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
         os.environ,
         engine_env(project_root=worktree_path, quest_id=quest.id,
                    quest_title=quest.title, quest_dir=quest.quest_dir,
+                   control_root=quest.control_root,
                    test_gates=test_gates, pythonpath=config.pythonpath),
     )
     policy = resolve_policy(

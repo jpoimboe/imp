@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from imp.engine.env import TestGates, engine_env, overlay_engine_env
+from imp.paths import imp_home
 
 
 def test_engine_env_exposes_id_and_title_no_artifacts() -> None:
@@ -243,3 +244,36 @@ def test_overlay_strips_ambient_interactive_editor() -> None:
     assert env["GIT_EDITOR"] == "true"
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["FOO"] == "bar"   # untouched non-engine vars pass through
+
+
+def test_engine_env_carries_the_state_dir_when_a_control_root_is_given(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "widget"
+    root.mkdir()
+    env = engine_env(project_root=root / "wt", quest_id="abc123",
+                     quest_title="T", control_root=root)
+    assert env["IMP_STATE_DIR"] == str(imp_home() / "projects" / "widget")
+
+
+def test_engine_env_omits_the_state_dir_without_a_control_root(tmp_path: Path) -> None:
+    env = engine_env(project_root=tmp_path, quest_id="abc123", quest_title="T")
+    assert "IMP_STATE_DIR" not in env
+
+
+def test_state_dir_survives_the_policy_env_bake(tmp_path: Path) -> None:
+    from imp.engine.sandbox import _build_setenv
+
+    root = tmp_path / "widget"
+    root.mkdir()
+    eng = engine_env(project_root=root / "wt", quest_id="abc123",
+                     quest_title="T", control_root=root)
+    baked = dict(_build_setenv(eng, {}, ()))
+    assert baked["IMP_STATE_DIR"] == str(imp_home() / "projects" / "widget")
+
+
+def test_overlay_preserves_an_inherited_state_dir() -> None:
+    # IMP_STATE_DIR must stay OUT of ENGINE_ENV_VARS: spawn.py overlays an empty
+    # dict, and membership would strip the migration's deferral pin.
+    merged = overlay_engine_env({"IMP_STATE_DIR": "/pinned/old"}, {})
+    assert merged["IMP_STATE_DIR"] == "/pinned/old"
