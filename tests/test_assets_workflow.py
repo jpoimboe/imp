@@ -317,7 +317,6 @@ def test_scope_code_check_rides_default_cap_and_label_suppressed() -> None:
 
 def test_commit_tool_is_removed_from_registry() -> None:
     # Fix #3: the commit tool is gone; all agents commit with raw git.
-    import imp.agents.tools  # noqa: F401 — triggers _register_builtins
     from imp.agents.tools import get_registry
     assert "commit" not in get_registry()
 

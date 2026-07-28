@@ -97,7 +97,6 @@ async def _run_anthropic(
     seed: Any = _seed_send_to_llm_transcript, resume_cause: str = "human",
 ) -> list[str]:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
@@ -181,7 +180,6 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
     tmp_path: Path,
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.claude_code import ClaudeCodeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
@@ -259,7 +257,6 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
     tmp_path: Path,
 ) -> None:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.claude_code import ClaudeCodeAgentRunner
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
@@ -356,7 +353,6 @@ async def _run_openai(
     seed: Any = _seed_send_to_llm_transcript, resume_cause: str = "human",
 ) -> tuple[list[str], Any]:
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.openai import OpenAIAgentRunner
     from tests.openai_fakes import (
@@ -468,7 +464,6 @@ async def test_claude_code_provider_retry_resume_journals_the_retry_note(
     """claude_code's resume-continue condition: the note is journaled as an
     engine_message/continuation and selected from the cause."""
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.agents.transcript import RESUME_RETRY_NUDGE
     from imp.engine.state import InMemoryEventLog
     from imp.providers.claude_code import ClaudeCodeAgentRunner
