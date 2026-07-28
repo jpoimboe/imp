@@ -224,9 +224,11 @@ def test_follow_conflict_flags_summary() -> None:
     assert _follow_conflict(_log_ns(follow=True, summary=True)) == "--summary"
 
 
-def test_follow_conflict_flags_full() -> None:
+def test_follow_conflict_allows_the_content_flags() -> None:
     from imp.cli.main import _follow_conflict
-    assert _follow_conflict(_log_ns(follow=True, full=True)) == "--full"
+    assert _follow_conflict(_log_ns(follow=True, full=True)) is None
+    assert _follow_conflict(_log_ns(follow=True, show=["thinking"])) is None
+    assert _follow_conflict(_log_ns(follow=True, hide=["tiers"])) is None
 
 
 def test_follow_conflict_flags_html() -> None:
@@ -269,7 +271,8 @@ def test_main_log_follow_implies_no_pager_on_tty(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("PAGER", raising=False)
     _fake_tty(monkeypatch, isatty=True)
-    monkeypatch.setattr(m, "_follow_live", lambda control, cid, home: 0)
+    monkeypatch.setattr(m, "_follow_live",
+                        lambda control, cid, home, *, cats: 0)
     with patch("imp.cli.main.subprocess.Popen") as popen:
         rc = m.main(["log", "-f", slug])
     assert rc == 0
@@ -287,7 +290,7 @@ def test_follow_log_replays_all_events_then_finishes() -> None:
     driver = MagicMock()
     with patch.object(m, "LiveDriver", return_value=driver), \
          patch.object(m, "LiveStatus"):
-        rc = m._follow_log(events)
+        rc = m._follow_log(events, cats=frozenset())
     assert rc == 0
     assert [c.args[0] for c in driver.on_event.call_args_list] == events
     driver.finish.assert_called_once()
@@ -393,7 +396,7 @@ def test_cmd_log_follow_routes_live_home_to_follow_live(
     seen: dict[str, object] = {}
     monkeypatch.setattr(
         m, "_follow_live",
-        lambda control, cid, home: (seen.update(cid=cid, home=home), 7)[1])
+        lambda control, cid, home, *, cats: (seen.update(cid=cid, home=home), 7)[1])
     rc = m.main(["log", "-f", slug])
     assert rc == 7
     assert seen["cid"] == slug
@@ -413,9 +416,32 @@ def test_cmd_log_follow_routes_archived_only_to_follow_log(
         m, "_load_events_for_id",
         lambda c, i: [{"type": "quest_created", "payload": {}}])
     monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
-    monkeypatch.setattr(m, "_follow_log", lambda events: 9)
+    monkeypatch.setattr(m, "_follow_log", lambda events, *, cats: 9)
     rc = m.main(["log", "-f", "arch"])
     assert rc == 9
+
+
+def test_cmd_log_follow_archived_only_threads_cats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The archived-only route hands _follow_log the resolved category set, so
+    `imp log -f --full` on a quest with no live home is a full-view replay."""
+    import imp.cli.main as m
+    from imp.cli.render_text import LOG_CATEGORIES
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "arch")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    monkeypatch.setattr(
+        m, "_load_events_for_id",
+        lambda c, i: [{"type": "quest_created", "payload": {}}])
+    monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(
+        m, "_follow_log",
+        lambda events, *, cats: (seen.update(cats=cats), 9)[1])
+    rc = m.main(["log", "-f", "--full", "--hide", "tiers", "arch"])
+    assert rc == 9
+    assert seen["cats"] == frozenset(LOG_CATEGORIES) - {"tiers"}
 
 
 def test_follow_live_ctrl_c_clears_and_returns_130(
@@ -429,7 +455,7 @@ def test_follow_live_ctrl_c_clears_and_returns_130(
     monkeypatch.setattr(m, "LiveStatus", lambda stream: status)
     monkeypatch.setattr(m, "LiveDriver", lambda **kw: driver)
     monkeypatch.setattr(m.anyio, "run", MagicMock(side_effect=KeyboardInterrupt))
-    rc = m._follow_live(tmp_path, "id", tmp_path / "home")
+    rc = m._follow_live(tmp_path, "id", tmp_path / "home", cats=frozenset())
     assert rc == 130
     status.reset.assert_called_once()
     driver.finish.assert_not_called()
@@ -547,7 +573,7 @@ def test_cmd_log_follow_long_form_starts_follow(
     seen: dict[str, object] = {}
     monkeypatch.setattr(
         m, "_follow_live",
-        lambda control, cid, home: (seen.update(cid=cid, home=home), 5)[1])
+        lambda control, cid, home, *, cats: (seen.update(cid=cid, home=home), 5)[1])
     rc = m.main(["log", "--follow", slug])
     assert rc == 5
     assert seen["cid"] == slug
@@ -610,10 +636,45 @@ def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
     seen: dict[str, object] = {}
     monkeypatch.setattr(
         m, "_follow_log",
-        lambda events: (seen.update(events=events), 0)[1])
+        lambda events, *, cats: (seen.update(events=events), 0)[1])
     rc = m.main(["log", "-f", slug])
     assert rc == 0
     assert seen["events"] == snapshot  # the store snapshot went to the one-shot path
     err = capsys.readouterr().err
     assert "imp: live follow is unavailable inside the sandbox" in err
     assert "imp log:" not in err
+
+
+def test_follow_log_threads_cats_into_the_driver() -> None:
+    """The one-shot replay path hands its resolved category set to LiveDriver."""
+    import imp.cli.main as m
+    seen: dict[str, object] = {}
+
+    def _fake_driver(**kwargs: object) -> MagicMock:
+        seen.update(kwargs)
+        return MagicMock()
+
+    with patch.object(m, "LiveDriver", _fake_driver), patch.object(m, "LiveStatus"):
+        rc = m._follow_log([], cats=frozenset({"thinking", "tools"}))
+    assert rc == 0
+    assert seen["cats"] == frozenset({"thinking", "tools"})
+
+
+def test_follow_live_threads_cats_into_the_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tailing path hands its resolved category set to LiveDriver."""
+    import imp.cli.main as m
+    seen: dict[str, object] = {}
+
+    def _fake_driver(**kwargs: object) -> MagicMock:
+        seen.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr(m, "LiveDriver", _fake_driver)
+    monkeypatch.setattr(m, "LiveStatus", MagicMock())
+    monkeypatch.setattr(m.anyio, "run", lambda *a, **kw: 0)
+    rc = m._follow_live(tmp_path, "id", tmp_path / "home",
+                        cats=frozenset({"prompts"}))
+    assert rc == 0
+    assert seen["cats"] == frozenset({"prompts"})

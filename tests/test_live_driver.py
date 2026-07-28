@@ -11,7 +11,7 @@ from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
-from imp.cli.render_text import render_tree
+from imp.cli.render_text import LOG_CATEGORIES, render_tree
 from imp.cli.signals import InterruptCoordinator
 from tests._event_fixtures import _TTY, _two_phase_events, ev
 
@@ -31,12 +31,22 @@ def _body(out: _Pipe) -> list[str]:
     return out.getvalue().splitlines()
 
 
-def _render_body(events) -> list[str]:
+def _render_body(events, cats: frozenset[str] = frozenset()) -> list[str]:
     """Full render_tree output. Neither renderer emits a slug/title header any
     more (the transcript opens on the first turn), so the live body and the
     render_tree body are directly comparable line-for-line."""
     tree = nv.build_tree(events)
-    return list(render_tree(tree, full=False, color=False, width=80))
+    return list(render_tree(tree, show=cats, color=False, width=80))
+
+
+def _cats_body(events, cats: frozenset[str]) -> list[str]:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     cats=cats)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    return out.getvalue().splitlines()
 
 
 def test_burst_recap_streams_then_prose_in_live_path() -> None:
@@ -3570,3 +3580,86 @@ def test_finish_clears_the_stop_ack_so_it_cannot_outlive_the_run() -> None:
     out.seek(0)
     status._draw()                       # a stray spinner tick after teardown
     assert out.getvalue() == ""
+
+
+def test_full_cats_expands_subagent_fold_like_log() -> None:
+    # With the `subagents` category on, the live driver must render the expanded
+    # `▾ {name}` fold + recursed inner transcript, byte-identical to imp log --full.
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
+           input={"subagent_name": "reviewer", "task_description": "review the diff"}),
+        ev("5", "thinking", agent_id="sub:4", content="weighing it up"),
+        ev("6", "agent_message", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
+        ev("7", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success","summary":"ok"}'),
+        ev("8", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    full = _cats_body(events, frozenset(LOG_CATEGORIES))
+    assert any(ln.strip().startswith("▾ reviewer") for ln in full)
+    assert any("the finding" in ln for ln in full)     # inner transcript recursed
+    assert full == _render_body(events, frozenset(LOG_CATEGORIES))
+    lean = _cats_body(events, frozenset())
+    assert not any("▾ reviewer" in ln for ln in lean)  # default stays the status row
+    assert not any("the finding" in ln for ln in lean)
+    assert lean == _render_body(events)
+
+
+def test_full_cats_emits_complete_step_block_at_step_close() -> None:
+    # The stashed complete_step args surface under --full, flush against the step's
+    # completion breadcrumb, with the following block still getting its blank above.
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="rev", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("3", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "reviewed it"}]}, usage={}),
+        ev("4", "agent_result", agent_id="step:review/rev", verdict="rework",
+           findings="Line 1 is wrong.\nLine 2 needs a guard."),
+        ev("5", "step_completed", step="rev", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("6", "step_started", step="patch", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("7", "step_completed", step="patch", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    lean = _cats_body(events, frozenset())
+    assert not any("complete_step" in ln for ln in lean)   # hidden by default
+    full = _cats_body(events, frozenset(LOG_CATEGORIES))
+    assert any("▾ complete_step" in ln for ln in full)
+    i = next(k for k, ln in enumerate(full) if "▾ complete_step" in ln)
+    assert "Line 2 needs a guard." in "\n".join(full[i:])
+    assert "rev · complete" in full[i - 1]      # flush against the breadcrumb
+    j = next(k for k, ln in enumerate(full) if "patch" in ln and k > i)
+    assert full[j - 1].strip() == ""            # next block keeps its blank above
+    assert full == _render_body(events, frozenset(LOG_CATEGORIES))
+
+
+def test_full_cats_complete_step_keeps_blank_above_a_frameless_step() -> None:
+    # A `show_label: false` agent step emits NO lines of its own (header suppressed,
+    # breadcrumb skipped), so its complete_step block is the whole rendered block and
+    # keeps the blank line above it that render_tree yields. Clearing the driver's
+    # armed separator unconditionally at the pop site would eat that blank.
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="a", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("3", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "first"}]}, usage={}),
+        ev("4", "step_completed", step="a", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "step_started", step="quiet", kind="agent", phase="p",
+           model="m", provider="anthropic", show_label=False),
+        ev("6", "agent_result", agent_id="step:p/quiet", findings="X" * 100),
+        ev("7", "step_completed", step="quiet", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    full = _cats_body(events, frozenset(LOG_CATEGORIES))
+    i = next(k for k, ln in enumerate(full) if "▾ complete_step" in ln)
+    assert full[i - 1].strip() == ""            # blank above, as render_tree yields
+    assert "a · complete" in full[i - 2]
+    assert full == _render_body(events, frozenset(LOG_CATEGORIES))
