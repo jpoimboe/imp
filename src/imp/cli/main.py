@@ -689,7 +689,7 @@ def _control_root() -> Path:
     return worktree.find_control_root(Path.cwd())
 
 
-def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None:
+def _preflight_imp_init(*, control_root: Path) -> str | None:
     """Return a clean 'run imp init first' message when no provider is
     env-available (e.g. a never-init'd machine with empty user `providers`),
     else None. Relocates+dresses the failure that per-step resolution would
@@ -1222,7 +1222,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         _emit_cli_error(f"{e}")
         return 2
 
-    block = _preflight_imp_init(control_root=control, project_root=control)
+    block = _preflight_imp_init(control_root=control)
     if block is not None:
         _emit_cli_error(f"{block}")
         return 2

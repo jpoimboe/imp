@@ -81,7 +81,7 @@ def test_preflight_still_swallows_the_guard(
 
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = _old_name_repo(tmp_path)
-    assert _preflight_imp_init(control_root=proj, project_root=proj) is None
+    assert _preflight_imp_init(control_root=proj) is None
 
 
 def test_hint_names_the_branch_the_old_file_sits_on(tmp_path: Path) -> None:
