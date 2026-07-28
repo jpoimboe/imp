@@ -224,9 +224,11 @@ def test_follow_conflict_flags_summary() -> None:
     assert _follow_conflict(_log_ns(follow=True, summary=True)) == "--summary"
 
 
-def test_follow_conflict_flags_full() -> None:
+def test_follow_conflict_allows_the_content_flags() -> None:
     from imp.cli.main import _follow_conflict
-    assert _follow_conflict(_log_ns(follow=True, full=True)) == "--full"
+    assert _follow_conflict(_log_ns(follow=True, full=True)) is None
+    assert _follow_conflict(_log_ns(follow=True, show=["thinking"])) is None
+    assert _follow_conflict(_log_ns(follow=True, hide=["tiers"])) is None
 
 
 def test_follow_conflict_flags_html() -> None:
@@ -417,6 +419,29 @@ def test_cmd_log_follow_routes_archived_only_to_follow_log(
     monkeypatch.setattr(m, "_follow_log", lambda events, *, cats: 9)
     rc = m.main(["log", "-f", "arch"])
     assert rc == 9
+
+
+def test_cmd_log_follow_archived_only_threads_cats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The archived-only route hands _follow_log the resolved category set, so
+    `imp log -f --full` on a quest with no live home is a full-view replay."""
+    import imp.cli.main as m
+    from imp.cli.render_text import LOG_CATEGORIES
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "arch")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    monkeypatch.setattr(
+        m, "_load_events_for_id",
+        lambda c, i: [{"type": "quest_created", "payload": {}}])
+    monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(
+        m, "_follow_log",
+        lambda events, *, cats: (seen.update(cats=cats), 9)[1])
+    rc = m.main(["log", "-f", "--full", "--hide", "tiers", "arch"])
+    assert rc == 9
+    assert seen["cats"] == frozenset(LOG_CATEGORIES) - {"tiers"}
 
 
 def test_follow_live_ctrl_c_clears_and_returns_130(

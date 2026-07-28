@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -49,20 +50,46 @@ def test_log_unknown_category_errors(
     assert "imp log:" not in err                     # divergent prefix gone
 
 
-def test_log_follow_show_conflict(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    rc = main(["log", _ID, "--follow", "--show", "thinking"])
-    assert rc == 2
-    assert "imp: -f/--follow not allowed with --show/--hide" in capsys.readouterr().err
+def _follow_driver_kwargs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str],
+) -> dict[str, object]:
+    """Run `imp log -f …` against a seeded quest (a real live home, so the
+    tailing route is taken) and return the kwargs the follow path passed to
+    LiveDriver. anyio.run is stubbed so the poll loop never starts."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Logq", quest_id=_ID, base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    seen: dict[str, object] = {}
+
+    def _fake_driver(**kwargs: object) -> MagicMock:
+        seen.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr(m, "LiveDriver", _fake_driver)
+    monkeypatch.setattr(m.anyio, "run", lambda *a, **kw: 0)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = m.main(argv)
+    assert rc == 0, f"{argv} was rejected"
+    return seen
 
 
-def test_log_follow_hide_conflict(
-    capsys: pytest.CaptureFixture[str],
+def test_log_follow_composes_with_show(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rc = main(["log", _ID, "--follow", "--hide", "tiers"])
-    assert rc == 2
-    assert "imp: -f/--follow not allowed with --show/--hide" in capsys.readouterr().err
+    seen = _follow_driver_kwargs(
+        tmp_path, monkeypatch, ["log", _ID, "--follow", "--show", "thinking"])
+    assert seen["cats"] == frozenset({"thinking"})
+
+
+def test_log_follow_composes_with_full_and_hide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen = _follow_driver_kwargs(
+        tmp_path, monkeypatch, ["log", _ID, "-f", "--full", "--hide", "tiers"])
+    assert seen["cats"] == _ALL - {"tiers"}
 
 
 def test_log_threads_computed_show_set(

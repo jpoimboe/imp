@@ -2220,11 +2220,12 @@ _LOG_EXPORT_DEFAULT = object()
 
 
 def _follow_conflict(args: argparse.Namespace) -> str | None:
-    """Return the first output-mode flag `--follow` conflicts with, or None."""
+    """Return the first output-mode flag `--follow` conflicts with, or None.
+
+    The content flags (--full/--show/--hide) compose — only whole other output
+    modes clash."""
     for name, present in (
         ("--summary", args.summary),
-        ("--full", args.full),
-        ("--show/--hide", bool(args.show or args.hide)),
         ("--html", args.html is not None),
         ("--md", args.md is not None),
     ):
