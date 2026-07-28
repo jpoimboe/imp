@@ -281,6 +281,7 @@ class _Cursor:
     container: Any   # WorkflowNode | PhaseNode | StepNode | SubagentFold
     depth: int       # depth at which this container's CHILDREN render
     index: int = 0   # next unemitted child
+    emit_mark: int = 0  # driver emission count when this container opened
 
 
 def _is_container(node: Any) -> bool:
@@ -350,6 +351,7 @@ class LiveDriver:
         self._startup_start_iso: str | None = None   # block start for the startup block-age timer
         self._unsandboxed = False
         self._emitted_any = False
+        self._emissions = 0
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
         # root cursor: render root's children at depth 0 (matches render_tree).
@@ -536,6 +538,24 @@ class LiveDriver:
                             prose=True,
                             separator_indent=rt._gutter_indent(
                                 cur.depth, self._gutters(), self._color))
+                    if (isinstance(cur.container, nv.StepNode)
+                            and self._cats >= rt._ALL_CATEGORIES
+                            and cur.container.agent_result):
+                        out_lines = list(rt._render_output_args(
+                            cur.container.agent_result, depth=cur.depth,
+                            color=self._color, width=self._cur_width(),
+                            gutters=self._gutters()))
+                        if out_lines:
+                            # The batch walk yields this block flush against the
+                            # step's own last line, then spaces the step as a whole.
+                            # A step that emitted nothing has no line to sit flush
+                            # against, so it keeps the separator its predecessor armed.
+                            if self._emissions > cur.emit_mark:
+                                self._prev_prose = False
+                            self._print_lines(
+                                out_lines, prose=True,
+                                separator_indent=rt._gutter_indent(
+                                    cur.depth, self._gutters(), self._color))
                     self._frontier.pop()        # container drained + closed
                     continue
                 return                          # open container, no new children yet
@@ -551,6 +571,7 @@ class LiveDriver:
                 # under the header instead of burying it — must match
                 # render_text._render. (aligned indent)
                 gutters = self._gutters()
+                mark = self._emissions      # before the header: it is this step's own output
                 suppress = rt.frame_suppressed(child)
                 if not suppress and rt.spaces_before(child):
                     self._prev_prose = True
@@ -566,7 +587,8 @@ class LiveDriver:
                 if not suppress and isinstance(child, (nv.StepNode, nv.PhaseNode)):
                     self._prev_prose = True
                 child_depth = cur.depth
-                self._frontier.append(_Cursor(container=child, depth=child_depth))
+                self._frontier.append(
+                    _Cursor(container=child, depth=child_depth, emit_mark=mark))
             else:
                 if not (isinstance(child, nv.BreadcrumbLine)
                         and rt.frame_suppressed(cur.container)):
@@ -680,6 +702,7 @@ class LiveDriver:
             return
         if not lines:
             return
+        self._emissions += 1
         if self._prompt_active:
             self._deferred.append((lines, prose, separator_indent))
             return

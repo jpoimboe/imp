@@ -3607,3 +3607,59 @@ def test_full_cats_expands_subagent_fold_like_log() -> None:
     assert not any("▾ reviewer" in ln for ln in lean)  # default stays the status row
     assert not any("the finding" in ln for ln in lean)
     assert lean == _render_body(events)
+
+
+def test_full_cats_emits_complete_step_block_at_step_close() -> None:
+    # The stashed complete_step args surface under --full, flush against the step's
+    # completion breadcrumb, with the following block still getting its blank above.
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="rev", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("3", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "reviewed it"}]}, usage={}),
+        ev("4", "agent_result", agent_id="step:review/rev", verdict="rework",
+           findings="Line 1 is wrong.\nLine 2 needs a guard."),
+        ev("5", "step_completed", step="rev", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("6", "step_started", step="patch", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("7", "step_completed", step="patch", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    lean = _cats_body(events, frozenset())
+    assert not any("complete_step" in ln for ln in lean)   # hidden by default
+    full = _cats_body(events, frozenset(LOG_CATEGORIES))
+    assert any("▾ complete_step" in ln for ln in full)
+    i = next(k for k, ln in enumerate(full) if "▾ complete_step" in ln)
+    assert "Line 2 needs a guard." in "\n".join(full[i:])
+    assert "rev · complete" in full[i - 1]      # flush against the breadcrumb
+    j = next(k for k, ln in enumerate(full) if "patch" in ln and k > i)
+    assert full[j - 1].strip() == ""            # next block keeps its blank above
+    assert full == _render_body(events, frozenset(LOG_CATEGORIES))
+
+
+def test_full_cats_complete_step_keeps_blank_above_a_frameless_step() -> None:
+    # A `show_label: false` agent step emits NO lines of its own (header suppressed,
+    # breadcrumb skipped), so its complete_step block is the whole rendered block and
+    # keeps the blank line above it that render_tree yields. Clearing the driver's
+    # armed separator unconditionally at the pop site would eat that blank.
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="a", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("3", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "first"}]}, usage={}),
+        ev("4", "step_completed", step="a", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "step_started", step="quiet", kind="agent", phase="p",
+           model="m", provider="anthropic", show_label=False),
+        ev("6", "agent_result", agent_id="step:p/quiet", findings="X" * 100),
+        ev("7", "step_completed", step="quiet", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    full = _cats_body(events, frozenset(LOG_CATEGORIES))
+    i = next(k for k, ln in enumerate(full) if "▾ complete_step" in ln)
+    assert full[i - 1].strip() == ""            # blank above, as render_tree yields
+    assert "a · complete" in full[i - 2]
+    assert full == _render_body(events, frozenset(LOG_CATEGORIES))
