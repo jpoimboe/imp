@@ -77,7 +77,7 @@ def test_load_migrates_v11_home_end_to_end(tmp_path: Path) -> None:
     st = _state(qd)
     assert st["resume_should_continue"] is True
     assert "resume_mode" not in st
-    assert _meta(qd)["layout_version"] == 13
+    assert _meta(qd)["layout_version"] == LAYOUT_VERSION
 
 
 def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
@@ -89,4 +89,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     assert st["resume_should_continue"] is True
     assert "resume_mode" not in st
     assert not list((qd / "state").glob(".state-*")) and not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 13
+    assert LAYOUT_VERSION == 14

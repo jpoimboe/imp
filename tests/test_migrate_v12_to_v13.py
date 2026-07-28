@@ -51,7 +51,7 @@ def test_load_migrates_v12_home_end_to_end(tmp_path: Path) -> None:
     qd = _seed_v12(tmp_path, "mv4", workflow="imp")
     Quest.load(tmp_path, "mv4")               # triggers the migration chain on load
     assert _meta(qd)["workflow"] == "default"
-    assert _meta(qd)["layout_version"] == 13
+    assert _meta(qd)["layout_version"] == LAYOUT_VERSION
 
 
 def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
@@ -62,4 +62,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     assert _meta(qd)["workflow"] == "default"
     assert _meta(qd)["layout_version"] == 13
     assert not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 13
+    assert LAYOUT_VERSION == 14

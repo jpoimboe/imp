@@ -29,7 +29,7 @@ from imp.engine.state import (
 )
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 13  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 14  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -352,6 +352,30 @@ def _migrate_v12_to_v13(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v13_to_v14(quest_dir: Path) -> None:
+    """v13->v14: State.project_facts was removed and the once-per-quest freeze
+    gate moved from `project_facts is None` to `memory is None`. Rewrite a live
+    home's state.json: drop project_facts, and when the home had already frozen
+    under the old gate (the legacy key was present and non-null) but carries no
+    memory, set memory to {} so the new gate reads "frozen" and does not
+    re-freeze. A home that never froze keeps memory null. The presence guard
+    makes the hop a no-op on re-run. The state rewrite precedes the version stamp
+    so a partial failure re-runs. A home without state.json (un-materialized
+    seed) advances only the version stamp. The archive migrates separately via
+    _DATA_VERSION 5->6."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text())
+        was_frozen = data.pop("project_facts", None) is not None
+        if was_frozen and data.get("memory") is None:
+            data["memory"] = {}
+        _rewrite_state_json(state_path, data)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 14
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -365,6 +389,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (10, 11): _migrate_v10_to_v11,
     (11, 12): _migrate_v11_to_v12,
     (12, 13): _migrate_v12_to_v13,
+    (13, 14): _migrate_v13_to_v14,
 }
 
 
