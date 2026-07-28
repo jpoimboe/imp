@@ -315,16 +315,11 @@ _PYTHONPATH_BLOCK_COMMENT = (
 )
 
 
-def _facts_hint() -> str:
+def _memory_pointer() -> str:
     return (
-        "\n# Project facts: human-authored values any agent prompt can read via\n"
-        "# {{ project.<key> }}. All commented out -- uncomment and edit to expose\n"
-        "# facts to your agents. For standing prose instructions to agents (what\n"
-        "# the old guidance key did), write markdown under imp/memory/ instead --\n"
-        "# e.g. imp/memory/<workflow>/<step>.md; see imp/memory/all.md for the layout.\n"
-        "# facts:\n"
-        "#   test_command: make test\n"
-        "#   stack: python 3.12, pytest\n"
+        "\n# Standing prose instructions for agents are markdown under imp/memory/\n"
+        "# -- e.g. imp/memory/<workflow>/<step>.md; see imp/memory/all.md for the\n"
+        "# layout. Nothing is injected until you edit those files.\n"
     )
 
 
@@ -748,7 +743,7 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     else:
         pythonpath_block = _pythonpath_hint()
     (imp_dir / "config.yaml").write_text(
-        body + test_block + pythonpath_block + _facts_hint())
+        body + test_block + pythonpath_block + _memory_pointer())
     _write_memory_scaffold(imp_dir, settings.default_workflow)
     _ensure_imp_gitignore(project_root)
     return _commit_init_files(

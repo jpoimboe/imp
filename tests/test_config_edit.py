@@ -22,7 +22,8 @@ def test_new_key_lands_above_the_trailing_teaching_blocks(tmp_path: Path) -> Non
     assert new[:11] == old[:11]        # every other line byte-identical
     assert new[12:] == old[11:]
     assert "# pythonpath: [src]\n" in result.text
-    assert "# facts:\n" in result.text
+    assert ("# Standing prose instructions for agents are markdown under imp/memory/\n"
+            in result.text)
 
 
 def test_updating_a_live_key_keeps_its_quoting_and_every_other_line(
@@ -63,14 +64,14 @@ def test_commented_nested_key_is_not_hoisted_as_top_level(tmp_path: Path) -> Non
     assert result.text == "# vars:\n#   theme: something\ndefault-base: main\ntheme: dark\n"
 
 
-def test_commented_out_block_is_left_alone(tmp_path: Path) -> None:
-    before = write_real_init_config(tmp_path)
+def test_commented_out_block_is_left_alone() -> None:
+    before = "default-base: main\n\n# vars:\n#   stack: python 3.12\n"
 
-    result = apply_set(before, ("facts", "stack"), "python")
+    result = apply_set(before, ("vars", "stack"), "python")
 
     assert result.outcome is SetOutcome.NEW
-    assert "# facts:\n" in result.text          # the block placeholder survives
-    assert "facts:\n  stack: python\n" in result.text
+    assert "# vars:\n" in result.text          # the block placeholder survives
+    assert "vars:\n  stack: python\n" in result.text
 
 
 def test_real_global_config_keeps_every_other_line(tmp_path: Path) -> None:
