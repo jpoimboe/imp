@@ -412,6 +412,12 @@ async def run_quest(
             _SNAPSHOT_CAPTURED.add(snapshot_key)
         else:
             workflow_refreshed = False
+        from imp.engine import worktree
+        # A draft has project_root == control_root: healing would commit on the user's branch.
+        config_renamed = (
+            quest.project_root != quest.control_root
+            and worktree.heal_project_config_rename(
+                quest.project_root, quest.control_root))
         config = load_effective_config(
             project_root=quest.project_root, control_root=quest.control_root,
         ).config
@@ -441,6 +447,9 @@ async def run_quest(
             on_event=_liveness_on_event(coordinator, on_event, state, quest.state_dir))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
+        if config_renamed:
+            _emit(log, "project_config_renamed",
+                  {"branch": f"imp/{quest.id}"}, agent_id=None)
         if captured_this_entry:
             for warning_message in workflow.load_warnings:
                 _emit(log, "warning",
