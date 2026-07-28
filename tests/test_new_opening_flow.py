@@ -33,8 +33,8 @@ def stub_new(monkeypatch, tmp_path):
     only its opening-flow control logic. Returns the patched main module."""
     monkeypatch.setattr(main, "install_process_group", lambda: None)
     monkeypatch.setattr(main, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(main.worktree, "check_preconditions", lambda *a, **k: None)
-    monkeypatch.setattr(main.worktree, "ensure_imp_ignored", lambda *a, **k: None)
+    monkeypatch.setattr("imp.engine.worktree.check_preconditions", lambda *a, **k: None)
+    monkeypatch.setattr("imp.engine.worktree.ensure_imp_ignored", lambda *a, **k: None)
     monkeypatch.setattr(main, "_resolve_new_base", lambda *a, **k: "main")
     monkeypatch.setattr(main, "_preflight_imp_init", lambda **k: None)
     monkeypatch.setattr(main, "_test_cmd_fast_nudge", lambda **k: None)
@@ -43,9 +43,10 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(main, "_term_width", lambda: 80)
     monkeypatch.setattr(main, "_editing_mode", lambda *a, **k: "emacs")
-    monkeypatch.setattr(main, "new_quest_id", lambda existing_stems=frozenset(): "z9y8x7")
     monkeypatch.setattr(
-        main.Quest, "create_draft",
+        "imp.engine.quest_id.new_quest_id", lambda existing_stems=frozenset(): "z9y8x7")
+    monkeypatch.setattr(
+        "imp.engine.quest.Quest.create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: None)))
@@ -73,7 +74,7 @@ async def test_new_persists_finalized_opening_intent(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: recorded.__setitem__("text", text))
 
-    monkeypatch.setattr(m.Quest, "create_draft", staticmethod(_make_draft))
+    monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_make_draft))
 
     class _FakePrompt:
         def __init__(self, **kwargs: object) -> None: ...
@@ -159,7 +160,7 @@ async def test_cancel_at_opening_prompt_discards_the_minted_draft(
 
     monkeypatch.setattr(m, "Prompt", _CancelPrompt)
     monkeypatch.setattr(
-        m, "discard_conversation",
+        "imp.engine.abandon.discard_conversation",
         lambda quest: discarded.__setitem__("id", quest.id))
 
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
@@ -178,7 +179,7 @@ async def test_cancel_at_opening_prompt_emits_discarded_spine(
     # stub_new forces should_use_color -> False, so the spine renders plain.
     m = stub_new
     monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
-    monkeypatch.setattr(m, "discard_conversation", lambda quest: None)
+    monkeypatch.setattr("imp.engine.abandon.discard_conversation", lambda quest: None)
 
     class _CancelPrompt:
         def __init__(self, **kwargs: object) -> None: ...
@@ -299,7 +300,7 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
 
     monkeypatch.setattr(m, "TerminalTitle", _FakeTitle)
     monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
-    monkeypatch.setattr(m, "discard_conversation", lambda quest: None)
+    monkeypatch.setattr("imp.engine.abandon.discard_conversation", lambda quest: None)
 
     class _CancelPrompt:
         def __init__(self, **kwargs: object) -> None: ...
@@ -406,7 +407,7 @@ async def test_new_run_now_forwards_depends_on(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: None)
 
-    monkeypatch.setattr(m.Quest, "create_draft", staticmethod(_cap))
+    monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_cap))
 
     async def _ok(*a: object, **k: object) -> int:
         return 0
@@ -491,7 +492,7 @@ async def test_create_draft_receives_create_mode_from_leave_mode(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: None)
 
-    monkeypatch.setattr(m.Quest, "create_draft", staticmethod(_cap))
+    monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_cap))
 
     async def _ok(*a: object, **k: object) -> int:
         return 0

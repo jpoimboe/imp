@@ -65,7 +65,7 @@ def test_summary_status_from_store_survives_masked_events(
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_row_for_id", _masked)
-    monkeypatch.setattr(m, "make_store", lambda _c: _FakeStore(_EVENTS, "MERGED"))
+    monkeypatch.setattr("imp.cli.store.make_store", lambda _c: _FakeStore(_EVENTS, "MERGED"))
     monkeypatch.setenv("NO_COLOR", "1")
 
     rc = m.main(argv)

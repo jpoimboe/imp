@@ -147,7 +147,7 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
 
     torn: list[str] = []
     monkeypatch.setattr(main_mod, "_deliver_abandon_resident", _hang)
-    monkeypatch.setattr(main_mod, "tear_down_quest", lambda ch: torn.append(ch.id))
+    monkeypatch.setattr("imp.engine.abandon.tear_down_quest", lambda ch: torn.append(ch.id))
 
     rc = main_mod._abandon_local(tmp_path, "feat")
     assert rc == 0

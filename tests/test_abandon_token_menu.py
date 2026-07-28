@@ -148,7 +148,7 @@ def test_cmd_abandon_zero_matches_archive_recovery(
         raise SystemExit(2)
 
     monkeypatch.setattr(m, "_resolve_id", raise_exit)
-    monkeypatch.setattr(m.archive_read, "archived_ids", lambda c: ["gone40"])
+    monkeypatch.setattr("imp.engine.archive.read.archived_ids", lambda c: ["gone40"])
     seen = {}
 
     def fake_abandon(control, quest_id, *, yes=False):
@@ -174,7 +174,7 @@ def test_cmd_abandon_zero_matches_unknown_exits_2(
         raise AssertionError("_abandon called for an unknown token")
 
     monkeypatch.setattr(m, "_resolve_id", raise_exit)
-    monkeypatch.setattr(m.archive_read, "archived_ids", lambda c: [])
+    monkeypatch.setattr("imp.engine.archive.read.archived_ids", lambda c: [])
     monkeypatch.setattr(m, "_abandon_local", boom_abandon)
     rc = m._cmd_abandon(argparse.Namespace(token="zzzz", yes=False))
     assert rc == 2

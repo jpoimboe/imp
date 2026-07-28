@@ -40,7 +40,7 @@ def test_merge_blocked_outcome_emits_no_paused_summary() -> None:
     quest = _Change([{"type": "merge_blocked",
                        "payload": {"reason": "refused", "base": "master",
                                    "detail": "error: Aborting"}}])
-    with patch.object(main, "State") as State, \
+    with patch("imp.engine.state.State") as State, \
          patch.object(main, "_emit_merge_blocked") as mb, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("merge_blocked")
@@ -52,7 +52,7 @@ def test_merge_blocked_outcome_emits_no_paused_summary() -> None:
 
 def test_non_merge_pause_still_emits_paused_summary() -> None:
     quest = _Change([])
-    with patch.object(main, "State") as State, \
+    with patch("imp.engine.state.State") as State, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step=None)
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
@@ -113,7 +113,7 @@ def test_handle_terminal_outcome_does_not_reprint_script_detail(capsys) -> None:
          "payload": {"step": "verify", "stderr": "err-detail", "stdout": "out-detail", "exit": 3}},
     ]
     quest = _Change(events)
-    with patch.object(main, "State") as State, \
+    with patch("imp.engine.state.State") as State, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step="verify")
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
@@ -129,7 +129,7 @@ def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
     quest = _Change([{"type": "merge_blocked",
                        "payload": {"reason": "conflict", "base": "master",
                                    "detail": "merge conflict", "note": note}}])
-    with patch.object(main, "State") as State, \
+    with patch("imp.engine.state.State") as State, \
          patch.object(main, "_emit_merge_blocked") as mb, \
          patch.object(main, "_emit_paused_summary"):
         State.load.return_value = _State("merge_blocked")
@@ -332,7 +332,7 @@ def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
         escalation_event = _Evt()
 
     quest = _Change([])
-    with patch.object(main, "State") as State, \
+    with patch("imp.engine.state.State") as State, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step=None)
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=_Coord())
@@ -352,7 +352,7 @@ def test_handle_terminal_outcome_reads_intent_from_archive(monkeypatch) -> None:
         b'{"type": "step_started", "payload": {"step": "s"}}\n'
     )
     monkeypatch.setattr(
-        main.archive_read, "read_events",
+        "imp.engine.archive.read.read_events",
         lambda control_root, quest_id: archive_blob)
     captured: dict = {}
     monkeypatch.setattr(
@@ -379,7 +379,7 @@ def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
     # above the (here mocked) pause banner.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     quest = _Change([])
-    with patch.object(main, "State") as State, \
+    with patch("imp.engine.state.State") as State, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step=None)
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _CtrlDCoord())
@@ -403,7 +403,7 @@ def test_sigterm_leave_prints_no_caret_and_paused_display_head(monkeypatch, caps
     # unchanged identity and resume lines.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     quest = _Change([])
-    with patch.object(main, "State") as State:
+    with patch("imp.engine.state.State") as State:
         State.load.return_value = _State("paused", step=None)
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _SigtermCoord())
     assert rc == 1
@@ -478,7 +478,7 @@ def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:
     # A pause that was not a Ctrl-D prompt leave retains no caret.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     quest = _Change([])
-    with patch.object(main, "State") as State, \
+    with patch("imp.engine.state.State") as State, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step=None)
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)

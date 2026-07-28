@@ -72,5 +72,5 @@ def test_iter_quest_ids_live_first_then_archived_sorted_deduped(
         _completed_row("quest-c", "2026-06-01T00:00:00+00:00"),
         _completed_row("quest-d", "2026-06-01T00:00:00+00:00"),
     ]
-    monkeypatch.setattr(m, "make_store", lambda _: _StubStore(homes, rows))
+    monkeypatch.setattr("imp.cli.store.make_store", lambda _: _StubStore(homes, rows))
     assert m._iter_quest_ids(tmp_path) == ["quest-b", "quest-a", "quest-c", "quest-d"]

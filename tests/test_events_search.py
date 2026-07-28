@@ -123,7 +123,7 @@ def test_events_search_active_includes_only_quests_with_matching_events(
                        input={"cmd": "GREPTARGET"})],
         "bbb222": [_ev("e0", "tool_call", "step:impl/coder", name="bash",
                        input={"cmd": "unrelated"})]})
-    monkeypatch.setattr(m, "make_store", lambda control: store)
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: store)
     hits = m._events_search_active(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["aaa111"]
     assert hits[0].zone == "active"
@@ -204,12 +204,12 @@ def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path
         def get_events(self, cid):
             return [_ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"})]
 
-    monkeypatch.setattr(m, "make_store", lambda control: _FakeStore())
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: _FakeStore())
 
     def _boom(*a, **k):
         raise AssertionError("client path must not open the archive index directly")
 
-    monkeypatch.setattr(m.archive_read, "search_archive_events_content", _boom)
+    monkeypatch.setattr("imp.engine.archive.read.search_archive_events_content", _boom)
 
     hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["arch01"]
