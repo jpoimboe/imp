@@ -22,7 +22,7 @@ def isolated_registry():
     on built-ins being present (test_fs_tools.py, etc.) break when their test
     order interleaves with these.
     """
-    snapshot = dict(_REGISTRY)
+    snapshot = get_registry()
     _REGISTRY.clear()
     yield
     _REGISTRY.clear()
