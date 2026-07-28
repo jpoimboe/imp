@@ -230,5 +230,5 @@ def test_config_default_max_parallel_test_runs_is_one() -> None:
 
 
 def test_to_config_reads_and_defaults_max_parallel_test_runs() -> None:
-    assert _to_config({"max_parallel_test_runs": 5}, {}).max_parallel_test_runs == 5
-    assert _to_config({}, {}).max_parallel_test_runs == 1
+    assert _to_config({"max_parallel_test_runs": 5}).max_parallel_test_runs == 5
+    assert _to_config({}).max_parallel_test_runs == 1

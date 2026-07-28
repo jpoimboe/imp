@@ -99,6 +99,7 @@ from imp.engine.types import (
     Workflow,
 )
 from imp.providers.effective import load_effective_config, validate_project_memory
+from imp.providers.memory import load_memory_snapshot
 from imp.providers.resolve import provider_from_model, resolve_run
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
@@ -433,8 +434,9 @@ async def run_quest(
         state.checkpoint_threshold = config.context_checkpoint_threshold()
         # Freeze once per quest: resume reuses the memory the first run saw.
         if state.memory is None:
-            validate_project_memory(quest.project_root, config.memory)
-            state.memory = config.memory
+            memory = load_memory_snapshot(quest.project_root / "imp" / "memory")
+            validate_project_memory(quest.project_root, memory)
+            state.memory = memory
             state.save(quest.state_dir)
         workflow = load_workflow(quest.workflow_dir)
         log: EventLog = JsonlEventLog(

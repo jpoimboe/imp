@@ -63,7 +63,6 @@ class Config:
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
     context: dict[str, Any] = field(hash=False, default_factory=dict)
-    memory: dict[str, str] = field(hash=False, default_factory=dict)
 
     def tier_names(self) -> frozenset[str]:
         return frozenset(self.tiers)

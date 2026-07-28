@@ -141,3 +141,19 @@ def test_repo_config_declares_pythonpath_src() -> None:
     # auto-shadow branch was deleted.
     layer, _src = parse_config_layer(_REPO_CONFIG)
     assert layer["pythonpath"] == ["src"]
+
+
+def test_memory_files_do_not_reach_the_merged_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Memory is a worktree payload loaded at its own call sites against a root
+    the caller names — never a Config field, which would let a caller pair it
+    with the wrong root."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    proj = tmp_path / "proj"
+    (proj / "imp" / "memory").mkdir(parents=True)
+    (proj / "imp" / "memory" / "all.md").write_text("a note")
+    (proj / "imp" / "config.yaml").write_text("theme: dark\n")
+    eff = load_effective_config(project_root=proj, control_root=None)
+    assert eff.config.theme == "dark"           # settings still merge
+    assert not hasattr(eff.config, "memory")    # the payload does not ride along

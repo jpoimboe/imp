@@ -607,12 +607,14 @@ class Quest:
             load_effective_config,
             validate_project_memory,
         )
+        from imp.providers.memory import load_memory_snapshot
 
         try:
             config = load_effective_config(
                 project_root=wt_path, control_root=control_root,
             ).config
-            validate_project_memory(wt_path, config.memory)
+            validate_project_memory(
+                wt_path, load_memory_snapshot(wt_path / "imp" / "memory"))
             from imp.assets import resolve_workflow_dir
             wf_name = workflow or config.default_workflow
             loaded_workflow = load_workflow(
@@ -693,12 +695,15 @@ class Quest:
                 load_effective_config,
                 validate_project_memory,
             )
+            from imp.providers.memory import load_memory_snapshot
 
             try:
                 config = load_effective_config(
                     project_root=control_root, control_root=control_root,
                 ).config
-                validate_project_memory(control_root, config.memory)
+                validate_project_memory(
+                    control_root,
+                    load_memory_snapshot(control_root / "imp" / "memory"))
                 from imp.assets import resolve_workflow_dir
                 wf_name = workflow or config.default_workflow
                 loaded_workflow = load_workflow(
