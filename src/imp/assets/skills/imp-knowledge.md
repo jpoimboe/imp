@@ -84,8 +84,8 @@ bookkeeping. Ask the CLI instead:
   branch (also before go-live only).
 - `imp config` — the effective settings and the layer each came from;
   `imp config set <key> <value>` / `unset <key>` edits the setting's own layer
-  (`imp/config.yaml` or `~/.imp/config.yaml`; `--project` / `--global` forces one),
-  preserving comments.
+  (the main checkout's `imp/config.yaml` or `~/.imp/config.yaml`; `--project` /
+  `--global` forces one), preserving comments.
 - `imp help`, `imp <cmd> --help` — the command list, or one command's flags.
 
 The event log is unbounded — filter (`--step`, `--agent`, `--limit`) rather than

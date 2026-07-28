@@ -12,7 +12,9 @@ Runbook for operating a running imp quest.
 - **Consequence:** cherry-picking a workflow fix onto a paused quest's branch is
   **inert** when the quest has a snapshot (the normal case). To unblock, edit
   the snapshot directly (`.imp/quest/workflow/workflow.yaml` plus `scripts/`); a
-  config fix goes in the gitignored local layer `<worktree>/.imp/config.yaml`.
+  config fix goes in the main checkout's gitignored local layer
+  `<main checkout>/.imp/config.yaml` — settings are never read from the quest's
+  worktree.
   The old cherry-pick-onto-branch recipe only works when there is *no* snapshot.
 - **Skew deadlock:** the snapshot is taken once and never auto-refreshed (the
   `--refresh-workflow` re-snapshot is unbuilt — `executor.py` references it only

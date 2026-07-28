@@ -327,3 +327,5 @@ def test_knowledge_cheat_sheet_lists_the_config_writer() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
     flat = " ".join(body.split())
     assert "`imp config set <key> <value>` / `unset <key>`" in flat
+    # the writer targets the MAIN CHECKOUT's project layer, never a worktree's
+    assert "the setting's own layer (the main checkout's `imp/config.yaml` or" in flat

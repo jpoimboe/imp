@@ -6,8 +6,9 @@ Precedence (later wins):
                           ← ~/.imp/config.yaml
                           ← <control root>/.imp/config.yaml (gitignored)
 
-All three files live in the MAIN CHECKOUT: a quest worktree has no say in the
-settings its own gates are judged by.
+Both repo-side files live in the MAIN CHECKOUT (`~/.imp/config.yaml` is
+machine-wide): a quest worktree has no say in the settings its own gates are
+judged by.
 
 The merged `Config.tiers` is always fully populated (floor + overrides), so
 `resolve.resolve_run` reads it unchanged. Provenance is a side-table keyed by
