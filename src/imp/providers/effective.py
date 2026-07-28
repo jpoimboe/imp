@@ -55,12 +55,6 @@ def legacy_global_config_path() -> Path:
     return Path(base) / "imp" / "config.yaml"
 
 
-PROJECT_RENAME_HINT = (
-    "imp/project.yaml found but imp now reads imp/config.yaml — "
-    "rename it on this branch with `git mv imp/project.yaml imp/config.yaml`"
-)
-
-
 def project_rename_pending(root: Path) -> bool:
     """`root` carries the pre-rename `imp/project.yaml` and no `imp/config.yaml`."""
     return ((root / "imp" / "project.yaml").is_file()
