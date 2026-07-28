@@ -2233,12 +2233,13 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
     return None
 
 
-def _follow_log(events: list[dict[str, Any]]) -> int:
+def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str]) -> int:
     """Replay a quest's narrative through the live run view's renderer."""
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
-        width=_term_width, display_width=_display_width, status=status)
+        width=_term_width, display_width=_display_width, status=status,
+        cats=cats)
     for event in events:
         driver.on_event(event)
     driver.finish(exit_block=False)
@@ -2330,14 +2331,16 @@ def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
 _FOLLOW_POLL_INTERVAL = 0.3
 
 
-def _follow_live(control: Path, quest_id: str, home: Path) -> int:
+def _follow_live(control: Path, quest_id: str, home: Path, *,
+                 cats: frozenset[str]) -> int:
     """Replay a live quest's narrative through LiveDriver, then tail
     events.jsonl until a terminal status or the home is archived away. Ctrl-C
     clears the footer and exits 130."""
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
-        width=_term_width, display_width=_display_width, status=status)
+        width=_term_width, display_width=_display_width, status=status,
+        cats=cats)
     tail = _EventTail(home / "events.jsonl")
     try:
         return anyio.run(
@@ -2454,11 +2457,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
         if os.environ.get("IMP_SESSION_SOCKET"):
             _emit_cli_error("live follow is unavailable inside the sandbox; "
                             "showing a one-shot snapshot.")
-            return _follow_log(events)
+            return _follow_log(events, cats=show)
         home = _quest_home(control, quest_id)
         if home.exists():
-            return _follow_live(control, quest_id, home)
-        return _follow_log(events)
+            return _follow_live(control, quest_id, home, cats=show)
+        return _follow_log(events, cats=show)
 
     selected = _select_log_events(args, quest_id, events)
     if isinstance(selected, int):
