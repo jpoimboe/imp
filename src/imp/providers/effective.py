@@ -20,7 +20,7 @@ from typing import Any
 
 from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
-from imp.providers.config import Config, parse_config_layer, parse_project_facts
+from imp.providers.config import Config, parse_config_layer
 from imp.providers.memory import load_memory_snapshot, validate_memory_tree
 from imp.providers.resolve import iter_provider_defaults
 
@@ -118,9 +118,7 @@ def merge_layers(
     return out, prov
 
 
-def _to_config(
-    merged: dict[str, Any], project_facts: dict[str, str], memory: dict[str, str],
-) -> Config:
+def _to_config(merged: dict[str, Any], memory: dict[str, str]) -> Config:
     return Config(
         providers=tuple(merged.get("providers", ())),
         tiers=merged.get("tiers", {}),
@@ -139,7 +137,6 @@ def _to_config(
         sandbox=merged.get("sandbox", {}),
         remote=merged.get("remote", {}),
         context=merged.get("context", {}),
-        project_facts=project_facts,
         memory=memory,
     )
 
@@ -158,7 +155,6 @@ def load_effective_config(
       when control_root is None.
     """
     layers: list[tuple[dict[str, Any], SourceLoc]] = [_floor_layer()]
-    project_facts: dict[str, str] = {}
     memory: dict[str, str] = {}
     if project_root is not None:
         proj_path = project_root / "imp" / "config.yaml"
@@ -167,7 +163,6 @@ def load_effective_config(
         p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)
-        project_facts = parse_project_facts(proj_path)
         memory = load_memory_snapshot(project_root / "imp" / "memory")
     g = parse_config_layer(global_config_path())
     if g is not None:
@@ -177,7 +172,7 @@ def load_effective_config(
         if local is not None:
             layers.append(local)
     merged, prov = merge_layers(layers)
-    return EffectiveConfig(config=_to_config(merged, project_facts, memory), provenance=prov)
+    return EffectiveConfig(config=_to_config(merged, memory), provenance=prov)
 
 
 def resolve_default_workflow(

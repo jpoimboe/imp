@@ -97,7 +97,7 @@ _BY_NAME: dict[str, SettableKey] = {key.dotted: key for key in _FIXED}
 _SUGGESTIONS: tuple[str, ...] = (
     *(key.dotted for key in _FIXED),
     "tiers.<tier>.<provider>", "provider_envs.<provider>.env",
-    "sandbox.<key>", "vars.<name>", "facts.<name>",
+    "sandbox.<key>", "vars.<name>",
 )
 
 
@@ -121,8 +121,6 @@ def resolve_key(dotted: str) -> SettableKey | None:
         return None
     if len(segs) == 2 and segs[0] == "vars":
         return _k(dotted, segs, "project", _as_scalar)
-    if len(segs) == 2 and segs[0] == "facts":
-        return _k(dotted, segs, "project", _as_str, project_only=True)
     return None
 
 

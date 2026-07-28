@@ -29,7 +29,6 @@ from imp.engine.errors import LoadError
 from imp.providers.config import (
     parse_config_layer,
     parse_default_base,
-    parse_project_facts,
 )
 from imp.providers.effective import global_config_path, project_rename_hint
 
@@ -37,8 +36,6 @@ from imp.providers.effective import global_config_path, project_rename_hint
 def read_back(file: Path, read_path: tuple[str, ...]) -> Any:
     """The value imp's own readers see at `read_path`, or None when absent."""
     head = read_path[0]
-    if head == "facts":
-        return parse_project_facts(file).get(read_path[1])
     if head == "default-base":
         return parse_default_base(file)
     parsed = parse_config_layer(file)
@@ -209,8 +206,8 @@ def run_set(*, key: str, value: str, scope: Layer | None,
         except YAMLError as err:
             raise ConfigWriteError(
                 f"invalid YAML in {target.name}: {config_yaml_error(err)}") from err
-        # Verify even when the text does not change: a fact is read back by a
-        # different parser, so an unchanged `window: 1:30` still reads as "90".
+        # Verify even when the text is unchanged: the write is accepted only if
+        # imp's own reader reports the value back at the claimed path.
         with scratch_seam(_scratch_dir(layer, target, project_root),
                           target.name) as scratch:
             if not verify(scratch, result.text, settable.read_path, parsed):
