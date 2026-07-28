@@ -91,6 +91,17 @@ def register_provider(
     _PROVIDER_DEFAULTS[name] = ProviderDefaults(tier_defaults=tier_defaults, env_var=env_var)
 
 
+def _ensure_builtins() -> None:
+    # Emptiness is a sound "not loaded" signal here because
+    # register_builtin_providers() writes _PROVIDERS all-at-once — unlike the
+    # tool registry, which @imp_tool fills incrementally, so non-empty there
+    # never means complete. Emptiness also self-heals reset_providers_for_tests().
+    # Function-local import: providers/__init__ imports this module.
+    if not _PROVIDERS:
+        from imp.providers import register_builtin_providers
+        register_builtin_providers()
+
+
 def reset_providers_for_tests() -> None:
     _PROVIDERS.clear()
     _PROVIDER_DEFAULTS.clear()
@@ -99,6 +110,7 @@ def reset_providers_for_tests() -> None:
 def provider_from_model(pm: ProviderModel) -> Provider:
     """Rebuild a live Provider from a persisted provider+model pair. env_check
     is NOT consulted — the provider was already chosen at resolution time."""
+    _ensure_builtins()
     if pm.provider not in _PROVIDERS:
         raise UnknownProvider(
             f"unknown provider {pm.provider!r} (known: {sorted(_PROVIDERS)})"
@@ -123,6 +135,7 @@ async def spawn_subagent_via_registry(sub_invocation: Any) -> Any:
 def _first_available_provider(config: Config) -> str | None:
     """Walk config.providers in order; return the first whose env_check passes.
     None means no provider is available at all (caller errors)."""
+    _ensure_builtins()
     for name in config.providers:
         if name not in _PROVIDERS:
             raise UnknownProvider(
@@ -138,6 +151,7 @@ def _first_available_provider(config: Config) -> str | None:
 def available_providers(config: Config) -> list[str]:
     """The registered providers named in config.providers whose env_check passes,
     in config order. The roster/validation source for /model and --model."""
+    _ensure_builtins()
     out: list[str] = []
     for name in config.providers:
         entry = _PROVIDERS.get(name)
@@ -284,4 +298,5 @@ def resolve_run(
 def iter_provider_defaults() -> dict[str, ProviderDefaults]:
     """Snapshot of registered floor metadata, keyed by provider name. Used by
     effective.load_effective_config to build the floor layer."""
+    _ensure_builtins()
     return dict(_PROVIDER_DEFAULTS)

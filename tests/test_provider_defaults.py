@@ -1,13 +1,23 @@
-"""Each provider module declares a TIER_DEFAULTS table covering low/medium/high."""
+"""Provider registry surface: each provider module declares a TIER_DEFAULTS table
+covering low/medium/high, and the builtins register lazily on first registry read."""
 import importlib
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from typing import ClassVar
 
 import pytest
 
 from imp.providers import register_builtin_providers, resolve
+from imp.providers.config import ProviderModel
 
 _MODULES = ["anthropic", "openai", "claude_code", "codex"]
 _REQUIRED = {"low", "medium", "high"}
+_BUILTINS = ["anthropic", "claude_code", "codex", "openai", "scripted"]
+
+
+class _Cfg:
+    """Minimal stand-in for providers.config.Config: the two registry readers that
+    take a config only ever walk `.providers`."""
+    providers: ClassVar[tuple[str, ...]] = ("anthropic",)
 
 
 @pytest.mark.parametrize("mod_name", _MODULES)
@@ -71,3 +81,29 @@ def test_partial_tier_defaults_rejected_at_registration() -> None:
 def test_unpacking_sites_still_two_tuple() -> None:
     env_check, factory = resolve._PROVIDERS["openai"]  # must still be a 2-tuple
     assert callable(env_check) and callable(factory)
+
+
+# Each reader repopulates from EMPTY, so this also pins that
+# reset_providers_for_tests() self-heals — the property a boolean
+# "already loaded" flag would break for tests that install fake providers.
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(lambda: resolve.iter_provider_defaults(), id="iter_provider_defaults"),
+        pytest.param(lambda: resolve.available_providers(_Cfg()), id="available_providers"),
+        pytest.param(
+            lambda: resolve._first_available_provider(_Cfg()), id="_first_available_provider"
+        ),
+        pytest.param(
+            lambda: resolve.provider_from_model(
+                ProviderModel(provider="scripted", model="m")
+            ),
+            id="provider_from_model",
+        ),
+    ],
+)
+def test_registry_reader_repopulates_an_empty_registry(read: Callable[[], object]) -> None:
+    resolve.reset_providers_for_tests()
+    assert resolve._PROVIDERS == {}
+    read()
+    assert sorted(resolve._PROVIDERS) == _BUILTINS
