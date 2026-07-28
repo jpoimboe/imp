@@ -34,11 +34,23 @@ def _slug(basename: str) -> str:
 def project_state_dir(control_root: Path) -> Path:
     """This project's state directory — where its quests, worktrees and archive
     live. Resolution claims: the first call for a control root creates the slug
-    directory under `imp_home()/projects` and writes its `repo` marker."""
+    directory under `imp_home()/projects` and writes its `repo` marker. A slug
+    already claimed by a different control root is skipped for `<slug>-2`, `-3`, …"""
     root = control_root.resolve()
-    candidate = imp_home() / "projects" / _slug(root.name)
-    if candidate.exists():
+    projects = imp_home() / "projects"
+    base = _slug(root.name)
+    n = 1
+    while True:
+        candidate = projects / (base if n == 1 else f"{base}-{n}")
+        if candidate.exists():
+            marker = candidate / "repo"
+            if marker.is_file() and marker.read_text().strip() == str(root):
+                return candidate
+            n += 1
+            continue
+        try:
+            candidate.mkdir(parents=True)
+        except FileExistsError:
+            continue  # another process claimed it between the two calls
+        (candidate / "repo").write_text(f"{root}\n")
         return candidate
-    candidate.mkdir(parents=True)
-    (candidate / "repo").write_text(f"{root}\n")
-    return candidate

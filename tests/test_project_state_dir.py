@@ -50,3 +50,35 @@ def test_slug_sanitizes_the_basename(tmp_path: Path, basename: str, slug: str) -
 
 def test_a_root_with_no_basename_slugs_to_project() -> None:
     assert project_state_dir(Path("/")) == imp_home() / "projects" / "project"
+
+
+def test_same_basename_in_other_checkouts_claims_numbered_slugs(tmp_path: Path) -> None:
+    first = _repo(tmp_path / "a", "widget")
+    second = _repo(tmp_path / "b", "widget")
+    third = _repo(tmp_path / "c", "widget")
+    assert project_state_dir(first).name == "widget"
+    assert project_state_dir(second).name == "widget-2"
+    assert project_state_dir(third).name == "widget-3"
+    # Each root keeps resolving to its own claim.
+    assert project_state_dir(second).name == "widget-2"
+    assert (imp_home() / "projects" / "widget-2" / "repo").read_text() == (
+        f"{second.resolve()}\n"
+    )
+
+
+def test_a_candidate_without_a_marker_is_skipped_not_adopted(tmp_path: Path) -> None:
+    squatter = imp_home() / "projects" / "widget"
+    squatter.mkdir(parents=True)
+    root = _repo(tmp_path, "widget")
+    state = project_state_dir(root)
+    assert state == imp_home() / "projects" / "widget-2"
+    assert not (squatter / "repo").exists()
+
+
+def test_a_candidate_with_a_foreign_marker_is_skipped(tmp_path: Path) -> None:
+    taken = imp_home() / "projects" / "widget"
+    taken.mkdir(parents=True)
+    (taken / "repo").write_text(f"{tmp_path / 'somewhere' / 'widget'}\n")
+    root = _repo(tmp_path, "widget")
+    assert project_state_dir(root) == imp_home() / "projects" / "widget-2"
+    assert (taken / "repo").read_text() == f"{tmp_path / 'somewhere' / 'widget'}\n"
