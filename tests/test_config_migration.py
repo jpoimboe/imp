@@ -12,11 +12,11 @@ from pathlib import Path
 import pytest
 
 from imp.cli.config_migrate import (
-    display_path,
     migrate_global_config,
     migrate_project_config,
     run_startup_migrations,
 )
+from imp.paths import display_path
 
 
 def _legacy(tmp_path: Path, body: str = "providers: [openai]\n") -> Path:

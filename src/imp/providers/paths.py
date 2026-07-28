@@ -1,17 +1,14 @@
-"""Config-file locations. Stdlib-only and free of `imp` imports: the startup
-migration in `imp.__main__` runs before any command dispatch, so resolving these
-paths must not drag in the yaml/provider stack."""
+"""Config-file locations. Stdlib-only, importing nothing beyond the equally
+stdlib-only `imp.paths` leaf: the startup migration in `imp.__main__` runs before
+any command dispatch, so resolving these paths must not drag in the yaml/provider
+stack."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-
-def imp_home() -> Path:
-    """$IMP_HOME, default ~/.imp — imp's per-machine directory."""
-    base = os.environ.get("IMP_HOME") or str(Path.home() / ".imp")
-    return Path(base)
+from imp.paths import imp_home
 
 
 def global_config_path() -> Path:

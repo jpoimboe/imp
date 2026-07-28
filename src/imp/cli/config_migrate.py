@@ -11,13 +11,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-
-def display_path(path: Path) -> str:
-    """`~`-relative under $HOME, absolute otherwise."""
-    home = Path.home()
-    if home in path.parents:
-        return f"~/{path.relative_to(home)}"
-    return str(path)
+from imp.paths import display_path
 
 
 def migrate_global_config(legacy: Path, new: Path) -> None:
