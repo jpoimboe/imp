@@ -104,17 +104,12 @@ def get_registry() -> dict[str, Tool]:
     return dict(_REGISTRY)
 
 
-def clear_registry() -> None:
-    """Test-only — reset between tests that exercise registration directly."""
-    _REGISTRY.clear()
-
-
 def register_tool(tool: Tool) -> None:
     """Programmatic registration (used by synthesized per-agent `complete_step`)."""
     _REGISTRY[tool.name] = tool
 
 
-__all__ = ["Tool", "clear_registry", "get_registry", "imp_tool", "register_tool"]
+__all__ = ["Tool", "get_registry", "imp_tool", "register_tool"]
 
 
 # DO NOT REORDER: `_REGISTRY` and `imp_tool` must be defined ABOVE this point
