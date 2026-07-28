@@ -8,6 +8,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.test_executor_pause_reason import _make_quest, _seed_single_agent
 
 
@@ -33,8 +34,7 @@ def _seed_merge_step(root: Path):
         "          - {else: true, pause: true}\n"
     )
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     return _make_quest(root)

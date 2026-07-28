@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
+
 FIXTURES = Path(__file__).parent / "fixtures"
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
 
@@ -374,11 +376,11 @@ def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
 
 
 def _init_repo(root: Path) -> None:
-    """A git repo with one commit on branch `main` and `.imp/` gitignored."""
+    """A git repo with one commit on branch `main`, ignoring imp's state dirs."""
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
@@ -401,7 +403,7 @@ def _seed_project(tmp_path: Path) -> None:
     imp new needs >=1 commit (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
     (Quest.create copies imp/workflows/imp; the settings layers are the control
-    root's imp/config.yaml + .imp/config.yaml — a quest worktree is never read).
+    root's imp/config.yaml + its state dir's config.yaml — a quest worktree is never read).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
     an extra gitignore commit.
@@ -449,7 +451,7 @@ def _seed_project(tmp_path: Path) -> None:
 
 def _seed_control(root: Path) -> None:
     """A git repo with committed imp/config.yaml marker + imp/workflows/imp
-    and a gitignored .imp/config.yaml local layer (read by load_effective_config)."""
+    and an out-of-tree config.yaml local layer (read by load_effective_config)."""
     _init_repo(root)
     src = root / "imp" / "workflows" / "imp"
     (src / "agents").mkdir(parents=True)
@@ -462,11 +464,10 @@ def _seed_control(root: Path) -> None:
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
-    # Config layers: committed marker + gitignored local layer.
+    # Config layers: committed marker + out-of-tree local layer.
     (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n"
         "  low: {anthropic: x}\n"

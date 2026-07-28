@@ -9,6 +9,7 @@ import pytest
 from imp.cli.config_cmd import layer_label
 from imp.cli.config_write import read_back
 from imp.cli.main import _build_parser, main
+from imp.paths import project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from tests._init_config import write_real_init_config
 
@@ -116,7 +117,7 @@ def test_project_only_keys_reject_the_global_layer(
     assert capsys.readouterr().err == (
         "imp: 'default-base' is a project setting; drop --global\n")
 
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
     assert main(["config", "set", "default-base", "dev"]) == 0
     assert read_back(project / "imp" / "config.yaml", ("default-base",)) == "dev"
 
@@ -149,7 +150,7 @@ def test_unknown_settings_are_rejected_and_write_nothing(
         "imp: unknown setting 'facts.stack' — run 'imp config' to see the settable keys\n")
 
     assert (project / "imp" / "config.yaml").read_text() == before
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
 
 
 def test_missing_project_config_and_the_transition_guard(
@@ -188,7 +189,7 @@ def test_global_set_creates_the_file_while_unset_creates_nothing(
     assert capsys.readouterr().out == (
         f"{layer_label(imp_home / 'config.yaml')}: theme is not set "
         "(nothing to do)\n")
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
 
     assert main(["config", "set", "theme", "light"]) == 0
     assert (imp_home / "config.yaml").read_text() == "theme: light\n"
@@ -228,8 +229,6 @@ def test_invalid_value_reports_the_validator_message_alone(
     assert "config-verify" not in err
     assert not (imp_home / "config.yaml").exists()
 
-    assert not imp_home.exists()
-
     assert main(["config", "set", "test_cmd_fast_timeout", "abc"]) == 2
     assert capsys.readouterr().err == (
         "imp: 'test_cmd_fast_timeout' must be a positive integer "
@@ -240,31 +239,31 @@ def test_invalid_value_reports_the_validator_message_alone(
 def test_unset_notes_a_shadowing_layer(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (project / ".imp").mkdir(exist_ok=True)
-    (project / ".imp" / "config.yaml").write_text("test_cmd_fast: make local\n")
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("test_cmd_fast: make local\n")
 
     assert main(["config", "unset", "test_cmd_fast"]) == 0
 
     out = capsys.readouterr().out.splitlines()
     assert out[0] == 'imp/config.yaml: test_cmd_fast commented out (was "make test")'
     assert out[1] == (
-        "note: test_cmd_fast is also set in .imp/config.yaml, which takes "
+        f"note: test_cmd_fast is also set in {state.name}/config.yaml, which takes "
         "precedence (effective: make local)")
 
 
 def test_shadow_note_names_the_layer_that_wins(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (project / ".imp").mkdir(exist_ok=True)
-    (project / ".imp" / "config.yaml").write_text("theme: ansi\n")
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("theme: ansi\n")
 
     assert main(["config", "set", "--project", "theme", "dark"]) == 0
 
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "imp/config.yaml: theme: \"dark\" (new)"
     assert out[1] == (
-        "note: theme is also set in .imp/config.yaml, which takes precedence "
-        "(effective: ansi)")
+        f"note: theme is also set in {state.name}/config.yaml, which takes "
+        "precedence (effective: ansi)")
 
 
 def test_table_routing_and_value_shapes(project: Path, imp_home: Path) -> None:
@@ -372,18 +371,18 @@ def test_bare_config_and_explain_are_unchanged(
     assert "tiers:" in capsys.readouterr().out
 
 
-def test_rejected_global_set_leaves_no_imp_home_and_accepted_set_leaves_no_scratch(
+def test_rejected_global_set_writes_no_config_and_accepted_set_leaves_no_scratch(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert main(["config", "set", "--global", "theme", "purple"]) == 2
     assert capsys.readouterr().err == "imp: 'theme' must be 'dark', 'light', or 'ansi'\n"
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
 
     assert main(["config", "set", "--global", "theme", "light"]) == 0
     capsys.readouterr()
     assert imp_home.is_dir()
     assert (imp_home / "config.yaml").read_text() == "theme: light\n"
-    assert [p.name for p in imp_home.iterdir()] == ["config.yaml"]
+    assert sorted(p.name for p in imp_home.iterdir()) == ["config.yaml", "projects"]
 
 
 def _config_action_parser(name: str) -> argparse.ArgumentParser:

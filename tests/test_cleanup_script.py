@@ -43,7 +43,7 @@ def _init(pr: Path) -> None:
     _git(pr, "init", "-b", "main")
     _git(pr, "config", "user.email", "t@t")
     _git(pr, "config", "user.name", "t")
-    (pr / ".gitignore").write_text(".imp/\n")
+    (pr / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _git(pr, "add", ".gitignore")
     _git(pr, "commit", "-m", "gitignore .imp/")
 

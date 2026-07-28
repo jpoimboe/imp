@@ -7,6 +7,7 @@ import pytest
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _branch_with_commit, _git, _init_repo, _seed_control
 
 
@@ -16,8 +17,7 @@ def _seed_control_without_workflow(root: Path) -> None:
     _init_repo(root)
     (root / "imp").mkdir()
     (root / "imp" / "config.yaml").write_text("default-workflow: default\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n  low: {anthropic: x}\n  medium: {anthropic: x}\n  high: {anthropic: x}\n"
     )

@@ -9,6 +9,7 @@ import pytest
 from imp.assets import bundled_workflow_dir, is_bundled_workflow
 from imp.engine.errors import LoadError
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from imp.providers import config as config_module
 from imp.providers.config import parse_default_base
 from imp.providers.effective import resolve_default_workflow
@@ -263,13 +264,12 @@ def test_resolve_default_workflow_with_no_root_reads_no_project_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """control_root=None is the quest-less subagent fallback (subagents.py):
-    floor + global only, so neither imp/config.yaml nor .imp/config.yaml under
+    floor + global only, so neither imp/config.yaml nor the state dir config under
     any tree is read."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("default-workflow: fromproject\n")
-    (proj / ".imp").mkdir()
-    (proj / ".imp" / "config.yaml").write_text("default-workflow: fromlocal\n")
+    (project_state_dir(proj) / "config.yaml").write_text("default-workflow: fromlocal\n")
     assert resolve_default_workflow(control_root=None) == "default"
     assert resolve_default_workflow(control_root=proj) == "fromlocal"

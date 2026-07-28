@@ -4,11 +4,11 @@
 Precedence (later wins):
     provider code (floor) ← <control root>/imp/config.yaml
                           ← ~/.imp/config.yaml
-                          ← <control root>/.imp/config.yaml (gitignored)
+                          ← ~/.imp/projects/<name>/config.yaml (this checkout)
 
-Both repo-side files live in the MAIN CHECKOUT (`~/.imp/config.yaml` is
-machine-wide): a quest worktree has no say in the settings its own gates are
-judged by.
+The project layer lives in the MAIN CHECKOUT and the local layer in that
+checkout's own state directory (`~/.imp/config.yaml` is machine-wide): a quest
+worktree has no say in the settings its own gates are judged by.
 
 The merged `Config.tiers` is always fully populated (floor + overrides), so
 `resolve.resolve_run` reads it unchanged. Provenance is a side-table keyed by
@@ -24,6 +24,7 @@ from typing import Any
 
 from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.config import Config, parse_config_layer
 from imp.providers.memory import validate_memory_tree
 from imp.providers.paths import global_config_path, project_rename_pending
@@ -128,7 +129,7 @@ def load_effective_config(*, control_root: Path | None = None) -> EffectiveConfi
       quest worktree. Skipped when control_root is None; raises when only the
       pre-rename `imp/project.yaml` is present.
     - global layer: `global_config_path()` (live).
-    - local layer: `control_root/.imp/config.yaml` (live, gitignored).
+    - local layer: `project_state_dir(control_root)/config.yaml` (live).
 
     control_root=None is floor + global only (`cli/pythonpath_detect.py` and the
     quest-less subagent fallback rely on that).
@@ -144,7 +145,7 @@ def load_effective_config(*, control_root: Path | None = None) -> EffectiveConfi
     if g is not None:
         layers.append(g)
     if control_root is not None:
-        local = parse_config_layer(control_root / ".imp" / "config.yaml")
+        local = parse_config_layer(project_state_dir(control_root) / "config.yaml")
         if local is not None:
             layers.append(local)
     merged, prov = merge_layers(layers)

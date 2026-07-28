@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.config_cmd import layer_label, render_config, render_explain
+from imp.paths import project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.effective import FLOOR_SRC, load_effective_config
 from imp.providers.paths import global_config_path
@@ -194,8 +195,7 @@ def test_render_marks_enabled_driver(
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [openai]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text("remote:\n  driver: telegram\n")
+    (project_state_dir(tmp_path) / "config.yaml").write_text("remote:\n  driver: telegram\n")
     eff = load_effective_config(control_root=tmp_path)
     out = io.StringIO()
     render_config(eff, out, color=False)

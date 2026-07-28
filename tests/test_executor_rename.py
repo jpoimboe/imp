@@ -16,6 +16,7 @@ from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _git
 
 
@@ -97,10 +98,9 @@ def _seed_two_step_control(root: Path) -> None:
         "  medium: {anthropic: x}\n"
         "  high: {anthropic: x}\n"
     )
-    # Config layers: committed marker + gitignored local layer.
+    # Config layers: committed marker + state dir local layer.
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_cfg)
+    (project_state_dir(root) / "config.yaml").write_text(_cfg)
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
 

@@ -915,7 +915,7 @@ def test_script_step_route_does_not_drain_interjects(tmp_path) -> None:
 
     coord = _Coord()
     quest = _types.SimpleNamespace(
-        workflow_dir=tmp_path, project_root=tmp_path,
+        workflow_dir=tmp_path, project_root=tmp_path, control_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "quests" / "test-quest",
     )

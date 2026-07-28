@@ -25,6 +25,7 @@ import pytest
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from imp.providers import resolve
 from imp.providers.anthropic import AnthropicProvider
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
@@ -215,17 +216,17 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
         "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
+    (project_state_dir(tmp_path) / "config.yaml").write_text(cfg_content)
 
     # Initialize a minimal git repo so `git status --porcelain` and
     # merge_to_base work.
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
-    # Ignore both .imp/ (runtime state + local config layer) and imp/ (test-only
-    # workflow/marker) so config rewrites in tests 2 and 3 don't dirty the worktree.
-    (tmp_path / ".gitignore").write_text(".imp/\nimp/\n")
+    # Ignore .imp/ (runtime state), imp/ (test-only workflow/marker), and
+    # .imp-isolated/ (per-test IMP_HOME) so config rewrites in tests 2 and 3
+    # don't dirty the worktree.
+    (tmp_path / ".gitignore").write_text(".imp/\nimp/\n.imp-isolated/\n")
     (tmp_path / "README.md").write_text("seed\n")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
@@ -239,10 +240,10 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
 
 
 def _rewrite_config(tmp_path: Path, *replacements: tuple[str, str]) -> None:
-    """Apply str replacements to the .imp/config.yaml local layer (the one
+    """Apply str replacements to the state dir's config.yaml local layer (the one
     load_effective_config reads), so a provider swap in a test reaches the
     runtime."""
-    p = tmp_path / ".imp" / "config.yaml"
+    p = project_state_dir(tmp_path) / "config.yaml"
     text = p.read_text()
     for old, new in replacements:
         text = text.replace(old, new)

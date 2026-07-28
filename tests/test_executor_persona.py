@@ -7,6 +7,7 @@ import pytest
 from imp.agents.reflow import reflow_markdown
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL
 from imp.engine.executor import RunResult, run_quest
+from imp.paths import project_state_dir
 from tests.test_executor import _make_quest, _register_invocation_capturing
 
 
@@ -37,8 +38,7 @@ def _seed(root: Path, *, persona: str | None) -> object:
     if persona is not None:
         (wf / "persona.md").write_text(persona)
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root, title="My Quest")
 
 

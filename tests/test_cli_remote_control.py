@@ -16,6 +16,7 @@ from imp.cli.main import (
     _cmd_remote_control_start,
     _cmd_remote_control_stop,
 )
+from imp.paths import project_state_dir
 from imp.remote.daemon import runner
 from imp.remote.daemon.discover import socket_path
 
@@ -108,8 +109,7 @@ def test_start_daemon_returns_rc2_for_config_error(
 ) -> None:
     from imp.remote.drivers.telegram import ConfigError
 
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
         "remote:\n  driver:\n    name: telegram\n")
 
     def _raise_config_error(*_a: object, **_kw: object) -> None:
@@ -120,8 +120,7 @@ def test_start_daemon_returns_rc2_for_config_error(
 
 
 def _write_telegram_config(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir(exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
         "remote:\n  driver:\n    name: telegram\n")
 
 

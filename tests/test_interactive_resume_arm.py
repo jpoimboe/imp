@@ -17,6 +17,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.executor import run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 SEED = "help me design a caching layer"
 
@@ -44,8 +45,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
         "      - {name: chat, file: agents/chat.md, tier: low, interactive: true,\n"
         "         rules: [{else: true, continue: true}]}\n")
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n"
         "  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
     quest_dir = root / ".imp" / "quests" / "c"

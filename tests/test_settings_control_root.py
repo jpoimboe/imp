@@ -16,6 +16,7 @@ import pytest
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _init_repo
 from tests.test_executor import _FAKE_CONFIG, _register_fake
 
@@ -45,16 +46,15 @@ _WORKFLOW = (
 
 def _seed_control_root(root: Path) -> None:
     """A main checkout on `main`: committed settings naming the gate command,
-    plus the recording workflow. `.imp/config.yaml` is the gitignored local
-    layer (already control-root-scoped)."""
+    plus the recording workflow. `project_state_dir(root)/config.yaml` is the
+    out-of-tree local layer."""
     _init_repo(root)
     wf = root / "imp" / "workflows" / "default"
     wf.mkdir(parents=True)
     (wf / "workflow.yaml").write_text(_WORKFLOW)
     (root / "imp" / "config.yaml").write_text(
         "test_cmd_fast: control-fast\npythonpath: [ctlsrc]\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         _FAKE_CONFIG + "sandbox:\n  enabled: false\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
@@ -144,8 +144,7 @@ def test_the_quest_less_subagent_fallback_reads_no_project_layer(
     # Both layers under ctx.project_root name a DIFFERENT bundled workflow.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: patent\n")
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text("default-workflow: patent\n")
+    (project_state_dir(tmp_path) / "config.yaml").write_text("default-workflow: patent\n")
 
     ctx = _dispatch_ctx(tmp_path)
     ctx.quest_context = None          # the quest-less path that synthesizes one

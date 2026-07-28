@@ -14,6 +14,7 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.engine.types import Goto
+from imp.paths import project_state_dir
 
 
 def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
@@ -140,8 +141,7 @@ def _seed_resume_loop_workflow(root: Path) -> Quest:
     # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     return _make_quest(root)
@@ -246,8 +246,7 @@ async def test_resumed_step_persistent_error_still_terminates(
     # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     quest = _make_quest(tmp_path)

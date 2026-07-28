@@ -16,6 +16,7 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.feedback import COMPLETION_BACKSTOP
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _init_repo
 
 
@@ -210,12 +211,10 @@ _FAKE_CONFIG = (
 
 def _write_fake_config(root: Path) -> None:
     """Write the `fake`-provider config in the layered layout that
-    load_effective_config reads: imp/config.yaml marker + .imp/config.yaml
-    local layer."""
+    load_effective_config reads: imp/config.yaml marker + state dir local layer."""
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG)
 
 
 def _seed_minimal_workflow(
@@ -3342,8 +3341,7 @@ async def test_resume_reincarnation_reset_is_single_shot(tmp_path):
         "    steps: []\n"
     )
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n"
         "  medium: {fake: m}\n  high: {fake: m}\n")
     quest = _make_quest(tmp_path)
@@ -3425,9 +3423,8 @@ async def test_clean_tree_bounce_does_not_refill_reincarnation_budget(tmp_path):
         "          - {else: true, pause: true}\n"
     )
     # Deterministic gate across environments (mirrors the lane-eviction harness).
-    (tmp_path / ".imp" / "config.yaml").write_text(
-        (tmp_path / ".imp" / "config.yaml").read_text()
-        + "sandbox:\n  enabled: false\n")
+    cfg_path = project_state_dir(tmp_path) / "config.yaml"
+    cfg_path.write_text(cfg_path.read_text() + "sandbox:\n  enabled: false\n")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "bounce workflow")
 

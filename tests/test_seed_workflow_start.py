@@ -5,6 +5,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.quest import Quest
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from imp.providers.effective import load_effective_config
 from tests.conftest import _git, _seed_control
 
@@ -23,7 +24,7 @@ def _seed_with_var(root: Path) -> None:
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "declare var n")
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n"
         "  low: {anthropic: x}\n  medium: {anthropic: x}\n  high: {anthropic: x}\n"

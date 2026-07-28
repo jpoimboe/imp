@@ -30,6 +30,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.quest import Quest
 from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 
@@ -295,8 +296,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     quest = _make_quest(tmp_path)

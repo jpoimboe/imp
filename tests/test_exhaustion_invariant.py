@@ -21,6 +21,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 
 def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
@@ -102,8 +103,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
     # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
 

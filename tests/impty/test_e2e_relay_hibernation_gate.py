@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from impty import TerminalSession
 from tests._live import _await_worktree, evidence, wait_for_status
 from tests.impty.e2e_support import (
@@ -92,7 +93,7 @@ def _seed_scripted_gate_project(root: Path) -> Path:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     agents = root / "imp" / "workflows" / "default" / "agents"
     agents.mkdir(parents=True)
@@ -108,8 +109,7 @@ def _seed_scripted_gate_project(root: Path) -> Path:
         "        interactive: true\n")
     (root / "imp" / "config.yaml").write_text(
         "default-workflow: default\ndefault-base: main\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
     script_path.write_text(json.dumps(
         {"default": [

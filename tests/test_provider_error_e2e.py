@@ -11,6 +11,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 
 def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
@@ -94,8 +95,7 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Quest:
     # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_cfg)
+    (project_state_dir(root) / "config.yaml").write_text(_cfg)
     return _make_quest(root)
 
 

@@ -11,6 +11,7 @@ import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import JsonlEventLog, State
+from imp.paths import project_state_dir
 from tests.test_executor import _make_quest, _register_invocation_capturing
 
 _FAKE_CONFIG_WITH_VAR = (
@@ -44,8 +45,7 @@ def _seed_var_workflow(root: Path) -> object:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG_WITH_VAR)
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG_WITH_VAR)
     return _make_quest(root)
 
 
@@ -119,7 +119,7 @@ def _seed_var_workflow_with_git(root: Path) -> object:
     _g("init", "-q", "-b", "main")
     _g("config", "user.email", "t@t")
     _g("config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     _g("add", "-A")
     _g("commit", "-qm", "seed")

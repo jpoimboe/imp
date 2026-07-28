@@ -12,6 +12,7 @@ from imp.engine.errors import LoadError
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.engine.types import SourceLoc, VarDecl, Vars
+from imp.paths import project_state_dir
 from imp.providers.config import apply_var_overrides, parse_config_layer
 from tests.conftest import _git, _seed_control
 
@@ -97,9 +98,9 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     # Quest.create reads the merged config via load_effective_config. Put the
-    # vars override on the local layer (.imp/config.yaml, gitignored control-root)
+    # vars override on the local layer (state dir config, gitignored control-root)
     # so the reader sees it.
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (project_state_dir(tmp_path) / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n"
         "  low: {anthropic: x}\n"

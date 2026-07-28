@@ -178,7 +178,7 @@ def test_cli_main_does_not_migrate(
     assert cli_main([]) == 0
     capsys.readouterr()
     assert legacy.is_file()
-    assert not (tmp_path / "home").exists()
+    assert not (tmp_path / "home" / "config.yaml").exists()
 
 
 _RENAME_NOTICE = ("imp: renamed imp/project.yaml to imp/config.yaml (staged) — "
@@ -208,7 +208,7 @@ def _old_name_git_repo(root: Path) -> Path:
     (root / "imp" / "project.yaml").write_text("default-workflow: default\n")
     # `imp init` gitignores .imp/ wholesale, and the worktree test below adds a
     # linked worktree under it — without this the main checkout reports `?? .imp/`.
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "init")
     return root

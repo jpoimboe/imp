@@ -670,6 +670,14 @@ def _settings_root() -> Path:
         return _project_root()
 
 
+def _claiming_settings_root() -> Path | None:
+    """`_settings_root()` when it is a real project, else None. Resolving a state
+    directory CLAIMS a slug, and `_settings_root` falls back to the bare cwd
+    outside a project — which would squat a slug on every `imp` run anywhere."""
+    root = _settings_root()
+    return root if (root / "imp" / "config.yaml").is_file() else None
+
+
 def _preflight_imp_init(*, control_root: Path) -> str | None:
     """Return a clean 'run imp init first' message when no provider is
     env-available (e.g. a never-init'd machine with empty user `providers`),
@@ -741,7 +749,8 @@ def _apply_theme() -> None:
         return
     from imp.providers.effective import load_effective_config
     try:
-        theme = load_effective_config(control_root=_settings_root()).config.theme
+        theme = load_effective_config(
+            control_root=_claiming_settings_root()).config.theme
         pal.set_theme(theme)
     except Exception:
         pass
@@ -3929,7 +3938,7 @@ def _cmd_events_search(
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
-    eff = load_effective_config(control_root=_settings_root())
+    eff = load_effective_config(control_root=_claiming_settings_root())
     color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
     buf = io.StringIO()

@@ -14,7 +14,7 @@ from imp.engine.types import Continue, Goto, Pause, Rule, SourceLoc, Step
 
 def _quest(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
-        workflow_dir=tmp_path, project_root=tmp_path,
+        workflow_dir=tmp_path, project_root=tmp_path, control_root=tmp_path,
         id="test-id", title="Test",
         quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
 

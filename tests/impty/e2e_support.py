@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine.state import LockHeld, ProjectLock
+from imp.paths import project_state_dir
 
 # Outer subprocess cap, just under the 240s pytest-timeout ceiling: connect 240 >= 235 < 240.
 E2E_SUBPROCESS_TIMEOUT = 235
@@ -111,7 +112,7 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     agents = root / "imp" / "workflows" / "default" / "agents"
     agents.mkdir(parents=True)
@@ -125,8 +126,7 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
         "      - name: coder\n        file: agents/coder.md\n")
     (root / "imp" / "config.yaml").write_text(
         "default-workflow: default\ndefault-base: main\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
     script_path.write_text(json.dumps(script))
     _git(root, "add", "-A")
@@ -208,15 +208,14 @@ def seed_default_repo(root: Path, *, script: dict[str, Any]) -> Path:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     (root / "imp" / "workflows").mkdir(parents=True)
     shutil.copytree(bundled_workflow_dir("default"),
                     root / "imp" / "workflows" / "default")
     (root / "imp" / "config.yaml").write_text(
         "default-workflow: default\ndefault-base: main\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
     script_path.write_text(json.dumps(script))
     _git(root, "add", "-A")
