@@ -13,8 +13,8 @@ from imp.engine.worktree import checked_out_branch
 from imp.providers.effective import (
     load_effective_config,
     project_rename_hint,
-    project_rename_pending,
 )
+from imp.providers.paths import project_rename_pending
 
 
 def _git(root: Path, *args: str) -> None:
@@ -123,7 +123,6 @@ def test_the_startup_migration_reads_the_shared_pending_predicate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from imp.cli.config_migrate import migrate_project_config
-    from imp.providers import effective
 
     proj = _old_name_repo(tmp_path)
     seen: list[Path] = []
@@ -132,7 +131,7 @@ def test_the_startup_migration_reads_the_shared_pending_predicate(
         seen.append(root)
         return False
 
-    monkeypatch.setattr(effective, "project_rename_pending", spy)
+    monkeypatch.setattr("imp.providers.paths.project_rename_pending", spy)
     # Short-circuiting the shared predicate stops the migration at its
     # pure-filesystem fast path: with its own private copy it would instead walk
     # on and raise PreconditionError, since proj is not a git repository.

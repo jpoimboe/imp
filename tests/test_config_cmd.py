@@ -6,7 +6,8 @@ import pytest
 
 from imp.cli.config_cmd import layer_label, render_config, render_explain
 from imp.providers import register_builtin_providers, resolve
-from imp.providers.effective import FLOOR_SRC, global_config_path, load_effective_config
+from imp.providers.effective import FLOOR_SRC, load_effective_config
+from imp.providers.paths import global_config_path
 
 
 @pytest.fixture(autouse=True)

@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import TextIO
 
 from imp.cli import palette as pal
-from imp.providers.effective import FLOOR_SRC, EffectiveConfig, global_config_path
+from imp.providers.effective import FLOOR_SRC, EffectiveConfig
+from imp.providers.paths import global_config_path
 from imp.providers.resolve import iter_provider_defaults
 from imp.remote.drivers import REGISTRY
 

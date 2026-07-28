@@ -911,7 +911,7 @@ def run_init(
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
 ) -> None:
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     color_on = pal.should_use_color(sys.stdout)
     imp_dir = project_root / "imp"
@@ -1063,7 +1063,7 @@ def run_init_noninteractive(
     no-TTY auto-headless fallback land here. Never prompts — resolves the
     integration branch from git, or raises IntegrationBranchUnresolved when git
     offers none."""
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     workflow = workflow or _DEFAULT_WORKFLOW
     imp_dir = project_root / "imp"

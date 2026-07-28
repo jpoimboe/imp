@@ -17,7 +17,6 @@ leaf-path — NEVER folded into `config.tiers`, whose leaves stay plain `str`.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +26,7 @@ from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
 from imp.providers.config import Config, parse_config_layer
 from imp.providers.memory import validate_memory_tree
+from imp.providers.paths import global_config_path, project_rename_pending
 from imp.providers.resolve import iter_provider_defaults
 
 # A synthetic source for floor leaves. The string is what `imp config` prints.
@@ -40,30 +40,6 @@ Provenance = dict[LeafPath, SourceLoc]
 class EffectiveConfig:
     config: Config
     provenance: Provenance
-
-
-def imp_home() -> Path:
-    """$IMP_HOME, default ~/.imp — imp's per-machine directory."""
-    base = os.environ.get("IMP_HOME") or str(Path.home() / ".imp")
-    return Path(base)
-
-
-def global_config_path() -> Path:
-    """$IMP_HOME/config.yaml, default ~/.imp/config.yaml."""
-    return imp_home() / "config.yaml"
-
-
-def legacy_global_config_path() -> Path:
-    """The pre-IMP_HOME location: $XDG_CONFIG_HOME/imp/config.yaml, default
-    ~/.config/imp/config.yaml. Read only by the startup migration."""
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "imp" / "config.yaml"
-
-
-def project_rename_pending(root: Path) -> bool:
-    """`root` carries the pre-rename `imp/project.yaml` and no `imp/config.yaml`."""
-    return ((root / "imp" / "project.yaml").is_file()
-            and not (root / "imp" / "config.yaml").exists())
 
 
 def project_rename_hint(root: Path) -> str:

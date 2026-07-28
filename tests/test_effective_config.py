@@ -6,10 +6,10 @@ import pytest
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.config import parse_config_layer
 from imp.providers.effective import (
-    global_config_path,
     load_effective_config,
     resolve_default_workflow,
 )
+from imp.providers.paths import global_config_path
 
 _REPO_CONFIG = Path(__file__).resolve().parents[1] / "imp" / "config.yaml"
 

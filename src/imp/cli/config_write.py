@@ -30,7 +30,8 @@ from imp.providers.config import (
     parse_config_layer,
     parse_default_base,
 )
-from imp.providers.effective import global_config_path, project_rename_hint
+from imp.providers.effective import project_rename_hint
+from imp.providers.paths import global_config_path
 
 
 def read_back(file: Path, read_path: tuple[str, ...]) -> Any:

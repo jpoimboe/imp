@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers.effective import global_config_path
+from imp.providers.paths import global_config_path
 
 
 def test_global_config_isolated_by_default(tmp_path: Path) -> None:

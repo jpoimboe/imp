@@ -4,7 +4,9 @@ The steps are plain functions over explicit paths, so the criteria are exercised
 directly rather than by hoping a main([...]) call fires them."""
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -127,7 +129,7 @@ def test_legacy_global_config_path_still_honors_xdg(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The migration's source, and the only remaining XDG_CONFIG_HOME reader in src/.
-    from imp.providers.effective import legacy_global_config_path
+    from imp.providers.paths import legacy_global_config_path
 
     monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/x")
     assert legacy_global_config_path() == Path("/tmp/x/imp/config.yaml")
@@ -344,3 +346,32 @@ def test_cli_main_does_not_stage_the_project_rename(
     capsys.readouterr()
     assert (repo / "imp" / "project.yaml").is_file()
     assert "imp/project.yaml" not in _git(repo, "status", "--porcelain").stdout
+
+
+def test_config_paths_module_is_stdlib_only(tmp_path: Path) -> None:
+    """The startup migration resolves these paths before any command dispatch, so
+    importing them must not drag in the yaml/provider stack."""
+    code = (
+        "import sys\n"
+        "from imp.providers.paths import global_config_path, legacy_global_config_path\n"
+        "heavy = sorted({n.split('.')[0] for n in sys.modules} & {'ruamel', 'yaml'})\n"
+        "print('HEAVY:' + ','.join(heavy))\n"
+        "print('GLOBAL:' + str(global_config_path()))\n"
+        "print('LEGACY:' + str(legacy_global_config_path()))\n"
+    )
+    env = {**os.environ, "IMP_HOME": str(tmp_path / "h"),
+           "XDG_CONFIG_HOME": str(tmp_path / "x")}
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, env=env, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    reported = {
+        key: value
+        for key, _, value in (ln.partition(":") for ln in proc.stdout.splitlines())
+        if key in {"HEAVY", "GLOBAL", "LEGACY"}
+    }
+    assert reported.keys() == {"HEAVY", "GLOBAL", "LEGACY"}, (
+        f"child did not report all three lines; stdout was {proc.stdout!r}"
+    )
+    assert reported["HEAVY"] == "", f"imp.providers.paths pulled in {reported['HEAVY']}"
+    assert reported["GLOBAL"] == str(tmp_path / "h" / "config.yaml")
+    assert reported["LEGACY"] == str(tmp_path / "x" / "imp" / "config.yaml")

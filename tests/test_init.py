@@ -1086,7 +1086,7 @@ def _colored_fresh_init(tmp_path, monkeypatch, msgs: list[str]) -> None:
 def test_host_success_lines_carry_engine_chrome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     msgs: list[str] = []
     _colored_fresh_init(tmp_path, monkeypatch, msgs)
@@ -1138,7 +1138,7 @@ def test_the_hand_off_line_is_gone(
 def test_already_initialized_rerun_block_stays_bare(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     monkeypatch.setenv("FORCE_COLOR", "1")
     (tmp_path / "imp").mkdir()
@@ -1177,7 +1177,7 @@ def test_noninteractive_output_stays_bare_under_forced_color(
 
 def test_already_initialized_rerun_leaves_the_palette_alone(tmp_path: Path) -> None:
     from imp.cli import palette as pal
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
