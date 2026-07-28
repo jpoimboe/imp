@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.errors import PermissionDenied
-from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
 from imp.engine.env import TestGates
 from imp.engine.types import AgentDef
 

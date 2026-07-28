@@ -34,7 +34,7 @@ import anyio
 
 from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-from imp.agents.tools.limits import (
+from imp.agents.timeouts import (
     AGENT_INACTIVITY_TIMEOUT_S,
     PROCESS_KILL_GRACE_S,
     PROVIDER_REQUEST_SILENCE_CEILING_S,
