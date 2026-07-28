@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.init import IntegrationBranchUnresolved, _resolve_init_base
+from imp.cli.init import BaseDetection, _resolve_init_base
 
 
 @pytest.fixture(autouse=True)
@@ -27,10 +27,6 @@ def _commit(root: Path) -> None:
     )
 
 
-def _no_prompt(_p: str) -> str:
-    raise AssertionError("must not prompt")
-
-
 def test_resolve_prefers_origin_head(tmp_path: Path) -> None:
     root = tmp_path / "r"
     _init_repo(root, "feature")
@@ -39,67 +35,38 @@ def test_resolve_prefers_origin_head(tmp_path: Path) -> None:
          "refs/remotes/origin/HEAD", "refs/remotes/origin/mainline"],
         check=True,
     )
-    assert _resolve_init_base(
-        root, git_created=False, input_fn=_no_prompt) == "mainline"
+    assert _resolve_init_base(root, git_created=False) == BaseDetection(
+        "mainline", "from origin/HEAD")
 
 
-def test_resolve_unborn_uses_current_without_prompt(tmp_path: Path) -> None:
+def test_resolve_unborn_repo_is_a_new_repo(tmp_path: Path) -> None:
     root = tmp_path / "r"
     _init_repo(root, "trunk")  # unborn: no commits yet
-    assert _resolve_init_base(
-        root, git_created=False, input_fn=_no_prompt) == "trunk"
+    assert _resolve_init_base(root, git_created=False) == BaseDetection(
+        "trunk", "new repo")
 
 
-def test_resolve_git_created_uses_current_without_prompt(tmp_path: Path) -> None:
+def test_resolve_git_created_this_run_is_a_new_repo(tmp_path: Path) -> None:
     root = tmp_path / "r"
     _init_repo(root, "main")
-    _commit(root)  # has commits, but git_created short-circuits the prompt
-    assert _resolve_init_base(
-        root, git_created=True, input_fn=_no_prompt) == "main"
+    _commit(root)  # has commits, but git_created still means a new repo
+    assert _resolve_init_base(root, git_created=True) == BaseDetection(
+        "main", "new repo")
 
 
-def test_resolve_prompts_and_takes_typed_answer(tmp_path: Path) -> None:
-    root = tmp_path / "r"
-    _init_repo(root, "main")
-    _commit(root)
-    prompts: list[str] = []
-
-    def _input(p: str) -> str:
-        prompts.append(p)
-        return "release"
-
-    assert _resolve_init_base(
-        root, git_created=False, input_fn=_input) == "release"
-    assert prompts and "integrate into" in prompts[0]
-
-
-def test_resolve_prompt_enter_accepts_current(tmp_path: Path) -> None:
+def test_resolve_existing_repo_adopts_the_current_branch(tmp_path: Path) -> None:
     root = tmp_path / "r"
     _init_repo(root, "main")
     _commit(root)
-    assert _resolve_init_base(
-        root, git_created=False, input_fn=lambda _p: "") == "main"
+    # No origin/HEAD, born, not created this run: the current branch, no prompt.
+    assert _resolve_init_base(root, git_created=False) == BaseDetection(
+        "main", "current branch")
 
 
-def test_resolve_eof_raises(tmp_path: Path) -> None:
-    root = tmp_path / "r"
-    _init_repo(root, "main")
-    _commit(root)
-
-    def _input(_p: str) -> str:
-        raise EOFError
-
-    with pytest.raises(IntegrationBranchUnresolved):
-        _resolve_init_base(root, git_created=False, input_fn=_input)
-
-
-def test_resolve_detached_head_empty_answer_raises(tmp_path: Path) -> None:
+def test_resolve_detached_head_yields_no_branch(tmp_path: Path) -> None:
     root = tmp_path / "r"
     _init_repo(root, "main")
     _commit(root)
     subprocess.run(
         ["git", "-C", str(root), "checkout", "--detach", "-q"], check=True)
-    # No remote default, has commits, no current branch -> prompt with no
-    # default; an empty answer has nothing to fall back on, so it raises.
-    with pytest.raises(IntegrationBranchUnresolved):
-        _resolve_init_base(root, git_created=False, input_fn=lambda _p: "")
+    assert _resolve_init_base(root, git_created=False) is None

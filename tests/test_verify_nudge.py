@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import _test_cmd_fast_nudge
+from imp.cli.verify_detect import DetectedTestCommand
 from imp.providers import register_builtin_providers, resolve
 
 
@@ -32,9 +33,12 @@ def test_non_interactive_warns_and_does_not_write(
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
-        detect_fn=lambda _r: "make check",
+        detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
-    assert any("make check" in e for e in errs)
+    assert errs == [
+        "imp: no test_cmd_fast configured; detected `make check`. Set "
+        f"test_cmd_fast in {root / 'imp' / 'config.yaml'} to gate regressions "
+        "in-loop."]
     assert "test_cmd_fast" not in (root / "imp" / "config.yaml").read_text()
 
 
@@ -46,7 +50,7 @@ def test_interactive_yes_appends_command(
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
         input_fn=_seq("y"), output_fn=lambda _m: None, err_fn=lambda _m: None,
-        detect_fn=lambda _r: "make check",
+        detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
     assert 'test_cmd_fast: "make check"' in (root / "imp" / "config.yaml").read_text()
 
@@ -60,7 +64,7 @@ def test_no_nudge_when_already_configured(
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
-        detect_fn=lambda _r: "make check",
+        detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
     assert errs == []
 
@@ -74,7 +78,7 @@ def test_no_nudge_when_opted_out(
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
-        detect_fn=lambda _r: "make check",
+        detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
     assert errs == []
 
@@ -87,7 +91,7 @@ def test_interactive_skip_writes_optout(
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
         input_fn=_seq("skip"), output_fn=lambda _m: None, err_fn=lambda _m: None,
-        detect_fn=lambda _r: "make check",
+        detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
     assert 'test_cmd_fast: ""' in (root / "imp" / "config.yaml").read_text()
 
@@ -100,7 +104,7 @@ def test_interactive_edit_writes_custom_command(
     _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
         input_fn=_seq("edit", "make ci"), output_fn=lambda _m: None, err_fn=lambda _m: None,
-        detect_fn=lambda _r: "make check",
+        detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
     assert 'test_cmd_fast: "make ci"' in (root / "imp" / "config.yaml").read_text()
 

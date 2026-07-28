@@ -48,10 +48,10 @@ lands stays maintainable.
 - **Provider-flexible.** Claude and Codex CLI subscriptions plus OpenAI and
   Anthropic APIs, per-role and multi-vendor in one run; imp uses its own tools (not
   the vendor CLIs) for consistent cross-provider behavior (production-tested with
-  Claude Code so far). Setup (`imp init`) is an interactive conversation that picks
-  the default workflow, integration branch, fast test command, and import root;
-  `--use-defaults` (with optional `--workflow`/`--base`/`--pythonpath`) runs it
-  provider-free for CI, and no-TTY invocations take that path automatically.
+  Claude Code so far). Setup (`imp init`) detects the default workflow, integration
+  branch, fast test command, and import root and confirms them on one screen, needing
+  no provider; `--use-defaults` (with optional `--workflow`/`--base`/`--pythonpath`)
+  runs it non-interactively, and no-TTY invocations take that path automatically.
 - **Batteries-included, customizable.** A default workflow encoding current
   best-practice agentic engineering; author your own if you like.
 - **Beyond software.** Not limited to code — imp can drive other structured

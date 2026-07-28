@@ -145,7 +145,8 @@ to score).
   - `imp init` — first-run bootstrap. A clone of an already-init'd imp repo (or a machine
     that already has `~/.imp/config.yaml`) short-circuits to "already set up"; to see
     the real interactive path, run in a **fresh non-imp git repo** with `IMP_HOME`
-    pointed at an empty dir. Only the **provider multi-select** is interactive — theme is
+    pointed at an empty dir. The **confirmation screen** (detected settings, `enter` to accept)
+    and **provider multi-select** are interactive — theme is
     **auto-detected silently** (no prompt; under a non-truecolor pty it picks `ansi`).
   - `imp new -h` — the flag surface (`--backlog`, `--background`, `--depends-on`,
     `--workflow`, `--autonomous`, `--headless`/`--message`, `--base`, `--model`): can a new

@@ -10,9 +10,24 @@ import pytest
 import yaml
 
 from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
+from imp.cli.init import (
+    BaseDetection,
+    InitScreenState,
+    _screen_state_from_detection,
+    run_init,
+)
 from imp.cli.init import _run_init_conversation as _real_run_init_conversation
-from imp.cli.init import run_init
+from imp.cli.pythonpath_detect import ImportRoots
+from imp.cli.verify_detect import DetectedTestCommand
 from tests.conftest import _git, _init_repo
+
+
+def _screen_state() -> InitScreenState:
+    return _screen_state_from_detection(
+        workflow="default",
+        base=BaseDetection("master", "from origin/HEAD"),
+        tests=DetectedTestCommand("make check", "from Makefile"),
+        roots=ImportRoots(["src"], "from pyproject.toml"))
 
 
 def _inputs(*answers: str) -> object:
@@ -38,16 +53,38 @@ def _stub_conv(monkeypatch, result) -> None:
                         lambda **kw: result, raising=False)
 
 
-def _stub_conv_recording_theme(monkeypatch, seen: dict) -> None:
-    """Stub the setup conversation and record the palette theme active while it runs."""
+def _stub_screen(monkeypatch, **overrides) -> None:
+    """Accept the detected state on the confirmation screen, any row overridden."""
+    from dataclasses import replace
+
+    import imp.cli.init as initmod
+
+    def _screen(_root, state, **_kw):
+        return initmod.ScreenAccepted(replace(state, **overrides))
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen,
+                        raising=False)
+
+
+def _stub_screen_talk(monkeypatch) -> None:
+    """Press `?` on the screen: hand the detected state to the conversation."""
+    import imp.cli.init as initmod
+    monkeypatch.setattr(
+        initmod, "_interactive_confirm_screen",
+        lambda _root, state, **_kw: initmod.ScreenTalk(state), raising=False)
+
+
+def _stub_screen_recording_theme(monkeypatch, seen: dict) -> None:
+    """Stub the confirmation screen and record the palette theme active while it runs."""
     import imp.cli.init as initmod
     from imp.cli import palette as pal
 
-    def _conv(**_kw):
+    def _screen(_root, state, **_kw):
         seen["theme"] = pal.active_theme()
-        return _conv_result()
+        return initmod.ScreenAccepted(state)
 
-    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen,
+                        raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -75,15 +112,16 @@ def _git_repo(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _stub_setup_gate(monkeypatch):
-    # Fresh interactive init now always runs the credential+sandbox gate and the
-    # conversation. Default them to "ready + success"; specific tests override.
-    # git_init=False is safe: _git_repo already git-inits tmp_path before every test.
+    # Fresh interactive init runs the sandbox gate, then the confirmation screen.
+    # Default them to "ready + accept as detected"; specific tests override. The
+    # conversation is only reachable behind the screen's `?`.
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
     monkeypatch.setattr(initmod, "resolve_detection_provider",
                         lambda _providers, **_kw: ("anthropic", "m"), raising=False)
     monkeypatch.setattr(initmod, "_run_init_conversation",
                         lambda **kw: _conv_result(), raising=False)
+    _stub_screen(monkeypatch)
 
 
 def test_writes_config_yaml_workflows_gitignore(tmp_path: Path) -> None:
@@ -223,16 +261,16 @@ def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_init_writes_test_cmd_fast_from_conversation(tmp_path, monkeypatch):
-    _stub_conv(monkeypatch, _conv_result(test_cmd_fast="make check"))
+def test_init_writes_test_cmd_fast_from_the_screen(tmp_path, monkeypatch):
+    _stub_screen(monkeypatch, test_cmd_fast="make check")
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] == "make check"
 
 
-def test_init_writes_optout_when_conversation_opts_out(tmp_path, monkeypatch):
-    _stub_conv(monkeypatch, _conv_result(test_cmd_fast=""))
+def test_init_writes_optout_when_the_screen_opts_out(tmp_path, monkeypatch):
+    _stub_screen(monkeypatch, test_cmd_fast="", tests_provenance="you set this")
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
@@ -240,7 +278,7 @@ def test_init_writes_optout_when_conversation_opts_out(tmp_path, monkeypatch):
 
 
 def test_init_comment_names_timeout_defaults(tmp_path, monkeypatch):
-    _stub_conv(monkeypatch, _conv_result(test_cmd_fast="make check"))
+    _stub_screen(monkeypatch, test_cmd_fast="make check")
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
     text = (tmp_path / "imp" / "config.yaml").read_text()
@@ -359,17 +397,42 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
     assert inactive.startswith("  ")
 
 
-def test_no_usable_credential_stops_without_config_yaml(tmp_path, monkeypatch):
+def test_no_usable_credential_still_finishes_init(tmp_path, monkeypatch):
+    # The hard-stop moved behind `?`: init needs no provider to write the config.
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "resolve_detection_provider",
                         lambda _p, **_kw: None, raising=False)
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=msgs.append)
-    assert not (tmp_path / "imp" / "config.yaml").exists()
-    assert "usable credential" in "\n".join(msgs)
+    assert (tmp_path / "imp" / "config.yaml").is_file()
+    assert "usable credential" not in "\n".join(msgs)
     user = tmp_path / "imphome" / "config.yaml"
     assert yaml.safe_load(user.read_text())["providers"] == ["anthropic"]
+
+
+def test_no_usable_credential_behind_the_talk_key_keeps_the_screen(
+    tmp_path, monkeypatch,
+):
+    import imp.cli.init as initmod
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p, **_kw: None, raising=False)
+    outcomes = iter(["talk", "accept"])
+
+    def _screen(_root, state, **_kw):
+        if next(outcomes) == "talk":
+            return initmod.ScreenTalk(state)
+        return initmod.ScreenAccepted(state)
+
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen,
+                        raising=False)
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append)
+    assert "imp needs a working model provider to talk this through." in msgs
+    assert ("Set one up and re-run `imp init`, or fill the fields in yourself."
+            in msgs)
+    assert (tmp_path / "imp" / "config.yaml").is_file()   # returned to the screen
 
 
 def test_configured_providers_skip_picker(tmp_path, monkeypatch):
@@ -377,7 +440,7 @@ def test_configured_providers_skip_picker(tmp_path, monkeypatch):
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
     (tmp_path / "src").mkdir()
-    _stub_conv(monkeypatch, _conv_result(roots=["src"]))
+    _stub_screen(monkeypatch, pythonpath=["src"])
 
     def _boom(_available):
         raise AssertionError("picker must not run when providers are configured")
@@ -391,7 +454,7 @@ def test_bwrap_missing_offer_accept_continues(tmp_path, monkeypatch):
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
     (tmp_path / "src").mkdir()
-    _stub_conv(monkeypatch, _conv_result(roots=["src"]))
+    _stub_screen(monkeypatch, pythonpath=["src"])
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs("y"),
              output_fn=msgs.append)
@@ -414,6 +477,7 @@ def test_bwrap_missing_offer_decline_stops(tmp_path, monkeypatch):
 
 def test_conversation_writes_chosen_workflow_and_pythonpath(tmp_path, monkeypatch):
     (tmp_path / "src").mkdir()
+    _stub_screen_talk(monkeypatch)
     _stub_conv(monkeypatch, _conv_result(
         default_workflow="minimal", default_base="develop",
         test_cmd_fast="make check", roots=["src"]))
@@ -428,6 +492,7 @@ def test_conversation_writes_chosen_workflow_and_pythonpath(tmp_path, monkeypatc
 
 def test_conversation_pythonpath_validated_against_disk(tmp_path, monkeypatch):
     (tmp_path / "real").mkdir()
+    _stub_screen_talk(monkeypatch)
     _stub_conv(monkeypatch, _conv_result(roots=["real", "ghost"]))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
@@ -436,6 +501,7 @@ def test_conversation_pythonpath_validated_against_disk(tmp_path, monkeypatch):
 
 
 def test_conversation_empty_roots_writes_hint(tmp_path, monkeypatch):
+    _stub_screen_talk(monkeypatch)
     _stub_conv(monkeypatch, _conv_result(roots=[]))
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
@@ -444,7 +510,7 @@ def test_conversation_empty_roots_writes_hint(tmp_path, monkeypatch):
     assert "# pythonpath:" in text
 
 
-def test_conversation_git_init_true_initializes_repo(tmp_path_factory, monkeypatch):
+def test_git_question_accepted_initializes_the_repo(tmp_path_factory, monkeypatch):
     fresh = tmp_path_factory.mktemp("norepo")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
     monkeypatch.setenv("IMP_HOME", str(fresh / "imphome"))
@@ -452,8 +518,7 @@ def test_conversation_git_init_true_initializes_repo(tmp_path_factory, monkeypat
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
     monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
-    _stub_conv(monkeypatch, _conv_result(git_init=True))
-    run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+    run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(""),
              output_fn=lambda _m: None)
     assert (fresh / ".git").exists()
     assert (fresh / "imp" / "config.yaml").is_file()
@@ -464,23 +529,24 @@ def test_conversation_git_init_true_initializes_repo(tmp_path_factory, monkeypat
     assert count == "1"
 
 
-def test_conversation_git_declined_in_non_repo_stops_cleanly(
+def test_git_question_declined_stops_before_the_screen(
     tmp_path_factory, monkeypatch,
 ):
-    # Agent returned Success but git_init=False with no repo present: the host
-    # must emit a clean message and write nothing, not crash in `git status`.
+    # No repo and the user said no: a clean message and nothing written, never a
+    # crash in _commit_init_files' `git status`.
     fresh = tmp_path_factory.mktemp("norepo2")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
     monkeypatch.setenv("IMP_HOME", str(fresh / "imphome"))
-    _stub_conv(monkeypatch, _conv_result(git_init=False))
     msgs: list[str] = []
-    run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+    run_init(fresh, picker_fn=_picks("anthropic"), input_fn=_inputs("n"),
              output_fn=msgs.append)
     assert not (fresh / "imp" / "config.yaml").exists()
+    assert not (fresh / ".git").exists()
     assert "git repository" in "\n".join(msgs).lower()
 
 
 def test_conversation_failure_stops_without_config_yaml(tmp_path, monkeypatch):
+    _stub_screen_talk(monkeypatch)
     _stub_conv(monkeypatch, InteractiveFailure("auth", "bad_key"))
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
@@ -490,6 +556,7 @@ def test_conversation_failure_stops_without_config_yaml(tmp_path, monkeypatch):
 
 
 def test_conversation_status_error_stops(tmp_path, monkeypatch):
+    _stub_screen_talk(monkeypatch)
     _stub_conv(monkeypatch, _conv_result(status="Error"))
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
@@ -590,11 +657,53 @@ def test_use_defaults_pythonpath_drops_absent_dirs(tmp_path):
 
 def test_use_defaults_fills_offline_test_command(tmp_path):
     from imp.cli.init import run_init_noninteractive
+    from imp.cli.verify_detect import DetectedTestCommand
     run_init_noninteractive(
         tmp_path, output_fn=lambda _m: None,
-        detect_verify_fn=lambda _r: "make check")   # heuristic hit, no prompt
+        # heuristic hit, no prompt
+        detect_verify_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"))
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] == "make check"
+
+
+def test_use_defaults_detects_pythonpath_from_pyproject(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
+    (tmp_path / "src" / "app").mkdir(parents=True)
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["pythonpath"] == ["src"]
+
+
+def test_use_defaults_explicit_pythonpath_overrides_detection(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
+    (tmp_path / "src" / "app").mkdir(parents=True)
+    (tmp_path / "vendor").mkdir()
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, pythonpath=["vendor"],
+        detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["pythonpath"] == ["vendor"]   # the flag wins over detection
+
+
+def test_use_defaults_empty_pythonpath_suppresses_detection(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    # Same fixture that triggers detection in test_use_defaults_detects_pythonpath_from_pyproject
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
+    (tmp_path / "src" / "app").mkdir(parents=True)
+    # pythonpath=[] explicitly opts out — detector must NOT run
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, pythonpath=[],
+        detect_verify_fn=lambda _r: None)
+    text = (tmp_path / "imp" / "config.yaml").read_text()
+    data = yaml.safe_load(text)
+    assert data.get("pythonpath") is None  # empty list => teaching hint, not ["src"]
+    assert "# pythonpath:" in text
 
 
 def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch):
@@ -636,20 +745,39 @@ def test_use_defaults_idempotent_in_non_git_dir(tmp_path_factory, monkeypatch):
     assert (fresh / ".git").exists()
 
 
-def test_use_defaults_raises_when_base_unresolvable(tmp_path):
+def test_use_defaults_adopts_current_branch_without_origin_head(tmp_path):
+    import subprocess
+
+    from imp.cli.init import run_init_noninteractive
+
+    # A born repo with no origin remote and no --base override: base resolution
+    # is prompt-free now, so it adopts the checked-out branch instead of raising.
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "seed", "-q"],
+                   cwd=tmp_path, check=True)
+    current = subprocess.run(
+        ["git", "symbolic-ref", "--short", "HEAD"],
+        cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip()
+    run_init_noninteractive(tmp_path, output_fn=lambda _m: None,
+                            detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["default-base"] == current
+
+
+def test_use_defaults_raises_on_detached_head(tmp_path):
     import subprocess
 
     from imp.cli.init import IntegrationBranchUnresolved, run_init_noninteractive
 
-    # A born repo (has a commit, so not the unborn shortcut) with no origin
-    # remote and no --base override: base resolution reaches the prompt seam,
-    # which the non-interactive path wires to an EOF-raising stub, so it must
-    # raise IntegrationBranchUnresolved rather than block on input.
     subprocess.run(["git", "commit", "--allow-empty", "-m", "seed", "-q"],
                    cwd=tmp_path, check=True)
-    with pytest.raises(IntegrationBranchUnresolved):
+    subprocess.run(["git", "checkout", "--detach", "-q"], cwd=tmp_path, check=True)
+    with pytest.raises(IntegrationBranchUnresolved) as excinfo:
         run_init_noninteractive(tmp_path, output_fn=lambda _m: None,
                                 detect_verify_fn=lambda _r: None)
+    assert str(excinfo.value) == (
+        "imp init couldn't determine an integration branch (HEAD is detached). "
+        "Re-run with `--base <branch>`, or add `default-base: <branch>` to "
+        "imp/config.yaml.")
 
 
 def test_init_parser_maps_use_defaults_to_non_interactive() -> None:
@@ -693,6 +821,29 @@ def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
     args.func(args)
     assert called["project"] == tmp_path
     assert called["kw"]["pythonpath"] == ["src", "lib"]   # comma-split, blanks dropped
+
+
+def test_init_empty_pythonpath_flag_passes_empty_list(tmp_path, monkeypatch):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    called: dict[str, object] = {}
+
+    def _spy(project, **kw):
+        called["kw"] = kw
+
+    monkeypatch.setattr(m, "run_init_noninteractive", _spy)
+
+    # --pythonpath "" must yield pythonpath=[] (not None)
+    args = m._build_parser().parse_args(["init", "--use-defaults", "--pythonpath", ""])
+    args.func(args)
+    assert called["kw"]["pythonpath"] == []
+
+    # absent --pythonpath must yield pythonpath=None
+    called.clear()
+    args2 = m._build_parser().parse_args(["init", "--use-defaults"])
+    args2.func(args2)
+    assert called["kw"]["pythonpath"] is None
 
 
 def _init_args(**over: object) -> argparse.Namespace:
@@ -818,6 +969,7 @@ def test_run_init_passes_the_setup_agents_declared_tier(tmp_path, monkeypatch):
 
     monkeypatch.setattr(initmod, "resolve_detection_provider", _capture,
                         raising=False)
+    _stub_screen_talk(monkeypatch)
     run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
              input_fn=_inputs(), output_fn=lambda _msg: None)
     declared = parse_agent_file(bundled_assets_dir() / "init.md").tier
@@ -846,19 +998,20 @@ def test_run_init_declared_tier_follows_the_agent_file(tmp_path, monkeypatch):
     monkeypatch.setattr(initmod, "parse_agent_file", _declare_high, raising=False)
     monkeypatch.setattr(initmod, "resolve_detection_provider", _capture,
                         raising=False)
+    _stub_screen_talk(monkeypatch)
     run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
              input_fn=_inputs(), output_fn=lambda _msg: None)
     assert seen["tier"] == "high"
 
 
-def test_fresh_init_applies_the_detected_theme_before_the_conversation(
+def test_fresh_init_applies_the_detected_theme_before_the_screen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from imp.cli import palette as pal
 
     monkeypatch.delenv("IMP_THEME", raising=False)
     seen: dict[str, str] = {}
-    _stub_conv_recording_theme(monkeypatch, seen)
+    _stub_screen_recording_theme(monkeypatch, seen)
 
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -879,7 +1032,7 @@ def test_init_does_not_clobber_an_imp_theme_override(
     monkeypatch.setenv("IMP_THEME", "light")
     pal.set_theme("light")  # as _apply_theme already did at startup
     seen: dict[str, str] = {}
-    _stub_conv_recording_theme(monkeypatch, seen)
+    _stub_screen_recording_theme(monkeypatch, seen)
 
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -897,7 +1050,6 @@ def test_provider_picker_runs_before_the_theme_is_applied(
     from imp.cli import palette as pal
 
     monkeypatch.delenv("IMP_THEME", raising=False)
-    _stub_conv(monkeypatch, _conv_result())
     seen: dict[str, str] = {}
 
     def _pick(_available):
@@ -924,7 +1076,6 @@ def _colored_fresh_init(tmp_path, monkeypatch, msgs: list[str]) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.delenv("IMP_THEME", raising=False)
     monkeypatch.setenv("FORCE_COLOR", "1")
-    _stub_conv(monkeypatch, _conv_result())
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
         input_fn=_inputs(), output_fn=msgs.append,
@@ -959,7 +1110,6 @@ def test_host_success_lines_stay_bare_without_color(
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
     msgs: list[str] = []
-    _stub_conv(monkeypatch, _conv_result())
 
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -976,7 +1126,6 @@ def test_the_hand_off_line_is_gone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     msgs: list[str] = []
-    _stub_conv(monkeypatch, _conv_result())
 
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -1056,7 +1205,7 @@ def _stub_splash(monkeypatch, seen: dict) -> None:
     monkeypatch.setattr(initmod.splash, "splash_block", _fake)
 
 
-def test_splash_prints_once_in_the_resolved_theme_before_the_conversation(
+def test_splash_prints_once_in_the_resolved_theme_before_the_screen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.init as initmod
@@ -1067,15 +1216,14 @@ def test_splash_prints_once_in_the_resolved_theme_before_the_conversation(
     seen: dict[str, object] = {}
     _stub_splash(monkeypatch, seen)
     msgs: list[str] = []
-    at_conversation: dict[str, bool] = {}
+    at_screen: dict[str, bool] = {}
 
-    def _conv(**kw):
-        at_conversation["splash_already_printed"] = "SPLASH-BLOCK" in msgs
-        # the real conversation prints the agent's opening prose here
-        kw["output_fn"]("Hi — which branch do you integrate into?")
-        return _conv_result()
+    def _screen(_root, state, **_kw):
+        at_screen["splash_already_printed"] = "SPLASH-BLOCK" in msgs
+        return initmod.ScreenAccepted(state)
 
-    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen,
+                        raising=False)
 
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -1086,16 +1234,18 @@ def test_splash_prints_once_in_the_resolved_theme_before_the_conversation(
     assert msgs.count("SPLASH-BLOCK") == 1
     assert seen["theme"] == "dark"
     assert seen["color"] is True
-    assert at_conversation["splash_already_printed"] is True
+    assert at_screen["splash_already_printed"] is True
     i = msgs.index("SPLASH-BLOCK")
     assert msgs[i - 1] == ""      # one blank above
     assert msgs[i - 2] != ""      # never two
-    assert msgs[i + 1] == ""      # one blank below
-    # never two: the agent's first line follows the single blank
-    assert msgs[i + 2] == "Hi — which branch do you integrate into?"
+    # the screen draws and erases itself here; one blank, then the settings block
+    assert msgs[i + 1] == ""
+    assert "Configured:" in msgs[i + 2]
+    created_idx = next(j for j, m in enumerate(msgs) if "Created:" in m)
+    assert created_idx > i + 2
 
 
-def test_no_splash_without_color_but_one_blank_before_the_conversation(
+def test_no_splash_without_color_but_one_blank_before_the_screen(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.init as initmod
@@ -1107,11 +1257,12 @@ def test_no_splash_without_color_but_one_blank_before_the_conversation(
     msgs: list[str] = []
     tail: dict[str, list[str]] = {}
 
-    def _conv(**_kw):
+    def _screen(_root, state, **_kw):
         tail["msgs"] = list(msgs)
-        return _conv_result()
+        return initmod.ScreenAccepted(state)
 
-    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen,
+                        raising=False)
 
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -1121,7 +1272,7 @@ def test_no_splash_without_color_but_one_blank_before_the_conversation(
 
     assert seen == {}                    # splash_block never called
     assert tail["msgs"][-1] == ""        # exactly one blank …
-    assert tail["msgs"][-2] != ""        # … before the conversation opens
+    assert tail["msgs"][-2] != ""        # … before the screen opens
 
 
 def test_already_initialized_rerun_prints_no_splash(
@@ -1196,7 +1347,8 @@ def test_setup_conversation_prompt_uses_the_cancel_setup_hint(
     monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_host)
 
     initmod._run_init_conversation(
-        project_root=tmp_path, provider_name="anthropic", model_name="m",
+        project_root=tmp_path, state=_screen_state(),
+        provider_name="anthropic", model_name="m",
         allow_unsandboxed=False, color=True, output_fn=lambda _m: None)
 
     assert seen["empty_hint"] == SETUP_EMPTY_PROMPT_HINT
