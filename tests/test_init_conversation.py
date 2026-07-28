@@ -4,6 +4,17 @@ import pytest
 
 from imp.agents.interactive import InteractiveSuccess
 from imp.assets import bundled_assets_dir
+from imp.cli.init import BaseDetection, InitScreenState, _screen_state_from_detection
+from imp.cli.pythonpath_detect import ImportRoots
+from imp.cli.verify_detect import DetectedTestCommand
+
+
+def _screen_state() -> InitScreenState:
+    return _screen_state_from_detection(
+        workflow="default",
+        base=BaseDetection("master", "from origin/HEAD"),
+        tests=DetectedTestCommand("make check", "from Makefile"),
+        roots=ImportRoots(["src"], "from pyproject.toml"))
 
 
 def _run_capturing_init_conversation(tmp_path, monkeypatch):
@@ -27,28 +38,42 @@ def _run_capturing_init_conversation(tmp_path, monkeypatch):
     monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_sync)
     monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
     result = initmod._run_init_conversation(
-        project_root=tmp_path,
+        project_root=tmp_path, state=_screen_state(),
         provider_name="anthropic", model_name="m",
         allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
     return result, captured
 
 
-def test_build_init_kickoff_embeds_workflows_and_base() -> None:
+def test_build_init_kickoff_reads_back_every_row_with_its_provenance() -> None:
     from imp.cli.init import _build_init_kickoff
     msg = _build_init_kickoff(
         workflows=[("default", "full pipeline"), ("minimal", "front-door -> review")],
-        base_hint="develop", git_exists=False)
+        state=_screen_state())
     assert "minimal — front-door -> review" in msg
-    assert "develop" in msg
-    assert "NOT yet a git repository" in msg
-
-
-def test_build_init_kickoff_notes_existing_repo_and_missing_base() -> None:
-    from imp.cli.init import _build_init_kickoff
-    msg = _build_init_kickoff(
-        workflows=[("default", "d")], base_hint=None, git_exists=True)
+    assert "  workflow: default  (full pipeline — spec, plan, implement, review, merge)" in msg
+    assert "  branch: master  (from origin/HEAD)" in msg
+    assert "  tests: make check  (from Makefile)" in msg
+    assert "  import root: src  (from pyproject.toml)" in msg
     assert "already a git repository" in msg
-    assert "No default integration branch" in msg
+
+
+def test_build_init_kickoff_carries_an_edited_row_as_the_users_own() -> None:
+    from dataclasses import replace
+
+    from imp.cli.init import _build_init_kickoff
+    edited = replace(_screen_state(), branch="trunk", branch_provenance="you set this")
+    msg = _build_init_kickoff(workflows=[("default", "d")], state=edited)
+    assert "  branch: trunk  (you set this)" in msg
+    assert "master" not in msg
+
+
+def test_build_init_kickoff_shows_an_unresolved_branch_as_none() -> None:
+    from imp.cli.init import _build_init_kickoff
+    unresolved = _screen_state_from_detection(
+        workflow="default", base=None, tests=None,
+        roots=ImportRoots([], "not a Python project"))
+    msg = _build_init_kickoff(workflows=[("default", "d")], state=unresolved)
+    assert "  branch: (none)  (nothing detected)" in msg
 
 
 def test_workflow_choices_include_bundled_minimal(tmp_path) -> None:
@@ -75,8 +100,7 @@ def test_workflow_choices_exclude_internal_memory(tmp_path) -> None:
     assert {"default", "minimal", "patent"} <= set(names)
     # descriptions still come from each workflow.yaml
     assert all(desc.strip() for _name, desc in choices)
-    kickoff = _build_init_kickoff(
-        workflows=choices, base_hint=None, git_exists=True)
+    kickoff = _build_init_kickoff(workflows=choices, state=_screen_state())
     assert "memory" not in kickoff
     assert "minimal" in kickoff
 
@@ -157,7 +181,7 @@ def test_run_init_conversation_ignores_a_project_local_default_workflow(
     monkeypatch.setattr(initmod, "Prompt", _FakePrompt)
 
     result = initmod._run_init_conversation(
-        project_root=tmp_path,
+        project_root=tmp_path, state=_screen_state(),
         provider_name="anthropic", model_name="m",
         allow_unsandboxed=True, color=False, output_fn=lambda _m: None)
 
@@ -169,7 +193,6 @@ def test_run_init_conversation_ignores_a_project_local_default_workflow(
 def test_build_init_kickoff_header_labels_the_lines_as_internal_step_names() -> None:
     from imp.cli.init import _build_init_kickoff
     msg = _build_init_kickoff(
-        workflows=[("minimal", "front-door -> review")],
-        base_hint=None, git_exists=True)
+        workflows=[("minimal", "front-door -> review")], state=_screen_state())
     assert "Available workflows (name — internal pipeline summary, in step names):" in msg
     assert "  minimal — front-door -> review" in msg

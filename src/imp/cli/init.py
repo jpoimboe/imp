@@ -757,24 +757,21 @@ def _workflow_choices(project_root: Path) -> list[tuple[str, str]]:
 def _build_init_kickoff(
     *,
     workflows: list[tuple[str, str]],
-    base_hint: str | None,
-    git_exists: bool,
+    state: InitScreenState,
 ) -> str:
-    """The setup-context kickoff message handed to the setup agent."""
+    """The setup-context kickoff handed to the setup agent: what the confirmation
+    screen is showing right now, so the conversation revises settled values
+    instead of rediscovering them. A row the user edited reads `you set this`."""
     lines = ["Repository setup context for this conversation:", ""]
     lines.append("Available workflows (name — internal pipeline summary, in step names):")
     for name, desc in workflows:
         lines.append(f"  {name} — {desc}" if desc else f"  {name}")
     lines.append("")
-    if git_exists:
-        lines.append("This project is already a git repository.")
-    else:
-        lines.append("This directory is NOT yet a git repository; imp needs one.")
-    if base_hint:
-        lines.append(
-            f"The repository's default integration branch appears to be `{base_hint}`.")
-    else:
-        lines.append("No default integration branch could be detected from git.")
+    lines.append("This project is already a git repository.")
+    lines.append("")
+    lines.append("Current settings, and where each came from:")
+    for label, value, note in _row_cells(state).values():
+        lines.append(f"  {label}: {value}  ({note})")
     lines.append("")
     lines.append("Begin the setup conversation now.")
     return "\n".join(lines)
@@ -794,6 +791,7 @@ def _conversation_failure_message(
 def _run_init_conversation(
     *,
     project_root: Path,
+    state: InitScreenState,
     provider_name: str,
     model_name: str,
     allow_unsandboxed: bool,
@@ -817,9 +815,7 @@ def _run_init_conversation(
     )
     agent_def = replace(agent_def, output_schema=replace(schema, fields=fields))
     kickoff = _build_init_kickoff(
-        workflows=_workflow_choices(project_root),
-        base_hint=worktree.origin_head_branch(project_root),
-        git_exists=_in_git_repo(project_root))
+        workflows=_workflow_choices(project_root), state=state)
     prompt = Prompt(color=color, empty_hint=SETUP_EMPTY_PROMPT_HINT)
     return run_interactive_agent_sync(
         agent_def=agent_def, provider_name=provider_name, model_name=model_name,
@@ -827,6 +823,68 @@ def _run_init_conversation(
         asset_dir=assets,
         sandbox_cfg=SandboxConfig(allow_unsandboxed=allow_unsandboxed),
         prompt=prompt, output_fn=output_fn, color=color, title="imp setup")
+
+
+_GIT_QUESTION = "imp needs a git repository. Initialize one here? [Y/n] "
+_GIT_DECLINED = ("imp needs a git repository to track quests. "
+                 "Re-run `imp init` when you're ready.")
+
+
+def _confirm_init_settings(
+    project_root: Path,
+    state: InitScreenState,
+    *,
+    providers: list[str],
+    allow_unsandboxed: bool,
+    color: bool,
+    output_fn: Callable[[str], None],
+) -> InitSettings | None:
+    """The confirmation screen, plus the setup conversation its `?` hands off to.
+    None when the conversation failed and init should stop — its message is
+    already printed. Cancelling the screen raises KeyboardInterrupt."""
+    workflows = selectable_workflow_names(project_root)
+    while True:
+        outcome = _interactive_confirm_screen(
+            project_root, state, workflows=workflows)
+        state = outcome.state
+        if isinstance(outcome, ScreenAccepted):
+            return InitSettings(
+                default_workflow=state.workflow,
+                default_base=state.branch,
+                test_cmd_fast=state.test_cmd_fast,
+                pythonpath=state.pythonpath)
+        setup_tier = parse_agent_file(bundled_assets_dir() / "init.md").tier or "medium"
+        resolved = resolve_detection_provider(providers, tier=setup_tier)
+        if resolved is None:
+            width = max(len(p) for p in providers)
+            output_fn("imp needs a working model provider to talk this through.")
+            output_fn("None of the providers you enabled has a usable credential yet:")
+            for prov in providers:
+                hint = _CREDENTIAL_HINTS.get(prov, "set up its credential")
+                output_fn(f"  {prov:<{width}} → {hint}")
+            output_fn(
+                "Set one up and re-run `imp init`, or fill the fields in yourself.")
+            continue
+        provider_name, model_name = resolved
+        result = _run_init_conversation(
+            project_root=project_root, state=state,
+            provider_name=provider_name, model_name=model_name,
+            allow_unsandboxed=allow_unsandboxed, color=color, output_fn=output_fn)
+        if isinstance(result, InteractiveFailure):
+            output_fn(_conversation_failure_message(provider_name, result))
+            return None
+        output = result.output
+        if output.get("status") != "Success":
+            output_fn(
+                "Setup didn't finish — the assistant reported it couldn't complete. "
+                "Re-run `imp init` when you're ready.")
+            return None
+        roots = list((output.get("pythonpath") or {}).get("roots", []))
+        return InitSettings(
+            default_workflow=str(output["default_workflow"]),
+            default_base=str(output["default_base"]),
+            test_cmd_fast=str(output["test_cmd_fast"]),
+            pythonpath=validate_detected_roots(project_root, roots))
 
 
 def run_init(
@@ -899,25 +957,7 @@ def run_init(
             output_fn("Committed imp/config.yaml.")
         return
 
-    # --- fresh init: credential + sandbox gate (a working provider is required
-    #     for the setup conversation) ---
-    setup_tier = parse_agent_file(bundled_assets_dir() / "init.md").tier or "medium"
-    resolved = resolve_detection_provider(providers, tier=setup_tier)
-    if resolved is None:
-        if wrote_user_config:
-            _bootstrap_user_config(
-                user_path, providers, theme, allow_unsandboxed=False)
-        width = max(len(p) for p in providers)
-        output_fn(
-            "imp needs a working model provider to finish setting up this project.")
-        output_fn("None of the providers you enabled has a usable credential yet:")
-        for prov in providers:
-            hint = _CREDENTIAL_HINTS.get(prov, "set up its credential")
-            output_fn(f"  {prov:<{width}} → {hint}")
-        output_fn("Set one up, then re-run `imp init`.")
-        return
-    provider_name, model_name = resolved
-
+    # --- fresh init: the sandbox gate (init itself needs no model provider) ---
     allow_unsandboxed = False
     if not sandbox_available():
         answer = input_fn(
@@ -951,45 +991,30 @@ def run_init(
         _bootstrap_user_config(
             user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
 
-    # --- hand off to the setup conversation ---
     output_fn("")
     if color_on:
         output_fn(splash.splash_block(
             theme=pal.active_theme(),
             width=shutil.get_terminal_size((80, 24)).columns, color=True))
-        output_fn("")
-    result = _run_init_conversation(
-        project_root=project_root,
-        provider_name=provider_name, model_name=model_name,
-        allow_unsandboxed=allow_unsandboxed,
+
+    # --- git, detection, and the confirmation screen ---
+    if not _in_git_repo(project_root):
+        answer = input_fn(_GIT_QUESTION).strip().lower()
+        if answer not in ("", "y", "yes"):
+            output_fn(_GIT_DECLINED)
+            return
+    git_created = _ensure_git_repo_silent(project_root)
+    settings = _confirm_init_settings(
+        project_root,
+        _screen_state_from_detection(
+            workflow=_DEFAULT_WORKFLOW,
+            base=_resolve_init_base(project_root, git_created=git_created),
+            tests=detect_test_command(project_root),
+            roots=detect_import_roots(project_root)),
+        providers=providers, allow_unsandboxed=allow_unsandboxed,
         color=theme in ("dark", "light"), output_fn=output_fn)
-
-    if isinstance(result, InteractiveFailure):
-        output_fn(_conversation_failure_message(provider_name, result))
+    if settings is None:
         return
-    output = result.output
-    if output.get("status") != "Success":
-        output_fn(
-            "Setup didn't finish — the assistant reported it couldn't complete. "
-            "Re-run `imp init` when you're ready.")
-        return
-
-    # --- host applies the agent's decisions and writes the files ---
-    if output.get("git_init"):
-        _ensure_git_repo_silent(project_root)
-    elif not _in_git_repo(project_root):
-        # The agent declined git in a repo-less dir: a clean message beats an
-        # uncaught CalledProcessError from _commit_init_files' `git status`.
-        output_fn(
-            "imp needs a git repository but setup left this directory without "
-            "one. Re-run `imp init` and allow git setup.")
-        return
-    roots = list((output.get("pythonpath") or {}).get("roots", []))
-    settings = InitSettings(
-        default_workflow=str(output["default_workflow"]),
-        default_base=str(output["default_base"]),
-        test_cmd_fast=str(output["test_cmd_fast"]),
-        pythonpath=validate_detected_roots(project_root, roots))
     committed = write_init_files(project_root, settings)
 
     output_fn("")

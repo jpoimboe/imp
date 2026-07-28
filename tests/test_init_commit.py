@@ -17,14 +17,12 @@ def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
     import imp.cli.init as initmod
-    from imp.agents.interactive import InteractiveSuccess
     monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p, **_kw: ("anthropic", "m"), raising=False)
-    monkeypatch.setattr(initmod, "_run_init_conversation", lambda **kw: InteractiveSuccess({
-        "status": "Success", "git_init": True, "default_workflow": "default",
-        "default_base": "main", "test_cmd_fast": "", "pythonpath": {"roots": []}}),
-        raising=False)
+    # The confirmation screen accepts what init detected; `input_fn` answers the
+    # git question, so a repo-less tmp dir still gets one.
+    monkeypatch.setattr(
+        initmod, "_interactive_confirm_screen",
+        lambda _root, state, **_kw: initmod.ScreenAccepted(state), raising=False)
 
 
 def _git(root: Path, *args: str) -> str:
