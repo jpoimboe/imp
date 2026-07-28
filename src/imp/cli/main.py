@@ -722,7 +722,7 @@ def _preflight_imp_init(*, control_root: Path) -> str | None:
 
 
 def _test_cmd_fast_nudge(
-    *, project_root: Path, control_root: Path, non_interactive: bool,
+    *, control_root: Path, non_interactive: bool,
     input_fn: Callable[[str], str], output_fn: Callable[[str], None],
     err_fn: Callable[[str], None],
     detect_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
@@ -741,10 +741,10 @@ def _test_cmd_fast_nudge(
         return
     if cfg.test_cmd_fast is not None:
         return
-    detected = detect(project_root)
+    detected = detect(control_root)
     if detected is None:
         return
-    project_file = project_root / "imp" / "config.yaml"
+    project_file = control_root / "imp" / "config.yaml"
     if non_interactive:
         err_fn(
             f"imp: no test_cmd_fast configured; detected `{detected.command}`. Set "
@@ -769,8 +769,7 @@ def _apply_theme() -> None:
         return
     from imp.providers.effective import load_effective_config
     try:
-        root = _project_root()
-        theme = load_effective_config(control_root=root).config.theme
+        theme = load_effective_config(control_root=_settings_root()).config.theme
         pal.set_theme(theme)
     except Exception:
         pass
@@ -1253,8 +1252,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     non_interactive = bool(getattr(args, "non_interactive", False))
     autonomous = bool(getattr(args, "autonomous", False))
     _test_cmd_fast_nudge(
-        project_root=control, control_root=control,
-        non_interactive=non_interactive,
+        control_root=control, non_interactive=non_interactive,
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 

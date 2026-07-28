@@ -67,6 +67,33 @@ def test_config_from_a_worktree_shows_the_main_checkout(
     assert "branch lies" not in out   # the worktree's file is not a layer
 
 
+def test_the_active_theme_comes_from_the_main_checkout(
+    checkouts: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`theme` is a setting like any other: the worktree's copy must not repaint
+    a command that runs inside it."""
+    from imp.cli import palette as pal
+    from imp.cli.main import _apply_theme
+    control, work = checkouts
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    (control / "imp" / "config.yaml").write_text("theme: dark\n")
+    (work / "imp" / "config.yaml").write_text("theme: light\n")
+
+    _apply_theme()
+
+    assert pal.active_theme() == "dark"
+
+
+def test_the_nudge_takes_one_root(tmp_path: Path) -> None:
+    from imp.cli.main import _test_cmd_fast_nudge
+
+    with pytest.raises(TypeError, match="project_root"):
+        _test_cmd_fast_nudge(  # type: ignore[call-arg]
+            project_root=tmp_path, control_root=tmp_path, non_interactive=True,
+            input_fn=lambda _p="": "", output_fn=lambda _m: None,
+            err_fn=lambda _m: None, detect_fn=lambda _r: None)
+
+
 def test_the_config_writer_takes_one_root(tmp_path: Path) -> None:
     """No parameter a caller can aim at a worktree: `project_root` is removed,
     not repointed (spec §1's rule, applied to the writer)."""
