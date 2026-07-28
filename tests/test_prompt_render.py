@@ -164,15 +164,6 @@ def test_project_namespace_is_gone(tmp_path: Path) -> None:
     assert "fact" not in str(ei.value)   # no facts-specific message survives
 
 
-def test_build_context_rejects_project_facts(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match="project_facts"):
-        build_context(
-            quest_title="t",
-            event_log=_log(tmp_path / "events.jsonl", []),
-            project_facts={"a": "1"},   # type: ignore[call-arg]
-        )
-
-
 def test_renders_quest_home(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(

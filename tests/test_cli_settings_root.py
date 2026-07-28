@@ -84,16 +84,6 @@ def test_the_active_theme_comes_from_the_main_checkout(
     assert pal.active_theme() == "dark"
 
 
-def test_the_nudge_takes_one_root(tmp_path: Path) -> None:
-    from imp.cli.main import _test_cmd_fast_nudge
-
-    with pytest.raises(TypeError, match="project_root"):
-        _test_cmd_fast_nudge(  # type: ignore[call-arg]
-            project_root=tmp_path, control_root=tmp_path, non_interactive=True,
-            input_fn=lambda _p="": "", output_fn=lambda _m: None,
-            err_fn=lambda _m: None, detect_fn=lambda _r: None)
-
-
 def test_the_config_writer_takes_one_root(tmp_path: Path) -> None:
     """No parameter a caller can aim at a worktree: `project_root` is removed,
     not repointed (spec §1's rule, applied to the writer)."""

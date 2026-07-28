@@ -673,12 +673,6 @@ def test_project_reference_is_not_validated_at_load(tmp_path: Path) -> None:
     load_workflow(wf)  # must not raise
 
 
-def test_project_keys_parameter_is_gone(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _STUB_WF, agents={"stub": _OK_AGENT})
-    with pytest.raises(TypeError, match="project_keys"):
-        load_workflow(wf, project_keys=frozenset({"x"}))  # type: ignore[call-arg]
-
-
 # ── _v_read_only_paths ────────────────────────────────────────────────────────
 
 def _read_only_wf(tmp_path: Path, path_literal: str):

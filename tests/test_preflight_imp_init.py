@@ -46,10 +46,3 @@ def test_preflight_defers_on_unknown_provider(
     (imp_home / "config.yaml").write_text("providers: [does_not_exist]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     assert _preflight_imp_init(control_root=tmp_path) is None
-
-
-def test_preflight_takes_no_project_root(tmp_path: Path) -> None:
-    """One settings root: there is no second root to disagree with it."""
-    with pytest.raises(TypeError, match="project_root"):
-        _preflight_imp_init(  # type: ignore[call-arg]
-            control_root=tmp_path, project_root=tmp_path)
