@@ -11,6 +11,7 @@ import pytest
 
 from imp.engine.worktree import PreconditionError
 from imp.paths import display_path, imp_home, project_state_dir
+from tests.conftest import clear_state_dir
 
 
 def _repo(parent: Path, name: str) -> Path:
@@ -134,3 +135,13 @@ def test_override_holding_another_checkouts_state_is_refused(
         f"IMP_STATE_DIR={display_path(override)} holds state for "
         f"{display_path(other)} — refusing to use it here"
     )
+
+
+def test_autouse_fixture_clears_an_inherited_state_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    leaked = tmp_path / "leaked-state"
+    monkeypatch.setenv("IMP_STATE_DIR", str(leaked))
+    clear_state_dir(monkeypatch)
+    root = _repo(tmp_path, "widget")
+    assert project_state_dir(root) == imp_home() / "projects" / "widget"
