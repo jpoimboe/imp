@@ -5,10 +5,11 @@ import json
 from pathlib import Path
 
 from imp.agents.tools.context import ToolContext
+from imp.paths import project_state_dir
 
 
 def _ctx(tmp_path: Path, agent_id: str = "step:plan/coder") -> ToolContext:
-    run_dir = tmp_path / ".imp" / "quests" / "test-quest"
+    run_dir = project_state_dir(tmp_path) / "quests" / "test-quest"
     run_dir.mkdir(parents=True, exist_ok=True)
     return ToolContext(project_root=tmp_path,
                        events_path=run_dir / "events.jsonl", agent_id=agent_id)
@@ -21,7 +22,7 @@ def test_bg_dir_is_per_invocation_and_hash_disambiguated(tmp_path: Path) -> None
     a = _bg_dir(_ctx(tmp_path, "step:review/final"))
     b = _bg_dir(_ctx(tmp_path, "researcher-1"))
     assert a != b
-    assert a.parent == b.parent == tmp_path / ".imp" / "quests" / "test-quest" / "bg"
+    assert a.parent == b.parent == project_state_dir(tmp_path) / "quests" / "test-quest" / "bg"
     # sanitizer is many-to-one; the hash suffix keeps colliding ids distinct
     c = _bg_dir(_ctx(tmp_path, "step.review.final"))
     assert a != c

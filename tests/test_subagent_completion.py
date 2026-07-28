@@ -16,6 +16,7 @@ from imp.engine.agent_run import (
     last_assistant_text,
 )
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.scripted import ScriptedAgentRunner, _build_tools
 
 
@@ -47,7 +48,7 @@ def _sub_invocation(tmp_path: Path, *, event_log=None) -> AgentInvocation:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "wf"),
+            workflow_dir=project_state_dir(tmp_path) / "wf"),
         user_chat_input_fn=None,
         transcript_dir=tmp_path / "sub",
         events_path=tmp_path / "events.jsonl",
@@ -175,7 +176,7 @@ async def test_dispatch_task_returns_raw_final_text(tmp_path: Path) -> None:
     ctx.coordinator = InterruptCoordinator()
     ctx.quest_context = QuestContext(
         id="c-1", title="C1", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "wf")
+        workflow_dir=project_state_dir(tmp_path) / "wf")
 
     async def _spawn(_inv):
         return _FakeRunner(

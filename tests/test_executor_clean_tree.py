@@ -6,6 +6,7 @@ from imp.engine.executor import _enforce_clean_tree
 from imp.engine.quest import Quest
 from imp.engine.state import InMemoryEventLog, State
 from imp.engine.types import Goto, Pause, SourceLoc, Step
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -79,7 +80,7 @@ def test_no_worktree_before_go_live_is_noop(tmp_path: Path) -> None:
     # A draft: project_root == control_root (no dedicated worktree yet). Even a
     # dirty control root must not trigger the check.
     _seed_control(tmp_path)
-    quest_dir = tmp_path / ".imp" / "quests" / "draft"
+    quest_dir = project_state_dir(tmp_path) / "quests" / "draft"
     (quest_dir / "state").mkdir(parents=True)
     ch = Quest(
         id="draft", title="t", base_branch="main",
@@ -102,7 +103,7 @@ def test_non_git_flipped_project_root_is_noop(tmp_path: Path) -> None:
     control.mkdir()
     fake_root = tmp_path / "flipped"      # bare dir, never git-inited
     fake_root.mkdir()
-    quest_dir = control / ".imp" / "quests" / "flip"
+    quest_dir = project_state_dir(control) / "quests" / "flip"
     (quest_dir / "state").mkdir(parents=True)
     ch = Quest(
         id="flip", title="t", base_branch="main",

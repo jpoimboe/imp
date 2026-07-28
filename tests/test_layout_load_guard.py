@@ -7,6 +7,7 @@ import pytest
 
 from imp.engine.errors import LayoutMismatch, LoadError
 from imp.engine.quest import LAYOUT_VERSION, Quest, migrate
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -71,7 +72,7 @@ def test_dir_without_quest_json_raises_plain_loaderror(tmp_path: Path) -> None:
     shape as a missing dir), never a raw FileNotFoundError — the stale-empty-dir
     case that used to crash imp log / imp show."""
     _seed_control(tmp_path)
-    stale = tmp_path / ".imp" / "quests" / "stale1"
+    stale = project_state_dir(tmp_path) / "quests" / "stale1"
     stale.mkdir(parents=True)                    # dir present, no quest.json
     assert not (stale / "quest.json").exists()
     with pytest.raises(LoadError) as ei:

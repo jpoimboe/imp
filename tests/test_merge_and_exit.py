@@ -7,6 +7,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import Continue, Goto, Pause, Rule, SourceLoc, Step
 from imp.engine.worktree import MergeResult
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -32,7 +33,7 @@ def test_merge_and_exit_removes_worktree_and_flips_root(tmp_path: Path) -> None:
     assert not isinstance(action, Pause)
     assert state.merge_commit is not None
     assert (tmp_path / "feature.txt").read_text() == "hi"             # merged into base
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()    # worktree removed
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()    # worktree removed
     assert ch.project_root == ch.control_root                         # project_root flipped
 
 
@@ -51,7 +52,7 @@ def test_merge_and_exit_idempotent_when_already_merged(tmp_path: Path) -> None:
 
     assert not isinstance(action, Pause)
     assert _git(tmp_path, "rev-parse", "main").stdout.strip() == base_before  # no 2nd merge
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()            # still exits
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()  # still exits
     assert ch.project_root == ch.control_root
 
 

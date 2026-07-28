@@ -5,11 +5,13 @@ import os
 import subprocess
 from pathlib import Path
 
+from imp.paths import project_state_dir
+
 SCRIPT = Path("src/imp/assets/workflows/default/scripts/integrate-rebase.sh").resolve()
 
 
 def _home(project_root: Path) -> Path:
-    return project_root.parent / ".imp" / "quests" / "x"
+    return project_state_dir(project_root.parent) / "quests" / "x"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

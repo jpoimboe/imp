@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.agent_run import drain_all_interjects_at_resume
+from imp.paths import project_state_dir
 
 
 @pytest.fixture
@@ -122,7 +123,7 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -260,7 +261,7 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -416,7 +417,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -757,7 +758,7 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -917,7 +918,7 @@ def test_script_step_route_does_not_drain_interjects(tmp_path) -> None:
     quest = _types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path, control_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "quests" / "test-quest",
+        quest_dir=project_state_dir(tmp_path) / "quests" / "test-quest",
     )
     step = Step(
         name="verify", phase="p", kind="script",

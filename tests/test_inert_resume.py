@@ -14,6 +14,7 @@ from imp.engine.abandon import archive_conversation
 from imp.engine.archive.read import rehydrate_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -290,7 +291,7 @@ def test_bare_turn_end_question_reprints_after_archive_and_rehydrate(
         payload={"steer_hint": "", "last_agent_message": "Which DB should I use?",
                  "interrupt": False})
     archive_conversation(ch)
-    assert not (tmp_path / ".imp" / "quests" / "c").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "c").exists()
 
     rehydrate_quest(tmp_path, "c")
     restored = Quest.load(tmp_path, "c")

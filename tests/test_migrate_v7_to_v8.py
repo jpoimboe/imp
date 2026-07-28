@@ -4,11 +4,12 @@ import json
 from pathlib import Path
 
 from imp.engine.quest import LAYOUT_VERSION, Quest, _migrate_v7_to_v8
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
 def _quest_dir(control: Path, cid: str) -> Path:
-    return control / ".imp" / "quests" / cid
+    return project_state_dir(control) / "quests" / cid
 
 
 def _seed_v7(control: Path, cid: str, *, status: str,

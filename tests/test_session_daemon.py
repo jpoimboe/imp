@@ -11,6 +11,7 @@ from imp.engine.completion import INTERRUPT_STEER_HINT
 from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_quest_session
 from imp.remote.session.discover import session_socket_path
@@ -41,7 +42,7 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        quest_dir=tmp_path / ".imp" / "quests" / quest_id,
+        quest_dir=project_state_dir(tmp_path) / "quests" / quest_id,
     )
     State(id=quest_id, step=None, step_attempt=0, status="paused").save(
         quest.state_dir)

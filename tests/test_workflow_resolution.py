@@ -55,7 +55,7 @@ def test_both_workflow_dirs_take_the_workflow_name_from_the_control_root(
     quest = Quest(
         id="2026-06-15-roots1", title="X", base_branch="main",
         control_root=control, project_root=worktree,
-        quest_dir=control / ".imp" / "quests" / "2026-06-15-roots1",
+        quest_dir=project_state_dir(control) / "quests" / "2026-06-15-roots1",
     )
     # Worktree dir root, control-root name. Under the old two-root read this was
     # bundled_workflow_dir("default") — the worktree naming its own workflow.
@@ -76,7 +76,7 @@ def test_change_create_tears_down_on_an_invalid_default_workflow(
     with pytest.raises(LoadError):
         Quest.create(tmp_path, title="X", quest_id="2026-06-15-tear01",
                      base_branch="main")
-    assert not (tmp_path / ".imp" / "quests" / "2026-06-15-tear01").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "2026-06-15-tear01").exists()
 
 
 def test_change_resolves_fork_workflow_dir(tmp_path: Path) -> None:

@@ -8,10 +8,11 @@ from imp.engine.archive import read as archive_read
 from imp.engine.archive import record, records_root
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 
 def _draft(control: Path, *, has_started: bool) -> Quest:
-    quest_dir = control / ".imp" / "quests" / "test-quest"
+    quest_dir = project_state_dir(control) / "quests" / "test-quest"
     (quest_dir / "state").mkdir(parents=True, exist_ok=True)
     State(id="c", step="chat", step_attempt=0, status="new",
           has_started=has_started).save(quest_dir / "state")

@@ -10,13 +10,14 @@ from imp.engine import executor as _executor
 from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import Continue, Goto, Pause, Rule, SourceLoc, Step
+from imp.paths import project_state_dir
 
 
 def _quest(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path, control_root=tmp_path,
         id="test-id", title="Test",
-        quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
+        quest_dir=project_state_dir(tmp_path) / "quests" / "test-quest")
 
 
 def _step(action) -> Step:

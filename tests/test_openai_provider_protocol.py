@@ -9,6 +9,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.base import Provider
 from imp.providers.openai import OpenAIAgentRunner, OpenAIProvider
 
@@ -34,7 +35,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "s",
 events_path=tmp_path / "events.jsonl",
     )

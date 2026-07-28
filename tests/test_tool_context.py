@@ -8,6 +8,7 @@ import pytest
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import PermissionDenied
 from imp.engine.sandbox import SandboxPolicy
+from imp.paths import project_state_dir
 
 
 def test_resolve_project_path(tmp_path: Path) -> None:
@@ -22,7 +23,7 @@ def test_quest_context_field(tmp_path: Path) -> None:
     assert ctx.quest_context is None
     ctx.quest_context = QuestContext(
         title="Test change", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow")
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow")
     assert ctx.quest_context.project_root == tmp_path
 
 
@@ -340,8 +341,8 @@ def test_tool_context_quest_home_defaults_none(tmp_path: Path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
     assert ctx.quest_home is None
-    ctx.quest_home = tmp_path / ".imp" / "quests" / "abc"
-    assert ctx.quest_home == tmp_path / ".imp" / "quests" / "abc"
+    ctx.quest_home = project_state_dir(tmp_path) / "quests" / "abc"
+    assert ctx.quest_home == project_state_dir(tmp_path) / "quests" / "abc"
     assert ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl",
                        quest_home=tmp_path).quest_home == tmp_path
 

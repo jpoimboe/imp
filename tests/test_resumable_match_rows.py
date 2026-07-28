@@ -8,6 +8,7 @@ from imp.engine.abandon import archive_conversation
 from imp.engine.archive import archive_quest
 from imp.engine.archive import read as archive_read
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -44,7 +45,7 @@ def test_match_rows_include_archived_resumable(tmp_path: Path) -> None:
     ch = Quest.create_draft(tmp_path, title="Left", quest_id="lodo40",
                              base_branch="main")
     archive_conversation(ch)
-    assert not (tmp_path / ".imp" / "quests" / "lodo40").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "lodo40").exists()
     ids = {r[0] for r in m._resumable_match_rows(tmp_path, "lodo")}
     assert ids == {"lodo40"}
 

@@ -49,7 +49,7 @@ def test_reads_back_as_is_type_exact() -> None:
 def test_verify_raises_the_validators_own_message_without_the_scratch_path(
     tmp_path: Path,
 ) -> None:
-    with (scratch_seam(tmp_path / ".imp" / "config-verify-1", "config.yaml") as scratch,
+    with (scratch_seam(tmp_path / "scratch" / "config-verify-1", "config.yaml") as scratch,
           pytest.raises(LoadError) as excinfo):
         verify(scratch, "theme: purple\n", ("theme",), "purple")
     assert excinfo.value.message == "'theme' must be 'dark', 'light', or 'ansi'"
@@ -68,7 +68,7 @@ def test_verify_reports_a_value_that_does_not_read_back(tmp_path: Path) -> None:
 def test_scratch_seam_uses_the_targets_basename_and_always_cleans_up(
     tmp_path: Path,
 ) -> None:
-    scratch_dir = tmp_path / ".imp" / "config-verify-7"
+    scratch_dir = tmp_path / "scratch" / "config-verify-7"
     with scratch_seam(scratch_dir, "config.yaml") as scratch:
         assert scratch.name == "config.yaml"
         assert scratch.parent == scratch_dir

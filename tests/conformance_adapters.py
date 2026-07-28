@@ -14,6 +14,7 @@ from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
@@ -83,7 +84,7 @@ def build(pair: str, tmp_path: Path, scripted: Any, *,
         workflow_dir, transcript_dir, init_msgs, qid = (
             tmp_path, tmp_path / "tx", (), "c1")
     else:
-        workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+        workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
         transcript_dir, qid = tmp_path / "step", "test"
         init_msgs = (Message(role="user", content=(TextBlock(text="go"),)),)
 

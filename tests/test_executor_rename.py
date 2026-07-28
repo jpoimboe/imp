@@ -126,7 +126,7 @@ def test_run_quest_rename_keeps_id_and_path(
     assert reloaded.id == "ccc333"
     from imp.engine import worktree
     # The no-merge completion removes the worktree but keeps the imp/<id> branch.
-    assert not (tmp_path / ".imp" / "worktrees" / "ccc333").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "ccc333").exists()
     assert worktree.branch_exists(tmp_path, "imp/ccc333")
 
 

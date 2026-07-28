@@ -16,6 +16,7 @@ from imp.agents.runner import (
     message_from_json,
     message_to_json,
 )
+from imp.paths import project_state_dir
 
 
 def test_message_immutable() -> None:
@@ -80,7 +81,7 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
         initial_messages=(Message(role="user", content=(TextBlock(text="x"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
@@ -89,7 +90,7 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
     assert inv.first_event_parent_id is None
 
 
-def test_agent_invocation_has_continuation_fn_default_none() -> None:
+def test_agent_invocation_has_continuation_fn_default_none(tmp_path) -> None:
     from pathlib import Path
 
     from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
@@ -111,7 +112,7 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=Path("."),
-            workflow_dir=Path(".") / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=tmp_path / "workflow"),
         transcript_dir=Path("."),
 events_path=Path("e.jsonl"),
     )
@@ -124,7 +125,7 @@ events_path=Path("e.jsonl"),
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=Path("."),
-            workflow_dir=Path(".") / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=tmp_path / "workflow"),
         transcript_dir=Path("."),
 events_path=Path("e.jsonl"),
         continuation_fn=lambda last: captured.append(last) or "nudge",
@@ -152,7 +153,7 @@ def test_agent_invocation_has_tiers_field() -> None:
     assert "model_tiers" not in fields
 
 
-def test_agent_invocation_resolved_tiers_defaults_none():
+def test_agent_invocation_resolved_tiers_defaults_none(tmp_path):
     from pathlib import Path
 
     from imp.agents.runner import AgentInvocation, QuestContext
@@ -170,7 +171,7 @@ def test_agent_invocation_resolved_tiers_defaults_none():
         initial_messages=(),
         quest_context=QuestContext(
             title="x", project_root=Path("."),
-            workflow_dir=Path(".") / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=tmp_path / "workflow"),
         transcript_dir=Path("."),
         events_path=Path("e.jsonl"))
     assert inv.resolved_tiers is None

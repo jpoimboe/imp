@@ -51,7 +51,7 @@ def _make_quest(root: Path) -> Quest:
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
 
-    quest_dir = root / ".imp" / "quests" / "test-quest"
+    quest_dir = project_state_dir(root) / "quests" / "test-quest"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(

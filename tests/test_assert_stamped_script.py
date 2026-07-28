@@ -12,12 +12,14 @@ import os
 import subprocess
 from pathlib import Path
 
+from imp.paths import project_state_dir
+
 ASSERT = Path("src/imp/assets/workflows/default/scripts/assert-stamped.sh").resolve()
 ID = "2026-06-20-assert-test"
 
 
 def _home(pr: Path) -> Path:
-    return pr.parent / ".imp" / "quests" / "x"
+    return project_state_dir(pr.parent) / "quests" / "x"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

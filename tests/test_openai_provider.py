@@ -21,6 +21,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.openai import (
     _imp_to_responses_input,
     _parse_responses_message,
@@ -65,7 +66,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         system_prompt="be terse", initial_messages=(),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
 events_path=tmp_path / "events.jsonl",

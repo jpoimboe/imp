@@ -14,6 +14,7 @@ from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES, ToolAborted
+from imp.paths import project_state_dir
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -23,7 +24,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     )
     ctx.quest_context = QuestContext(
         id="test01", title="Test Quest", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
     )
     return ctx
 
@@ -757,11 +758,11 @@ def test_bash_prepends_shim_dir_to_path(tmp_path: Path) -> None:
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     ctx.quest_context = QuestContext(
         id="test01", title="Test Quest", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
-        quest_home=str(tmp_path / ".imp" / "quests" / "test-quest"),
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
+        quest_home=str(project_state_dir(tmp_path) / "quests" / "test-quest"),
     )
     out = json.loads(_run_bash(ctx, {"command": 'printf %s "$PATH"'}))
-    shim = tmp_path / ".imp" / "quests" / "test-quest" / "imp-shim"
+    shim = project_state_dir(tmp_path) / "quests" / "test-quest" / "imp-shim"
     assert out["stdout"].startswith(str(shim) + os.pathsep)
 
 
@@ -773,7 +774,7 @@ def test_bash_no_quest_home_leaves_path_unchanged(
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     ctx.quest_context = QuestContext(
         id="test01", title="Test Quest", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
     )
     out = json.loads(_run_bash(ctx, {"command": 'printf %s "$PATH"'}))
     assert "imp-shim" not in out["stdout"]

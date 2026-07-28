@@ -419,8 +419,7 @@ def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
 
 def test_artifact_commit_snapshots_full_tree_with_guard(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    stage = tmp_path / ".imp"
-    stage.mkdir(exist_ok=True)
+    stage = project_state_dir(tmp_path)
     spec = stage / "spec.md"
     spec.write_text("# the spec\n")
     plan = stage / "plan.md"
@@ -611,8 +610,7 @@ def test_artifact_commit_starts_new_lineage_on_unreadable_parent(
     tmp_path: Path,
 ) -> None:
     _init_repo(tmp_path)
-    stage = tmp_path / ".imp"
-    stage.mkdir(exist_ok=True)
+    stage = project_state_dir(tmp_path)
     spec = stage / "spec.md"
 
     # First snapshot -> root commit; a healthy path fires no warning.
@@ -678,8 +676,7 @@ def test_origin_head_branch_strips_origin_prefix(tmp_path: Path) -> None:
 def test_artifact_commit_warn_defaults_to_none(tmp_path: Path) -> None:
     # warn is optional: omitting it on the corrupt-parent path must not raise.
     _init_repo(tmp_path)
-    stage = tmp_path / ".imp"
-    stage.mkdir(exist_ok=True)
+    stage = project_state_dir(tmp_path)
     spec = stage / "spec.md"
     spec.write_text("# a\n")
     assert wt.artifact_commit(

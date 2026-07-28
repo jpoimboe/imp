@@ -28,6 +28,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.completion import completion_instruction
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers import claude_code
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.claude_code_session_store import (
@@ -118,7 +119,7 @@ def _live_inv(tmp_path: Path) -> AgentInvocation:
         continuation_fn=_auto_nudge_continuation(),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
@@ -324,7 +325,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
         continuation_fn=_auto_nudge_continuation(),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",

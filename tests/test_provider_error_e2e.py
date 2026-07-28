@@ -20,7 +20,7 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "quests" / quest_id
+    quest_dir = project_state_dir(root) / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({

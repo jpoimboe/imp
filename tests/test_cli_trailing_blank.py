@@ -4,6 +4,8 @@ import sys
 
 import pytest
 
+from imp.paths import project_state_dir
+
 
 def test_with_trailing_blank_empty_input_yields_one_blank() -> None:
     from imp.cli.main import _with_trailing_blank
@@ -102,7 +104,7 @@ def test_log_ends_with_one_trailing_blank_on_tty(
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
     # Add step events so the narrative tree has visible content to render.
-    log = JsonlEventLog(tmp_path / ".imp" / "quests" / "alpha" / "events.jsonl")
+    log = JsonlEventLog(project_state_dir(tmp_path) / "quests" / "alpha" / "events.jsonl")
     log.append(agent_id=None, type="step_started", payload={"step": "s"})
     log.append(agent_id=None, type="step_completed",
                payload={"step": "s", "status": "Success"})

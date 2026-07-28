@@ -20,6 +20,7 @@ from imp.agents.runner import (
 from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.openai import OpenAIAgentRunner
 from tests._events import control_events
 from tests.openai_fakes import (
@@ -61,7 +62,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             id="test", title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
@@ -573,7 +574,7 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
         inv,
         quest_context=QuestContext(
             id="test-2", title="Test 2", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
     )
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",

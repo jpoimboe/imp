@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.slash import ask_line_with_slash
+from imp.paths import project_state_dir
 
 
 @pytest.fixture
@@ -24,7 +25,7 @@ def _fake_quest(tmp_path: Path):
         def __init__(self) -> None:
             self.id = "abcd12"
             self.title = "Fake change"
-            self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+            self.workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
             skills = self.workflow_dir / "skills"
             skills.mkdir(parents=True)
             self._events = tmp_path / "events.jsonl"

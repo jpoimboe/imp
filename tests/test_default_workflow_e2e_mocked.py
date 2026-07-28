@@ -145,7 +145,7 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "quests" / quest_id
+    quest_dir = project_state_dir(root) / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({
@@ -232,9 +232,10 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
     _git(tmp_path, "commit", "-qm", "seed")
     # Create the imp/<slug> branch and a git worktree at the expected path so
     # merge_to_base and remove_worktree both succeed.
-    (tmp_path / ".imp" / "worktrees").mkdir(parents=True, exist_ok=True)
+    quest_wt_path = project_state_dir(tmp_path) / "worktrees" / "test-quest"
+    quest_wt_path.parent.mkdir(parents=True, exist_ok=True)
     _git(tmp_path, "worktree", "add", "-q", "-b", "imp/test-quest",
-         ".imp/worktrees/test-quest", "main")
+         str(quest_wt_path), "main")
 
     return _make_quest(tmp_path, title="e2e-default-workflow")
 
@@ -789,7 +790,7 @@ def _register_step_aware_anthropic() -> None:
 
 def _commit_in_quest_worktree(root: Path) -> None:
     """Real work on the quest branch, so the merge has something to advance base with."""
-    quest_wt = root / ".imp" / "worktrees" / "test-quest"
+    quest_wt = project_state_dir(root) / "worktrees" / "test-quest"
     (quest_wt / "feature.txt").write_text("done\n")
     _git(quest_wt, "add", "-A")
     _git(quest_wt, "commit", "-qm", "quest work")

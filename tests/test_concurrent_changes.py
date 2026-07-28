@@ -11,6 +11,7 @@ import pytest
 from imp.engine.executor import RunResult, _complete, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -114,7 +115,7 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
     result = anyio.run(run_quest, ch)
     assert result is RunResult.COMPLETED
     assert (tmp_path / "out.txt").read_text() == "done"          # merged into live base
-    assert not (tmp_path / ".imp" / "worktrees" / "spine").exists()  # worktree removed
+    assert not (project_state_dir(tmp_path) / "worktrees" / "spine").exists()  # worktree removed
     branch_list = _git(tmp_path, "branch", "--list", "imp/spine").stdout
     assert "imp/spine" in branch_list                            # branch kept
     from imp.engine.archive import read as archive_read

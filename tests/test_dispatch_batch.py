@@ -16,6 +16,7 @@ from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 
 
 @pytest.fixture
@@ -48,7 +49,7 @@ def _ctx(tmp_path: Path, *, spawn, event_log=None) -> ToolContext:
     ctx.event_log = event_log
     ctx.quest_context = QuestContext(
         title="Quest 42", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow")
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow")
     return ctx
 
 

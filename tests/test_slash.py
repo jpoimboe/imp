@@ -7,6 +7,7 @@ import anyio
 import pytest
 
 from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
+from imp.paths import project_state_dir
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -17,7 +18,7 @@ class _FakeQuest:
     def __init__(self, tmp_path: Path) -> None:
         self.id = "abcd12"
         self.title = "Fake change"
-        self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+        self.workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
         user = self.workflow_dir / "skills" / "user"
         user.mkdir(parents=True)
         (user / "refactor.md").write_text("# Refactor\nstep one\n")
