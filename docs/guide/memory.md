@@ -35,9 +35,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
   <key>`, which keeps the file's comments and writes each setting to its own
   layer — `imp/config.yaml` for these, `~/.imp/config.yaml` for machine-wide ones
   like `theme`; `--project` / `--global` overrides that for anything that is not
-  project-only. `imp init` scaffolds the file — its interactive setup picks the
-  default workflow and base (use `imp init --use-defaults` to skip the
-  conversation in CI).
+  project-only. `imp init` scaffolds the file — it detects the default workflow
+  and base and confirms them on one screen (use `imp init --use-defaults` for a
+  non-interactive CI setup).
 
 ## Reading what is active
 

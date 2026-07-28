@@ -119,7 +119,7 @@ clone for now.
 ```bash
 git clone <repo-url> imp && cd imp
 python3 -m pip install -e .
-imp init          # interactive setup: pick your default workflow + settings
+imp init          # setup: imp detects your settings and confirms them on one screen
                   # (imp init --use-defaults for a non-interactive CI setup)
 ```
 
