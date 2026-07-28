@@ -1,5 +1,6 @@
-"""Project facts/memory freeze into state.json at first run and are reused on
-resume — never re-read live mid-Quest (spec item 6 / AC 10)."""
+"""Project memory freezes into state.json at first run and is reused on resume —
+never re-read live mid-quest. `state.memory is None` is the freeze gate: None ==
+not yet frozen, {} == frozen with no memory files."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,13 +23,13 @@ _FAKE_CONFIG = (
 )
 
 
-def _seed(root: Path, *, facts_yaml: str, memory: str | None = None):
+def _seed(root: Path, *, memory: str | None = None):
     wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "hello {{ project.greeting }}\n"
+        "hello world\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -36,7 +37,7 @@ def _seed(root: Path, *, facts_yaml: str, memory: str | None = None):
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    (root / "imp" / "config.yaml").write_text(facts_yaml)
+    (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     if memory is not None:
         (root / "imp" / "memory").mkdir(parents=True, exist_ok=True)
         (root / "imp" / "memory" / "all.md").write_text(memory)
@@ -46,12 +47,8 @@ def _seed(root: Path, *, facts_yaml: str, memory: str | None = None):
 
 
 @pytest.mark.anyio
-async def test_first_run_freezes_facts_and_memory(tmp_path: Path) -> None:
-    quest = _seed(
-        tmp_path,
-        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\n",
-        memory="live note",
-    )
+async def test_first_run_freezes_memory(tmp_path: Path) -> None:
+    quest = _seed(tmp_path, memory="live note")
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
@@ -60,13 +57,23 @@ async def test_first_run_freezes_facts_and_memory(tmp_path: Path) -> None:
 
     from imp.engine.archive import read as archive_read
     archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
-    state = State.load(quest.state_dir)
-    assert state.project_facts == {"greeting": "hi"}
-    assert state.memory == {"all.md": "live note"}
+    assert State.load(quest.state_dir).memory == {"all.md": "live note"}
     body = sink[0].initial_messages[0].content[0].text
-    assert "hello hi" in body                     # fact still rendered via the template
     assert "## Project memory" in body            # engine-injected section
     assert "live note" in body                    # frozen memory text
+
+
+@pytest.mark.anyio
+async def test_project_with_no_memory_freezes_an_empty_snapshot(tmp_path: Path) -> None:
+    quest = _seed(tmp_path)
+    _register_invocation_capturing({"status": "Success"}, [])
+
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)
+    # {} (frozen, no files), NOT None — otherwise the gate would re-freeze.
+    assert State.load(quest.state_dir).memory == {}
 
 
 @pytest.mark.anyio
@@ -74,30 +81,23 @@ async def test_first_run_raises_on_invalid_memory_and_leaves_state_unfrozen(
     tmp_path: Path,
 ) -> None:
     """An invalid imp/memory/ tree raises LoadError at the first-run freeze site
-    and leaves state.project_facts None (freeze never committed)."""
-    quest = _seed(
-        tmp_path,
-        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\n",
-    )
+    and leaves state.memory None (freeze never committed)."""
+    quest = _seed(tmp_path)
     (tmp_path / "imp" / "memory").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "memory" / "notallowed.md").write_text("x")
 
     with pytest.raises(LoadError):
         await run_quest(quest, on_event=lambda _e: None)
-    assert State.load(quest.state_dir).project_facts is None
+    assert State.load(quest.state_dir).memory is None
 
 
 @pytest.mark.anyio
-async def test_run_uses_frozen_state_not_live_config_yaml(tmp_path: Path) -> None:
-    # config.yaml says greeting=hi and memory=live, but state was frozen earlier
-    # with different values. The executor must render from the FROZEN state.
-    quest = _seed(
-        tmp_path,
-        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\n",
-        memory="live",
-    )
+async def test_run_uses_frozen_memory_not_the_live_tree(tmp_path: Path) -> None:
+    # The live imp/memory/all.md differs from what state was frozen with. An
+    # already-frozen quest must render the FROZEN memory and must not re-freeze —
+    # even though project_facts was never set.
+    quest = _seed(tmp_path, memory="LIVE-MEMO")
     state = State.load(quest.state_dir)
-    state.project_facts = {"greeting": "FROZEN"}
     state.memory = {"all.md": "FROZEN-MEMO"}
     state.save(quest.state_dir)
 
@@ -106,11 +106,9 @@ async def test_run_uses_frozen_state_not_live_config_yaml(tmp_path: Path) -> Non
     await run_quest(quest, on_event=lambda _e: None)
 
     from imp.engine.archive import read as archive_read
-    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    archive_read.rehydrate_quest(quest.control_root, quest.id)
     body = sink[0].initial_messages[0].content[0].text
-    assert "hello FROZEN" in body                 # frozen fact, not live config.yaml
     assert "## Project memory" in body
     assert "FROZEN-MEMO" in body                  # frozen memory, injected
-    assert "hello hi" not in body                 # live greeting never used
-    # The guard never overwrites an already-frozen value.
-    assert State.load(quest.state_dir).project_facts == {"greeting": "FROZEN"}
+    assert "LIVE-MEMO" not in body                # live tree never read
+    assert State.load(quest.state_dir).memory == {"all.md": "FROZEN-MEMO"}

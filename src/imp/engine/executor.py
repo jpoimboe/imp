@@ -431,8 +431,8 @@ async def run_quest(
         # Tier A handoff watch always sees the configured threshold without
         # persisting it (the resolved_tiers block below is skipped on resume).
         state.checkpoint_threshold = config.context_checkpoint_threshold()
-        # Freeze once per quest: resume reuses the facts/memory the first run saw.
-        if state.project_facts is None:
+        # Freeze once per quest: resume reuses the memory the first run saw.
+        if state.memory is None:
             validate_project_memory(quest.project_root, config.memory)
             state.project_facts = config.project_facts
             state.memory = config.memory
