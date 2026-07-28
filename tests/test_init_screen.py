@@ -105,12 +105,14 @@ def test_cycle_workflow_advances_wraps_and_touches_nothing_else() -> None:
 def _body(state: InitScreenState, cursor: ScreenRow) -> list[str]:
     """Each row's text with the two-character caret/gutter prefix removed."""
     return [text[2:].rstrip("\n")
-            for _style, text in _confirm_rows(state, cursor)[1:-1]]
+            for _style, text in _confirm_rows(state, cursor)[2:-1]]
 
 
 def test_confirm_rows_header_and_hint_are_verbatim() -> None:
     rows = _confirm_rows(_detected_state(), ScreenRow.WORKFLOW)
-    assert rows[0] == ("bold", "Here's how imp will set up this project:\n\n")
+    # screen-owned: erased with the screen, so it never renders flush against splash or re-draws
+    assert rows[0] == ("", "\n")
+    assert rows[1] == ("bold", "Here's how imp will set up this project:\n\n")
     assert rows[-1] == (
         "ansibrightblack",
         "\n↑↓ move · space change · enter accept · ? talk it through · esc cancel")
@@ -141,8 +143,8 @@ def test_confirm_rows_pad_each_column_to_its_widest_entry() -> None:
 
 def test_confirm_rows_mark_the_cursor_row_with_a_render_safe_caret() -> None:
     rows = _confirm_rows(_detected_state(), ScreenRow.TESTS)
-    styles = [style for style, _text in rows[1:-1]]
-    texts = [text for _style, text in rows[1:-1]]
+    styles = [style for style, _text in rows[2:-1]]
+    texts = [text for _style, text in rows[2:-1]]
     assert styles == ["", "", "ansiyellow bold", ""]
     assert texts[2].startswith("> ")
     assert "❯" not in texts[2]

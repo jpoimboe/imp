@@ -553,7 +553,7 @@ def _confirm_rows(
     cells = _row_cells(state)
     label_w = max(len(label) for label, _value, _note in cells.values())
     value_w = max(len(value) for _label, value, _note in cells.values())
-    out: list[tuple[str, str]] = [("bold", f"{_CONFIRM_HEADER}\n\n")]
+    out: list[tuple[str, str]] = [("", "\n"), ("bold", f"{_CONFIRM_HEADER}\n\n")]
     for row in ScreenRow:
         label, value, note = cells[row]
         arrow = "> " if row is cursor else "  "
