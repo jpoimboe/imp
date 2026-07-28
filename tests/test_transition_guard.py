@@ -122,7 +122,11 @@ def test_pending_is_old_present_and_new_absent(tmp_path: Path) -> None:
 def test_the_startup_migration_reads_the_shared_pending_predicate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import imp.providers.effective as effective
+    import imp.providers.paths as paths
     from imp.cli.config_migrate import migrate_project_config
+
+    assert effective.project_rename_pending is paths.project_rename_pending
 
     proj = _old_name_repo(tmp_path)
     seen: list[Path] = []
