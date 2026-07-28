@@ -42,15 +42,48 @@ def test_setup_agent_output_schema() -> None:
 def test_setup_agent_body_states_the_facts_it_must_convey() -> None:
     flat = _flat_body()
     assert "Ground every proposal" in flat
-    for decision in ("**git**", "**Default workflow**", "**Integration branch**",
-                     "**Fast test command**", "**Python import root**"):
-        assert decision in flat, decision
+    for setting in ("**git**", "**Default workflow**", "**Integration branch**",
+                    "**Fast test command**", "**Python import root**"):
+        assert setting in flat, setting
     assert "`default`" in flat and "`minimal`" in flat
     assert "--workflow" in flat
     assert "name the signal you used" in flat
     assert "load the `imp-knowledge` skill" in flat
     assert "an empty string means imp runs no tests" in flat   # test-cmd opt-out
     assert "gets an empty list" in flat                        # import-root opt-out
+
+
+def test_setup_agent_body_revises_the_screens_settings() -> None:
+    """It is reached only from the confirmation screen's `?`, so it revises
+    settled values instead of settling five decisions from scratch."""
+    flat = _flat_body()
+    assert "pressed `?`" in flat
+    assert "you set this" in flat
+    assert "Five things to settle" not in flat
+    assert "settle one decision at a time" not in flat
+
+
+def test_setup_agent_body_decodes_the_kickoffs_empty_value_sentinel() -> None:
+    """_row_cells renders an empty branch/test-command/roots as `(none)`, and the
+    host writes test_cmd_fast and default_base back unvalidated — so the body says
+    the sentinel means empty, while still refusing the empty branch that `enter`
+    is refused for."""
+    flat = _flat_body()
+    assert "`(none)` is empty, never a literal" in flat
+    assert "hand an empty test command back as an empty string" in flat
+    assert "never hand back an empty integration branch" in flat
+
+
+def test_setup_agent_body_keeps_the_test_opt_out_deliberate() -> None:
+    """test_cmd_fast has no null in the schema, so an undetected command would
+    otherwise come back as "" — the opt-out that suppresses the `imp new` nudge."""
+    assert "propose a command rather than leaving it empty" in _flat_body()
+
+
+def test_setup_agent_body_pins_git_init_false() -> None:
+    """run_init asks the git question itself before the screen, so the surviving
+    git_init field has exactly one correct value."""
+    assert "always set git_init false" in _flat_body()
 
 
 def test_setup_agent_scripts_no_opening_line() -> None:
