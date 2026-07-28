@@ -14,10 +14,12 @@ import gzip
 import io
 import json
 
+import pytest
+
 from imp.cli import narrative as nv
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
-from imp.cli.render_text import render_tree
+from imp.cli.render_text import LOG_CATEGORIES, render_tree
 from tests.conftest import FIXTURES
 
 _GZ = FIXTURES / "cc_open_by_asking_full.jsonl.gz"
@@ -33,17 +35,19 @@ def _events() -> list[dict]:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def _live_body(events) -> str:
+def _live_body(events, cats: frozenset[str] = frozenset()) -> str:
     out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     cats=cats)
     for e in events:
         drv.on_event(e)
     drv.finish()  # force-flush the final block
     return out.getvalue()
 
 
-def _log_body(events) -> str:
-    return "\n".join(render_tree(nv.build_tree(events), full=False, color=False, width=80)) + "\n"
+def _log_body(events, cats: frozenset[str] = frozenset()) -> str:
+    return "\n".join(render_tree(nv.build_tree(events), show=cats, color=False,
+                                 width=80)) + "\n"
 
 
 _LIVE_REFRESH = (
@@ -104,11 +108,13 @@ def test_no_stall_invariant_final_breadcrumb_present() -> None:
     )
 
 
-def test_live_log_body_parity() -> None:
+@pytest.mark.parametrize("cats", [frozenset(), frozenset(LOG_CATEGORIES)],
+                         ids=["lean", "full"])
+def test_live_log_body_parity(cats: frozenset[str]) -> None:
     # quest_merged is intentionally suppressed in the live path (main.py owns
     # that line), so exclude it from the parity comparison.
     events = [e for e in _events() if e.get("type") != "quest_merged"]
-    assert _live_body(events) == _log_body(events), (
+    assert _live_body(events, cats) == _log_body(events, cats), (
         "live and log bodies diverged — live/log parity invariant broken"
     )
 
