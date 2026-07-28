@@ -61,6 +61,22 @@ PROJECT_RENAME_HINT = (
 )
 
 
+def project_rename_pending(root: Path) -> bool:
+    """`root` carries the pre-rename `imp/project.yaml` and no `imp/config.yaml`."""
+    return ((root / "imp" / "project.yaml").is_file()
+            and not (root / "imp" / "config.yaml").exists())
+
+
+def project_rename_hint(root: Path) -> str:
+    """The rename instruction, naming the checkout and (when resolvable) its branch."""
+    from imp.engine.worktree import checked_out_branch
+
+    branch = checked_out_branch(root)
+    where = f"{root} (branch {branch})" if branch is not None else str(root)
+    return (f"imp/project.yaml found in {where} but imp now reads imp/config.yaml — "
+            f"rename it with `git -C {root} mv imp/project.yaml imp/config.yaml`")
+
+
 def _floor_layer() -> tuple[dict[str, Any], SourceLoc]:
     """The bottom merge layer, materialized from registry metadata: every
     registered vendor's tier_defaults assembled into {tier: {vendor: model}},
@@ -152,8 +168,8 @@ def load_effective_config(
     memory: dict[str, str] = {}
     if project_root is not None:
         proj_path = project_root / "imp" / "config.yaml"
-        if not proj_path.is_file() and (project_root / "imp" / "project.yaml").is_file():
-            raise LoadError(PROJECT_RENAME_HINT)
+        if project_rename_pending(project_root):
+            raise LoadError(project_rename_hint(project_root))
         p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)
