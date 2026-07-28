@@ -40,21 +40,17 @@ def _git_toplevel(cwd: Path) -> Path | None:
     return Path(proc.stdout.strip()).resolve()
 
 
-def _rename_pending(root: Path) -> bool:
-    return ((root / "imp" / "project.yaml").is_file()
-            and not (root / "imp" / "config.yaml").exists())
-
-
 def migrate_project_config(cwd: Path) -> None:
     """Stage `imp/project.yaml` -> `imp/config.yaml` in the main checkout, once."""
     from imp.engine.worktree import find_control_root
+    from imp.providers.effective import project_rename_pending
 
     # Pure-filesystem pre-check: an already-migrated repo is the permanent steady
     # state, and must not pay a git spawn on every imp invocation.
-    if not any(_rename_pending(p) for p in (cwd, *cwd.parents)):
+    if not any(project_rename_pending(p) for p in (cwd, *cwd.parents)):
         return
     control = find_control_root(cwd)
-    if not _rename_pending(control):
+    if not project_rename_pending(control):
         return
     # In a linked worktree the toplevel is the worktree and the control root the
     # main checkout, so this inequality IS the mid-run guard.
