@@ -26,6 +26,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from enum import IntEnum
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -46,6 +47,7 @@ from imp.cli import palette as pal
 from imp.cli import splash
 from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT, Prompt
 from imp.cli.pythonpath_detect import (
+    ImportRoots,
     detect_import_roots,
     format_pythonpath_yaml,
     resolve_detection_provider,
@@ -456,6 +458,73 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
         mouse_support=False,
     )
     return list(app.run())
+
+
+_CONFIRM_HEADER = "Here's how imp will set up this project:"
+_CONFIRM_HINT = "↑↓ move · space change · enter accept · ? talk it through · esc cancel"
+_NO_VALUE = "(none)"
+_YOU_SET_THIS = "you set this"
+_NO_TESTS_DETECTED = "nothing detected — imp will run no tests"
+_NO_BRANCH_DETECTED = "nothing detected"
+_CUSTOM_WORKFLOW = "custom workflow"
+
+# Hand-written, never derived: every workflow.yaml `description:` opens with its
+# internal step-name pipeline, which must not reach a user's first screen.
+_WORKFLOW_BLURBS = {
+    "default": "full pipeline — spec, plan, implement, review, merge",
+    "minimal": "scope, build on a branch, merge it yourself",
+    "patent": "turns an inventor interview into a patent-spec draft",
+}
+
+
+class ScreenRow(IntEnum):
+    WORKFLOW = 0
+    BRANCH = 1
+    TESTS = 2
+    IMPORT_ROOT = 3
+
+
+@dataclass(frozen=True, slots=True)
+class InitScreenState:
+    """What the confirmation screen shows and, on accept, writes. `test_cmd_fast`
+    and `pythonpath` carry InitSettings' semantics exactly, so accepting needs no
+    reinterpretation. The workflow row's provenance is derived, never stored."""
+    workflow: str
+    branch: str
+    branch_provenance: str
+    test_cmd_fast: str | None
+    tests_provenance: str
+    pythonpath: list[str]
+    roots_provenance: str
+
+
+def _screen_state_from_detection(
+    *,
+    workflow: str,
+    base: BaseDetection | None,
+    tests: DetectedTestCommand | None,
+    roots: ImportRoots,
+) -> InitScreenState:
+    return InitScreenState(
+        workflow=workflow,
+        branch=base.branch if base else "",
+        branch_provenance=base.provenance if base else _NO_BRANCH_DETECTED,
+        test_cmd_fast=tests.command if tests else None,
+        tests_provenance=tests.provenance if tests else _NO_TESTS_DETECTED,
+        pythonpath=list(roots.roots),
+        roots_provenance=roots.provenance,
+    )
+
+
+def _workflow_blurb(name: str) -> str:
+    return _WORKFLOW_BLURBS.get(name, _CUSTOM_WORKFLOW)
+
+
+def _cycle_workflow(state: InitScreenState, workflows: list[str]) -> InitScreenState:
+    # The caller passes the list the state was seeded from, so the name is in it.
+    return replace(
+        state,
+        workflow=workflows[(workflows.index(state.workflow) + 1) % len(workflows)])
 
 
 def write_init_files(project_root: Path, settings: InitSettings) -> bool:
