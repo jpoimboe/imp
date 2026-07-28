@@ -52,6 +52,7 @@ from imp.cli.pythonpath_detect import (
     validate_detected_roots,
 )
 from imp.cli.verify_detect import (
+    DetectedTestCommand,
     detect_test_command,
     format_test_cmd_fast_yaml,
 )
@@ -776,7 +777,7 @@ def run_init_noninteractive(
     workflow: str | None = None,
     base: str | None = None,
     pythonpath: list[str] | None = None,
-    detect_verify_fn: Callable[[Path], str | None] | None = None,
+    detect_verify_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
 ) -> None:
     """Provider-free, non-interactive `imp init`: write imp/config.yaml from
     defaults (+ overrides) with no model call. Both `--use-defaults` and the
@@ -808,7 +809,8 @@ def run_init_noninteractive(
     output_fn(f"Integration branch: {default_base}")
 
     detect_cmd = detect_verify_fn or detect_test_command
-    test_cmd_fast = detect_cmd(project_root)  # None omits; a heuristic hit fills it
+    detected = detect_cmd(project_root)
+    test_cmd_fast = detected.command if detected else None  # None omits the block
     roots = (validate_detected_roots(project_root, pythonpath) if pythonpath
              else detect_import_roots(project_root).roots)
 

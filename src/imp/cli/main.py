@@ -60,6 +60,7 @@ from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.store import HomeDigest, SearchHit, SearchZones, Store, make_store
 from imp.cli.terminal_title import TerminalTitle
+from imp.cli.verify_detect import DetectedTestCommand
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
 from imp.engine.abandon import (
@@ -715,7 +716,7 @@ def _test_cmd_fast_nudge(
     *, project_root: Path, control_root: Path, non_interactive: bool,
     input_fn: Callable[[str], str], output_fn: Callable[[str], None],
     err_fn: Callable[[str], None],
-    detect_fn: Callable[[Path], str | None] | None = None,
+    detect_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
 ) -> None:
     """`imp new` backstop: nudge when test_cmd_fast is absent and a command is detected."""
     from imp.cli.verify_detect import (
@@ -732,16 +733,16 @@ def _test_cmd_fast_nudge(
         return
     if cfg.test_cmd_fast is not None:
         return
-    suggested = detect(project_root)
-    if suggested is None:
+    detected = detect(project_root)
+    if detected is None:
         return
     project_file = project_root / "imp" / "config.yaml"
     if non_interactive:
         err_fn(
-            f"imp: no test_cmd_fast configured; detected `{suggested}`. Set "
+            f"imp: no test_cmd_fast configured; detected `{detected.command}`. Set "
             f"test_cmd_fast in {project_file} to gate regressions in-loop.")
         return
-    chosen = resolve_test_cmd_choice(suggested, input_fn, output_fn)
+    chosen = resolve_test_cmd_choice(detected.command, input_fn, output_fn)
     existing = project_file.read_text()
     with project_file.open("a") as f:
         if existing and not existing.endswith("\n"):

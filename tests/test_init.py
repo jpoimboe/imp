@@ -590,9 +590,11 @@ def test_use_defaults_pythonpath_drops_absent_dirs(tmp_path):
 
 def test_use_defaults_fills_offline_test_command(tmp_path):
     from imp.cli.init import run_init_noninteractive
+    from imp.cli.verify_detect import DetectedTestCommand
     run_init_noninteractive(
         tmp_path, output_fn=lambda _m: None,
-        detect_verify_fn=lambda _r: "make check")   # heuristic hit, no prompt
+        # heuristic hit, no prompt
+        detect_verify_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"))
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] == "make check"
 
