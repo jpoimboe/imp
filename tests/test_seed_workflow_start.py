@@ -33,13 +33,10 @@ def _seed_with_var(root: Path) -> None:
 
 def test_seed_workflow_start_seeds_cursor_and_vars(tmp_path: Path) -> None:
     _seed_with_var(tmp_path)
-    config = load_effective_config(
-        project_root=tmp_path, control_root=tmp_path,
-    ).config
+    config = load_effective_config(control_root=tmp_path).config
     workflow = load_workflow(
         resolve_workflow_dir(tmp_path, "imp"),
         configured_tiers=config.tier_names(),
-        project_keys=frozenset(config.project_facts),
     )
     state = State(id="q", step=None, step_attempt=0, status="new")
 

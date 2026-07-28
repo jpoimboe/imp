@@ -17,7 +17,6 @@ def validate(
     workflow: Workflow,
     *,
     configured_tiers: frozenset[str] | None = None,
-    project_keys: frozenset[str] = frozenset(),
 ) -> tuple[list[LoadError], list[LoadError]]:
     """Run every validator. Returns (errors, warnings).
 
@@ -41,7 +40,7 @@ def validate(
         _v_step_tier_configured(workflow, configured_tiers, errors)
     _v_differ_from_targets_exist(workflow, errors)
     _v_subagent_forbidden_tools(workflow, errors)
-    _v_project_refs(workflow, project_keys, errors)
+    _v_agent_template_syntax(workflow, errors)
     _v_unknown_tool_grants(workflow, warnings)
 
     return errors, warnings
@@ -317,47 +316,19 @@ def _v_subagent_forbidden_tools(
                 )
 
 
-def _v_project_refs(
-    workflow: Workflow, project_keys: frozenset[str], errors: list[LoadError],
-) -> None:
+def _v_agent_template_syntax(workflow: Workflow, errors: list[LoadError]) -> None:
+    """A malformed agent template fails at load, not mid-run at render."""
     import jinja2
-    from jinja2 import nodes
 
     env = jinja2.Environment()
-    known = set(project_keys)
     for agent in workflow.agents.values():
         try:
-            ast = env.parse(agent.prompt_template_source)
+            env.parse(agent.prompt_template_source)
         except jinja2.exceptions.TemplateSyntaxError as e:
             errors.append(LoadError(
                 f"agent {agent.name!r}: template syntax error: {e.message}",
                 agent.source,
             ))
-            continue
-        for ga in ast.find_all(nodes.Getattr):
-            if not (isinstance(ga.node, nodes.Name) and ga.node.name == "project"):
-                continue
-            key = ga.attr
-            if key not in known:
-                errors.append(LoadError(
-                    f"agent {agent.name!r}: unknown project fact {key!r} "
-                    f"in '{{{{ project.{key} }}}}'",
-                    agent.source,
-                    hint=f"configured project keys: {sorted(known)}",
-                ))
-        for gi in ast.find_all(nodes.Getitem):
-            if not (isinstance(gi.node, nodes.Name) and gi.node.name == "project"):
-                continue
-            if not (isinstance(gi.arg, nodes.Const) and isinstance(gi.arg.value, str)):
-                continue  # dynamic subscript: checked at render, not statically
-            key = gi.arg.value
-            if key not in known:
-                errors.append(LoadError(
-                    f"agent {agent.name!r}: unknown project fact {key!r} "
-                    f"in '{{{{ project[\"{key}\"] }}}}'",
-                    agent.source,
-                    hint=f"configured project keys: {sorted(known)}",
-                ))
 
 
 def _v_unknown_tool_grants(workflow: Workflow, warnings: list[LoadError]) -> None:

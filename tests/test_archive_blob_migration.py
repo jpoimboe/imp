@@ -257,8 +257,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_five() -> None:
-    assert archive._DATA_VERSION == 5
+def test_data_version_bumped_to_six() -> None:
+    assert archive._DATA_VERSION == 6
 
 
 def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:
@@ -279,7 +279,7 @@ def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None
     migrated = record.read_record(archive.records_root(tmp_path), "wf01")
     assert migrated is not None
     assert migrated["quest_meta"]["workflow"] == "default"
-    assert archive.data_version_path(tmp_path).read_text().strip() == "5"
+    assert archive.data_version_path(tmp_path).read_text().strip() == "6"
 
 
 def test_migrate_remaps_resume_target_prompt_to_prompt_paused(tmp_path: Path) -> None:
@@ -354,3 +354,46 @@ def test_ensure_current_leaves_null_workflow_untouched(tmp_path: Path) -> None:
     migrated = record.read_record(archive.records_root(tmp_path), "wf03")
     assert migrated is not None
     assert migrated["quest_meta"]["workflow"] is None
+
+
+def test_migrate_strips_project_facts_from_final_state(tmp_path: Path) -> None:
+    from imp.engine.archive import index
+
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "pf01", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
+        {"id": "pf01", "status": "merged", "step": "finalize",
+         "project_facts": {"stack": "python"}},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+
+    archive.ensure_current(tmp_path)
+
+    fs = _final_state_of(tmp_path, "pf01")
+    assert "project_facts" not in fs
+    assert fs["status"] == "merged"                     # nothing else disturbed
+    assert archive._read_user_version(tmp_path) >= index._SCHEMA_VERSION
+    assert archive.data_version_path(tmp_path).read_text().strip() == "6"
+
+
+def test_stripping_project_facts_is_idempotent(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "pf02", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
+        {"id": "pf02", "status": "merged", "step": "finalize",
+         "project_facts": {"stack": "python"}},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+
+    archive._migrate_archive_blobs(tmp_path)
+    archive._migrate_archive_blobs(tmp_path)            # re-run must be a no-op
+
+    fs = _final_state_of(tmp_path, "pf02")
+    assert "project_facts" not in fs
+    assert fs["status"] == "merged"

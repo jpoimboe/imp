@@ -12,7 +12,6 @@ _LAYER = (
     "provider_envs:\n  openai: {env: OPENAI_KEY}\n"
     "remote:\n  driver: telegram\n"
     "providers: [a, b]\n"
-    "facts:\n  window: 1:30\n"
     "default-base: main\n"
 )
 
@@ -26,8 +25,6 @@ def test_read_back_uses_imps_own_readers(tmp_path: Path) -> None:
     assert list(read_back(layer, ("providers",))) == ["a", "b"]
     assert read_back(layer, ("default-base",)) == "main"
     assert read_back(layer, ("theme",)) is None
-    # facts go through LineLoader (YAML 1.1), where 1:30 is sexagesimal 90
-    assert read_back(layer, ("facts", "window")) == "90"
 
 
 def test_read_back_preserves_var_override_types(tmp_path: Path) -> None:
@@ -61,10 +58,11 @@ def test_verify_raises_the_validators_own_message_without_the_scratch_path(
 
 def test_verify_reports_a_value_that_does_not_read_back(tmp_path: Path) -> None:
     with scratch_seam(tmp_path / "scratch", "config.yaml") as scratch:
-        assert verify(scratch, "facts:\n  window: 1:30\n",
-                      ("facts", "window"), "1:30") is False
-        assert verify(scratch, 'facts:\n  window: "1:30"\n',
-                      ("facts", "window"), "1:30") is True
+        # The document defines `other`, so `window` cannot read back as "1:30".
+        assert verify(scratch, "vars:\n  other: 1:30\n",
+                      ("vars", "window"), "1:30") is False
+        assert verify(scratch, 'vars:\n  window: "1:30"\n',
+                      ("vars", "window"), "1:30") is True
 
 
 def test_scratch_seam_uses_the_targets_basename_and_always_cleans_up(

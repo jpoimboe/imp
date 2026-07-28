@@ -14,7 +14,7 @@ from imp.providers.effective import validate_project_memory
 
 def test_empty_memory_is_noop(tmp_path: pathlib.Path) -> None:
     # No files -> nothing to validate, no workflow load, no raise.
-    validate_project_memory(tmp_path, {}, {})
+    validate_project_memory(tmp_path, {})
 
 
 def test_valid_tree_passes(tmp_path: pathlib.Path) -> None:
@@ -23,13 +23,12 @@ def test_valid_tree_passes(tmp_path: pathlib.Path) -> None:
     validate_project_memory(
         tmp_path,
         {"all.md": "g", "default/all.md": "w", "default/threshold.md": "s"},
-        {},
     )
 
 
 def test_nonstep_file_raises_and_lists_steps(tmp_path: pathlib.Path) -> None:
     with pytest.raises(LoadError) as ei:
-        validate_project_memory(tmp_path, {"default/notastep.md": "x"}, {})
+        validate_project_memory(tmp_path, {"default/notastep.md": "x"})
     msg = str(ei.value)
     assert "notastep" in msg
     assert "threshold" in msg  # a real default step is listed as valid
@@ -37,11 +36,11 @@ def test_nonstep_file_raises_and_lists_steps(tmp_path: pathlib.Path) -> None:
 
 def test_unknown_workflow_dir_raises(tmp_path: pathlib.Path) -> None:
     with pytest.raises(LoadError) as ei:
-        validate_project_memory(tmp_path, {"bogus/all.md": "x"}, {})
+        validate_project_memory(tmp_path, {"bogus/all.md": "x"})
     assert "bogus" in str(ei.value)
 
 
 def test_stray_toplevel_step_file_raises(tmp_path: pathlib.Path) -> None:
     with pytest.raises(LoadError) as ei:
-        validate_project_memory(tmp_path, {"threshold.md": "x"}, {})
+        validate_project_memory(tmp_path, {"threshold.md": "x"})
     assert "threshold.md" in str(ei.value)

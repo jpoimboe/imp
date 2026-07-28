@@ -19,7 +19,7 @@ def test_preflight_blocks_when_no_provider(
 ) -> None:
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    msg = _preflight_imp_init(control_root=tmp_path, project_root=tmp_path)
+    msg = _preflight_imp_init(control_root=tmp_path)
     assert msg is not None
     assert "imp init" in msg
 
@@ -32,7 +32,7 @@ def test_preflight_passes_when_provider_available(
     (imp_home / "config.yaml").write_text("providers: [openai]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     monkeypatch.setenv("OPENAI_API_KEY", "x")
-    assert _preflight_imp_init(control_root=tmp_path, project_root=tmp_path) is None
+    assert _preflight_imp_init(control_root=tmp_path) is None
 
 
 def test_preflight_defers_on_unknown_provider(
@@ -45,4 +45,4 @@ def test_preflight_defers_on_unknown_provider(
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [does_not_exist]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    assert _preflight_imp_init(control_root=tmp_path, project_root=tmp_path) is None
+    assert _preflight_imp_init(control_root=tmp_path) is None

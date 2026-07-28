@@ -29,7 +29,7 @@ from imp.engine.state import (
 )
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 13  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 14  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -352,6 +352,30 @@ def _migrate_v12_to_v13(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v13_to_v14(quest_dir: Path) -> None:
+    """v13->v14: State.project_facts was removed and the once-per-quest freeze
+    gate moved from `project_facts is None` to `memory is None`. Rewrite a live
+    home's state.json: drop project_facts, and when the home had already frozen
+    under the old gate (the legacy key was present and non-null) but carries no
+    memory, set memory to {} so the new gate reads "frozen" and does not
+    re-freeze. A home that never froze keeps memory null. The presence guard
+    makes the hop a no-op on re-run. The state rewrite precedes the version stamp
+    so a partial failure re-runs. A home without state.json (un-materialized
+    seed) advances only the version stamp. The archive migrates separately via
+    _DATA_VERSION 5->6."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text())
+        was_frozen = data.pop("project_facts", None) is not None
+        if was_frozen and data.get("memory") is None:
+            data["memory"] = {}
+        _rewrite_state_json(state_path, data)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 14
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -365,6 +389,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (10, 11): _migrate_v10_to_v11,
     (11, 12): _migrate_v11_to_v12,
     (12, 13): _migrate_v12_to_v13,
+    (13, 14): _migrate_v13_to_v14,
 }
 
 
@@ -509,8 +534,7 @@ class Quest:
     def live_workflow_dir(self) -> Path:
         from imp.assets import resolve_workflow_dir
         from imp.providers.effective import resolve_default_workflow
-        name = self.workflow or resolve_default_workflow(
-            project_root=self.project_root, control_root=self.control_root)
+        name = self.workflow or resolve_default_workflow(control_root=self.control_root)
         return resolve_workflow_dir(self.project_root, name)
 
     @property
@@ -518,8 +542,7 @@ class Quest:
         """Mirror of live_workflow_dir rooted at the control root, not the worktree."""
         from imp.assets import resolve_workflow_dir
         from imp.providers.effective import resolve_default_workflow
-        name = self.workflow or resolve_default_workflow(
-            project_root=self.control_root, control_root=self.control_root)
+        name = self.workflow or resolve_default_workflow(control_root=self.control_root)
         return resolve_workflow_dir(self.control_root, name)
 
     @property
@@ -582,18 +605,17 @@ class Quest:
             load_effective_config,
             validate_project_memory,
         )
+        from imp.providers.memory import load_memory_snapshot
 
         try:
-            config = load_effective_config(
-                project_root=wt_path, control_root=control_root,
-            ).config
-            validate_project_memory(wt_path, config.memory, config.project_facts)
+            config = load_effective_config(control_root=control_root).config
+            validate_project_memory(
+                wt_path, load_memory_snapshot(wt_path / "imp" / "memory"))
             from imp.assets import resolve_workflow_dir
             wf_name = workflow or config.default_workflow
             loaded_workflow = load_workflow(
                 resolve_workflow_dir(wt_path, wf_name),
                 configured_tiers=config.tier_names(),
-                project_keys=frozenset(config.project_facts),
             )
         except (LoadError, LoadErrors):
             # State is not yet written; tear down the worktree so no orphan is left.
@@ -669,19 +691,18 @@ class Quest:
                 load_effective_config,
                 validate_project_memory,
             )
+            from imp.providers.memory import load_memory_snapshot
 
             try:
-                config = load_effective_config(
-                    project_root=control_root, control_root=control_root,
-                ).config
+                config = load_effective_config(control_root=control_root).config
                 validate_project_memory(
-                    control_root, config.memory, config.project_facts)
+                    control_root,
+                    load_memory_snapshot(control_root / "imp" / "memory"))
                 from imp.assets import resolve_workflow_dir
                 wf_name = workflow or config.default_workflow
                 loaded_workflow = load_workflow(
                     resolve_workflow_dir(control_root, wf_name),
                     configured_tiers=config.tier_names(),
-                    project_keys=frozenset(config.project_facts),
                 )
             except (LoadError, LoadErrors):
                 shutil.rmtree(quest_dir, ignore_errors=True)

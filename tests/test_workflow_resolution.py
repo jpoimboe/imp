@@ -37,21 +37,29 @@ def test_parse_default_workflow_is_gone() -> None:
     assert not hasattr(config_module, "parse_default_workflow")
 
 
-def test_control_workflow_dir_reads_the_control_root_not_the_worktree(
+def test_both_workflow_dirs_take_the_workflow_name_from_the_control_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The NAME comes from the control root's settings (AC 1d); the two
+    properties still resolve that name against their own separate dir roots."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     control = tmp_path / "control"
     worktree = tmp_path / "wt"
     for root, name in ((control, "patent"), (worktree, "default")):
         (root / "imp").mkdir(parents=True)
         (root / "imp" / "config.yaml").write_text(f"default-workflow: {name}\n")
+    # A committed fork of the CONTROL root's chosen name, present only in the
+    # worktree: reachable solely by resolving "patent" against the worktree.
+    (worktree / "imp" / "workflows" / "patent").mkdir(parents=True)
     quest = Quest(
         id="2026-06-15-roots1", title="X", base_branch="main",
         control_root=control, project_root=worktree,
         quest_dir=control / ".imp" / "quests" / "2026-06-15-roots1",
     )
-    assert quest.live_workflow_dir == bundled_workflow_dir("default")
+    # Worktree dir root, control-root name. Under the old two-root read this was
+    # bundled_workflow_dir("default") — the worktree naming its own workflow.
+    assert quest.live_workflow_dir == worktree / "imp" / "workflows" / "patent"
+    # Control dir root: no committed fork there, so the bundled copy.
     assert quest.control_workflow_dir == bundled_workflow_dir("patent")
 
 
@@ -225,7 +233,7 @@ def test_resolve_default_workflow_defaults_when_no_layer_sets_it(
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("theme: dark\n")
-    assert resolve_default_workflow(project_root=proj, control_root=None) == "default"
+    assert resolve_default_workflow(control_root=proj) == "default"
 
 
 def test_resolve_default_workflow_reads_the_project_layer(
@@ -235,7 +243,7 @@ def test_resolve_default_workflow_reads_the_project_layer(
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("default-workflow: mine\n")
-    assert resolve_default_workflow(project_root=proj, control_root=None) == "mine"
+    assert resolve_default_workflow(control_root=proj) == "mine"
 
 
 def test_resolve_default_workflow_global_beats_project(
@@ -248,22 +256,20 @@ def test_resolve_default_workflow_global_beats_project(
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("default-workflow: fromproject\n")
-    assert resolve_default_workflow(
-        project_root=proj, control_root=None) == "fromglobal"
+    assert resolve_default_workflow(control_root=proj) == "fromglobal"
 
 
-def test_resolve_default_workflow_local_layer_needs_a_control_root(
+def test_resolve_default_workflow_with_no_root_reads_no_project_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """control_root=None (the subagents.py fallback) drops the local layer and
-    keeps everything below it."""
+    """control_root=None is the quest-less subagent fallback (subagents.py):
+    floor + global only, so neither imp/config.yaml nor .imp/config.yaml under
+    any tree is read."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("default-workflow: fromproject\n")
     (proj / ".imp").mkdir()
     (proj / ".imp" / "config.yaml").write_text("default-workflow: fromlocal\n")
-    assert resolve_default_workflow(
-        project_root=proj, control_root=None) == "fromproject"
-    assert resolve_default_workflow(
-        project_root=proj, control_root=proj) == "fromlocal"
+    assert resolve_default_workflow(control_root=None) == "default"
+    assert resolve_default_workflow(control_root=proj) == "fromlocal"

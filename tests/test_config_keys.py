@@ -34,7 +34,7 @@ def test_remote_driver_reads_back_under_its_name_field() -> None:
 
 
 def test_project_only_keys_are_marked() -> None:
-    for dotted in ("default-base", "facts.stack"):
+    for dotted in ("default-base",):
         key = resolve_key(dotted)
         assert key is not None, dotted
         assert key.project_only is True
@@ -92,7 +92,12 @@ def test_value_parsing_follows_the_value_column() -> None:
     assert _parsed("vars.x", "true") is True
     assert _parsed("vars.x", "12") == 12
     assert _parsed("vars.x", "12a") == "12a"
-    assert _parsed("facts.stack", "python") == "python"
+
+
+def test_facts_keys_are_not_settable() -> None:
+    assert resolve_key("facts.stack") is None
+    assert unknown_key_message("facts.stack") == (
+        "unknown setting 'facts.stack' — run 'imp config' to see the settable keys")
 
 
 def test_unshapeable_values_pass_through_for_the_reader_to_reject() -> None:

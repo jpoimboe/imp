@@ -49,7 +49,7 @@ def test_error_reason_backfills_error(tmp_path: Path) -> None:
     state = json.loads((qd / "state" / "state.json").read_text())
     assert state["status"] == "error"
     assert _halt(qd) is None
-    assert json.loads((qd / "quest.json").read_text())["layout_version"] == 13
+    assert json.loads((qd / "quest.json").read_text())["layout_version"] == LAYOUT_VERSION
 
 
 def test_clean_reason_backfills_none(tmp_path: Path) -> None:
@@ -58,7 +58,7 @@ def test_clean_reason_backfills_none(tmp_path: Path) -> None:
                   paused_events=[_paused("awaiting_user")])
     Quest.load(tmp_path, "m2")
     assert _halt(qd) is None
-    assert json.loads((qd / "quest.json").read_text())["layout_version"] == 13
+    assert json.loads((qd / "quest.json").read_text())["layout_version"] == LAYOUT_VERSION
 
 
 def test_interrupt_over_error_reason_backfills_none(tmp_path: Path) -> None:
@@ -109,4 +109,4 @@ def test_migration_leaves_no_temp_file(tmp_path: Path) -> None:
                   paused_events=[_paused("max_loops")])
     _migrate_v7_to_v8(qd)
     assert not list((qd / "state").glob(".state-*"))
-    assert LAYOUT_VERSION == 13
+    assert LAYOUT_VERSION == 14

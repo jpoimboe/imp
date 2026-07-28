@@ -10,9 +10,10 @@ its own). Pair with `imp-knowledge` for the stable picture.
   summary, the event log (the ordered provenance of what each agent and review
   did), and `state/`. Persistent and per-quest: a left draft resumes with
   `imp resume <id>`, and finished quests stay findable with `imp search`.
-- **Project-level config** — the repo's `imp/` config dir (`imp/config.yaml`
-  plus `imp/memory/`), the home of standing, human-authored project memory
-  applied to every quest:
+- **Project-level config** — the repo's `imp/` config dir, now split by root:
+  `imp/config.yaml` in the main checkout, `imp/memory/` in the quest's own
+  worktree — the home of standing, human-authored project memory applied to
+  every quest:
   - `imp/memory/` — human-authored markdown standing instructions, layered onto
     agents broad → narrow (frozen per run): `imp/memory/all.md` reaches every
     agent, `imp/memory/<workflow>/all.md` every step of that workflow, and
@@ -20,36 +21,40 @@ its own). Pair with `imp-knowledge` for the stable picture.
     `all.md` means "everything at this level". HTML `<!-- ... -->` comments are
     stripped before injection; `all.md` is injected into *every* agent, so use
     it extremely sparingly.
-  - `facts` — a `{key: value}` map any prompt reads as `{{ project.<key> }}`;
-    also project-only.
   - `default-workflow` / `default-base` — what new quests default to.
   - `test_cmd_fast` / `test_cmd_slow` (and timeouts) — the commands the verify
     gates run.
 
   Other config (providers, tiers, sandbox, `default-workflow`, …) layers across
-  `floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`;
-  `facts` and `default-base` live only in the project layer;
-  `imp/memory/` files live in the repo's `imp/` config dir, not the merged config;
-  change them by editing the markdown files under `imp/memory/` directly. Change
-  `facts` or defaults with `imp config set <key> <value>` / `imp config unset
-  <key>`, which keeps the file's comments and writes each setting to its own
-  layer — `imp/config.yaml` for these, `~/.imp/config.yaml` for machine-wide ones
-  like `theme`; `--project` / `--global` overrides that for anything that is not
-  project-only. `imp init` scaffolds the file — it detects the default workflow
-  and base and confirms them on one screen (use `imp init --use-defaults` for a
-  non-interactive CI setup).
+  `floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`, and both
+  repo-side layers (`imp/config.yaml` and `.imp/config.yaml`) are read from the
+  **main checkout** — never from a quest's worktree, so a branch cannot change
+  the `test_cmd_*`, `pythonpath`, or gate timeouts its own verification is judged
+  by. (`~/.imp/config.yaml` is machine-wide and the floor is provider code, so
+  neither is repo-side at all.) `imp/memory/` is the deliberate exception: it is
+  read from the quest's own worktree, so a memory quest can validate its own edit
+  before it merges. `default-base` lives only in the project layer; `imp/memory/`
+  files are not part of the merged config — change them by editing the markdown
+  files under `imp/memory/` directly. Change defaults with
+  `imp config set <key> <value>` / `imp config unset <key>`, which keeps the
+  file's comments and writes each setting to its own layer — the main checkout's
+  `imp/config.yaml` for project settings like `default-workflow`,
+  `~/.imp/config.yaml` for machine-wide ones like `theme`; `--project` /
+  `--global` overrides that for anything that is not project-only. `imp init`
+  scaffolds the file — it detects the default workflow and base and confirms them
+  on one screen (use `imp init --use-defaults` for a non-interactive CI setup).
 
 ## Reading what is active
 
-- **Memory and facts** — read the repo's `imp/` config dir directly: markdown
-  under `imp/memory/` is the standing prose injected into agents (as a
-  `## Project memory` section), and `imp/config.yaml`'s `facts:` is the
-  `{{ project.<key> }}` map. Both are project-only and are **not** shown by
+- **Memory** — read `imp/memory/` in the quest's own worktree directly: the
+  markdown there is the standing prose injected into agents (as a
+  `## Project memory` section). It is project-only and is **not** shown by
   `imp config`.
 - **Merged effective config** — run `imp config` for the resolved providers,
   tiers, `default-workflow`, and test/lint commands, each tagged in brackets with
-  the layer it came from. Mind its blind spots: it omits `imp/memory/`, `facts`,
-  and `default-base` — read those from the files.
+  the layer it came from. Run from inside a worktree, it still reports the main
+  checkout's settings. Mind its blind spots: it omits `imp/memory/` and
+  `default-base` — read those from the files.
 
 When the user asks what the standing instructions say, read the applicable
 `imp/memory/` files and quote them verbatim rather than paraphrasing.

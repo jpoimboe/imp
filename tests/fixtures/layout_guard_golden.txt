@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 13
+# LAYOUT_VERSION: 14
 [paths]
 events.jsonl
 quest.json
@@ -33,7 +33,6 @@ memory
 merge_commit
 outcome_history
 phase_label
-project_facts
 reincarnations
 resolved_steps
 resolved_tiers

@@ -7,7 +7,6 @@ import pytest
 import yaml
 
 from imp.cli.init import run_init
-from imp.providers.config import parse_project_facts
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +98,7 @@ def test_init_leaves_existing_user_config(
     assert user["providers"] == ["anthropic"]
 
 
-def test_init_appends_commented_facts_example(
+def test_init_config_yaml_has_no_facts_scaffolding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     imp_home = tmp_path / "imphome"
@@ -109,11 +108,9 @@ def test_init_appends_commented_facts_example(
     _run(root, ["claude_code"])
 
     text = (root / "imp" / "config.yaml").read_text()
-    assert "# facts:" in text
-    assert "{{ project." in text
-
-    facts = parse_project_facts(root / "imp" / "config.yaml")
-    assert facts == {}
+    assert "facts:" not in text
+    assert "{{ project." not in text
+    assert "imp/memory/" in text   # memory is still the pointer for standing prose
 
 
 def test_init_scaffolds_inert_memory_files(
@@ -154,21 +151,6 @@ def test_init_memory_snapshot_resolves_to_nothing(
     assert set(snap) == {"all.md", "default/all.md"}
     # A freshly initialized project injects no memory at any step.
     assert resolve_memory(snap, workflow="default", step="threshold") == ""
-
-
-def test_init_facts_hint_points_at_memory_not_guidance(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    imp_home = tmp_path / "imphome"
-    monkeypatch.setenv("IMP_HOME", str(imp_home))
-    root = tmp_path / "repo"
-    root.mkdir()
-    _run(root, ["claude_code"])
-
-    text = (root / "imp" / "config.yaml").read_text()
-    assert "imp/memory/" in text        # points at the new home for standing prose
-    assert "guidance:" not in text      # the removed key's stub is gone
-    assert "# facts:" in text           # facts guidance survives
 
 
 def test_init_reinit_without_scaffolds_does_not_raise(

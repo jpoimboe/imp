@@ -636,7 +636,7 @@ def test_default_resolved_subagent_has_no_forbidden_tools(tmp_path: Path) -> Non
     load_workflow(wf)  # must not raise — `plain` resolves to BASE_CAPS only
 
 
-# ── _v_project_refs ──────────────────────────────────────────────────────────
+# ── agent template syntax ────────────────────────────────────────────────────
 
 def _agent_with_body(body: str) -> str:
     return (
@@ -646,7 +646,7 @@ def _agent_with_body(body: str) -> str:
     )
 
 
-_PROJECT_WF = """\
+_STUB_WF = """\
 name: t
 description: t
 phases:
@@ -657,66 +657,20 @@ phases:
 """
 
 
-def test_project_ref_known_key_ok(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body("run {{ project.test_command }}")})
-    load_workflow(wf, project_keys=frozenset({"test_command"}))  # must not raise
-
-
-def test_project_ref_unknown_key_errors_with_hint(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body("run {{ project.absent }}")})
-    with pytest.raises((LoadError, LoadErrors)) as ei:
-        load_workflow(wf, project_keys=frozenset({"test_command"}))
-    msg = "\n".join(str(e) for e in ei.value.errors)
-    assert "absent" in msg
-    assert "test_command" in msg  # configured keys appear in the hint
-
-
-def test_project_guidance_no_longer_special(tmp_path: Path) -> None:
-    # The guidance key is gone; {{ project.guidance }} is now an unknown ref.
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body("{{ project.guidance }}")})
-    with pytest.raises((LoadError, LoadErrors)):
-        load_workflow(wf)  # default project_keys=frozenset() -> guidance unknown
-
-
-def test_project_ref_with_no_facts_block_errors(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body("{{ project.anything }}")})
-    with pytest.raises((LoadError, LoadErrors)):
-        load_workflow(wf)  # validator runs unconditionally with empty keys
-
-
-def test_constant_subscript_validated(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body('{{ project["absent"] }}')})
-    with pytest.raises((LoadError, LoadErrors)):
-        load_workflow(wf, project_keys=frozenset({"x"}))
-
-
-def test_dynamic_subscript_skipped(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body("{% set k = 'x' %}{{ project[k] }}")})
-    load_workflow(wf, project_keys=frozenset())  # dynamic subscript -> not checked
-
-
-def test_nested_attr_validates_only_first(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body("{{ project.foo.bar }}")})
-    load_workflow(wf, project_keys=frozenset({"foo"}))  # only `foo` checked -> ok
-
-
 def test_jinja_syntax_error_is_loaderror(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF,
-             agents={"stub": _agent_with_body("{{ project.foo ")})
-    with pytest.raises((LoadError, LoadErrors)):
-        load_workflow(wf, project_keys=frozenset({"foo"}))
+    wf = _wf(tmp_path, _STUB_WF,
+             agents={"stub": _agent_with_body("{{ vars.foo ")})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert "template syntax error" in "\n".join(str(e) for e in ei.value.errors)
 
 
-def test_no_facts_block_and_no_project_refs_loads_ok(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, _PROJECT_WF, agents={"stub": _OK_AGENT})
-    load_workflow(wf)  # no facts block, no project.* refs -> must not raise
+def test_project_reference_is_not_validated_at_load(tmp_path: Path) -> None:
+    # No facts machinery: `project` is an ordinary undefined name, caught at
+    # render, not statically at load.
+    wf = _wf(tmp_path, _STUB_WF,
+             agents={"stub": _agent_with_body("{{ project.anything }}")})
+    load_workflow(wf)  # must not raise
 
 
 # ── _v_read_only_paths ────────────────────────────────────────────────────────

@@ -5,7 +5,11 @@ import pytest
 
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.config import parse_config_layer
-from imp.providers.effective import global_config_path, load_effective_config
+from imp.providers.effective import (
+    global_config_path,
+    load_effective_config,
+    resolve_default_workflow,
+)
 
 _REPO_CONFIG = Path(__file__).resolve().parents[1] / "imp" / "config.yaml"
 
@@ -18,7 +22,7 @@ def _registry() -> None:
 
 def test_floor_only_populates_all_tiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))  # no global config
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     cfg = eff.config
     assert cfg.tiers["high"]["anthropic"] == "claude-opus-5[1m]"
     assert cfg.tiers["high"]["openai"] == "gpt-5.5"
@@ -33,7 +37,7 @@ def test_project_leaf_override_is_additive_over_floor(
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("tiers:\n  high: {anthropic: opus-pinned}\n")
-    eff = load_effective_config(project_root=proj, control_root=None)
+    eff = load_effective_config(control_root=proj)
     # Overridden leaf comes from project; sibling vendor stays at the floor.
     assert eff.config.tiers["high"]["anthropic"] == "opus-pinned"
     assert eff.config.tiers["high"]["openai"] == "gpt-5.5"
@@ -48,14 +52,13 @@ def test_local_beats_global_beats_project(
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("theme: light\nproviders: [openai]\n")
     monkeypatch.setenv("IMP_HOME", str(imp_home))
-    proj = tmp_path / "proj"
-    (proj / "imp").mkdir(parents=True)
-    (proj / "imp" / "config.yaml").write_text("theme: dark\n")
     control = tmp_path / "control"
-    (control / ".imp").mkdir(parents=True)
+    (control / "imp").mkdir(parents=True)
+    (control / "imp" / "config.yaml").write_text("theme: dark\n")
+    (control / ".imp").mkdir()
     (control / ".imp" / "config.yaml").write_text("theme: ansi\n")
-    eff = load_effective_config(project_root=proj, control_root=control)
-    assert eff.config.theme == "ansi"  # local wins
+    eff = load_effective_config(control_root=control)
+    assert eff.config.theme == "ansi"           # local wins
     assert eff.config.providers == ("openai",)  # from global
     assert eff.provenance[("theme",)].file == control / ".imp" / "config.yaml"
 
@@ -85,7 +88,7 @@ def test_test_cmd_fields_flow_from_project_to_config(
         "test_cmd_slow: make check && make test-live\n"
         "test_cmd_fast_timeout: 120\n"
         "test_cmd_slow_timeout: 300\n")
-    eff = load_effective_config(project_root=proj, control_root=None)
+    eff = load_effective_config(control_root=proj)
     assert eff.config.test_cmd_fast == "make check"
     assert eff.config.test_cmd_slow == "make check && make test-live"
     assert eff.config.test_cmd_fast_timeout == 120
@@ -96,7 +99,7 @@ def test_test_cmd_fields_default_to_none_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     assert eff.config.test_cmd_fast is None
     assert eff.config.test_cmd_slow is None
     assert eff.config.test_cmd_fast_timeout is None
@@ -110,7 +113,7 @@ def test_pythonpath_flows_from_project_to_config(
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("pythonpath: [src, vendor]\n")
-    eff = load_effective_config(project_root=proj, control_root=None)
+    eff = load_effective_config(control_root=proj)
     assert eff.config.pythonpath == ("src", "vendor")
 
 
@@ -118,7 +121,7 @@ def test_pythonpath_defaults_to_empty_tuple_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     assert eff.config.pythonpath == ()
 
 
@@ -141,3 +144,28 @@ def test_repo_config_declares_pythonpath_src() -> None:
     # auto-shadow branch was deleted.
     layer, _src = parse_config_layer(_REPO_CONFIG)
     assert layer["pythonpath"] == ["src"]
+
+
+def test_memory_files_do_not_reach_the_merged_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Memory is a worktree payload loaded at its own call sites against a root
+    the caller names — never a Config field, which would let a caller pair it
+    with the wrong root."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    proj = tmp_path / "proj"
+    (proj / "imp" / "memory").mkdir(parents=True)
+    (proj / "imp" / "memory" / "all.md").write_text("a note")
+    (proj / "imp" / "config.yaml").write_text("theme: dark\n")
+    eff = load_effective_config(control_root=proj)
+    assert eff.config.theme == "dark"           # settings still merge
+    assert not hasattr(eff.config, "memory")    # the payload does not ride along
+
+
+def test_no_parameter_can_aim_a_settings_load_at_a_worktree(tmp_path: Path) -> None:
+    """The project_root parameter is removed, not repointed (spec §1)."""
+    with pytest.raises(TypeError, match="project_root"):
+        load_effective_config(project_root=tmp_path)  # type: ignore[call-arg]
+    with pytest.raises(TypeError, match="project_root"):
+        resolve_default_workflow(  # type: ignore[call-arg]
+            project_root=tmp_path, control_root=None)

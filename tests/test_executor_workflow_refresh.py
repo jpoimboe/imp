@@ -321,10 +321,8 @@ async def test_new_quest_snapshots_on_first_entry(tmp_path: Path) -> None:
 
 def _load_workflow_and_config(quest):
     """Load the refreshed snapshot workflow + config the way run_quest does."""
-    config = load_effective_config(
-        project_root=quest.project_root, control_root=quest.control_root,
-    ).config
-    workflow = load_workflow(quest.workflow_dir, project_keys=frozenset())
+    config = load_effective_config(control_root=quest.control_root).config
+    workflow = load_workflow(quest.workflow_dir)
     return workflow, config
 
 

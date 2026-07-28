@@ -61,8 +61,7 @@ def _make_quest(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Qu
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_effective_config(
-            project_root=root, control_root=root).config.tier_names()
+        configured_tiers = load_effective_config(control_root=root).config.tier_names()
 
     workflow = load_workflow(wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()

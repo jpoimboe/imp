@@ -324,11 +324,10 @@ def test_cmd_config_trailing_blank_on_tty(
     import imp.providers.effective as eff_mod
 
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
         eff_mod, "load_effective_config",
-        lambda *, project_root, control_root: object())
+        lambda *, control_root: object())
 
     captured: dict = {}
 
@@ -355,11 +354,10 @@ def test_cmd_config_unchanged_when_piped(
     import imp.providers.effective as eff_mod
 
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
         eff_mod, "load_effective_config",
-        lambda *, project_root, control_root: object())
+        lambda *, control_root: object())
 
     captured: dict = {}
 
@@ -386,11 +384,10 @@ def test_cmd_config_explain_trailing_blank_on_tty(
     import imp.providers.effective as eff_mod
 
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
         eff_mod, "load_effective_config",
-        lambda *, project_root, control_root: object())
+        lambda *, control_root: object())
 
     captured: dict = {}
 

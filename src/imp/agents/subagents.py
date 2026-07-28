@@ -174,9 +174,7 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
     )
     from imp.providers.effective import load_effective_config
 
-    config = load_effective_config(
-        project_root=quest.project_root, control_root=quest.control_root,
-    ).config
+    config = load_effective_config(control_root=quest.control_root).config
     cfg = sandbox_config_from_raw(config.sandbox or {})
     eng = overlay_engine_env(
         os.environ,
@@ -305,10 +303,10 @@ async def dispatch_task(
             # No quest context -> no quest_dir, no snapshot; live dir is the only option.
             workflow_dir=resolve_workflow_dir(
                 ctx.project_root,
-                # ToolContext carries no control root, and this fallback can run
-                # on a spike worktree that is not a git repo.
-                resolve_default_workflow(
-                    project_root=ctx.project_root, control_root=None),
+                # No settings root: ToolContext carries no control root, and this
+                # quest-less fallback can run on a spike worktree that is not a
+                # git repo — so default-workflow comes from floor + global only.
+                resolve_default_workflow(control_root=None),
             ),
         )
         if isolated:
@@ -322,7 +320,6 @@ async def dispatch_task(
             quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
             vars=ctx.quest_state.vars if ctx.quest_state is not None else {},
-            project_facts=cc.project_facts,
         )
         rendered_prompt = render_prompt(
             subagent_def.prompt_template_source, prompt_ctx,

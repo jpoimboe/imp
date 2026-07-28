@@ -31,7 +31,7 @@ def test_non_interactive_warns_and_does_not_write(
     root = _project(tmp_path, "default-workflow: imp\n")
     errs: list[str] = []
     _test_cmd_fast_nudge(
-        project_root=root, control_root=root, non_interactive=True,
+        control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
@@ -48,7 +48,7 @@ def test_interactive_yes_appends_command(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     _test_cmd_fast_nudge(
-        project_root=root, control_root=root, non_interactive=False,
+        control_root=root, non_interactive=False,
         input_fn=_seq("y"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
@@ -62,7 +62,7 @@ def test_no_nudge_when_already_configured(
     root = _project(tmp_path, "default-workflow: imp\ntest_cmd_fast: make test\n")
     errs: list[str] = []
     _test_cmd_fast_nudge(
-        project_root=root, control_root=root, non_interactive=True,
+        control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
@@ -76,7 +76,7 @@ def test_no_nudge_when_opted_out(
     root = _project(tmp_path, 'default-workflow: imp\ntest_cmd_fast: ""\n')
     errs: list[str] = []
     _test_cmd_fast_nudge(
-        project_root=root, control_root=root, non_interactive=True,
+        control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
@@ -89,7 +89,7 @@ def test_interactive_skip_writes_optout(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     _test_cmd_fast_nudge(
-        project_root=root, control_root=root, non_interactive=False,
+        control_root=root, non_interactive=False,
         input_fn=_seq("skip"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
@@ -102,7 +102,7 @@ def test_interactive_edit_writes_custom_command(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     root = _project(tmp_path, "default-workflow: imp\n")
     _test_cmd_fast_nudge(
-        project_root=root, control_root=root, non_interactive=False,
+        control_root=root, non_interactive=False,
         input_fn=_seq("edit", "make ci"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
@@ -116,7 +116,7 @@ def test_no_nudge_when_nothing_detected(
     root = _project(tmp_path, "default-workflow: imp\n")
     errs: list[str] = []
     _test_cmd_fast_nudge(
-        project_root=root, control_root=root, non_interactive=True,
+        control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: None,
     )

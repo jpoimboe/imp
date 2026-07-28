@@ -116,10 +116,6 @@ def test_project_only_keys_reject_the_global_layer(
     assert capsys.readouterr().err == (
         "imp: 'default-base' is a project setting; drop --global\n")
 
-    assert main(["config", "set", "--global", "facts.stack", "python"]) == 2
-    assert capsys.readouterr().err == (
-        "imp: 'facts.stack' is a project setting; drop --global\n")
-
     assert not imp_home.exists()
     assert main(["config", "set", "default-base", "dev"]) == 0
     assert read_back(project / "imp" / "config.yaml", ("default-base",)) == "dev"
@@ -147,6 +143,10 @@ def test_unknown_settings_are_rejected_and_write_nothing(
     assert capsys.readouterr().err == (
         "imp: unknown setting 'remote.driver.startup_timeout' — "
         "run 'imp config' to see the settable keys\n")
+
+    assert main(["config", "set", "facts.stack", "python"]) == 2
+    assert capsys.readouterr().err == (
+        "imp: unknown setting 'facts.stack' — run 'imp config' to see the settable keys\n")
 
     assert (project / "imp" / "config.yaml").read_text() == before
     assert not imp_home.exists()
@@ -196,27 +196,9 @@ def test_global_set_creates_the_file_while_unset_creates_nothing(
 
 def test_yaml_1_2_values_survive_the_writer(project: Path, imp_home: Path) -> None:
     assert main(["config", "set", "vars.window", "1:30"]) == 0
-    assert main(["config", "set", "facts.window", "1:30"]) == 0
 
     config = project / "imp" / "config.yaml"
     assert read_back(config, ("vars", "window")) == "1:30"
-    assert read_back(config, ("facts", "window")) == "1:30"
-    assert 'window: "1:30"' in config.read_text()   # the fact was re-emitted quoted
-
-
-def test_setting_a_fact_to_its_own_text_repairs_the_yaml_1_1_read(
-    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
-) -> None:
-    config = project / "imp" / "config.yaml"
-    config.write_text(config.read_text() + "facts:\n  window: 1:30\n")
-    assert read_back(config, ("facts", "window")) == "90"   # LineLoader, YAML 1.1
-
-    assert main(["config", "set", "facts.window", "1:30"]) == 0
-
-    assert read_back(config, ("facts", "window")) == "1:30"
-    assert 'window: "1:30"' in config.read_text()
-    assert capsys.readouterr().out == (
-        'imp/config.yaml: facts.window: "1:30" (was "1:30")\n')
 
 
 def test_a_value_that_never_reads_back_aborts_and_leaves_the_file_untouched(

@@ -21,8 +21,7 @@ class _Workflow:
 
 def _state(resolved_steps, resolved_tiers, step="brainstorm"):
     return SimpleNamespace(
-        step=step, resolved_steps=resolved_steps, resolved_tiers=resolved_tiers,
-        project_facts={})
+        step=step, resolved_steps=resolved_steps, resolved_tiers=resolved_tiers)
 
 
 def test_current_provider_model_prefers_step_then_tier() -> None:

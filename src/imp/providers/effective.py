@@ -2,8 +2,13 @@
 2026-06-08-config-file-split §2).
 
 Precedence (later wins):
-    provider code (floor) ← imp/config.yaml ← ~/.imp/config.yaml
-                          ← .imp/config.yaml (control root, gitignored)
+    provider code (floor) ← <control root>/imp/config.yaml
+                          ← ~/.imp/config.yaml
+                          ← <control root>/.imp/config.yaml (gitignored)
+
+Both repo-side files live in the MAIN CHECKOUT (`~/.imp/config.yaml` is
+machine-wide): a quest worktree has no say in the settings its own gates are
+judged by.
 
 The merged `Config.tiers` is always fully populated (floor + overrides), so
 `resolve.resolve_run` reads it unchanged. Provenance is a side-table keyed by
@@ -13,15 +18,15 @@ leaf-path — NEVER folded into `config.tiers`, whose leaves stay plain `str`.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
-from imp.providers.config import Config, parse_config_layer, parse_project_facts
-from imp.providers.memory import load_memory_snapshot, validate_memory_tree
+from imp.providers.config import Config, parse_config_layer
+from imp.providers.memory import validate_memory_tree
 from imp.providers.resolve import iter_provider_defaults
 
 # A synthetic source for floor leaves. The string is what `imp config` prints.
@@ -118,9 +123,7 @@ def merge_layers(
     return out, prov
 
 
-def _to_config(
-    merged: dict[str, Any], project_facts: dict[str, str], memory: dict[str, str],
-) -> Config:
+def _to_config(merged: dict[str, Any]) -> Config:
     return Config(
         providers=tuple(merged.get("providers", ())),
         tiers=merged.get("tiers", {}),
@@ -139,36 +142,28 @@ def _to_config(
         sandbox=merged.get("sandbox", {}),
         remote=merged.get("remote", {}),
         context=merged.get("context", {}),
-        project_facts=project_facts,
-        memory=memory,
     )
 
 
-def load_effective_config(
-    *, project_root: Path | None = None, control_root: Path | None = None,
-) -> EffectiveConfig:
+def load_effective_config(*, control_root: Path | None = None) -> EffectiveConfig:
     """Build the floor, then merge project ← global ← local on top.
 
-    - project layer: `project_root/imp/config.yaml` (the worktree for a quest;
-      the control-root checkout for quest-less commands). Skipped when
-      project_root is None; raises when only the pre-rename `imp/project.yaml`
-      is present.
+    - project layer: `control_root/imp/config.yaml` — the main checkout, never a
+      quest worktree. Skipped when control_root is None; raises when only the
+      pre-rename `imp/project.yaml` is present.
     - global layer: `global_config_path()` (live).
-    - local layer: `control_root/.imp/config.yaml` (live, gitignored). Skipped
-      when control_root is None.
+    - local layer: `control_root/.imp/config.yaml` (live, gitignored).
+
+    control_root=None is floor + global only (`cli/pythonpath_detect.py` and the
+    quest-less subagent fallback rely on that).
     """
     layers: list[tuple[dict[str, Any], SourceLoc]] = [_floor_layer()]
-    project_facts: dict[str, str] = {}
-    memory: dict[str, str] = {}
-    if project_root is not None:
-        proj_path = project_root / "imp" / "config.yaml"
-        if project_rename_pending(project_root):
-            raise LoadError(project_rename_hint(project_root))
-        p = parse_config_layer(proj_path)
+    if control_root is not None:
+        if project_rename_pending(control_root):
+            raise LoadError(project_rename_hint(control_root))
+        p = parse_config_layer(control_root / "imp" / "config.yaml")
         if p is not None:
             layers.append(p)
-        project_facts = parse_project_facts(proj_path)
-        memory = load_memory_snapshot(project_root / "imp" / "memory")
     g = parse_config_layer(global_config_path())
     if g is not None:
         layers.append(g)
@@ -177,28 +172,21 @@ def load_effective_config(
         if local is not None:
             layers.append(local)
     merged, prov = merge_layers(layers)
-    return EffectiveConfig(config=_to_config(merged, project_facts, memory), provenance=prov)
+    return EffectiveConfig(config=_to_config(merged), provenance=prov)
 
 
-def resolve_default_workflow(
-    *, project_root: Path, control_root: Path | None,
-) -> str:
-    """The layered `default-workflow` for one root pair. Keyword-only: swapping
-    the roots would silently read the wrong checkout's project layer."""
-    return load_effective_config(
-        project_root=project_root, control_root=control_root,
-    ).config.default_workflow
+def resolve_default_workflow(*, control_root: Path | None) -> str:
+    """The layered `default-workflow` for one settings root."""
+    return load_effective_config(control_root=control_root).config.default_workflow
 
 
 def memory_validation_scopes(
     project_root: Path,
     relpaths: Iterable[str],
-    project_facts: Mapping[str, str],
 ) -> tuple[list[str], dict[str, frozenset[str]]]:
     """Build the (valid_workflows, workflow_steps) inputs for
     `validate_memory_tree`: every known workflow name, plus the step names of
-    each workflow referenced by a `<workflow>/...` relpath. Honors project-key
-    gating via `project_facts` so no unrelated template-ref error can fire."""
+    each workflow referenced by a `<workflow>/...` relpath."""
     from imp.assets import available_workflow_names, resolve_workflow_dir
     from imp.engine.loader import load_workflow
 
@@ -213,10 +201,7 @@ def memory_validation_scopes(
     )
     workflow_steps: dict[str, frozenset[str]] = {}
     for name in referenced:
-        wf = load_workflow(
-            resolve_workflow_dir(project_root, name),
-            project_keys=frozenset(project_facts),
-        )
+        wf = load_workflow(resolve_workflow_dir(project_root, name))
         workflow_steps[name] = frozenset(s.name for s in wf.flat_steps())
     return valid, workflow_steps
 
@@ -224,19 +209,14 @@ def memory_validation_scopes(
 def validate_project_memory(
     project_root: Path,
     memory: dict[str, str],
-    project_facts: dict[str, str],
 ) -> None:
     """Validate a loaded `imp/memory/` snapshot against the project's known
     workflows and their steps. Raises LoadError (loud, fail-fast) on any unknown
     workflow dir, non-step `.md`, or stray top-level step file. An empty
-    snapshot is a no-op. Loads only the workflows a subdir references, reusing
-    the same `project_keys` the executor passes so no unrelated template-ref
-    error can fire here."""
+    snapshot is a no-op. Loads only the workflows a subdir references."""
     if not memory:
         return
-    valid, workflow_steps = memory_validation_scopes(
-        project_root, memory.keys(), project_facts
-    )
+    valid, workflow_steps = memory_validation_scopes(project_root, memory.keys())
     errors = validate_memory_tree(
         memory.keys(), valid_workflows=valid, workflow_steps=workflow_steps
     )

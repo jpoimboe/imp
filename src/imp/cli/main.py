@@ -689,7 +689,18 @@ def _control_root() -> Path:
     return worktree.find_control_root(Path.cwd())
 
 
-def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None:
+def _settings_root() -> Path:
+    """The one root every settings layer is read from and written to: the main
+    checkout, resolved via git even from inside a quest worktree. Falls back to
+    the marker walk only when git can resolve nothing (no repo, no git binary) —
+    there the two roots coincide anyway, and a command must not die over it."""
+    try:
+        return _control_root()
+    except Exception:
+        return _project_root()
+
+
+def _preflight_imp_init(*, control_root: Path) -> str | None:
     """Return a clean 'run imp init first' message when no provider is
     env-available (e.g. a never-init'd machine with empty user `providers`),
     else None. Relocates+dresses the failure that per-step resolution would
@@ -697,9 +708,7 @@ def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import UnknownProvider, _first_available_provider
     try:
-        config = load_effective_config(
-            project_root=project_root, control_root=control_root,
-        ).config
+        config = load_effective_config(control_root=control_root).config
         no_provider = _first_available_provider(config) is None
     except (LoadError, LoadErrors, UnknownProvider):
         # A malformed config (bad YAML, or a `providers:` entry that names an
@@ -713,7 +722,7 @@ def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None
 
 
 def _test_cmd_fast_nudge(
-    *, project_root: Path, control_root: Path, non_interactive: bool,
+    *, control_root: Path, non_interactive: bool,
     input_fn: Callable[[str], str], output_fn: Callable[[str], None],
     err_fn: Callable[[str], None],
     detect_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
@@ -727,16 +736,15 @@ def _test_cmd_fast_nudge(
     from imp.providers.effective import load_effective_config
     detect = detect_fn or detect_test_command
     try:
-        cfg = load_effective_config(
-            project_root=project_root, control_root=control_root).config
+        cfg = load_effective_config(control_root=control_root).config
     except (LoadError, LoadErrors):
         return
     if cfg.test_cmd_fast is not None:
         return
-    detected = detect(project_root)
+    detected = detect(control_root)
     if detected is None:
         return
-    project_file = project_root / "imp" / "config.yaml"
+    project_file = control_root / "imp" / "config.yaml"
     if non_interactive:
         err_fn(
             f"imp: no test_cmd_fast configured; detected `{detected.command}`. Set "
@@ -761,8 +769,7 @@ def _apply_theme() -> None:
         return
     from imp.providers.effective import load_effective_config
     try:
-        root = _project_root()
-        theme = load_effective_config(project_root=root, control_root=root).config.theme
+        theme = load_effective_config(control_root=_settings_root()).config.theme
         pal.set_theme(theme)
     except Exception:
         pass
@@ -1225,7 +1232,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         _emit_cli_error(f"{e}")
         return 2
 
-    block = _preflight_imp_init(control_root=control, project_root=control)
+    block = _preflight_imp_init(control_root=control)
     if block is not None:
         _emit_cli_error(f"{block}")
         return 2
@@ -1235,8 +1242,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         from imp.cli.model_command import validate_model_available
         from imp.providers.effective import load_effective_config
         from imp.providers.resolve import available_providers
-        config = load_effective_config(
-            project_root=control, control_root=control).config
+        config = load_effective_config(control_root=control).config
         reason = validate_model_available(
             model_arg, available=available_providers(config))
         if reason is not None:
@@ -1246,8 +1252,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     non_interactive = bool(getattr(args, "non_interactive", False))
     autonomous = bool(getattr(args, "autonomous", False))
     _test_cmd_fast_nudge(
-        project_root=control, control_root=control,
-        non_interactive=non_interactive,
+        control_root=control, non_interactive=non_interactive,
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 
@@ -1526,8 +1531,7 @@ def _prelaunch_position_model(quest: Quest, state: State) -> str | None:
         return None
     from imp.engine.loader import load_workflow
     from imp.engine.model_override import current_provider_model
-    workflow = load_workflow(
-        quest.workflow_dir, project_keys=frozenset(state.project_facts or {}))
+    workflow = load_workflow(quest.workflow_dir)
     try:
         return current_provider_model(state, workflow, state.step).model
     except (StopIteration, KeyError):
@@ -1605,9 +1609,7 @@ def _editing_mode(control_root: Path) -> str:
     double-fail here just to pick a prompt mode)."""
     from imp.providers.effective import load_effective_config
     try:
-        return load_effective_config(
-            project_root=control_root, control_root=control_root,
-        ).config.editing_mode
+        return load_effective_config(control_root=control_root).config.editing_mode
     except (LoadError, LoadErrors):
         return "emacs"
 
@@ -2487,8 +2489,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = resolve_default_workflow(
-            project_root=control, control_root=control)
+        workflow = resolve_default_workflow(control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         lines = render_summary(build_summary(events), header=header,
@@ -2518,8 +2519,7 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = resolve_default_workflow(
-            project_root=control, control_root=control)
+        workflow = resolve_default_workflow(control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         document = render_summary_markdown(build_summary(events), header=header)
@@ -3810,23 +3810,10 @@ def _cmd_events_search(
     return 0
 
 
-def _config_roots() -> tuple[Path, Path]:
-    """(project_root, control_root) for the config commands. _project_root()
-    never raises (it returns the resolved start dir when no marker is found);
-    only the git resolution can, and pointing control at the project root there
-    just skips the local `.imp/config.yaml` layer."""
-    root = _project_root()
-    try:
-        return root, _control_root()
-    except Exception:
-        return root, root
-
-
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
-    root, control = _config_roots()
-    eff = load_effective_config(project_root=root, control_root=control)
+    eff = load_effective_config(control_root=_settings_root())
     color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
     buf = io.StringIO()
@@ -3840,16 +3827,14 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 def _cmd_config_set(args: argparse.Namespace) -> int:
     from imp.cli.config_write import run_set
-    project_root, control_root = _config_roots()
     return run_set(key=args.key, value=args.value, scope=args.scope,
-                   project_root=project_root, control_root=control_root)
+                   control_root=_settings_root())
 
 
 def _cmd_config_unset(args: argparse.Namespace) -> int:
     from imp.cli.config_write import run_unset
-    project_root, control_root = _config_roots()
     return run_unset(key=args.key, scope=args.scope,
-                     project_root=project_root, control_root=control_root)
+                     control_root=_settings_root())
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (

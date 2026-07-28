@@ -159,8 +159,7 @@ def _seed_single_step(root: Path) -> Quest:
         {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
-        configured = load_effective_config(
-            project_root=root, control_root=root).config.tier_names()
+        configured = load_effective_config(control_root=root).config.tier_names()
     workflow = load_workflow(wf, configured_tiers=configured)
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",

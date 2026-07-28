@@ -40,7 +40,6 @@ def make_load_skill_tool() -> Tool:
                 build_context(
                     quest_title=qc.title, event_log=log,
                     quest_id=qc.id, quest_home=qc.quest_home,
-                    project_facts=qc.project_facts,
                 ),
                 workflow_dir=qc.workflow_dir,
             )  # PromptRenderError -> guarded is_error result

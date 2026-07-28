@@ -77,15 +77,11 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
-    project_keys: frozenset[str] = frozenset()
     with contextlib.suppress(Exception):
-        _cfg = load_effective_config(
-            project_root=root, control_root=root).config
+        _cfg = load_effective_config(control_root=root).config
         configured_tiers = _cfg.tier_names()
-        project_keys = frozenset(_cfg.project_facts)
 
-    workflow = load_workflow(
-        src_wf, configured_tiers=configured_tiers, project_keys=project_keys)
+    workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
@@ -2135,40 +2131,10 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     assert result is RunResult.COMPLETED
 
 
-@pytest.mark.anyio
-async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
-    wf = tmp_path / "imp" / "workflows" / "imp"
-    (wf / "agents").mkdir(parents=True)
-    (wf / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "run {{ project.test_command }}\n"
-    )
-    (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\n"
-        "defaults: {max_retries: 1, max_loops: 6}\n"
-        "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: low}\n"
-    )
-    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "default-workflow: imp\nfacts:\n  test_command: make check\n"
-    )
-    quest = _make_quest(tmp_path)
-    sink: list = []
-    _register_invocation_capturing({"status": "Success"}, sink)
-
-    result = await run_quest(quest, on_event=lambda _e: None)
-    assert result is RunResult.COMPLETED
-    assert any("run make check" in i.initial_messages[0].content[0].text for i in sink)
-
-
-def test_quest_context_defaults_empty_facts() -> None:
+def test_quest_context_defaults_empty_memory() -> None:
     from imp.agents.runner import QuestContext
     cc = QuestContext(
         title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
-    assert cc.project_facts == {}
     assert cc.memory == {}
 
 
@@ -4612,7 +4578,7 @@ def test_build_sandbox_policy_ensures_quest_tmp_dir(
     )
     _write_fake_config(tmp_path)
     quest = _make_quest(tmp_path)
-    config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
+    config = load_effective_config(control_root=tmp_path).config
 
     assert not quest.tmp_dir.exists()
 
@@ -4656,7 +4622,7 @@ def test_build_sandbox_policy_creates_var_tmp_bind_source(
     )
     _write_fake_config(tmp_path)
     quest = _make_quest(tmp_path)
-    config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
+    config = load_effective_config(control_root=tmp_path).config
 
     # Nest the leaf so its parent is a dir the provisioning itself creates (the
     # imp-<uid> parent in production), not pytest's tmp_path.

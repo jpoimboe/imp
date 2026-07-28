@@ -1,15 +1,14 @@
 """Prompt template rendering for agent .md bodies.
 
-Seven namespaces (spec §7.5):
+Six namespaces (spec §7.5):
   quest.id — stable identity; quest.title — human title
   events.<step-name>.<field> — validated agent_result of prior step;
       missing steps render as empty (lenient-within)
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
       because the dict is passed directly under StrictUndefined (strict-within)
-  project.<fact> — project facts; missing key raises (strict-within)
   run.autonomous — whether the run may auto-take recommendations at
       recommendation-bearing gates (bool); a missing attr under run raises
-      (strict-within), like quest/project
+      (strict-within), like quest
   step.lap — this step's 1-based lap number (1 = first forward pass);
       step.prior_laps — retained {lap, outcome, head} entries of prior laps
   docs.path — absolute path to imp's repo-root docs/ corpus, resolved in
@@ -109,38 +108,11 @@ class _DocsNamespace:
     path: str = ""
 
 
-class _ProjectNamespace:
-    """Strict project-facts namespace: raises UndefinedError on a missing key,
-    AttributeError for dunder/leading-underscore names."""
-
-    def __init__(self, facts: dict[str, str]) -> None:
-        self._facts = facts
-
-    def __getattr__(self, name: str) -> str:
-        if name.startswith("_"):
-            raise AttributeError(name)
-        try:
-            return self._facts[name]
-        except KeyError:
-            raise jinja2.exceptions.UndefinedError(
-                f"project has no fact {name!r}"
-            ) from None
-
-    def __getitem__(self, key: str) -> str:
-        try:
-            return self._facts[key]
-        except KeyError:
-            raise jinja2.exceptions.UndefinedError(
-                f"project has no fact {key!r}"
-            ) from None
-
-
 @dataclass(frozen=True, slots=True)
 class PromptContext:
     quest: _QuestNamespace
     events: _EventsNamespace
     vars: dict[str, Any]
-    project: _ProjectNamespace
     run: _RunNamespace
     step: _StepNamespace
     docs: _DocsNamespace
@@ -154,12 +126,10 @@ def build_context(
     parent: dict[str, str] | None = None,
     depends_on: list[dict[str, Any]] | None = None,
     vars: dict[str, Any] | None = None,
-    project_facts: dict[str, str] | None = None,
     autonomous: bool = False, opening: str = "",
     prior_laps: list[dict[str, Any]] | None = None,
     docs_path: str | None = None,
 ) -> PromptContext:
-    facts = dict(project_facts or {})
     laps = tuple(prior_laps or ())
     resolved_docs = docs_path if docs_path is not None else str(bundled_docs_dir())
     # lap from the stored lap, not len: history truncates to OUTCOME_HISTORY_K so len saturates.
@@ -173,7 +143,6 @@ def build_context(
                               depends_on=tuple(depends_on or ())),
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
-        project=_ProjectNamespace(facts),
         run=_RunNamespace(autonomous=autonomous, opening=opening),
         step=_StepNamespace(
             lap=(laps[-1]["lap"] + 1 if laps else 1), prior_laps=laps),
@@ -239,7 +208,7 @@ def render_prompt(
     try:
         return _env_for(workflow_dir).from_string(template_source).render(
             quest=ctx.quest, events=ctx.events, vars=ctx.vars,
-            project=ctx.project, run=ctx.run, step=ctx.step, docs=ctx.docs,
+            run=ctx.run, step=ctx.step, docs=ctx.docs,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e
