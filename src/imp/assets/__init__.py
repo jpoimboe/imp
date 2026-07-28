@@ -126,20 +126,14 @@ def resolve_workflow_dir(project_root: Path, name: str) -> Path:
     from imp.providers.config import validate_workflow_name
     if not validate_workflow_name(name):
         from imp.engine.errors import LoadError
-        from imp.engine.types import SourceLoc
-        raise LoadError(
-            f"invalid workflow name {name!r}",
-            SourceLoc(file=project_root / "imp" / "config.yaml", line=1),
-        )
+        raise LoadError(f"invalid workflow name {name!r}")
     committed = project_root / "imp" / "workflows" / name
     if committed.is_dir():
         return committed
     if is_bundled_workflow(name):
         return bundled_workflow_dir(name)
     from imp.engine.errors import LoadError
-    from imp.engine.types import SourceLoc
     raise LoadError(
         f"unknown workflow {name!r}; available: "
-        f"{', '.join(available_workflow_names(project_root))}",
-        SourceLoc(file=project_root / "imp" / "config.yaml", line=1),
+        f"{', '.join(available_workflow_names(project_root))}"
     )
