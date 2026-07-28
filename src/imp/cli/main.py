@@ -792,11 +792,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
                     "--pythonpath.",
                     file=sys.stderr,
                 )
-            pythonpath = None
-            if getattr(args, "pythonpath", None):
-                pythonpath = [
-                    s.strip() for s in args.pythonpath.split(",") if s.strip()
-                ]
+            raw_pythonpath = getattr(args, "pythonpath", None)
+            pythonpath = (
+                [s.strip() for s in raw_pythonpath.split(",") if s.strip()]
+                if raw_pythonpath is not None
+                else None
+            )
             run_init_noninteractive(
                 project,
                 output_fn=print,

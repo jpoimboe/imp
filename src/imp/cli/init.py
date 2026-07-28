@@ -1078,7 +1078,7 @@ def run_init_noninteractive(
     detect_cmd = detect_verify_fn or detect_test_command
     detected = detect_cmd(project_root)
     test_cmd_fast = detected.command if detected else None  # None omits the block
-    roots = (validate_detected_roots(project_root, pythonpath) if pythonpath
+    roots = (validate_detected_roots(project_root, pythonpath) if pythonpath is not None
              else detect_import_roots(project_root).roots)
 
     settings = InitSettings(

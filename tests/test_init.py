@@ -690,6 +690,22 @@ def test_use_defaults_explicit_pythonpath_overrides_detection(tmp_path):
     assert data["pythonpath"] == ["vendor"]   # the flag wins over detection
 
 
+def test_use_defaults_empty_pythonpath_suppresses_detection(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    # Same fixture that triggers detection in test_use_defaults_detects_pythonpath_from_pyproject
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
+    (tmp_path / "src" / "app").mkdir(parents=True)
+    # pythonpath=[] explicitly opts out — detector must NOT run
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, pythonpath=[],
+        detect_verify_fn=lambda _r: None)
+    text = (tmp_path / "imp" / "config.yaml").read_text()
+    data = yaml.safe_load(text)
+    assert data.get("pythonpath") is None  # empty list => teaching hint, not ["src"]
+    assert "# pythonpath:" in text
+
+
 def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch):
     # A truly repo-less dir OUTSIDE the autouse _git_repo fixture's repo (which
     # git-inits tmp_path, so any tmp_path subdir is already inside a repo). Cap
@@ -805,6 +821,29 @@ def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
     args.func(args)
     assert called["project"] == tmp_path
     assert called["kw"]["pythonpath"] == ["src", "lib"]   # comma-split, blanks dropped
+
+
+def test_init_empty_pythonpath_flag_passes_empty_list(tmp_path, monkeypatch):
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    called: dict[str, object] = {}
+
+    def _spy(project, **kw):
+        called["kw"] = kw
+
+    monkeypatch.setattr(m, "run_init_noninteractive", _spy)
+
+    # --pythonpath "" must yield pythonpath=[] (not None)
+    args = m._build_parser().parse_args(["init", "--use-defaults", "--pythonpath", ""])
+    args.func(args)
+    assert called["kw"]["pythonpath"] == []
+
+    # absent --pythonpath must yield pythonpath=None
+    called.clear()
+    args2 = m._build_parser().parse_args(["init", "--use-defaults"])
+    args2.func(args2)
+    assert called["kw"]["pythonpath"] is None
 
 
 def _init_args(**over: object) -> argparse.Namespace:
