@@ -140,28 +140,28 @@ def _settable(key: str) -> SettableKey:
 
 
 def _target(key: SettableKey, scope: Layer | None,
-            project_root: Path) -> tuple[Layer, Path]:
+            control_root: Path) -> tuple[Layer, Path]:
     layer: Layer = scope or key.home
     if layer == "global":
         if key.project_only:
             raise ConfigWriteError(
                 f"{key.dotted!r} is a project setting; drop --global")
         return "global", global_config_path()
-    return "project", project_root / "imp" / "config.yaml"
+    return "project", control_root / "imp" / "config.yaml"
 
 
-def _require_project_file(target: Path, project_root: Path) -> None:
+def _require_project_file(target: Path, control_root: Path) -> None:
     if target.is_file():
         return
-    if (project_root / "imp" / "project.yaml").is_file():
-        raise ConfigWriteError(project_rename_hint(project_root))
+    if (control_root / "imp" / "project.yaml").is_file():
+        raise ConfigWriteError(project_rename_hint(control_root))
     raise ConfigWriteError(
-        f"no imp/config.yaml in {project_root} — run 'imp init' first")
+        f"no imp/config.yaml in {control_root} — run 'imp init' first")
 
 
-def _scratch_dir(layer: Layer, target: Path, project_root: Path) -> Path:
+def _scratch_dir(layer: Layer, target: Path, control_root: Path) -> Path:
     if layer == "project":
-        return project_root / ".imp" / f"config-verify-{os.getpid()}"
+        return control_root / ".imp" / f"config-verify-{os.getpid()}"
     return target.parent / f".config-verify-{os.getpid()}"
 
 
@@ -193,12 +193,12 @@ def _emit_shadow(key: SettableKey, layer: Layer, control_root: Path) -> None:
 
 
 def run_set(*, key: str, value: str, scope: Layer | None,
-            project_root: Path, control_root: Path) -> int:
+            control_root: Path) -> int:
     try:
         settable = _settable(key)
-        layer, target = _target(settable, scope, project_root)
+        layer, target = _target(settable, scope, control_root)
         if layer == "project":
-            _require_project_file(target, project_root)
+            _require_project_file(target, control_root)
         current = target.read_text() if target.is_file() else ""
         parsed = settable.parse(value)
         try:
@@ -208,7 +208,7 @@ def run_set(*, key: str, value: str, scope: Layer | None,
                 f"invalid YAML in {target.name}: {config_yaml_error(err)}") from err
         # Verify even when the text is unchanged: the write is accepted only if
         # imp's own reader reports the value back at the claimed path.
-        with scratch_seam(_scratch_dir(layer, target, project_root),
+        with scratch_seam(_scratch_dir(layer, target, control_root),
                           target.name) as scratch:
             if not verify(scratch, result.text, settable.read_path, parsed):
                 if not isinstance(parsed, str):
@@ -231,12 +231,12 @@ def run_set(*, key: str, value: str, scope: Layer | None,
 
 
 def run_unset(*, key: str, scope: Layer | None,
-              project_root: Path, control_root: Path) -> int:
+              control_root: Path) -> int:
     try:
         settable = _settable(key)
-        layer, target = _target(settable, scope, project_root)
+        layer, target = _target(settable, scope, control_root)
         if layer == "project":
-            _require_project_file(target, project_root)
+            _require_project_file(target, control_root)
         elif not target.is_file():
             _emit_line(f"{layer_label(target)}: {settable.dotted} "
                        "is not set (nothing to do)")
@@ -258,7 +258,7 @@ def run_unset(*, key: str, scope: Layer | None,
             _emit_line(f"{layer_label(target)}: {settable.dotted} "
                        "is not set (nothing to do)")
             return 0
-        with scratch_seam(_scratch_dir(layer, target, project_root),
+        with scratch_seam(_scratch_dir(layer, target, control_root),
                           target.name) as scratch:
             verify_readable(scratch, result.text)
             land(scratch, target)

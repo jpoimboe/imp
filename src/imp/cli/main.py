@@ -689,6 +689,17 @@ def _control_root() -> Path:
     return worktree.find_control_root(Path.cwd())
 
 
+def _settings_root() -> Path:
+    """The one root every settings layer is read from and written to: the main
+    checkout, resolved via git even from inside a quest worktree. Falls back to
+    the marker walk only when git can resolve nothing (no repo, no git binary) —
+    there the two roots coincide anyway, and a command must not die over it."""
+    try:
+        return _control_root()
+    except Exception:
+        return _project_root()
+
+
 def _preflight_imp_init(*, control_root: Path) -> str | None:
     """Return a clean 'run imp init first' message when no provider is
     env-available (e.g. a never-init'd machine with empty user `providers`),
@@ -3801,23 +3812,10 @@ def _cmd_events_search(
     return 0
 
 
-def _config_roots() -> tuple[Path, Path]:
-    """(project_root, control_root) for the config commands. _project_root()
-    never raises (it returns the resolved start dir when no marker is found);
-    only the git resolution can, and pointing control at the project root there
-    just skips the local `.imp/config.yaml` layer."""
-    root = _project_root()
-    try:
-        return root, _control_root()
-    except Exception:
-        return root, root
-
-
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
-    _, control = _config_roots()
-    eff = load_effective_config(control_root=control)
+    eff = load_effective_config(control_root=_settings_root())
     color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
     buf = io.StringIO()
@@ -3831,16 +3829,14 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 def _cmd_config_set(args: argparse.Namespace) -> int:
     from imp.cli.config_write import run_set
-    project_root, control_root = _config_roots()
     return run_set(key=args.key, value=args.value, scope=args.scope,
-                   project_root=project_root, control_root=control_root)
+                   control_root=_settings_root())
 
 
 def _cmd_config_unset(args: argparse.Namespace) -> int:
     from imp.cli.config_write import run_unset
-    project_root, control_root = _config_roots()
     return run_unset(key=args.key, scope=args.scope,
-                     project_root=project_root, control_root=control_root)
+                     control_root=_settings_root())
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
