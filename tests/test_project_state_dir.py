@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.paths import imp_home, project_state_dir
+from imp.engine.worktree import PreconditionError
+from imp.paths import display_path, imp_home, project_state_dir
 
 
 def _repo(parent: Path, name: str) -> Path:
@@ -82,3 +83,54 @@ def test_a_candidate_with_a_foreign_marker_is_skipped(tmp_path: Path) -> None:
     root = _repo(tmp_path, "widget")
     assert project_state_dir(root) == imp_home() / "projects" / "widget-2"
     assert (taken / "repo").read_text() == f"{tmp_path / 'somewhere' / 'widget'}\n"
+
+
+def test_override_is_returned_verbatim_and_claims_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override = tmp_path / "elsewhere" / "state"
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    root = _repo(tmp_path, "widget")
+    assert project_state_dir(root) == override
+    assert not override.exists()
+    assert not (imp_home() / "projects").exists()
+
+
+def test_override_marked_for_this_checkout_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo(tmp_path, "widget")
+    override = tmp_path / "state"
+    override.mkdir()
+    (override / "repo").write_text(f"{root.resolve()}\n")
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    assert project_state_dir(root) == override
+
+
+def test_override_without_a_marker_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The in-sandbox shape: the directory exists but the marker is masked away.
+    override = tmp_path / "state"
+    override.mkdir()
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    root = _repo(tmp_path, "widget")
+    assert project_state_dir(root) == override
+    assert not (imp_home() / "projects").exists()
+
+
+def test_override_holding_another_checkouts_state_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other = tmp_path / "other" / "repo"
+    override = tmp_path / "state"
+    override.mkdir()
+    (override / "repo").write_text(f"{other}\n")
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    root = _repo(tmp_path, "widget")
+    with pytest.raises(PreconditionError) as excinfo:
+        project_state_dir(root)
+    assert str(excinfo.value) == (
+        f"IMP_STATE_DIR={display_path(override)} holds state for "
+        f"{display_path(other)} — refusing to use it here"
+    )
