@@ -47,10 +47,7 @@ def print_model_roster(
     config = load_effective_config(
         project_root=quest.project_root, control_root=quest.control_root,
     ).config
-    workflow = load_workflow(
-        quest.workflow_dir,
-        project_keys=frozenset(state.project_facts or {}),
-    )
+    workflow = load_workflow(quest.workflow_dir)
     assert state.step is not None
     current = resolve_current_model(state, workflow, config, state.step)
     rosters = discover_roster(

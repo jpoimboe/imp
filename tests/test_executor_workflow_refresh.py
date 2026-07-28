@@ -324,7 +324,7 @@ def _load_workflow_and_config(quest):
     config = load_effective_config(
         project_root=quest.project_root, control_root=quest.control_root,
     ).config
-    workflow = load_workflow(quest.workflow_dir, project_keys=frozenset())
+    workflow = load_workflow(quest.workflow_dir)
     return workflow, config
 
 

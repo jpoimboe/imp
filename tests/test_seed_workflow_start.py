@@ -39,7 +39,6 @@ def test_seed_workflow_start_seeds_cursor_and_vars(tmp_path: Path) -> None:
     workflow = load_workflow(
         resolve_workflow_dir(tmp_path, "imp"),
         configured_tiers=config.tier_names(),
-        project_keys=frozenset(config.project_facts),
     )
     state = State(id="q", step=None, step_attempt=0, status="new")
 

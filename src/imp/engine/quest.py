@@ -587,13 +587,12 @@ class Quest:
             config = load_effective_config(
                 project_root=wt_path, control_root=control_root,
             ).config
-            validate_project_memory(wt_path, config.memory, config.project_facts)
+            validate_project_memory(wt_path, config.memory)
             from imp.assets import resolve_workflow_dir
             wf_name = workflow or config.default_workflow
             loaded_workflow = load_workflow(
                 resolve_workflow_dir(wt_path, wf_name),
                 configured_tiers=config.tier_names(),
-                project_keys=frozenset(config.project_facts),
             )
         except (LoadError, LoadErrors):
             # State is not yet written; tear down the worktree so no orphan is left.
@@ -674,14 +673,12 @@ class Quest:
                 config = load_effective_config(
                     project_root=control_root, control_root=control_root,
                 ).config
-                validate_project_memory(
-                    control_root, config.memory, config.project_facts)
+                validate_project_memory(control_root, config.memory)
                 from imp.assets import resolve_workflow_dir
                 wf_name = workflow or config.default_workflow
                 loaded_workflow = load_workflow(
                     resolve_workflow_dir(control_root, wf_name),
                     configured_tiers=config.tier_names(),
-                    project_keys=frozenset(config.project_facts),
                 )
             except (LoadError, LoadErrors):
                 shutil.rmtree(quest_dir, ignore_errors=True)

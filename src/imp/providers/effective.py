@@ -13,7 +13,7 @@ leaf-path — NEVER folded into `config.tiers`, whose leaves stay plain `str`.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -193,12 +193,10 @@ def resolve_default_workflow(
 def memory_validation_scopes(
     project_root: Path,
     relpaths: Iterable[str],
-    project_facts: Mapping[str, str],
 ) -> tuple[list[str], dict[str, frozenset[str]]]:
     """Build the (valid_workflows, workflow_steps) inputs for
     `validate_memory_tree`: every known workflow name, plus the step names of
-    each workflow referenced by a `<workflow>/...` relpath. Honors project-key
-    gating via `project_facts` so no unrelated template-ref error can fire."""
+    each workflow referenced by a `<workflow>/...` relpath."""
     from imp.assets import available_workflow_names, resolve_workflow_dir
     from imp.engine.loader import load_workflow
 
@@ -213,10 +211,7 @@ def memory_validation_scopes(
     )
     workflow_steps: dict[str, frozenset[str]] = {}
     for name in referenced:
-        wf = load_workflow(
-            resolve_workflow_dir(project_root, name),
-            project_keys=frozenset(project_facts),
-        )
+        wf = load_workflow(resolve_workflow_dir(project_root, name))
         workflow_steps[name] = frozenset(s.name for s in wf.flat_steps())
     return valid, workflow_steps
 
@@ -224,19 +219,14 @@ def memory_validation_scopes(
 def validate_project_memory(
     project_root: Path,
     memory: dict[str, str],
-    project_facts: dict[str, str],
 ) -> None:
     """Validate a loaded `imp/memory/` snapshot against the project's known
     workflows and their steps. Raises LoadError (loud, fail-fast) on any unknown
     workflow dir, non-step `.md`, or stray top-level step file. An empty
-    snapshot is a no-op. Loads only the workflows a subdir references, reusing
-    the same `project_keys` the executor passes so no unrelated template-ref
-    error can fire here."""
+    snapshot is a no-op. Loads only the workflows a subdir references."""
     if not memory:
         return
-    valid, workflow_steps = memory_validation_scopes(
-        project_root, memory.keys(), project_facts
-    )
+    valid, workflow_steps = memory_validation_scopes(project_root, memory.keys())
     errors = validate_memory_tree(
         memory.keys(), valid_workflows=valid, workflow_steps=workflow_steps
     )

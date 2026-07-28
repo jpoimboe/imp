@@ -38,10 +38,7 @@ def apply_model_override(
 ) -> None:
     """Resolve `arg` against `step_name`'s current provider and persist the override."""
     parsed = parse_model_arg(arg)
-    workflow = load_workflow(
-        quest.workflow_dir,
-        project_keys=frozenset(state.project_facts or {}),
-    )
+    workflow = load_workflow(quest.workflow_dir)
     current = current_provider_model(state, workflow, step_name)
     provider = parsed.provider if parsed.provider is not None else current.provider
     if state.resolved_steps is None:

@@ -1526,8 +1526,7 @@ def _prelaunch_position_model(quest: Quest, state: State) -> str | None:
         return None
     from imp.engine.loader import load_workflow
     from imp.engine.model_override import current_provider_model
-    workflow = load_workflow(
-        quest.workflow_dir, project_keys=frozenset(state.project_facts or {}))
+    workflow = load_workflow(quest.workflow_dir)
     try:
         return current_provider_model(state, workflow, state.step).model
     except (StopIteration, KeyError):

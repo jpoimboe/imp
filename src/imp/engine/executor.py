@@ -433,15 +433,11 @@ async def run_quest(
         state.checkpoint_threshold = config.context_checkpoint_threshold()
         # Freeze once per quest: resume reuses the facts/memory the first run saw.
         if state.project_facts is None:
-            validate_project_memory(
-                quest.project_root, config.memory, config.project_facts)
+            validate_project_memory(quest.project_root, config.memory)
             state.project_facts = config.project_facts
             state.memory = config.memory
             state.save(quest.state_dir)
-        workflow = load_workflow(
-            quest.workflow_dir,
-            project_keys=frozenset(state.project_facts),
-        )
+        workflow = load_workflow(quest.workflow_dir)
         log: EventLog = JsonlEventLog(
             quest.events_path,
             on_event=_liveness_on_event(coordinator, on_event, state, quest.state_dir))

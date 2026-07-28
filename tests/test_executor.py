@@ -77,15 +77,12 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
-    project_keys: frozenset[str] = frozenset()
     with contextlib.suppress(Exception):
         _cfg = load_effective_config(
             project_root=root, control_root=root).config
         configured_tiers = _cfg.tier_names()
-        project_keys = frozenset(_cfg.project_facts)
 
-    workflow = load_workflow(
-        src_wf, configured_tiers=configured_tiers, project_keys=project_keys)
+    workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
