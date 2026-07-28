@@ -65,3 +65,10 @@ def test_edit_documents_base_flag() -> None:
     assert sp.description is not None and "base branch" in sp.description
     # The subparser's own one-line help (as `imp --help` lists it) names it too.
     assert "base branch" in " ".join(_build_parser().format_help().split())
+
+
+def test_log_follow_help_documents_content_flag_composition() -> None:
+    help_text = " ".join(_subparser("log").format_help().split())
+    assert ("Live-tail the narrative (tail -f): replay it, then stream new events "
+            "until the quest reaches a terminal status. Composes with "
+            "--full/--show/--hide; implies --no-pager.") in help_text

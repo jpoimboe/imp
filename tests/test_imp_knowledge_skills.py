@@ -125,9 +125,11 @@ def test_introspection_documents_log_windowing_filters() -> None:
     assert "`--step`, `--range` (or a positional `<range>`), `--limit`, and `--agent`" in body
     # The --type exclusion is explicitly called out with its rationale.
     assert "fights the folded narrative" in body
-    # Export carry-through and the --follow exemption are documented.
+    # Export carry-through and what --follow does / does not take are documented.
     assert "`--md`/`--html` exports" in body
-    assert "`--follow` stays unfiltered" in body
+    # Wrap-independent: the clause is hard-wrapped across lines in the guide.
+    assert ("`--follow` takes no windowing filters but composes with the content "
+            "flags `--full` / `--show` / `--hide`.") in " ".join(body.split())
     # The named-consumer read of the seed conversation is called out.
     assert "--step threshold" in body
 

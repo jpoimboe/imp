@@ -4224,8 +4224,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "-f", "--follow", action="store_true",
         help="Live-tail the narrative (tail -f): replay it, then stream new "
-             "events until the quest reaches a terminal status. Renders the "
-             "live run view; implies --no-pager.",
+             "events until the quest reaches a terminal status. Composes with "
+             "--full/--show/--hide; implies --no-pager.",
     )
     p_log.add_argument(
         "--show", action=SplitAppend, default=None, metavar="CAT",
