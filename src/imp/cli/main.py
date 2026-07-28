@@ -4180,7 +4180,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_init.set_defaults(func=_cmd_init)
+    p_init.set_defaults(func=_cmd_init, warm=True)
     p_init.add_argument(
         "--use-defaults", action="store_true", dest="non_interactive",
         help="Non-interactive, provider-free setup: write imp/config.yaml with "
@@ -4248,7 +4248,7 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Run the opening step under a chosen model "
                             "(provider:model or bare model); the same override as "
                             "typing /model at the opening prompt.")
-    p_new.set_defaults(func=_cmd_new)
+    p_new.set_defaults(func=_cmd_new, warm=True)
 
     p_chat = sub.add_parser(
         "chat",
@@ -4270,7 +4270,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Run the opening step under a chosen model "
                              "(provider:model or bare model); the same override as "
                              "typing /model at the opening prompt.")
-    p_chat.set_defaults(func=_cmd_chat)
+    p_chat.set_defaults(func=_cmd_chat, warm=True)
 
     p_resume = sub.add_parser(
         "resume",
@@ -4292,7 +4292,7 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
                                "Requires --headless.")
-    p_resume.set_defaults(func=_cmd_resume)
+    p_resume.set_defaults(func=_cmd_resume, warm=True)
 
     p_log = sub.add_parser(
         "log",
@@ -4730,6 +4730,10 @@ def main(argv: list[str] | None = None) -> int:
             ns = _build_events_search_parser().parse_args(args[2:])
         else:
             ns = parser.parse_args(args)
+        if getattr(ns, "warm", False):
+            # Import the graph up front so an on-disk update can't splice into a long run.
+            from imp.remote.session.warmup import warm_module_graph
+            warm_module_graph()
         _apply_theme()   # resolve dark/light/ansi once, before any command renders
         rc: int = ns.func(ns)
         # Flush here, inside the guard: output small enough to fit Python's

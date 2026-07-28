@@ -248,3 +248,61 @@ def test_imp_help_pulls_in_no_heavy_dependency(tmp_path: Path) -> None:
     marker = [ln for ln in proc.stderr.splitlines() if ln.startswith("LEAKED:")]
     assert marker, f"child did not report; stderr was {proc.stderr!r}"
     assert marker[0] == "LEAKED:", f"imp --help imported {marker[0][len('LEAKED:'):]}"
+
+
+@pytest.mark.parametrize(
+    "cmd,handler",
+    [("init", "_cmd_init"), ("new", "_cmd_new"),
+     ("chat", "_cmd_chat"), ("resume", "_cmd_resume")],
+)
+def test_long_lived_commands_warm_the_module_graph_first(
+    cmd: str, handler: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The four long-lived commands import imp's whole graph before their
+    handler runs, so a concurrent on-disk update can't splice into the run."""
+    import imp.cli.main as m
+
+    monkeypatch.chdir(tmp_path)
+    calls: list[str] = []
+
+    def _fake_warm() -> list[tuple[str, BaseException]]:
+        calls.append("warm")
+        return []
+
+    def _fake_handler(_ns: object) -> int:
+        calls.append("handler")
+        return 0
+
+    monkeypatch.setattr("imp.remote.session.warmup.warm_module_graph", _fake_warm)
+    monkeypatch.setattr(m, handler, _fake_handler)
+
+    assert main([cmd]) == 0
+    assert calls == ["warm", "handler"]
+
+
+def test_short_lived_command_is_not_warmed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`imp list` renders and exits — paying warmup would be a visible
+    regression. Its namespace carries no `warm` at all, as does the
+    hand-built `events search` one, hence main()'s getattr default."""
+    import imp.cli.main as m
+
+    monkeypatch.chdir(tmp_path)
+    calls: list[str] = []
+
+    def _fake_warm() -> list[tuple[str, BaseException]]:
+        calls.append("warm")
+        return []
+
+    def _fake_handler(_ns: object) -> int:
+        calls.append("handler")
+        return 0
+
+    monkeypatch.setattr("imp.remote.session.warmup.warm_module_graph", _fake_warm)
+    monkeypatch.setattr(m, "_cmd_list", _fake_handler)
+
+    assert main(["list"]) == 0
+    assert calls == ["handler"]
+    assert not hasattr(_build_parser().parse_args(["list"]), "warm")
+    assert not hasattr(m._build_events_search_parser().parse_args([]), "warm")
