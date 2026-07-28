@@ -5,18 +5,26 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import yaml
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from imp.assets import bundled_assets_dir
 from imp.cli.init import (
     _EDIT_PROMPTS,
     BaseDetection,
     InitScreenState,
+    ScreenAccepted,
     ScreenRow,
+    ScreenTalk,
     _apply_row_edit,
     _confirm_rows,
     _cycle_workflow,
+    _default_row_prompt,
     _edit_default,
+    _interactive_confirm_screen,
     _screen_state_from_detection,
     _workflow_blurb,
 )
@@ -219,3 +227,167 @@ def test_edit_prompt_labels_are_verbatim() -> None:
     assert _EDIT_PROMPTS[ScreenRow.TESTS] == "Fast test command: "
     assert _EDIT_PROMPTS[ScreenRow.IMPORT_ROOT] == "Import roots (comma-separated): "
     assert ScreenRow.WORKFLOW not in _EDIT_PROMPTS
+
+
+def _never_prompts(message: str, default: str) -> str:
+    raise AssertionError(f"the screen must not prompt here: {message!r}")
+
+
+def test_space_on_the_workflow_row_cycles_without_leaving_the_screen(
+    tmp_path: Path,
+) -> None:
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text(" ")     # cycle default -> minimal, in place
+        pipe.send_text("\r")    # accept
+        outcome = _interactive_confirm_screen(
+            tmp_path, _detected_state(), workflows=_WORKFLOWS,
+            prompt_fn=_never_prompts)
+    assert isinstance(outcome, ScreenAccepted)
+    assert outcome.state.workflow == "minimal"
+    assert outcome.state.branch == "master"
+
+
+def test_space_on_an_editable_row_prompts_prefilled_then_re_renders(
+    tmp_path: Path,
+) -> None:
+    asked: list[tuple[str, str]] = []
+
+    def _fake_prompt(message: str, default: str) -> str:
+        asked.append((message, default))
+        return "trunk"
+
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\x1b[B")   # down to branch
+        pipe.send_text(" ")        # edit it
+        pipe.send_text("\r")       # accept the re-rendered screen
+        outcome = _interactive_confirm_screen(
+            tmp_path, _detected_state(), workflows=_WORKFLOWS,
+            prompt_fn=_fake_prompt)
+    assert asked == [("Integration branch: ", "master")]
+    assert isinstance(outcome, ScreenAccepted)
+    assert outcome.state.branch == "trunk"
+    assert outcome.state.branch_provenance == "you set this"
+
+
+def test_up_wraps_from_the_first_row_to_import_root(tmp_path: Path) -> None:
+    (tmp_path / "lib").mkdir()
+    asked: list[tuple[str, str]] = []
+
+    def _fake_prompt(message: str, default: str) -> str:
+        asked.append((message, default))
+        return "lib"
+
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\x1b[A")   # up from workflow wraps to import root
+        pipe.send_text(" ")
+        pipe.send_text("\r")
+        outcome = _interactive_confirm_screen(
+            tmp_path, _detected_state(), workflows=_WORKFLOWS,
+            prompt_fn=_fake_prompt)
+    assert asked == [("Import roots (comma-separated): ", "src")]
+    assert isinstance(outcome, ScreenAccepted)
+    assert outcome.state.pythonpath == ["lib"]
+
+
+def test_enter_is_refused_while_the_branch_is_empty(tmp_path: Path) -> None:
+    state = _screen_state_from_detection(
+        workflow="default", base=None, tests=None,
+        roots=ImportRoots([], "not a Python project"))
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\r")      # refused: the screen stays open
+        pipe.send_text("\x1b")    # esc cancels it instead
+        with pytest.raises(KeyboardInterrupt):
+            _interactive_confirm_screen(
+                tmp_path, state, workflows=_WORKFLOWS, prompt_fn=_never_prompts)
+
+
+def test_question_mark_hands_off_carrying_the_current_values(tmp_path: Path) -> None:
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text(" ")   # cycle the workflow first
+        pipe.send_text("?")
+        outcome = _interactive_confirm_screen(
+            tmp_path, _detected_state(), workflows=_WORKFLOWS,
+            prompt_fn=_never_prompts)
+    assert isinstance(outcome, ScreenTalk)
+    assert outcome.state.workflow == "minimal"
+
+
+def test_ctrl_c_cancels_the_screen(tmp_path: Path) -> None:
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\x03")
+        with pytest.raises(KeyboardInterrupt):
+            _interactive_confirm_screen(
+                tmp_path, _detected_state(), workflows=_WORKFLOWS,
+                prompt_fn=_never_prompts)
+
+
+def test_the_row_prompt_pre_fills_the_current_value() -> None:
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\r")   # accept the pre-filled value untouched
+        assert _default_row_prompt("Integration branch: ", "master") == "master"
+
+
+def test_ctrl_d_at_a_row_prompt_cancels_the_screen() -> None:
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\x7f" * len("master"))   # clear the pre-filled value
+        pipe.send_text("\x04")                   # ctrl-d on an empty buffer is EOF
+        with pytest.raises(KeyboardInterrupt):
+            _default_row_prompt("Integration branch: ", "master")
+
+
+def test_the_screen_erases_itself_so_re_renders_do_not_stack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import prompt_toolkit as pt
+
+    real_application = pt.Application
+    captured: dict[str, object] = {}
+
+    def spy(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return real_application(*args, **kwargs)
+
+    monkeypatch.setattr(pt, "Application", spy)
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\r")
+        _interactive_confirm_screen(
+            tmp_path, _detected_state(), workflows=_WORKFLOWS,
+            prompt_fn=_never_prompts)
+    assert captured.get("erase_when_done") is True
+
+
+def test_down_wraps_from_the_last_row_back_to_the_first_landing_on_workflow(
+    tmp_path: Path,
+) -> None:
+    with create_pipe_input() as pipe, create_app_session(
+            input=pipe, output=DummyOutput()):
+        pipe.send_text("\x1b[A")   # up from workflow wraps to import root
+        pipe.send_text("\x1b[B")   # down from import root wraps back to workflow
+        pipe.send_text(" ")        # space on workflow row cycles default -> minimal, no prompt
+        pipe.send_text("\r")       # accept
+        outcome = _interactive_confirm_screen(
+            tmp_path, _detected_state(), workflows=_WORKFLOWS,
+            prompt_fn=_never_prompts)
+    assert isinstance(outcome, ScreenAccepted)
+    assert outcome.state.workflow == "minimal"
+    assert outcome.state.pythonpath == ["src"]
+
+
+def test_screen_accepted_equals_screen_talk_but_isinstance_still_discriminates_them() -> None:
+    state = _detected_state()
+    accepted = ScreenAccepted(state)
+    talk = ScreenTalk(state)
+    assert accepted == talk
+    assert isinstance(accepted, ScreenAccepted)
+    assert not isinstance(accepted, ScreenTalk)
+    assert isinstance(talk, ScreenTalk)
+    assert not isinstance(talk, ScreenAccepted)

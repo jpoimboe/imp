@@ -26,7 +26,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from enum import IntEnum
+from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -584,6 +584,120 @@ def _apply_row_edit(
     return replace(
         state, pythonpath=validate_detected_roots(project_root, entered),
         roots_provenance=_YOU_SET_THIS)
+
+
+class ScreenAccepted(NamedTuple):
+    """`enter` on the confirmation screen: write this state. Discriminate against
+    ScreenTalk with isinstance — as tuples of one equal field, the two compare equal."""
+    state: InitScreenState
+
+
+class ScreenTalk(NamedTuple):
+    """`?` on the confirmation screen: hand these values to the setup conversation."""
+    state: InitScreenState
+
+
+class _ScreenAction(Enum):
+    ACCEPT = "accept"
+    TALK = "talk"
+    EDIT = "edit"
+
+
+def _default_row_prompt(message: str, default: str) -> str:
+    from prompt_toolkit import prompt as pt_prompt
+    try:
+        return str(pt_prompt(message, default=default))
+    except EOFError:  # ctrl-d cancels setup, the same exit esc offers on the screen
+        raise KeyboardInterrupt from None
+
+
+def _run_confirm_app(
+    state: InitScreenState, cursor: ScreenRow, workflows: list[str],
+) -> tuple[_ScreenAction, InitScreenState, ScreenRow]:
+    """One pass of the screen. Returns why it exited, plus the state and cursor
+    it exited with. Cancel (esc / ctrl-c) raises KeyboardInterrupt, as the
+    provider picker does. `erase_when_done` keeps a re-render from stacking."""
+    from prompt_toolkit import Application
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import Layout
+    from prompt_toolkit.layout.containers import HSplit, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.layout.dimension import Dimension
+
+    row = cursor
+    current = state
+
+    def _render() -> list[tuple[str, str]]:
+        return _confirm_rows(current, row)
+
+    kb = KeyBindings()
+
+    @kb.add("up")
+    def _up(_event: Any) -> None:
+        nonlocal row
+        row = ScreenRow((row - 1) % len(ScreenRow))
+
+    @kb.add("down")
+    def _down(_event: Any) -> None:
+        nonlocal row
+        row = ScreenRow((row + 1) % len(ScreenRow))
+
+    @kb.add(" ")
+    def _space(event: Any) -> None:
+        nonlocal current
+        if row is ScreenRow.WORKFLOW:
+            current = _cycle_workflow(current, workflows)
+        else:
+            event.app.exit(result=_ScreenAction.EDIT)
+
+    @kb.add("enter")
+    def _enter(event: Any) -> None:
+        if not current.branch:
+            return  # an unwritable config is unreachable
+        event.app.exit(result=_ScreenAction.ACCEPT)
+
+    @kb.add("?")
+    def _talk(event: Any) -> None:
+        event.app.exit(result=_ScreenAction.TALK)
+
+    @kb.add("c-c")
+    @kb.add("escape", eager=True)
+    def _cancel(event: Any) -> None:
+        event.app.exit(exception=KeyboardInterrupt)
+
+    control = FormattedTextControl(text=_render, focusable=True, show_cursor=False)
+    height = sum(text.count("\n") for _style, text in _render()) + 1
+    body = Window(content=control, height=Dimension(min=height, max=height))
+    app: Any = Application(
+        layout=Layout(HSplit([body])),
+        key_bindings=kb,
+        full_screen=False,
+        mouse_support=False,
+        erase_when_done=True,
+    )
+    action: _ScreenAction = app.run()
+    return action, current, row
+
+
+def _interactive_confirm_screen(
+    project_root: Path,
+    state: InitScreenState,
+    *,
+    workflows: list[str],
+    prompt_fn: Callable[[str, str], str] = _default_row_prompt,
+) -> ScreenAccepted | ScreenTalk:
+    """The detected-and-confirmed setup screen. Editing a row leaves the screen,
+    asks for the value with the current one pre-filled, and re-renders."""
+    cursor = ScreenRow.WORKFLOW
+    while True:
+        action, state, cursor = _run_confirm_app(state, cursor, workflows)
+        if action is _ScreenAction.ACCEPT:
+            return ScreenAccepted(state)
+        if action is _ScreenAction.TALK:
+            return ScreenTalk(state)
+        state = _apply_row_edit(
+            project_root, state, cursor,
+            prompt_fn(_EDIT_PROMPTS[cursor], _edit_default(state, cursor)))
 
 
 def write_init_files(project_root: Path, settings: InitSettings) -> bool:
