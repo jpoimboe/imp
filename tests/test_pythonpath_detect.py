@@ -232,6 +232,88 @@ def test_import_roots_unparseable_pyproject_falls_through_to_probe(
         ["src"], "from the layout on disk")
 
 
+# --- detect_import_roots: declared paths in setup.cfg / setup.py ---
+
+def test_import_roots_setup_cfg_package_dir_root_key(tmp_path: Path) -> None:
+    (tmp_path / "setup.cfg").write_text(
+        "[metadata]\nname = x\n\n[options]\npackage_dir =\n    = lib\n")
+    (tmp_path / "lib").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots(["lib"], "from setup.cfg")
+
+
+def test_import_roots_setup_cfg_package_dir_named_package(tmp_path: Path) -> None:
+    (tmp_path / "setup.cfg").write_text(
+        "[metadata]\nname = x\n\n[options]\npackage_dir =\n    mypkg = lib/mypkg\n")
+    (tmp_path / "lib" / "mypkg").mkdir(parents=True)
+    assert detect_import_roots(tmp_path) == ImportRoots(["lib"], "from setup.cfg")
+
+
+def test_import_roots_setup_cfg_pytest_pythonpath(tmp_path: Path) -> None:
+    (tmp_path / "setup.cfg").write_text(
+        "[metadata]\nname = x\n\n[tool:pytest]\npythonpath = stubs\n")
+    (tmp_path / "stubs").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots(["stubs"], "from setup.cfg")
+
+
+def test_import_roots_setup_py_package_dir(tmp_path: Path) -> None:
+    (tmp_path / "setup.py").write_text(
+        "from setuptools import setup\n"
+        "setup(name='x', package_dir={'': 'lib'})\n")
+    (tmp_path / "lib").mkdir()
+    assert detect_import_roots(tmp_path) == ImportRoots(["lib"], "from setup.py")
+
+
+def test_import_roots_setup_py_computed_value_falls_through_to_probe(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "setup.py").write_text(
+        "from setuptools import setup\n"
+        "def where():\n    return {'': 'lib'}\n"
+        "setup(name='x', package_dir=where())\n")
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__init__.py").write_text("")
+    # Not a literal, and setup.py is never executed — the probe answers.
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["src"], "from the layout on disk")
+
+
+def test_import_roots_pyproject_wins_over_setup_cfg(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.setuptools]\npackage-dir = {"" = "declared"}\n')
+    (tmp_path / "setup.cfg").write_text(
+        "[metadata]\nname = x\n\n[options]\npackage_dir =\n    = other\n")
+    (tmp_path / "declared").mkdir()
+    (tmp_path / "other").mkdir()
+    # Both sources declare existing directories; pyproject.toml must take priority.
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["declared"], "from pyproject.toml")
+
+
+def test_import_roots_setup_cfg_package_dir_wins_over_pytest_pythonpath(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "setup.cfg").write_text(
+        "[metadata]\nname = x\n\n[options]\npackage_dir =\n    = lib\n\n"
+        "[tool:pytest]\npythonpath = stubs\n")
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "stubs").mkdir()
+    # Within a single setup.cfg, package_dir must win over [tool:pytest] pythonpath.
+    assert detect_import_roots(tmp_path) == ImportRoots(["lib"], "from setup.cfg")
+
+
+def test_import_roots_unparseable_setup_cfg_falls_through_to_probe(
+    tmp_path: Path,
+) -> None:
+    # A key before any section header triggers MissingSectionHeaderError.
+    (tmp_path / "setup.cfg").write_text(
+        "key = value without section header\n[options]\npackage_dir =\n    = lib\n")
+    (tmp_path / "src" / "pkg").mkdir(parents=True)
+    (tmp_path / "src" / "pkg" / "__init__.py").write_text("")
+    assert detect_import_roots(tmp_path) == ImportRoots(
+        ["src"], "from the layout on disk")
+
+
 def test_detector_and_agent_are_retired() -> None:
     import imp.cli.pythonpath_detect as ppd
     from imp.assets import bundled_workflow_dir

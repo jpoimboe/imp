@@ -9,8 +9,11 @@ provider-credential readiness check (`resolve_detection_provider`).
 
 from __future__ import annotations
 
+import ast
+import configparser
 import json
 import tomllib
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple
@@ -150,6 +153,61 @@ def _declared_in_pyproject(project_root: Path) -> list[str]:
     return []
 
 
+def _declared_in_setup_cfg(project_root: Path) -> list[str]:
+    """setuptools' `[options] package_dir`, else a `[tool:pytest] pythonpath` —
+    the two setup.cfg declarations that name an import root."""
+    path = project_root / "setup.cfg"
+    if not path.is_file():
+        return []
+    parser = configparser.RawConfigParser()
+    try:
+        parser.read_string(path.read_text(errors="ignore"))
+    except configparser.Error:
+        return []
+    mapping: dict[str, str] = {}
+    for line in parser.get("options", "package_dir", fallback="").splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            mapping[key.strip()] = value.strip()
+    roots = _package_dir_roots(mapping)
+    if roots:
+        return roots
+    return parser.get("tool:pytest", "pythonpath", fallback="").split()
+
+
+def _declared_in_setup_py(project_root: Path) -> list[str]:
+    """A literal `package_dir={...}` keyword read out of setup.py's AST. The
+    file is parsed, never executed, so a computed value is skipped."""
+    path = project_root / "setup.py"
+    if not path.is_file():
+        return []
+    try:
+        tree = ast.parse(path.read_text(errors="ignore"))
+    except SyntaxError:
+        return []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "package_dir":
+                continue
+            try:
+                value = ast.literal_eval(kw.value)
+            except (ValueError, TypeError, SyntaxError):
+                continue
+            roots = _package_dir_roots(value)
+            if roots:
+                return roots
+    return []
+
+
+_DECLARED_SOURCES: tuple[tuple[str, Callable[[Path], list[str]]], ...] = (
+    ("from pyproject.toml", _declared_in_pyproject),
+    ("from setup.cfg", _declared_in_setup_cfg),
+    ("from setup.py", _declared_in_setup_py),
+)
+
+
 def _probe_layout(project_root: Path) -> list[str]:
     """`src` when it directly holds a package dir, else the repo root when it does —
     empty when neither."""
@@ -170,10 +228,10 @@ def detect_import_roots(project_root: Path) -> ImportRoots:
     Every empty outcome is reported as `not a Python project`."""
     if not is_python_packaging_project(project_root):
         return ImportRoots([], _NOT_PYTHON)
-    declared = validate_detected_roots(
-        project_root, _declared_in_pyproject(project_root))
-    if declared:
-        return ImportRoots(declared, "from pyproject.toml")
+    for provenance, reader in _DECLARED_SOURCES:
+        declared = validate_detected_roots(project_root, reader(project_root))
+        if declared:
+            return ImportRoots(declared, provenance)
     probed = validate_detected_roots(project_root, _probe_layout(project_root))
     if probed:
         return ImportRoots(probed, _FROM_LAYOUT)
