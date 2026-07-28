@@ -2,8 +2,12 @@
 2026-06-08-config-file-split §2).
 
 Precedence (later wins):
-    provider code (floor) ← imp/config.yaml ← ~/.imp/config.yaml
-                          ← .imp/config.yaml (control root, gitignored)
+    provider code (floor) ← <control root>/imp/config.yaml
+                          ← ~/.imp/config.yaml
+                          ← <control root>/.imp/config.yaml (gitignored)
+
+All three files live in the MAIN CHECKOUT: a quest worktree has no say in the
+settings its own gates are judged by.
 
 The merged `Config.tiers` is always fully populated (floor + overrides), so
 `resolve.resolve_run` reads it unchanged. Provenance is a side-table keyed by
@@ -140,25 +144,23 @@ def _to_config(merged: dict[str, Any]) -> Config:
     )
 
 
-def load_effective_config(
-    *, project_root: Path | None = None, control_root: Path | None = None,
-) -> EffectiveConfig:
+def load_effective_config(*, control_root: Path | None = None) -> EffectiveConfig:
     """Build the floor, then merge project ← global ← local on top.
 
-    - project layer: `project_root/imp/config.yaml` (the worktree for a quest;
-      the control-root checkout for quest-less commands). Skipped when
-      project_root is None; raises when only the pre-rename `imp/project.yaml`
-      is present.
+    - project layer: `control_root/imp/config.yaml` — the main checkout, never a
+      quest worktree. Skipped when control_root is None; raises when only the
+      pre-rename `imp/project.yaml` is present.
     - global layer: `global_config_path()` (live).
-    - local layer: `control_root/.imp/config.yaml` (live, gitignored). Skipped
-      when control_root is None.
+    - local layer: `control_root/.imp/config.yaml` (live, gitignored).
+
+    control_root=None is floor + global only (`cli/pythonpath_detect.py` and the
+    quest-less subagent fallback rely on that).
     """
     layers: list[tuple[dict[str, Any], SourceLoc]] = [_floor_layer()]
-    if project_root is not None:
-        proj_path = project_root / "imp" / "config.yaml"
-        if project_rename_pending(project_root):
-            raise LoadError(project_rename_hint(project_root))
-        p = parse_config_layer(proj_path)
+    if control_root is not None:
+        if project_rename_pending(control_root):
+            raise LoadError(project_rename_hint(control_root))
+        p = parse_config_layer(control_root / "imp" / "config.yaml")
         if p is not None:
             layers.append(p)
     g = parse_config_layer(global_config_path())
@@ -172,14 +174,9 @@ def load_effective_config(
     return EffectiveConfig(config=_to_config(merged), provenance=prov)
 
 
-def resolve_default_workflow(
-    *, project_root: Path, control_root: Path | None,
-) -> str:
-    """The layered `default-workflow` for one root pair. Keyword-only: swapping
-    the roots would silently read the wrong checkout's project layer."""
-    return load_effective_config(
-        project_root=project_root, control_root=control_root,
-    ).config.default_workflow
+def resolve_default_workflow(*, control_root: Path | None) -> str:
+    """The layered `default-workflow` for one settings root."""
+    return load_effective_config(control_root=control_root).config.default_workflow
 
 
 def memory_validation_scopes(

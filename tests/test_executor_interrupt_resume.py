@@ -34,8 +34,7 @@ def _make_quest(root: Path, *, quest_id: str = "c", title: str = "t") -> Quest:
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_effective_config(
-            project_root=root, control_root=root).config.tier_names()
+        configured_tiers = load_effective_config(control_root=root).config.tier_names()
 
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()

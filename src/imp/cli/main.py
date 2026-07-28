@@ -697,9 +697,7 @@ def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import UnknownProvider, _first_available_provider
     try:
-        config = load_effective_config(
-            project_root=project_root, control_root=control_root,
-        ).config
+        config = load_effective_config(control_root=control_root).config
         no_provider = _first_available_provider(config) is None
     except (LoadError, LoadErrors, UnknownProvider):
         # A malformed config (bad YAML, or a `providers:` entry that names an
@@ -727,8 +725,7 @@ def _test_cmd_fast_nudge(
     from imp.providers.effective import load_effective_config
     detect = detect_fn or detect_test_command
     try:
-        cfg = load_effective_config(
-            project_root=project_root, control_root=control_root).config
+        cfg = load_effective_config(control_root=control_root).config
     except (LoadError, LoadErrors):
         return
     if cfg.test_cmd_fast is not None:
@@ -762,7 +759,7 @@ def _apply_theme() -> None:
     from imp.providers.effective import load_effective_config
     try:
         root = _project_root()
-        theme = load_effective_config(project_root=root, control_root=root).config.theme
+        theme = load_effective_config(control_root=root).config.theme
         pal.set_theme(theme)
     except Exception:
         pass
@@ -1235,8 +1232,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         from imp.cli.model_command import validate_model_available
         from imp.providers.effective import load_effective_config
         from imp.providers.resolve import available_providers
-        config = load_effective_config(
-            project_root=control, control_root=control).config
+        config = load_effective_config(control_root=control).config
         reason = validate_model_available(
             model_arg, available=available_providers(config))
         if reason is not None:
@@ -1604,9 +1600,7 @@ def _editing_mode(control_root: Path) -> str:
     double-fail here just to pick a prompt mode)."""
     from imp.providers.effective import load_effective_config
     try:
-        return load_effective_config(
-            project_root=control_root, control_root=control_root,
-        ).config.editing_mode
+        return load_effective_config(control_root=control_root).config.editing_mode
     except (LoadError, LoadErrors):
         return "emacs"
 
@@ -2486,8 +2480,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = resolve_default_workflow(
-            project_root=control, control_root=control)
+        workflow = resolve_default_workflow(control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         lines = render_summary(build_summary(events), header=header,
@@ -2517,8 +2510,7 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         from imp.providers.effective import resolve_default_workflow
         card = store.quest_card(quest_id)
         status = card.status if card is not None else "?"
-        workflow = resolve_default_workflow(
-            project_root=control, control_root=control)
+        workflow = resolve_default_workflow(control_root=control)
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         document = render_summary_markdown(build_summary(events), header=header)
@@ -3824,8 +3816,8 @@ def _config_roots() -> tuple[Path, Path]:
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
-    root, control = _config_roots()
-    eff = load_effective_config(project_root=root, control_root=control)
+    _, control = _config_roots()
+    eff = load_effective_config(control_root=control)
     color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
     buf = io.StringIO()

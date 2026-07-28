@@ -44,9 +44,7 @@ def print_model_roster(
     from imp.providers.model_roster import discover_roster
 
     state = State.load(quest.state_dir)
-    config = load_effective_config(
-        project_root=quest.project_root, control_root=quest.control_root,
-    ).config
+    config = load_effective_config(control_root=quest.control_root).config
     workflow = load_workflow(quest.workflow_dir)
     assert state.step is not None
     current = resolve_current_model(state, workflow, config, state.step)
@@ -62,9 +60,7 @@ def roster_model_names(quest: Any) -> list[str]:
     from imp.providers.effective import load_effective_config
     from imp.providers.model_roster import discover_roster
 
-    config = load_effective_config(
-        project_root=quest.project_root, control_root=quest.control_root,
-    ).config
+    config = load_effective_config(control_root=quest.control_root).config
     rosters = discover_roster(config, claude_options=read_claude_model_options())
     names: list[str] = []
     for roster in rosters:
@@ -77,9 +73,7 @@ def roster_model_names(quest: Any) -> list[str]:
 def _available_for_quest(quest: Any) -> list[str]:
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import available_providers
-    config = load_effective_config(
-        project_root=quest.project_root, control_root=quest.control_root,
-    ).config
+    config = load_effective_config(control_root=quest.control_root).config
     return available_providers(config)
 
 

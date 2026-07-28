@@ -419,9 +419,7 @@ async def run_quest(
             quest.project_root != quest.control_root
             and worktree.heal_project_config_rename(
                 quest.project_root, quest.control_root))
-        config = load_effective_config(
-            project_root=quest.project_root, control_root=quest.control_root,
-        ).config
+        config = load_effective_config(control_root=quest.control_root).config
         state = State.load(quest.state_dir)
         quest.relink_home()
         if state.halt_condition is not None:

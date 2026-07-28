@@ -328,7 +328,7 @@ def test_cmd_config_trailing_blank_on_tty(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
         eff_mod, "load_effective_config",
-        lambda *, project_root, control_root: object())
+        lambda *, control_root: object())
 
     captured: dict = {}
 
@@ -359,7 +359,7 @@ def test_cmd_config_unchanged_when_piped(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
         eff_mod, "load_effective_config",
-        lambda *, project_root, control_root: object())
+        lambda *, control_root: object())
 
     captured: dict = {}
 
@@ -390,7 +390,7 @@ def test_cmd_config_explain_trailing_blank_on_tty(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(
         eff_mod, "load_effective_config",
-        lambda *, project_root, control_root: object())
+        lambda *, control_root: object())
 
     captured: dict = {}
 

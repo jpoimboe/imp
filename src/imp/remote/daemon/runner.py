@@ -565,8 +565,7 @@ def start_daemon(control_root: Path) -> int:
     except DaemonAlreadyRunning:
         _emit_cli_error("a remote-control daemon is already running for this repo")
         return 2
-    config = load_effective_config(
-        project_root=control_root, control_root=control_root).config
+    config = load_effective_config(control_root=control_root).config
     _driver_raw = (getattr(config, "remote", None) or {}).get("driver")
     if not _driver_raw:
         _emit_cli_error("remote-control requires a configured remote.driver; add a "

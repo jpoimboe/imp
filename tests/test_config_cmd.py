@@ -20,7 +20,7 @@ def _eff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [openai]\ntheme: light\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    return load_effective_config(project_root=None, control_root=None)
+    return load_effective_config()
 
 
 def _block(lines: list[str], header: str) -> list[str]:
@@ -72,7 +72,7 @@ def test_render_shows_configured_test_cmds(
         "test_cmd_slow_timeout: 600\n"
     )
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_config(eff, out, color=False)
     text = out.getvalue()
@@ -96,7 +96,7 @@ def test_render_shows_disabled_test_cmds(
         'test_cmd_slow: ""\n'
     )
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_config(eff, out, color=False)
     text = out.getvalue()
@@ -125,7 +125,7 @@ def test_cli_authenticated_provider_skips_key_check(
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [claude_code]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_config(eff, out, color=False)
     text = out.getvalue()
@@ -178,7 +178,7 @@ def test_config_default_shows_full_matrix_when_no_providers_configured(
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("theme: ansi\n")  # no providers: key
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_config(eff, out, color=False)              # show_all=False (default)
     text = out.getvalue()
@@ -195,7 +195,7 @@ def test_render_marks_enabled_driver(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     (tmp_path / ".imp").mkdir()
     (tmp_path / ".imp" / "config.yaml").write_text("remote:\n  driver: telegram\n")
-    eff = load_effective_config(project_root=None, control_root=tmp_path)
+    eff = load_effective_config(control_root=tmp_path)
     out = io.StringIO()
     render_config(eff, out, color=False)
     assert "telegram" in out.getvalue()
@@ -216,7 +216,7 @@ def test_explain_colors_sources_when_layers_differ(
         "    openai: gpt-5-custom\n"
     )
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_explain(eff, "high", out, color=True)
     assert "\x1b[" in out.getvalue()   # labels always colored when color=True
@@ -249,7 +249,7 @@ def test_explain_never_colors_under_no_color(
         "    openai: gpt-5-custom\n"
     )
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_explain(eff, "high", out, color=False)
     assert "\x1b[" not in out.getvalue()
@@ -287,7 +287,7 @@ def test_render_shows_configured_pythonpath(
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [openai]\npythonpath: [src, lib]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_config(eff, out, color=False)
     line = next((ln.strip() for ln in out.getvalue().splitlines()
@@ -305,7 +305,7 @@ def test_config_brackets_align_across_tiers_and_settings(
         "test_cmd_slow: make check && make test-live\n"   # 28 chars, exceeds 24
     )
     monkeypatch.setenv("IMP_HOME", str(imp_home))
-    eff = load_effective_config(project_root=None, control_root=None)
+    eff = load_effective_config()
     out = io.StringIO()
     render_config(eff, out, color=False)
     lines = out.getvalue().splitlines()
@@ -381,7 +381,7 @@ def test_settings_block_leads_with_default_workflow(
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("default-workflow: mine\n")
-    eff = load_effective_config(project_root=proj, control_root=None)
+    eff = load_effective_config(control_root=proj)
     out = io.StringIO()
     render_config(eff, out, color=False)
     settings = _block(out.getvalue().splitlines(), "settings:")

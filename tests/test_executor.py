@@ -78,8 +78,7 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        _cfg = load_effective_config(
-            project_root=root, control_root=root).config
+        _cfg = load_effective_config(control_root=root).config
         configured_tiers = _cfg.tier_names()
 
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
@@ -4579,7 +4578,7 @@ def test_build_sandbox_policy_ensures_quest_tmp_dir(
     )
     _write_fake_config(tmp_path)
     quest = _make_quest(tmp_path)
-    config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
+    config = load_effective_config(control_root=tmp_path).config
 
     assert not quest.tmp_dir.exists()
 
@@ -4623,7 +4622,7 @@ def test_build_sandbox_policy_creates_var_tmp_bind_source(
     )
     _write_fake_config(tmp_path)
     quest = _make_quest(tmp_path)
-    config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
+    config = load_effective_config(control_root=tmp_path).config
 
     # Nest the leaf so its parent is a dir the provisioning itself creates (the
     # imp-<uid> parent in production), not pytest's tmp_path.

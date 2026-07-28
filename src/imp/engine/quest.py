@@ -534,8 +534,7 @@ class Quest:
     def live_workflow_dir(self) -> Path:
         from imp.assets import resolve_workflow_dir
         from imp.providers.effective import resolve_default_workflow
-        name = self.workflow or resolve_default_workflow(
-            project_root=self.project_root, control_root=self.control_root)
+        name = self.workflow or resolve_default_workflow(control_root=self.control_root)
         return resolve_workflow_dir(self.project_root, name)
 
     @property
@@ -543,8 +542,7 @@ class Quest:
         """Mirror of live_workflow_dir rooted at the control root, not the worktree."""
         from imp.assets import resolve_workflow_dir
         from imp.providers.effective import resolve_default_workflow
-        name = self.workflow or resolve_default_workflow(
-            project_root=self.control_root, control_root=self.control_root)
+        name = self.workflow or resolve_default_workflow(control_root=self.control_root)
         return resolve_workflow_dir(self.control_root, name)
 
     @property
@@ -610,9 +608,7 @@ class Quest:
         from imp.providers.memory import load_memory_snapshot
 
         try:
-            config = load_effective_config(
-                project_root=wt_path, control_root=control_root,
-            ).config
+            config = load_effective_config(control_root=control_root).config
             validate_project_memory(
                 wt_path, load_memory_snapshot(wt_path / "imp" / "memory"))
             from imp.assets import resolve_workflow_dir
@@ -698,9 +694,7 @@ class Quest:
             from imp.providers.memory import load_memory_snapshot
 
             try:
-                config = load_effective_config(
-                    project_root=control_root, control_root=control_root,
-                ).config
+                config = load_effective_config(control_root=control_root).config
                 validate_project_memory(
                     control_root,
                     load_memory_snapshot(control_root / "imp" / "memory"))

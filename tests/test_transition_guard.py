@@ -38,7 +38,7 @@ def test_old_project_file_raises_instead_of_loading_empty(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = _old_name_repo(tmp_path)
     with pytest.raises(LoadError) as exc:
-        load_effective_config(project_root=proj, control_root=None)
+        load_effective_config(control_root=proj)
     # No SourceLoc: str(LoadError) would otherwise prefix a `file:line` naming a
     # path that does not exist. The message alone carries the instruction.
     # proj is not a git repo, so this is also the branch-unresolvable hint form.
@@ -53,7 +53,7 @@ def test_new_name_present_wins_and_the_old_file_is_never_read(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = _old_name_repo(tmp_path)
     (proj / "imp" / "config.yaml").write_text("theme: light\n")
-    eff = load_effective_config(project_root=proj, control_root=None)
+    eff = load_effective_config(control_root=proj)
     assert eff.config.theme == "light"
     # `providers: [openai]` lives only in the old file; the floor sets no
     # providers, so an empty tuple proves the old file was not merged in.
@@ -66,7 +66,7 @@ def test_neither_file_present_still_loads_the_floor(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "empty"
     (proj / "imp").mkdir(parents=True)
-    eff = load_effective_config(project_root=proj, control_root=None)
+    eff = load_effective_config(control_root=proj)
     assert eff.config.theme == "ansi"
 
 
