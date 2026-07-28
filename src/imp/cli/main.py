@@ -26,21 +26,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 
-import anyio
-
 from imp import __version__
-from imp.agents.random_status import random_status_phrase
-from imp.agents.skills import load_user_skill
-from imp.assets import selectable_workflow_names
 from imp.cli import palette as pal
 from imp.cli import quest_row, splash
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
-from imp.diagnostics import install_stack_dumper
-from imp.providers.config import parse_default_base, validate_workflow_name
-from imp.remote.daemon.directory import session_is_resident
-from imp.remote.session.attach import DaemonStartupError
-from imp.remote.session.protocol import SkillRequest
 
 if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
@@ -50,6 +40,7 @@ if TYPE_CHECKING:
     from imp.engine.executor import RunResult
     from imp.engine.quest import Quest
     from imp.engine.state import State
+    from imp.remote.session.attach import DaemonStartupError
 
 
 class ReplyInterjectRouter:
@@ -757,6 +748,7 @@ def _apply_theme() -> None:
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
+    from imp.assets import selectable_workflow_names
     from imp.cli.init import IntegrationBranchUnresolved, run_init, run_init_noninteractive
     from imp.engine import worktree
     project = _project_root()
@@ -847,7 +839,9 @@ async def _read_intent_line(
 ) -> str:
     """Read one pre-session intent line, capturing `/model` into `model_sink`
     and `/sandbox` into `sandbox_sink`."""
+    from imp.agents.skills import load_user_skill
     from imp.cli.slash import ask_line_with_slash
+    from imp.remote.session.protocol import SkillRequest
     while True:
         line = await ask_line_with_slash(
             prompt, None, quest, color=color, width=width, hint=hint,
@@ -1159,6 +1153,7 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
     any other unknown branch.
     """
     from imp.engine import worktree
+    from imp.providers.config import parse_default_base
     if base_flag is not None:
         if not worktree.branch_exists(control, base_flag):
             raise BaseResolutionError(
@@ -1192,6 +1187,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     from imp.engine.errors import LoadError, LoadErrors
     from imp.engine.quest import Quest, live_stems
     from imp.engine.quest_id import new_quest_id
+    from imp.providers.config import validate_workflow_name
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
         return _emit_mutation_result(await proxy_mutation_async("new", {
             "opening": getattr(args, "opening", None),
@@ -1389,10 +1385,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
+    import anyio
     return anyio.run(functools.partial(_async_cmd_new, leave_mode="new"), args)
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
+    import anyio
     return anyio.run(functools.partial(_async_cmd_new, leave_mode="chat"), args)
 
 
@@ -1428,6 +1426,7 @@ def _build_resume_driver(
     *, quest: Quest, state: State, status: LiveStatus,
     color: bool, preceded_by_blank: bool = False,
 ) -> LiveDriver:
+    from imp.agents.random_status import random_status_phrase
     from imp.cli.live_driver import LiveDriver
     # startup_verb is drawn once at construction — compose_startup stores it, never re-draws.
     return LiveDriver(
@@ -1557,6 +1556,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
+    import anyio
     return anyio.run(_async_cmd_resume, args)
 
 
@@ -2407,6 +2407,8 @@ def _follow_live(control: Path, quest_id: str, home: Path, *,
     """Replay a live quest's narrative through LiveDriver, then tail
     events.jsonl until a terminal status or the home is archived away. Ctrl-C
     clears the footer and exits 130."""
+    import anyio
+
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     status = LiveStatus(sys.stdout)
@@ -2429,6 +2431,7 @@ async def _follow_poll_loop(
 ) -> int:
     """Advance the spinner (LiveStatus.tick) concurrently with a poll loop that
     feeds new events and checks exit conditions every _FOLLOW_POLL_INTERVAL."""
+    import anyio
     rc = 0
     async with anyio.create_task_group() as tg:
         tg.start_soon(status.tick)
@@ -3032,6 +3035,8 @@ async def _resolve_resume_target(
 
 
 def _deliver_abandon_resident(quest_id: str) -> None:
+    import anyio
+
     from imp.remote.session.client import SessionClient
     from imp.remote.session.discover import session_socket_path
     from imp.remote.session.protocol import CONTROL_ABANDON
@@ -3064,6 +3069,7 @@ def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
     from imp.engine.errors import LoadError, LoadErrors
     from imp.engine.quest import Quest
     from imp.engine.state import LockHeld
+    from imp.remote.daemon.directory import session_is_resident
     try:
         quest = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
@@ -3159,6 +3165,8 @@ async def _pick_abandon_matches(
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
+    import anyio
+
     from imp.cli.mutation_proxy import proxy_mutation
     from imp.engine.archive import read as archive_read
     token = args.token
@@ -4702,6 +4710,7 @@ def _init_logging() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from imp.diagnostics import install_stack_dumper
     from imp.engine import worktree
     _init_logging()
     with contextlib.suppress(Exception):

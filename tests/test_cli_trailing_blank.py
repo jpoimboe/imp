@@ -526,7 +526,7 @@ def test_abandon_resident_delivery_trailing_blank_on_tty(
 
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    monkeypatch.setattr(m, "session_is_resident", lambda _ctrl, cid: True)
+    monkeypatch.setattr("imp.remote.daemon.directory.session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(m, "_deliver_abandon_resident", lambda cid: None)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     rc = m._abandon_local(tmp_path, "feat")

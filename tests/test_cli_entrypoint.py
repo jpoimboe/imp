@@ -225,3 +225,26 @@ def test_artifact_commit_subcommand_is_removed() -> None:
     # The nested-CLI artifact surface is gone — the engine journals artifacts
     # in-process at each step boundary. The subcommand must not be registered.
     assert "artifact-commit" not in _command_names(_build_parser())
+
+
+def test_imp_help_pulls_in_no_heavy_dependency(tmp_path: Path) -> None:
+    """`imp --help` must exit inside parse_args without loading the agent stack.
+    Fresh interpreter: in-process, the suite has already imported all of these."""
+    code = (
+        "import runpy, sys\n"
+        "sys.argv = ['imp', '--help']\n"
+        "try:\n"
+        "    runpy.run_module('imp', run_name='__main__')\n"
+        "except SystemExit:\n"
+        "    pass\n"
+        "heavy = {'pydantic', 'jinja2', 'httpx', 'PIL', 'rich', 'yaml', 'ruamel',\n"
+        "         'anyio', 'prompt_toolkit'}\n"
+        "leaked = sorted({n.split('.')[0] for n in sys.modules} & heavy)\n"
+        "sys.stderr.write('LEAKED:' + ','.join(leaked) + '\\n')\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    marker = [ln for ln in proc.stderr.splitlines() if ln.startswith("LEAKED:")]
+    assert marker, f"child did not report; stderr was {proc.stderr!r}"
+    assert marker[0] == "LEAKED:", f"imp --help imported {marker[0][len('LEAKED:'):]}"

@@ -450,7 +450,7 @@ def test_follow_live_ctrl_c_clears_and_returns_130(
     driver = MagicMock()
     monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda stream: status)
     monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda **kw: driver)
-    monkeypatch.setattr(m.anyio, "run", MagicMock(side_effect=KeyboardInterrupt))
+    monkeypatch.setattr("anyio.run", MagicMock(side_effect=KeyboardInterrupt))
     rc = m._follow_live(tmp_path, "id", tmp_path / "home", cats=frozenset())
     assert rc == 130
     status.reset.assert_called_once()
@@ -672,7 +672,7 @@ def test_follow_live_threads_cats_into_the_driver(
 
     monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _fake_driver)
     monkeypatch.setattr("imp.cli.live_status.LiveStatus", MagicMock())
-    monkeypatch.setattr(m.anyio, "run", lambda *a, **kw: 0)
+    monkeypatch.setattr("anyio.run", lambda *a, **kw: 0)
     rc = m._follow_live(tmp_path, "id", tmp_path / "home",
                         cats=frozenset({"prompts"}))
     assert rc == 0

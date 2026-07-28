@@ -86,7 +86,7 @@ def test_headless_resume_unlabeled_step_uses_random_phrase(
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
     monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "random_status_phrase", lambda: "scheming")
+    monkeypatch.setattr("imp.agents.random_status.random_status_phrase", lambda: "scheming")
     captured = _capture_driver(monkeypatch)
 
     async def _ok(*a: object, **k: object) -> int:
