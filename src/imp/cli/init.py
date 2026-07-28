@@ -46,6 +46,7 @@ from imp.cli import palette as pal
 from imp.cli import splash
 from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT, Prompt
 from imp.cli.pythonpath_detect import (
+    detect_import_roots,
     format_pythonpath_yaml,
     resolve_detection_provider,
     validate_detected_roots,
@@ -808,7 +809,8 @@ def run_init_noninteractive(
 
     detect_cmd = detect_verify_fn or detect_test_command
     test_cmd_fast = detect_cmd(project_root)  # None omits; a heuristic hit fills it
-    roots = validate_detected_roots(project_root, pythonpath) if pythonpath else []
+    roots = (validate_detected_roots(project_root, pythonpath) if pythonpath
+             else detect_import_roots(project_root).roots)
 
     settings = InitSettings(
         default_workflow=workflow, default_base=default_base,

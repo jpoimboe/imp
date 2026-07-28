@@ -597,6 +597,30 @@ def test_use_defaults_fills_offline_test_command(tmp_path):
     assert data["test_cmd_fast"] == "make check"
 
 
+def test_use_defaults_detects_pythonpath_from_pyproject(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
+    (tmp_path / "src" / "app").mkdir(parents=True)
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["pythonpath"] == ["src"]
+
+
+def test_use_defaults_explicit_pythonpath_overrides_detection(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
+    (tmp_path / "src" / "app").mkdir(parents=True)
+    (tmp_path / "vendor").mkdir()
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, pythonpath=["vendor"],
+        detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["pythonpath"] == ["vendor"]   # the flag wins over detection
+
+
 def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch):
     # A truly repo-less dir OUTSIDE the autouse _git_repo fixture's repo (which
     # git-inits tmp_path, so any tmp_path subdir is already inside a repo). Cap
