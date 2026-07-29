@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -19,10 +20,13 @@ from imp.cli.state_migrate import (
     _rewrite_archive_roots,
     _rewrite_quest_roots,
     _target_control_root,
+    migrate_project_state,
 )
-from imp.engine.quest import link_quest_home, live_quest_ids
-from imp.paths import imp_home
-from tests.conftest import _assert_outside_a_git_work_tree, _init_repo
+from imp.engine import archive
+from imp.engine.archive.record import read_record
+from imp.engine.quest import Quest, link_quest_home, live_quest_ids
+from imp.paths import display_path, imp_home, project_state_dir
+from tests.conftest import _assert_outside_a_git_work_tree, _init_repo, _seed_control
 
 
 def _seed(legacy: Path) -> None:
@@ -412,3 +416,222 @@ def test_a_stale_lock_does_not_defer(
     assert _target_control_root(control) == control
     assert capsys.readouterr().err == ""
     assert "IMP_STATE_DIR" not in os.environ
+
+
+LIVE_ID = "mig111"
+DRAFT_ID = "drf111"
+ARCHIVED_ID = "arc111"
+
+
+class OldLayout(NamedTuple):
+    control: Path
+    legacy: Path
+
+
+def _seed_archive_record(control: Path, quest_id: str, project_root: Path,
+                         scratch: Path) -> None:
+    """One record through the real archive writer, carrying an old-layout
+    project_root in its embedded quest_meta."""
+    scratch.mkdir(parents=True, exist_ok=True)
+    events = scratch / "events.jsonl"
+    events.write_text("")
+    quest_json = scratch / "quest.json"
+    quest_json.write_text(json.dumps({
+        "id": quest_id, "title": "archived", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+        "project_root": str(project_root), "materialized": True,
+    }, indent=2, sort_keys=True))
+    state_json = scratch / "state.json"
+    state_json.write_text(json.dumps(
+        {"id": quest_id, "status": "abandoned", "step": "spec"}))
+    archive.archive_quest(control, quest_id, events_path=events,
+                          quest_json_path=quest_json, state_json_path=state_json)
+
+
+@pytest.fixture
+def old_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> OldLayout:
+    """A checkout in the pre-migration shape — quest home, real linked worktree,
+    un-materialized draft, archived record and local config layer all under
+    <control>/.imp, written by the real production writers with the seam pinned
+    there (exactly the deferral pin's own shape)."""
+    (tmp_path / "proj").mkdir()
+    control = (tmp_path / "proj").resolve()
+    legacy = control / ".imp"
+    legacy.mkdir()
+    monkeypatch.setenv("IMP_STATE_DIR", str(legacy))
+    _seed_control(control)
+    Quest.create(control, title="live", quest_id=LIVE_ID, base_branch="main")
+    Quest.create_draft(control, title="idea", quest_id=DRAFT_ID, base_branch="main")
+    _seed_archive_record(control, ARCHIVED_ID, legacy / "worktrees" / ARCHIVED_ID,
+                         tmp_path / "scratch")
+    monkeypatch.delenv("IMP_STATE_DIR")
+    return OldLayout(control, legacy)
+
+
+@pytest.mark.timeout(240)
+def test_migration_moves_every_entry_and_reports_it(
+    old_layout: OldLayout, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec AC 14: everything moves, the checkout directory is gone, and both
+    mandated lines are printed."""
+    capsys.readouterr()                       # drop the fixture's own output
+    migrate_project_state(old_layout.control)
+
+    state_dir = project_state_dir(old_layout.control)
+    assert (state_dir / "quests" / LIVE_ID / "quest.json").is_file()
+    assert (state_dir / "quests" / DRAFT_ID / "quest.json").is_file()
+    assert (state_dir / "worktrees" / LIVE_ID / "README.md").read_text() == "seed\n"
+    assert (state_dir / "archive" / "records" / f"{ARCHIVED_ID}.json").is_file()
+    assert (state_dir / "config.yaml").read_text().startswith("providers:")
+    assert not old_layout.legacy.exists()
+    # Spec's Copy section pins both lines verbatim; the paths go through
+    # display_path because a tmp dir may itself live under $HOME.
+    assert capsys.readouterr().err == (
+        f"imp: moving .imp/ to {display_path(state_dir)} — this may take a moment\n"
+        f"imp: moved .imp/ to {display_path(state_dir)}\n")
+
+
+@pytest.mark.timeout(240)
+def test_the_moved_worktree_still_works_and_git_knows_where_it_is(
+    old_layout: OldLayout,
+) -> None:
+    """Spec AC 15."""
+    migrate_project_state(old_layout.control)
+
+    moved = project_state_dir(old_layout.control) / "worktrees" / LIVE_ID
+    assert _git(moved, "status", "--porcelain", check=False).returncode == 0
+    assert str(moved) in _git(old_layout.control, "worktree", "list").stdout
+
+
+@pytest.mark.timeout(240)
+def test_the_quest_home_symlink_follows_the_move(old_layout: OldLayout) -> None:
+    """Spec AC 16."""
+    migrate_project_state(old_layout.control)
+
+    state_dir = project_state_dir(old_layout.control)
+    link = state_dir / "worktrees" / LIVE_ID / ".imp" / "quests" / LIVE_ID
+    assert link.is_symlink()
+    assert link.resolve() == state_dir / "quests" / LIVE_ID
+
+
+@pytest.mark.timeout(240)
+def test_recorded_roots_move_except_the_draft_s(old_layout: OldLayout) -> None:
+    """Spec AC 17: live quest and archived record follow the worktree; the draft's
+    project_root is the control root and stays put."""
+    migrate_project_state(old_layout.control)
+
+    state_dir = project_state_dir(old_layout.control)
+    assert _meta(state_dir, LIVE_ID)["project_root"] == str(
+        state_dir / "worktrees" / LIVE_ID)
+    assert _meta(state_dir, DRAFT_ID)["project_root"] == str(old_layout.control)
+    record = read_record(state_dir / "archive" / "records", ARCHIVED_ID)
+    assert record is not None
+    assert record["quest_meta"]["project_root"] == str(
+        state_dir / "worktrees" / ARCHIVED_ID)
+
+
+@pytest.mark.timeout(240)
+def test_an_interrupted_fixup_completes_on_the_next_run(
+    old_layout: OldLayout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 20a: the emptied .imp survives as the in-progress marker, so the
+    guard keeps passing and the next invocation finishes the job."""
+    real = state_migrate._rewrite_quest_roots
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("interrupted")
+
+    monkeypatch.setattr(state_migrate, "_rewrite_quest_roots", boom)
+    with pytest.raises(OSError, match="interrupted"):
+        migrate_project_state(old_layout.control)
+    assert old_layout.legacy.is_dir()
+    assert not (old_layout.legacy / "quests").exists()      # step 3 did complete
+
+    monkeypatch.setattr(state_migrate, "_rewrite_quest_roots", real)
+    migrate_project_state(old_layout.control)
+
+    state_dir = project_state_dir(old_layout.control)
+    assert not old_layout.legacy.exists()
+    assert _meta(state_dir, LIVE_ID)["project_root"] == str(
+        state_dir / "worktrees" / LIVE_ID)
+    assert str(state_dir / "worktrees" / LIVE_ID) in _git(
+        old_layout.control, "worktree", "list").stdout
+
+
+@pytest.mark.timeout(240)
+def test_an_interrupted_move_completes_on_the_next_run(
+    old_layout: OldLayout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 20b: half the entries moved, the rest still at the source."""
+    real_rename = os.rename
+
+    def flaky_rename(src: Path, dst: Path) -> None:
+        if dst.name == "quests":      # sorted after archive and config.yaml
+            raise OSError("interrupted")
+        real_rename(src, dst)
+
+    monkeypatch.setattr(state_migrate.os, "rename", flaky_rename)
+    with pytest.raises(OSError, match="interrupted"):
+        migrate_project_state(old_layout.control)
+    assert (old_layout.legacy / "quests").is_dir()
+    assert (old_layout.legacy / "worktrees").is_dir()
+
+    monkeypatch.setattr(state_migrate.os, "rename", real_rename)
+    migrate_project_state(old_layout.control)
+
+    state_dir = project_state_dir(old_layout.control)
+    assert not old_layout.legacy.exists()
+    assert (state_dir / "worktrees" / LIVE_ID / "README.md").read_text() == "seed\n"
+    assert _meta(state_dir, LIVE_ID)["project_root"] == str(
+        state_dir / "worktrees" / LIVE_ID)
+
+
+@pytest.mark.timeout(240)
+def test_the_cross_device_branch_reaches_the_same_end_state(
+    old_layout: OldLayout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 21: copy/rename/delete instead of rename, same result."""
+    monkeypatch.setattr(state_migrate, "_same_device", lambda a, b: False)
+
+    migrate_project_state(old_layout.control)
+
+    state_dir = project_state_dir(old_layout.control)
+    assert not old_layout.legacy.exists()
+    assert (state_dir / "worktrees" / LIVE_ID / "README.md").read_text() == "seed\n"
+    assert (state_dir / "worktrees" / LIVE_ID / ".imp" / "quests" / LIVE_ID
+            ).resolve() == state_dir / "quests" / LIVE_ID
+    assert _meta(state_dir, DRAFT_ID)["project_root"] == str(old_layout.control)
+    assert str(state_dir / "worktrees" / LIVE_ID) in _git(
+        old_layout.control, "worktree", "list").stdout
+
+
+@pytest.mark.timeout(240)
+def test_an_interrupted_cross_device_copy_discards_its_partial_staging(
+    old_layout: OldLayout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 21 + 20b: the source is authoritative until the rename, so the
+    half-written staging directory is safe to throw away on the next run."""
+    monkeypatch.setattr(state_migrate, "_same_device", lambda a, b: False)
+    real_copytree = shutil.copytree
+
+    def flaky_copytree(src: Path, dst: Path, *args: object, **kwargs: object) -> None:
+        if src.name == "quests":      # sorted after archive; worktrees comes later
+            dst.mkdir(parents=True)
+            (dst / "half.txt").write_text("partial copy")
+            raise OSError("interrupted")
+        real_copytree(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(state_migrate.shutil, "copytree", flaky_copytree)
+    with pytest.raises(OSError, match="interrupted"):
+        migrate_project_state(old_layout.control)
+    assert (old_layout.legacy / "quests" / LIVE_ID / "quest.json").is_file()
+
+    monkeypatch.setattr(state_migrate.shutil, "copytree", real_copytree)
+    migrate_project_state(old_layout.control)
+
+    state_dir = project_state_dir(old_layout.control)
+    assert not old_layout.legacy.exists()
+    assert not (state_dir / "quests" / "half.txt").exists()
+    assert not (state_dir / ".migrating-quests").exists()
+    assert _meta(state_dir, LIVE_ID)["project_root"] == str(
+        state_dir / "worktrees" / LIVE_ID)

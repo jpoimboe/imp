@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from imp.cli.config_migrate import _git_toplevel
-from imp.paths import imp_home
+from imp.paths import display_path, imp_home, project_state_dir
 
 
 def legacy_state_dir(control_root: Path) -> Path:
@@ -198,3 +198,23 @@ def _target_control_root(cwd: Path) -> Path | None:
         _pin(legacy)
         return None
     return control_root
+
+
+def migrate_project_state(cwd: Path) -> None:
+    """Move <control_root>/.imp into the project's state directory, once. Steps 3-7
+    are each idempotent and the emptied source directory is the in-progress marker,
+    so an interrupted run simply finishes on the next invocation."""
+    control_root = _target_control_root(cwd)
+    if control_root is None:
+        return
+    legacy = legacy_state_dir(control_root)
+    state_dir = project_state_dir(control_root)
+    print(f"imp: moving .imp/ to {display_path(state_dir)} — this may take a moment",
+          file=sys.stderr)
+    _move_entries(legacy, state_dir)
+    _rewrite_quest_roots(legacy, state_dir)
+    _repair_worktrees(control_root, legacy, state_dir)
+    _relink_quest_homes(legacy, state_dir)
+    _rewrite_archive_roots(legacy, state_dir)
+    legacy.rmdir()
+    print(f"imp: moved .imp/ to {display_path(state_dir)}", file=sys.stderr)
