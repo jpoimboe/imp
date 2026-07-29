@@ -123,3 +123,20 @@ def test_docs_reorg_moved_all_eight_with_no_stale_root_copy() -> None:
     for old, new in moved.items():
         assert not Path(old).exists(), f"stale root copy left: {old}"
         assert Path(new).is_file(), f"missing at new home: {new}"
+
+
+def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
+    text = ARCH.read_text()
+    assert "### Where state lives" in text
+    assert "`~/.imp/projects/<slug>/`" in text
+    assert "project_state_dir()" in text
+    assert "$IMP_STATE_DIR" in text
+    assert "$IMP_HOME" in text
+    assert "`repo` marker" in text
+    for entry in ("`quests/<id>/`", "`worktrees/<id>/`", "`archive/`"):
+        assert entry in text, entry
+    # the one imp path left in a worktree is the symlink into the quest home
+    assert "`.imp/quests/<id>` pointing at that quest's home" in text
+    # no checkout-relative state path survives anywhere in the doc
+    for stale in (".imp/quest/", ".imp/archive", ".imp/worktrees"):
+        assert stale not in text, stale
