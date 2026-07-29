@@ -196,7 +196,8 @@ def test_migrate_emits_dim_inplace_progress_on_tty(
     assert "\x1b[2m" in out and "\x1b[0m" in out  # dim SGR wrap
     assert "\r\x1b[K" in out                       # in-place rewrite idiom
     assert "Reindexing" not in out                 # migration pass only (reindex no-op'd)
-    assert out.endswith("\r\x1b[K")                # trailing erase after the loop
+    # final frame committed to scrollback, newline-terminated, no trailing erase
+    assert out.endswith("\x1b[2mMigrating archive... 2/2\x1b[0m\n")
 
 
 def test_migrate_on_non_tty_emits_nothing_and_migrates(

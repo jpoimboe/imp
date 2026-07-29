@@ -139,7 +139,8 @@ def test_rebuild_emits_dim_inplace_progress_on_tty(tmp_path: Path, monkeypatch) 
     assert "\x1b[2m" in out and "\x1b[0m" in out    # dim SGR wrap
     assert "\r\x1b[K" in out                         # in-place rewrite idiom
     assert "2/2" in out                              # counts up to record total
-    assert out.endswith("\r\x1b[K")                  # trailing erase after the loop
+    # final frame committed to scrollback, newline-terminated, no trailing erase
+    assert out.endswith("\x1b[2mReindexing archive... 2/2\x1b[0m\n")
 
 
 def test_rebuild_on_non_tty_emits_nothing_and_indexes(tmp_path: Path, monkeypatch) -> None:
@@ -163,7 +164,7 @@ def test_rebuild_on_non_tty_emits_nothing_and_indexes(tmp_path: Path, monkeypatc
     assert all(ts)                     # last_event_ts populated
 
 
-def test_rebuild_erases_progress_line_on_exception(tmp_path: Path, monkeypatch) -> None:
+def test_rebuild_keeps_partial_progress_line_on_exception(tmp_path: Path, monkeypatch) -> None:
     _archive_one(tmp_path, "alpha", "beta", "quest_created")
     _archive_one(tmp_path, "gamma", "alpha", "quest_merged")
 
@@ -177,5 +178,14 @@ def test_rebuild_erases_progress_line_on_exception(tmp_path: Path, monkeypatch) 
     with pytest.raises(KeyboardInterrupt):
         archive.rebuild_index(tmp_path)
 
-    # the transient line was erased by the finally before the exception propagated
-    assert fake.text.endswith("\r\x1b[K")
+    # the partial counter survives above the traceback rather than being erased
+    assert fake.text.endswith("\x1b[2mReindexing archive... 1/2\x1b[0m\n")
+
+
+def test_rebuild_on_empty_archive_emits_nothing_on_tty(tmp_path: Path, monkeypatch) -> None:
+    fake = _FakeStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", fake)
+
+    archive.rebuild_index(tmp_path)
+
+    assert fake.text == ""  # never painted, so no bare newline either

@@ -92,18 +92,21 @@ def archive_quest(
 def _progress(label: str) -> Iterator[Callable[[int, int], None]]:
     stream = sys.stderr
     tty = stream.isatty()
+    painted = False
 
     def emit(i: int, total: int) -> None:
+        nonlocal painted
         if not tty:
             return
         stream.write(f"\r\x1b[K\x1b[2m{label} {i}/{total}\x1b[0m")
         stream.flush()
+        painted = True
 
     try:
         yield emit
     finally:
-        if tty:
-            stream.write("\r\x1b[K")
+        if painted:
+            stream.write("\n")
             stream.flush()
 
 
