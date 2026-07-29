@@ -56,3 +56,11 @@ def test_lifecycle_documents_waiting_error_and_no_draft_word() -> None:
     assert "shown as a `draft`" not in body
     assert "relabeled `draft`" not in body
     assert "shown as a **draft**" not in body
+
+
+def test_lifecycle_places_the_quest_home_outside_the_checkout() -> None:
+    flat = " ".join(DOC.read_text().split())
+    assert ("per-quest home on disk at `~/.imp/projects/<slug>/quests/<id>/`, "
+            "outside the checkout") in flat
+    # the in-worktree path is named as the symlink it is
+    assert "reachable as `.imp/quests/<id>/`, a symlink" in flat

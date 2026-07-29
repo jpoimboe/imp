@@ -68,6 +68,12 @@ def test_introspection_skill_is_loadable_profile_b() -> None:
     assert not body.lstrip().startswith("---"), "imp-introspection has frontmatter"
 
 
+def test_introspection_places_the_snapshot_in_the_quest_home() -> None:
+    flat = " ".join(_introspection_doc().split())
+    assert "`~/.imp/projects/<slug>/quests/<id>/workflow/`" in flat
+    assert "through the symlink `.imp/quests/<id>/workflow/`" in flat
+
+
 def test_introspection_names_ground_truth_files() -> None:
     body = _introspection_doc()
     assert "workflow/workflow.yaml" in body

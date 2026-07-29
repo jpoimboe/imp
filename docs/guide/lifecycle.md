@@ -6,8 +6,10 @@ appears in the UI, and what happens when you leave a conversation mid-stream.
 ## Quest and its home
 
 A **quest** is one unit of work imp tracks from idea to merge. Each quest has a
-per-quest home on disk at `.imp/quests/<id>/` holding its spec, plans, events,
-and state — its whole record lives there. The home also holds the quest's
+per-quest home on disk at `~/.imp/projects/<slug>/quests/<id>/`, outside the
+checkout, holding its spec, plans, events, and state — its whole record lives
+there. From inside the quest's own worktree that same home is reachable as
+`.imp/quests/<id>/`, a symlink. The home also holds the quest's
 **workflow snapshot** at `workflow/` — the `workflow.yaml` plus the agent
 prompts, partials, scripts, and skills that drove it.
 
