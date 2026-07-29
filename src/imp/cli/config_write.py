@@ -144,11 +144,13 @@ def _settable(key: str) -> SettableKey:
 def _target(key: SettableKey, scope: Layer | None,
             control_root: Path) -> tuple[Layer, Path]:
     layer: Layer = scope or key.home
-    if layer == "global":
+    if layer in ("global", "local"):
         if key.project_only:
             raise ConfigWriteError(
-                f"{key.dotted!r} is a project setting; drop --global")
-        return "global", global_config_path()
+                f"{key.dotted!r} is a project setting; drop --{layer}")
+        if layer == "global":
+            return "global", global_config_path()
+        return "local", project_state_dir(control_root) / "config.yaml"
     return "project", control_root / "imp" / "config.yaml"
 
 

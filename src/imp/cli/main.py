@@ -4160,8 +4160,8 @@ _CONFIG_KEY_HELP = "Dotted setting name, e.g. theme or tiers.high.anthropic."
 
 
 def _add_config_scope(parser: argparse.ArgumentParser) -> None:
-    """--project / --global as a store_const into `scope` (`args.global` would
-    be a syntax error)."""
+    """--project / --global / --local as a store_const into `scope`
+    (`args.global` would be a syntax error)."""
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--project", dest="scope", action="store_const",
                        const="project",
@@ -4169,6 +4169,10 @@ def _add_config_scope(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--global", dest="scope", action="store_const",
                        const="global",
                        help="Write to ~/.imp/config.yaml (this machine).")
+    group.add_argument("--local", dest="scope", action="store_const",
+                       const="local",
+                       help="Write to ~/.imp/projects/<name>/config.yaml "
+                            "(this checkout).")
     parser.set_defaults(scope=None)
 
 

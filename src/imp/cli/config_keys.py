@@ -15,7 +15,7 @@ from imp.providers.config import (
     _SANDBOX_LIST_KEYS,
 )
 
-Layer = Literal["project", "global"]
+Layer = Literal["project", "global", "local"]
 ParseFn = Callable[[str], Any]
 
 

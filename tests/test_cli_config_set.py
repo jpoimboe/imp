@@ -355,10 +355,90 @@ def test_a_malformed_target_file_reports_invalid_yaml(
     assert config.read_text() == "theme: dark\ntheme: light\n"
 
 
-def test_the_local_layer_is_not_writable(project: Path, imp_home: Path) -> None:
-    with pytest.raises(SystemExit) as excinfo:
-        main(["config", "set", "--local", "theme", "dark"])
-    assert excinfo.value.code == 2
+def test_local_set_creates_the_file_and_wins_the_stack(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)          # also creates imp_home
+    label = display_path(state / "config.yaml")
+    assert not (state / "config.yaml").exists()
+    # the project layer already sets test_cmd_fast to "make test"; seed the
+    # global layer with the same key so the render proves local beats both
+    (imp_home / "config.yaml").write_text("test_cmd_fast: make global\n")
+
+    assert main(["config", "set", "--local", "test_cmd_fast", "make local"]) == 0
+    assert capsys.readouterr().out.splitlines()[0] == (
+        f'{label}: test_cmd_fast: "make local" (new)')
+    assert read_back(state / "config.yaml", ("test_cmd_fast",)) == "make local"
+    assert 'test_cmd_fast: "make test"' in (
+        project / "imp" / "config.yaml").read_text()
+    assert (imp_home / "config.yaml").read_text() == "test_cmd_fast: make global\n"
+
+    assert main(["config"]) == 0
+    line = next(ln for ln in capsys.readouterr().out.splitlines()
+                if ln.strip().startswith("test_cmd_fast "))
+    assert "make local" in line
+    assert line.rstrip().endswith(f"[{label}]")
+
+
+def test_local_set_creates_a_missing_state_dir_under_the_override(
+    project: Path, imp_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "elsewhere" / "state"
+    monkeypatch.setenv("IMP_STATE_DIR", str(state))
+
+    assert main(["config", "set", "--local", "theme", "dark"]) == 0
+
+    assert read_back(state / "config.yaml", ("theme",)) == "dark"
+    assert sorted(p.name for p in state.iterdir()) == ["config.yaml"]
+
+
+def test_local_unset_comments_the_key_out(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("theme: ansi\n")
+    label = display_path(state / "config.yaml")
+
+    assert main(["config", "unset", "--local", "theme"]) == 0
+
+    assert capsys.readouterr().out == (
+        f'{label}: theme commented out (was "ansi")\n')
+    assert "# theme: ansi" in (state / "config.yaml").read_text()
+    assert read_back(state / "config.yaml", ("theme",)) is None
+
+
+def test_local_unset_does_nothing_when_config_is_absent(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+    label = display_path(state / "config.yaml")
+
+    assert main(["config", "unset", "--local", "theme"]) == 0
+
+    assert capsys.readouterr().out == f"{label}: theme is not set (nothing to do)\n"
+    assert not (state / "config.yaml").exists()
+
+
+def test_project_only_keys_reject_the_local_layer(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+
+    assert main(["config", "set", "--local", "default-base", "dev"]) == 2
+
+    assert capsys.readouterr().err == (
+        "imp: 'default-base' is a project setting; drop --local\n")
+    assert not (state / "config.yaml").exists()
+
+
+def test_the_three_scopes_are_mutually_exclusive(
+    project: Path, imp_home: Path,
+) -> None:
+    for pair in (("--project", "--local"), ("--global", "--local"),
+                 ("--project", "--global")):
+        with pytest.raises(SystemExit) as excinfo:
+            main(["config", "set", *pair, "theme", "dark"])
+        assert excinfo.value.code == 2
 
 
 def test_bare_config_and_explain_are_unchanged(
@@ -414,3 +494,5 @@ def test_help_copy_matches_the_spec() -> None:
              if action.option_strings}
     assert flags["--project"] == "Write to imp/config.yaml (this repo)."
     assert flags["--global"] == "Write to ~/.imp/config.yaml (this machine)."
+    assert flags["--local"] == (
+        "Write to ~/.imp/projects/<name>/config.yaml (this checkout).")
