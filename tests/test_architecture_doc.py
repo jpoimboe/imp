@@ -151,9 +151,10 @@ def test_operator_notes_document_the_moved_checkout_limitation() -> None:
     assert "orphaned" in flat
     # the manual recovery: re-slug the directory, repoint the marker, repair git
     assert "git worktree repair" in text
-    # imp already claimed an empty <new-name>; a plain `mv` would nest the old
-    # dir inside it and `imp config` would still look right
-    assert 'mv -T "$OLD" "$NEW"' in text
+    # imp already claimed an empty <new-name>; an unguarded mv nests the
+    # orphaned dir inside that stub, leaving `imp config` correct over wrong contents
+    assert '[ -e "$NEW" ]' in text
+    assert 'mv "$OLD" "$NEW"' in text
     assert '[ "$(ls -A "$NEW" 2>/dev/null)" = repo ] && rm -rf "$NEW"' in text
     assert "imp list" in text
     # in-flight quests record absolute paths that the rename does not rewrite
