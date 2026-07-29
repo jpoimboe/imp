@@ -203,7 +203,8 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     assert "test_cmd_fast" in body
     assert "test_cmd_slow" in body
     # the concrete config layering chain
-    assert "floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml" in body
+    assert ("floor ← imp/config.yaml ← ~/.imp/config.yaml ← "
+            "~/.imp/projects/<slug>/config.yaml") in body
     # how to read what is active, incl. imp config's blind spots
     assert "imp config" in body
     assert "blind spots" in body
@@ -212,10 +213,11 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
 def test_memory_doc_states_the_settings_memory_root_split() -> None:
     body = _memory_doc()
     flat = " ".join(body.split())
-    # the two REPO-SIDE settings layers are rooted in the main checkout, not the
+    # the two CHECKOUT-KEYED settings layers are rooted in the main checkout, not the
     # worktree (~/.imp/config.yaml is machine-wide, so it is not claimed here)
-    assert ("both repo-side layers (`imp/config.yaml` and `.imp/config.yaml`) are "
-            "read from the **main checkout** — never from a quest's worktree") in flat
+    assert ("both checkout-keyed layers (`imp/config.yaml` and the local "
+            "`~/.imp/projects/<slug>/config.yaml`) are read from the **main checkout** "
+            "— never from a quest's worktree") in flat
     assert "a branch cannot change the `test_cmd_*`, `pythonpath`, or gate" in flat
     # imp/memory/ is the one deliberate exception, named on the tier bullet too
     assert "it is read from the quest's own worktree" in flat
@@ -335,3 +337,12 @@ def test_knowledge_cheat_sheet_lists_the_config_writer() -> None:
     assert "`imp config set <key> <value>` / `unset <key>`" in flat
     # the writer targets the MAIN CHECKOUT's project layer, never a worktree's
     assert "the setting's own layer (the main checkout's `imp/config.yaml` or" in flat
+
+
+def test_memory_doc_names_the_local_write_scope() -> None:
+    flat = " ".join(_memory_doc().split())
+    assert "`--project` / `--global` / `--local`" in flat
+    assert ("`--local` writes this checkout's `~/.imp/projects/<slug>/config.yaml`, "
+            "which tops the stack and is never committed") in flat
+    # `imp config` leads with the resolved state directory
+    assert "Its first line, `project state:`, names this checkout's state directory." in flat
