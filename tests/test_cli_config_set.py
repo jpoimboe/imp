@@ -445,9 +445,16 @@ def test_bare_config_and_explain_are_unchanged(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert main(["config"]) == 0
-    assert "settings:" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "settings:" in out
+    assert out.splitlines()[0] == (
+        f"project state: {display_path(project_state_dir(project))}")
+
     assert main(["config", "--explain", "high"]) == 0
-    assert "tier high:" in capsys.readouterr().out
+    explained = capsys.readouterr().out
+    assert explained.splitlines()[0] == "tier high:"
+    assert "project state:" not in explained
+
     assert main(["config", "--all"]) == 0
     assert "tiers:" in capsys.readouterr().out
 

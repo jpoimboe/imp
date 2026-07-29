@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
+from imp.paths import display_path, project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from tests._init_config import write_real_init_config
 from tests.conftest import _git
@@ -60,11 +61,17 @@ def test_config_set_project_from_a_worktree_writes_the_main_checkout(
 def test_config_from_a_worktree_shows_the_main_checkout(
     checkouts: tuple[Path, Path], capsys: pytest.CaptureFixture[str],
 ) -> None:
+    control, _ = checkouts
+
     assert main(["config"]) == 0
 
     out = capsys.readouterr().out
     assert "make test" in out         # the main checkout's committed value
     assert "branch lies" not in out   # the worktree's file is not a layer
+    lines = out.splitlines()
+    assert lines[0] == (
+        f"project state: {display_path(project_state_dir(control))}")
+    assert lines[1] == ""
 
 
 def test_the_active_theme_comes_from_the_main_checkout(

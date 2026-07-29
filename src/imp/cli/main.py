@@ -3939,14 +3939,17 @@ def _cmd_events_search(
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
-    eff = load_effective_config(control_root=_claiming_settings_root())
+    root = _claiming_settings_root()
+    eff = load_effective_config(control_root=root)
     color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
     buf = io.StringIO()
     if explain:
         render_explain(eff, explain, buf, color=color)
     else:
-        render_config(eff, buf, color=color, show_all=args.all)
+        render_config(eff, buf,
+                      state_dir=None if root is None else project_state_dir(root),
+                      color=color, show_all=args.all)
     _emit_human(buf.getvalue().splitlines())
     return 0
 
