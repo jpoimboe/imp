@@ -346,3 +346,10 @@ def test_memory_doc_names_the_local_write_scope() -> None:
             "which tops the stack and is never committed") in flat
     # `imp config` leads with the resolved state directory
     assert "Its first line, `project state:`, names this checkout's state directory." in flat
+
+
+def test_knowledge_cheat_sheet_names_the_local_write_scope() -> None:
+    flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert "led by this checkout's `project state:` directory (not under `--explain`)" in flat
+    assert "`--project` / `--global` / `--local` forces one" in flat
+    assert "`~/.imp/projects/<name>/config.yaml`" in flat
