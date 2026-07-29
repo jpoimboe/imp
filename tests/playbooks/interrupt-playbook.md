@@ -298,13 +298,14 @@ floor** (current models, shipped with imp). Confirm the override won — and on 
 before testing:
 ```bash
 cd "$WT" && imp config                  # the `providers` row must resolve to the provider under test,
-                                        # its label reading `[~/.imp/projects/<clone-name>/config.yaml]`
+                                        # its label reading `[$STATE/config.yaml]` (shown as
+                                        # `[~/.imp/projects/<clone-name>/config.yaml]` when IMP_HOME is under $HOME, else absolute)
 cd "$WT" && imp config --explain high   # the high-tier model the forced provider will use
 ```
 `imp config` tags each leaf with its source layer in brackets. If the
-`providers` row reads `[~/.imp/config.yaml]`, your file landed at the wrong path (`$WT/imp/config.yaml`,
-or a state directory other than the one `project state:` names) and the global layer silently won —
-fix it before recording anything.
+`providers` row names imp's global `config.yaml` (not `$STATE/config.yaml`), your file landed at the
+wrong path (`$WT/imp/config.yaml`, or a state directory other than the one `project state:` names)
+and the global layer silently won — fix it before recording anything.
 The `--explain` line shows the floor model **before** you spend a billable call.
 
 > Model names drift, but they live in the **code floor**, not this file. If a floor model 404s

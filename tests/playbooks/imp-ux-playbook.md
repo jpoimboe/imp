@@ -37,7 +37,8 @@ cat > "$STATE/config.yaml" <<'YAML'
 providers: [claude_code]       # local provider; no API key → no shell wrapper needed (CLI). See §2.
 theme: dark                    # primary pass; you will also sweep light + ansi (below)
 YAML
-cd "$WT" && imp config                    # confirm provider/theme resolved (label: `[~/.imp/projects/<clone-name>/config.yaml]`)
+cd "$WT" && imp config                    # confirm provider/theme resolved; label must read `[$STATE/config.yaml]`
+                                          # (shown as `[~/.imp/projects/<clone-name>/config.yaml]` when IMP_HOME is under $HOME, else absolute)
 ```
 
 > **Sweep all three themes.** imp ships `dark`, `light`, and `ansi` — `dark`/`light` are

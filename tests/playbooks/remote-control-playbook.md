@@ -47,8 +47,9 @@ remote:
     name: telegram
 YAML
 cd "$WT" && imp config      # the `providers` row must resolve to your provider, its label reading
-                            # `[~/.imp/projects/<clone-name>/config.yaml]`. If it reads
-                            # `[~/.imp/config.yaml]`, the write landed elsewhere; fix it before driving.
+                            # `[$STATE/config.yaml]` (shown as `[~/.imp/projects/<clone-name>/config.yaml]`
+                            # when IMP_HOME is under $HOME, absolute otherwise). If it names imp's
+                            # global config.yaml instead, the write landed elsewhere; fix it before driving.
 ```
 
 Start the **fake Telegram harness** and point the daemon at it. Allowlist a chat id and a fake
