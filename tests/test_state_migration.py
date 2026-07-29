@@ -13,6 +13,8 @@ from typing import NamedTuple
 import pytest
 
 from imp.cli import state_migrate
+from imp.cli.config_migrate import run_startup_migrations
+from imp.cli.main import main as cli_main
 from imp.cli.state_migrate import (
     _move_entries,
     _relink_quest_homes,
@@ -635,3 +637,50 @@ def test_an_interrupted_cross_device_copy_discards_its_partial_staging(
     assert not (state_dir / ".migrating-quests").exists()
     assert _meta(state_dir, LIVE_ID)["project_root"] == str(
         state_dir / "worktrees" / LIVE_ID)
+
+
+@pytest.mark.timeout(240)
+def test_run_startup_migrations_moves_the_state_at_the_process_cwd(
+    old_layout: OldLayout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(old_layout.control)
+
+    run_startup_migrations()
+
+    state_dir = project_state_dir(old_layout.control)
+    assert not old_layout.legacy.exists()
+    assert (state_dir / "quests" / LIVE_ID / "quest.json").is_file()
+
+
+@pytest.mark.timeout(240)
+def test_a_failing_state_move_is_not_swallowed(
+    old_layout: OldLayout, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 26: unlike the two config steps, this one may not be best-effort."""
+    monkeypatch.chdir(old_layout.control)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(state_migrate, "_move_entries", boom)
+    with pytest.raises(OSError, match="no space left on device"):
+        run_startup_migrations()
+
+
+def test_outside_a_git_repo_the_startup_step_is_silent_and_the_cli_still_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec AC 27: with the step unsuppressed, a non-repo cwd must not kill
+    `imp --version`."""
+    monkeypatch.chdir(tmp_path)
+    _assert_outside_a_git_work_tree(tmp_path)
+
+    run_startup_migrations()                  # must not raise
+
+    assert capsys.readouterr().err == ""
+    assert "IMP_STATE_DIR" not in os.environ
+    with pytest.raises(SystemExit) as exit_info:
+        cli_main(["--version"])
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out.startswith("imp ")
