@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,9 +18,11 @@ from imp.cli.state_migrate import (
     _repair_worktrees,
     _rewrite_archive_roots,
     _rewrite_quest_roots,
+    _target_control_root,
 )
-from imp.engine.quest import link_quest_home
-from tests.conftest import _init_repo
+from imp.engine.quest import link_quest_home, live_quest_ids
+from imp.paths import imp_home
+from tests.conftest import _assert_outside_a_git_work_tree, _init_repo
 
 
 def _seed(legacy: Path) -> None:
@@ -263,3 +266,149 @@ def test_a_repair_git_refuses_is_reported_not_raised(
 
     assert capsys.readouterr().err == (
         "imp: git could not repair every moved worktree:\nfatal: cannot repair\n")
+
+
+DEFERRED_NOTICE = ("imp: not moving .imp/ yet — a quest is running; "
+                   "re-run when it finishes\n")
+
+
+def _explode(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("unexpected subprocess spawn")
+
+
+def _dead_pid() -> int:
+    # A reaped child's pid is gone (and not reused within this test).
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
+
+
+def _live_quest(legacy: Path, quest_id: str) -> Path:
+    home = legacy / "quests" / quest_id
+    home.mkdir(parents=True)
+    (home / "quest.json").write_text(json.dumps(
+        {"id": quest_id, "title": "live", "base_branch": "main"}))
+    return home
+
+
+def test_an_already_migrated_checkout_spawns_no_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The permanent steady state: the pure-filesystem pre-check must decline
+    before the control root is ever resolved (spec AC 22)."""
+    _assert_outside_a_git_work_tree(tmp_path)
+    control = _repo(tmp_path / "proj")
+    shutil.rmtree(control / ".imp")
+    monkeypatch.setattr(subprocess, "run", _explode)
+
+    assert _target_control_root(control) is None
+
+
+def test_an_explicit_override_is_left_alone_and_spawns_no_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 23: an explicit IMP_STATE_DIR owns the path — tested first, before
+    any walk or spawn, because every agent-side invocation carries one."""
+    _assert_outside_a_git_work_tree(tmp_path)
+    control = _repo(tmp_path / "proj")
+    monkeypatch.setenv("IMP_STATE_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(subprocess, "run", _explode)
+
+    assert _target_control_root(control) is None
+    assert os.environ["IMP_STATE_DIR"] == str(tmp_path / "elsewhere")
+    assert (control / ".imp").is_dir()
+
+
+def test_imp_s_own_home_under_a_git_home_does_not_qualify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dotfiles $HOME satisfies both the .imp and .git conjuncts; only the
+    imp_home() exclusion rejects it (spec AC 24)."""
+    _assert_outside_a_git_work_tree(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    _repo(home)                       # $HOME is itself a checkout...
+    control = _repo(home / "proj")    # ...holding an already-migrated project
+    shutil.rmtree(control / ".imp")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("IMP_HOME", str(home / ".imp"))
+    monkeypatch.setattr(subprocess, "run", _explode)
+
+    assert _target_control_root(control) is None
+
+
+@pytest.mark.timeout(240)
+def test_inside_a_quest_worktree_nothing_moves_and_the_old_path_is_pinned(
+    tmp_path: Path,
+) -> None:
+    """Spec AC 25: same guard as migrate_project_config, but this one pins on the
+    way out — the state it declines to move still has to be findable."""
+    control = _repo(tmp_path / "proj")
+    worktree = control / ".imp" / "worktrees" / "aaa111"
+    _git(control, "worktree", "add", "-q", "-b", "imp/aaa111", str(worktree), "main")
+
+    assert _target_control_root(worktree) is None
+    assert os.environ["IMP_STATE_DIR"] == str(control / ".imp")
+    assert worktree.is_dir()
+    assert not (imp_home() / "projects").exists()      # no slug claimed
+
+
+def test_a_state_dir_outside_any_git_repo_is_left_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """find_control_root raises PreconditionError here; unsuppressed, that would
+    kill `imp --version` from any non-repo directory (spec AC 27)."""
+    stray = tmp_path / "stray"
+    (stray / ".imp").mkdir(parents=True)
+    (stray / ".git").mkdir()          # satisfies the pre-check; not a real repo
+    monkeypatch.chdir(stray)
+    _assert_outside_a_git_work_tree(stray)
+
+    assert _target_control_root(stray) is None
+    assert "IMP_STATE_DIR" not in os.environ
+
+
+def test_a_live_quest_lock_defers_the_move(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec AC 18: no filesystem change, the deferred line, and a pin that keeps
+    the running quest visible for the rest of this invocation."""
+    control = _repo(tmp_path / "proj")
+    legacy = control / ".imp"
+    home = _live_quest(legacy, "aaa111")
+    (home / "lock").write_text(f"{os.getpid()}\n")
+
+    assert _target_control_root(control) is None
+    assert capsys.readouterr().err == DEFERRED_NOTICE
+    assert os.environ["IMP_STATE_DIR"] == str(legacy)
+    assert live_quest_ids(control) == ["aaa111"]       # a following `imp list` sees it
+    assert not (imp_home() / "projects").exists()
+
+
+def test_a_live_daemon_pid_defers_the_move(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec AC 19: the remote-control daemon blocks the move identically."""
+    control = _repo(tmp_path / "proj")
+    legacy = control / ".imp"
+    (legacy / "remote-control.pid").write_text(f"{os.getpid()}\n")
+
+    assert _target_control_root(control) is None
+    assert capsys.readouterr().err == DEFERRED_NOTICE
+    assert os.environ["IMP_STATE_DIR"] == str(legacy)
+
+
+def test_a_stale_lock_does_not_defer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Liveness, not mere presence: a crashed run's lock file must not wedge the
+    migration forever."""
+    control = _repo(tmp_path / "proj")
+    legacy = control / ".imp"
+    home = _live_quest(legacy, "aaa111")
+    (home / "lock").write_text(f"{_dead_pid()}\n")
+    (legacy / "remote-control.pid").write_text(f"{_dead_pid()}\n")
+
+    assert _target_control_root(control) == control
+    assert capsys.readouterr().err == ""
+    assert "IMP_STATE_DIR" not in os.environ

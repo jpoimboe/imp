@@ -257,8 +257,14 @@ def clear_state_dir(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_state_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_state_dir(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     clear_state_dir(monkeypatch)
+    yield
+    # The startup migration pins the pre-migration path by writing os.environ
+    # directly; monkeypatch never saw that set and cannot undo it. Drop it here so
+    # it can't leak into the next test in this worker. monkeypatch's own undo runs
+    # after this teardown and still restores a genuinely inherited value.
+    os.environ.pop("IMP_STATE_DIR", None)
 
 
 @pytest.fixture(autouse=True)
@@ -372,6 +378,15 @@ def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
     assert started.returncode == 0, started.stderr
     assert (root / ".git" / "rebase-merge").is_dir()
     return env
+
+
+def _assert_outside_a_git_work_tree(path: Path) -> None:
+    """A startup migration's no-op guarantee rests on tmp_path not being a work
+    tree; a --basetemp inside the checkout would silently make the step real."""
+    from imp.engine.worktree import PreconditionError, find_control_root
+
+    with pytest.raises(PreconditionError):
+        find_control_root(path)
 
 
 def _init_repo(root: Path) -> None:

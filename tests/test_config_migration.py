@@ -17,6 +17,7 @@ from imp.cli.config_migrate import (
     run_startup_migrations,
 )
 from imp.paths import display_path
+from tests.conftest import _assert_outside_a_git_work_tree
 
 
 def _legacy(tmp_path: Path, body: str = "providers: [openai]\n") -> Path:
@@ -24,15 +25,6 @@ def _legacy(tmp_path: Path, body: str = "providers: [openai]\n") -> Path:
     p.parent.mkdir(parents=True)
     p.write_text(body)
     return p
-
-
-def _assert_outside_a_git_work_tree(path: Path) -> None:
-    """These tests' no-op guarantee rests on tmp_path not being a work tree; a
-    --basetemp inside the checkout would silently make the project step real."""
-    from imp.engine.worktree import PreconditionError, find_control_root
-
-    with pytest.raises(PreconditionError):
-        find_control_root(path)
 
 
 def test_migrates_once_and_reports_it(

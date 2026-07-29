@@ -10,6 +10,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from imp.cli.config_migrate import _git_toplevel
+from imp.paths import imp_home
+
 
 def legacy_state_dir(control_root: Path) -> Path:
     """Where per-project state lived before this migration."""
@@ -135,3 +138,63 @@ def _relink_quest_homes(legacy: Path, state_dir: Path) -> None:
             continue
         link.unlink()
         link.symlink_to(new + target[len(old):])
+
+
+_DEFERRED = ("imp: not moving .imp/ yet — a quest is running; "
+             "re-run when it finishes")
+
+
+def _pin(legacy: Path) -> None:
+    """This invocation runs on state that has not moved yet. Readers stay
+    single-version and resolve only through the seam, so it is the seam's own
+    override that points them at the old location for the pre-migration window."""
+    os.environ["IMP_STATE_DIR"] = str(legacy)
+
+
+def _any_unmigrated_ancestor(cwd: Path) -> bool:
+    """Pure-filesystem pre-check. `.git` sibling required and imp's own home
+    excluded: `~/.imp` always exists, so a bare `.imp`-ancestor test matches it for
+    every checkout under $HOME and this guard would never fire in production."""
+    home = imp_home().resolve()
+    for directory in (cwd, *cwd.parents):
+        legacy = legacy_state_dir(directory)
+        if legacy.is_dir() and (directory / ".git").exists() and legacy.resolve() != home:
+            return True
+    return False
+
+
+def _quest_is_running(legacy: Path) -> bool:
+    from imp.engine.state import lock_is_live
+
+    quests = legacy / "quests"
+    locks = sorted(quests.glob("*/lock")) if quests.is_dir() else []
+    return (any(lock_is_live(lock) for lock in locks)
+            or lock_is_live(legacy / "remote-control.pid"))
+
+
+def _target_control_root(cwd: Path) -> Path | None:
+    """The control root whose state this invocation should move, or None. Declining
+    pins IMP_STATE_DIR wherever the state exists but has not moved yet."""
+    from imp.engine.worktree import PreconditionError, find_control_root
+
+    if os.environ.get("IMP_STATE_DIR"):
+        return None
+    if not _any_unmigrated_ancestor(cwd):
+        return None
+    try:
+        control_root = find_control_root(cwd)
+    except PreconditionError:
+        return None
+    legacy = legacy_state_dir(control_root)
+    if not legacy.is_dir():
+        return None
+    # In a linked worktree the toplevel is the worktree and the control root the
+    # main checkout, so this inequality IS the mid-run guard.
+    if _git_toplevel(cwd) != control_root:
+        _pin(legacy)
+        return None
+    if _quest_is_running(legacy):
+        print(_DEFERRED, file=sys.stderr)
+        _pin(legacy)
+        return None
+    return control_root
