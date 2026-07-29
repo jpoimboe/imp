@@ -14,7 +14,6 @@ from imp.agents.runner import (
     QuestContext,
     TextBlock,
 )
-from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude_code import ClaudeCodeAgentRunner

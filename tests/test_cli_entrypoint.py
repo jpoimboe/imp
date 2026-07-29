@@ -170,7 +170,7 @@ async def test_run_fresh_session_threads_autonomous(
         captured.update(kw)
         return 0
 
-    monkeypatch.setattr(main, "run_session_client", _fake_rsc)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
     args = main._build_parser().parse_args(["new", "--headless", "--autonomous"])
     rc = await main._run_fresh_session(
         SimpleNamespace(id="x", title="t", create_mode="new"), args=args)
@@ -197,8 +197,10 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
 
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
     monkeypatch.setattr(m, "_clear_loop", _fake_clear_loop)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: (lambda _: None))
-    monkeypatch.setattr(m, "run_session_client", _fake_rsc)
+    monkeypatch.setattr(
+        "imp.cli.session_run.make_interactive_solicit", lambda *a, **k: (lambda _: None)
+    )
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_rsc)
 
     args = m._build_parser().parse_args(["new", "--autonomous"])
     rc = await m._run_fresh_session(
@@ -223,3 +225,84 @@ def test_artifact_commit_subcommand_is_removed() -> None:
     # The nested-CLI artifact surface is gone — the engine journals artifacts
     # in-process at each step boundary. The subcommand must not be registered.
     assert "artifact-commit" not in _command_names(_build_parser())
+
+
+def test_imp_help_pulls_in_no_heavy_dependency(tmp_path: Path) -> None:
+    """`imp --help` must exit inside parse_args without loading the agent stack.
+    Fresh interpreter: in-process, the suite has already imported all of these."""
+    code = (
+        "import runpy, sys\n"
+        "sys.argv = ['imp', '--help']\n"
+        "try:\n"
+        "    runpy.run_module('imp', run_name='__main__')\n"
+        "except SystemExit:\n"
+        "    pass\n"
+        "heavy = {'pydantic', 'jinja2', 'httpx', 'PIL', 'rich', 'yaml', 'ruamel',\n"
+        "         'anyio', 'prompt_toolkit'}\n"
+        "leaked = sorted({n.split('.')[0] for n in sys.modules} & heavy)\n"
+        "sys.stderr.write('LEAKED:' + ','.join(leaked) + '\\n')\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    marker = [ln for ln in proc.stderr.splitlines() if ln.startswith("LEAKED:")]
+    assert marker, f"child did not report; stderr was {proc.stderr!r}"
+    assert marker[0] == "LEAKED:", f"imp --help imported {marker[0][len('LEAKED:'):]}"
+
+
+@pytest.mark.parametrize(
+    "cmd,handler",
+    [("init", "_cmd_init"), ("new", "_cmd_new"),
+     ("chat", "_cmd_chat"), ("resume", "_cmd_resume")],
+)
+def test_long_lived_commands_warm_the_module_graph_first(
+    cmd: str, handler: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The four long-lived commands import imp's whole graph before their
+    handler runs, so a concurrent on-disk update can't splice into the run."""
+    import imp.cli.main as m
+
+    monkeypatch.chdir(tmp_path)
+    calls: list[str] = []
+
+    def _fake_warm() -> list[tuple[str, BaseException]]:
+        calls.append("warm")
+        return []
+
+    def _fake_handler(_ns: object) -> int:
+        calls.append("handler")
+        return 0
+
+    monkeypatch.setattr("imp.remote.session.warmup.warm_module_graph", _fake_warm)
+    monkeypatch.setattr(m, handler, _fake_handler)
+
+    assert main([cmd]) == 0
+    assert calls == ["warm", "handler"]
+
+
+def test_short_lived_command_is_not_warmed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`imp list` renders and exits — paying warmup would be a visible
+    regression. Its namespace carries no `warm` at all, as does the
+    hand-built `events search` one, hence main()'s getattr default."""
+    import imp.cli.main as m
+
+    monkeypatch.chdir(tmp_path)
+    calls: list[str] = []
+
+    def _fake_warm() -> list[tuple[str, BaseException]]:
+        calls.append("warm")
+        return []
+
+    def _fake_handler(_ns: object) -> int:
+        calls.append("handler")
+        return 0
+
+    monkeypatch.setattr("imp.remote.session.warmup.warm_module_graph", _fake_warm)
+    monkeypatch.setattr(m, "_cmd_list", _fake_handler)
+
+    assert main(["list"]) == 0
+    assert calls == ["handler"]
+    assert not hasattr(_build_parser().parse_args(["list"]), "warm")
+    assert not hasattr(m._build_events_search_parser().parse_args([]), "warm")

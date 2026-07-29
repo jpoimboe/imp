@@ -185,7 +185,7 @@ def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> Non
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     monkeypatch.setattr(
-        m.archive_read, "completed_rows",
+        "imp.engine.archive.read.completed_rows",
         lambda control: [("cid", "merged", "-", "iso", "Title", "created", None)])
     monkeypatch.setattr(m, "_status_rows", lambda control: [])
     rows = m._completed_rows(tmp_path)

@@ -454,7 +454,7 @@ def test_cmd_init_appends_trailing_blank_on_tty(
         output_fn("Created:")
         output_fn("  imp/config.yaml")
 
-    monkeypatch.setattr(m, "run_init", fake_run_init)
+    monkeypatch.setattr("imp.cli.init.run_init", fake_run_init)
     rc = m._cmd_init(argparse.Namespace(non_interactive=False))
     assert rc == 0
     assert capsys.readouterr().out == "Created:\n  imp/config.yaml\n\n"
@@ -476,7 +476,7 @@ def test_cmd_init_unchanged_when_piped(
     def fake_noninteractive(project, *, output_fn, **kwargs):
         output_fn("Created:")
 
-    monkeypatch.setattr(m, "run_init_noninteractive", fake_noninteractive)
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive", fake_noninteractive)
     rc = m._cmd_init(argparse.Namespace(non_interactive=False))
     assert rc == 0
     assert capsys.readouterr().out == "Created:\n"
@@ -526,7 +526,7 @@ def test_abandon_resident_delivery_trailing_blank_on_tty(
 
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    monkeypatch.setattr(m, "session_is_resident", lambda _ctrl, cid: True)
+    monkeypatch.setattr("imp.remote.daemon.directory.session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(m, "_deliver_abandon_resident", lambda cid: None)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     rc = m._abandon_local(tmp_path, "feat")

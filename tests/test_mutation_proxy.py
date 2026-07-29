@@ -164,7 +164,7 @@ def test_cmd_edit_proxies_when_socket_set(monkeypatch: pytest.MonkeyPatch) -> No
         seen["args"] = args
         return {"returncode": 0, "message": ""}
 
-    monkeypatch.setattr(main, "proxy_mutation", _fake)
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation", _fake)
     args = argparse.Namespace(
         token="q1", title="New", backlog=False, active=False,
         depends_on=None, clear_deps=False, append_intent=None,
@@ -188,7 +188,7 @@ def test_async_cmd_resume_proxies_when_socket_set(
         seen["args"] = args
         return {"returncode": 0, "message": "Resuming @q1…"}
 
-    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
     args = argparse.Namespace(token="q1")
     assert asyncio.run(main._async_cmd_resume(args)) == 0
     assert seen == {"op": "resume", "args": {"token": "q1"}}
@@ -205,7 +205,7 @@ def test_async_cmd_new_proxies_when_socket_set(
         seen["args"] = args
         return {"returncode": 0, "message": "imp: recorded backlog quest q9"}
 
-    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
     args = argparse.Namespace(
         opening="brief", title=None, workflow=None, base=None,
         idea="Idea", depends_on=["dep1"])
@@ -265,7 +265,7 @@ def test_async_cmd_new_chat_mode_does_not_proxy(
         called = True
         return {"returncode": 0, "message": ""}
 
-    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
 
     class _Stop(Exception):
         pass
@@ -273,7 +273,7 @@ def test_async_cmd_new_chat_mode_does_not_proxy(
     def _boom(*a, **k):
         raise _Stop
 
-    monkeypatch.setattr(main, "install_process_group", _boom)
+    monkeypatch.setattr("imp.cli.signals.install_process_group", _boom)
     args = argparse.Namespace(
         opening="brief", title=None, workflow=None, base=None,
         idea=None, depends_on=None)
@@ -341,7 +341,7 @@ def test_cmd_abandon_proxies_when_socket_set(
         seen["args"] = args
         return {"returncode": 0, "message": "Abandoned q1."}
 
-    monkeypatch.setattr(main, "proxy_mutation", _fake)
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation", _fake)
     assert main._cmd_abandon(argparse.Namespace(token="q1")) == 0
     assert seen == {"op": "abandon", "args": {"token": "q1"}}
 
@@ -355,7 +355,7 @@ def test_cmd_abandon_missing_token_in_sandbox_errors(
     def _boom(op: str, args: dict) -> dict:
         raise AssertionError("must not proxy or tear down without a token")
 
-    monkeypatch.setattr(main, "proxy_mutation", _boom)
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation", _boom)
     rc = main._cmd_abandon(argparse.Namespace(token=token))
     assert rc == 2
     assert "needs a quest token" in capsys.readouterr().err
@@ -371,7 +371,7 @@ def test_async_cmd_new_proxy_forwards_background(
         seen["args"] = args
         return {"returncode": 0, "message": "imp: started quest q9"}
 
-    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+    monkeypatch.setattr("imp.cli.mutation_proxy.proxy_mutation_async", _fake)
     args = argparse.Namespace(
         opening="brief", title="T", workflow=None, base=None, idea=None,
         depends_on=None, background=True)

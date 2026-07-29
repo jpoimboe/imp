@@ -1,6 +1,8 @@
 # tests/test_tool_limits.py
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import anyio
@@ -166,10 +168,8 @@ def test_watchdog_decoupled_from_tool_wallclock() -> None:
     full duration of every foreground tool call, so it no longer has to outlast
     B.1 (TOOL_WALLCLOCK_TIMEOUT_S). The old F4 coupling is INVERTED — B.2 is now
     well below B.1 — and B.2 is the short byte-liveness freeze-detection window."""
-    from imp.agents.tools.limits import (
-        AGENT_INACTIVITY_TIMEOUT_S,
-        TOOL_WALLCLOCK_TIMEOUT_S,
-    )
+    from imp.agents.timeouts import AGENT_INACTIVITY_TIMEOUT_S
+    from imp.agents.tools.limits import TOOL_WALLCLOCK_TIMEOUT_S
     assert AGENT_INACTIVITY_TIMEOUT_S == 300.0
     assert AGENT_INACTIVITY_TIMEOUT_S < TOOL_WALLCLOCK_TIMEOUT_S
 
@@ -180,15 +180,42 @@ def test_provider_request_ceiling_between_window_and_wallclock() -> None:
     wall-clock deadline: long enough that a healthy provider wait (~9 min observed
     max) never false-kills, short enough to still tear down a dead-but-open
     connection well before the wall-clock deadline."""
-    from imp.agents.tools.limits import (
+    from imp.agents.timeouts import (
         AGENT_INACTIVITY_TIMEOUT_S,
         PROVIDER_REQUEST_SILENCE_CEILING_S,
-        TOOL_WALLCLOCK_TIMEOUT_S,
     )
+    from imp.agents.tools.limits import TOOL_WALLCLOCK_TIMEOUT_S
     assert PROVIDER_REQUEST_SILENCE_CEILING_S == 900.0
     assert (AGENT_INACTIVITY_TIMEOUT_S
             < PROVIDER_REQUEST_SILENCE_CEILING_S
             < TOOL_WALLCLOCK_TIMEOUT_S)
+
+
+def test_agent_run_does_not_import_the_tools_package() -> None:
+    """The engine drive loop reads its three timing constants from the stdlib-only
+    imp.agents.timeouts, so importing it never pays for the imp.agents.tools package
+    (pydantic + every builtin tool module + PIL). Fresh interpreter: an in-process
+    check would see whatever an earlier test already imported."""
+    code = (
+        "import sys, imp.engine.agent_run\n"
+        "print(','.join(sorted(n for n in sys.modules\n"
+        "                      if n == 'imp.agents.tools'\n"
+        "                      or n.startswith('imp.agents.tools.'))))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    leaked = [n for n in proc.stdout.strip().split(",") if n]
+    assert not leaked, f"importing imp.engine.agent_run pulled in: {leaked}"
+
+
+def test_limits_does_not_reexport_the_timeout_constants() -> None:
+    """No shim: the three constants have exactly ONE home. A re-export in limits.py
+    would let a cold-path importer silently reach them through the tools package again."""
+    from imp.agents.tools import limits
+    for name in ("AGENT_INACTIVITY_TIMEOUT_S",
+                 "PROVIDER_REQUEST_SILENCE_CEILING_S",
+                 "PROCESS_KILL_GRACE_S"):
+        assert not hasattr(limits, name), f"limits.py still exposes {name}"
 
 
 def test_bg_wait_budget_decoupled_from_watchdog() -> None:
@@ -196,7 +223,8 @@ def test_bg_wait_budget_decoupled_from_watchdog() -> None:
     foreground tool call, so B.2 is frozen for the whole wait — the wait budget
     no longer has to fit under B.2. The old F4 coupling is INVERTED: BG_WAIT_MAX_S
     is now larger than B.2."""
-    from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S, BG_WAIT_MAX_S
+    from imp.agents.timeouts import AGENT_INACTIVITY_TIMEOUT_S
+    from imp.agents.tools.limits import BG_WAIT_MAX_S
     assert BG_WAIT_MAX_S > AGENT_INACTIVITY_TIMEOUT_S
 
 

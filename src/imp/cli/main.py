@@ -24,60 +24,23 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, NamedTuple, NoReturn
-
-import anyio
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 
 from imp import __version__
-from imp.agents.random_status import random_status_phrase
-from imp.agents.skills import load_user_skill
-from imp.assets import selectable_workflow_names
 from imp.cli import palette as pal
-from imp.cli import quest_row, resume_select, splash
-from imp.cli.inert_resume import (
-    bare_turn_end_question,
-    make_buffered_solicit,
-    render_inert_question,
-    run_inert_resume,
-)
-from imp.cli.init import (
-    IntegrationBranchUnresolved,
-    run_init,
-    run_init_noninteractive,
-)
-from imp.cli.live_driver import LiveDriver, compose_prelaunch_position_row
-from imp.cli.live_status import LiveStatus
-from imp.cli.mutation_proxy import proxy_mutation, proxy_mutation_async
+from imp.cli import quest_row, splash
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
-from imp.cli.session_run import (
-    infer_session_result,
-    make_headless_solicit,
-    make_interactive_solicit,
-    run_session_client,
-)
-from imp.cli.signals import install_process_group, prompt_sigint_guard
-from imp.cli.slash import ask_line_with_slash
-from imp.cli.store import HomeDigest, SearchHit, SearchZones, Store, make_store
-from imp.cli.terminal_title import TerminalTitle
-from imp.cli.verify_detect import DetectedTestCommand
-from imp.diagnostics import install_stack_dumper
-from imp.engine import backlog, worktree
-from imp.engine.abandon import (
-    discard_conversation,
-    tear_down_quest,
-)
-from imp.engine.archive import read as archive_read
-from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
-from imp.engine.executor import RunResult
-from imp.engine.project_root import find_project_root
-from imp.engine.quest import Quest, live_quest_ids, live_stems
-from imp.engine.quest_id import new_quest_id
-from imp.engine.state import LockHeld, State, lock_is_live
-from imp.providers.config import parse_default_base, validate_workflow_name
-from imp.remote.daemon.directory import session_is_resident
-from imp.remote.session.attach import DaemonStartupError
-from imp.remote.session.protocol import SkillRequest
+
+if TYPE_CHECKING:
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.store import HomeDigest, SearchHit, Store
+    from imp.cli.verify_detect import DetectedTestCommand
+    from imp.engine.executor import RunResult
+    from imp.engine.quest import Quest
+    from imp.engine.state import State
+    from imp.remote.session.attach import DaemonStartupError
 
 
 class ReplyInterjectRouter:
@@ -594,6 +557,9 @@ def _handle_terminal_outcome(
     COMPLETED → green completion line (rc 0). PAUSED → merge_blocked exits early
     (no summary); every other pause falls through to the dim paused summary (rc 1).
     Shared by `new`/`resume` (relocated verbatim from the post-run `else` arm)."""
+    from imp.engine.archive import read as archive_read
+    from imp.engine.executor import RunResult
+    from imp.engine.state import State
     if result is RunResult.COMPLETED:
         _ep = getattr(quest, 'events_path', None)
         if _ep is not None and not _ep.exists():
@@ -674,6 +640,8 @@ def _print_leave_disposition(
 
 
 def _session_exit_code(quest: Quest, coord: Any) -> int:
+    from imp.cli.session_run import infer_session_result
+    from imp.engine.executor import RunResult
     result = infer_session_result(quest)
     outcome = _handle_terminal_outcome(quest, result, coord)
     if result is RunResult.PAUSED and coord.interrupted:
@@ -682,10 +650,12 @@ def _session_exit_code(quest: Quest, coord: Any) -> int:
 
 
 def _project_root() -> Path:
+    from imp.engine.project_root import find_project_root
     return find_project_root()
 
 
 def _control_root() -> Path:
+    from imp.engine import worktree
     return worktree.find_control_root(Path.cwd())
 
 
@@ -705,6 +675,7 @@ def _preflight_imp_init(*, control_root: Path) -> str | None:
     env-available (e.g. a never-init'd machine with empty user `providers`),
     else None. Relocates+dresses the failure that per-step resolution would
     otherwise raise as a raw ProviderUnavailable deep in a step (spec §4)."""
+    from imp.engine.errors import LoadError, LoadErrors
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import UnknownProvider, _first_available_provider
     try:
@@ -733,6 +704,7 @@ def _test_cmd_fast_nudge(
         format_test_cmd_fast_yaml,
         resolve_test_cmd_choice,
     )
+    from imp.engine.errors import LoadError, LoadErrors
     from imp.providers.effective import load_effective_config
     detect = detect_fn or detect_test_command
     try:
@@ -776,6 +748,9 @@ def _apply_theme() -> None:
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
+    from imp.assets import selectable_workflow_names
+    from imp.cli.init import IntegrationBranchUnresolved, run_init, run_init_noninteractive
+    from imp.engine import worktree
     project = _project_root()
     if worktree.head_detached(project):
         _emit_cli_error(
@@ -864,6 +839,9 @@ async def _read_intent_line(
 ) -> str:
     """Read one pre-session intent line, capturing `/model` into `model_sink`
     and `/sandbox` into `sandbox_sink`."""
+    from imp.agents.skills import load_user_skill
+    from imp.cli.slash import ask_line_with_slash
+    from imp.remote.session.protocol import SkillRequest
     while True:
         line = await ask_line_with_slash(
             prompt, None, quest, color=color, width=width, hint=hint,
@@ -915,7 +893,14 @@ async def _run_cleared_session(
     leave_mode: str = "new",
 ) -> int:
     """Open a fresh imp new-style draft in place after /clear."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.session_run import make_interactive_solicit, run_session_client
     from imp.cli.signals import InterruptCoordinator
+    from imp.cli.terminal_title import TerminalTitle
+    from imp.engine.abandon import discard_conversation
+    from imp.engine.quest import Quest, live_stems
+    from imp.engine.quest_id import new_quest_id
 
     color = should_use_color(sys.stdout)
     quest = Quest.create_draft(
@@ -990,6 +975,10 @@ async def _clear_loop(
 
 
 def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
+    from imp.engine import backlog
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest, live_stems
+    from imp.engine.quest_id import new_quest_id
     title = args.idea
     if not title.strip():
         _emit_cli_error("--backlog title must be non-empty")
@@ -1018,6 +1007,10 @@ def apply_new(
     background: bool = False,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest."""
+    from imp.engine import backlog
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest, live_stems
+    from imp.engine.quest_id import new_quest_id
     try:
         resolved_base = _resolve_new_base(control, base)
     except BaseResolutionError as e:
@@ -1083,6 +1076,13 @@ async def _run_fresh_session(
 ) -> int:
     """Run a freshly-created quest (new / materialized backlog) through
     the per-quest session daemon, dispatching on headless / interactive."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.session_run import (
+        make_headless_solicit,
+        make_interactive_solicit,
+        run_session_client,
+    )
     from imp.cli.signals import InterruptCoordinator
 
     _print_run_header(
@@ -1152,6 +1152,8 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
     `.` and `HEAD` are ordinary names here: they fail the existence check like
     any other unknown branch.
     """
+    from imp.engine import worktree
+    from imp.providers.config import parse_default_base
     if base_flag is not None:
         if not worktree.branch_exists(control, base_flag):
             raise BaseResolutionError(
@@ -1170,6 +1172,22 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.mutation_proxy import proxy_mutation_async
+    from imp.cli.session_run import (
+        make_headless_solicit,
+        make_interactive_solicit,
+        run_session_client,
+    )
+    from imp.cli.signals import install_process_group, prompt_sigint_guard
+    from imp.cli.terminal_title import TerminalTitle
+    from imp.engine import worktree
+    from imp.engine.abandon import discard_conversation
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest, live_stems
+    from imp.engine.quest_id import new_quest_id
+    from imp.providers.config import validate_workflow_name
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
         return _emit_mutation_result(await proxy_mutation_async("new", {
             "opening": getattr(args, "opening", None),
@@ -1367,10 +1385,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
+    import anyio
     return anyio.run(functools.partial(_async_cmd_new, leave_mode="new"), args)
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
+    import anyio
     return anyio.run(functools.partial(_async_cmd_new, leave_mode="chat"), args)
 
 
@@ -1382,12 +1402,14 @@ def _resume_opens_fresh(quest: Quest) -> bool:
     replays. Reads the durable per-quest fact (State.has_started) from the
     persisted state.json the resume flow already rehydrated -- never a re-scan
     of events.jsonl."""
+    from imp.engine.state import State
     if quest.materialized or not quest.seed_opening:
         return False
     return not State.load(quest.state_dir).has_started
 
 
 def _warn_if_blocked(quest: Quest) -> None:
+    from imp.cli.store import make_store
     try:
         deps = json.loads((quest.quest_dir / "quest.json").read_bytes()).get("depends_on", [])
     except (FileNotFoundError, json.JSONDecodeError):
@@ -1404,6 +1426,8 @@ def _build_resume_driver(
     *, quest: Quest, state: State, status: LiveStatus,
     color: bool, preceded_by_blank: bool = False,
 ) -> LiveDriver:
+    from imp.agents.random_status import random_status_phrase
+    from imp.cli.live_driver import LiveDriver
     # startup_verb is drawn once at construction — compose_startup stores it, never re-draws.
     return LiveDriver(
         stream=sys.stdout, color=color,
@@ -1441,6 +1465,16 @@ def _print_resume_opening(
 
 
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
+    from imp.cli.inert_resume import bare_turn_end_question
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.mutation_proxy import proxy_mutation_async
+    from imp.cli.session_run import (
+        make_headless_solicit,
+        make_interactive_solicit,
+        run_session_client,
+    )
+    from imp.cli.signals import install_process_group
+    from imp.engine.state import State, lock_is_live
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(
             await proxy_mutation_async("resume", {"token": args.token}))
@@ -1522,6 +1556,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
+    import anyio
     return anyio.run(_async_cmd_resume, args)
 
 
@@ -1564,7 +1599,13 @@ async def _resume_inert(
     autonomous: bool = False,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
+    from imp.cli.inert_resume import make_buffered_solicit, render_inert_question, run_inert_resume
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    from imp.cli.live_status import LiveStatus
+    from imp.cli.session_run import make_interactive_solicit, run_session_client
     from imp.cli.signals import InterruptCoordinator
+    from imp.cli.terminal_title import TerminalTitle
+    from imp.engine.state import State
 
     color = should_use_color(sys.stdout)
     term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle")
@@ -1607,6 +1648,7 @@ def _editing_mode(control_root: Path) -> str:
     """Read editing_mode from the merged config; default to emacs if config is
     absent or invalid (run_quest reports a bad config with full context — don't
     double-fail here just to pick a prompt mode)."""
+    from imp.engine.errors import LoadError, LoadErrors
     from imp.providers.effective import load_effective_config
     try:
         return load_effective_config(control_root=control_root).config.editing_mode
@@ -1642,6 +1684,7 @@ def _display_width() -> int:
 
 def _list_quest_homes(control: Path) -> list[str]:
     """Ids of quests with a permanent root home under .imp/quests/."""
+    from imp.engine.quest import live_quest_ids
     return live_quest_ids(control)
 
 
@@ -1654,6 +1697,7 @@ def _iter_quest_ids(control: Path) -> list[str]:
     through the store (scan_homes), not a raw .imp/quests/ disk scan, so an
     in-sandbox CLI resolves them via the session daemon: the fail-closed .imp mask
     hides sibling homes on disk, and the daemon reads them unsandboxed."""
+    from imp.cli.store import make_store
     store = make_store(control)
     live = [h.quest_id for h in store.scan_homes()]
     seen = set(live)
@@ -1667,6 +1711,7 @@ def _iter_quest_ids(control: Path) -> list[str]:
 
 def _title_for_id(control: Path, quest_id: str) -> str | None:
     """Read a quest's current title (worktree home first, archive second)."""
+    from imp.engine.archive import read as archive_read
     cdir = _quest_home(control, quest_id)
     cj = cdir / "quest.json"
     if cj.exists():
@@ -1700,6 +1745,7 @@ def _resolve_id(control: Path, token: str) -> str:
 
 
 def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoReturn:
+    from imp.cli.store import make_store
     _emit_cli_error(f"{token!r} is ambiguous; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
@@ -1734,6 +1780,7 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
 
 
 def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
+    from imp.engine.archive import read as archive_read
     live = _quest_home(control, quest_id) / "artifacts" / rel
     if live.is_file():
         return live.read_bytes()
@@ -1799,6 +1846,7 @@ def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
 
 
 def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
+    from imp.engine.archive import read as archive_read
     cdir = _quest_home(control, quest_id)
     raw: bytes | None
     if (cdir / "quest.json").exists():
@@ -1815,6 +1863,7 @@ def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
 
 
 def _quest_state(control: Path, quest_id: str) -> dict[str, Any] | None:
+    from imp.engine.archive import read as archive_read
     cdir = _quest_home(control, quest_id)
     sj = cdir / "state" / "state.json"
     raw = sj.read_bytes() if sj.exists() else archive_read.read_state_json(control, quest_id)
@@ -1852,6 +1901,10 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     `status: backlog` brief instead of a History item. None for any archived-only
     id or any home the shared backlog predicate rejects (materialized,
     draft-origin, already-conversed, or lock-live)."""
+    from imp.cli.store import make_store
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest
+    from imp.engine.state import lock_is_live
     cdir = _quest_home(control, quest_id)
     cj = cdir / "quest.json"
     if not cj.exists():
@@ -1882,6 +1935,7 @@ def _card_field(label: str, value: str, width: int, *, color: bool) -> str:
 
 def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
                   color: bool) -> list[str]:
+    from imp.cli.store import make_store
     r = make_store(control).backlog_readiness(meta.get("depends_on", []))
     ready, unmerged = r.ready, list(r.blocked_on)
     readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
@@ -1914,6 +1968,7 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
 
 def _quest_card(control: Path, quest_id: str, *, now: datetime,
                 color: bool) -> list[str]:
+    from imp.cli.store import make_store
     card = make_store(control).quest_card(quest_id)
     if card is None:
         return []
@@ -1971,6 +2026,7 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime,
 
 
 def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
+    from imp.cli.store import make_store
     card = make_store(control).quest_card(quest_id)
     if card is None:
         return None
@@ -1995,6 +2051,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
 
 
 def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
+    from imp.cli.store import make_store
     r = make_store(control).backlog_readiness(meta.get("depends_on", []))
     ready, unmerged = r.ready, list(r.blocked_on)
     body = meta.get("seed_opening") or ""
@@ -2015,6 +2072,7 @@ def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
+    from imp.engine import worktree
     try:
         control = _control_root()
     except worktree.PreconditionError:
@@ -2041,6 +2099,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
+    from imp.cli.store import make_store
     token = args.token
     if token is None:
         args.parser.print_help(sys.stderr)
@@ -2097,6 +2156,9 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     one place (the archive snapshot is written once, concurrent with worktree
     removal), so the only overlap is a crash mid-sequence where worktree-first
     harmlessly returns identical content."""
+    from imp.engine.archive import read as archive_read
+    from imp.engine.errors import LayoutMismatch, LoadError, MigrationLockHeld
+    from imp.engine.quest import Quest
     try:
         quest = Quest.load(control, quest_id, migrate_if_lockable=True)
     except (LayoutMismatch, MigrationLockHeld):
@@ -2240,6 +2302,8 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
 
 def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str]) -> int:
     """Replay a quest's narrative through the live run view's renderer."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
@@ -2299,6 +2363,7 @@ def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
                         control: Path, quest_id: str) -> int:
     """The home vanished mid-follow: feed the archived events beyond the count
     already emitted (none if the id is not archived), finish, and exit 0."""
+    from imp.engine.archive import read as archive_read
     raw = archive_read.read_events(control, quest_id)
     if raw is not None:
         for event in _parse_jsonl(raw)[tail.emitted:]:
@@ -2313,6 +2378,7 @@ def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
     drives the footer from the lock's liveness. Returns an exit code when the
     follow should stop (terminal status, or the home vanished into the archive),
     else None to keep polling."""
+    from imp.engine.state import State, lock_is_live
     if not home.exists():
         return _drain_from_archive(driver, tail, control, quest_id)
     for event in tail.read_new():
@@ -2341,6 +2407,10 @@ def _follow_live(control: Path, quest_id: str, home: Path, *,
     """Replay a live quest's narrative through LiveDriver, then tail
     events.jsonl until a terminal status or the home is archived away. Ctrl-C
     clears the footer and exits 130."""
+    import anyio
+
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
@@ -2361,6 +2431,7 @@ async def _follow_poll_loop(
 ) -> int:
     """Advance the spinner (LiveStatus.tick) concurrently with a poll loop that
     feeds new events and checks exit conditions every _FOLLOW_POLL_INTERVAL."""
+    import anyio
     rc = 0
     async with anyio.create_task_group() as tg:
         tg.start_soon(status.tick)
@@ -2420,6 +2491,7 @@ def _select_log_events(
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import LOG_CATEGORIES, render_tree
+    from imp.cli.store import make_store
 
     show_names = args.show or []
     hide_names = args.hide or []
@@ -2605,6 +2677,7 @@ def _last_event_iso(events_path: Path) -> str | None:
 
 
 def _journal_last_iso(control: Path, quest_id: str) -> str | None:
+    from imp.cli.store import make_store
     for r in make_store(control).completed_rows():
         if r.quest_id == quest_id:
             return r.last or None
@@ -2612,10 +2685,12 @@ def _journal_last_iso(control: Path, quest_id: str) -> str | None:
 
 
 def _journal_status(control: Path, quest_id: str) -> str | None:
+    from imp.engine.archive import read as archive_read
     return archive_read.status_of(control, quest_id)
 
 
 def _resume_gone(control: Path, quest_id: str) -> int:
+    from imp.engine.archive import read as archive_read
     status = _journal_status(control, quest_id)
     title = _title_for_id(control, quest_id) or quest_id
     if status == "abandoned":
@@ -2630,7 +2705,10 @@ def _resume_gone(control: Path, quest_id: str) -> int:
 
 
 def _rehydrate_resumable(control: Path, quest_id: str) -> Quest | None:
+    from imp.engine.archive import read as archive_read
     from imp.engine.archive import record, records_root
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest
     rec = record.read_record(records_root(control), quest_id)
     if rec is None or not rec.get("resumable"):
         return None
@@ -2642,6 +2720,8 @@ def _rehydrate_resumable(control: Path, quest_id: str) -> Quest | None:
 
 
 def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
+    from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+    from imp.engine.quest import Quest
     try:
         return Quest.load(control, quest_id)
     except LayoutMismatch as e:
@@ -2722,6 +2802,8 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
 
 
 def _row_for_id(control: Path, quest_id: str) -> _Row | None:
+    from imp.engine.archive import read as archive_read
+    from imp.engine.state import lock_is_live
     cdir = _quest_home(control, quest_id)
     live_home = (cdir / "quest.json").exists()
     # archive_read returns bytes | None; the live quest-home branch always finds
@@ -2757,6 +2839,7 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
 
 
 def _status_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
+    from imp.cli.store import make_store
     homes = make_store(control).scan_homes() if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
@@ -2782,6 +2865,7 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     """Completed/abandoned quests NOT currently surfaced in-flight, from a
     SINGLE indexed archive query (spec AC 7). `live_ids` lets the overview reuse
     the in-flight id set it already computed instead of re-deriving it."""
+    from imp.cli.store import make_store
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
     for r in make_store(control).completed_rows():
@@ -2794,6 +2878,7 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
 def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     """Shelved conversations — archived final status `shelved` with no live home —
     for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
+    from imp.cli.store import make_store
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None)
             for r in make_store(control).completed_rows()
@@ -2827,6 +2912,7 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     "shelved" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
     matches, so a terminal id sharing a stem never joins the menu."""
+    from imp.engine.archive import read as archive_read
     from imp.engine.archive import record, records_root
 
     rows = [r for r in _resumable_rows(control) if token in r[0]]
@@ -2890,6 +2976,7 @@ async def _pick_quest_target(
     selected_index: int = 0,
     non_interactive: bool = False,
 ) -> str | int:
+    from imp.cli import resume_select
     if not rows:
         return on_empty()
     if non_interactive or not _interactive():
@@ -2948,6 +3035,8 @@ async def _resolve_resume_target(
 
 
 def _deliver_abandon_resident(quest_id: str) -> None:
+    import anyio
+
     from imp.remote.session.client import SessionClient
     from imp.remote.session.discover import session_socket_path
     from imp.remote.session.protocol import CONTROL_ABANDON
@@ -2975,6 +3064,12 @@ def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
     worktree removal (records live inside the worktree); `git branch -D` AFTER
     (git refuses to delete a branch checked out in a worktree). Idempotent /
     crash-tolerant: re-running after any mid-sequence crash converges."""
+    from imp.engine import worktree
+    from imp.engine.abandon import tear_down_quest
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest
+    from imp.engine.state import LockHeld
+    from imp.remote.daemon.directory import session_is_resident
     try:
         quest = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
@@ -3070,6 +3165,10 @@ async def _pick_abandon_matches(
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
+    import anyio
+
+    from imp.cli.mutation_proxy import proxy_mutation
+    from imp.engine.archive import read as archive_read
     token = args.token
     if os.environ.get("IMP_SESSION_SOCKET"):
         if token is None or not token.strip():
@@ -3115,6 +3214,8 @@ def apply_edit(
     append_intent: str | None, base: str | None,
 ) -> tuple[int, str | None]:
     """Return (rc, message) for an `imp edit` mutation so host CLI and daemon proxy share it."""
+    from imp.engine import worktree
+    from imp.engine.quest import Quest
     quest = Quest.load(control, quest_id)
 
     zone_change = backlog or active
@@ -3202,6 +3303,7 @@ def _emit_mutation_result(result: dict[str, Any]) -> int:
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
+    from imp.cli.mutation_proxy import proxy_mutation
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(proxy_mutation("edit", {
             "token": args.token, "title": args.title, "backlog": args.backlog,
@@ -3221,6 +3323,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
 
 
 def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
+    from imp.cli.store import make_store
     homes = make_store(control).scan_homes() if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
@@ -3359,6 +3462,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool, name_cap: int | None = None) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
+    from imp.cli.store import make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     inflight = _sort_rows_started_first(status_rows)
@@ -3396,6 +3500,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                               cutoff: datetime | None, now: datetime,
                               color: bool) -> list[str]:
     """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
+    from imp.cli.store import make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
@@ -3423,6 +3528,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
+    from imp.engine import worktree
     try:
         control = _control if _control is not None else _control_root()
     except worktree.PreconditionError:
@@ -3458,6 +3564,7 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
 def _search_active(control: Path, query: str) -> list[SearchHit]:
     """In-flight + draft-origin quests whose id, title, or conversation prose
     contains `query` (case-insensitive)."""
+    from imp.cli.store import SearchHit, make_store
     q = query.lower()
     scanned = make_store(control).scan_homes()
     prose_by_id = {d.quest_id: d.prose for d in scanned}
@@ -3481,6 +3588,7 @@ def _backlog_seed_opening(control: Path, quest_id: str) -> str:
 def _search_backlog(control: Path, query: str) -> list[SearchHit]:
     """Backlog quests whose id, title, or seed_opening body (title + description)
     contains `query` (case-insensitive)."""
+    from imp.cli.store import SearchHit
     q = query.lower()
     hits: list[SearchHit] = []
     for r in _backlog_rows(control):
@@ -3494,6 +3602,8 @@ def _search_backlog(control: Path, query: str) -> list[SearchHit]:
 def _search_archived(control: Path, query: str, statuses: set[str],
                      merged_after: str | None) -> list[SearchHit]:
     """Archive hits in `statuses`; completed hits also gated by merged_after."""
+    from imp.cli.store import SearchHit
+    from imp.engine.archive import read as archive_read
     hits: list[SearchHit] = []
     for cid, title, content, status, last in archive_read.search_archive_content(
             control, query):
@@ -3543,6 +3653,7 @@ def _events_search_active(
     control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
     """In-flight quests with >=1 event matching query (after type/agent filters)."""
+    from imp.cli.store import make_store
     store = make_store(control)
     scanned = store.scan_homes()
     hits: list[EventSearchHit] = []
@@ -3575,6 +3686,7 @@ def _events_search_archived(
     control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
     """Archived quests: index candidates re-scanned to specific matching events."""
+    from imp.cli.store import make_store
     store = make_store(control)
     hits: list[EventSearchHit] = []
     for cid, title, _status, last in store.search_event_candidates(query):
@@ -3603,6 +3715,8 @@ def _events_search(
 
 def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
     """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
+    from imp.engine import worktree
+    from imp.engine.archive import read as archive_read
     merge_commit = archive_read.merge_commit_of(control, quest_id)
     if not merge_commit:
         return False
@@ -3693,6 +3807,7 @@ def _search_list_line(
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
+    from imp.cli.store import SearchZones, make_store
     control = _control if _control is not None else _control_root()
     want_active, want_backlog, statuses = _selected_search(args)
     zones = SearchZones(active=want_active, backlog=want_backlog,
@@ -3737,6 +3852,7 @@ def _render_events_search_hit(
     hit: EventSearchHit, query: str, *, now: datetime, color: bool,
     width: int, limit: int = 3,
 ) -> list[str]:
+    from imp.cli.store import SearchHit
     from imp.engine import events_index as ei
     spine = _search_list_line(
         SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity),
@@ -3894,6 +4010,7 @@ class SplitAppend(argparse.Action):
 
 
 def _cmd_events(args: argparse.Namespace) -> int:
+    from imp.cli.store import make_store
     from imp.engine import events_index as ei
 
     if args.token is None:
@@ -4063,7 +4180,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_init.set_defaults(func=_cmd_init)
+    p_init.set_defaults(func=_cmd_init, warm=True)
     p_init.add_argument(
         "--use-defaults", action="store_true", dest="non_interactive",
         help="Non-interactive, provider-free setup: write imp/config.yaml with "
@@ -4131,7 +4248,7 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Run the opening step under a chosen model "
                             "(provider:model or bare model); the same override as "
                             "typing /model at the opening prompt.")
-    p_new.set_defaults(func=_cmd_new)
+    p_new.set_defaults(func=_cmd_new, warm=True)
 
     p_chat = sub.add_parser(
         "chat",
@@ -4153,7 +4270,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Run the opening step under a chosen model "
                              "(provider:model or bare model); the same override as "
                              "typing /model at the opening prompt.")
-    p_chat.set_defaults(func=_cmd_chat)
+    p_chat.set_defaults(func=_cmd_chat, warm=True)
 
     p_resume = sub.add_parser(
         "resume",
@@ -4175,7 +4292,7 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
                                "Requires --headless.")
-    p_resume.set_defaults(func=_cmd_resume)
+    p_resume.set_defaults(func=_cmd_resume, warm=True)
 
     p_log = sub.add_parser(
         "log",
@@ -4593,6 +4710,8 @@ def _init_logging() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from imp.diagnostics import install_stack_dumper
+    from imp.engine import worktree
     _init_logging()
     with contextlib.suppress(Exception):
         install_stack_dumper(
@@ -4611,6 +4730,10 @@ def main(argv: list[str] | None = None) -> int:
             ns = _build_events_search_parser().parse_args(args[2:])
         else:
             ns = parser.parse_args(args)
+        if getattr(ns, "warm", False):
+            # Import the graph up front so an on-disk update can't splice into a long run.
+            from imp.remote.session.warmup import warm_module_graph
+            warm_module_graph()
         _apply_theme()   # resolve dark/light/ansi once, before any command renders
         rc: int = ns.func(ns)
         # Flush here, inside the guard: output small enough to fit Python's

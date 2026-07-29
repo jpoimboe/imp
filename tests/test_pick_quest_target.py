@@ -78,7 +78,7 @@ async def test_tty_lone_auto_selects_without_drawing_picker(monkeypatch) -> None
     async def boom(*a, **k):
         raise AssertionError("picker drawn for a lone candidate")
 
-    monkeypatch.setattr(m.resume_select, "run_picker", boom)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", boom)
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("solo")], header="h",
         on_empty=lambda: 0, on_non_tty=lambda rows: 0)
@@ -95,7 +95,7 @@ async def test_tty_multiple_runs_picker_with_header_and_index(monkeypatch) -> No
         captured["selected_index"] = selected_index
         return candidates[selected_index].quest_id
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("a"), _row("b")], header="Pick one?",
         on_empty=lambda: 0, on_non_tty=lambda rows: 0, selected_index=1)
@@ -113,7 +113,7 @@ async def test_pick_quest_target_threads_phase_and_step_label(monkeypatch) -> No
         captured["candidates"] = candidates
         return candidates[0].quest_id
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     rows = [
         _row("x", step_label="coding", phase_label="implement phase"),
         _row("y", step_label="testing", phase_label="verify phase"),
@@ -134,7 +134,7 @@ async def test_picker_cancel_returns_2(monkeypatch) -> None:
     async def fake_picker(candidates, *, now, color, header, selected_index):
         return None
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     rc = await m._pick_quest_target(
         control=Path("."), rows=[_row("a"), _row("b")], header="h",
         on_empty=lambda: 0, on_non_tty=lambda rows: 0)

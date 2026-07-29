@@ -33,6 +33,7 @@ from typing import Any
 
 import anyio
 
+from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools import imp_tool
 from imp.agents.tools import limits as _limits
 from imp.agents.tools.context import (
@@ -42,7 +43,6 @@ from imp.agents.tools.context import (
     kill_process_group,
 )
 from imp.agents.tools.limits import (
-    PROCESS_KILL_GRACE_S,
     TOOL_OUTPUT_CAP_BYTES,
     tool_checkpoint,
 )

@@ -156,7 +156,6 @@ def test_follow_step_home_vanished_drains_archive(
 ) -> None:
     """When the home dir is gone, drain from the archive only the events beyond
     the already-emitted count, then finish() and exit 0."""
-    import imp.cli.main as m
     from imp.cli.main import _EventTail, _follow_step
     slug = "gone"
     home = tmp_path / ".imp" / "quests" / slug  # never created → not exists
@@ -164,7 +163,7 @@ def test_follow_step_home_vanished_drains_archive(
     tail.emitted = 1  # pretend one event was already shown before the vanish
     archived = [{"type": "a"}, {"type": "b"}, {"type": "c"}]
     raw = "".join(json.dumps(e) + "\n" for e in archived).encode()
-    monkeypatch.setattr(m.archive_read, "read_events", lambda c, i: raw)
+    monkeypatch.setattr("imp.engine.archive.read.read_events", lambda c, i: raw)
     driver, status = MagicMock(), MagicMock()
     rc = _follow_step(driver, tail, status, tmp_path, slug, home)
     assert rc == 0
@@ -182,7 +181,6 @@ def test_follow_step_state_vanished_mid_poll_drains_archive(
     then State.load raises FileNotFoundError; the drain feeds only the archived
     events beyond the count already emitted by tail.read_new().
     """
-    import imp.cli.main as m
     from imp.cli.main import _EventTail, _follow_step
     slug = "race"
     home = tmp_path / ".imp" / "quests" / slug
@@ -191,7 +189,7 @@ def test_follow_step_state_vanished_mid_poll_drains_archive(
     # Archive holds the complete sequence; drain skips what tail already emitted
     archived = [{"type": "live"}, {"type": "arch1"}, {"type": "arch2"}]
     raw = "".join(json.dumps(e) + "\n" for e in archived).encode()
-    monkeypatch.setattr(m.archive_read, "read_events", lambda c, i: raw)
+    monkeypatch.setattr("imp.engine.archive.read.read_events", lambda c, i: raw)
     driver, status = MagicMock(), MagicMock()
     tail = _EventTail(home / "events.jsonl")
     rc = _follow_step(driver, tail, status, tmp_path, slug, home)
@@ -206,12 +204,11 @@ def test_follow_step_unknown_after_vanish_finishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Home gone AND not in the archive → finish() and exit 0, nothing fed."""
-    import imp.cli.main as m
     from imp.cli.main import _EventTail, _follow_step
     slug = "poof"
     home = tmp_path / ".imp" / "quests" / slug  # not exists
     tail = _EventTail(home / "events.jsonl")
-    monkeypatch.setattr(m.archive_read, "read_events", lambda c, i: None)
+    monkeypatch.setattr("imp.engine.archive.read.read_events", lambda c, i: None)
     driver, status = MagicMock(), MagicMock()
     rc = _follow_step(driver, tail, status, tmp_path, slug, home)
     assert rc == 0
@@ -288,8 +285,8 @@ def test_follow_log_replays_all_events_then_finishes() -> None:
         {"type": "step_started", "payload": {"step": "s"}},
     ]
     driver = MagicMock()
-    with patch.object(m, "LiveDriver", return_value=driver), \
-         patch.object(m, "LiveStatus"):
+    with patch("imp.cli.live_driver.LiveDriver", return_value=driver), \
+         patch("imp.cli.live_status.LiveStatus"):
         rc = m._follow_log(events, cats=frozenset())
     assert rc == 0
     assert [c.args[0] for c in driver.on_event.call_args_list] == events
@@ -358,7 +355,6 @@ def test_follow_step_second_drain_catches_late_append(
 ) -> None:
     """An event appended in the window between the first read and the terminal
     status check is fed by the second drain, not the first."""
-    import imp.cli.main as m
     from imp.cli.main import _EventTail, _follow_step
     slug = "late"
     home = tmp_path / ".imp" / "quests" / slug
@@ -374,7 +370,7 @@ def test_follow_step_second_drain_catches_late_append(
             f.write(json.dumps({"type": "b"}) + "\n")
         return _TerminalState()
 
-    monkeypatch.setattr(m.State, "load", _load_and_append)
+    monkeypatch.setattr("imp.engine.state.State.load", _load_and_append)
     rc = _follow_step(driver, tail, status, tmp_path, slug, home)
     assert rc == 0
     assert [c.args[0] for c in driver.on_event.call_args_list] == \
@@ -452,9 +448,9 @@ def test_follow_live_ctrl_c_clears_and_returns_130(
     import imp.cli.main as m
     status = MagicMock()
     driver = MagicMock()
-    monkeypatch.setattr(m, "LiveStatus", lambda stream: status)
-    monkeypatch.setattr(m, "LiveDriver", lambda **kw: driver)
-    monkeypatch.setattr(m.anyio, "run", MagicMock(side_effect=KeyboardInterrupt))
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda stream: status)
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda **kw: driver)
+    monkeypatch.setattr("anyio.run", MagicMock(side_effect=KeyboardInterrupt))
     rc = m._follow_live(tmp_path, "id", tmp_path / "home", cats=frozenset())
     assert rc == 130
     status.reset.assert_called_once()
@@ -623,7 +619,7 @@ def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
     # IMP_SESSION_SOCKET set → the real make_store picks ProxyStore; stub it so the
     # events come from the store without a live daemon socket.
     monkeypatch.setattr(
-        m, "make_store",
+        "imp.cli.store.make_store",
         lambda control: types.SimpleNamespace(
             get_events=lambda qid: snapshot,
             scan_homes=lambda: [HomeDigest(slug, b"{}", None, {}, "", False, "", None, False)],
@@ -654,7 +650,10 @@ def test_follow_log_threads_cats_into_the_driver() -> None:
         seen.update(kwargs)
         return MagicMock()
 
-    with patch.object(m, "LiveDriver", _fake_driver), patch.object(m, "LiveStatus"):
+    with (
+        patch("imp.cli.live_driver.LiveDriver", _fake_driver),
+        patch("imp.cli.live_status.LiveStatus"),
+    ):
         rc = m._follow_log([], cats=frozenset({"thinking", "tools"}))
     assert rc == 0
     assert seen["cats"] == frozenset({"thinking", "tools"})
@@ -671,9 +670,9 @@ def test_follow_live_threads_cats_into_the_driver(
         seen.update(kwargs)
         return MagicMock()
 
-    monkeypatch.setattr(m, "LiveDriver", _fake_driver)
-    monkeypatch.setattr(m, "LiveStatus", MagicMock())
-    monkeypatch.setattr(m.anyio, "run", lambda *a, **kw: 0)
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _fake_driver)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", MagicMock())
+    monkeypatch.setattr("anyio.run", lambda *a, **kw: 0)
     rc = m._follow_live(tmp_path, "id", tmp_path / "home",
                         cats=frozenset({"prompts"}))
     assert rc == 0

@@ -42,7 +42,7 @@ async def test_pick_abandon_matches_interactive_selection(
         assert "Abandon which quest?" in header
         return candidates[1].quest_id
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     rows = [_row("lodo40"), _row("lodo77")]
     assert await m._pick_abandon_matches(tmp_path, "lodo", rows) == "lodo77"
 
@@ -58,7 +58,7 @@ async def test_pick_abandon_matches_non_tty_token_specific(
     async def boom(*a, **k):
         raise AssertionError("picker drawn on a non-tty")
 
-    monkeypatch.setattr(m.resume_select, "run_picker", boom)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", boom)
     rows = [_row("lodo40"), _row("lodo77")]
     rc = await m._pick_abandon_matches(tmp_path, "lodo", rows)
     err = capsys.readouterr().err
@@ -148,7 +148,7 @@ def test_cmd_abandon_zero_matches_archive_recovery(
         raise SystemExit(2)
 
     monkeypatch.setattr(m, "_resolve_id", raise_exit)
-    monkeypatch.setattr(m.archive_read, "archived_ids", lambda c: ["gone40"])
+    monkeypatch.setattr("imp.engine.archive.read.archived_ids", lambda c: ["gone40"])
     seen = {}
 
     def fake_abandon(control, quest_id, *, yes=False):
@@ -174,7 +174,7 @@ def test_cmd_abandon_zero_matches_unknown_exits_2(
         raise AssertionError("_abandon called for an unknown token")
 
     monkeypatch.setattr(m, "_resolve_id", raise_exit)
-    monkeypatch.setattr(m.archive_read, "archived_ids", lambda c: [])
+    monkeypatch.setattr("imp.engine.archive.read.archived_ids", lambda c: [])
     monkeypatch.setattr(m, "_abandon_local", boom_abandon)
     rc = m._cmd_abandon(argparse.Namespace(token="zzzz", yes=False))
     assert rc == 2

@@ -1,13 +1,25 @@
-"""Each provider module declares a TIER_DEFAULTS table covering low/medium/high."""
+"""Provider registry surface: each provider module declares a TIER_DEFAULTS table
+covering low/medium/high, and the builtins register lazily on first registry read."""
 import importlib
-from collections.abc import Generator
+import subprocess
+import sys
+from collections.abc import Callable, Generator
+from typing import ClassVar
 
 import pytest
 
 from imp.providers import register_builtin_providers, resolve
+from imp.providers.config import ProviderModel
 
 _MODULES = ["anthropic", "openai", "claude_code", "codex"]
 _REQUIRED = {"low", "medium", "high"}
+_BUILTINS = ["anthropic", "claude_code", "codex", "openai", "scripted"]
+
+
+class _Cfg:
+    """Minimal stand-in for providers.config.Config: the two registry readers that
+    take a config only ever walk `.providers`."""
+    providers: ClassVar[tuple[str, ...]] = ("anthropic",)
 
 
 @pytest.mark.parametrize("mod_name", _MODULES)
@@ -71,3 +83,63 @@ def test_partial_tier_defaults_rejected_at_registration() -> None:
 def test_unpacking_sites_still_two_tuple() -> None:
     env_check, factory = resolve._PROVIDERS["openai"]  # must still be a 2-tuple
     assert callable(env_check) and callable(factory)
+
+
+# Each reader repopulates from EMPTY, so this also pins that
+# reset_providers_for_tests() self-heals — the property a boolean
+# "already loaded" flag would break for tests that install fake providers.
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(lambda: resolve.iter_provider_defaults(), id="iter_provider_defaults"),
+        pytest.param(lambda: resolve.available_providers(_Cfg()), id="available_providers"),
+        pytest.param(
+            lambda: resolve._first_available_provider(_Cfg()), id="_first_available_provider"
+        ),
+        pytest.param(
+            lambda: resolve.provider_from_model(
+                ProviderModel(provider="scripted", model="m")
+            ),
+            id="provider_from_model",
+        ),
+    ],
+)
+def test_registry_reader_repopulates_an_empty_registry(read: Callable[[], object]) -> None:
+    resolve.reset_providers_for_tests()
+    assert resolve._PROVIDERS == {}
+    read()
+    assert sorted(resolve._PROVIDERS) == _BUILTINS
+
+
+def test_importing_the_package_registers_nothing() -> None:
+    """Importing imp.providers must not register the builtins, and must not
+    import the five provider modules (which pull httpx -> rich/click/pygments).
+    Fresh interpreter: in-process, any earlier test in this worker has already
+    imported them."""
+    code = (
+        "import sys, imp.providers\n"
+        "from imp.providers import resolve\n"
+        "eager = sorted(n for n in sys.modules if n in {\n"
+        "    'imp.providers.anthropic', 'imp.providers.openai',\n"
+        "    'imp.providers.claude_code', 'imp.providers.codex',\n"
+        "    'imp.providers.scripted'})\n"
+        "if 'httpx' in sys.modules:\n"
+        "    eager.append('httpx')\n"
+        "print('EAGER:' + ','.join(eager))\n"
+        "print('BEFORE:' + ','.join(sorted(resolve._PROVIDERS)))\n"
+        "resolve.iter_provider_defaults()\n"
+        "print('AFTER:' + ','.join(sorted(resolve._PROVIDERS)))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    reported = {
+        key: value
+        for key, _, value in (ln.partition(":") for ln in proc.stdout.splitlines())
+        if key in {"EAGER", "BEFORE", "AFTER"}
+    }
+    assert reported.keys() == {"EAGER", "BEFORE", "AFTER"}, (
+        f"child did not report all three lines; stdout was {proc.stdout!r}"
+    )
+    assert reported["EAGER"] == "", f"import imp.providers eagerly loaded: {reported['EAGER']}"
+    assert reported["BEFORE"] == ""
+    assert reported["AFTER"] == ",".join(_BUILTINS)

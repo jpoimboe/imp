@@ -119,7 +119,7 @@ def test_cmd_new_passes_resolved_base_to_ensure_imp_ignored(
     monkeypatch.chdir(tmp_path)
     seen: list[tuple[Path, str]] = []
     monkeypatch.setattr(
-        main.worktree, "ensure_imp_ignored",
+        "imp.engine.worktree.ensure_imp_ignored",
         lambda control, base: seen.append((control, base)))
 
     # An invalid workflow name aborts right AFTER the ignore repair, so the
@@ -139,7 +139,7 @@ def test_cmd_new_skips_ignore_repair_when_base_unresolvable(
     monkeypatch.chdir(tmp_path)
     seen: list[tuple[object, ...]] = []
     monkeypatch.setattr(
-        main.worktree, "ensure_imp_ignored", lambda *a: seen.append(a))
+        "imp.engine.worktree.ensure_imp_ignored", lambda *a: seen.append(a))
 
     rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
 

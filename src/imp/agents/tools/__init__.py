@@ -1,7 +1,8 @@
 """@imp_tool decorator + global tool registry (spec §6.5).
 
-Tools are Python functions registered once at import-time. Each runner
-filters the registry to the agent's declared tools at step start.
+Tools are Python functions registered once, on the first get_registry()
+read. Each runner filters the registry to the agent's declared tools at
+step start.
 
 Schema derivation:
   - Use pydantic to build an args_schema from the function's type hints,
@@ -48,6 +49,7 @@ class Tool:
 
 
 _REGISTRY: dict[str, Tool] = {}
+_builtins_loaded: bool = False
 
 
 def _build_input_schema(fn: Callable[..., Any]) -> dict[str, Any]:
@@ -94,12 +96,12 @@ def imp_tool(
 
 
 def get_registry() -> dict[str, Tool]:
+    # Flag, not emptiness: @imp_tool fills _REGISTRY incrementally, so non-empty can be partial.
+    global _builtins_loaded
+    if not _builtins_loaded:
+        _builtins_loaded = True
+        _register_builtins()
     return dict(_REGISTRY)
-
-
-def clear_registry() -> None:
-    """Test-only — reset between tests that exercise registration directly."""
-    _REGISTRY.clear()
 
 
 def register_tool(tool: Tool) -> None:
@@ -107,7 +109,7 @@ def register_tool(tool: Tool) -> None:
     _REGISTRY[tool.name] = tool
 
 
-__all__ = ["Tool", "clear_registry", "get_registry", "imp_tool", "register_tool"]
+__all__ = ["Tool", "get_registry", "imp_tool", "register_tool"]
 
 
 # DO NOT REORDER: `_REGISTRY` and `imp_tool` must be defined ABOVE this point
@@ -144,6 +146,3 @@ def _register_builtins() -> None:
             logging.getLogger(__name__).warning(
                 "built-in tool %r failed to import; skipping", name, exc_info=True
             )
-
-
-_register_builtins()

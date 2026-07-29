@@ -108,8 +108,8 @@ def test_terminate_uses_named_grace_constant():
     # The grace is a named constant, not a 2.0 literal (must be 4.0).
     import inspect
 
+    from imp.agents.timeouts import PROCESS_KILL_GRACE_S
     from imp.agents.tools import context
-    from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
     sig = inspect.signature(context.terminate_running_processes)
     assert sig.parameters["timeout"].default == PROCESS_KILL_GRACE_S
     assert PROCESS_KILL_GRACE_S == 4.0

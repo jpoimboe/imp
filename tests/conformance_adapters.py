@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-from imp.agents.tools import get_registry  # noqa: F401  ensures tools registered
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc

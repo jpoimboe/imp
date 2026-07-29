@@ -84,7 +84,7 @@ async def test_two_matches_open_scoped_picker_interactive(
         assert "Resume which quest?" in header
         return candidates[1].quest_id
 
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", fake_picker)
     assert await m._resolve_resume_target(
         tmp_path, "lodo", non_interactive=False) == "lodo77"
 
@@ -102,7 +102,7 @@ async def test_two_matches_non_tty_errors_pass_token(
     async def boom(*a, **k):
         raise AssertionError("picker drawn on a non-tty")
 
-    monkeypatch.setattr(m.resume_select, "run_picker", boom)
+    monkeypatch.setattr("imp.cli.resume_select.run_picker", boom)
     rc = await m._resolve_resume_target(tmp_path, "lodo", non_interactive=False)
     err = capsys.readouterr().err
     assert rc == 2

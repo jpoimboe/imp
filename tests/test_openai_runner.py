@@ -17,7 +17,6 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc

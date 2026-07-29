@@ -26,7 +26,7 @@ def test_resume_layout_mismatch_prints_actionable_not_resume_gone(
     async def _fail_client(*_a, **_k) -> int:
         raise AssertionError("LayoutMismatch must short-circuit before the session client")
 
-    monkeypatch.setattr(m, "run_session_client", _fail_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fail_client)
 
     rc = anyio.run(m._async_cmd_resume,
                    argparse.Namespace(token="feat"))

@@ -11,7 +11,6 @@ from imp.agents.runner import (
     QuestContext,
     TextBlock,
 )
-from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.agent_run import deliver_interject
 from imp.engine.state import InMemoryEventLog

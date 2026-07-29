@@ -47,7 +47,7 @@ def test_exit_ambiguous_renders_each_candidate_via_quest_card(
         def quest_card(self, cid: str) -> QuestCard:
             return fake_card(cid)
 
-    monkeypatch.setattr(m, "make_store", lambda control: FakeStore())
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: FakeStore())
     with pytest.raises(SystemExit) as exc:
         m._exit_ambiguous(
             "2026-06-04", ["2026-06-04-aaa111", "2026-06-04-bbb222"], tmp_path)

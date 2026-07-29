@@ -48,7 +48,7 @@ async def test_run_cleared_session_opens_fresh_new_draft(
             return "build a parser"
 
     monkeypatch.setattr(m, "Prompt", _FakePrompt)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     captured: dict[str, object] = {}
@@ -58,7 +58,7 @@ async def test_run_cleared_session_opens_fresh_new_draft(
         captured.update(kwargs)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     ls: dict[str, str] = {}
     rc = await m._run_cleared_session(tmp_path, "main", leave_state=ls)
@@ -275,7 +275,7 @@ def test_fresh_session_line_routes_through_clear_loop(
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
@@ -313,13 +313,13 @@ async def test_run_cleared_session_leads_with_header_before_splash(
             return "build a parser"
 
     monkeypatch.setattr(m, "Prompt", _FakePrompt)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     async def _fake_client(quest: object, **kwargs: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
 
@@ -347,7 +347,7 @@ def test_resume_interactive_routes_through_clear_loop(
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
@@ -387,7 +387,7 @@ def test_resume_interactive_leads_with_header_before_splash(
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
@@ -428,15 +428,15 @@ def test_resume_interactive_wires_preceded_by_blank_to_splash(
         def __init__(self, **kwargs: object) -> None:
             captured.update(kwargs)
 
-    monkeypatch.setattr(m, "LiveDriver", _CapDriver)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _CapDriver)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
 
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
 
     async def _fake_loop(control, base, *, first):
         return await first({})
@@ -479,7 +479,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
             return "build a parser"
 
     monkeypatch.setattr(m, "Prompt", _CapturePrompt)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     captured: dict[str, object] = {}
@@ -489,7 +489,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
         captured.update(kwargs)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
 
@@ -525,7 +525,7 @@ async def test_run_cleared_session_cancel_resets_title(
         def reset(self) -> None:
             reset.append("reset")
 
-    monkeypatch.setattr(m, "TerminalTitle", _FakeTitle)
+    monkeypatch.setattr("imp.cli.terminal_title.TerminalTitle", _FakeTitle)
 
     class _CancelPrompt:
         def __init__(self, *a: object, **k: object) -> None: ...
@@ -555,7 +555,7 @@ async def test_run_cleared_session_chat_marks_header_chat(
             return "build a parser"
 
     monkeypatch.setattr(m, "Prompt", _FakePrompt)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     captured: dict[str, object] = {}
@@ -564,7 +564,7 @@ async def test_run_cleared_session_chat_marks_header_chat(
         captured.update(kwargs)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     buf = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buf)
@@ -592,7 +592,7 @@ async def test_run_cleared_session_intercepts_help(
             return self._lines.pop(0)
 
     monkeypatch.setattr(m, "Prompt", _QueuePrompt)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     captured: dict[str, object] = {}
@@ -602,7 +602,7 @@ async def test_run_cleared_session_intercepts_help(
         captured.update(kwargs)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     buf = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buf)
@@ -655,7 +655,7 @@ async def test_clear_loop_records_caller_base_on_detached_head(
             return "build a parser"
 
     monkeypatch.setattr(m, "Prompt", _FakePrompt)
-    monkeypatch.setattr(m, "make_interactive_solicit",
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
     captured: dict[str, object] = {}
@@ -664,7 +664,7 @@ async def test_clear_loop_records_caller_base_on_detached_head(
         captured["quest"] = quest
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _fake_client)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _fake_client)
 
     async def _first(leave_state: dict[str, str]) -> int:
         leave_state["intent"] = "clear"

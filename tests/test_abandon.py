@@ -124,7 +124,7 @@ def test_abandon_resident_routes_through_daemon(
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     delivered: list[str] = []
-    monkeypatch.setattr(_m, "session_is_resident", lambda _ctrl, cid: True)
+    monkeypatch.setattr("imp.remote.daemon.directory.session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(_m, "_deliver_abandon_resident",
                         lambda cid: delivered.append(cid))
     rc = _abandon_local(tmp_path, "feat")
@@ -140,14 +140,14 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
-    monkeypatch.setattr(main_mod, "session_is_resident", lambda c, cid: True)
+    monkeypatch.setattr("imp.remote.daemon.directory.session_is_resident", lambda c, cid: True)
 
     def _hang(_cid: str) -> None:
         raise TimeoutError  # simulate the bounded receive timing out
 
     torn: list[str] = []
     monkeypatch.setattr(main_mod, "_deliver_abandon_resident", _hang)
-    monkeypatch.setattr(main_mod, "tear_down_quest", lambda ch: torn.append(ch.id))
+    monkeypatch.setattr("imp.engine.abandon.tear_down_quest", lambda ch: torn.append(ch.id))
 
     rc = main_mod._abandon_local(tmp_path, "feat")
     assert rc == 0

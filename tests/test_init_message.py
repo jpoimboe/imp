@@ -9,7 +9,7 @@ def _run(project: Path, monkeypatch, lines: list[str]) -> None:
     # Pin the user-config path into a tmp dir so the test never touches a real
     # machine config; pick the providers non-interactively.
     user_cfg = project / "userhome" / "config.yaml"
-    monkeypatch.setattr("imp.providers.effective.global_config_path",
+    monkeypatch.setattr("imp.providers.paths.global_config_path",
                         lambda: user_cfg)
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)

@@ -80,15 +80,15 @@ def _seed_live(tmp_path, *, halt_condition=None, live=False) -> Quest:
 def _patch_headless(monkeypatch) -> None:
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
-    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(m, "_build_resume_driver", lambda **k: SimpleNamespace())
     monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
 
     async def _ok(*a: object, **k: object) -> int:
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
 
 
 def test_headless_live_resume_marks_already_running_and_notice(
@@ -133,7 +133,7 @@ def test_live_waiting_threads_already_waiting_into_inert_path(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (False, False))
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
+    monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, object] = {}
 
     async def fake_inert(quest, question, *, marker, notice, autonomous=False):

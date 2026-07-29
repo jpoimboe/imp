@@ -43,7 +43,7 @@ def _git_toplevel(cwd: Path) -> Path | None:
 def migrate_project_config(cwd: Path) -> None:
     """Stage `imp/project.yaml` -> `imp/config.yaml` in the main checkout, once."""
     from imp.engine.worktree import find_control_root
-    from imp.providers.effective import project_rename_pending
+    from imp.providers.paths import project_rename_pending
 
     # Pure-filesystem pre-check: an already-migrated repo is the permanent steady
     # state, and must not pay a git spawn on every imp invocation.
@@ -66,7 +66,7 @@ def run_startup_migrations() -> None:
     """Best-effort per step: a migration that cannot run is retried on the next
     invocation and must never be the reason a command dies."""
     with suppress(Exception):
-        from imp.providers.effective import (
+        from imp.providers.paths import (
             global_config_path,
             legacy_global_config_path,
         )

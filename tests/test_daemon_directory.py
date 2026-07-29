@@ -84,7 +84,7 @@ def test_resident_session_ids_never_enumerates_the_archive(
     def _boom(_cr: Path) -> list[str]:
         raise AssertionError("residency poll must not enumerate the archive")
 
-    monkeypatch.setattr("imp.cli.main.archive_read.archived_ids", _boom)
+    monkeypatch.setattr("imp.engine.archive.read.archived_ids", _boom)
 
     srv = _bind_live_socket(control_root, "live-one")
     try:

@@ -2084,7 +2084,7 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
         return
     if p.get("category") == "stalled":
         # Calm stall teardown warning; lazy import keeps narrative.py module-level-import-free.
-        from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
+        from imp.agents.timeouts import AGENT_INACTIVITY_TIMEOUT_S
         self._append(ErrorNode(
             message=(f"no response for {AGENT_INACTIVITY_TIMEOUT_S:.0f}s"
                      " — resuming; work already saved is preserved"),

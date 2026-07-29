@@ -813,8 +813,8 @@ def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
         called["project"] = project
         called["kw"] = kw
 
-    monkeypatch.setattr(m, "run_init_noninteractive", _spy)
-    monkeypatch.setattr(m, "run_init",
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive", _spy)
+    monkeypatch.setattr("imp.cli.init.run_init",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("interactive path must not run without a tty")))
     args = m._build_parser().parse_args(["init", "--pythonpath", "src, ,lib"])
@@ -832,7 +832,7 @@ def test_init_empty_pythonpath_flag_passes_empty_list(tmp_path, monkeypatch):
     def _spy(project, **kw):
         called["kw"] = kw
 
-    monkeypatch.setattr(m, "run_init_noninteractive", _spy)
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive", _spy)
 
     # --pythonpath "" must yield pythonpath=[] (not None)
     args = m._build_parser().parse_args(["init", "--use-defaults", "--pythonpath", ""])
@@ -864,7 +864,7 @@ def test_cmd_init_rejects_unknown_workflow_before_writing(tmp_path, monkeypatch,
     import imp.cli.main as m
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_init_noninteractive",
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("a typo'd --workflow must not reach the writer")))
     rc = m._cmd_init(_init_args(workflow="minimial"))
@@ -881,7 +881,7 @@ def test_cmd_init_rejects_internal_memory_workflow(tmp_path, monkeypatch, capsys
     import imp.cli.main as m
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_init_noninteractive",
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("memory is not selectable as a project default")))
     rc = m._cmd_init(_init_args(workflow="memory"))
@@ -903,7 +903,7 @@ def test_cmd_init_rejects_bad_workflow_on_the_interactive_path(
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True, raising=False)
     monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True, raising=False)
-    monkeypatch.setattr(m, "run_init",
+    monkeypatch.setattr("imp.cli.init.run_init",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("setup must not start with a bad --workflow")))
     rc = m._cmd_init(_init_args(non_interactive=False, workflow="minimial"))
@@ -920,7 +920,7 @@ def test_cmd_init_tolerates_a_namespace_without_the_workflow_attr(
     import imp.cli.main as m
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_init_noninteractive", lambda project, **kw: None)
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive", lambda project, **kw: None)
     # No `workflow` attribute at all — the shape existing _cmd_init tests build.
     assert m._cmd_init(argparse.Namespace(non_interactive=True)) == 0
 
@@ -1086,7 +1086,7 @@ def _colored_fresh_init(tmp_path, monkeypatch, msgs: list[str]) -> None:
 def test_host_success_lines_carry_engine_chrome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     msgs: list[str] = []
     _colored_fresh_init(tmp_path, monkeypatch, msgs)
@@ -1138,7 +1138,7 @@ def test_the_hand_off_line_is_gone(
 def test_already_initialized_rerun_block_stays_bare(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     monkeypatch.setenv("FORCE_COLOR", "1")
     (tmp_path / "imp").mkdir()
@@ -1177,7 +1177,7 @@ def test_noninteractive_output_stays_bare_under_forced_color(
 
 def test_already_initialized_rerun_leaves_the_palette_alone(tmp_path: Path) -> None:
     from imp.cli import palette as pal
-    from imp.providers.effective import global_config_path
+    from imp.providers.paths import global_config_path
 
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
@@ -1376,7 +1376,7 @@ def test_cmd_init_refuses_on_detached_head(tmp_path, monkeypatch, capsys):
     _git(tmp_path, "checkout", "-q", "--detach")
     head_before = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_init_noninteractive",
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("a detached HEAD must not reach the writer")))
 

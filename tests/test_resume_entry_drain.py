@@ -50,7 +50,6 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
         ToolResultBlock,
         ToolUseBlock,
     )
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -188,7 +187,6 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
         ToolResultBlock,
         ToolUseBlock,
     )
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -327,7 +325,6 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         ToolResultBlock,
         ToolUseBlock,
     )
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -685,7 +682,6 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
         QuestContext,
         TextBlock,
     )
-    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc

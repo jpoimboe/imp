@@ -41,15 +41,15 @@ def _capture_leave_mode(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         captured.update(k)
         return 0
 
-    monkeypatch.setattr(m, "run_session_client", _cap)
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _cap)
     return captured
 
 
 def _stub_ui(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
-    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(
-        m, "LiveDriver",
+        "imp.cli.live_driver.LiveDriver",
         lambda *a, **k: SimpleNamespace(
             install_startup_status=lambda: None,
             echo_submitted_reply=lambda _t: None,
@@ -63,7 +63,7 @@ async def test_run_fresh_session_headless_threads_create_mode(
     monkeypatch: pytest.MonkeyPatch, create_mode: str,
 ) -> None:
     _stub_ui(monkeypatch)
-    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
     captured = _capture_leave_mode(monkeypatch)
     args = m._build_parser().parse_args(["resume", "--headless"])
     quest = SimpleNamespace(
@@ -80,7 +80,7 @@ async def test_run_fresh_session_interactive_threads_create_mode(
 ) -> None:
     _stub_ui(monkeypatch)
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
 
     async def _fake_loop(control: object, base: str, *, first: object) -> int:
         return await first({})
@@ -105,7 +105,7 @@ def test_interactive_resume_threads_create_mode(
     _stub_ui(monkeypatch)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr(m, "_is_interactive", lambda **k: True)
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
     monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True)
     captured = _capture_leave_mode(monkeypatch)
@@ -128,7 +128,7 @@ def test_headless_resume_threads_create_mode(
     monkeypatch.chdir(tmp_path)
     _stub_ui(monkeypatch)
     monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
-    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
     captured = _capture_leave_mode(monkeypatch)
     rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
         token="feat", non_interactive=True, message="go", autonomous=False))
@@ -146,10 +146,10 @@ async def test_inert_resume_threads_create_mode(
     _stub_ui(monkeypatch)
     monkeypatch.setattr(m, "_term_width", lambda: 80)
     monkeypatch.setattr(m, "_prelaunch_position_model", lambda *a, **k: None)
-    monkeypatch.setattr(m, "compose_prelaunch_position_row", lambda **k: "")
-    monkeypatch.setattr(m, "render_inert_question", lambda *a, **k: a[0])
-    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
-    monkeypatch.setattr(m, "make_buffered_solicit", lambda line, inner: None)
+    monkeypatch.setattr("imp.cli.live_driver.compose_prelaunch_position_row", lambda **k: "")
+    monkeypatch.setattr("imp.cli.inert_resume.render_inert_question", lambda *a, **k: a[0])
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.inert_resume.make_buffered_solicit", lambda line, inner: None)
     captured = _capture_leave_mode(monkeypatch)
 
     async def _fake_run_inert(*, question: object, ask_line: object, launch: object) -> int:
@@ -158,7 +158,7 @@ async def test_inert_resume_threads_create_mode(
     async def _fake_loop(control: object, base: str, *, first: object) -> int:
         return await first({})
 
-    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
     rc = await m._resume_inert(
         quest, "the question?", marker="resuming", notice=None, autonomous=False)
