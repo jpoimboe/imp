@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import TextIO
 
 from imp.cli import palette as pal
+from imp.paths import display_path, imp_home
 from imp.providers.effective import FLOOR_SRC, EffectiveConfig
-from imp.providers.paths import global_config_path
 from imp.providers.resolve import iter_provider_defaults
 from imp.remote.drivers import REGISTRY
 
@@ -17,11 +17,8 @@ def layer_label(src_file: Path) -> str:
     """Short display name for a config layer's file, shared with `imp config set` output."""
     if src_file == FLOOR_SRC.file:
         return "provider default"
-    if src_file == global_config_path():
-        home = Path.home()
-        if src_file.is_relative_to(home):
-            return f"~/{src_file.relative_to(home)}"
-        return str(src_file)
+    if src_file.is_relative_to(imp_home()):
+        return display_path(src_file)
     return f"{src_file.parent.name}/{src_file.name}"
 
 

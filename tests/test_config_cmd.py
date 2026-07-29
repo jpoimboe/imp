@@ -403,6 +403,33 @@ def test_config_dims_tiers_block_provenance_when_color(
     assert tier_line.rstrip().endswith("\x1b[0m")   # dim closed with a reset
 
 
+def test_layer_label_renders_the_four_layers_distinctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under a default $IMP_HOME the local layer must not collapse onto the
+    project layer's `<parent>/<name>` form (spec AC 40a)."""
+    home = tmp_path / "home"
+    repo = home / "repo"
+    repo.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("IMP_HOME", raising=False)
+
+    labels = [
+        layer_label(FLOOR_SRC.file),
+        layer_label(repo / "imp" / "config.yaml"),
+        layer_label(global_config_path()),
+        layer_label(project_state_dir(repo) / "config.yaml"),
+    ]
+
+    assert labels == [
+        "provider default",
+        "imp/config.yaml",
+        "~/.imp/config.yaml",
+        "~/.imp/projects/repo/config.yaml",
+    ]
+    assert len(set(labels)) == 4
+
+
 def test_config_dims_settings_block_provenance_when_color(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

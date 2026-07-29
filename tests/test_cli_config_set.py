@@ -9,7 +9,7 @@ import pytest
 from imp.cli.config_cmd import layer_label
 from imp.cli.config_write import read_back
 from imp.cli.main import _build_parser, main
-from imp.paths import project_state_dir
+from imp.paths import display_path, project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from tests._init_config import write_real_init_config
 
@@ -247,7 +247,8 @@ def test_unset_notes_a_shadowing_layer(
     out = capsys.readouterr().out.splitlines()
     assert out[0] == 'imp/config.yaml: test_cmd_fast commented out (was "make test")'
     assert out[1] == (
-        f"note: test_cmd_fast is also set in {state.name}/config.yaml, which takes "
+        f"note: test_cmd_fast is also set in "
+        f"{display_path(state / 'config.yaml')}, which takes "
         "precedence (effective: make local)")
 
 
@@ -262,8 +263,8 @@ def test_shadow_note_names_the_layer_that_wins(
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "imp/config.yaml: theme: \"dark\" (new)"
     assert out[1] == (
-        f"note: theme is also set in {state.name}/config.yaml, which takes "
-        "precedence (effective: ansi)")
+        f"note: theme is also set in {display_path(state / 'config.yaml')}, "
+        "which takes precedence (effective: ansi)")
 
 
 def test_table_routing_and_value_shapes(project: Path, imp_home: Path) -> None:
