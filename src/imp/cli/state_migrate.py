@@ -102,15 +102,13 @@ def _rewrite_archive_roots(legacy: Path, state_dir: Path) -> None:
         write_record(records, record)
 
 
-def _registered_worktrees(control_root: Path) -> list[str]:
+def _registered_worktrees(stdout: str) -> list[str]:
     """The paths git holds admin records for. A worktree whose directory moved is
     still listed at its OLD path (marked prunable) — which is what makes this the
     right source for the fixup — while a pruned or never-registered directory is
     not listed at all."""
-    proc = subprocess.run(
-        ["git", "-C", str(control_root), "worktree", "list", "--porcelain"],
-        capture_output=True, text=True, check=True)
-    return [line.removeprefix("worktree ") for line in proc.stdout.splitlines()
+    return [line.removeprefix("worktree ")
+            for line in stdout.splitlines()
             if line.startswith("worktree ")]
 
 
@@ -120,9 +118,18 @@ def _repair_worktrees(control_root: Path, legacy: Path, state_dir: Path) -> None
     behind. Taking the set from git makes that unrepresentable; a refusal on a
     registered worktree is reported rather than raised, because the state has
     already moved by now and the legacy directory is removed only at the very end —
-    so raising would wedge every later invocation on the same failure."""
+    so raising would wedge every later invocation on the same failure. A failed
+    listing is treated identically: imp cannot repair worktrees it could not list."""
     old, new = _prefixes(legacy, state_dir, "worktrees")
-    moved = [new + path[len(old):] for path in _registered_worktrees(control_root)
+    proc = subprocess.run(
+        ["git", "-C", str(control_root), "worktree", "list", "--porcelain"],
+        capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        print(f"imp: git could not repair every moved worktree:\n{proc.stderr.strip()}",
+              file=sys.stderr)
+        return
+    moved = [new + path[len(old):]
+             for path in _registered_worktrees(proc.stdout)
              if path.startswith(old)]
     if not moved:
         return

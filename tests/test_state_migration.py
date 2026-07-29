@@ -318,6 +318,31 @@ def test_a_repair_git_refuses_is_reported_not_raised(
         "imp: git could not repair every moved worktree:\nfatal: cannot repair\n")
 
 
+@pytest.mark.timeout(240)
+def test_a_failing_worktree_listing_is_reported_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed git worktree list must not wedge the migration: report, don't raise."""
+    control = _repo(tmp_path / "proj")
+    legacy = control / ".imp"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    real_run = subprocess.run
+
+    def fail_list(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "list" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", "fatal: not a git repository\n")
+        return real_run(argv, **kwargs)     # type: ignore[call-overload,no-any-return]
+
+    monkeypatch.setattr(state_migrate.subprocess, "run", fail_list)
+
+    _repair_worktrees(control, legacy, state_dir)      # must not raise
+
+    assert capsys.readouterr().err == (
+        "imp: git could not repair every moved worktree:\nfatal: not a git repository\n")
+
+
 DEFERRED_NOTICE = ("imp: not moving .imp/ yet — a quest is running; "
                    "re-run when it finishes\n")
 
