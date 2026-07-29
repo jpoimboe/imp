@@ -173,7 +173,7 @@ def _refusal(target: Path, key: SettableKey) -> str:
 
 
 def _emit_shadow(key: SettableKey, layer: Layer, control_root: Path) -> None:
-    if key.project_only:
+    if key.project_only or layer == "local":
         return
     above = [global_config_path()] if layer == "project" else []
     if (control_root / "imp" / "config.yaml").is_file():

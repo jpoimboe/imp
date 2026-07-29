@@ -366,8 +366,8 @@ def test_local_set_creates_the_file_and_wins_the_stack(
     (imp_home / "config.yaml").write_text("test_cmd_fast: make global\n")
 
     assert main(["config", "set", "--local", "test_cmd_fast", "make local"]) == 0
-    assert capsys.readouterr().out.splitlines()[0] == (
-        f'{label}: test_cmd_fast: "make local" (new)')
+    assert capsys.readouterr().out == (
+        f'{label}: test_cmd_fast: "make local" (new)\n')
     assert read_back(state / "config.yaml", ("test_cmd_fast",)) == "make local"
     assert 'test_cmd_fast: "make test"' in (
         project / "imp" / "config.yaml").read_text()
@@ -472,6 +472,25 @@ def _config_action_parser(name: str) -> argparse.ArgumentParser:
                   if isinstance(action, argparse._SubParsersAction))
     return next(action.choices[name] for action in config._actions
                 if isinstance(action, argparse._SubParsersAction))
+
+
+def test_a_local_write_has_nothing_above_it(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Local is the top layer; a --local write must not name itself — or any
+    lower layer — as a shadow (spec AC 39)."""
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("theme: light\n")
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("theme: ansi\n")
+    label = display_path(state / "config.yaml")
+
+    assert main(["config", "set", "--local", "theme", "dark"]) == 0
+    assert capsys.readouterr().out == f'{label}: theme: "dark" (was "ansi")\n'
+
+    assert main(["config", "unset", "--local", "theme"]) == 0
+    assert capsys.readouterr().out == (
+        f'{label}: theme commented out (was "dark")\n')
 
 
 def test_help_copy_matches_the_spec() -> None:
