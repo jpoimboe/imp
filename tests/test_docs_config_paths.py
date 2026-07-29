@@ -46,6 +46,21 @@ def test_no_live_doc_places_project_state_in_the_checkout(needle: str) -> None:
     assert offenders == []
 
 
+def test_playbooks_locate_quest_state_outside_the_clone() -> None:
+    """Quest homes and worktrees live under the state directory; a playbook that
+    still points inside `$WT` sends the operator to a path that does not exist."""
+    for name in ("interrupt-playbook.md", "before-after-playbook.md"):
+        body = (Path("tests/playbooks") / name).read_text()
+        for stale in ("$WT/.imp/quests", "$REPO/.imp/quests", "$REPO/.imp/worktrees",
+                      "<control_root>/.imp/quests", "`.imp/worktrees/<id>`"):
+            assert stale not in body, f"{name}: {stale}"
+    interrupt = (Path("tests/playbooks") / "interrupt-playbook.md").read_text()
+    assert 'STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"' in interrupt
+    before_after = (Path("tests/playbooks") / "before-after-playbook.md").read_text()
+    assert 'imp show "$ID" --json' in before_after
+    assert 'git -C "$REPO" worktree list --porcelain' in before_after
+
+
 def test_playbooks_verify_against_the_bracketed_layer_label() -> None:
     """`imp config` tags each leaf with a bracketed short label; the retired
     `…/<path> (layer)` form must not survive in the verification steps."""

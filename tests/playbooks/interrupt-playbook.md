@@ -341,8 +341,9 @@ not reach imp.
 - `view(full=True)` → the whole run so far (scrolled-off history + current screen); the
   three-part leave block and the quest id live here.
 - `snapshot()` → PNG; use it to *see* the leave banner's color/layout when judging clarity.
-- **Daemon-death triage.** If a pause banner reads `ended unexpectedly — see
-  .imp/quests/<id>/daemon.stderr`, the per-quest session daemon died rather than pausing
+- **Daemon-death triage.** If a pause banner reads `crash: see
+  <state dir>/quests/<id>/daemon.stderr` (an absolute path under
+  `~/.imp/projects/<clone-name>/`), the per-quest session daemon died rather than pausing
   cleanly — read that stderr file before judging. A daemon death *caused by* an interrupt is a
   defect (record it); one from an unrelated crash is a separate bug, not an interrupt failure.
 
@@ -381,8 +382,9 @@ not reach imp.
 5. **Event-log check:** the quest's event log is at a deterministic path —
 
    ```bash
-   ev="$WT/.imp/quests/<id>/events.jsonl"
-   test -f "$ev" || ev=$(find "$WT" -path '*'"<id>"'*' -name 'events.jsonl' 2>/dev/null | head -1)  # fallback
+   STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # this clone's state dir (`imp config` prints it)
+   ev="$STATE/quests/<id>/events.jsonl"
+   test -f "$ev" || ev=$(find "$STATE" -path '*'"<id>"'*' -name 'events.jsonl' 2>/dev/null | head -1)  # fallback
    # The interrupt is recorded as a clean PAUSE, never an unknown error. How it is recorded
    # depends on regime: a MATERIALIZED quest writes a `workflow_paused`; a phase-0 draft leave
    # writes a `conversation_saved` instead — both carry the trigger in `interrupt_reason`.
@@ -398,13 +400,13 @@ not reach imp.
    > interrupt, never `category:"unknown"`* — holds regardless. Whether the direct-API providers
    > (`anthropic`/`openai`) emit an `error`/`interrupted` record is untested; treat its absence as
    > acceptable, not a failure.
-   (`quest_dir` is `<control_root>/.imp/quests/<id>` and `events_path` is `events.jsonl` within it. If
+   (`quest_dir` is `<state dir>/quests/<id>` and `events_path` is `events.jsonl` within it. If
    you still can't locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what
    it surfaces; note the limitation.)
 6. **Record the quest id** for resume + abandon. The authoritative source is
-   `bash: cd "$WT" && imp list` — its first column is the quest **id** (the
-   `.imp/worktrees/<id>` dir name), which is what the event path and `imp resume`/`imp abandon`
-   key on. The `paused` headline should print that same id; if it ever shows a slug or other
+   `bash: cd "$WT" && imp list` — its first column is the quest **id** (also the
+   `<state dir>/worktrees/<id>` dir name), which is what the event path and
+   `imp resume`/`imp abandon` key on. The `paused` headline should print that same id; if it ever shows a slug or other
    display name instead, that's itself a bug — record it and rely on `imp list` for the id.
 
 ### **`RESUME-AND-VERIFY(id)`**
