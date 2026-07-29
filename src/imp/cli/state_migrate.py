@@ -3,6 +3,7 @@ into its state directory. The only reader of the pre-migration layout left."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -34,24 +35,33 @@ def _discard(path: Path) -> None:
 def _move_entries(legacy: Path, state_dir: Path) -> None:
     """Relocate each top-level entry, resumably: a destination that already exists
     was moved by an earlier run, and the source is never touched until the
-    destination is in place — so a partial staging dir is always safe to discard."""
-    same = _same_device(legacy, state_dir)
-    for entry in sorted(legacy.iterdir()):
-        dest = state_dir / entry.name
-        if dest.exists():
+    destination is in place — so a partial staging dir is always safe to discard.
+    Concurrent invocations racing this one-shot migration both converge: a vanished
+    source entry is skipped, and the catch also covers legacy itself vanishing under
+    a concurrent winner's rmdir (state_dir cannot be missing — project_state_dir
+    creates it before any caller reaches here)."""
+    try:
+        same = _same_device(legacy, state_dir)
+        entries = sorted(legacy.iterdir())
+    except FileNotFoundError:
+        return
+    for entry in entries:
+        with contextlib.suppress(FileNotFoundError):
+            dest = state_dir / entry.name
+            if dest.exists():
+                _discard(entry)
+                continue
+            if same:
+                os.rename(entry, dest)
+                continue
+            staging = state_dir / f".migrating-{entry.name}"
+            _discard(staging)
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.copytree(entry, staging, symlinks=True)
+            else:
+                shutil.copy2(entry, staging, follow_symlinks=False)
+            os.rename(staging, dest)
             _discard(entry)
-            continue
-        if same:
-            os.rename(entry, dest)
-            continue
-        staging = state_dir / f".migrating-{entry.name}"
-        _discard(staging)
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.copytree(entry, staging, symlinks=True)
-        else:
-            shutil.copy2(entry, staging, follow_symlinks=False)
-        os.rename(staging, dest)
-        _discard(entry)
 
 
 def _prefixes(legacy: Path, state_dir: Path, name: str) -> tuple[str, str]:
@@ -216,5 +226,6 @@ def migrate_project_state(cwd: Path) -> None:
     _repair_worktrees(control_root, legacy, state_dir)
     _relink_quest_homes(legacy, state_dir)
     _rewrite_archive_roots(legacy, state_dir)
-    legacy.rmdir()
+    with contextlib.suppress(FileNotFoundError):
+        legacy.rmdir()
     print(f"imp: moved .imp/ to {display_path(state_dir)}", file=sys.stderr)

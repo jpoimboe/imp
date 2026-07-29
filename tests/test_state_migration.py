@@ -245,6 +245,50 @@ def test_repair_ignores_a_directory_git_never_registered(tmp_path: Path) -> None
     assert (state_dir / "worktrees" / "leftover").is_dir()
 
 
+def test_concurrent_loser_does_not_raise_when_legacy_vanishes(
+    tmp_path: Path,
+) -> None:
+    """Concurrent invocations racing the same one-shot migration both converge."""
+    legacy = tmp_path / "proj" / ".imp"
+    legacy.mkdir(parents=True)
+    _seed(legacy)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    # Winner moves all entries, then removes legacy (as migrate_project_state does).
+    _move_entries(legacy, state_dir)
+    legacy.rmdir()
+    # Loser's _move_entries after legacy has vanished — must not raise.
+    _move_entries(legacy, state_dir)
+    assert (state_dir / "quests" / "aaa111" / "quest.json").exists()
+
+
+def test_concurrent_per_entry_toctou_is_suppressed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-entry contextlib.suppress covers the actual TOCTOU: dest.exists()
+    was False, but the winner atomically moved the entry away before our
+    os.rename fires."""
+    legacy = tmp_path / "proj" / ".imp"
+    legacy.mkdir(parents=True)
+    _seed(legacy)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    real_rename = os.rename
+    called = [False]
+
+    def winner_then_fail(src: object, dst: object) -> None:
+        if not called[0]:
+            called[0] = True
+            real_rename(src, dst)   # winner moves it to dest first
+        real_rename(src, dst)       # loser: src is gone → FileNotFoundError
+
+    monkeypatch.setattr(state_migrate.os, "rename", winner_then_fail)
+
+    _move_entries(legacy, state_dir)   # must not raise
+
+    assert (state_dir / "quests" / "aaa111" / "quest.json").exists()
+
+
 @pytest.mark.timeout(240)
 def test_a_repair_git_refuses_is_reported_not_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
