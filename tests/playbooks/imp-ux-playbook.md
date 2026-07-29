@@ -244,6 +244,8 @@ functional findings as *defects* (severity = correctness).
 
 ## 5. Cleanup
 ```bash
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
+[ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 cd "$REPO" && rm -rf "$WT"
 git -C "$REPO" status --short    # only the notes file(s) should be new
 ```

@@ -535,6 +535,8 @@ with no artifact is the most likely failure of this convention.
 
 ```bash
 cd "$WT" && imp abandon <id>   # abandon any open quests in the clone (get <id> from §5.6 / imp list)
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
+[ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 rm -rf "$WT"
 git -C "$REPO" status --short  # only the report file should be new
 ```

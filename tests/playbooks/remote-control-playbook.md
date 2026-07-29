@@ -190,6 +190,8 @@ all-green invariant summary, and an explicit "no defects observed" note.
 ```bash
 kill "$DAEMON_PID" "$FAKE_PID" 2>/dev/null
 cd "$WT" && imp list | grep . && imp abandon <id>   # skip if no open change
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
+[ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 rm -rf "$WT"
 git -C "$REPO" status --short   # only the new report file should appear
 ```

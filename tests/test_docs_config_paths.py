@@ -71,3 +71,19 @@ def test_playbooks_verify_against_the_bracketed_layer_label() -> None:
         assert "[.imp/config.yaml]" not in body, name
         assert "(local)" not in body, name
         assert "(global)" not in body, name
+
+
+_RECLAIM = ('[ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] '
+            '&& rm -rf "$STATE"')
+
+
+def test_playbook_cleanup_reclaims_the_project_state_directory() -> None:
+    """A run's quests, worktrees and archive live outside the clone now, so a
+    Cleanup block that only removes `$WT` strands them in the operator's home —
+    and the marker guard keeps the removal to the directory this clone claimed."""
+    for name in ("dogfood-playbook.md", "imp-ux-playbook.md",
+                 "interrupt-playbook.md", "remote-control-playbook.md"):
+        body = (Path("tests/playbooks") / name).read_text()
+        assert _RECLAIM in body, name
+        # the state dir goes first: the guard reads `$WT` to confirm ownership
+        assert body.index(_RECLAIM) < body.index('rm -rf "$WT"'), name
