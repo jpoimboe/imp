@@ -59,8 +59,10 @@ def test_imp_operator_notes_has_unblocking_section() -> None:
     assert "snapshot" in body
     assert "cherry-pick" in body
     assert "skew deadlock" in body.lower()
-    # the local layer is the MAIN CHECKOUT's — a worktree .imp/config.yaml is inert
-    assert "`<main checkout>/.imp/config.yaml`" in body
+    # the local layer is keyed to the MAIN CHECKOUT and lives outside every checkout
+    assert "`~/.imp/projects/<slug>/config.yaml`" in body
+    assert "the main checkout's local layer" in body
+    assert "<main checkout>/.imp/config.yaml" not in body
     assert "<worktree>/.imp/config.yaml" not in body
 
 

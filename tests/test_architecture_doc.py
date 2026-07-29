@@ -53,7 +53,8 @@ def test_imp_invariants_names_quest_concept() -> None:
 def test_imp_operator_notes_names_quest_concept() -> None:
     text = Path("docs/guide/operator-notes.md").read_text()
     assert "Runbook for operating a running imp quest." in text
-    assert ".imp/quest/workflow" in text
+    assert ".imp/quests/<id>/workflow/" in text
+    assert ".imp/quest/workflow" not in text
     assert ".imp/change/" not in text
     assert ".imp/changes/" not in text
 
@@ -140,3 +141,20 @@ def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
     # no checkout-relative state path survives anywhere in the doc
     for stale in (".imp/quest/", ".imp/archive", ".imp/worktrees"):
         assert stale not in text, stale
+
+
+def test_operator_notes_document_the_moved_checkout_limitation() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    flat = " ".join(text.split())
+    assert "## Moving or renaming a checkout" in text
+    assert "`repo` marker" in text
+    assert "orphaned" in flat
+    # the manual recovery: re-slug the directory, repoint the marker, repair git
+    assert "git worktree repair" in text
+    # imp already claimed an empty <new-name>; a plain `mv` would nest the old
+    # dir inside it and `imp config` would still look right
+    assert 'mv -T "$OLD" "$NEW"' in text
+    assert '[ "$(ls -A "$NEW" 2>/dev/null)" = repo ] && rm -rf "$NEW"' in text
+    assert "imp list" in text
+    # in-flight quests record absolute paths that the rename does not rewrite
+    assert "Finish or abandon in-flight quests before moving a checkout" in text
