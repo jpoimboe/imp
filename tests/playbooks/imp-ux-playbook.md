@@ -30,12 +30,14 @@ REPO=$(git rev-parse --show-toplevel)     # main checkout — notes land here, s
 WT=/tmp/imp-ux-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"
 echo "$WT"                                # cwd for every imp run
-mkdir -p "$WT/.imp"
-cat > "$WT/.imp/config.yaml" <<'YAML'
+cd "$WT" && imp config >/dev/null         # claims this clone's state dir under ~/.imp/projects/
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
+test -f "$STATE/repo"                     # the claim marker — missing means imp claimed a different slug
+cat > "$STATE/config.yaml" <<'YAML'
 providers: [claude_code]       # local provider; no API key → no shell wrapper needed (CLI). See §2.
 theme: dark                    # primary pass; you will also sweep light + ansi (below)
 YAML
-cd "$WT" && imp config                    # confirm provider/theme resolved
+cd "$WT" && imp config                    # confirm provider/theme resolved (label: `[~/.imp/projects/<clone-name>/config.yaml]`)
 ```
 
 > **Sweep all three themes.** imp ships `dark`, `light`, and `ansi` — `dark`/`light` are

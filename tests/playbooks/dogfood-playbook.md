@@ -34,18 +34,21 @@ git clone "$REPO" "$WT"                       # standalone clone of HEAD; contro
 ls "$WT"/imp/config.yaml                      # confirms $WT is an imp project
 ```
 
-Force a single provider via the gitignored **local** layer (default `claude_code`; substitute
-another only if the operator names one):
+Force a single provider via the **local** layer — this clone's own state directory under
+`~/.imp/projects/`, outside the checkout (default `claude_code`; substitute another only if the
+operator names one):
 
 ```bash
-mkdir -p "$WT/.imp"
-cat > "$WT/.imp/config.yaml" <<'YAML'
+cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; prints `project state: ~/.imp/projects/<clone-name>`
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
+test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
+cat > "$STATE/config.yaml" <<'YAML'
 providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
 theme: ansi
 YAML
 cd "$WT" && imp config      # the `providers` row must resolve to your provider, its label reading
-                            # `[.imp/config.yaml]`. If it reads `[~/.imp/config.yaml]`, your file
-                            # landed at the wrong path; fix it before driving.
+                            # `[~/.imp/projects/<clone-name>/config.yaml]`. If it reads
+                            # `[~/.imp/config.yaml]`, the write landed elsewhere; fix it before driving.
 ```
 
 **Seed a deterministic feature intent that requests a unique sentinel.** Generate the sentinel and

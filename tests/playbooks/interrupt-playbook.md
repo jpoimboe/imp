@@ -182,16 +182,20 @@ A correct imp does **all** of:
 - **Which `imp`:** the installed `imp` on PATH (a current build off `master`, which carries
   the feature). State the commit you tested in the report.
 - **Where:** a fresh standalone `git clone` of this repo (created in §3) — **not** a
-  `git worktree`. Provider-forcing (§4) writes the **local** config layer `.imp/config.yaml`,
-  which imp reads from the **control root**; a linked worktree's `find_control_root` resolves
-  to the **main checkout**, so the override would pollute the shared main tree. A standalone
-  clone's control root is *itself*, so `$WT/.imp/config.yaml` both wins and stays isolated.
+  `git worktree`. Provider-forcing (§4) writes the **local** config layer, which imp keys to
+  the **control root** and keeps in that project's state directory
+  (`~/.imp/projects/<clone-name>/config.yaml`); a linked worktree's `find_control_root`
+  resolves to the **main checkout**, so the override would pollute the main tree's state
+  directory. A standalone clone's control root is *itself* and claims its own state
+  directory, so the override both wins and stays isolated.
   Every `imp new` / `imp resume` runs with cwd inside the clone, so all quests (branches,
-  nested worktrees, journals) are contained and discardable.
+  worktrees, journals) are contained and discardable — they live under
+  `~/.imp/projects/<clone-name>/`, not inside `$WT`.
 - **Config layout:** the `config-file-split` layout — a provider **code floor** (tier→model
   defaults) under three layers: committed `imp/config.yaml` (workflow/lint/test/vars, read
   from the worktree), global `~/.imp/config.yaml` (`providers`/`theme`, per machine), and
-  gitignored `.imp/config.yaml` (local, control root, highest precedence). Precedence
+  the local `~/.imp/projects/<clone-name>/config.yaml` (keyed to the control root, never
+  committed, highest precedence). Precedence
   (low→high): `floor < project < global < local` — operator-wins among the config layers.
 - **Provider:** exactly one per run — `claude_code` by default, or whichever single provider
   the operator names (`anthropic`, `openai`, or `codex`). That one provider is in scope for the
@@ -260,7 +264,7 @@ ls "$WT"/imp/config.yaml                # the committed project marker → confi
 (`git clone .` copies committed state at the current branch tip. If you need uncommitted local
 changes under test, commit them first or `rsync` them into `$WT` after cloning.)
 
-You force the provider via `"$WT"/.imp/config.yaml` (the gitignored local layer) in §4.
+You force the provider via the clone's local layer — `~/.imp/projects/<clone-name>/config.yaml` — in §4.
 
 ---
 
@@ -268,17 +272,20 @@ You force the provider via `"$WT"/.imp/config.yaml` (the gitignored local layer)
 
 imp runs the **first** provider in the resolved `providers:` whose env_check passes. Since
 `providers` is **global**-config-homed and precedence is operator-wins (`project < global <
-local`), the layer that forces a provider is **local** — `$WT/.imp/config.yaml` (gitignored,
-read from the control root). Because `$WT` is a standalone clone, its control root is `$WT`
-itself, so this file both **wins** (highest precedence) and **stays isolated**.
+local`), the layer that forces a provider is **local** — `~/.imp/projects/<clone-name>/config.yaml`,
+this project's state directory, keyed to the control root. Because `$WT` is a standalone clone,
+its control root is `$WT` itself and it claims its own state directory, so this file both
+**wins** (highest precedence) and **stays isolated**.
 
 Write the single-provider override (this run targets exactly one provider — `claude_code` by
 default; substitute another only if the operator named it). The `remote: {driver: null}` line
 keeps inherited channels off so a channel subprocess's stderr can't interleave with imp's
 streaming output:
 ```bash
-mkdir -p "$WT/.imp"
-cat > "$WT/.imp/config.yaml" <<'YAML'
+cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; prints `project state: ~/.imp/projects/<clone-name>`
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
+test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
+cat > "$STATE/config.yaml" <<'YAML'
 providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
 theme: ansi                # fixed theme so snapshots render predictably
 remote:
@@ -291,16 +298,17 @@ floor** (current models, shipped with imp). Confirm the override won — and on 
 before testing:
 ```bash
 cd "$WT" && imp config                  # the `providers` row must resolve to the provider under test,
-                                        # its label reading `[.imp/config.yaml]`
+                                        # its label reading `[~/.imp/projects/<clone-name>/config.yaml]`
 cd "$WT" && imp config --explain high   # the high-tier model the forced provider will use
 ```
 `imp config` tags each leaf with its source layer in brackets. If the
 `providers` row reads `[~/.imp/config.yaml]`, your file landed at the wrong path (`$WT/imp/config.yaml`,
-not `$WT/.imp/config.yaml`) and the global layer silently won — fix it before recording anything.
+or a state directory other than the one `project state:` names) and the global layer silently won —
+fix it before recording anything.
 The `--explain` line shows the floor model **before** you spend a billable call.
 
 > Model names drift, but they live in the **code floor**, not this file. If a floor model 404s
-> / "unknown model"s at launch, add a single overriding leaf to `$WT/.imp/config.yaml`
+> / "unknown model"s at launch, add a single overriding leaf to `$STATE/config.yaml`
 > (e.g. `tiers: {high: {openai: <current>}}`) and **note the substitution** — it's not an
 > interrupt bug. codex refuses `*-codex` models, so any codex tier override must be a plain
 > model (e.g. `gpt-5.5`).

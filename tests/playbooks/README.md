@@ -80,11 +80,12 @@ API (`start`/`url`/`inject`/`inject_reply`/`outbox`/`stop`); the playbook launch
 ## Throwaway-clone reference
 
 Run in a **standalone `git clone`** (not a `git worktree add`) and abandon all churn at the end.
-A clone supplies cwd plus a discardable imp project whose control root is *itself* — so a
-local-layer config override (`.imp/config.yaml`, e.g. to force a provider) both **wins** and
-**stays isolated**. A linked worktree can't guarantee that: its control root resolves to the
-main checkout (`git rev-parse --git-common-dir` → parent), so a local override would pollute the
-shared tree. Test against the installed `imp` like every other test — don't hard-code internal
+A clone supplies cwd plus a discardable imp project whose control root is *itself*, claiming its
+own state directory (`~/.imp/projects/<clone-name>/`) — so a local-layer config override
+(`<state dir>/config.yaml`, e.g. to force a provider) both **wins** and **stays isolated**. A
+linked worktree can't guarantee that: its control root resolves to the main checkout (`git
+rev-parse --git-common-dir` → parent), so a local override would pollute the main project's
+state directory. Test against the installed `imp` like every other test — don't hard-code internal
 symbols or branch paths into a playbook.
 
 ## Index

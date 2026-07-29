@@ -49,8 +49,10 @@ def test_no_live_doc_places_project_state_in_the_checkout(needle: str) -> None:
 def test_playbooks_verify_against_the_bracketed_layer_label() -> None:
     """`imp config` tags each leaf with a bracketed short label; the retired
     `…/<path> (layer)` form must not survive in the verification steps."""
-    for name in ("interrupt-playbook.md", "dogfood-playbook.md"):
+    for name in ("interrupt-playbook.md", "dogfood-playbook.md",
+                 "imp-ux-playbook.md", "remote-control-playbook.md"):
         body = (Path("tests/playbooks") / name).read_text()
-        assert "[.imp/config.yaml]" in body, name
+        assert "[~/.imp/projects/<clone-name>/config.yaml]" in body, name
+        assert "[.imp/config.yaml]" not in body, name
         assert "(local)" not in body, name
         assert "(global)" not in body, name
