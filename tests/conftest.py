@@ -185,6 +185,9 @@ def _pin_subprocess_imp_to_working_tree() -> None:
 
 _pin_subprocess_imp_to_working_tree()
 
+# imp builds imp: strip the inherited value before any module-scoped fixture sets up.
+os.environ.pop("IMP_STATE_DIR", None)
+
 
 @pytest.fixture(autouse=True)
 def _stub_provider_api_keys(
