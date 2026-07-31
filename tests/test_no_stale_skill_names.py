@@ -4,20 +4,18 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests._corpus import tracked
+
 # The two skills were renamed to imp-tool-reference / imp-driving-terminal-uis.
 # No shipped file may still name a bare old slug — a match NOT already prefixed by
 # "imp-". Scoped to the shipped tree (src/ + docs/); the spec doc and tests are out
 # of scope for this guard.
 _OLD = re.compile(r"(?<!imp-)(?:tool-reference|driving-terminal-uis)")
-_ROOTS = (Path("src"), Path("docs"))
+_ROOTS = ("src", "docs")
 
 
 def _shipped_text_files() -> list[Path]:
-    files: list[Path] = []
-    for root in _ROOTS:
-        files.extend(root.rglob("*.md"))
-        files.extend(root.rglob("*.py"))
-    return files
+    return tracked(*_ROOTS, suffixes=(".md", ".py"))
 
 
 def test_no_shipped_file_names_the_old_skill_slugs() -> None:

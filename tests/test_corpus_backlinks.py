@@ -5,13 +5,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests._corpus import tracked
+
 # Only the two corpus areas — NOT docs/ideas/, which holds non-corpus scratch notes.
-CORPUS_DIRS = (Path("docs/guide"), Path("docs/internals"))
+CORPUS_DIRS = ("docs/guide", "docs/internals")
 SENTINEL = "Part of imp's self-knowledge corpus"
 
 
 def test_every_corpus_doc_backlinks_to_the_hub() -> None:
-    docs = sorted(p for d in CORPUS_DIRS for p in d.rglob("*.md"))
+    docs = tracked(*CORPUS_DIRS)
     assert docs, "no corpus docs found"
     missing = [
         str(p) for p in docs
