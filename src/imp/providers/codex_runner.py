@@ -1129,29 +1129,6 @@ def _flush_codex_prose(
     state["turn_had_llm"] = True
 
 
-def _parse_codex_message(raw: dict[str, Any]) -> Message:
-    """raw → assistant Message for codex.  A codex `agent_message.raw` now
-    carries prose text blocks only (tool_use lives in the standalone
-    `tool_call` events); this parser also tolerates a tool_use block for the
-    hand-built audit/parse fixtures.  A web_search appears as a query-only
-    tool_use block.  Unknown blocks are dropped.
-
-    Lives here (not in replay.py) per the provider-exports-its-parser convention:
-    replay.py imports + registers it, runner can reuse it, no replay-import cycle.
-    """
-    content: list[Any] = []
-    for block in raw.get("content", []):
-        kind = block.get("type")
-        if kind == "text":
-            content.append(TextBlock(text=block.get("text", "")))
-        elif kind == "tool_use":
-            content.append(ToolUseBlock(
-                id=block["id"], name=block["name"],
-                input=block.get("input", {})))
-        # unknown: skipped
-    return Message(role="assistant", content=tuple(content))
-
-
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str, run_state: Any = None,

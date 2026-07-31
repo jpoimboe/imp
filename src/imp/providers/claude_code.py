@@ -991,18 +991,6 @@ def _serialize_claude_code_message(sdk_msg: Any) -> dict[str, Any]:
     }
 
 
-def _parse_claude_code_message(raw: dict[str, Any]) -> Message:
-    content: list[Any] = []
-    for block in raw.get("content", []):
-        kind = block.get("type")
-        if kind == "text":
-            content.append(TextBlock(text=block.get("text", "")))
-        elif kind == "tool_use":
-            content.append(ToolUseBlock(id=block["id"], name=block["name"],
-                                        input=block.get("input", {})))
-    return Message(role="assistant", content=tuple(content))
-
-
 def _parse_cc_web_citations(
     norm_name: str, call_input: dict[str, Any], content: Any,
 ) -> list[dict[str, Any]]:

@@ -50,6 +50,7 @@ from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers.base import Provider
 from imp.providers.catalog import ANTHROPIC, model_info
+from imp.providers.message_parsers import _parse_anthropic_message
 from imp.providers.push_session import PushSession
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
@@ -262,30 +263,6 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
             ("input_tokens", "output_tokens",
              "cache_read_input_tokens", "cache_creation_input_tokens")
             if getattr(usage, k, None) is not None}
-
-
-def _parse_anthropic_message(raw: dict[str, Any]) -> Message:
-    """raw → assistant Message. Reconstruction-critical; shared with replay.py.
-    Thinking blocks (signed + redacted) are PRESERVED as ThinkingBlocks so a
-    tool-use turn carrying thinking replays unchanged; unknown blocks are
-    dropped (they're not conversation history)."""
-    content: list[Any] = []
-    for block in raw.get("content", []):
-        kind = block.get("type")
-        if kind == "text":
-            content.append(TextBlock(text=block.get("text", "")))
-        elif kind == "tool_use":
-            content.append(ToolUseBlock(id=block["id"], name=block["name"],
-                                        input=block.get("input", {})))
-        elif kind == "thinking":
-            content.append(ThinkingBlock(
-                thinking=block.get("thinking", ""),
-                signature=block.get("signature", ""),
-            ))
-        elif kind == "redacted_thinking":
-            content.append(ThinkingBlock(redacted_thinking=block.get("data", "")))
-        # other unknown blocks: skipped (see diagnostics)
-    return Message(role="assistant", content=tuple(content))
 
 
 def _extract_anthropic_diagnostics(raw: dict[str, Any]) -> Diagnostics:

@@ -1,9 +1,10 @@
 """Shared raw → assistant Message parse dispatch for the LLM event audit trail.
 
 parse_message is the single shared raw→assistant-Message function, also used
-by each runner — so runner and replay can never drift. Provider modules export
-_parse_*_message; this module wires them into the dispatch table. (Providers do
-not import replay, so there is no cycle.)
+by each runner — so runner and replay can never drift. The parsers live in
+imp.providers.message_parsers, not in the provider modules, so wiring this
+table imports no provider module and no httpx: `imp list`, `imp log` and
+`imp events` render without the agent stack.
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ from collections.abc import Callable
 from typing import Any
 
 from imp.agents.runner import Message
-from imp.providers.anthropic import _parse_anthropic_message
-from imp.providers.claude_code import _parse_claude_code_message
-from imp.providers.codex_runner import _parse_codex_message
-from imp.providers.openai import _parse_responses_message
+from imp.providers.message_parsers import (
+    _parse_anthropic_message,
+    _parse_claude_code_message,
+    _parse_codex_message,
+    _parse_responses_message,
+)
 
 _MESSAGE_PARSERS: dict[str, Callable[[dict[str, Any]], Message]] = {
     "anthropic": _parse_anthropic_message,
