@@ -8,16 +8,15 @@ from pathlib import Path
 
 import pytest
 
+from tests._corpus import tracked
+
 _ROOTS = ("docs", "src/imp/assets", "tests/playbooks")
 
 
 def _corpus() -> list[Path]:
-    files = [Path("README.md")]
-    for root in _ROOTS:
-        found = sorted(p for p in Path(root).rglob("*.md") if p.is_file())
-        assert found, f"no markdown files found under {root!r}"
-        files.extend(found)
-    return files
+    found = tracked(*_ROOTS)
+    assert found, f"no tracked markdown files found under {_ROOTS!r}"
+    return [Path("README.md"), *found]
 
 
 @pytest.mark.parametrize(
@@ -39,8 +38,7 @@ _IN_CHECKOUT_STATE = (".imp/quest/", ".imp/worktrees", ".imp/archive")
 def test_no_live_doc_places_project_state_in_the_checkout(needle: str) -> None:
     offenders = sorted(
         f"{p}:{n}"
-        for root in _LIVE_DOC_ROOTS
-        for p in sorted(Path(root).rglob("*.md"))
+        for p in tracked(*_LIVE_DOC_ROOTS)
         for n, line in enumerate(p.read_text().splitlines(), 1)
         if needle in line)
     assert offenders == []
