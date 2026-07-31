@@ -60,16 +60,6 @@ def _registry() -> Generator[None, None, None]:
     register_builtin_providers()
 
 
-def test_iter_provider_defaults_includes_builtins() -> None:
-    defaults = resolve.iter_provider_defaults()
-    assert {"anthropic", "openai", "claude_code", "codex"} <= set(defaults)
-    anthropic_tiers = defaults["anthropic"].tier_defaults
-    assert anthropic_tiers is not None
-    assert anthropic_tiers["high"] == "claude-opus-5[1m]"
-    assert defaults["openai"].env_var == "OPENAI_API_KEY"
-    assert defaults["claude_code"].env_var is None
-
-
 def test_partial_tier_defaults_rejected_at_registration() -> None:
     resolve.reset_providers_for_tests()
     with pytest.raises(ValueError, match="must cover"):
@@ -143,3 +133,78 @@ def test_importing_the_package_registers_nothing() -> None:
     assert reported["EAGER"] == "", f"import imp.providers eagerly loaded: {reported['EAGER']}"
     assert reported["BEFORE"] == ""
     assert reported["AFTER"] == ",".join(_BUILTINS)
+
+
+# Exact literals — a wrong-but-plausible id ships a bad default with a green suite.
+_EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
+    "anthropic": (
+        {
+            "low": "claude-haiku-4-5",
+            "medium": "claude-sonnet-4-6",
+            "high": "claude-opus-5[1m]",
+        },
+        "ANTHROPIC_API_KEY",
+    ),
+    "openai": (
+        {"low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5"},
+        "OPENAI_API_KEY",
+    ),
+    "claude_code": (
+        {
+            "low": "claude-haiku-4-5",
+            "medium": "claude-sonnet-4-6",
+            "high": "claude-opus-5[1m]",
+        },
+        None,
+    ),
+    "codex": (
+        {"low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5"},
+        None,
+    ),
+    "scripted": (None, "IMP_SCRIPTED_SCRIPT"),
+}
+
+
+def test_iter_provider_defaults_returns_the_whole_builtin_floor() -> None:
+    defaults = resolve.iter_provider_defaults()
+    assert sorted(defaults) == _BUILTINS
+    actual = {n: (d.tier_defaults, d.env_var) for n, d in defaults.items()}
+    assert actual == _EXPECTED_FLOOR
+    for name in _MODULES:
+        tiers = defaults[name].tier_defaults
+        assert tiers is not None, f"{name} contributes no floor tiers"
+        assert set(tiers) >= _REQUIRED
+
+
+def test_registry_factory_builds_the_providers_own_provider() -> None:
+    from imp.providers.scripted import ScriptedProvider
+    prov = resolve.provider_from_model(ProviderModel(provider="scripted", model="m"))
+    assert isinstance(prov, ScriptedProvider)
+    assert prov.model == "m"
+
+
+def test_registered_fake_floor_reaches_effective_config_and_render() -> None:
+    """A registered fake's tier_defaults must reach the floor layer and `imp config`'s rendering."""
+    import io
+
+    from imp.cli.config_cmd import render_config
+    from imp.providers.effective import load_effective_config
+
+    resolve.register_provider(
+        "faux", env_check=lambda: True, factory=lambda m: None,  # type: ignore[arg-type,return-value]
+        tier_defaults={"low": "f-lo", "medium": "f-mid", "high": "f-hi"},
+        env_var="FAUX_KEY",
+    )
+    eff = load_effective_config()
+    assert eff.config.tiers["high"]["faux"] == "f-hi"
+    assert eff.config.tiers["low"]["faux"] == "f-lo"
+
+    out = io.StringIO()
+    render_config(eff, out, state_dir=None, color=False, show_all=True)
+    row = next(
+        (ln for ln in out.getvalue().splitlines() if ln.strip().startswith("high faux ")),
+        None,
+    )
+    assert row is not None, out.getvalue()
+    assert "f-hi" in row
+    assert "provider default" in row
