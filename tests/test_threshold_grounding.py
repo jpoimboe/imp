@@ -8,7 +8,7 @@ from pathlib import Path
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
-from imp.engine.state import JsonlEventLog
+from imp.engine.state import InMemoryEventLog, JsonlEventLog
 
 PARTIALS = Path("src/imp/assets/partials")
 FRONT_DOOR = Path("src/imp/assets/partials/front-door.md")
@@ -161,8 +161,17 @@ def test_sandbox_limits_partial_documents_both_hatches() -> None:
     assert "gdb" in text
     # (c) the SIGUSR1 self-dump path: trigger, pid discovery, and dump file.
     assert "kill -USR1 <pid>" in text
-    assert ".imp/quests/<id>/lock" in text
-    assert ".imp/quests/<id>/stack-dump.txt" in text
+    # (d) neither path is hard-coded: the home is interpolated, so a draft quest
+    # (no worktree, hence no `.imp/quests/<id>` symlink) gets a resolvable path.
+    assert ".imp/quests" not in text
+    for home in (".imp/quests/abc", "/home/u/.imp/projects/p/quests/abc"):
+        rendered = render_prompt(
+            text,
+            build_context(quest_title="t", event_log=InMemoryEventLog(),
+                          quest_id="abc", quest_home=home),
+            workflow_dir=bundled_workflow_dir("default"))
+        assert f"{home}/lock" in rendered, home
+        assert f"{home}/stack-dump.txt" in rendered, home
 
 
 def test_threshold_surfaces_dependency_subsection_and_carveout_exception() -> None:

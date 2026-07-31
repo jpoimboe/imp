@@ -18,7 +18,7 @@ Shared caps: text output is capped at 50 KB per call, and only the first 5 MB
 of a file is read or scanned.
 
 `grep` and `glob` both skip paths git ignores (build artifacts, caches,
-`.venv`, etc.) and the `.git/` dir; the quest's `.imp/quests/<id>/artifacts/`
+`.venv`, etc.) and the `.git/` dir; a quest worktree's `.imp/quests/<id>/artifacts/`
 subtree stays visible, and explicitly targeting an ignored path searches it
 anyway.
 
