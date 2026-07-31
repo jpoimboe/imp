@@ -102,37 +102,41 @@ def test_registry_reader_repopulates_an_empty_registry(read: Callable[[], object
 
 
 def test_importing_the_package_registers_nothing() -> None:
-    """Importing imp.providers must not register the builtins, and must not
-    import the five provider modules (which pull httpx -> rich/click/pygments).
-    Fresh interpreter: in-process, any earlier test in this worker has already
-    imported them."""
+    """Fresh interpreter: package import and first registry read must not load provider modules."""
     code = (
         "import sys, imp.providers\n"
         "from imp.providers import resolve\n"
-        "eager = sorted(n for n in sys.modules if n in {\n"
+        "PROVIDER_MODULES = {\n"
         "    'imp.providers.anthropic', 'imp.providers.openai',\n"
         "    'imp.providers.claude_code', 'imp.providers.codex',\n"
-        "    'imp.providers.scripted'})\n"
-        "if 'httpx' in sys.modules:\n"
-        "    eager.append('httpx')\n"
-        "print('EAGER:' + ','.join(eager))\n"
+        "    'imp.providers.codex_runner', 'imp.providers.scripted'}\n"
+        "def leaked():\n"
+        "    out = sorted(n for n in sys.modules if n in PROVIDER_MODULES)\n"
+        "    if 'httpx' in sys.modules:\n"
+        "        out.append('httpx')\n"
+        "    return ','.join(out)\n"
+        "print('EAGER:' + leaked())\n"
         "print('BEFORE:' + ','.join(sorted(resolve._PROVIDERS)))\n"
         "resolve.iter_provider_defaults()\n"
         "print('AFTER:' + ','.join(sorted(resolve._PROVIDERS)))\n"
+        "print('LEAKED:' + leaked())\n"
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     reported = {
         key: value
         for key, _, value in (ln.partition(":") for ln in proc.stdout.splitlines())
-        if key in {"EAGER", "BEFORE", "AFTER"}
+        if key in {"EAGER", "BEFORE", "AFTER", "LEAKED"}
     }
-    assert reported.keys() == {"EAGER", "BEFORE", "AFTER"}, (
-        f"child did not report all three lines; stdout was {proc.stdout!r}"
+    assert reported.keys() == {"EAGER", "BEFORE", "AFTER", "LEAKED"}, (
+        f"child did not report all four lines; stdout was {proc.stdout!r}"
     )
     assert reported["EAGER"] == "", f"import imp.providers eagerly loaded: {reported['EAGER']}"
     assert reported["BEFORE"] == ""
     assert reported["AFTER"] == ",".join(_BUILTINS)
+    assert reported["LEAKED"] == "", (
+        f"the first registry read imported: {reported['LEAKED']}"
+    )
 
 
 # Exact literals — a wrong-but-plausible id ships a bad default with a green suite.
@@ -208,3 +212,27 @@ def test_registered_fake_floor_reaches_effective_config_and_render() -> None:
     assert row is not None, out.getvalue()
     assert "f-hi" in row
     assert "provider default" in row
+
+
+def test_registry_env_check_follows_a_module_level_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thunked env_check resolves per call, so a module monkeypatch is honored."""
+    import imp.providers.anthropic as a
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env_check, _factory = resolve._PROVIDERS["anthropic"]
+    assert env_check() is False
+    monkeypatch.setattr(a, "_env_check", lambda: True)
+    assert env_check() is True
+
+
+def test_builtin_floor_table_names_a_module_for_every_builtin() -> None:
+    """Every BUILTIN_FLOOR entry names a real module exposing _env_check and _factory."""
+    from imp.providers import BUILTIN_FLOOR
+
+    assert sorted(BUILTIN_FLOOR) == _BUILTINS
+    for name, entry in BUILTIN_FLOOR.items():
+        mod = importlib.import_module(f"imp.providers.{entry.module}")
+        assert callable(mod._env_check), name
+        assert callable(mod._factory), name
