@@ -15,7 +15,9 @@ _ROOTS = ("src", "docs")
 
 
 def _shipped_text_files() -> list[Path]:
-    return tracked(*_ROOTS, suffixes=(".md", ".py"))
+    found = tracked(*_ROOTS, suffixes=(".md", ".py"))
+    assert found, f"no tracked text files found under {_ROOTS!r}"
+    return found
 
 
 def test_no_shipped_file_names_the_old_skill_slugs() -> None:
