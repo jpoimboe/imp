@@ -19,8 +19,8 @@ from imp.providers.anthropic import (
     _emit_anthropic_web_events,
     _extract_anthropic_diagnostics,
     _message_to_anthropic,
-    _parse_anthropic_message,
 )
+from imp.providers.message_parsers import _parse_anthropic_message
 
 _WEB_RAW = {
     "content": [

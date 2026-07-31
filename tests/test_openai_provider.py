@@ -22,11 +22,8 @@ from imp.agents.runner import (
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.openai import (
-    _imp_to_responses_input,
-    _parse_responses_message,
-    _responses_tool_schema,
-)
+from imp.providers.message_parsers import _parse_responses_message
+from imp.providers.openai import _imp_to_responses_input, _responses_tool_schema
 from tests.openai_fakes import resp_function_call, resp_response
 
 

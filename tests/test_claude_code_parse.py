@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from imp.agents.runner import TextBlock, ToolUseBlock
-from imp.providers.claude_code import (
-    _parse_claude_code_message,
-    _serialize_claude_code_message,
-)
+from imp.providers.claude_code import _serialize_claude_code_message
+from imp.providers.message_parsers import _parse_claude_code_message
 from tests.cc_fakes import FakeAssistantMessage, FakeTextBlock, FakeToolUseBlock
 
 

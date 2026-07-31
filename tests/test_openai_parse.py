@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from imp.agents.runner import TextBlock, ToolUseBlock
+from imp.providers.message_parsers import _parse_responses_message
 from imp.providers.openai import (
     _extract_responses_diagnostics,
-    _parse_responses_message,
     _serialize_responses_response,
 )
 from tests.openai_fakes import resp_function_call, resp_message, resp_response

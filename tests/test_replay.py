@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from imp.agents.classify import ResumeState, classify_resume
-from imp.agents.runner import Message, TextBlock, ToolUseBlock
+from imp.agents.runner import Message, TextBlock, ThinkingBlock, ToolUseBlock
 from imp.agents.transcript import Transcript, repair_dangling_tool_use_on_resume
 from imp.engine.replay import parse_message
 
@@ -52,3 +55,75 @@ def test_stall_redrive_balances_torn_down_turn_no_replay(tmp_path) -> None:
     # Post-repair: the dangling tool_use is paired, so the re-drive sends a balanced transcript.
     assert classify_resume(messages) is not ResumeState.DANGLING_TOOL_USE
     assert classify_resume(messages) is ResumeState.SEND_TO_LLM
+
+
+def test_parse_message_dispatches_each_provider_to_its_own_wire_format() -> None:
+    """Each registry key must reach the parser for that provider's wire format,
+    not merely *a* parser: anthropic (and scripted, which shares it) preserves
+    thinking blocks, claude_code/codex drop them, and openai reads Responses
+    `output[]` rather than `content[]`."""
+    blocks_raw = {"content": [
+        {"type": "thinking", "thinking": "hmm", "signature": "sig"},
+        {"type": "text", "text": "hi"}]}
+    for provider in ("anthropic", "scripted"):
+        assert parse_message(provider, blocks_raw).content == (
+            ThinkingBlock(thinking="hmm", signature="sig"),
+            TextBlock(text="hi"),
+        ), provider
+    for provider in ("claude_code", "codex"):
+        assert parse_message(provider, blocks_raw).content == (
+            TextBlock(text="hi"),
+        ), provider
+
+    responses_raw = {"output": [
+        {"type": "message", "content": [{"type": "output_text", "text": "hi"}]},
+        {"type": "function_call", "call_id": "c1", "name": "read_file",
+         "arguments": '{"p": "x"}'}]}
+    assert parse_message("openai", responses_raw).content == (
+        TextBlock(text="hi"),
+        ToolUseBlock(id="c1", name="read_file", input={"p": "x"}),
+    )
+    # The same payload through the anthropic parser yields nothing — proof the
+    # openai entry is not silently bound to the wrong transform.
+    assert parse_message("anthropic", responses_raw).content == ()
+
+
+def test_building_the_parse_table_imports_no_provider_module() -> None:
+    """replay's dispatch table is on the read-only CLI path (imp list -> store ->
+    render_helpers -> replay); importing it must not pull a provider module, and
+    with it httpx. Fresh interpreter: in-process, other tests have already
+    imported them."""
+    code = (
+        "import sys, imp.engine.replay\n"
+        "watched = {'imp.providers.anthropic', 'imp.providers.openai',\n"
+        "           'imp.providers.claude_code', 'imp.providers.codex',\n"
+        "           'imp.providers.codex_runner', 'imp.providers.scripted',\n"
+        "           'httpx'}\n"
+        "print('LEAKED:' + ','.join(sorted(watched & sys.modules.keys())))\n"
+        "print('PARSERS:' + ','.join(sorted(imp.engine.replay._MESSAGE_PARSERS)))\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    reported = {
+        key: value
+        for key, _, value in (ln.partition(":") for ln in proc.stdout.splitlines())
+        if key in {"LEAKED", "PARSERS"}
+    }
+    assert reported.keys() == {"LEAKED", "PARSERS"}, (
+        f"child did not report both lines; stdout was {proc.stdout!r}"
+    )
+    assert reported["PARSERS"] == "anthropic,claude_code,codex,openai,scripted"
+    assert reported["LEAKED"] == "", (
+        f"importing imp.engine.replay loaded: {reported['LEAKED']}"
+    )
+
+
+def test_the_relocated_parsers_leave_no_re_export_shim() -> None:
+    import imp.providers.claude_code as cc
+    import imp.providers.codex_runner as cr
+    from imp.providers import message_parsers
+
+    assert not hasattr(cc, "_parse_claude_code_message")
+    assert not hasattr(cr, "_parse_codex_message")
+    assert callable(message_parsers._parse_claude_code_message)
+    assert callable(message_parsers._parse_codex_message)

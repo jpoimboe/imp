@@ -12,9 +12,9 @@ from imp.agents.runner import (
 from imp.providers.anthropic import (
     _extract_anthropic_diagnostics,
     _message_to_anthropic,
-    _parse_anthropic_message,
     _serialize_anthropic_response,
 )
+from imp.providers.message_parsers import _parse_anthropic_message
 from tests.anthropic_fakes import (
     redacted_thinking,
     response,

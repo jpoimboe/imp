@@ -9,10 +9,10 @@ from imp.agents.runner import (
     ToolUseBlock,
 )
 from imp.agents.tools import Tool
+from imp.providers.message_parsers import _parse_responses_message
 from imp.providers.openai import (
     _extract_responses_diagnostics,
     _imp_to_responses_input,
-    _parse_responses_message,
     _responses_tool_schema,
     _serialize_responses_response,
 )

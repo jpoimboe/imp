@@ -51,6 +51,7 @@ from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
+from imp.providers.message_parsers import _parse_responses_message
 from imp.providers.push_session import PushSession
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
@@ -256,33 +257,6 @@ def _serialize_responses_response(response: Any) -> dict[str, Any]:
         "output": getattr(response, "output", []) or [],
         "usage": _usage_dict(getattr(response, "usage", None)),
     }
-
-
-def _parse_responses_message(raw: dict[str, Any]) -> Message:
-    """Reconstruct the assistant Message from Responses `output[]`.
-
-    message → output_text parts become TextBlocks; function_call items become
-    ToolUseBlocks. web_search_call / reasoning items are NOT conversation
-    content (web events are emitted separately in Task 18)."""
-    blocks: list[Any] = []
-    for item in raw.get("output", []) or []:
-        itype = item.get("type")
-        if itype == "message":
-            text = "".join(
-                part.get("text", "")
-                for part in item.get("content", []) or []
-                if part.get("type") == "output_text")
-            if text:
-                blocks.append(TextBlock(text=text))
-        elif itype == "function_call":
-            try:
-                args = json.loads(item.get("arguments") or "{}")
-            except json.JSONDecodeError:
-                args = {}
-            blocks.append(ToolUseBlock(
-                id=item.get("call_id", ""),
-                name=cast(str, item.get("name")), input=args))
-    return Message(role="assistant", content=tuple(blocks))
 
 
 def _usage_dict(usage: Any) -> dict[str, Any]:
@@ -583,12 +557,6 @@ class OpenAIProvider:
             model_name=self.model, client_factory=self._client_factory,
             user_input_fn=invocation.user_input_fn,
         )
-
-
-TIER_DEFAULTS: dict[str, str] = {
-    "low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5",
-}
-ENV_VAR: str | None = "OPENAI_API_KEY"
 
 
 def _env_check() -> bool:

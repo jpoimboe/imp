@@ -30,10 +30,8 @@ async def collect_first_assistant_tool_uses(
 async def _call_anthropic(prompt: str, tool_description: str) -> list[ContentBlock]:
     import anthropic
 
-    from imp.providers.anthropic import (
-        _parse_anthropic_message,
-        _serialize_anthropic_response,
-    )
+    from imp.providers.anthropic import _serialize_anthropic_response
+    from imp.providers.message_parsers import _parse_anthropic_message
 
     key = anthropic_key()
     assert key is not None, (
@@ -64,10 +62,8 @@ async def _call_openai(prompt: str, tool_description: str) -> list[ContentBlock]
     import openai
 
     from imp.providers._openai_schema import to_openai_strict
-    from imp.providers.openai import (
-        _parse_responses_message,
-        _serialize_responses_response,
-    )
+    from imp.providers.message_parsers import _parse_responses_message
+    from imp.providers.openai import _serialize_responses_response
 
     key = openai_key()
     assert key is not None, (

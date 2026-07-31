@@ -991,18 +991,6 @@ def _serialize_claude_code_message(sdk_msg: Any) -> dict[str, Any]:
     }
 
 
-def _parse_claude_code_message(raw: dict[str, Any]) -> Message:
-    content: list[Any] = []
-    for block in raw.get("content", []):
-        kind = block.get("type")
-        if kind == "text":
-            content.append(TextBlock(text=block.get("text", "")))
-        elif kind == "tool_use":
-            content.append(ToolUseBlock(id=block["id"], name=block["name"],
-                                        input=block.get("input", {})))
-    return Message(role="assistant", content=tuple(content))
-
-
 def _parse_cc_web_citations(
     norm_name: str, call_input: dict[str, Any], content: Any,
 ) -> list[dict[str, Any]]:
@@ -2168,16 +2156,6 @@ class ClaudeCodeProvider:
             model_name=self.model, client_factory=self._client_factory,
             user_input_fn=invocation.user_input_fn,
         )
-
-
-# Pinned to undated major.minor ids: they track dated snapshots of that minor
-# but never jump to a new major/minor release (a bare "sonnet" alias would).
-TIER_DEFAULTS: dict[str, str] = {
-    "low": "claude-haiku-4-5",
-    "medium": "claude-sonnet-4-6",
-    "high": "claude-opus-5[1m]",
-}
-ENV_VAR: str | None = None  # CLI-authenticated (claude login); no env var
 
 
 def _env_check() -> bool:

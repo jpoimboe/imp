@@ -28,7 +28,6 @@ from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
 
 ENV_VAR = "IMP_SCRIPTED_SCRIPT"
-TIER_DEFAULTS: dict[str, str] | None = None
 
 
 def _env_check() -> bool:
