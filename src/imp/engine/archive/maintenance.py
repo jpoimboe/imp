@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 
 from imp.engine.archive import ensure_current, index, index_path
+from imp.paths import project_state_dir
 
 
 def reap_archived_homes(control_root: Path) -> int:
@@ -38,8 +39,9 @@ def reap_archived_homes(control_root: Path) -> int:
 
 
 def reap_stray_homes(control_root: Path) -> int:
-    """Remove empty stray quest-home dirs (no quest.json) under .imp/quests/; return the count."""
-    quests_root = control_root / ".imp" / "quests"
+    """Remove empty stray quest-home dirs (no quest.json) under <state dir>/quests/;
+    return the count."""
+    quests_root = project_state_dir(control_root) / "quests"
     if not quests_root.is_dir():
         return 0
     reaped = 0

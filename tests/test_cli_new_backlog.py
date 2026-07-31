@@ -8,6 +8,7 @@ import pytest
 
 from imp.cli import main
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -19,7 +20,7 @@ def _args(**kw) -> argparse.Namespace:
 
 
 def _only_new_id(control: Path) -> str:
-    return next(p.name for p in (control / ".imp" / "quests").iterdir())
+    return next(p.name for p in (project_state_dir(control) / "quests").iterdir())
 
 
 def test_new_backlog_creates_quest_home_with_origin_backlog(
@@ -63,7 +64,7 @@ def test_new_idea_blank_title_errors_without_creating(
     monkeypatch.chdir(tmp_path)
     rc = main._record_idea(_args(idea="   "), tmp_path, "main")
     assert rc == 2
-    assert not (tmp_path / ".imp" / "quests").exists()
+    assert not (project_state_dir(tmp_path) / "quests").exists()
     captured = capsys.readouterr()
     assert "imp:" in captured.err
     assert "--backlog" in captured.err
@@ -80,7 +81,7 @@ def test_new_idea_with_title_flag_is_error(
                            non_interactive=True, message=None,
                            workflow=None)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "quests").exists()
+    assert not (project_state_dir(tmp_path) / "quests").exists()
     assert "--backlog" in capsys.readouterr().err
 
 
@@ -144,7 +145,7 @@ def test_backlog_with_run_only_flag_errors(
     ns.update(flag)
     rc = asyncio.run(main._async_cmd_new(argparse.Namespace(**ns)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "quests").exists()
+    assert not (project_state_dir(tmp_path) / "quests").exists()
     err = capsys.readouterr().err
     assert "files an idea instantly and never runs" in err
     assert "imp resume" in err

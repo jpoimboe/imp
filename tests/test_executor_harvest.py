@@ -11,6 +11,7 @@ import pytest
 from imp.engine import executor
 from imp.engine.gates import RuleMatch
 from imp.engine.types import Continue
+from imp.paths import project_state_dir
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -21,7 +22,7 @@ def _init_repo(root: Path) -> None:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
@@ -31,7 +32,7 @@ def _change(root: Path, quest_id: str) -> SimpleNamespace:
     # The harvest helper only reads .control_root, .quest_dir and .id.
     return SimpleNamespace(
         control_root=root,
-        quest_dir=root / ".imp" / "quests" / quest_id,
+        quest_dir=project_state_dir(root) / "quests" / quest_id,
         id=quest_id,
     )
 

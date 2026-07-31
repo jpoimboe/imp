@@ -27,6 +27,7 @@ from imp.engine.types import (
     OutputSchema,
     SourceLoc,
 )
+from imp.paths import project_state_dir
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 
 
@@ -51,9 +52,9 @@ def _invocation(project_root: Path) -> AgentInvocation:
         quest_context=QuestContext(
             title="Test",
             project_root=project_root,
-            workflow_dir=project_root / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(project_root) / "quests" / "test-quest" / "workflow",
         ),
-        transcript_dir=project_root / ".imp" / "steps",
+        transcript_dir=project_state_dir(project_root) / "steps",
         events_path=project_root / "events.jsonl",
     )
 

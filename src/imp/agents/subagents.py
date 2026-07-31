@@ -180,6 +180,7 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
         os.environ,
         engine_env(project_root=worktree_path, quest_id=quest.id,
                    quest_title=quest.title, quest_dir=quest.quest_dir,
+                   control_root=quest.control_root,
                    test_gates=test_gates, pythonpath=config.pythonpath),
     )
     policy = resolve_policy(
@@ -200,7 +201,7 @@ def _attach_isolated_home(
     """Attach the per-invocation writable-home layer to an isolated subagent's
     policy, keyed by the spike worktree, and return (policy, cleanup). The overlay
     upper/work/merged dirs are SIBLINGS of the spike worktree under
-    .imp/worktrees/ (a real local fs, not the symlinked quest home inside the
+    <state dir>/worktrees/ (a real local fs, not the symlinked quest home inside the
     worktree); cleanup rmtrees them at teardown. Without overlay support the home
     is a plain rw bind (cleanup is a no-op). An inactive or home-less policy is
     returned unchanged with cleanup None."""

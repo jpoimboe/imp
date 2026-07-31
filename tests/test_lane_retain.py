@@ -18,6 +18,7 @@ from imp.engine import merge_queue as mq
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _init_repo
 
 
@@ -77,7 +78,6 @@ def _seed_wf(root: Path, workflow_yaml: str, *, sandbox_disabled: bool = False) 
     (src / "workflow.yaml").write_text(workflow_yaml)
     (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
-    (root / ".imp").mkdir(exist_ok=True)
     cfg = ("providers: [fake]\n"
            "tiers:\n"
            "  low: {fake: m}\n"
@@ -85,7 +85,7 @@ def _seed_wf(root: Path, workflow_yaml: str, *, sandbox_disabled: bool = False) 
            "  high: {fake: m}\n")
     if sandbox_disabled:
         cfg += "sandbox:\n  enabled: false\n"
-    (root / ".imp" / "config.yaml").write_text(cfg)
+    (project_state_dir(root) / "config.yaml").write_text(cfg)
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
 

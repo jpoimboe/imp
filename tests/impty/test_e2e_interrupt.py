@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
 from impty import TerminalSession
 from tests._live import _await_change_dir
 from tests.impty.e2e_support import (
@@ -66,7 +67,7 @@ def _seed_subagent_repo(root: Path, *, script: dict) -> Path:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     agents = root / "imp" / "workflows" / "imp" / "agents"
     agents.mkdir(parents=True)
@@ -82,8 +83,7 @@ def _seed_subagent_repo(root: Path, *, script: dict) -> Path:
         "      - name: driver\n        file: agents/driver.md\n")
     (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
     script_path.write_text(json.dumps(script))
     _git(root, "add", "-A")

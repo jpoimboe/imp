@@ -8,6 +8,7 @@ import pytest
 import imp.cli.main as m
 from imp.cli.main import main
 from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 
 T0 = "2026-01-01T00:00:00+00:00"
 T1 = "2026-01-01T00:00:30+00:00"
@@ -17,7 +18,7 @@ T2 = "2026-01-01T00:01:30+00:00"
 def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     from imp.engine.state import State
 
-    quest_dir = control / ".imp" / "quests" / slug
+    quest_dir = project_state_dir(control) / "quests" / slug
     (quest_dir / "state").mkdir(parents=True)
     (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": slug, "base_branch": "main",

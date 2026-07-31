@@ -7,6 +7,7 @@ from imp.engine import test_lane
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -24,9 +25,8 @@ def _write_testlane_workflow(root: Path) -> None:
         "          - {if: {exit: 0}, pause: true}\n"
         "          - {else: true, pause: true}\n"
     )
-    (root / ".imp" / "config.yaml").write_text(
-        (root / ".imp" / "config.yaml").read_text()
-        + "sandbox:\n  enabled: false\n")
+    cfg_path = project_state_dir(root) / "config.yaml"
+    cfg_path.write_text(cfg_path.read_text() + "sandbox:\n  enabled: false\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "test-lane workflow")
 

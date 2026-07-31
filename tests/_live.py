@@ -20,6 +20,7 @@ from typing import NoReturn
 
 import pytest
 
+from imp.paths import project_state_dir
 from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT
 
 KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude_code", "codex")
@@ -269,21 +270,22 @@ def build_isolated_venv(
 
 
 def _await_worktree(control_root: Path, timeout: float) -> Path:
-    """Poll .imp/worktrees/ for the single Quest worktree dir and return it;
-    its .name is the slug. The real guard is the presence of
-    .imp/quests/<slug>/quest.json at the control root (scratch/.merge-* dirs
+    """Poll the state dir's worktrees/ for the single Quest worktree dir and
+    return it; its .name is the slug. The real guard is the presence of
+    quests/<slug>/quest.json in the state dir (scratch/.merge-* dirs
     have no such entry); the leading-dot exclusion is redundant belt-and-suspenders.
 
     Replaces stdout-parsing of `imp new`'s "Created Quest <slug>:" line:
     sidesteps PTY/PIPE read-timing and yields the slug directly. Raises
     TimeoutError if no Quest worktree appears within `timeout` seconds."""
-    root = control_root / ".imp" / "worktrees"
+    root = project_state_dir(control_root) / "worktrees"
     deadline = time.time() + timeout
     while time.time() < deadline:
         if root.is_dir():
             for p in sorted(root.iterdir()):
                 if (p.is_dir() and not p.name.startswith(".")
-                        and (control_root / ".imp" / "quests" / p.name / "quest.json").exists()):
+                        and (project_state_dir(control_root) / "quests" / p.name
+                             / "quest.json").exists()):
                     return p
         time.sleep(0.1)
     raise TimeoutError(
@@ -292,15 +294,16 @@ def _await_worktree(control_root: Path, timeout: float) -> Path:
 
 
 def _await_change_dir(control_root: Path, timeout: float) -> Path:
-    """Poll .imp/quests/ for the single Quest's permanent home dir and return it;
+    """Poll the state dir's quests/ for the single Quest's permanent home dir
+    and return it;
     its .name is the slug. Guards on quest.json so a half-written dir is skipped.
 
     Under the deferred-worktree model `imp new` creates an un-materialized draft
-    (no branch/worktree) with state+events under <control_root>/.imp/quests/<id>/.
+    (no branch/worktree) with state+events under the state dir's quests/<id>/.
     A workflow that never calls create_and_enter_worktree runs to completion as a
     draft, so tests that used to await a worktree must await the change home here.
     Raises TimeoutError if no Quest home appears within `timeout` seconds."""
-    root = control_root / ".imp" / "quests"
+    root = project_state_dir(control_root) / "quests"
     deadline = time.time() + timeout
     while time.time() < deadline:
         if root.is_dir():

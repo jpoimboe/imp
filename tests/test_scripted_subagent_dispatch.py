@@ -18,6 +18,7 @@ import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _git, _init_repo, write_agent_md
 
 
@@ -52,8 +53,7 @@ def _seed_repo(root: Path) -> None:
         "      - {name: s, file: agents/driver.md}\n"
     )
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [scripted]\n"
         "tiers:\n"
         "  low: {scripted: x}\n"

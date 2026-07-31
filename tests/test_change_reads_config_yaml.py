@@ -39,7 +39,7 @@ def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (imp_home / "config.yaml").write_text("providers: [openai]\n")
     (root / "imp" / "workflows").mkdir()
     shutil.copytree(bundled_workflow_dir("default"), root / "imp" / "workflows" / "imp")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
     return root

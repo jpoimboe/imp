@@ -17,10 +17,11 @@ the user is in and what the next step does, without surfacing internal step ids.
 
 `workflow.yaml` is only the skeleton — the ordered phases and steps. The
 actual instructions each step runs live beside it in the quest's
-**workflow snapshot** at `.imp/quests/<id>/workflow/` — a copy of the live
-workflow, refreshed at the start of each run, that is exactly what drove
-this quest. When a question turns on what a step *does*, not just its name,
-read the snapshot:
+**workflow snapshot** — a copy of the live workflow, refreshed at the start
+of each run, that is exactly what drove this quest. It lives in the quest
+home (`~/.imp/projects/<slug>/quests/<id>/workflow/`), which a quest's
+worktree reaches through the symlink `.imp/quests/<id>/workflow/`. When a
+question turns on what a step *does*, not just its name, read the snapshot:
 
 - `workflow.yaml` — phases, steps, tiers, vars: the order of what runs.
 - `agents/<name>.md` — the full prompt a given agent step follows; where a

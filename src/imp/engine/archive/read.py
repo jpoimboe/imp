@@ -15,6 +15,7 @@ from imp.engine.archive import (
     records_root,
 )
 from imp.engine.archive.blobstore import LocalBlobStore
+from imp.paths import project_state_dir
 
 
 def _read_index_ids(control_root: Path) -> list[str]:
@@ -189,7 +190,7 @@ def read_artifact(control_root: Path, quest_id: str, rel: str) -> bytes | None:
 
 def rehydrate_quest(control_root: Path, quest_id: str) -> Path:
     """Recreate a live scratch dir from the archive so a shelved conversation can be resumed."""
-    quest_dir = control_root / ".imp" / "quests" / quest_id
+    quest_dir = project_state_dir(control_root) / "quests" / quest_id
     if quest_dir.exists():
         raise FileExistsError(f"live home for {quest_id!r} already exists")
     quest_json = read_quest_json(control_root, quest_id)

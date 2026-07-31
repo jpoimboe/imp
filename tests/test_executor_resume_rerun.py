@@ -12,6 +12,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.executor import RunResult, _resume_replays_transcript, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 
 def _write(dir_: Path, *messages: Message) -> None:
@@ -77,10 +78,9 @@ def _seed_single_agent(root: Path) -> Quest:
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n")
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    quest_dir = root / ".imp" / "quests" / "test-quest"
+    quest_dir = project_state_dir(root) / "quests" / "test-quest"
     (quest_dir / "state").mkdir(parents=True, exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main"}, sort_keys=True))

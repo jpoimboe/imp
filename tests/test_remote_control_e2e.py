@@ -7,6 +7,7 @@ from pathlib import Path
 import anyio
 import pytest
 
+from imp.paths import project_state_dir
 from imp.remote.daemon.commands import HELP_TEXT, ROUTE_HINT
 from imp.remote.daemon.discover import QuestInfo, socket_is_live, socket_path
 from imp.remote.daemon.runner import run_daemon
@@ -37,7 +38,7 @@ async def test_e2e_chat_commands_round_trip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    home = tmp_path / ".imp" / "quests" / CHANGE
+    home = project_state_dir(tmp_path) / "quests" / CHANGE
     home.mkdir(parents=True, exist_ok=True)
     (home / "quest.json").write_text("{}")
     monkeypatch.setattr(

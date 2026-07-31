@@ -8,6 +8,7 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.paths import project_state_dir
 from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
@@ -15,7 +16,7 @@ from tests.async_wait import wait_until
 
 
 def _make_home(control_root: Path, quest_id: str) -> Path:
-    home = control_root / ".imp" / "quests" / quest_id
+    home = project_state_dir(control_root) / "quests" / quest_id
     home.mkdir(parents=True, exist_ok=True)
     (home / "quest.json").write_text("{}")
     return home

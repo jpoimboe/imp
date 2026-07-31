@@ -14,6 +14,7 @@ import pytest
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 
 @pytest.fixture
@@ -47,13 +48,12 @@ def _make_quest(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Qu
 
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n"
         "  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
 
-    quest_dir = root / ".imp" / "quests" / "c"
+    quest_dir = project_state_dir(root) / "quests" / "c"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(

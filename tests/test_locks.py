@@ -4,12 +4,13 @@ from pathlib import Path
 import pytest
 
 from imp.engine.state import LockHeld, ProjectLock
+from imp.paths import project_state_dir
 
 
 def test_acquire_and_release(tmp_path: Path) -> None:
-    lock = ProjectLock(tmp_path / ".imp" / "lock")
+    lock = ProjectLock(project_state_dir(tmp_path) / "lock")
     with lock.acquire():
-        assert (tmp_path / ".imp" / "lock").exists()
+        assert (project_state_dir(tmp_path) / "lock").exists()
     # Re-acquire after release
     with lock.acquire():
         pass
@@ -27,8 +28,7 @@ def _hold_lock(path: str, sync_path: str, ready: str) -> None:
 
 def test_contention_blocks(tmp_path: Path) -> None:
     import time
-    lock_path = tmp_path / ".imp" / "lock"
-    lock_path.parent.mkdir(parents=True)
+    lock_path = project_state_dir(tmp_path) / "lock"
     sync = tmp_path / "release.flag"
     ready = tmp_path / "ready.flag"
 
@@ -52,7 +52,7 @@ def test_contention_blocks(tmp_path: Path) -> None:
 
 def test_lock_records_pid(tmp_path: Path) -> None:
     import os
-    lock_path = tmp_path / ".imp" / "lock"
+    lock_path = project_state_dir(tmp_path) / "lock"
     lock = ProjectLock(lock_path)
     with lock.acquire():
         text = lock_path.read_text()

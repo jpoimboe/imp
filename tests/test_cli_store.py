@@ -9,6 +9,7 @@ from imp.cli.store import LocalStore, SearchZones, make_store
 from imp.engine import archive, worktree
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control, held_lock
 
 
@@ -268,7 +269,7 @@ def test_scan_homes_tolerates_future_layout_version(tmp_path: Path) -> None:
     Quest.create(tmp_path, title="Future", quest_id="futq", base_branch="main")
 
     # Stamp a future (unknowable) layout_version — migration must fail gracefully.
-    quest_json_path = tmp_path / ".imp" / "quests" / "futq" / "quest.json"
+    quest_json_path = project_state_dir(tmp_path) / "quests" / "futq" / "quest.json"
     meta = json.loads(quest_json_path.read_text())
     meta["layout_version"] = 99
     quest_json_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
@@ -321,7 +322,7 @@ def _digest_version(control: Path, cid: str) -> int:
 
 
 def _quest_dir(control: Path, cid: str) -> Path:
-    return control / ".imp" / "quests" / cid
+    return project_state_dir(control) / "quests" / cid
 
 
 def test_scan_homes_migrates_idle_stale_home(tmp_path: Path) -> None:

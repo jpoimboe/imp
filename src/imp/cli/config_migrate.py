@@ -1,7 +1,8 @@
-"""One-shot startup migrations: the global config file's move into $IMP_HOME and
-the project config file's staged rename. Run by the console-script entrypoint
-(`imp.__main__:main`), never by `imp.cli.main:main` — the suite drives the latter
-in-process, where a migration would rearrange the developer's own files."""
+"""One-shot startup migrations: the global config file's move into $IMP_HOME, the
+project config file's staged rename, and the per-project state directory's move out
+of the checkout. Run by the console-script entrypoint (`imp.__main__:main`), never
+by `imp.cli.main:main` — the suite drives the latter in-process, where a migration
+would rearrange the developer's own files."""
 
 from __future__ import annotations
 
@@ -11,13 +12,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-
-def display_path(path: Path) -> str:
-    """`~`-relative under $HOME, absolute otherwise."""
-    home = Path.home()
-    if home in path.parents:
-        return f"~/{path.relative_to(home)}"
-    return str(path)
+from imp.paths import display_path
 
 
 def migrate_global_config(legacy: Path, new: Path) -> None:
@@ -63,8 +58,10 @@ def migrate_project_config(cwd: Path) -> None:
 
 
 def run_startup_migrations() -> None:
-    """Best-effort per step: a migration that cannot run is retried on the next
-    invocation and must never be the reason a command dies."""
+    """Best-effort per config step: one that cannot run is retried on the next
+    invocation and must never be the reason a command dies. The state move is
+    deliberately outside that promise — imp running on half-moved state is worse
+    than imp not running."""
     with suppress(Exception):
         from imp.providers.paths import (
             global_config_path,
@@ -73,3 +70,8 @@ def run_startup_migrations() -> None:
         migrate_global_config(legacy_global_config_path(), global_config_path())
     with suppress(Exception):
         migrate_project_config(Path.cwd())
+    # Lazy: state_migrate imports _git_toplevel from here, so a module-scope import
+    # would be circular.
+    from imp.cli.state_migrate import migrate_project_state
+
+    migrate_project_state(Path.cwd())

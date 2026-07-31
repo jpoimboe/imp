@@ -14,6 +14,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import Goto, Pause
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -50,7 +51,8 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
     assert not isinstance(action, Pause)
     assert state.merge_commit is not None
     assert (tmp_path / "feature.txt").read_text() == "hi"          # merged into base
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists() # worktree removed by route
+    # worktree removed by route
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()
     assert ch.project_root == ch.control_root                       # project_root reset
 
     (ch.quest_dir / "steps").mkdir(parents=True, exist_ok=True)
@@ -103,7 +105,7 @@ def test_merge_step_conflict_routes_to_recovery(tmp_path: Path) -> None:
     assert retries[0]["payload"]["max"] == 3
     assert retries[0]["payload"]["base"] == "main"
     assert not any(e.get("type") == "merge_blocked" for e in events)
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()  # left intact
+    assert (project_state_dir(tmp_path) / "worktrees" / "feat").is_dir()  # left intact
     assert state.held_lane == "main"           # lane retained — recovery goto never releases
     assert not any(e.get("type") == "lane_evicted" for e in events)
 
@@ -128,7 +130,7 @@ def test_merge_step_dirty_routes_to_recovery(tmp_path: Path) -> None:
     assert len(retries) == 1 and retries[0]["payload"]["status"] == "DIRTY"
     assert not any(e.get("type") == "merge_blocked" for e in events)
     assert (ch.project_root / "uncommitted.txt").exists()        # nothing lost
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()   # worktree intact
+    assert (project_state_dir(tmp_path) / "worktrees" / "feat").is_dir()   # worktree intact
     assert state.held_lane == "main"           # lane retained — recovery goto never releases
     assert not any(e.get("type") == "lane_evicted" for e in events)
 
@@ -153,7 +155,7 @@ def test_merge_dirty_recovers_then_completes(tmp_path: Path) -> None:
     result = _complete(ch, state, JsonlEventLog(ch.events_path))
     assert result.value == "completed"
     assert (tmp_path / "f.txt").read_text() == "v"
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()
 
 
 def test_merge_step_refused_pauses(tmp_path: Path, monkeypatch) -> None:

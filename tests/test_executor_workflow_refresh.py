@@ -595,7 +595,7 @@ def test_capture_pins_to_committed_head_ignoring_dirty_worktree(
     edit (a merge-queue write mid-flight) is NOT adopted, so the snapshot can
     never be torn or newer than a single committed HEAD."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
-    (tmp_path / ".gitignore").write_text(".imp/\n")
+    (tmp_path / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _init_git(tmp_path)
     _git_commit_all(tmp_path, "wf v1")
     live_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
@@ -619,7 +619,7 @@ def test_capture_resolves_workflow_symlink_to_tracked_target(
     real.parent.mkdir(parents=True)
     shutil.move(str(wf), str(real))
     wf.symlink_to(os.path.relpath(real, wf.parent))
-    (tmp_path / ".gitignore").write_text(".imp/\n")
+    (tmp_path / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _init_git(tmp_path)
     _git_commit_all(tmp_path, "wf via symlink")
     # Dirty the working tree of the real target; capture must pin to HEAD.
@@ -650,7 +650,7 @@ def test_git_capture_replaces_snapshot_crash_safe(tmp_path: Path) -> None:
     """AC 5 on the git path: a committed workflow change IS adopted on a fresh
     capture, and the .tmp/.old swap leaves no crash artifacts behind."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
-    (tmp_path / ".gitignore").write_text(".imp/\n")
+    (tmp_path / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _init_git(tmp_path)
     _git_commit_all(tmp_path, "wf v1")
     assert _refresh_workflow_snapshot(quest) is False        # initial git capture

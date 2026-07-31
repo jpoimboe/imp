@@ -53,7 +53,8 @@ def test_imp_invariants_names_quest_concept() -> None:
 def test_imp_operator_notes_names_quest_concept() -> None:
     text = Path("docs/guide/operator-notes.md").read_text()
     assert "Runbook for operating a running imp quest." in text
-    assert ".imp/quest/workflow" in text
+    assert ".imp/quests/<id>/workflow/" in text
+    assert ".imp/quest/workflow" not in text
     assert ".imp/change/" not in text
     assert ".imp/changes/" not in text
 
@@ -123,3 +124,38 @@ def test_docs_reorg_moved_all_eight_with_no_stale_root_copy() -> None:
     for old, new in moved.items():
         assert not Path(old).exists(), f"stale root copy left: {old}"
         assert Path(new).is_file(), f"missing at new home: {new}"
+
+
+def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
+    text = ARCH.read_text()
+    assert "### Where state lives" in text
+    assert "`~/.imp/projects/<slug>/`" in text
+    assert "project_state_dir()" in text
+    assert "$IMP_STATE_DIR" in text
+    assert "$IMP_HOME" in text
+    assert "`repo` marker" in text
+    for entry in ("`quests/<id>/`", "`worktrees/<id>/`", "`archive/`"):
+        assert entry in text, entry
+    # the one imp path left in a worktree is the symlink into the quest home
+    assert "`.imp/quests/<id>` pointing at that quest's home" in text
+    # no checkout-relative state path survives anywhere in the doc
+    for stale in (".imp/quest/", ".imp/archive", ".imp/worktrees"):
+        assert stale not in text, stale
+
+
+def test_operator_notes_document_the_moved_checkout_limitation() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    flat = " ".join(text.split())
+    assert "## Moving or renaming a checkout" in text
+    assert "`repo` marker" in text
+    assert "orphaned" in flat
+    # the manual recovery: re-slug the directory, repoint the marker, repair git
+    assert "git worktree repair" in text
+    # imp already claimed an empty <new-name>; an unguarded mv nests the
+    # orphaned dir inside that stub, leaving `imp config` correct over wrong contents
+    assert '[ -e "$NEW" ]' in text
+    assert 'mv "$OLD" "$NEW"' in text
+    assert '[ "$(ls -A "$NEW" 2>/dev/null)" = repo ] && rm -rf "$NEW"' in text
+    assert "imp list" in text
+    # in-flight quests record absolute paths that the rename does not rewrite
+    assert "Finish or abandon in-flight quests before moving a checkout" in text

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine import worktree as wt
+from imp.paths import project_state_dir
 from tests.conftest import _stop_at_rebase_edit
 
 
@@ -20,7 +21,7 @@ def _init_repo(root: Path) -> None:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
@@ -81,7 +82,7 @@ def test_repo_git_lock_serializes(tmp_path: Path) -> None:
 def test_create_worktree(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     path = wt.create_worktree(tmp_path, "add-oauth", "main")
-    assert path == tmp_path / ".imp" / "worktrees" / "add-oauth"
+    assert path == project_state_dir(tmp_path) / "worktrees" / "add-oauth"
     assert path.is_dir()
     assert (path / "README.md").exists()  # checked out from main
     branches = _git(tmp_path, "branch", "--list", "imp/add-oauth").stdout
@@ -118,7 +119,7 @@ def test_remove_worktree_keeps_branch(tmp_path: Path) -> None:
 def _commit_on_branch(root: Path, branch: str, name: str, body: str) -> None:
     """Add+commit one file directly in the change worktree the test already
     created for <branch>, so the control root's checkout stays untouched."""
-    wtpath = root / ".imp" / "worktrees" / branch.removeprefix("imp/")
+    wtpath = project_state_dir(root) / "worktrees" / branch.removeprefix("imp/")
     (wtpath / name).write_text(body)
     _git(wtpath, "add", "-A")
     _git(wtpath, "commit", "-qm", f"add {name}")
@@ -153,7 +154,7 @@ def _seed_base_and_branch(root: Path) -> None:
     _git(root, "commit", "-qm", "add shared.txt")
     # Create imp/feat branch and commit a change to shared.txt
     wt.create_worktree(root, "feat", "main")
-    wtpath = root / ".imp" / "worktrees" / "feat"
+    wtpath = project_state_dir(root) / "worktrees" / "feat"
     (wtpath / "shared.txt").write_text("branch version\n")
     _git(wtpath, "add", "shared.txt")
     _git(wtpath, "commit", "-qm", "update shared.txt on branch")
@@ -207,7 +208,7 @@ def test_merge_base_checked_out_nowhere(tmp_path: Path) -> None:
     assert _git(tmp_path, "rev-parse", "main").stdout.strip() != base_before  # ref moved
     assert result.merge_commit == _git(tmp_path, "rev-parse", "main").stdout.strip()
     # scratch worktree cleaned up
-    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / ".merge-feat").exists()
 
 
 def test_merge_detached_conflict_cleans_scratch(tmp_path: Path) -> None:
@@ -223,8 +224,9 @@ def test_merge_detached_conflict_cleans_scratch(tmp_path: Path) -> None:
 
     result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
     assert result.status == "CONFLICT"
-    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()  # scratch cleaned
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()             # branch worktree intact
+    worktrees = project_state_dir(tmp_path) / "worktrees"
+    assert not (worktrees / ".merge-feat").exists()   # scratch cleaned
+    assert (worktrees / "feat").is_dir()              # branch worktree intact
 
 
 def test_merge_detached_body_threads_into_commit(tmp_path: Path) -> None:
@@ -266,8 +268,8 @@ def test_merge_detached_refuses_while_base_is_being_rebased(tmp_path: Path) -> N
     # translated) rather than the sentence keeps a localized git from false-firing.
     assert result.detail is not None and "main" in result.detail
     assert _git(tmp_path, "rev-parse", "main").stdout.strip() == base_before
-    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
+    assert not (project_state_dir(tmp_path) / "worktrees" / ".merge-feat").exists()
+    assert (project_state_dir(tmp_path) / "worktrees" / "feat").is_dir()
     assert _git(tmp_path, "rev-parse", "--verify", "imp/feat").returncode == 0
 
     resumed = subprocess.run(
@@ -290,14 +292,14 @@ def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
     assert result.status == "CONFLICT"
     # branch + change worktree untouched, no merge state lingering
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
+    assert (project_state_dir(tmp_path) / "worktrees" / "feat").is_dir()
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
 
 
 def _make_worktree_and_check(root, slug="probe") -> bool:
     """True iff a fresh worktree off base HEAD ignores .imp/."""
     wt.create_worktree(root, slug, "main")
-    wpath = root / ".imp" / "worktrees" / slug
+    wpath = project_state_dir(root) / "worktrees" / slug
     return _git(wpath, "check-ignore", ".imp/quests").returncode == 0
 
 
@@ -417,8 +419,7 @@ def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
 
 def test_artifact_commit_snapshots_full_tree_with_guard(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    stage = tmp_path / ".imp"
-    stage.mkdir(exist_ok=True)
+    stage = project_state_dir(tmp_path)
     spec = stage / "spec.md"
     spec.write_text("# the spec\n")
     plan = stage / "plan.md"
@@ -521,7 +522,7 @@ def test_merge_body_none_keeps_minimal(tmp_path: Path) -> None:
 def test_merge_to_base_is_idempotent_on_already_merged(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     wt.create_worktree(tmp_path, "feat", "main")
-    wt_path = (tmp_path / ".imp" / "worktrees" / "feat")
+    wt_path = (project_state_dir(tmp_path) / "worktrees" / "feat")
     (wt_path / "x.txt").write_text("hi\n")
     _git(wt_path, "add", "-A")
     _git(wt_path, "commit", "-qm", "feat")
@@ -560,13 +561,13 @@ def test_create_spike_worktree_distinct_from_change_worktree(tmp_path: Path) -> 
     wt.create_worktree(tmp_path, "chg", "main")
     # a disposable spike worktree for the same change never collides
     spike = wt.create_spike_worktree(tmp_path, "chg", 1, "main")
-    assert spike == (tmp_path / ".imp" / "worktrees" / "spike-chg-1").resolve()
+    assert spike == (project_state_dir(tmp_path) / "worktrees" / "spike-chg-1").resolve()
     assert spike.is_dir()
     assert (spike / "README.md").exists()   # checked out from main's tip
     assert "imp/spike-chg-1" in _git(
         tmp_path, "branch", "--list", "imp/spike-chg-1").stdout
     # the change's own worktree is untouched
-    assert (tmp_path / ".imp" / "worktrees" / "chg").is_dir()
+    assert (project_state_dir(tmp_path) / "worktrees" / "chg").is_dir()
 
 
 def test_destroy_spike_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
@@ -609,8 +610,7 @@ def test_artifact_commit_starts_new_lineage_on_unreadable_parent(
     tmp_path: Path,
 ) -> None:
     _init_repo(tmp_path)
-    stage = tmp_path / ".imp"
-    stage.mkdir(exist_ok=True)
+    stage = project_state_dir(tmp_path)
     spec = stage / "spec.md"
 
     # First snapshot -> root commit; a healthy path fires no warning.
@@ -676,8 +676,7 @@ def test_origin_head_branch_strips_origin_prefix(tmp_path: Path) -> None:
 def test_artifact_commit_warn_defaults_to_none(tmp_path: Path) -> None:
     # warn is optional: omitting it on the corrupt-parent path must not raise.
     _init_repo(tmp_path)
-    stage = tmp_path / ".imp"
-    stage.mkdir(exist_ok=True)
+    stage = project_state_dir(tmp_path)
     spec = stage / "spec.md"
     spec.write_text("# a\n")
     assert wt.artifact_commit(
@@ -774,7 +773,7 @@ def test_create_and_teardown_from_detached_control_root(tmp_path: Path) -> None:
 
     wt.remove_worktree(tmp_path, "feat")
     wt.delete_branch(tmp_path, "feat")
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "feat").exists()
     assert _git(tmp_path, "rev-parse", "--verify", "imp/feat").returncode != 0
     assert _git(tmp_path, "rev-parse", "HEAD").stdout.strip() == head_before
     assert wt.checked_out_branch(tmp_path) is None

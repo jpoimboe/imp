@@ -19,6 +19,7 @@ from imp.engine import archive
 from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 from tests.async_wait import HANG_BACKSTOP, wait_until
@@ -37,7 +38,7 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        quest_dir=tmp_path / ".imp" / "quests" / quest_id,
+        quest_dir=project_state_dir(tmp_path) / "quests" / quest_id,
     )
 
 
@@ -65,7 +66,7 @@ def test_infer_session_result_paused_for_parked_draft_no_worktree(tmp_path: Path
 
 def test_infer_session_result_completed_when_status_completed(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-done")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
     assert infer_session_result(quest) is RunResult.COMPLETED
@@ -73,7 +74,7 @@ def test_infer_session_result_completed_when_status_completed(tmp_path: Path) ->
 
 def test_infer_session_result_paused_when_parked_at_gate(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-parked")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
     assert infer_session_result(quest) is RunResult.PAUSED
@@ -81,7 +82,7 @@ def test_infer_session_result_paused_when_parked_at_gate(tmp_path: Path) -> None
 
 def test_infer_session_result_paused_when_merge_blocked(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-blocked")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merge_blocked").save(
         quest.state_dir)
     assert infer_session_result(quest) is RunResult.PAUSED
@@ -93,7 +94,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-run")
     # The on-disk terminal state the client reads once the daemon exits.
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -147,7 +148,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-tick")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -204,7 +205,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-interrupted")
     # Worktree exists + paused status → infer_session_result returns PAUSED.
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
 
@@ -375,7 +376,7 @@ async def test_run_session_client_threads_resume_into_attach(
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-resume")
     # On-disk terminal state read after the (stubbed) daemon "exits".
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -444,7 +445,7 @@ async def test_daemon_startup_timeout_surfaces_distinctly(
 
     quest = _make_quest(tmp_path, "feat")
     # Worktree exists in non-completed state → daemon crashed, not fast-completed.
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
 
@@ -465,7 +466,7 @@ async def test_daemon_startup_timeout_surfaces_distinctly(
     assert summarized == []              # NOT routed through the paused summary
     out = capsys.readouterr().out
     assert "startup failed: session daemon did not come up" in out   # backstop block on stdout
-    assert f"{quest.control_root}/.imp/remote-control.log" in out
+    assert str(project_state_dir(quest.control_root) / "remote-control.log") in out
 
 
 @pytest.mark.anyio
@@ -523,7 +524,7 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
 
     assert captured["leave_mode"] == "new"
     # The foreground does NOT apply the disposition — the daemon owns it.
-    assert (tmp_path / ".imp" / "quests" / "d1").exists()
+    assert (project_state_dir(tmp_path) / "quests" / "d1").exists()
     assert rc == 0
 
 
@@ -553,7 +554,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
         solicit=lambda _p: _never(), leave_mode="chat")
 
     assert captured["leave_mode"] == "chat"
-    assert (tmp_path / ".imp" / "quests" / "c1").exists()
+    assert (project_state_dir(tmp_path) / "quests" / "c1").exists()
     assert rc == 0
 
 
@@ -564,7 +565,7 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
     from imp.cli.terminal_title import TerminalTitle
 
     quest = _make_quest(tmp_path, "2026-06-15-title")   # _make_quest sets title="T"
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -593,7 +594,7 @@ async def test_run_session_client_passes_control_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-cr")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -621,7 +622,7 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
     # Worktree exists + non-completed state → infer_session_result returns PAUSED,
     # so this is the rc=3 daemon-startup-failure path (not a fast-completed run).
     quest = _make_quest(tmp_path, "2026-06-15-leak")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
 
@@ -662,7 +663,7 @@ async def test_run_session_client_threads_provided_leave_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-ls")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -740,7 +741,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-aut")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -793,7 +794,7 @@ async def test_daemon_startup_crash_surfaces_exit_code_and_stderr_path(
     from imp.remote.session.attach import DaemonStartupError
 
     quest = _make_quest(tmp_path, "crashy")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
 
@@ -900,7 +901,7 @@ async def test_run_session_client_installs_startup_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-startup")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -930,7 +931,7 @@ async def test_run_session_client_threads_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-model")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -975,7 +976,7 @@ async def test_run_session_client_threads_opening_unsandboxed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-unsbx")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -1030,7 +1031,7 @@ async def test_daemon_layout_downgrade_surfaces_message_directly(
     from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT, DaemonStartupError
 
     quest = _make_quest(tmp_path, "stale")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
 
@@ -1062,7 +1063,7 @@ async def test_run_session_client_registers_ack_hook_when_interactive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-ack-on")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
@@ -1100,7 +1101,7 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-ack-off")
-    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 

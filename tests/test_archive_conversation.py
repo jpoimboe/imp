@@ -13,6 +13,7 @@ from imp.engine.archive import read as archive_read
 from imp.engine.archive import record, records_root
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -22,9 +23,10 @@ def test_archive_conversation_materialized_tears_down_resumable(tmp_path: Path) 
 
     archive_conversation(ch)
 
-    assert not (tmp_path / ".imp" / "worktrees" / "conv").exists()          # worktree gone
+    state = project_state_dir(tmp_path)
+    assert not (state / "worktrees" / "conv").exists()                         # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/conv").stdout.strip() == ""  # branch gone
-    assert not (tmp_path / ".imp" / "quests" / "conv").exists()            # live home dropped
+    assert not (state / "quests" / "conv").exists()                            # live home dropped
 
     # Archived, resumable, NOT abandoned.
     rec = archive_read.read_quest_json(tmp_path, "conv")
@@ -44,7 +46,7 @@ def test_archive_conversation_unmaterialized_draft_has_no_worktree(tmp_path: Pat
 
     archive_conversation(ch)  # must not raise on absent worktree/branch
 
-    assert not (tmp_path / ".imp" / "quests" / "draft").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "draft").exists()
     full = record.read_record(records_root(tmp_path), "draft")
     assert full is not None
     assert full["resumable"] is True

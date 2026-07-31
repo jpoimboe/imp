@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from imp.cli.main import _print_run_header, _run_header_line
+from imp.paths import project_state_dir
 
 
 def test_named_change_leads_with_id_then_title_and_marker() -> None:
@@ -74,7 +75,7 @@ def _seed_log_quest(control) -> None:
 
     _seed_control(control)
     Quest.create(control, title="A", quest_id="alpha", base_branch="main")
-    log = JsonlEventLog(control / ".imp" / "quests" / "alpha" / "events.jsonl")
+    log = JsonlEventLog(project_state_dir(control) / "quests" / "alpha" / "events.jsonl")
     log.append(agent_id=None, type="step_started", payload={"step": "s"})
     log.append(agent_id=None, type="step_completed",
                payload={"step": "s", "status": "Success"})

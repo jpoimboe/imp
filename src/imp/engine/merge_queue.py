@@ -2,7 +2,7 @@
 
 A single shared file at <control_root>/.git/imp/merge-queue.json, mutated only
 under RepoGitLock (the same lock-adjacent, sandbox-writable git common dir that
-holds repo.lock — NOT the per-worktree gitignored .imp/). Each entry:
+holds repo.lock — NOT the out-of-tree per-quest state dir). Each entry:
     {"quest_id": "...", "base_branch": "...", "enqueued_at": "<iso8601>"}
 """
 from __future__ import annotations

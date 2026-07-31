@@ -36,6 +36,7 @@ from imp.engine.sandbox import (
     sandbox_available,
 )
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
 
@@ -80,7 +81,7 @@ def _init_repo(root: Path) -> None:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
@@ -114,7 +115,7 @@ def _write_quest(
 ) -> Path:
     """Write a live quest home under `.imp/quests/<qid>/` (quest.json + optional
     state.json + events.jsonl + optional spec artifact). Returns the home dir."""
-    d = control / ".imp" / "quests" / qid
+    d = project_state_dir(control) / "quests" / qid
     (d / "state").mkdir(parents=True, exist_ok=True)
     meta = {
         "id": qid, "title": title, "base_branch": "main",
@@ -177,7 +178,26 @@ def _build_project(base: Path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def project():
+def _module_imp_home():
+    """IMP_HOME anchors the state dir, and `project` is built once per module, so
+    the home must outlive a single test — conftest's per-test one would strand the
+    quests built here under the first test's tmp_path."""
+    home = Path(tempfile.mkdtemp(prefix="imp-store-e2e-home-"))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("IMP_HOME", str(home))
+        yield home
+    shutil.rmtree(home, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_global_config(_module_imp_home, monkeypatch):
+    """Shadows conftest's per-test isolation with this module's shared home."""
+    monkeypatch.setenv("IMP_HOME", str(_module_imp_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(_module_imp_home / "xdg"))
+
+
+@pytest.fixture(scope="module")
+def project(_module_imp_home):
     base = Path(tempfile.mkdtemp(prefix="imp-store-e2e-"))
     try:
         yield _build_project(base)
@@ -195,14 +215,17 @@ async def _serve_and_run(
     self-read). Returns (returncode, stdout, stderr). Asserts no timeout/deadlock."""
     from subprocess import PIPE
 
-    engine_env = {"PYTHONPATH": _SRC}
+    # Mirror engine_env(): the in-sandbox CLI resolves the state dir through this
+    # override, since the mask hides the `repo` marker the slug walk needs.
+    engine_env = {"PYTHONPATH": _SRC,
+                  "IMP_STATE_DIR": str(project_state_dir(control))}
     cfg = SandboxConfig(enabled=True, allow_unsandboxed=False, network=True,
                         uid=os.getuid())
     policy = resolve_policy(
         worktree=control, control_root=control, quest_id=CUR, cfg=cfg,
         engine_env_result=engine_env, environ=dict(os.environ),
         available=True, disposable_tree=True,
-        quest_dir=control / ".imp" / "quests" / CUR)
+        quest_dir=project_state_dir(control) / "quests" / CUR)
     # Mirror executor._build_sandbox_policy: create quest_var_tmp_dir before bwrap.
     if policy.quest_var_tmp_dir:
         Path(policy.quest_var_tmp_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -282,7 +305,7 @@ def test_current_events_served_and_raw_masked(project) -> None:
     # recursive grep must not find it.
     _, scan, _ = anyio.run(
         _serve_and_run, control,
-        "grep -rn CURMARK .imp/quests 2>/dev/null; echo SCAN_DONE")
+        'grep -rn CURMARK "$IMP_STATE_DIR/quests" 2>/dev/null; echo SCAN_DONE')
     assert "SCAN_DONE" in scan
     assert CUR_MARK not in scan, "events.jsonl not masked inside sandbox — mask leaked"
 
@@ -309,7 +332,7 @@ def test_archived_events_served_and_blobs_masked(project) -> None:
 
     _, scan, _ = anyio.run(
         _serve_and_run, control,
-        "grep -rn ARCHMARK .imp/archive 2>/dev/null; echo SCAN_DONE")
+        'grep -rn ARCHMARK "$IMP_STATE_DIR/archive" 2>/dev/null; echo SCAN_DONE')
     assert "SCAN_DONE" in scan
     assert ARCH_MARK not in scan, "archive blobs/index.db not masked — mask leaked"
 

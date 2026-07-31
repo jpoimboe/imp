@@ -17,6 +17,8 @@ from typing import Literal
 
 import filelock
 
+from imp.paths import project_state_dir
+
 
 class PreconditionError(Exception):
     """imp new ran in a repo that can't host a worktree (spec §5.1)."""
@@ -110,39 +112,39 @@ def commit_count(control_root: Path, quest_id: str, base: str) -> int:
 
 
 def create_worktree(control_root: Path, quest_id: str, base: str) -> Path:
-    """`git worktree add -b imp/<id> .imp/worktrees/<id> <base>` (spec §4).
+    """`git worktree add -b imp/<id> <state dir>/worktrees/<id> <base>` (spec §4).
     Branch collision surfaces as BranchExists — the caller reports a clean error
     (there is no retry; the random id is the uniqueness guarantee)."""
-    rel = Path(".imp") / "worktrees" / quest_id
+    wt = project_state_dir(control_root) / "worktrees" / quest_id
     branch = f"imp/{quest_id}"
     with RepoGitLock(control_root).acquire():
         if branch_exists(control_root, branch):
             raise BranchExists(branch)
-        proc = _git(control_root, "worktree", "add", "-b", branch, str(rel), base)
+        proc = _git(control_root, "worktree", "add", "-b", branch, str(wt), base)
         if proc.returncode != 0:
             if "already exists" in proc.stderr:
                 raise BranchExists(branch)
             raise RuntimeError(f"git worktree add failed: {proc.stderr.strip()}")
-    return (control_root / rel).resolve()
+    return wt.resolve()
 
 
 def remove_worktree(control_root: Path, quest_id: str, *, force: bool = False) -> None:
-    """`git worktree remove .imp/worktrees/<id>`. Branch is KEPT (spec §4).
+    """`git worktree remove <state dir>/worktrees/<id>`. Branch is KEPT (spec §4).
 
     Default (force=False) is the merge-teardown behaviour: a plain remove that
     errors on a dirty tree. With force=True (used by `imp abandon`) tolerate a
     dirty tree / stale metadata / an already-absent worktree: retry with
     --force, then prune git's bookkeeping and drop any leftover directory so a
     re-run after a crash converges."""
-    rel = Path(".imp") / "worktrees" / quest_id
+    wt = project_state_dir(control_root) / "worktrees" / quest_id
     with RepoGitLock(control_root).acquire():
         if not force:
-            _git_ok(control_root, "worktree", "remove", str(rel))
+            _git_ok(control_root, "worktree", "remove", str(wt))
             return
-        proc = _git(control_root, "worktree", "remove", "--force", str(rel))
+        proc = _git(control_root, "worktree", "remove", "--force", str(wt))
         if proc.returncode != 0:
             _git(control_root, "worktree", "prune")
-            shutil.rmtree(control_root / rel, ignore_errors=True)
+            shutil.rmtree(wt, ignore_errors=True)
 
 
 def delete_branch(control_root: Path, quest_id: str) -> None:
@@ -166,11 +168,11 @@ def destroy_worktree(control_root: Path, quest_id: str) -> None:
     Best-effort git calls (not _git_ok) so a teardown hiccup never masks the
     LoadError that triggered the rollback — a teardown failure may therefore
     leave an orphan rather than raise. Acceptable under V0's single principal."""
-    rel = Path(".imp") / "worktrees" / quest_id
+    wt = project_state_dir(control_root) / "worktrees" / quest_id
     branch = f"imp/{quest_id}"
     with RepoGitLock(control_root).acquire():
-        _git(control_root, "worktree", "remove", "--force", str(rel))
-        shutil.rmtree(control_root / rel, ignore_errors=True)
+        _git(control_root, "worktree", "remove", "--force", str(wt))
+        shutil.rmtree(wt, ignore_errors=True)
         # If `worktree remove` failed but rmtree deleted the dir, git still has a
         # stale registration that makes `branch -D` fail with "checked out at …",
         # leaking the branch. Prune the stale entry first so the delete succeeds.
@@ -183,14 +185,14 @@ def create_spike_worktree(
 ) -> Path:
     """Disposable worktree on branch imp/spike-<id>-<n>, cut from base's tip."""
     name = f"spike-{quest_id}-{discriminator}"
-    rel = Path(".imp") / "worktrees" / name
+    wt = project_state_dir(control_root) / "worktrees" / name
     branch = f"imp/{name}"
     with RepoGitLock(control_root).acquire():
-        proc = _git(control_root, "worktree", "add", "-b", branch, str(rel), base)
+        proc = _git(control_root, "worktree", "add", "-b", branch, str(wt), base)
         if proc.returncode != 0:
             raise RuntimeError(
                 f"git worktree add (spike) failed: {proc.stderr.strip()}")
-    return (control_root / rel).resolve()
+    return wt.resolve()
 
 
 def destroy_spike_worktree(
@@ -198,11 +200,11 @@ def destroy_spike_worktree(
 ) -> None:
     """Full best-effort teardown of a spike worktree and its branch, crash-tolerant."""
     name = f"spike-{quest_id}-{discriminator}"
-    rel = Path(".imp") / "worktrees" / name
+    wt = project_state_dir(control_root) / "worktrees" / name
     branch = f"imp/{name}"
     with RepoGitLock(control_root).acquire():
-        _git(control_root, "worktree", "remove", "--force", str(rel))
-        shutil.rmtree(control_root / rel, ignore_errors=True)
+        _git(control_root, "worktree", "remove", "--force", str(wt))
+        shutil.rmtree(wt, ignore_errors=True)
         _git(control_root, "worktree", "prune")
         _git(control_root, "branch", "-D", branch)
 
@@ -212,10 +214,10 @@ class RepoGitLock:
     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""
 
     def __init__(self, control_root: Path) -> None:
-        # Lives under .git (the git common dir), NOT .imp: artifact_commit
+        # Lives under .git (the git common dir), NOT the state dir: artifact_commit
         # acquires this lock from inside the bwrap sandbox, whose writable set
-        # binds back the worktree and <control>/.git but leaves the control
-        # root's top-level .imp/ read-only. .git is already rw-bound and is the
+        # binds back the worktree and <control>/.git but masks every project's
+        # state directory. .git is already rw-bound and is the
         # right scope for a repo-wide lock guarding writes to refs/imp/*.
         self.path = control_root / ".git" / "imp" / "repo.lock"
         # Create the parent up front so correctness doesn't rely on filelock
@@ -345,11 +347,10 @@ def _merge_detached(control_root: Path, quest_id: str, branch: str, base: str,
     the ref under a rebase of <base> wedges it — the user's `git rebase
     --continue` then fails forever on a ref lock — so we surface git's refusal as
     REFUSED and let the human resolve it."""
-    scratch_rel = Path(".imp") / "worktrees" / f".merge-{quest_id}"
-    scratch = control_root / scratch_rel
-    _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
+    scratch = project_state_dir(control_root) / "worktrees" / f".merge-{quest_id}"
+    _git(control_root, "worktree", "remove", "--force", str(scratch))
     shutil.rmtree(scratch, ignore_errors=True)
-    _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
+    _git_ok(control_root, "worktree", "add", "--detach", str(scratch), base)
     subject = _merge_subject(title, quest_id, body)
     try:
         proc = _git(scratch, "merge", "--no-ff", "-m", subject, branch)
@@ -363,13 +364,13 @@ def _merge_detached(control_root: Path, quest_id: str, branch: str, base: str,
             return MergeResult("REFUSED", detail=detail)
         return MergeResult("MERGED", commit)
     finally:
-        _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
+        _git(control_root, "worktree", "remove", "--force", str(scratch))
 
 
 @contextmanager
 def _temp_index(control_root: Path):  # type: ignore[no-untyped-def]
     """Yield a throwaway GIT_INDEX_FILE env dict (file lives under .git/imp/,
-    the sandbox-writable git common dir — NOT the read-only .imp/; see
+    the sandbox-writable git common dir — NOT the masked state dir; see
     RepoGitLock).
     Do NOT simplify the unlink dance: a 0-byte index makes `git update-index`
     fail; a *missing* GIT_INDEX_FILE is treated as an empty index — exactly
@@ -498,9 +499,10 @@ def _write_exclude(control_root: Path) -> None:
 
 def ensure_imp_ignored(control_root: Path, base: str) -> None:
     """Guarantee .imp/ is ignored in a way fresh worktrees inherit (spec §8).
-    Correctness depends on it: nested worktrees must not show as untracked, and
-    the inner .imp/quests/ state must never be captured by `git add -A`. The
-    rule is committed only when the checkout stands on `base`; any other state
+    Correctness depends on it: each quest worktree holds a .imp/quests/<id>
+    symlink to its out-of-tree home, and that link must never show as untracked
+    nor be captured by `git add -A`. The rule is committed only when the checkout
+    stands on `base`; any other state
     (detached, mid-rebase, another branch) gets the shared info/exclude, because
     a commit there never reaches the quest's fork point."""
     if _imp_ignored_durably(control_root, base):

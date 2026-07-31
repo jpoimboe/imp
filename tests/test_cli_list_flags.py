@@ -12,6 +12,7 @@ import pytest
 from imp.cli.main import _build_parser, main
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.state import JsonlEventLog
+from imp.paths import project_state_dir
 
 
 def test_events_type_flattens_at_parse() -> None:
@@ -55,7 +56,7 @@ _EVENTS = [
 
 
 def _make_live_quest(control: Path, cid: str) -> None:
-    d = control / ".imp" / "quests" / cid
+    d = project_state_dir(control) / "quests" / cid
     d.mkdir(parents=True, exist_ok=True)
     (d / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",

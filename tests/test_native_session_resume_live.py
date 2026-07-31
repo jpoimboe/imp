@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
 from tests._live import (
     _await_change_dir,
     assert_sigint_exit,
@@ -66,11 +67,10 @@ def _seed_multiread_project(tmp_path: Path) -> None:
               - {name: w, file: agents/writer.md, tier: low}
     """))
     (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\ndefault-base: main\n")
-    # providers/tiers go in the gitignored .imp/config.yaml local layer (highest
+    # providers/tiers go in the state dir's config.yaml local layer (highest
     # precedence) so a developer's ~/.imp/config.yaml cannot shadow them
     # and skip/fail this gated test — mirrors conftest._seed_control.
-    (tmp_path / ".imp").mkdir(exist_ok=True)
-    (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
+    (project_state_dir(tmp_path) / "config.yaml").write_text(textwrap.dedent("""\
         providers: [claude_code]
         tiers:
           low: {claude_code: claude-haiku-4-5-20251001}

@@ -9,6 +9,7 @@ import anyio
 import pytest
 
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from imp.remote.session.attach import (
     DaemonStartupError,
     _read_stderr_tail,
@@ -35,7 +36,7 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        quest_dir=tmp_path / ".imp" / "quests" / quest_id,
+        quest_dir=project_state_dir(tmp_path) / "quests" / quest_id,
     )
 
 

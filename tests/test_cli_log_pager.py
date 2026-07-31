@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 
 
 def _fake_tty_stdout(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
@@ -362,7 +363,7 @@ def test_keyboard_interrupt_in_wait_does_not_raise(
 def _make_quest_worktree(control: Path, slug: str, title: str) -> Path:
     """Create a minimal on-disk Quest home under control/.imp/quests/<slug>
     with one rendered step (phase "spec") so the narrative reaches output."""
-    quest_dir = control / ".imp" / "quests" / slug
+    quest_dir = project_state_dir(control) / "quests" / slug
     quest_dir.mkdir(parents=True)
     (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": title, "base_branch": "main",

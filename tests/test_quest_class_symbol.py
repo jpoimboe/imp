@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -9,7 +10,7 @@ def test_quest_class_creates_home(tmp_path: Path) -> None:
     q = Quest.create(tmp_path, title="X", quest_id="que777", base_branch="main")
     assert q.id == "que777"
     assert q.base_branch == "main"
-    assert q.quest_dir == tmp_path / ".imp" / "quests" / "que777"
+    assert q.quest_dir == project_state_dir(tmp_path) / "quests" / "que777"
     assert (q.quest_dir / "quest.json").exists()
 
 

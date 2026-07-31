@@ -8,6 +8,7 @@ import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import JsonlEventLog, State
+from imp.paths import project_state_dir
 from imp.providers.config import ProviderModel
 from tests.test_executor import (
     _CapturingProvider,
@@ -53,8 +54,7 @@ def _seed_render(root: Path) -> object:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root)
 
 
@@ -72,8 +72,7 @@ def _seed_two_step(root: Path) -> object:
         "      - {name: b, file: agents/writer.md, tier: low}\n"
     )
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root)
 
 
@@ -92,8 +91,7 @@ def _seed(root: Path) -> object:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root)
 
 

@@ -167,7 +167,7 @@ def render_label(
     try:
         return render_prompt(label, build_context(
             quest_title=quest.title, event_log=log,
-            quest_id=quest.id, quest_home=f".imp/quests/{quest.id}",
+            quest_id=quest.id, quest_home=quest.agent_quest_home,
             cur_base_head=quest.cur_base_head,
             orig_base_head=quest.orig_base_head,
             vars=state.vars if state is not None else {},

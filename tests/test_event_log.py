@@ -6,6 +6,7 @@ import pytest
 
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.engine.state import InMemoryEventLog, JsonlEventLog
+from imp.paths import project_state_dir
 
 
 def _read(path: Path) -> list[dict]:
@@ -314,7 +315,7 @@ def test_append_creates_missing_parent_and_persists(tmp_path: Path) -> None:
 
 def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:
     # .imp/quests/ exists (other quests live here) but this quest's home was rmtree'd.
-    quests_root = tmp_path / ".imp" / "quests"
+    quests_root = project_state_dir(tmp_path) / "quests"
     quests_root.mkdir(parents=True)
     home = quests_root / "archived-gone"
     assert not home.exists()

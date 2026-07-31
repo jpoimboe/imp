@@ -6,10 +6,11 @@ from pathlib import Path
 from imp.cli.signals import pause_and_exit
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 
 def _change(tmp_path: Path, status: str) -> Quest:
-    cd = tmp_path / ".imp" / "quests" / "test-quest"
+    cd = project_state_dir(tmp_path) / "quests" / "test-quest"
     (cd / "state").mkdir(parents=True, exist_ok=True)
     (cd / "quest.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main"}))

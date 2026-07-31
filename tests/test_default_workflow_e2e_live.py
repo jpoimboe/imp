@@ -35,7 +35,7 @@ async def test_live_minimal_change_completes_one_step(
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
-    (tmp_path / ".gitignore").write_text(".imp/\n")
+    (tmp_path / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(

@@ -128,7 +128,8 @@ class QuestContext:
     project_root: Path
     workflow_dir: Path
     id: str = ""
-    quest_home: str = ""
+    quest_home: str = ""          # agent-facing; worktree-relative once materialized
+    quest_dir: Path | None = None # absolute host path; None outside a quest
     memory: dict[str, str] = field(hash=False, default_factory=dict)
     workflow_name: str = ""
     step_name: str = ""
@@ -143,7 +144,7 @@ class AgentInvocation:
     system_prompt: str
     initial_messages: tuple[Message, ...]
     quest_context: QuestContext
-    transcript_dir: Path                   # .imp/quests/<id>/steps/<phase>/<step>/
+    transcript_dir: Path                   # <state dir>/quests/<id>/steps/<phase>/<step>/
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means no tool-count cap (opt-in only)

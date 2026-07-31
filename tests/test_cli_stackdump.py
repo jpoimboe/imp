@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli import main as cli_main
+from imp.paths import project_state_dir
 
 
 def test_main_installs_pid_keyed_stack_dumper(
@@ -19,7 +20,7 @@ def test_main_installs_pid_keyed_stack_dumper(
     rc = cli_main.main([])
 
     assert rc == 0
-    expected = tmp_path / ".imp" / f"cli.{os.getpid()}.stack-dump.txt"
+    expected = project_state_dir(tmp_path) / f"cli.{os.getpid()}.stack-dump.txt"
     assert calls == [expected]
 
 

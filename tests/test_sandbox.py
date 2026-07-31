@@ -20,12 +20,13 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
 )
+from imp.paths import imp_home, project_state_dir
 
 
 def _policy(**over) -> SandboxPolicy:
     base = dict(
         active=True,
-        worktree="/ctl/.imp/worktrees/abc",
+        worktree="/state/worktrees/abc",
         git_common_dir="/ctl/.git",
         git_ro_remask=("/ctl/.git/hooks", "/ctl/.git/config"),
         writable_caches=("/home/u/.cache", "/home/u/.cargo"),
@@ -34,7 +35,7 @@ def _policy(**over) -> SandboxPolicy:
         secret_dirs=("/home/u/.ssh", "/run/user/1000"),
         secret_files=("/home/u/.netrc",),
         setenv=(("PATH", "/usr/bin"), ("HOME", "/home/u"),
-                ("IMP_PROJECT_ROOT", "/ctl/.imp/worktrees/abc"),
+                ("IMP_PROJECT_ROOT", "/state/worktrees/abc"),
                 ("TMPDIR", "/tmp/imp-1000/abc")),
         network=True,
         note="",
@@ -45,14 +46,14 @@ def _policy(**over) -> SandboxPolicy:
 
 def test_inactive_policy_returns_bare_argv():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
+    argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(active=False), engine_env={})
     assert argv == ["sh", "-c", "echo hi"]
     assert SANDBOX_ENTERED_MARKER not in argv[-1]
 
 
 def test_active_policy_wraps_with_bwrap():
-    argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
+    argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[0] == "bwrap"
     assert argv[-3:-1] == ["sh", "-c"]
@@ -64,7 +65,7 @@ def test_active_policy_emits_entry_sentinel_in_tail():
     import shlex
 
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
+    argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[-3:-1] == ["sh", "-c"]
     expected_tail = (
@@ -74,7 +75,7 @@ def test_active_policy_emits_entry_sentinel_in_tail():
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
     argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
-    assert "--bind /ctl/.imp/worktrees/abc /ctl/.imp/worktrees/abc" in argv
+    assert "--bind /state/worktrees/abc /state/worktrees/abc" in argv
     assert "--bind /ctl/.git /ctl/.git" in argv
 
 
@@ -163,7 +164,7 @@ def test_real_tmp_is_bound_rw_early():
     # still win on their paths even if a repo lives under /tmp).
     i_ro_floor = argv.index("/")          # first "/" after --ro-bind is the src
     i_tmp_bind = argv.index("/tmp")       # first "/tmp" after --bind is the src
-    i_wt_bind = argv.index("/ctl/.imp/worktrees/abc")  # worktree src
+    i_wt_bind = argv.index("/state/worktrees/abc")  # worktree src
     # The load-bearing invariant: /tmp must be bound BEFORE the git RO-remask, so a
     # repo whose .git lives under /tmp still has hooks/config remasked RO (the late
     # remask wins over the early /tmp bind). Assert directly against the remask, not
@@ -177,7 +178,7 @@ def test_real_tmp_is_bound_rw_early():
 def test_clearenv_and_setenv_allowlist():
     argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--clearenv" in argv
-    assert "--setenv IMP_PROJECT_ROOT /ctl/.imp/worktrees/abc" in argv
+    assert "--setenv IMP_PROJECT_ROOT /state/worktrees/abc" in argv
     assert "--setenv TMPDIR /tmp" in argv
 
 
@@ -217,8 +218,8 @@ def test_pythonpath_flows_through_build_sandbox_argv():
     # the sandboxed spawn must see it via --setenv.
     argv = build_sandbox_argv(
         "x", cwd="/wt", policy=_policy(),
-        engine_env={"PYTHONPATH": "/ctl/.imp/worktrees/abc/src"})
-    assert "--setenv PYTHONPATH /ctl/.imp/worktrees/abc/src" in " ".join(argv)
+        engine_env={"PYTHONPATH": "/state/worktrees/abc/src"})
+    assert "--setenv PYTHONPATH /state/worktrees/abc/src" in " ".join(argv)
 
 
 def test_no_pythonpath_setenv_when_engine_env_lacks_it():
@@ -243,21 +244,22 @@ def test_network_off_adds_unshare_net():
 
 
 def test_chdir_is_cwd():
-    argv = " ".join(build_sandbox_argv("x", cwd="/ctl/.imp/worktrees/abc/sub",
+    argv = " ".join(build_sandbox_argv("x", cwd="/state/worktrees/abc/sub",
                                        policy=_policy(), engine_env={}))
-    assert "--chdir /ctl/.imp/worktrees/abc/sub" in argv
+    assert "--chdir /state/worktrees/abc/sub" in argv
 
 
 def _layout(tmp_path):
     control = tmp_path / "ctl"
-    wt = control / ".imp" / "worktrees" / "abc"
+    control.mkdir()
+    wt = project_state_dir(control) / "worktrees" / "abc"
     wt.mkdir(parents=True)
     (control / ".git" / "hooks").mkdir(parents=True)
     (control / ".git" / "config").write_text("")
     wdir = control / ".git" / "worktrees" / "abc"
     wdir.mkdir(parents=True)
     (wdir / "config.worktree").write_text("")
-    return control, wt
+    return control, wt.resolve()
 
 
 def test_resolve_policy_active_when_enabled_and_available(tmp_path):
@@ -285,7 +287,7 @@ def test_resolve_policy_masks_worktrees_not_sibling_config(tmp_path):
     pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True,
-                         quest_dir=control / ".imp" / "quests" / "abc")
+                         quest_dir=project_state_dir(control) / "quests" / "abc")
     # The sibling config.worktree is NO LONGER enumerated into git_ro_remask...
     assert str(sib / "config.worktree") not in pol.git_ro_remask
     # ...it is hidden wholesale by the .git/worktrees tmpfs mask; the sibling is
@@ -300,7 +302,7 @@ def test_resolve_policy_masks_worktrees_and_reexposes_self(tmp_path):
     pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True,
-                         quest_dir=control / ".imp" / "quests" / "abc")
+                         quest_dir=project_state_dir(control) / "quests" / "abc")
     git = control / ".git"
     assert pol.git_worktrees_mask == str(git / "worktrees")
     assert pol.git_worktree_self == str(git / "worktrees" / "abc")
@@ -334,7 +336,7 @@ def test_resolve_policy_unmaterialized_draft_masks_worktrees_without_self(tmp_pa
     pol = resolve_policy(worktree=control, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True,
-                         quest_dir=control / ".imp" / "quests" / "abc")
+                         quest_dir=project_state_dir(control) / "quests" / "abc")
     git = control / ".git"
     assert pol.git_worktrees_mask == str(git / "worktrees")
     assert pol.git_worktree_self == ""
@@ -343,7 +345,7 @@ def test_resolve_policy_unmaterialized_draft_masks_worktrees_without_self(tmp_pa
 
 def test_prepare_spawn_policy_keeps_worktrees_mask_even_if_absent(tmp_path):
     # The mask + self re-expose are retained unconditionally by prepare_spawn_policy
-    # (like control_imp), NOT existence-gated like git_ro_remask, so the mask cannot
+    # (like state_mask), NOT existence-gated like git_ro_remask, so the mask cannot
     # silently drop mid-run. Contrast a vanished git_ro_remask entry, which IS
     # dropped — and git_ref_reexpose, which is re-created instead.
     gone = tmp_path / "nope" / ".git" / "worktrees"
@@ -676,20 +678,21 @@ def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
 
 def _fake_quest(tmp_path):
     control = tmp_path / "ctl"
-    wt = control / ".imp" / "worktrees" / "abc"
+    wt = project_state_dir(control) / "worktrees" / "abc"
     wt.mkdir(parents=True, exist_ok=True)
     (control / ".git").mkdir(parents=True, exist_ok=True)
     return _types.SimpleNamespace(
         project_root=wt, control_root=control, id="abc",
         handle="abc-slug", title="Abc Title",
-        quest_dir=control / ".imp" / "quests" / "abc",
+        quest_dir=project_state_dir(control) / "quests" / "abc",
         tmp_dir=Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")
 
 
-def test_fake_quest_home_roots_at_control_root(tmp_path):
+def test_fake_quest_home_roots_at_the_state_dir(tmp_path):
     quest = _fake_quest(tmp_path)
-    assert quest.quest_dir == quest.control_root / ".imp" / "quests" / "abc"
-    assert ".imp/worktrees" not in str(quest.quest_dir)
+    state = project_state_dir(quest.control_root)
+    assert quest.quest_dir == state / "quests" / "abc"
+    assert str(state / "worktrees") not in str(quest.quest_dir)
 
 
 def _fake_config(**over):
@@ -940,7 +943,7 @@ def test_home_layer_rw_binds_real_home_first():
     flat = " ".join(argv)
     assert "--bind /home/u /home/u" in flat
     i_home = argv.index("/home/u")                 # first "/home/u" is the bind source
-    i_wt = argv.index("/ctl/.imp/worktrees/abc")
+    i_wt = argv.index("/state/worktrees/abc")
     i_secret = argv.index("/home/u/.ssh")
     assert i_home < i_wt < i_secret
 
@@ -1111,7 +1114,7 @@ def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
 
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
-    home = control / ".imp" / "quests" / "abc"
+    home = project_state_dir(control) / "quests" / "abc"
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
@@ -1127,11 +1130,11 @@ def test_resolve_policy_binds_quest_home_rw(tmp_path):
 
 def test_resolve_policy_masks_own_steps_not_siblings(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     (quest_dir / "steps").mkdir(parents=True)
     (quest_dir / "artifacts").mkdir()
     (quest_dir / "events.jsonl").write_text("")
-    sib_dir = control / ".imp" / "quests" / "sib"
+    sib_dir = project_state_dir(control) / "quests" / "sib"
     (sib_dir / "steps").mkdir(parents=True)
     (sib_dir / "events.jsonl").write_text("")
     pol = resolve_policy(
@@ -1145,19 +1148,19 @@ def test_resolve_policy_masks_own_steps_not_siblings(tmp_path):
     assert str(sib_dir / "steps") not in pol.secret_dirs
     assert str(sib_dir / "events.jsonl") not in pol.secret_files
     assert not any("sib" in b for b, _ in pol.bind_plan())
-    # The sibling is nonetheless denied in-mirror by the whole-.imp tmpfs.
+    # The sibling is nonetheless denied in-mirror by the whole-state tmpfs.
     assert pol.allows_read(sib_dir / "steps" / "x") is False
     assert pol.allows_read(sib_dir / "events.jsonl") is False
 
 
 def test_resolve_policy_allows_read_reflects_steps_mask(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     (quest_dir / "steps").mkdir(parents=True)
     (quest_dir / "artifacts").mkdir()
     (quest_dir / "workflow").mkdir()
     (quest_dir / "events.jsonl").write_text("")
-    sib_dir = control / ".imp" / "quests" / "sib"
+    sib_dir = project_state_dir(control) / "quests" / "sib"
     (sib_dir / "steps").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1172,7 +1175,7 @@ def test_resolve_policy_allows_read_reflects_steps_mask(tmp_path):
 
 def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)
     # No steps/ subdirectory created — the existence-gate must produce no entry.
     pol = resolve_policy(
@@ -1185,10 +1188,10 @@ def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
 
 def test_resolve_policy_masks_own_events_not_siblings(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)
     (quest_dir / "events.jsonl").write_text('{"e":1}\n')
-    sib_dir = control / ".imp" / "quests" / "sib"
+    sib_dir = project_state_dir(control) / "quests" / "sib"
     sib_dir.mkdir(parents=True)
     (sib_dir / "events.jsonl").write_text("")
     pol = resolve_policy(
@@ -1203,7 +1206,7 @@ def test_resolve_policy_masks_own_events_not_siblings(tmp_path):
 
 def test_resolve_policy_events_mask_is_existence_gated(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)
     # No events.jsonl written — the existence-gate must produce no entry.
     pol = resolve_policy(
@@ -1227,17 +1230,17 @@ def test_readonly_overlay_denies_write_inside_allows_sibling():
 
 def test_readonly_overlay_whole_worktree_keeps_quest_home_writable():
     p = _policy(
-        worktree="/ctl/.imp/worktrees/abc",
-        quest_home="/ctl/.imp/quests/abc",
+        worktree="/state/worktrees/abc",
+        quest_home="/state/quests/abc",
         git_common_dir="/ctl/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
         extra_writable=(), secret_dirs=(), secret_files=(),
-        readonly_overlays=("/ctl/.imp/worktrees/abc",),
+        readonly_overlays=("/state/worktrees/abc",),
     )
     # Whole-worktree ro overlay: source is locked...
-    assert p.allows_write(Path("/ctl/.imp/worktrees/abc/src/x.py")) is False
+    assert p.allows_write(Path("/state/worktrees/abc/src/x.py")) is False
     # ...but quest_home lives OUTSIDE the worktree, so it stays rw.
-    assert p.allows_write(Path("/ctl/.imp/quests/abc/progress.md")) is True
+    assert p.allows_write(Path("/state/quests/abc/progress.md")) is True
 
 
 def test_writable_cache_wins_over_readonly_overlay():
@@ -1510,7 +1513,7 @@ def test_resolve_policy_defaults_disposable_tree_false(tmp_path):
 
 def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     (quest_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1522,7 +1525,7 @@ def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
 
 def test_resolve_policy_omits_workflow_overlay_when_snapshot_absent(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)   # change home exists, but no workflow/ subtree
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1545,7 +1548,7 @@ def test_resolve_policy_omits_workflow_overlay_when_quest_dir_unset(tmp_path):
 
 def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     (quest_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1558,7 +1561,7 @@ def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_pat
 
 def test_resolve_policy_workflow_ro_bind_emitted_after_quest_home(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     snapshot = quest_dir / "workflow"
     snapshot.mkdir(parents=True)
     pol = resolve_policy(
@@ -1576,7 +1579,7 @@ def test_resolve_policy_workflow_ro_bind_emitted_after_quest_home(tmp_path):
 
 def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)
     (quest_dir / "workflow").write_text("")   # a plain file, not a directory
     pol = resolve_policy(
@@ -1589,7 +1592,7 @@ def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_p
 
 def test_resolve_policy_archive_hidden_by_imp_tmpfs_not_enumerated(tmp_path):
     control, wt = _layout(tmp_path)
-    archive = control / ".imp" / "archive"
+    archive = project_state_dir(control) / "archive"
     (archive / "blobs").mkdir(parents=True)
     (archive / "index.db").write_text("")
     (archive / "records").mkdir()
@@ -1601,7 +1604,7 @@ def test_resolve_policy_archive_hidden_by_imp_tmpfs_not_enumerated(tmp_path):
     assert str(archive / "blobs") not in pol.secret_dirs
     assert str(archive / "index.db") not in pol.secret_files
     assert not any(b.startswith(str(archive)) for b, _ in pol.bind_plan())
-    # ...but the whole-.imp tmpfs denies every archive path in the read mirror,
+    # ...but the whole-state tmpfs denies every archive path in the read mirror,
     # including records/ (a capability nothing used).
     assert pol.allows_read(archive / "blobs" / "ab" / "cd") is False
     assert pol.allows_read(archive / "index.db") is False
@@ -1613,7 +1616,7 @@ def test_resolve_policy_sibling_appearance_and_removal_are_noop(tmp_path):
     # NOTHING about the current quest's resolved policy or emitted argv — the mask
     # race is gone by construction (no sibling enumeration).
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     (quest_dir / "steps").mkdir(parents=True)
     (quest_dir / "artifacts").mkdir()
     (quest_dir / "events.jsonl").write_text("")
@@ -1632,7 +1635,7 @@ def test_resolve_policy_sibling_appearance_and_removal_are_noop(tmp_path):
     argv1 = build_sandbox_argv("x", cwd=str(wt), policy=pol1, engine_env={})
 
     # Sibling APPEARS with its own steps/ + events.jsonl.
-    sib = control / ".imp" / "quests" / "other"
+    sib = project_state_dir(control) / "quests" / "other"
     (sib / "steps").mkdir(parents=True)
     (sib / "events.jsonl").write_text('{"e":1}\n')
     pol2 = _resolve()
@@ -1647,39 +1650,30 @@ def test_resolve_policy_sibling_appearance_and_removal_are_noop(tmp_path):
     assert pol3 == pol1
 
 
-def test_resolve_policy_sets_control_imp_tmpfs(tmp_path):
-    control, wt = _layout(tmp_path)
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
-    )
-    assert pol.control_imp == str(control / ".imp")
-    assert (str(control / ".imp"), "mask_dir") in pol.bind_plan()
-
-
 def test_bind_plan_imp_tmpfs_before_worktree_for_nested_worktree():
-    # Normal quest: worktree nested at .imp/worktrees/abc, quest home at
-    # .imp/quests/abc. The tmpfs must precede the worktree rw bind, and both the
+    # Normal quest: worktree nested at <state>/worktrees/abc, quest home at
+    # <state>/quests/abc. The tmpfs must precede the worktree rw bind, and both the
     # worktree and quest_home rebinds must follow it (last-wins re-exposes them).
-    p = _policy(control_imp="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
+    p = _policy(state_mask="/state", quest_home="/state/quests/abc")
     paths = [b for b, _ in p.bind_plan()]
-    i_tmpfs = paths.index("/ctl/.imp")
-    i_wt = paths.index("/ctl/.imp/worktrees/abc")
-    i_home = paths.index("/ctl/.imp/quests/abc")
+    i_tmpfs = paths.index("/state")
+    i_wt = paths.index("/state/worktrees/abc")
+    i_home = paths.index("/state/quests/abc")
     assert i_tmpfs < i_wt < i_home
     assert p.bind_plan()[i_tmpfs][1] == "mask_dir"
 
 
 def test_bind_plan_imp_tmpfs_after_worktree_for_draft():
-    # Draft/degenerate agent: worktree == control_root (an ANCESTOR of .imp). The
-    # control-root rw bind must precede the tmpfs (so the tmpfs re-masks .imp), the
-    # quest_home rebind must follow it, and the worktree is NOT re-exposed after it.
-    p = _policy(control_imp="/ctl/.imp", worktree="/ctl",
-                quest_home="/ctl/.imp/quests/abc")
+    # Draft/degenerate agent: worktree == control_root, outside the state mask. The
+    # control-root rw bind must precede the tmpfs (so the tmpfs masks the state
+    # dir), the quest_home rebind must follow it, and the worktree is NOT
+    # re-exposed after it.
+    p = _policy(state_mask="/state", worktree="/ctl",
+                quest_home="/state/quests/abc")
     paths = [b for b, _ in p.bind_plan()]
     i_wt = paths.index("/ctl")
-    i_tmpfs = paths.index("/ctl/.imp")
-    i_home = paths.index("/ctl/.imp/quests/abc")
+    i_tmpfs = paths.index("/state")
+    i_home = paths.index("/state/quests/abc")
     assert i_wt < i_tmpfs < i_home
     assert paths.count("/ctl") == 1   # worktree bound once, before the tmpfs only
 
@@ -1687,55 +1681,55 @@ def test_bind_plan_imp_tmpfs_after_worktree_for_draft():
 def test_argv_binds_match_bind_plan_with_imp_tmpfs():
     # Drift guard: the new tmpfs round-trips through the argv parser for BOTH the
     # nested and draft orderings.
-    p = _policy(control_imp="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
+    p = _policy(state_mask="/state", quest_home="/state/quests/abc")
     argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
-    assert ("/ctl/.imp", "mask_dir") in p.bind_plan()
+    assert ("/state", "mask_dir") in p.bind_plan()
 
-    pd = _policy(control_imp="/ctl/.imp", worktree="/ctl",
-                 quest_home="/ctl/.imp/quests/abc")
+    pd = _policy(state_mask="/state", worktree="/ctl",
+                 quest_home="/state/quests/abc")
     argvd = build_sandbox_argv("x", cwd="/ctl", policy=pd, engine_env={})
     assert _parse_argv_binds(argvd) == pd.bind_plan()
 
 
-def test_allows_read_draft_tmpfs_supersedes_control_root_bind():
-    # AC 5 / AC 9(b): in the draft case the control-root rw bind covers a sibling
-    # path, but the LATER .imp tmpfs supersedes it — siblings, archive, and config
-    # read as denied, while the re-exposed own home reads True and its own
-    # steps/events masks still deny.
+def test_allows_read_draft_tmpfs_masks_sibling_state():
+    # Draft case: the worktree IS the control root and the state mask sits outside
+    # it, so the tmpfs — emitted after the control-root rw bind — is what denies
+    # siblings, the archive and the local config, while the re-exposed own home
+    # reads True and its own steps/events masks still deny.
     p = _policy(
-        control_imp="/ctl/.imp", worktree="/ctl",
-        quest_home="/ctl/.imp/quests/abc",
-        secret_dirs=("/ctl/.imp/quests/abc/steps", "/run/user/1000"),
-        secret_files=("/ctl/.imp/quests/abc/events.jsonl",),
+        state_mask="/state", worktree="/ctl",
+        quest_home="/state/quests/abc",
+        secret_dirs=("/state/quests/abc/steps", "/run/user/1000"),
+        secret_files=("/state/quests/abc/events.jsonl",),
     )
-    assert p.allows_read(Path("/ctl/.imp/quests/other/events.jsonl")) is False
-    assert p.allows_read(Path("/ctl/.imp/archive/blobs/ab/cd")) is False
-    assert p.allows_read(Path("/ctl/.imp/config.yaml")) is False
-    assert p.allows_read(Path("/ctl/.imp/quests/abc/artifacts/spec/abc.md")) is True
-    assert p.allows_read(Path("/ctl/.imp/quests/abc/steps/x")) is False
-    assert p.allows_read(Path("/ctl/.imp/quests/abc/events.jsonl")) is False
-    assert p.allows_write(Path("/ctl/.imp/quests/other/x")) is False
-    assert p.allows_write(Path("/ctl/.imp/quests/abc/artifacts/x.md")) is True
+    assert p.allows_read(Path("/state/quests/other/events.jsonl")) is False
+    assert p.allows_read(Path("/state/archive/blobs/ab/cd")) is False
+    assert p.allows_read(Path("/state/config.yaml")) is False
+    assert p.allows_read(Path("/state/quests/abc/artifacts/spec/abc.md")) is True
+    assert p.allows_read(Path("/state/quests/abc/steps/x")) is False
+    assert p.allows_read(Path("/state/quests/abc/events.jsonl")) is False
+    assert p.allows_write(Path("/state/quests/other/x")) is False
+    assert p.allows_write(Path("/state/quests/abc/artifacts/x.md")) is True
 
 
 def test_allows_read_nested_tmpfs_masks_siblings_and_archive():
-    # Nested (normal) worktree: the .imp tmpfs precedes the worktree rw bind. A
+    # Nested (normal) worktree: the state tmpfs precedes the worktree rw bind. A
     # sibling home and the archive read as denied; the re-exposed own home and the
     # nested worktree read True, while the own steps/events masks still deny.
     p = _policy(
-        control_imp="/ctl/.imp", worktree="/ctl/.imp/worktrees/abc",
-        quest_home="/ctl/.imp/quests/abc",
-        secret_dirs=("/ctl/.imp/quests/abc/steps", "/run/user/1000"),
-        secret_files=("/ctl/.imp/quests/abc/events.jsonl",),
+        state_mask="/state", worktree="/state/worktrees/abc",
+        quest_home="/state/quests/abc",
+        secret_dirs=("/state/quests/abc/steps", "/run/user/1000"),
+        secret_files=("/state/quests/abc/events.jsonl",),
     )
-    assert p.allows_read(Path("/ctl/.imp/quests/other/events.jsonl")) is False
-    assert p.allows_read(Path("/ctl/.imp/archive/blobs/ab/cd")) is False
-    assert p.allows_read(Path("/ctl/.imp/config.yaml")) is False
-    assert p.allows_read(Path("/ctl/.imp/quests/abc/artifacts/spec/abc.md")) is True
-    assert p.allows_read(Path("/ctl/.imp/worktrees/abc/src/x.py")) is True
-    assert p.allows_read(Path("/ctl/.imp/quests/abc/steps/x")) is False
-    assert p.allows_read(Path("/ctl/.imp/quests/abc/events.jsonl")) is False
+    assert p.allows_read(Path("/state/quests/other/events.jsonl")) is False
+    assert p.allows_read(Path("/state/archive/blobs/ab/cd")) is False
+    assert p.allows_read(Path("/state/config.yaml")) is False
+    assert p.allows_read(Path("/state/quests/abc/artifacts/spec/abc.md")) is True
+    assert p.allows_read(Path("/state/worktrees/abc/src/x.py")) is True
+    assert p.allows_read(Path("/state/quests/abc/steps/x")) is False
+    assert p.allows_read(Path("/state/quests/abc/events.jsonl")) is False
 
 
 def test_resolve_policy_injects_session_socket_marker(tmp_path):
@@ -1805,7 +1799,7 @@ def test_build_setenv_prepends_shim_dir_no_existing_path():
 def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
     import os
     control, wt = _layout(tmp_path)
-    qd = control / ".imp" / "quests" / "abc"
+    qd = project_state_dir(control) / "quests" / "abc"
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
         engine_env_result={}, environ={"PATH": "/usr/bin"}, available=True,
@@ -1818,10 +1812,10 @@ def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
 
 def test_worktree_swap_flips_exposure_to_new_worktree(tmp_path):
     # Go-live refreshes the policy with a single dataclasses.replace of `worktree`.
-    # Swapping the draft's control-root worktree for the nested .imp/worktrees/<id>
+    # Swapping the draft's control-root worktree for the nested <state>/worktrees/<id>
     # path must flip exposure from draft-shaped to live-shaped.
-    control, wt = _layout(tmp_path)                 # wt = control/.imp/worktrees/abc
-    quest_dir = control / ".imp" / "quests" / "abc"
+    control, wt = _layout(tmp_path)                 # wt = <state>/worktrees/abc
+    quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)
     draft = resolve_policy(
         worktree=control, control_root=control, quest_id="abc",
@@ -1838,8 +1832,8 @@ def test_worktree_swap_flips_exposure_to_new_worktree(tmp_path):
     # (b) the quest home stays allowed after the swap.
     assert live.allows_read(quest_dir / "artifacts" / "spec.md") is True
     assert live.allows_write(quest_dir / "artifacts" / "spec.md") is True
-    # (c) a sibling elsewhere under .imp stays masked.
-    sibling = control / ".imp" / "worktrees" / "other" / "f.py"
+    # (c) a sibling elsewhere under the state dir stays masked.
+    sibling = project_state_dir(control) / "worktrees" / "other" / "f.py"
     assert live.allows_read(sibling) is False
 
 
@@ -1856,9 +1850,9 @@ def test_imp_output_env_passes_through_unrewritten():
     flat = " ".join(build_sandbox_argv(
         "x", cwd="/wt", policy=pol,
         engine_env={"IMP_OUTPUT": "/t/imp-1000/abc/imp-output-XY.json",
-                    "IMP_PROJECT_ROOT": "/ctl/.imp/worktrees/abc"}))
+                    "IMP_PROJECT_ROOT": "/state/worktrees/abc"}))
     assert "--setenv IMP_OUTPUT /t/imp-1000/abc/imp-output-XY.json" in flat
-    assert "--setenv IMP_PROJECT_ROOT /ctl/.imp/worktrees/abc" in flat
+    assert "--setenv IMP_PROJECT_ROOT /state/worktrees/abc" in flat
 
 
 def test_var_tmp_bind_source_and_position():
@@ -1870,7 +1864,7 @@ def test_var_tmp_bind_source_and_position():
     argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
     i_tmp = argv.index("/tmp")                    # first "/tmp" is the /tmp bind source
     i_vt = argv.index("/vt/imp-1000/abc")         # the /var/tmp bind source
-    i_wt = argv.index("/ctl/.imp/worktrees/abc")  # worktree src (default _policy worktree)
+    i_wt = argv.index("/state/worktrees/abc")  # worktree src (default _policy worktree)
     assert i_tmp < i_vt < i_wt
     bp = pol.bind_plan()
     assert bp[bp.index(("/tmp", "rw")) + 1] == ("/var/tmp", "rw")  # right after /tmp
@@ -2035,3 +2029,125 @@ def test_retired_overlay_symbols_are_gone():
     for name in ("OVERLAY_SETUP_FAILED_MARKER", "OVERLAY_SETUP_FAILED_CODE",
                  "OVERLAY_SETUP_FAILED_MESSAGE", "overlay_setup_failed"):
         assert not hasattr(sb, name), f"{name} should be deleted"
+
+
+def test_setenv_carries_the_state_dir_when_the_spawn_supplies_none():
+    # The bash tool passes no control root, so its live engine_env has no
+    # IMP_STATE_DIR — the value baked into policy.setenv at run start must still
+    # reach the sandbox argv.
+    p = _policy(setenv=(("PATH", "/usr/bin"),
+                        ("IMP_STATE_DIR", "/home/u/.imp/projects/widget")))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    i = argv.index("IMP_STATE_DIR")
+    assert argv[i - 1] == "--setenv"
+    assert argv[i + 1] == "/home/u/.imp/projects/widget"
+
+
+def test_resolve_policy_masks_the_whole_projects_dir(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    assert pol.state_mask == str((imp_home() / "projects").resolve())
+    assert (pol.state_mask, "mask_dir") in pol.bind_plan()
+
+
+def test_a_real_quests_worktree_is_nested_in_the_mask(tmp_path):
+    # bind_plan's ordering turns on this: a false `nested` emits the tmpfs AFTER
+    # the worktree rw bind and masks the agent's own worktree away. The mask is
+    # resolved, the worktree is resolved, so a symlinked home cannot split them.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt.resolve(), control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    paths = [b for b, _ in pol.bind_plan()]
+    assert paths.index(pol.state_mask) < paths.index(str(wt.resolve()))
+
+
+def test_a_symlinked_state_path_still_exposes_the_quests_own_home(
+    tmp_path, monkeypatch,
+):
+    # The mask and the quest home must be resolved consistently: if the mask
+    # resolves and the home does not, the policy mirror finds the mask covering
+    # and the re-expose not covering, denying the agent its own artifacts.
+    real = tmp_path / "real-home"
+    real.mkdir()
+    link = tmp_path / "linked-home"
+    link.symlink_to(real)
+    monkeypatch.setenv("IMP_HOME", str(link))
+    control, wt = _layout(tmp_path)
+    quest_dir = project_state_dir(control) / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt.resolve(), control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+        quest_dir=quest_dir,
+    )
+    artifact = quest_dir.resolve() / "artifacts" / "spec" / "abc.md"
+    assert pol.allows_read(artifact) is True
+    assert pol.allows_write(artifact) is True
+    assert pol.allows_read(
+        quest_dir.resolve().parent / "sibling" / "quest.json") is False
+
+
+def test_state_mask_hides_other_projects_and_spares_the_global_config(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = project_state_dir(control) / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+        quest_dir=quest_dir,
+    )
+    other = (imp_home() / "projects" / "other-repo" / "quests" / "zzz").resolve()
+    assert pol.allows_read(other) is False
+    assert pol.allows_read((imp_home() / "config.yaml").resolve()) is True
+    assert pol.allows_read(wt.resolve() / "src" / "x.py") is True
+    assert pol.allows_read(
+        quest_dir.resolve() / "artifacts" / "spec" / "abc.md") is True
+
+
+def test_state_mask_follows_the_override(tmp_path, monkeypatch):
+    control = tmp_path / "ctl"
+    (control / ".git" / "hooks").mkdir(parents=True)
+    (control / ".git" / "config").write_text("")
+    override = tmp_path / "elsewhere"
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    wt = (override / "worktrees" / "abc")
+    wt.mkdir(parents=True)
+    wt = wt.resolve()          # production always hands resolve_policy a resolved worktree
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    assert pol.state_mask == str(override.resolve())
+    paths = [b for b, _ in pol.bind_plan()]
+    # nested (AC 28's shape): mask first, worktree re-exposed on top
+    assert paths.index(pol.state_mask) < paths.index(str(wt))
+
+
+def test_draft_ordering_holds_under_the_override(tmp_path, monkeypatch):
+    # AC 32's second half: with the override set, the draft case (worktree ==
+    # control root, outside the mask) still binds the worktree BEFORE the tmpfs
+    # and re-exposes the quest home after it.
+    control = tmp_path / "ctl"
+    (control / ".git" / "hooks").mkdir(parents=True)
+    (control / ".git" / "config").write_text("")
+    override = tmp_path / "elsewhere"
+    quest_dir = override / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    pol = resolve_policy(
+        worktree=control.resolve(), control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+        quest_dir=quest_dir,
+    )
+    paths = [b for b, _ in pol.bind_plan()]
+    assert paths.index(str(control.resolve())) < paths.index(pol.state_mask) \
+        < paths.index(str(quest_dir.resolve()))
+    assert pol.allows_read(
+        override.resolve() / "quests" / "sibling" / "state.json") is False
+    assert pol.allows_read(
+        quest_dir.resolve() / "artifacts" / "spec" / "abc.md") is True

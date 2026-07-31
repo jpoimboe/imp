@@ -45,6 +45,7 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
 from imp.providers.claude_code import ClaudeCodeAgentRunner, _RunState, _wrap_one
 from imp.providers.openai import OpenAIAgentRunner
@@ -97,7 +98,7 @@ def _make_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentInv
     The AgentDef intentionally does NOT declare load_skill in its tools set —
     assertion 3 verifies it still appears in the step_context tools_schema.
     """
-    workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+    workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
     skills_dir = workflow_dir / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)
@@ -324,7 +325,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
         (ClaudeCode's dispatch path emits the event identically to anthropic/openai)
     """
     # Set up workflow_dir with skills/refactor.md
-    workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+    workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
     skills_dir = workflow_dir / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)
@@ -383,7 +384,7 @@ async def test_claude_code_load_skill_flush_orders_below_narration(
     flush_llm_group, so no agent_message event is emitted at all and the
     membership assertion fails; with the fix it is emitted, and before skill_load.
     """
-    workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+    workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
     skills_dir = workflow_dir / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)

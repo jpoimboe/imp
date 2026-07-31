@@ -6,7 +6,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
 
 ## Two tiers of durable state
 
-- **Per-quest records** — everything under `.imp/quests/<id>/`: the spec, plans,
+- **Per-quest records** — everything in the quest's home, which lives outside the
+  checkout at `~/.imp/projects/<slug>/quests/<id>/` (reached from the quest's own
+  worktree as `.imp/quests/<id>/`): the spec, plans,
   summary, the event log (the ordered provenance of what each agent and review
   did), and `state/`. Persistent and per-quest: a left draft resumes with
   `imp resume <id>`, and finished quests stay findable with `imp search`.
@@ -26,12 +28,13 @@ its own). Pair with `imp-knowledge` for the stable picture.
     gates run.
 
   Other config (providers, tiers, sandbox, `default-workflow`, …) layers across
-  `floor ← imp/config.yaml ← ~/.imp/config.yaml ← .imp/config.yaml`, and both
-  repo-side layers (`imp/config.yaml` and `.imp/config.yaml`) are read from the
-  **main checkout** — never from a quest's worktree, so a branch cannot change
+  `floor ← imp/config.yaml ← ~/.imp/config.yaml ← ~/.imp/projects/<slug>/config.yaml`,
+  and both checkout-keyed layers (`imp/config.yaml` and the local
+  `~/.imp/projects/<slug>/config.yaml`) are read from the **main checkout** —
+  never from a quest's worktree, so a branch cannot change
   the `test_cmd_*`, `pythonpath`, or gate timeouts its own verification is judged
   by. (`~/.imp/config.yaml` is machine-wide and the floor is provider code, so
-  neither is repo-side at all.) `imp/memory/` is the deliberate exception: it is
+  neither is keyed to a checkout at all.) `imp/memory/` is the deliberate exception: it is
   read from the quest's own worktree, so a memory quest can validate its own edit
   before it merges. `default-base` lives only in the project layer; `imp/memory/`
   files are not part of the merged config — change them by editing the markdown
@@ -40,7 +43,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
   file's comments and writes each setting to its own layer — the main checkout's
   `imp/config.yaml` for project settings like `default-workflow`,
   `~/.imp/config.yaml` for machine-wide ones like `theme`; `--project` /
-  `--global` overrides that for anything that is not project-only. `imp init`
+  `--global` / `--local` overrides that for anything that is not project-only
+  (`--local` writes this checkout's `~/.imp/projects/<slug>/config.yaml`, which
+  tops the stack and is never committed). `imp init`
   scaffolds the file — it detects the default workflow and base and confirms them
   on one screen (use `imp init --use-defaults` for a non-interactive CI setup).
 
@@ -52,7 +57,8 @@ its own). Pair with `imp-knowledge` for the stable picture.
   `imp config`.
 - **Merged effective config** — run `imp config` for the resolved providers,
   tiers, `default-workflow`, and test/lint commands, each tagged in brackets with
-  the layer it came from. Run from inside a worktree, it still reports the main
+  the layer it came from. Its first line, `project state:`, names this checkout's
+  state directory. Run from inside a worktree, it still reports the main
   checkout's settings. Mind its blind spots: it omits `imp/memory/` and
   `default-base` — read those from the files.
 
@@ -66,7 +72,8 @@ concatenates `all.md`, then `W/all.md`, then `W/<step>.md`. Step names only mean
 something inside a workflow, which is why per-step files nest under a
 `<workflow>/` directory keyed by the workflow's directory name. To get the real
 step names for a workflow, read its `workflow.yaml` (a running quest's snapshot
-is at `.imp/quests/<id>/workflow/workflow.yaml`) — never guess a step name.
+is at `.imp/quests/<id>/workflow/workflow.yaml` inside its worktree) — never
+guess a step name.
 
 imp validates the whole `imp/memory/` tree at load, before any agent runs: a
 directory must name a known workflow, and a `.md` under it must be `all` or a

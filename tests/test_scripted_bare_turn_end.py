@@ -9,6 +9,7 @@ from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.completion import build_continuation_fn
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.scripted import ScriptedAgentRunner
 
 
@@ -40,7 +41,7 @@ def _inv(tmp_path: Path, *, event_log, user_input_fn) -> AgentInvocation:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",
@@ -109,7 +110,7 @@ async def test_scripted_bare_turn_end_noop_without_continuation_fn(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",

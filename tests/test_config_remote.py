@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.errors import LoadError
+from imp.paths import project_state_dir
 from imp.providers.config import parse_config_layer
 from imp.providers.effective import load_effective_config
 
@@ -95,8 +96,7 @@ def test_effective_config_surfaces_remote_from_local_layer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))  # no global config
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text("remote:\n  driver: telegram\n")
+    (project_state_dir(tmp_path) / "config.yaml").write_text("remote:\n  driver: telegram\n")
     cfg = load_effective_config(control_root=tmp_path).config
     assert cfg.remote == {"driver": {"name": "telegram"}}
 

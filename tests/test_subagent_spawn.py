@@ -7,6 +7,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers import resolve
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
@@ -64,7 +65,7 @@ def _inv(provider, model, tmp_path):
         agent_def=_agent("rev"), provider_name=provider, model_name=model,
         system_prompt="", initial_messages=(),
         quest_context=QuestContext(
-            tmp_path, tmp_path, tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+            tmp_path, tmp_path, project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path,
         events_path=tmp_path / "e.jsonl")
 

@@ -19,6 +19,7 @@ from imp.cli.main import (
 )
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 _NOW = datetime(2026, 6, 20, 12, 0, 0, tzinfo=UTC)
@@ -31,7 +32,7 @@ def _term(monkeypatch, cols):
 
 def _inflight_home(control, cid, *, title, phase_label, step_label,
                    step="write", intent=None):
-    cdir = control / ".imp" / "quests" / cid
+    cdir = project_state_dir(control) / "quests" / cid
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": cid, "title": title, "base_branch": "main",

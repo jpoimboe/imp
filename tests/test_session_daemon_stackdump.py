@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
 from imp.remote.session import daemon
 
 
@@ -12,7 +13,7 @@ def test_main_installs_stack_dumper_at_quest_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[Path] = []
-    quest_dir = tmp_path / ".imp" / "quests" / "q"
+    quest_dir = project_state_dir(tmp_path) / "quests" / "q"
     monkeypatch.setattr(daemon, "warm_module_graph", lambda: None)
     monkeypatch.setattr(
         daemon.Quest, "load",

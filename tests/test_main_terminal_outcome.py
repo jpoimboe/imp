@@ -6,6 +6,7 @@ import pytest
 
 from imp.cli import main
 from imp.engine.executor import RunResult
+from imp.paths import project_state_dir
 
 
 class _Events:
@@ -22,6 +23,7 @@ class _Change:
     base_branch = "master"
     materialized = False                # the real render-seam value (draft never reloaded)
     state_dir = "/tmp/imp-test-state"   # never touched: State.load is patched
+    project_root = "/imp-state/worktrees/2026-06-12-run-x"
 
     def __init__(self, events: list[dict]) -> None:
         self._events = events
@@ -92,7 +94,7 @@ def test_emit_merge_blocked_conflict_body_order_note_before_git_said(capsys) -> 
     out = capsys.readouterr().out
     assert "merge blocked: imp/2026-06-12-run-x doesn't auto-merge into master" in out
     assert "imp can't resolve conflicts in this version" in out
-    assert "`.imp/worktrees/2026-06-12-run-x` can be removed" in out
+    assert "`/imp-state/worktrees/2026-06-12-run-x` can be removed" in out
     assert out.index("tried 3 passes") < out.index("git said: CONFLICT (content): f.txt")
     assert "resume: imp resume" not in out             # no standalone resume line
 
@@ -492,7 +494,7 @@ def test_handle_terminal_outcome_merged_event_yields_merged_true(
 ) -> None:
     # The worktree dir is still present at render time (the queued / cross-process
     # case). Pre-fix, the wt_path probe would read merged=False; the event wins now.
-    wt = tmp_path / ".imp" / "worktrees" / "2026-06-12-run-x"
+    wt = project_state_dir(tmp_path) / "worktrees" / "2026-06-12-run-x"
     wt.mkdir(parents=True)
     events = [
         {"type": "quest_merged", "payload": {"base": "master", "commit": "abc123"}},

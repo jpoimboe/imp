@@ -13,6 +13,7 @@ from imp.assets import bundled_workflow_dir
 from imp.cli import main as cli_main
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -336,6 +337,6 @@ def test_new_creates_unmaterialized_draft(
     quest = captured["change"]
     cid = quest.id  # type: ignore[union-attr]
     assert quest.materialized is False                                  # type: ignore[union-attr]
-    assert not (tmp_path / ".imp" / "worktrees" / cid).exists()          # no worktree
+    assert not (project_state_dir(tmp_path) / "worktrees" / cid).exists()          # no worktree
     assert _git(tmp_path, "branch", "--list", f"imp/{cid}").stdout.strip() == ""  # no branch
-    assert (tmp_path / ".imp" / "quests" / cid / "quest.json").exists()  # permanent home
+    assert (project_state_dir(tmp_path) / "quests" / cid / "quest.json").exists()  # permanent home

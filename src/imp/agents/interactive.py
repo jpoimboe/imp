@@ -190,7 +190,7 @@ async def run_interactive_agent(
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=project_root, quest_id=_SETUP_QUEST_ID,
-                   quest_title=title),
+                   quest_title=title, control_root=project_root),
     )
     try:
         policy = resolve_policy(

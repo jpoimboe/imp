@@ -11,10 +11,11 @@ from imp.agents.skills import SkillNameError, SkillNotFound
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.engine.state import JsonlEventLog
+from imp.paths import project_state_dir
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    wf = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+    wf = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
     (wf / "skills" / "user").mkdir(parents=True)
     (wf / "skills" / "refactor.md").write_text("# Refactor\ndo the thing\n")
     ctx = ToolContext(

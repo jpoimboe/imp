@@ -8,6 +8,7 @@ from imp.cli import main
 from imp.engine import archive
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 _NOW = datetime(2026, 6, 20, 12, 0, 0, tzinfo=UTC)
@@ -38,7 +39,7 @@ def test_detail_card_backlog_source(tmp_path: Path) -> None:
 
 
 def _live_change(control: Path, quest_id: str) -> None:
-    cdir = control / ".imp" / "quests" / quest_id
+    cdir = project_state_dir(control) / "quests" / quest_id
     cdir.mkdir(parents=True)
     (cdir / "state").mkdir()
     (cdir / "quest.json").write_text(
@@ -97,7 +98,7 @@ def _live_change_task_prompt(control: Path, quest_id: str) -> None:
     """A live change whose sole user_message is the composed task prompt (no
     opening_intent, no awaiting_user_input, no interject) -- the resumed-from-
     backlog shape whose card must show no prompt dump."""
-    cdir = control / ".imp" / "quests" / quest_id
+    cdir = project_state_dir(control) / "quests" / quest_id
     cdir.mkdir(parents=True)
     (cdir / "state").mkdir()
     (cdir / "quest.json").write_text(
@@ -166,7 +167,7 @@ def test_detail_card_live_source(tmp_path: Path) -> None:
 
 def test_detail_card_sources_phase_from_persisted_state(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-src01"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-src01"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-src01", "title": "Widget", "base_branch": "main",
@@ -193,7 +194,7 @@ def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> No
     import os
     import time
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-tsx001"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-tsx001"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-tsx001", "title": "Widget", "base_branch": "main",
@@ -223,7 +224,7 @@ def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> No
 
 def test_detail_card_shows_merge_commit_for_live_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mrg01"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-mrg01"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-mrg01", "title": "Widget", "base_branch": "main",
@@ -243,7 +244,7 @@ def test_detail_card_shows_merge_commit_for_live_quest(tmp_path: Path) -> None:
 
 def test_detail_card_omits_merge_commit_when_absent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mrg02"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-mrg02"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-mrg02", "title": "Widget", "base_branch": "main",
@@ -280,7 +281,7 @@ def test_quest_card_dims_summary_header(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     _live_change(tmp_path, "2026-06-20-dim02")
-    summary = (tmp_path / ".imp" / "quests" / "2026-06-20-dim02"
+    summary = (project_state_dir(tmp_path) / "quests" / "2026-06-20-dim02"
                / "artifacts" / "summary")
     summary.mkdir(parents=True)
     (summary / "2026-06-20-dim02.md").write_text("Shipped the widget.\n")
@@ -329,11 +330,11 @@ def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> No
 def test_detail_card_renders_parent_line(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     # Parent quest's live home supplies the resolved title.
-    phome = tmp_path / ".imp" / "quests" / "prnt09"
+    phome = project_state_dir(tmp_path) / "quests" / "prnt09"
     phome.mkdir(parents=True)
     (phome / "quest.json").write_text(json.dumps(
         {"id": "prnt09", "title": "Parent Q", "base_branch": "main"}))
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-chld09"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-chld09"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-chld09", "title": "Child", "base_branch": "main",
@@ -351,7 +352,7 @@ def test_detail_card_renders_parent_line(tmp_path: Path) -> None:
 
 def test_detail_card_omits_parent_line_when_absent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-nop09"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-nop09"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-nop09", "title": "No parent", "base_branch": "main",
@@ -381,18 +382,18 @@ def _archive_dep(control: Path, qid: str, title: str) -> None:
 def test_detail_card_reshapes_depends_on(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     # Live (unmerged) dep resolves its title from the live home.
-    lhome = tmp_path / ".imp" / "quests" / "livedp"
+    lhome = project_state_dir(tmp_path) / "quests" / "livedp"
     lhome.mkdir(parents=True)
     (lhome / "quest.json").write_text(json.dumps(
         {"id": "livedp", "title": "Live Dep", "base_branch": "main"}))
     # Merged (archived) dep resolves from the archive.
     _archive_dep(tmp_path, "mrgdp1", "Merged Dep")
     # Parent quest's live home supplies the resolved title.
-    phome = tmp_path / ".imp" / "quests" / "prntdp"
+    phome = project_state_dir(tmp_path) / "quests" / "prntdp"
     phome.mkdir(parents=True)
     (phome / "quest.json").write_text(json.dumps(
         {"id": "prntdp", "title": "Parent P", "base_branch": "main"}))
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-chd20"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-chd20"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-chd20", "title": "Child", "base_branch": "main",
@@ -486,7 +487,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
 
 def test_quest_card_shows_merged_for_merged_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mgd01"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-mgd01"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-mgd01", "title": "Widget", "base_branch": "main",
@@ -502,7 +503,7 @@ def test_quest_card_shows_merged_for_merged_quest(tmp_path: Path) -> None:
 
 def test_quest_card_shows_merged_for_completed_unmerged(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-cmp01"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-cmp01"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-cmp01", "title": "Widget", "base_branch": "main",
@@ -518,7 +519,7 @@ def test_quest_card_shows_merged_for_completed_unmerged(tmp_path: Path) -> None:
 
 def test_quest_json_status_is_merged_for_completed(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mgj01"
+    cdir = project_state_dir(tmp_path) / "quests" / "2026-06-20-mgj01"
     (cdir / "state").mkdir(parents=True)
     (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-mgj01", "title": "Widget", "base_branch": "main",

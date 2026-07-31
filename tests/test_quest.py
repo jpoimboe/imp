@@ -7,6 +7,7 @@ import pytest
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _branch_with_commit, _git, _init_repo, _seed_control
 
 
@@ -16,8 +17,7 @@ def _seed_control_without_workflow(root: Path) -> None:
     _init_repo(root)
     (root / "imp").mkdir()
     (root / "imp" / "config.yaml").write_text("default-workflow: default\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n  low: {anthropic: x}\n  medium: {anthropic: x}\n  high: {anthropic: x}\n"
     )
@@ -31,7 +31,7 @@ def test_create_quest_makes_worktree_and_state(tmp_path: Path) -> None:
                        quest_id="abc123", base_branch="main")
     assert ch.id == "abc123"
     assert ch.base_branch == "main"
-    wtpath = tmp_path / ".imp" / "worktrees" / "abc123"
+    wtpath = project_state_dir(tmp_path) / "worktrees" / "abc123"
     assert ch.project_root == wtpath
     assert (ch.quest_dir / "quest.json").exists()
     # create() does not take a snapshot; no workflow/ snapshot dir yet.
@@ -43,11 +43,11 @@ def test_create_quest_makes_worktree_and_state(tmp_path: Path) -> None:
     assert state.id == "abc123" and state.step == "s" and state.status == "new"
 
 
-def test_quest_home_lives_at_control_root_outside_worktree(tmp_path: Path) -> None:
+def test_quest_home_lives_in_the_state_dir_outside_worktree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="X", quest_id="hom123", base_branch="main")
-    assert ch.quest_dir == tmp_path / ".imp" / "quests" / "hom123"
-    # The physical home lives at the control root, OUTSIDE the worktree: the
+    assert ch.quest_dir == project_state_dir(tmp_path) / "quests" / "hom123"
+    # The physical home lives in the state dir, OUTSIDE the worktree: the
     # worktree holds only an id-scoped symlink pointer, not the real directory.
     assert (ch.project_root / ".imp" / "quests" / ch.id).is_symlink()
     assert (ch.quest_dir / "quest.json").exists()
@@ -88,7 +88,7 @@ def test_create_without_committed_workflow_resolves_bundled(tmp_path: Path) -> N
     ch = Quest.create(tmp_path, title="X", quest_id="bund01", base_branch="main")
     # No committed imp/workflows/imp -> the installed bundled workflow runs.
     assert ch.workflow_dir == bundled_workflow_dir("default")
-    assert (tmp_path / ".imp" / "worktrees" / "bund01").exists()
+    assert (project_state_dir(tmp_path) / "worktrees" / "bund01").exists()
 
 
 def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
@@ -114,9 +114,9 @@ def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
     with pytest.raises(LoadErrors):
         Quest.create(tmp_path, title="X", quest_id="badwf", base_branch="main")
     # The branch+worktree created before validation must be torn down.
-    assert not (tmp_path / ".imp" / "worktrees" / "badwf").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "badwf").exists()
     assert "imp/badwf" not in _git(tmp_path, "branch", "--list", "imp/badwf").stdout
-    assert not (tmp_path / ".imp" / "quests" / "badwf").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "badwf").exists()
 
 
 def test_workflow_dir_prefers_snapshot_when_present(tmp_path: Path) -> None:
@@ -136,7 +136,8 @@ def test_create_persists_project_root(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="X", quest_id="prr", base_branch="main")
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
-    assert meta["project_root"] == str((tmp_path / ".imp" / "worktrees" / "prr").resolve())
+    assert meta["project_root"] == str(
+        (project_state_dir(tmp_path) / "worktrees" / "prr").resolve())
 
 
 def test_load_reads_persisted_project_root(tmp_path: Path) -> None:
@@ -221,7 +222,7 @@ def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
     ch = Quest.create_draft(tmp_path, title="X", quest_id="drf1", base_branch="main")
     assert ch.materialized is False
     assert ch.project_root == tmp_path                       # the main checkout
-    assert not (tmp_path / ".imp" / "worktrees" / "drf1").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "drf1").exists()
     assert "imp/drf1" not in _git(tmp_path, "branch", "--list", "imp/drf1").stdout
     state = State.load(ch.quest_dir / "state")
     assert state.step == "s" and state.status == "new"   # seeded at the first step
@@ -249,7 +250,7 @@ def test_create_draft_without_committed_workflow_resolves_bundled(tmp_path: Path
     ch = Quest.create_draft(tmp_path, title="X", quest_id="drf3", base_branch="main")
     # No committed imp/workflows/imp -> the installed bundled workflow runs.
     assert ch.live_workflow_dir == bundled_workflow_dir("default")
-    assert (tmp_path / ".imp" / "quests" / "drf3").exists()
+    assert (project_state_dir(tmp_path) / "quests" / "drf3").exists()
 
 
 def test_create_draft_refuses_invalid_workflow_and_leaves_no_home(
@@ -268,7 +269,7 @@ def test_create_draft_refuses_invalid_workflow_and_leaves_no_home(
     _git(tmp_path, "commit", "-qm", "break tier")
     with pytest.raises(LoadErrors):
         Quest.create_draft(tmp_path, title="X", quest_id="drf4", base_branch="main")
-    assert not (tmp_path / ".imp" / "quests" / "drf4").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "drf4").exists()
 
 
 def test_create_refuses_invalid_memory_and_leaves_no_orphan(tmp_path: Path) -> None:
@@ -283,9 +284,9 @@ def test_create_refuses_invalid_memory_and_leaves_no_orphan(tmp_path: Path) -> N
 
     with pytest.raises(LoadError):
         Quest.create(tmp_path, title="X", quest_id="badmem1", base_branch="main")
-    assert not (tmp_path / ".imp" / "worktrees" / "badmem1").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "badmem1").exists()
     assert "imp/badmem1" not in _git(tmp_path, "branch", "--list", "imp/badmem1").stdout
-    assert not (tmp_path / ".imp" / "quests" / "badmem1").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "badmem1").exists()
 
 
 def test_create_draft_refuses_invalid_memory_and_leaves_no_home(tmp_path: Path) -> None:
@@ -300,7 +301,7 @@ def test_create_draft_refuses_invalid_memory_and_leaves_no_home(tmp_path: Path) 
 
     with pytest.raises(LoadError):
         Quest.create_draft(tmp_path, title="X", quest_id="badmem2", base_branch="main")
-    assert not (tmp_path / ".imp" / "quests" / "badmem2").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "badmem2").exists()
 
 
 def test_create_draft_refuses_bad_branch_and_leaves_no_home(tmp_path: Path) -> None:
@@ -311,14 +312,14 @@ def test_create_draft_refuses_bad_branch_and_leaves_no_home(tmp_path: Path) -> N
         Quest.create_draft(
             tmp_path, title="X", quest_id="drf5", base_branch="nonexistent-branch"
         )
-    assert not (tmp_path / ".imp" / "quests" / "drf5").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "drf5").exists()
 
 
 def test_materialize_forks_worktree_and_flips_root(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="X", quest_id="mz1", base_branch="main")
     head_changed = ch.materialize()
-    wt = tmp_path / ".imp" / "worktrees" / "mz1"
+    wt = project_state_dir(tmp_path) / "worktrees" / "mz1"
     assert wt.exists()
     assert "imp/mz1" in _git(tmp_path, "branch", "--list", "imp/mz1").stdout
     assert ch.project_root == wt and ch.materialized is True
@@ -463,7 +464,7 @@ def test_create_draft_unknown_workflow_rolls_back(tmp_path: Path) -> None:
     with pytest.raises(LoadError):
         Quest.create_draft(tmp_path, title="X", quest_id="dft002",
                              base_branch="main", workflow="bogus")
-    assert not (tmp_path / ".imp" / "quests" / "dft002").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "dft002").exists()
 
 
 def test_create_persists_and_resolves_workflow_override(tmp_path: Path) -> None:
@@ -488,7 +489,7 @@ def test_create_unknown_workflow_rolls_back(tmp_path: Path) -> None:
     with pytest.raises(LoadError):
         Quest.create(tmp_path, title="X", quest_id="crt002",
                       base_branch="main", workflow="bogus")
-    assert not (tmp_path / ".imp" / "quests" / "crt002").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "crt002").exists()
 
 
 def test_create_draft_records_origin_and_seed_opening(tmp_path: Path) -> None:
@@ -585,7 +586,7 @@ def test_materialize_raises_on_empty_title_and_creates_nothing(tmp_path: Path) -
         ch.materialize()
     # Nothing was created and the change stays un-materialized.
     assert ch.materialized is False
-    assert not (tmp_path / ".imp" / "worktrees" / "ttl1").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "ttl1").exists()
     assert "imp/ttl1" not in _git(tmp_path, "branch", "--list", "imp/ttl1").stdout
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["materialized"] is False
@@ -598,7 +599,7 @@ def test_materialize_untitled_then_named_recovery(tmp_path: Path) -> None:
         ch.materialize()
     ch.rename("Real title", log=ch.event_log())
     head_changed = ch.materialize()
-    wt = tmp_path / ".imp" / "worktrees" / "ttl2"
+    wt = project_state_dir(tmp_path) / "worktrees" / "ttl2"
     assert wt.exists()
     assert ch.materialized is True and ch.project_root == wt
     assert head_changed is False
@@ -679,7 +680,7 @@ def test_create_draft_defer_seed_survives_skew_workflow(tmp_path: Path) -> None:
     # backlog stub is recorded despite the broken on-disk workflow.
     ch = Quest.create_draft(
         tmp_path, title="X", quest_id="dfr2", base_branch="main", defer_seed=True)
-    assert (tmp_path / ".imp" / "quests" / "dfr2").exists()
+    assert (project_state_dir(tmp_path) / "quests" / "dfr2").exists()
     state = State.load(ch.state_dir)
     assert state.step is None
     assert state.status == "new"
@@ -690,7 +691,7 @@ def test_create_draft_eager_still_fails_fast_on_skew_workflow(tmp_path: Path) ->
     with pytest.raises(LoadError):
         Quest.create_draft(
             tmp_path, title="X", quest_id="dfr3", base_branch="main")
-    assert not (tmp_path / ".imp" / "quests" / "dfr3").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "dfr3").exists()
 
 
 def test_create_draft_persists_parent_id(tmp_path: Path) -> None:
@@ -754,7 +755,7 @@ def test_create_draft_persists_create_mode_chat(tmp_path: Path) -> None:
     Quest.create_draft(tmp_path, title="X", quest_id="cmode1",
                        base_branch="main", create_mode="chat")
     meta = json.loads(
-        (tmp_path / ".imp" / "quests" / "cmode1" / "quest.json").read_text())
+        (project_state_dir(tmp_path) / "quests" / "cmode1" / "quest.json").read_text())
     assert meta["create_mode"] == "chat"
     assert Quest.load(tmp_path, "cmode1").create_mode == "chat"
 
@@ -822,7 +823,7 @@ def test_materialize_forks_from_base_changed_on_disk(tmp_path: Path) -> None:
     head_changed = ch.materialize()
 
     assert _git(tmp_path, "rev-parse", "imp/mz10").stdout.strip() == release_tip
-    wt = tmp_path / ".imp" / "worktrees" / "mz10"
+    wt = project_state_dir(tmp_path) / "worktrees" / "mz10"
     assert (wt / "release-2.0.txt").exists()   # the file that exists only on the new base
     assert ch.base_branch == "release-2.0"
     meta = json.loads((ch.quest_dir / "quest.json").read_text())

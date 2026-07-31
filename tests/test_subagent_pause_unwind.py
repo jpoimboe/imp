@@ -13,6 +13,7 @@ from imp.agents.subagents import SubagentSuspended
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 
 
 @pytest.fixture
@@ -149,10 +150,9 @@ def _seed_single_step(root: Path) -> Quest:
     # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_cfg)
+    (project_state_dir(root) / "config.yaml").write_text(_cfg)
 
-    quest_dir = root / ".imp" / "quests" / "test-quest"
+    quest_dir = project_state_dir(root) / "quests" / "test-quest"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(

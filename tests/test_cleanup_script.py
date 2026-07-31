@@ -16,12 +16,14 @@ import os
 import subprocess
 from pathlib import Path
 
+from imp.paths import project_state_dir
+
 CLEANUP = Path("src/imp/assets/workflows/default/scripts/cleanup.sh").resolve()
 ID = "2026-06-20-cleanup-test"
 
 
 def _home(pr: Path) -> Path:
-    return pr.parent / ".imp" / "quests" / "x"
+    return project_state_dir(pr.parent) / "quests" / "x"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -43,7 +45,7 @@ def _init(pr: Path) -> None:
     _git(pr, "init", "-b", "main")
     _git(pr, "config", "user.email", "t@t")
     _git(pr, "config", "user.name", "t")
-    (pr / ".gitignore").write_text(".imp/\n")
+    (pr / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _git(pr, "add", ".gitignore")
     _git(pr, "commit", "-m", "gitignore .imp/")
 

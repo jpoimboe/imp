@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
+
 FIXTURES = Path(__file__).parent / "fixtures"
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
 
@@ -247,6 +249,24 @@ def _isolate_session_socket(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
 
 
+def clear_state_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop an inherited IMP_STATE_DIR — imp builds imp, so pytest runs as an agent
+    subprocess with the var injected, and every test would then share one state
+    directory instead of resolving under its own tmp_path."""
+    monkeypatch.delenv("IMP_STATE_DIR", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_state_dir(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    clear_state_dir(monkeypatch)
+    yield
+    # The startup migration pins the pre-migration path by writing os.environ
+    # directly; monkeypatch never saw that set and cannot undo it. Drop it here so
+    # it can't leak into the next test in this worker. monkeypatch's own undo runs
+    # after this teardown and still restores a genuinely inherited value.
+    os.environ.pop("IMP_STATE_DIR", None)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_quest_tmp_root(
     tmp_path_factory: pytest.TempPathFactory,
@@ -335,7 +355,6 @@ def _no_inprocess_setpgrp(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
     """An empty 'project' directory under tmp_path."""
-    (tmp_path / ".imp").mkdir()
     return tmp_path
 
 
@@ -361,12 +380,21 @@ def _stop_at_rebase_edit(root: Path) -> dict[str, str]:
     return env
 
 
+def _assert_outside_a_git_work_tree(path: Path) -> None:
+    """A startup migration's no-op guarantee rests on tmp_path not being a work
+    tree; a --basetemp inside the checkout would silently make the step real."""
+    from imp.engine.worktree import PreconditionError, find_control_root
+
+    with pytest.raises(PreconditionError):
+        find_control_root(path)
+
+
 def _init_repo(root: Path) -> None:
-    """A git repo with one commit on branch `main` and `.imp/` gitignored."""
+    """A git repo with one commit on branch `main`, ignoring imp's state dirs."""
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / ".gitignore").write_text(".imp/\n")
+    (root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     (root / "README.md").write_text("seed\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
@@ -389,7 +417,7 @@ def _seed_project(tmp_path: Path) -> None:
     imp new needs >=1 commit (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
     (Quest.create copies imp/workflows/imp; the settings layers are the control
-    root's imp/config.yaml + .imp/config.yaml — a quest worktree is never read).
+    root's imp/config.yaml + its state dir's config.yaml — a quest worktree is never read).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
     an extra gitignore commit.
@@ -437,7 +465,7 @@ def _seed_project(tmp_path: Path) -> None:
 
 def _seed_control(root: Path) -> None:
     """A git repo with committed imp/config.yaml marker + imp/workflows/imp
-    and a gitignored .imp/config.yaml local layer (read by load_effective_config)."""
+    and an out-of-tree config.yaml local layer (read by load_effective_config)."""
     _init_repo(root)
     src = root / "imp" / "workflows" / "imp"
     (src / "agents").mkdir(parents=True)
@@ -450,11 +478,10 @@ def _seed_control(root: Path) -> None:
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
-    # Config layers: committed marker + gitignored local layer.
+    # Config layers: committed marker + out-of-tree local layer.
     (root / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ndefault-base: main\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
+    (project_state_dir(root) / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n"
         "  low: {anthropic: x}\n"

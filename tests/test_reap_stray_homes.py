@@ -4,10 +4,11 @@ import json
 from pathlib import Path
 
 from imp.engine.archive.maintenance import reap_stray_homes
+from imp.paths import project_state_dir
 
 
 def _quests_root(control: Path) -> Path:
-    root = control / ".imp" / "quests"
+    root = project_state_dir(control) / "quests"
     root.mkdir(parents=True)
     return root
 

@@ -20,6 +20,20 @@ flowchart LR
 
 The four lanes off the executor (agents, scripts, git, log→render) are detailed below.
 
+### Where state lives
+
+A project's runtime state lives **outside** its checkout, in a per-project state directory: `~/.imp/projects/<slug>/` by default (`paths.py · project_state_dir()`). `<slug>` is the checkout's directory name, lowercased, with anything outside `[a-z0-9._-]` replaced by `-` and truncated to 64 characters; a `repo` marker file inside it names the checkout that claimed it, so a second checkout slugging to the same name claims `<slug>-2`. `$IMP_HOME` moves `~/.imp`; `$IMP_STATE_DIR` overrides the per-project path verbatim — no slug walk, no marker written — and `engine_env()` injects it into every agent subprocess, so resolution is identical inside the sandbox.
+
+| Under the state directory | Holds |
+|---|---|
+| `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, `artifacts/`, `progress.md`, and the `workflow/` snapshot |
+| `worktrees/<id>/` | the quest's git worktree, on branch `imp/<id>` |
+| `archive/` | completed quests: content-addressed blobs, immutable records, SQLite index |
+| `config.yaml` | the local config layer (`imp config set --local`) |
+| `remote-control.log`, `remote-control.pid` | the session daemon's files |
+
+The checkout holds no imp state. A quest **worktree** holds exactly one imp path — the symlink `.imp/quests/<id>` pointing at that quest's home — which is why an agent running in a worktree still addresses its home by the unchanged worktree-relative path, and why `.imp/` is still gitignored. An agent running in the main checkout (a draft, before go-live) has no worktree and no symlink, so it is given the home's absolute path instead.
+
 ### Zoom 1 — executor & step loop
 
 The loop loads the workflow once, then for each step dispatches by `kind`, evaluates the step's rules against the current `vars`, and routes. State is a derived cursor; the event log is the truth.
@@ -70,7 +84,7 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/quest/` (gitignored); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `minimal` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
+All git mechanics sit behind `worktree.py`. Worktrees are cut under the state directory (`worktrees/<id>/`), and spec/plan artifacts live in the quest home (`quests/<id>/artifacts/`, which the worktree reaches as `.imp/quests/<id>/artifacts/`); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under the state directory's `archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `minimal` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
 
 ```mermaid
 flowchart LR
@@ -78,7 +92,7 @@ flowchart LR
   WT --> MERGE["merge-to-base<br/>(RepoGitLock)"]
   WT --> RM["remove worktree<br/>(on completion)"]
   WT --> WIP[("refs/imp/artifacts/&lt;id&gt;<br/>spec · plan artifacts")]
-  RM -. "on completion" .-> ARC[("archive/__init__.py<br/>.imp/archive (blobs · record · index)<br/>events.jsonl")]
+  RM -. "on completion" .-> ARC[("archive/__init__.py<br/>~/.imp/projects/&lt;slug&gt;/archive (blobs · record · index)<br/>events.jsonl")]
   ADD --> REPO[("git repo")]
   MERGE --> REPO
 ```
@@ -109,7 +123,7 @@ flowchart LR
 | Providers | `providers/*.py`, `providers/resolve.py` | `resolve_run()` maps tiers→(provider, model) once per run; each provider implements the `AgentRunner` protocol. |
 | Agent drive / tools | `engine/agent_run.py`, `agents/runner.py`, `agents/tools/*` | Build `AgentInvocation`, consume the event stream, dispatch per-agent allowlisted tools (incl. synthesized `complete_step`, `wait_for_user`). |
 | Subagents | `agents/subagents.py`, `agents/dispatch.py` | `dispatch_task()` spawns child invocations with depth + parent-event threading. |
-| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-quest `refs/imp/artifacts/<id>` artifact ref; at completion the quest is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under `.imp/archive/`). |
+| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-quest `refs/imp/artifacts/<id>` artifact ref; at completion the quest is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under the state directory's `archive/`). |
 | Workflow assets | `assets/__init__.py` | Bundled workflows ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one. Workflow-agnostic front-door partials ship bundled under `assets/partials/` and are overlaid (local-first) into each quest's `workflow/partials/` at snapshot time, like skills. `imp init`'s setup agent is the one bundled agent that ships outside every workflow — `assets/init.md`, loaded via `bundled_assets_dir()`, so a project-local workflow cannot shadow setup. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
 | Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |
@@ -150,7 +164,7 @@ Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedbac
 
 ### Phase ① spec
 
-Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the quest → write the spec under `.imp/quest/artifacts/spec/` (the engine journals it to the quest's `refs/imp/artifacts/<id>` ref at the step boundary), verify the artifact is present on disk, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
+Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the quest → write the spec under the quest home's `artifacts/spec/` (the engine journals it to the quest's `refs/imp/artifacts/<id>` ref at the step boundary), verify the artifact is present on disk, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
 
 ```mermaid
 flowchart TD
@@ -268,13 +282,13 @@ flowchart TD
 
 ### Data files
 
-All four live under `.imp/quest/` (gitignored); spec/plan artifacts are journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
+These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. Spec/plan artifacts are journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
 
-| File | Written by | Read by |
+| File (relative to the quest home) | Written by | Read by |
 |---|---|---|
-| `.imp/quest/artifacts/spec/{slug}.md` | spec-writer | all phases |
-| `.imp/quest/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
-| `.imp/quest/progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
+| `artifacts/spec/{slug}.md` | spec-writer | all phases |
+| `artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
+| `progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
 
 ---
 

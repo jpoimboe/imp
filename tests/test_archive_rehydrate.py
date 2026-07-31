@@ -11,6 +11,7 @@ from imp.engine.archive import read as archive_read
 from imp.engine.executor import _resume_replays_transcript
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -19,10 +20,10 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     ch = Quest.create_draft(tmp_path, title="Conv", quest_id="draft", base_branch="main")
     orig_head = ch.orig_base_head
     archive_conversation(ch)  # drops the live home into the archive
-    assert not (tmp_path / ".imp" / "quests" / "draft").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "draft").exists()
 
     quest_dir = archive_read.rehydrate_quest(tmp_path, "draft")
-    assert quest_dir == tmp_path / ".imp" / "quests" / "draft"
+    assert quest_dir == project_state_dir(tmp_path) / "quests" / "draft"
 
     # The rehydrated home is a faithful, loadable Quest.
     loaded = Quest.load(tmp_path, "draft")

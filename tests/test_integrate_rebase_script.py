@@ -5,11 +5,13 @@ import os
 import subprocess
 from pathlib import Path
 
+from imp.paths import project_state_dir
+
 SCRIPT = Path("src/imp/assets/workflows/default/scripts/integrate-rebase.sh").resolve()
 
 
 def _home(project_root: Path) -> Path:
-    return project_root.parent / ".imp" / "quests" / "x"
+    return project_state_dir(project_root.parent) / "quests" / "x"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -36,7 +38,7 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
     _git(project_root, "init", "-b", "main")
     _git(project_root, "config", "user.email", "t@t")
     _git(project_root, "config", "user.name", "t")
-    (project_root / ".gitignore").write_text(".imp/\n")
+    (project_root / ".gitignore").write_text(".imp/\n.imp-isolated/\n")
     _git(project_root, "add", ".gitignore")
     _git(project_root, "commit", "-m", "gitignore")
     (project_root / "f.txt").write_text("base v1\n")

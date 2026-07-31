@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.config_cmd import layer_label, render_config, render_explain
+from imp.paths import display_path, project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.effective import FLOOR_SRC, load_effective_config
 from imp.providers.paths import global_config_path
@@ -37,7 +38,7 @@ def _block(lines: list[str], header: str) -> list[str]:
 def test_render_shows_floor_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     eff = _eff(tmp_path, monkeypatch)
     out = io.StringIO()
-    render_config(eff, out, color=False, show_all=True)
+    render_config(eff, out, state_dir=None, color=False, show_all=True)
     text = out.getvalue()
     assert "provider default" in text   # floor leaves attributed to provider code
     assert "high" in text and "opus" in text
@@ -49,7 +50,7 @@ def test_render_shows_test_cmd_unset_defaults(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     text = out.getvalue()
     lines = text.splitlines()
     fast_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_fast ")), None)
@@ -75,7 +76,7 @@ def test_render_shows_configured_test_cmds(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     text = out.getvalue()
     lines = text.splitlines()
     fast_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_fast ")), None)
@@ -99,7 +100,7 @@ def test_render_shows_disabled_test_cmds(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     text = out.getvalue()
     lines = text.splitlines()
     fast_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_fast ")), None)
@@ -128,7 +129,7 @@ def test_cli_authenticated_provider_skips_key_check(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     text = out.getvalue()
     assert "(CLI-authenticated)" in text
     assert "CLAUDE_CODE_API_KEY" not in text
@@ -139,7 +140,7 @@ def test_render_lists_available_drivers(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)            # no remote.driver configured
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     text = out.getvalue()
     assert "available drivers:" in text
     assert "telegram" in text
@@ -153,7 +154,7 @@ def test_config_default_lists_only_configured_provider_tiers(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)            # providers: [openai]
     out = io.StringIO()
-    render_config(eff, out, color=False)         # default: show_all=False
+    render_config(eff, out, state_dir=None, color=False)         # default: show_all=False
     text = out.getvalue()
     assert "openai" in text
     assert "anthropic" not in text               # non-configured vendor hidden
@@ -164,7 +165,7 @@ def test_config_all_lists_full_provider_matrix(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)
     out = io.StringIO()
-    render_config(eff, out, color=False, show_all=True)
+    render_config(eff, out, state_dir=None, color=False, show_all=True)
     text = out.getvalue()
     assert "openai" in text and "anthropic" in text
 
@@ -181,7 +182,7 @@ def test_config_default_shows_full_matrix_when_no_providers_configured(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
     out = io.StringIO()
-    render_config(eff, out, color=False)              # show_all=False (default)
+    render_config(eff, out, state_dir=None, color=False)              # show_all=False (default)
     text = out.getvalue()
     assert "anthropic" in text
     assert "openai" in text
@@ -194,11 +195,10 @@ def test_render_marks_enabled_driver(
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text("providers: [openai]\n")
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text("remote:\n  driver: telegram\n")
+    (project_state_dir(tmp_path) / "config.yaml").write_text("remote:\n  driver: telegram\n")
     eff = load_effective_config(control_root=tmp_path)
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     assert "telegram" in out.getvalue()
     assert "(enabled)" in out.getvalue()         # the configured driver's state marker
 
@@ -290,7 +290,7 @@ def test_render_shows_configured_pythonpath(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     line = next((ln.strip() for ln in out.getvalue().splitlines()
                  if ln.strip().startswith("pythonpath ")), None)
     assert line is not None and "src, lib" in line
@@ -308,7 +308,7 @@ def test_config_brackets_align_across_tiers_and_settings(
     monkeypatch.setenv("IMP_HOME", str(imp_home))
     eff = load_effective_config()
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     lines = out.getvalue().splitlines()
     tiers = _block(lines, "tiers:")
     settings = _block(lines, "settings:")
@@ -324,7 +324,7 @@ def test_render_shows_unset_pythonpath(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)  # config with no pythonpath
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     line = next((ln.strip() for ln in out.getvalue().splitlines()
                  if ln.strip().startswith("pythonpath ")), None)
     assert line is not None and "(unset)" in line
@@ -364,7 +364,7 @@ def test_config_never_elides_a_provenance_path(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)   # global config at <IMP_HOME>/config.yaml
     out = io.StringIO()
-    render_config(eff, out, color=False, show_all=True)
+    render_config(eff, out, state_dir=None, color=False, show_all=True)
     text = out.getvalue()
     assert "…/" not in text                     # the two-segment elision is gone
     theme_line = next(ln for ln in text.splitlines()
@@ -384,7 +384,7 @@ def test_settings_block_leads_with_default_workflow(
     (proj / "imp" / "config.yaml").write_text("default-workflow: mine\n")
     eff = load_effective_config(control_root=proj)
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, state_dir=None, color=False)
     settings = _block(out.getvalue().splitlines(), "settings:")
     assert settings[0].split()[0] == "default-workflow"
     assert "mine" in settings[0]
@@ -396,11 +396,38 @@ def test_config_dims_tiers_block_provenance_when_color(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)   # providers: [openai]
     out = io.StringIO()
-    render_config(eff, out, color=True, show_all=True)
+    render_config(eff, out, state_dir=None, color=True, show_all=True)
     tier_line = next(ln for ln in out.getvalue().splitlines()
                      if ln.lstrip().startswith("high openai"))
     assert "\x1b[2m[" in tier_line
     assert tier_line.rstrip().endswith("\x1b[0m")   # dim closed with a reset
+
+
+def test_layer_label_renders_the_four_layers_distinctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under a default $IMP_HOME the local layer must not collapse onto the
+    project layer's `<parent>/<name>` form (spec AC 40a)."""
+    home = tmp_path / "home"
+    repo = home / "repo"
+    repo.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("IMP_HOME", raising=False)
+
+    labels = [
+        layer_label(FLOOR_SRC.file),
+        layer_label(repo / "imp" / "config.yaml"),
+        layer_label(global_config_path()),
+        layer_label(project_state_dir(repo) / "config.yaml"),
+    ]
+
+    assert labels == [
+        "provider default",
+        "imp/config.yaml",
+        "~/.imp/config.yaml",
+        "~/.imp/projects/repo/config.yaml",
+    ]
+    assert len(set(labels)) == 4
 
 
 def test_config_dims_settings_block_provenance_when_color(
@@ -408,7 +435,7 @@ def test_config_dims_settings_block_provenance_when_color(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)   # theme: light is a user-set leaf
     out = io.StringIO()
-    render_config(eff, out, color=True)
+    render_config(eff, out, state_dir=None, color=True)
     theme_line = next(ln for ln in out.getvalue().splitlines()
                       if ln.lstrip().startswith("theme "))
     assert "\x1b[2m[" in theme_line
@@ -419,7 +446,7 @@ def test_config_leaves_marks_and_values_plain_when_color(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)
     out = io.StringIO()
-    render_config(eff, out, color=True)
+    render_config(eff, out, state_dir=None, color=True)
     lines = out.getvalue().splitlines()
     mark_line = next(ln for ln in lines if "✓" in ln or "✗" in ln)
     assert "\x1b[" not in mark_line      # provider-key marks carry no SGR
@@ -433,6 +460,33 @@ def test_config_no_color_is_byte_clean(
 ) -> None:
     eff = _eff(tmp_path, monkeypatch)
     out = io.StringIO()
-    render_config(eff, out, color=False, show_all=True)
+    render_config(eff, out, state_dir=None, color=False, show_all=True)
     assert "\x1b[" not in out.getvalue()   # piped/NO_COLOR output stays byte-clean
     assert "←" not in out.getvalue()
+
+
+def test_config_leads_with_the_project_state_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    state = tmp_path / "imphome" / "projects" / "repo"
+    out = io.StringIO()
+
+    render_config(eff, out, state_dir=state, color=False)
+
+    lines = out.getvalue().splitlines()
+    assert lines[0] == f"project state: {display_path(state)}"
+    assert lines[1] == ""
+    assert lines[2] == "tiers:"
+
+
+def test_config_omits_the_state_line_outside_a_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+
+    render_config(eff, out, state_dir=None, color=False)
+
+    assert out.getvalue().splitlines()[0] == "tiers:"
+    assert "project state:" not in out.getvalue()

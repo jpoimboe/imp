@@ -16,6 +16,7 @@ from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _git
 
 
@@ -97,10 +98,9 @@ def _seed_two_step_control(root: Path) -> None:
         "  medium: {anthropic: x}\n"
         "  high: {anthropic: x}\n"
     )
-    # Config layers: committed marker + gitignored local layer.
+    # Config layers: committed marker + state dir local layer.
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_cfg)
+    (project_state_dir(root) / "config.yaml").write_text(_cfg)
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
 
@@ -126,7 +126,7 @@ def test_run_quest_rename_keeps_id_and_path(
     assert reloaded.id == "ccc333"
     from imp.engine import worktree
     # The no-merge completion removes the worktree but keeps the imp/<id> branch.
-    assert not (tmp_path / ".imp" / "worktrees" / "ccc333").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "ccc333").exists()
     assert worktree.branch_exists(tmp_path, "imp/ccc333")
 
 

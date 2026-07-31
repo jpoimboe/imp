@@ -23,6 +23,7 @@ from imp.agents.runner import (
 from imp.engine.agent_run import drive_invocation
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.paths import project_state_dir
 from imp.providers.anthropic import AnthropicAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
@@ -56,7 +57,7 @@ def _inv(tmp_path: Path, tools, *, event_log=None, max_tool_calls=None,
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / transcript_dir,
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",

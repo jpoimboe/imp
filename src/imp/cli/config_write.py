@@ -26,6 +26,7 @@ from imp.cli.config_edit import (
 from imp.cli.config_keys import Layer, SettableKey, resolve_key, unknown_key_message
 from imp.engine._yaml import config_yaml_error
 from imp.engine.errors import LoadError
+from imp.paths import project_state_dir
 from imp.providers.config import (
     parse_config_layer,
     parse_default_base,
@@ -143,11 +144,13 @@ def _settable(key: str) -> SettableKey:
 def _target(key: SettableKey, scope: Layer | None,
             control_root: Path) -> tuple[Layer, Path]:
     layer: Layer = scope or key.home
-    if layer == "global":
+    if layer in ("global", "local"):
         if key.project_only:
             raise ConfigWriteError(
-                f"{key.dotted!r} is a project setting; drop --global")
-        return "global", global_config_path()
+                f"{key.dotted!r} is a project setting; drop --{layer}")
+        if layer == "global":
+            return "global", global_config_path()
+        return "local", project_state_dir(control_root) / "config.yaml"
     return "project", control_root / "imp" / "config.yaml"
 
 
@@ -160,9 +163,7 @@ def _require_project_file(target: Path, control_root: Path) -> None:
         f"no imp/config.yaml in {control_root} — run 'imp init' first")
 
 
-def _scratch_dir(layer: Layer, target: Path, control_root: Path) -> Path:
-    if layer == "project":
-        return control_root / ".imp" / f"config-verify-{os.getpid()}"
+def _scratch_dir(target: Path) -> Path:
     return target.parent / f".config-verify-{os.getpid()}"
 
 
@@ -172,10 +173,11 @@ def _refusal(target: Path, key: SettableKey) -> str:
 
 
 def _emit_shadow(key: SettableKey, layer: Layer, control_root: Path) -> None:
-    if key.project_only:
+    if key.project_only or layer == "local":
         return
     above = [global_config_path()] if layer == "project" else []
-    above.append(control_root / ".imp" / "config.yaml")
+    if (control_root / "imp" / "config.yaml").is_file():
+        above.append(project_state_dir(control_root) / "config.yaml")
     winner: Path | None = None
     effective: Any = None
     for src in above:
@@ -209,7 +211,7 @@ def run_set(*, key: str, value: str, scope: Layer | None,
                 f"invalid YAML in {target.name}: {config_yaml_error(err)}") from err
         # Verify even when the text is unchanged: the write is accepted only if
         # imp's own reader reports the value back at the claimed path.
-        with scratch_seam(_scratch_dir(layer, target, control_root),
+        with scratch_seam(_scratch_dir(target),
                           target.name) as scratch:
             if not verify(scratch, result.text, settable.read_path, parsed):
                 if not isinstance(parsed, str):
@@ -259,7 +261,7 @@ def run_unset(*, key: str, scope: Layer | None,
             _emit_line(f"{layer_label(target)}: {settable.dotted} "
                        "is not set (nothing to do)")
             return 0
-        with scratch_seam(_scratch_dir(layer, target, control_root),
+        with scratch_seam(_scratch_dir(target),
                           target.name) as scratch:
             verify_readable(scratch, result.text)
             land(scratch, target)

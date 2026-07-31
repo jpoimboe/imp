@@ -40,12 +40,15 @@ are two git trees you check out side by side.
 REPO=$(git rev-parse --show-toplevel)
 ID=2026-06-11-9k6zii                 # the Change id (see `imp list --all`)
 BR=imp/$ID                           # the Change's branch
-BASE=$(python3 -c "import json;print(json.load(open('$REPO/.imp/quests/$ID/quest.json'))['base_branch'])" 2>/dev/null || echo master)
+BASE=$(cd "$REPO" && imp show "$ID" --json 2>/dev/null \
+       | python3 -c "import json,sys;print(json.load(sys.stdin)['base_branch'] or 'master')" 2>/dev/null || echo master)
 
-# AFTER tree: the Change's live worktree if it still exists (in-flight), else a
-# fresh worktree at the branch tip (works for a merged Change too — the ref lives on).
-AFTER=$REPO/.imp/worktrees/$ID
-[ -d "$AFTER" ] || { AFTER=/tmp/showcase/after-tree; git worktree add -q "$AFTER" "$BR"; }
+# AFTER tree: the quest's live worktree if it still exists (in-flight — git knows
+# where it is, under ~/.imp/projects/<slug>/worktrees/), else a fresh worktree at
+# the branch tip (works for a merged quest too — the ref lives on).
+AFTER=$(git -C "$REPO" worktree list --porcelain \
+        | awk -v b="branch refs/heads/$BR" '/^worktree /{w=$2} $0==b{print w}')
+[ -n "$AFTER" ] && [ -d "$AFTER" ] || { AFTER=/tmp/showcase/after-tree; git worktree add -q "$AFTER" "$BR"; }
 
 # BEFORE tree: where the branch diverged from base — the code as it was.
 MB=$(git merge-base "$BASE" "$BR")

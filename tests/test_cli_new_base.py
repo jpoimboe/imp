@@ -17,6 +17,7 @@ from imp.cli.main import (
 )
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -92,7 +93,7 @@ def test_cmd_new_missing_default_base_exits_2_and_creates_no_draft(
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "quests").exists()  # no draft created
+    assert not (project_state_dir(tmp_path) / "quests").exists()  # no draft created
     assert "imp init" in capsys.readouterr().err
 
 
@@ -105,7 +106,7 @@ def test_cmd_new_nonexistent_default_base_exits_2_and_creates_no_draft(
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "quests").exists()  # no draft created
+    assert not (project_state_dir(tmp_path) / "quests").exists()  # no draft created
     assert "does not name an existing branch" in capsys.readouterr().err
 
 
@@ -177,7 +178,7 @@ def test_record_idea_uses_passed_base_not_current_branch(
         idea="my idea", opening=None, depends_on=None, workflow=None)
     rc = _record_idea(ns, tmp_path, "release/9")
     assert rc == 0
-    ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
+    ids = [p.name for p in (project_state_dir(tmp_path) / "quests").iterdir()]
     assert len(ids) == 1, ids
     quest = Quest.load(tmp_path, ids[0])
     assert quest.base_branch == "release/9"
@@ -191,7 +192,7 @@ def test_apply_new_backlog_records_quest(tmp_path: Path, monkeypatch) -> None:
         base=None, idea="Widget work", depends_on=["dep55"])
     assert rc == 0
     assert "recorded backlog quest" in msg
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
     assert quest.origin == "backlog"
@@ -207,7 +208,7 @@ def test_apply_new_draft_records_quest(tmp_path: Path, monkeypatch) -> None:
         base=None, idea=None, depends_on=None)
     assert rc == 0
     assert "recorded backlog quest" in msg
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
     assert quest.origin == "backlog"
     assert quest.title == "Thing"
@@ -242,7 +243,7 @@ def test_apply_new_backlog_defers_seed_and_records_parent(
         tmp_path, opening="brief", title=None, workflow=None, base=None,
         idea="Child work", depends_on=None, parent="mom7")
     assert rc == 0
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["parent"] == "mom7"
@@ -256,7 +257,7 @@ def test_apply_new_draft_defers_seed(tmp_path: Path, monkeypatch) -> None:
         tmp_path, opening="do it", title="Thing", workflow=None, base=None,
         idea=None, depends_on=None, parent="pdraft")
     assert rc == 0
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
     assert State.load(quest.quest_dir / "state").step is None
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
@@ -276,7 +277,7 @@ def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
         base=None, idea=None, depends_on=None, background=True, parent="mom3")
     assert rc == 0
     assert "started quest" in msg
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
     assert quest.origin == "draft"
     assert started["qid"] == quest.id
@@ -330,7 +331,7 @@ def test_record_idea_defers_seed(tmp_path: Path, monkeypatch) -> None:
         idea="my idea", opening=None, depends_on=None, workflow=None)
     rc = _record_idea(ns, tmp_path, "main")
     assert rc == 0
-    ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
+    ids = [p.name for p in (project_state_dir(tmp_path) / "quests").iterdir()]
     quest = Quest.load(tmp_path, ids[0])
     assert State.load(quest.quest_dir / "state").step is None
 

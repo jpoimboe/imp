@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.agents.tools.context import ToolContext
+from imp.paths import project_state_dir
 
 
 def _ctx(tmp_path: Path, agent_id: str = "step:plan/coder") -> ToolContext:
-    run = tmp_path / ".imp" / "quests" / "test-quest"
+    run = project_state_dir(tmp_path) / "quests" / "test-quest"
     run.mkdir(parents=True, exist_ok=True)
     return ToolContext(
         project_root=tmp_path,

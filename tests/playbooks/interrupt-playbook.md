@@ -182,16 +182,20 @@ A correct imp does **all** of:
 - **Which `imp`:** the installed `imp` on PATH (a current build off `master`, which carries
   the feature). State the commit you tested in the report.
 - **Where:** a fresh standalone `git clone` of this repo (created in §3) — **not** a
-  `git worktree`. Provider-forcing (§4) writes the **local** config layer `.imp/config.yaml`,
-  which imp reads from the **control root**; a linked worktree's `find_control_root` resolves
-  to the **main checkout**, so the override would pollute the shared main tree. A standalone
-  clone's control root is *itself*, so `$WT/.imp/config.yaml` both wins and stays isolated.
+  `git worktree`. Provider-forcing (§4) writes the **local** config layer, which imp keys to
+  the **control root** and keeps in that project's state directory
+  (`~/.imp/projects/<clone-name>/config.yaml`); a linked worktree's `find_control_root`
+  resolves to the **main checkout**, so the override would pollute the main tree's state
+  directory. A standalone clone's control root is *itself* and claims its own state
+  directory, so the override both wins and stays isolated.
   Every `imp new` / `imp resume` runs with cwd inside the clone, so all quests (branches,
-  nested worktrees, journals) are contained and discardable.
+  worktrees, journals) are contained and discardable — they live under
+  `~/.imp/projects/<clone-name>/`, not inside `$WT`.
 - **Config layout:** the `config-file-split` layout — a provider **code floor** (tier→model
   defaults) under three layers: committed `imp/config.yaml` (workflow/lint/test/vars, read
   from the worktree), global `~/.imp/config.yaml` (`providers`/`theme`, per machine), and
-  gitignored `.imp/config.yaml` (local, control root, highest precedence). Precedence
+  the local `~/.imp/projects/<clone-name>/config.yaml` (keyed to the control root, never
+  committed, highest precedence). Precedence
   (low→high): `floor < project < global < local` — operator-wins among the config layers.
 - **Provider:** exactly one per run — `claude_code` by default, or whichever single provider
   the operator names (`anthropic`, `openai`, or `codex`). That one provider is in scope for the
@@ -260,7 +264,7 @@ ls "$WT"/imp/config.yaml                # the committed project marker → confi
 (`git clone .` copies committed state at the current branch tip. If you need uncommitted local
 changes under test, commit them first or `rsync` them into `$WT` after cloning.)
 
-You force the provider via `"$WT"/.imp/config.yaml` (the gitignored local layer) in §4.
+You force the provider via the clone's local layer — `~/.imp/projects/<clone-name>/config.yaml` — in §4.
 
 ---
 
@@ -268,17 +272,20 @@ You force the provider via `"$WT"/.imp/config.yaml` (the gitignored local layer)
 
 imp runs the **first** provider in the resolved `providers:` whose env_check passes. Since
 `providers` is **global**-config-homed and precedence is operator-wins (`project < global <
-local`), the layer that forces a provider is **local** — `$WT/.imp/config.yaml` (gitignored,
-read from the control root). Because `$WT` is a standalone clone, its control root is `$WT`
-itself, so this file both **wins** (highest precedence) and **stays isolated**.
+local`), the layer that forces a provider is **local** — `~/.imp/projects/<clone-name>/config.yaml`,
+this project's state directory, keyed to the control root. Because `$WT` is a standalone clone,
+its control root is `$WT` itself and it claims its own state directory, so this file both
+**wins** (highest precedence) and **stays isolated**.
 
 Write the single-provider override (this run targets exactly one provider — `claude_code` by
 default; substitute another only if the operator named it). The `remote: {driver: null}` line
 keeps inherited channels off so a channel subprocess's stderr can't interleave with imp's
 streaming output:
 ```bash
-mkdir -p "$WT/.imp"
-cat > "$WT/.imp/config.yaml" <<'YAML'
+cd "$WT" && imp config | sed -n '1p'          # claims this clone's state dir; prints `project state: ~/.imp/projects/<clone-name>`
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # the same directory, absolute
+test -f "$STATE/repo"                         # the claim marker — missing means imp claimed a different slug
+cat > "$STATE/config.yaml" <<'YAML'
 providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
 theme: ansi                # fixed theme so snapshots render predictably
 remote:
@@ -291,16 +298,18 @@ floor** (current models, shipped with imp). Confirm the override won — and on 
 before testing:
 ```bash
 cd "$WT" && imp config                  # the `providers` row must resolve to the provider under test,
-                                        # its label reading `[.imp/config.yaml]`
+                                        # its label reading `[$STATE/config.yaml]` (shown as
+                                        # `[~/.imp/projects/<clone-name>/config.yaml]` when IMP_HOME is under $HOME, else absolute)
 cd "$WT" && imp config --explain high   # the high-tier model the forced provider will use
 ```
 `imp config` tags each leaf with its source layer in brackets. If the
-`providers` row reads `[~/.imp/config.yaml]`, your file landed at the wrong path (`$WT/imp/config.yaml`,
-not `$WT/.imp/config.yaml`) and the global layer silently won — fix it before recording anything.
+`providers` row names imp's global `config.yaml` (not `$STATE/config.yaml`), your file landed at the
+wrong path (`$WT/imp/config.yaml`, or a state directory other than the one `project state:` names)
+and the global layer silently won — fix it before recording anything.
 The `--explain` line shows the floor model **before** you spend a billable call.
 
 > Model names drift, but they live in the **code floor**, not this file. If a floor model 404s
-> / "unknown model"s at launch, add a single overriding leaf to `$WT/.imp/config.yaml`
+> / "unknown model"s at launch, add a single overriding leaf to `$STATE/config.yaml`
 > (e.g. `tiers: {high: {openai: <current>}}`) and **note the substitution** — it's not an
 > interrupt bug. codex refuses `*-codex` models, so any codex tier override must be a plain
 > model (e.g. `gpt-5.5`).
@@ -333,8 +342,9 @@ not reach imp.
 - `view(full=True)` → the whole run so far (scrolled-off history + current screen); the
   three-part leave block and the quest id live here.
 - `snapshot()` → PNG; use it to *see* the leave banner's color/layout when judging clarity.
-- **Daemon-death triage.** If a pause banner reads `ended unexpectedly — see
-  .imp/quests/<id>/daemon.stderr`, the per-quest session daemon died rather than pausing
+- **Daemon-death triage.** If a pause banner reads `crash: see
+  <state dir>/quests/<id>/daemon.stderr` (an absolute path under
+  `~/.imp/projects/<clone-name>/`), the per-quest session daemon died rather than pausing
   cleanly — read that stderr file before judging. A daemon death *caused by* an interrupt is a
   defect (record it); one from an unrelated crash is a separate bug, not an interrupt failure.
 
@@ -373,8 +383,9 @@ not reach imp.
 5. **Event-log check:** the quest's event log is at a deterministic path —
 
    ```bash
-   ev="$WT/.imp/quests/<id>/events.jsonl"
-   test -f "$ev" || ev=$(find "$WT" -path '*'"<id>"'*' -name 'events.jsonl' 2>/dev/null | head -1)  # fallback
+   STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"   # this clone's state dir (`imp config` prints it)
+   ev="$STATE/quests/<id>/events.jsonl"
+   test -f "$ev" || ev=$(find "$STATE" -path '*'"<id>"'*' -name 'events.jsonl' 2>/dev/null | head -1)  # fallback
    # The interrupt is recorded as a clean PAUSE, never an unknown error. How it is recorded
    # depends on regime: a MATERIALIZED quest writes a `workflow_paused`; a phase-0 draft leave
    # writes a `conversation_saved` instead — both carry the trigger in `interrupt_reason`.
@@ -390,13 +401,13 @@ not reach imp.
    > interrupt, never `category:"unknown"`* — holds regardless. Whether the direct-API providers
    > (`anthropic`/`openai`) emit an `error`/`interrupted` record is untested; treat its absence as
    > acceptable, not a failure.
-   (`quest_dir` is `<control_root>/.imp/quests/<id>` and `events_path` is `events.jsonl` within it. If
+   (`quest_dir` is `<state dir>/quests/<id>` and `events_path` is `events.jsonl` within it. If
    you still can't locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what
    it surfaces; note the limitation.)
 6. **Record the quest id** for resume + abandon. The authoritative source is
-   `bash: cd "$WT" && imp list` — its first column is the quest **id** (the
-   `.imp/worktrees/<id>` dir name), which is what the event path and `imp resume`/`imp abandon`
-   key on. The `paused` headline should print that same id; if it ever shows a slug or other
+   `bash: cd "$WT" && imp list` — its first column is the quest **id** (also the
+   `<state dir>/worktrees/<id>` dir name), which is what the event path and
+   `imp resume`/`imp abandon` key on. The `paused` headline should print that same id; if it ever shows a slug or other
    display name instead, that's itself a bug — record it and rely on `imp list` for the id.
 
 ### **`RESUME-AND-VERIFY(id)`**
@@ -525,6 +536,8 @@ with no artifact is the most likely failure of this convention.
 
 ```bash
 cd "$WT" && imp abandon <id>   # abandon any open quests in the clone (get <id> from §5.6 / imp list)
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
+[ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 rm -rf "$WT"
 git -C "$REPO" status --short  # only the report file should be new
 ```

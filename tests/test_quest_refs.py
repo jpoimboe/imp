@@ -5,11 +5,12 @@ from pathlib import Path
 
 from imp.engine import archive, quest_refs
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
 def _live_home(control: Path, qid: str, title: str) -> None:
-    home = control / ".imp" / "quests" / qid
+    home = project_state_dir(control) / "quests" / qid
     home.mkdir(parents=True, exist_ok=True)
     (home / "quest.json").write_text(json.dumps(
         {"id": qid, "title": title, "base_branch": "main"}))

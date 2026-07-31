@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -115,6 +116,9 @@ def rebuild_archive_index(control_root: Path, dry_run: bool) -> None:
     print("  [index] delete index.db and rebuild under the quests schema")
     if dry_run:
         return
+    # This script's whole subject is the in-repo .imp/ layout, so pin the state
+    # seam there — rebuild_index otherwise resolves the out-of-tree state dir.
+    os.environ["IMP_STATE_DIR"] = str(archive_dir.parent)
     from imp.engine.archive import rebuild_index
 
     (archive_dir / "index.db").unlink(missing_ok=True)

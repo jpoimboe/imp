@@ -32,6 +32,7 @@ from typing import Any
 
 from imp.engine.env import HEADLESS_ENV, quest_var_tmp_root
 from imp.engine.shim import imp_shim_dir
+from imp.paths import project_state_dir
 from imp.remote.session.discover import session_socket_path
 
 
@@ -65,8 +66,8 @@ class SandboxPolicy:
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
-    quest_home: str = ""                     # <control>/.imp/quests/<id> rw bind ("" → none)
-    control_imp: str = ""                    # <control>/.imp fail-closed tmpfs mask ("" → none)
+    quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
+    state_mask: str = ""                     # fail-closed tmpfs mask ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     disposable_tree: bool = False            # agent runs in a disposable git worktree
@@ -90,34 +91,33 @@ class SandboxPolicy:
         when quest_var_tmp_dir is set; empty → no /var/tmp bind, host /var/tmp stays
         on the read-only floor), and the secret masks unconditionally LAST.
 
-        The <control>/.imp tmpfs (control_imp) is a fail-closed mask over the whole
-        control tree; its position is worktree-relative and LOAD-BEARING. Normal
-        quest: the worktree is nested at .imp/worktrees/<id> (a DESCENDANT of .imp),
-        so the tmpfs precedes the worktree rw bind and last-wins re-exposes the
-        nested worktree on top. Draft/degenerate agent: worktree == control_root (an
-        ANCESTOR of .imp), so the control-root rw bind precedes the tmpfs — the tmpfs
-        re-masks .imp instead of being re-exposed by it — and the worktree is
-        deliberately NOT re-bound after it. In BOTH cases the quest_home rebind and
-        the own steps/events masks come AFTER the tmpfs. Invariant: after the whole
-        plan applies, the exposed set under <control>/.imp is EXACTLY the current
+        The state tmpfs (state_mask) is a fail-closed mask over every project's
+        state directory; its position is worktree-relative and LOAD-BEARING. Normal
+        quest: the worktree is nested at <state>/worktrees/<id> (a DESCENDANT of the
+        mask), so the tmpfs precedes the worktree rw bind and last-wins re-exposes the
+        nested worktree on top. Draft/degenerate agent: worktree == control_root (which
+        is NOT under the mask), so the control-root rw bind precedes the tmpfs and the
+        worktree is deliberately NOT re-bound after it. In BOTH cases the quest_home
+        rebind and the own steps/events masks come AFTER the tmpfs. Invariant: after the
+        whole plan applies, the exposed set under the mask is EXACTLY the current
         quest's own home (minus its own steps/events) plus the current worktree iff
-        the worktree is a descendant of .imp; everything else under .imp is masked.
+        the worktree is a descendant of the mask; everything else under it is masked.
         Mis-ordering buries a live quest's own bookkeeping (normal) or leaks every
         sibling (draft).
 
         The .git/worktrees mask (git_worktrees_mask) + self re-expose
         (git_worktree_self) are emitted AFTER git_ref_reexpose, the same last-wins
-        shape as control_imp: the tmpfs hides every sibling admin dir under
+        shape as state_mask: the tmpfs hides every sibling admin dir under
         .git/worktrees, then the self re-expose (emitted only for a materialized
         worktree) re-binds the current quest's own .git/worktrees/<self> on top so
         its HEAD/index/logs stay writable."""
-        imp_mask = [(self.control_imp, "mask_dir")] if self.control_imp else []
-        nested = bool(self.control_imp) and Path(self.worktree).is_relative_to(
-            Path(self.control_imp))
+        state_tmpfs = [(self.state_mask, "mask_dir")] if self.state_mask else []
+        nested = bool(self.state_mask) and Path(self.worktree).is_relative_to(
+            Path(self.state_mask))
         worktree_block = (
-            [*imp_mask, (self.worktree, "rw")] if nested
-            # draft: worktree is an ANCESTOR of .imp, so bind it BEFORE the tmpfs
-            else [(self.worktree, "rw"), *imp_mask])
+            [*state_tmpfs, (self.worktree, "rw")] if nested
+            # draft: worktree is OUTSIDE the mask, so bind it BEFORE the tmpfs
+            else [(self.worktree, "rw"), *state_tmpfs])
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
             ("/tmp", "rw"),
@@ -316,7 +316,7 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     branch inside the sandbox could not write its loose ref. The directory is
     imp's own and always safe to create.
 
-    After the fail-closed .imp allowlist, secret_dirs/secret_files name only
+    After the fail-closed state allowlist, secret_dirs/secret_files name only
     self-owned never-vanishing paths — the current quest's own steps/ +
     events.jsonl, the home secret dirs/files, and /run/user/$UID — so the prune
     over those two sets is effectively a no-op. Its remaining job is
@@ -403,7 +403,7 @@ def sandbox_available() -> bool:
 def _force_rmtree(path: Path) -> None:
     """rmtree that also clears the mode-000 `work/work` dir overlayfs leaves in
     its workdir (untraversable until chmod'd), so no overlay residue survives
-    under .imp/. Owner is the real uid, so the chmod always succeeds."""
+    under the state dir. Owner is the real uid, so the chmod always succeeds."""
     for root, dirs, _files in os.walk(path):
         for d in dirs:
             with contextlib.suppress(OSError):
@@ -416,7 +416,7 @@ def overlay_available(probe_base: Path, home: Path) -> bool:
     """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
     inside a user namespace succeeds using the agent's REAL home as lowerdir.
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
-    real dir under `.imp/`, NOT /tmp — some hosts refuse an overlay upperdir on
+    real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
     tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
     build_sandbox_argv uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
@@ -493,6 +493,20 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
     )
 
 
+def _state_mask(control_root: Path) -> Path:
+    """The fail-closed tmpfs root: every project's state under imp_home(), or the
+    pinned override directory itself. Created if absent — bwrap cannot mount a
+    tmpfs over a missing directory. Returned RESOLVED: bind_plan compares it
+    against the already-resolved worktree, and a symlinked $HOME would otherwise
+    make a real quest's worktree read as non-nested and mask it away."""
+    # os.environ, not resolve_policy's `environ` arg: the seam owns this variable
+    # and project_state_dir reads it the same way, so the two cannot disagree.
+    state = project_state_dir(control_root)
+    mask = state if os.environ.get("IMP_STATE_DIR") else state.parent
+    mask.mkdir(parents=True, exist_ok=True)
+    return mask.resolve()
+
+
 def resolve_policy(
     *, worktree: Path, control_root: Path, quest_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
@@ -515,6 +529,8 @@ def resolve_policy(
             "user/local config"
         )
 
+    if quest_dir is not None:
+        quest_dir = quest_dir.resolve()
     home = cfg.home or Path.home()
     uid = cfg.uid if cfg.uid is not None else os.getuid()
 
@@ -563,8 +579,8 @@ def resolve_policy(
     # present, never-churning): steps/ is an overlay-home mountpoint a raw walk
     # would stall on; events.jsonl is the unbounded footgun log whose sole in-
     # sandbox reader is the CLI (routed through the daemon store). Emitted last (via
-    # secret_dirs/secret_files) so they re-mask on top of the quest_home rebind. The
-    # <control>/.imp tmpfs (control_imp) hides every sibling and the archive for
+    # secret_dirs/secret_files) so they re-mask on top of the quest_home rebind.
+    # The state tmpfs (state_mask) hides every sibling and the archive for
     # free — no glob, no enumeration — so a sibling appearing or reaping mid-run
     # changes nothing: the mask TOCTOU race is gone by construction.
     if quest_dir is not None:
@@ -593,7 +609,7 @@ def resolve_policy(
         worktree=str(worktree),
         git_common_dir=str(git),
         quest_home=str(quest_dir) if quest_dir is not None else "",
-        control_imp=str(control_root / ".imp"),
+        state_mask=str(_state_mask(control_root)),
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         git_worktrees_mask=str(git / "worktrees"),

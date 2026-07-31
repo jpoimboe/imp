@@ -14,18 +14,19 @@ import imp.agents.tools.bash  # noqa: F401  (registers bash + bg builtins)
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from imp.paths import project_state_dir
 from tests._dac import dac_enforced
 
 
 def _ctx(tmp_path: Path, agent_id: str = "step:t/coder") -> ToolContext:
-    run_dir = tmp_path / ".imp" / "quests" / "test-quest"
+    run_dir = project_state_dir(tmp_path) / "quests" / "test-quest"
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(project_root=tmp_path,
                       events_path=run_dir / "events.jsonl", agent_id=agent_id,
                       background_enabled=True)
     ctx.quest_context = QuestContext(
         title="T", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow")
+        workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow")
     return ctx
 
 

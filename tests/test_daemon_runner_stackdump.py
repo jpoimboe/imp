@@ -7,6 +7,7 @@ from pathlib import Path
 import anyio
 import pytest
 
+from imp.paths import project_state_dir
 from imp.remote.daemon.runner import pid_path, run_daemon
 from tests.async_wait import wait_until
 from tests.conftest import _seed_control
@@ -55,4 +56,4 @@ async def test_run_daemon_installs_stack_dumper_beside_pidfile(
         await wait_until(lambda: pid_path(tmp_path).exists())
         shutdown.set()
 
-    assert calls == [tmp_path / ".imp" / "remote-control.stack-dump.txt"]
+    assert calls == [project_state_dir(tmp_path) / "remote-control.stack-dump.txt"]

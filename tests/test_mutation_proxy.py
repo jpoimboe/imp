@@ -12,6 +12,7 @@ import imp.remote.daemon.spawn as spawn_mod
 from imp.cli import main
 from imp.cli.mutation_proxy import build_session_handler, proxy_mutation, run_mutation
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _branch_with_commit, _seed_control
 
@@ -123,7 +124,7 @@ def test_run_mutation_new_records_backlog(tmp_path: Path) -> None:
         "idea": "From the agent", "depends_on": None})
     assert result["returncode"] == 0
     assert "recorded backlog quest" in result["message"]
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     assert Quest.load(tmp_path, quests[-1].name).title == "From the agent"
 
 
@@ -221,7 +222,7 @@ def test_run_mutation_new_records_parent(tmp_path: Path) -> None:
         "opening": "x", "title": None, "workflow": None, "base": None,
         "idea": "Child", "depends_on": None}, "mom99")
     assert result["returncode"] == 0
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     meta = json.loads((quests[-1] / "quest.json").read_text())
     assert meta["parent"] == "mom99"
 
@@ -249,7 +250,7 @@ async def test_build_session_handler_threads_parent_id(tmp_path: Path) -> None:
         "opening": "x", "title": None, "workflow": None, "base": None,
         "idea": "Child", "depends_on": None})
     assert result["returncode"] == 0
-    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     meta = json.loads((quests[-1] / "quest.json").read_text())
     assert meta["parent"] == "mom7"
 
@@ -288,7 +289,7 @@ def test_run_mutation_abandon_tears_down_target(tmp_path: Path) -> None:
     result = run_mutation(tmp_path, "abandon", {"token": "abn10"})
     assert result["returncode"] == 0
     assert "Abandoned" in result["message"]
-    assert not (tmp_path / ".imp" / "quests" / "2026-06-24-abn10").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "2026-06-24-abn10").exists()
 
 
 def test_run_mutation_abandon_no_match_returns_error(tmp_path: Path) -> None:
@@ -324,7 +325,7 @@ async def test_proxy_mutation_abandon_round_trips_over_socket(
         result = await anyio.to_thread.run_sync(
             proxy_mutation, "abandon", {"token": "abn50"})
         assert result["returncode"] == 0
-        assert not (tmp_path / ".imp" / "quests" / "2026-06-24-abn50").exists()
+        assert not (project_state_dir(tmp_path) / "quests" / "2026-06-24-abn50").exists()
 
         await session.close()
         tg.cancel_scope.cancel()

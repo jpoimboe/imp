@@ -9,6 +9,7 @@ import pytest
 from imp.assets import bundled_workflow_dir, is_bundled_workflow
 from imp.engine.errors import LoadError
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from imp.providers import config as config_module
 from imp.providers.config import parse_default_base
 from imp.providers.effective import resolve_default_workflow
@@ -54,7 +55,7 @@ def test_both_workflow_dirs_take_the_workflow_name_from_the_control_root(
     quest = Quest(
         id="2026-06-15-roots1", title="X", base_branch="main",
         control_root=control, project_root=worktree,
-        quest_dir=control / ".imp" / "quests" / "2026-06-15-roots1",
+        quest_dir=project_state_dir(control) / "quests" / "2026-06-15-roots1",
     )
     # Worktree dir root, control-root name. Under the old two-root read this was
     # bundled_workflow_dir("default") — the worktree naming its own workflow.
@@ -75,7 +76,7 @@ def test_change_create_tears_down_on_an_invalid_default_workflow(
     with pytest.raises(LoadError):
         Quest.create(tmp_path, title="X", quest_id="2026-06-15-tear01",
                      base_branch="main")
-    assert not (tmp_path / ".imp" / "quests" / "2026-06-15-tear01").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "2026-06-15-tear01").exists()
 
 
 def test_change_resolves_fork_workflow_dir(tmp_path: Path) -> None:
@@ -263,13 +264,12 @@ def test_resolve_default_workflow_with_no_root_reads_no_project_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """control_root=None is the quest-less subagent fallback (subagents.py):
-    floor + global only, so neither imp/config.yaml nor .imp/config.yaml under
+    floor + global only, so neither imp/config.yaml nor the state dir config under
     any tree is read."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp").mkdir(parents=True)
     (proj / "imp" / "config.yaml").write_text("default-workflow: fromproject\n")
-    (proj / ".imp").mkdir()
-    (proj / ".imp" / "config.yaml").write_text("default-workflow: fromlocal\n")
+    (project_state_dir(proj) / "config.yaml").write_text("default-workflow: fromlocal\n")
     assert resolve_default_workflow(control_root=None) == "default"
     assert resolve_default_workflow(control_root=proj) == "fromlocal"

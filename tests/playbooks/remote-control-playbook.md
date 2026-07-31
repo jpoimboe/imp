@@ -31,18 +31,25 @@ git clone "$REPO" "$WT"
 ls "$WT"/imp/config.yaml                      # confirms $WT is an imp project
 ```
 
-Force a single provider via the gitignored **local** layer (default `claude_code`; substitute
-another only if the operator names one):
+Force a single provider via the **local** layer — this clone's own state directory under
+`~/.imp/projects/`, outside the checkout (default `claude_code`; substitute another only if the
+operator names one):
 
 ```bash
-mkdir -p "$WT/.imp"
-cat > "$WT/.imp/config.yaml" <<'YAML'
+cd "$WT" && imp config | sed -n '1p'       # claims this clone's state dir; prints `project state: ~/.imp/projects/<clone-name>`
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
+test -f "$STATE/repo"                      # the claim marker — missing means imp claimed a different slug
+cat > "$STATE/config.yaml" <<'YAML'
 providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
 theme: ansi
 remote:
   driver:
     name: telegram
 YAML
+cd "$WT" && imp config      # the `providers` row must resolve to your provider, its label reading
+                            # `[$STATE/config.yaml]` (shown as `[~/.imp/projects/<clone-name>/config.yaml]`
+                            # when IMP_HOME is under $HOME, absolute otherwise). If it names imp's
+                            # global config.yaml instead, the write landed elsewhere; fix it before driving.
 ```
 
 Start the **fake Telegram harness** and point the daemon at it. Allowlist a chat id and a fake
@@ -184,6 +191,8 @@ all-green invariant summary, and an explicit "no defects observed" note.
 ```bash
 kill "$DAEMON_PID" "$FAKE_PID" 2>/dev/null
 cd "$WT" && imp list | grep . && imp abandon <id>   # skip if no open change
+STATE="${IMP_HOME:-$HOME/.imp}/projects/$(basename "$WT")"
+[ -d "$WT" ] && [ "$(cat "$STATE/repo" 2>/dev/null)" = "$(cd "$WT" && pwd -P)" ] && rm -rf "$STATE"   # this clone's state only
 rm -rf "$WT"
 git -C "$REPO" status --short   # only the new report file should appear
 ```

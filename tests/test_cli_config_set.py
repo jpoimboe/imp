@@ -9,6 +9,7 @@ import pytest
 from imp.cli.config_cmd import layer_label
 from imp.cli.config_write import read_back
 from imp.cli.main import _build_parser, main
+from imp.paths import display_path, project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from tests._init_config import write_real_init_config
 
@@ -116,7 +117,7 @@ def test_project_only_keys_reject_the_global_layer(
     assert capsys.readouterr().err == (
         "imp: 'default-base' is a project setting; drop --global\n")
 
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
     assert main(["config", "set", "default-base", "dev"]) == 0
     assert read_back(project / "imp" / "config.yaml", ("default-base",)) == "dev"
 
@@ -149,7 +150,7 @@ def test_unknown_settings_are_rejected_and_write_nothing(
         "imp: unknown setting 'facts.stack' — run 'imp config' to see the settable keys\n")
 
     assert (project / "imp" / "config.yaml").read_text() == before
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
 
 
 def test_missing_project_config_and_the_transition_guard(
@@ -188,7 +189,7 @@ def test_global_set_creates_the_file_while_unset_creates_nothing(
     assert capsys.readouterr().out == (
         f"{layer_label(imp_home / 'config.yaml')}: theme is not set "
         "(nothing to do)\n")
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
 
     assert main(["config", "set", "theme", "light"]) == 0
     assert (imp_home / "config.yaml").read_text() == "theme: light\n"
@@ -228,8 +229,6 @@ def test_invalid_value_reports_the_validator_message_alone(
     assert "config-verify" not in err
     assert not (imp_home / "config.yaml").exists()
 
-    assert not imp_home.exists()
-
     assert main(["config", "set", "test_cmd_fast_timeout", "abc"]) == 2
     assert capsys.readouterr().err == (
         "imp: 'test_cmd_fast_timeout' must be a positive integer "
@@ -240,31 +239,32 @@ def test_invalid_value_reports_the_validator_message_alone(
 def test_unset_notes_a_shadowing_layer(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (project / ".imp").mkdir(exist_ok=True)
-    (project / ".imp" / "config.yaml").write_text("test_cmd_fast: make local\n")
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("test_cmd_fast: make local\n")
 
     assert main(["config", "unset", "test_cmd_fast"]) == 0
 
     out = capsys.readouterr().out.splitlines()
     assert out[0] == 'imp/config.yaml: test_cmd_fast commented out (was "make test")'
     assert out[1] == (
-        "note: test_cmd_fast is also set in .imp/config.yaml, which takes "
+        f"note: test_cmd_fast is also set in "
+        f"{display_path(state / 'config.yaml')}, which takes "
         "precedence (effective: make local)")
 
 
 def test_shadow_note_names_the_layer_that_wins(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    (project / ".imp").mkdir(exist_ok=True)
-    (project / ".imp" / "config.yaml").write_text("theme: ansi\n")
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("theme: ansi\n")
 
     assert main(["config", "set", "--project", "theme", "dark"]) == 0
 
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "imp/config.yaml: theme: \"dark\" (new)"
     assert out[1] == (
-        "note: theme is also set in .imp/config.yaml, which takes precedence "
-        "(effective: ansi)")
+        f"note: theme is also set in {display_path(state / 'config.yaml')}, "
+        "which takes precedence (effective: ansi)")
 
 
 def test_table_routing_and_value_shapes(project: Path, imp_home: Path) -> None:
@@ -355,35 +355,122 @@ def test_a_malformed_target_file_reports_invalid_yaml(
     assert config.read_text() == "theme: dark\ntheme: light\n"
 
 
-def test_the_local_layer_is_not_writable(project: Path, imp_home: Path) -> None:
-    with pytest.raises(SystemExit) as excinfo:
-        main(["config", "set", "--local", "theme", "dark"])
-    assert excinfo.value.code == 2
+def test_local_set_creates_the_file_and_wins_the_stack(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)          # also creates imp_home
+    label = display_path(state / "config.yaml")
+    assert not (state / "config.yaml").exists()
+    # the project layer already sets test_cmd_fast to "make test"; seed the
+    # global layer with the same key so the render proves local beats both
+    (imp_home / "config.yaml").write_text("test_cmd_fast: make global\n")
+
+    assert main(["config", "set", "--local", "test_cmd_fast", "make local"]) == 0
+    assert capsys.readouterr().out == (
+        f'{label}: test_cmd_fast: "make local" (new)\n')
+    assert read_back(state / "config.yaml", ("test_cmd_fast",)) == "make local"
+    assert 'test_cmd_fast: "make test"' in (
+        project / "imp" / "config.yaml").read_text()
+    assert (imp_home / "config.yaml").read_text() == "test_cmd_fast: make global\n"
+
+    assert main(["config"]) == 0
+    line = next(ln for ln in capsys.readouterr().out.splitlines()
+                if ln.strip().startswith("test_cmd_fast "))
+    assert "make local" in line
+    assert line.rstrip().endswith(f"[{label}]")
+
+
+def test_local_set_creates_a_missing_state_dir_under_the_override(
+    project: Path, imp_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "elsewhere" / "state"
+    monkeypatch.setenv("IMP_STATE_DIR", str(state))
+
+    assert main(["config", "set", "--local", "theme", "dark"]) == 0
+
+    assert read_back(state / "config.yaml", ("theme",)) == "dark"
+    assert sorted(p.name for p in state.iterdir()) == ["config.yaml"]
+
+
+def test_local_unset_comments_the_key_out(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("theme: ansi\n")
+    label = display_path(state / "config.yaml")
+
+    assert main(["config", "unset", "--local", "theme"]) == 0
+
+    assert capsys.readouterr().out == (
+        f'{label}: theme commented out (was "ansi")\n')
+    assert "# theme: ansi" in (state / "config.yaml").read_text()
+    assert read_back(state / "config.yaml", ("theme",)) is None
+
+
+def test_local_unset_does_nothing_when_config_is_absent(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+    label = display_path(state / "config.yaml")
+
+    assert main(["config", "unset", "--local", "theme"]) == 0
+
+    assert capsys.readouterr().out == f"{label}: theme is not set (nothing to do)\n"
+    assert not (state / "config.yaml").exists()
+
+
+def test_project_only_keys_reject_the_local_layer(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = project_state_dir(project)
+
+    assert main(["config", "set", "--local", "default-base", "dev"]) == 2
+
+    assert capsys.readouterr().err == (
+        "imp: 'default-base' is a project setting; drop --local\n")
+    assert not (state / "config.yaml").exists()
+
+
+def test_the_three_scopes_are_mutually_exclusive(
+    project: Path, imp_home: Path,
+) -> None:
+    for pair in (("--project", "--local"), ("--global", "--local"),
+                 ("--project", "--global")):
+        with pytest.raises(SystemExit) as excinfo:
+            main(["config", "set", *pair, "theme", "dark"])
+        assert excinfo.value.code == 2
 
 
 def test_bare_config_and_explain_are_unchanged(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert main(["config"]) == 0
-    assert "settings:" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "settings:" in out
+    assert out.splitlines()[0] == (
+        f"project state: {display_path(project_state_dir(project))}")
+
     assert main(["config", "--explain", "high"]) == 0
-    assert "tier high:" in capsys.readouterr().out
+    explained = capsys.readouterr().out
+    assert explained.splitlines()[0] == "tier high:"
+    assert "project state:" not in explained
+
     assert main(["config", "--all"]) == 0
     assert "tiers:" in capsys.readouterr().out
 
 
-def test_rejected_global_set_leaves_no_imp_home_and_accepted_set_leaves_no_scratch(
+def test_rejected_global_set_writes_no_config_and_accepted_set_leaves_no_scratch(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert main(["config", "set", "--global", "theme", "purple"]) == 2
     assert capsys.readouterr().err == "imp: 'theme' must be 'dark', 'light', or 'ansi'\n"
-    assert not imp_home.exists()
+    assert not (imp_home / "config.yaml").exists()
 
     assert main(["config", "set", "--global", "theme", "light"]) == 0
     capsys.readouterr()
     assert imp_home.is_dir()
     assert (imp_home / "config.yaml").read_text() == "theme: light\n"
-    assert [p.name for p in imp_home.iterdir()] == ["config.yaml"]
+    assert sorted(p.name for p in imp_home.iterdir()) == ["config.yaml", "projects"]
 
 
 def _config_action_parser(name: str) -> argparse.ArgumentParser:
@@ -392,6 +479,25 @@ def _config_action_parser(name: str) -> argparse.ArgumentParser:
                   if isinstance(action, argparse._SubParsersAction))
     return next(action.choices[name] for action in config._actions
                 if isinstance(action, argparse._SubParsersAction))
+
+
+def test_a_local_write_has_nothing_above_it(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Local is the top layer; a --local write must not name itself — or any
+    lower layer — as a shadow (spec AC 39)."""
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("theme: light\n")
+    state = project_state_dir(project)
+    (state / "config.yaml").write_text("theme: ansi\n")
+    label = display_path(state / "config.yaml")
+
+    assert main(["config", "set", "--local", "theme", "dark"]) == 0
+    assert capsys.readouterr().out == f'{label}: theme: "dark" (was "ansi")\n'
+
+    assert main(["config", "unset", "--local", "theme"]) == 0
+    assert capsys.readouterr().out == (
+        f'{label}: theme commented out (was "dark")\n')
 
 
 def test_help_copy_matches_the_spec() -> None:
@@ -414,3 +520,5 @@ def test_help_copy_matches_the_spec() -> None:
              if action.option_strings}
     assert flags["--project"] == "Write to imp/config.yaml (this repo)."
     assert flags["--global"] == "Write to ~/.imp/config.yaml (this machine)."
+    assert flags["--local"] == (
+        "Write to ~/.imp/projects/<name>/config.yaml (this checkout).")

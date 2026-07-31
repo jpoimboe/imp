@@ -13,6 +13,7 @@ from imp.engine.archive.read import rehydrate_quest
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -41,7 +42,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     seeded_bytes = (tdir / "transcript.jsonl").read_bytes()
 
     archive_conversation(ch)
-    assert not (tmp_path / ".imp" / "quests" / "conv").exists()
+    assert not (project_state_dir(tmp_path) / "quests" / "conv").exists()
 
     quest_dir = rehydrate_quest(tmp_path, "conv")
     restored = quest_dir / "steps" / "p" / "s" / "transcript.jsonl"

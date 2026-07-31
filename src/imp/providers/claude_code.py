@@ -75,7 +75,6 @@ from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
     kill_process_group,
-    quest_home_path,
     request_bracketed,
     suspend_inactivity_watchdog,
 )
@@ -1188,7 +1187,7 @@ class ClaudeCodeSession(ObserveSession):
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.quest_context.quest_home),
+            quest_home=invocation.quest_context.quest_dir,
         )
         ctx.quest_context = invocation.quest_context
         ctx.quest_state = invocation.quest_state

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import _pause_lines
+from imp.paths import project_state_dir
 from tests._event_fixtures import ev
 
 
@@ -121,7 +122,7 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
 
     quest = Quest(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
-                    quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
+                    quest_dir=project_state_dir(tmp_path) / "quests" / "test-quest")
     name, title, token, _reason, _opening = _pause_facts(quest)
     assert name == "qzbscf"
     assert token == "qzbscf"
@@ -135,7 +136,7 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
     quest = Quest(id="qzbscf", title="Add version flag",
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
-                    quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
+                    quest_dir=project_state_dir(tmp_path) / "quests" / "test-quest")
     name, title, token, _reason, _opening = _pause_facts(quest)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
@@ -283,7 +284,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     from imp.cli.main import _pause_facts, _PauseInfo
     from imp.engine.quest import Quest
 
-    quest_dir = tmp_path / ".imp" / "quests" / "mona44"
+    quest_dir = project_state_dir(tmp_path) / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
@@ -301,7 +302,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     name, _title, token, reason, _opening = _pause_facts(quest)
     assert name == "mona44"
     assert token == "mona44"
-    assert reason == _PauseInfo("crash", "see .imp/quests/mona44/daemon.stderr")
+    assert reason == _PauseInfo("crash", f"see {quest_dir / 'daemon.stderr'}")
 
 
 def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
@@ -312,7 +313,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     from imp.cli.main import _pause_facts, _PauseInfo
     from imp.engine.quest import Quest
 
-    quest_dir = tmp_path / ".imp" / "quests" / "mona44"
+    quest_dir = project_state_dir(tmp_path) / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
     # Same resumed-without-pause STALE event shape as a crash...
     events = [
@@ -340,7 +341,7 @@ def test_pause_facts_stale_empty_stderr_renders_calm_interrupt(tmp_path: Path) -
     # daemon.stderr present but EMPTY (0 bytes): no crash traceback, so a clean
     # detach — the calm interrupt reason, no pointer (the empty-read path,
     # distinct from the missing-file OSError path).
-    quest_dir = tmp_path / ".imp" / "quests" / "mona44"
+    quest_dir = project_state_dir(tmp_path) / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
@@ -366,7 +367,7 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     # Event log that, WITHOUT a deliberate-leave signal, reads as STALE (a pause
     # followed by a resume) — the daemon-derived path would render the
     # unexpected-death banner. The stamped trigger must win instead.
-    quest_dir = tmp_path / ".imp" / "quests" / "krol99"
+    quest_dir = project_state_dir(tmp_path) / "quests" / "krol99"
     quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="implement"),
@@ -392,7 +393,7 @@ def test_pause_facts_returns_the_opening_prompt(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts, _PauseInfo
     from imp.engine.quest import Quest
 
-    quest_dir = tmp_path / ".imp" / "quests" / "opn11"
+    quest_dir = project_state_dir(tmp_path) / "quests" / "opn11"
     quest_dir.mkdir(parents=True)
     events = [
         ev("1", "user_message", subtype="intent",

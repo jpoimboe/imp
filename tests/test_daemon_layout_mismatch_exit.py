@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.quest import LAYOUT_VERSION
+from imp.paths import project_state_dir
 from imp.remote.session import daemon
 from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT
 from tests.conftest import _seed_control
@@ -14,7 +15,7 @@ from tests.conftest import _seed_control
 def _seed_downgraded_home(control: Path, cid: str) -> None:
     """A home stamped one version FORWARD of this engine (stored > engine): a
     genuine downgrade, which Quest.load's migrate() rejects with LayoutMismatch."""
-    quest_dir = control / ".imp" / "quests" / cid
+    quest_dir = project_state_dir(control) / "quests" / cid
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({
         "id": cid,

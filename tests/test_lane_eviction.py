@@ -7,6 +7,7 @@ from imp.engine import merge_queue as mq
 from imp.engine.executor import RunResult, _evict_if_holding, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -81,9 +82,8 @@ def _write_serialize_workflow(root: Path, touch_cmd: str) -> None:
         "          - {else: true, pause: true}\n"
     )
     # keep the script gate deterministic across environments
-    (root / ".imp" / "config.yaml").write_text(
-        (root / ".imp" / "config.yaml").read_text()
-        + "sandbox:\n  enabled: false\n")
+    cfg_path = project_state_dir(root) / "config.yaml"
+    cfg_path.write_text(cfg_path.read_text() + "sandbox:\n  enabled: false\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "serialize workflow")
 

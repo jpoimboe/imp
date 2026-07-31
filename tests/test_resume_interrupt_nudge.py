@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+from imp.paths import project_state_dir
 
 
 @pytest.fixture
@@ -119,7 +120,7 @@ async def _run_anthropic(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -215,7 +216,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -293,7 +294,7 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -384,7 +385,7 @@ async def _run_openai(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -490,7 +491,7 @@ async def test_claude_code_provider_retry_resume_journals_the_retry_note(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=inv_dir, events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log, coordinator=_Coord(),
         resume_should_continue=True, resume_cause="provider_retry")

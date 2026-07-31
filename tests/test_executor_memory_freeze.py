@@ -10,6 +10,7 @@ import pytest
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import State
+from imp.paths import project_state_dir
 from tests.test_executor import _make_quest, _register_invocation_capturing
 
 
@@ -41,8 +42,7 @@ def _seed(root: Path, *, memory: str | None = None):
     if memory is not None:
         (root / "imp" / "memory").mkdir(parents=True, exist_ok=True)
         (root / "imp" / "memory" / "all.md").write_text(memory)
-    (root / ".imp").mkdir(parents=True, exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_quest(root)
 
 

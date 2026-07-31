@@ -26,6 +26,7 @@ from prompt_toolkit.output import DummyOutput
 from imp.cli.prompt import Prompt
 from imp.cli.slash import _ask_or_exit, ask_line_with_slash
 from imp.engine.awaiting_user_input import AwaitingUserInput
+from imp.paths import project_state_dir
 
 
 @pytest.fixture
@@ -50,7 +51,7 @@ def _fake_quest(tmp_path: Path):
         def __init__(self) -> None:
             self.id = "abcd12"
             self.title = "Fake change"
-            self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
+            self.workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
             (self.workflow_dir / "skills").mkdir(parents=True)
             self._events = tmp_path / "events.jsonl"
 

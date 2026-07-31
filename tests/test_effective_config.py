@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.paths import project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.config import parse_config_layer
 from imp.providers.effective import (
@@ -55,12 +56,12 @@ def test_local_beats_global_beats_project(
     control = tmp_path / "control"
     (control / "imp").mkdir(parents=True)
     (control / "imp" / "config.yaml").write_text("theme: dark\n")
-    (control / ".imp").mkdir()
-    (control / ".imp" / "config.yaml").write_text("theme: ansi\n")
+    state = project_state_dir(control)
+    (state / "config.yaml").write_text("theme: ansi\n")
     eff = load_effective_config(control_root=control)
     assert eff.config.theme == "ansi"           # local wins
     assert eff.config.providers == ("openai",)  # from global
-    assert eff.provenance[("theme",)].file == control / ".imp" / "config.yaml"
+    assert eff.provenance[("theme",)].file == state / "config.yaml"
 
 
 def test_global_config_path_respects_imp_home(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,3 +170,39 @@ def test_no_parameter_can_aim_a_settings_load_at_a_worktree(tmp_path: Path) -> N
     with pytest.raises(TypeError, match="project_root"):
         resolve_default_workflow(  # type: ignore[call-arg]
             project_root=tmp_path, control_root=None)
+
+
+def test_local_layer_reads_from_the_state_dir_not_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    control = tmp_path / "control"
+    (control / "imp").mkdir(parents=True)
+    (control / "imp" / "config.yaml").write_text("theme: dark\n")
+    (control / ".imp").mkdir()
+    (control / ".imp" / "config.yaml").write_text("theme: ansi\n")
+    state = project_state_dir(control)
+    (state / "config.yaml").write_text("theme: light\n")
+    eff = load_effective_config(control_root=control)
+    assert eff.config.theme == "light"
+    assert eff.provenance[("theme",)].file == state / "config.yaml"
+
+
+def test_a_command_outside_a_project_claims_no_slug_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.main import main
+    from imp.engine import worktree
+
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.chdir(scratch)
+    # Assumes tmp_path is not inside a git work tree: under a --basetemp within
+    # the checkout, main()'s stack dumper resolves a control root and claims a
+    # slug before dispatch, which would look like a regression here. git walks
+    # UP, so this must probe the resolver, not just scratch/.git.
+    with pytest.raises(worktree.PreconditionError):
+        worktree.find_control_root(scratch)
+    main(["list"])
+    assert not (tmp_path / "imphome" / "projects").exists()

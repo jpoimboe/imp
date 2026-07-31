@@ -19,6 +19,7 @@ from imp.diagnostics import install_stack_dumper
 from imp.engine.archive import maintenance as archive_maintenance
 from imp.engine.errors import LayoutMismatch, LoadError
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
@@ -64,7 +65,7 @@ _LOG_NAMES = ("imp.daemon", "imp.remote")
 def _install_file_logging(
     control_root: Path, env: Mapping[str, str],
 ) -> list[logging.Handler]:
-    log_path = control_root / ".imp" / "remote-control.log"
+    log_path = project_state_dir(control_root) / "remote-control.log"
     level = logging.DEBUG if env.get("IMP_DEBUG") == "1" else logging.INFO
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +156,7 @@ def drain_responses(
 
 
 def pid_path(control_root: Path) -> Path:
-    return control_root / ".imp" / "remote-control.pid"
+    return project_state_dir(control_root) / "remote-control.pid"
 
 
 def write_pid(control_root: Path) -> None:
@@ -505,7 +506,7 @@ async def run_daemon(
         write_pid(control_root)
         if install_signals:
             install_stack_dumper(
-                control_root / ".imp" / "remote-control.stack-dump.txt")
+                project_state_dir(control_root) / "remote-control.stack-dump.txt")
         reaped = archive_maintenance.reap_archived_homes(control_root)
         _log.info("reaped %d archived-terminal quest home(s) at startup", reaped)
         strays = archive_maintenance.reap_stray_homes(control_root)

@@ -13,6 +13,7 @@ from imp.engine.executor import RunResult, _complete, _route_merge_and_exit_work
 from imp.engine.loader import load_workflow
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -69,12 +70,12 @@ def test_complete_finalizes_even_when_next_head_vanishes(tmp_path, monkeypatch) 
     assert state.merge_commit is not None                   # finalize path will run
 
     # Next head's records vanish in the pop->spawn window.
-    shutil.rmtree(tmp_path / ".imp" / "quests" / "bbb")
+    shutil.rmtree(project_state_dir(tmp_path) / "quests" / "bbb")
 
     result = _complete(a, state, log)                       # must NOT raise
 
     assert result == RunResult.COMPLETED
-    assert not (tmp_path / ".imp" / "worktrees" / "aaa").exists()
+    assert not (project_state_dir(tmp_path) / "worktrees" / "aaa").exists()
     from imp.engine import archive
     assert archive.records_root(tmp_path).joinpath("aaa.json").is_file()  # archived
     assert spawned == []                                    # vanished next head never spawned
@@ -235,7 +236,7 @@ def test_complete_without_merge_removes_worktree_keeps_branch(tmp_path, monkeypa
     mq.enqueue_if_absent(tmp_path, "feat", "main")
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
 
-    wt = tmp_path / ".imp" / "worktrees" / "feat"
+    wt = project_state_dir(tmp_path) / "worktrees" / "feat"
     assert wt.exists()  # falsifiable: worktree present pre-finalize
     assert ch.project_root == wt                          # ...and project_root points into it
 

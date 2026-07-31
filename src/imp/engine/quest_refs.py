@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from imp.engine.archive import read as archive_read
+from imp.paths import project_state_dir
 
 if TYPE_CHECKING:
     from imp.engine.quest import Quest
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 def _title(control_root: Path, quest_id: str) -> str:
     """The quest's current title: live home, then archive, then the id itself as a fallback."""
-    home = control_root / ".imp" / "quests" / quest_id / "quest.json"
+    home = project_state_dir(control_root) / "quests" / quest_id / "quest.json"
     if home.exists():
         try:
             return str(json.loads(home.read_bytes())["title"])

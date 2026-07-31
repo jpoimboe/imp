@@ -258,10 +258,6 @@ async def request_bracketed(
                 await aclose()
 
 
-def quest_home_path(quest_home: str | None) -> Path | None:
-    return Path(quest_home) if quest_home else None
-
-
 def _supports_killpg() -> bool:
     # start_new_session (os.setsid) gives the child pgid == pid, so os.killpg can
     # target the whole tree without os.getpgid (which would add a second
