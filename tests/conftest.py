@@ -252,21 +252,10 @@ def _isolate_session_socket(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
 
 
-def clear_state_dir(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop an inherited IMP_STATE_DIR — imp builds imp, so pytest runs as an agent
-    subprocess with the var injected, and every test would then share one state
-    directory instead of resolving under its own tmp_path."""
-    monkeypatch.delenv("IMP_STATE_DIR", raising=False)
-
-
 @pytest.fixture(autouse=True)
-def _isolate_state_dir(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
-    clear_state_dir(monkeypatch)
+def _isolate_state_dir() -> Generator[None, None, None]:
     yield
-    # The startup migration pins the pre-migration path by writing os.environ
-    # directly; monkeypatch never saw that set and cannot undo it. Drop it here so
-    # it can't leak into the next test in this worker. monkeypatch's own undo runs
-    # after this teardown and still restores a genuinely inherited value.
+    # The startup migration writes os.environ directly; pop it so it can't leak forward.
     os.environ.pop("IMP_STATE_DIR", None)
 
 
