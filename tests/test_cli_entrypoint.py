@@ -249,6 +249,65 @@ def test_imp_help_pulls_in_no_heavy_dependency(tmp_path: Path) -> None:
     assert marker[0] == "LEAKED:", f"imp --help imported {marker[0][len('LEAKED:'):]}"
 
 
+# yaml/ruamel are absent deliberately: a dispatching command parses config through ruamel.
+_FORBIDDEN_TOP_LEVEL = frozenset({
+    "httpx", "rich", "click", "pygments", "pydantic", "pydantic_core",
+    "jinja2", "anyio", "PIL", "prompt_toolkit",
+})
+_PROVIDER_MODULES = frozenset({
+    "imp.providers.anthropic", "imp.providers.openai",
+    "imp.providers.claude_code", "imp.providers.codex",
+    "imp.providers.codex_runner", "imp.providers.scripted",
+})
+
+
+@pytest.mark.parametrize(
+    "cmd,witness",
+    # A per-command witness module: an early bail-out cannot pass with an empty leak set.
+    [("config", "imp.cli.config_cmd"), ("list", "imp.engine.replay")],
+)
+def test_read_only_command_dispatches_without_the_provider_stack(
+    cmd: str, witness: str, tmp_path: Path
+) -> None:
+    """A dispatching read-only command must reach its handler without importing a
+    provider module, and so without httpx and the agent stack behind it. The cwd
+    must be a real work tree: `_cmd_list` bails out before touching the store when
+    `find_control_root` raises, which would make this guard vacuous."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    code = (
+        "import runpy, sys\n"
+        f"sys.argv = ['imp', {cmd!r}]\n"
+        "try:\n"
+        "    runpy.run_module('imp', run_name='__main__')\n"
+        "except SystemExit:\n"
+        "    pass\n"
+        f"forbidden = {set(_FORBIDDEN_TOP_LEVEL)!r}\n"
+        f"providers = {set(_PROVIDER_MODULES)!r}\n"
+        "heavy = sorted({n.split('.')[0] for n in sys.modules} & forbidden)\n"
+        "prov = sorted(providers & sys.modules.keys())\n"
+        f"sys.stderr.write('WITNESS:' + str({witness!r} in sys.modules) + '\\n')\n"
+        "sys.stderr.write('LEAKED:' + ','.join(heavy) + '\\n')\n"
+        "sys.stderr.write('PROVIDERS:' + ','.join(prov) + '\\n')\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, cwd=tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    reported = {
+        key: value
+        for key, _, value in (ln.partition(":") for ln in proc.stderr.splitlines())
+        if key in {"WITNESS", "LEAKED", "PROVIDERS"}
+    }
+    assert reported.keys() == {"WITNESS", "LEAKED", "PROVIDERS"}, (
+        f"child did not report; stderr was {proc.stderr!r}"
+    )
+    assert reported["WITNESS"] == "True", (
+        f"imp {cmd} never imported {witness} — it exited before dispatching, so"
+        f" this guard would pass vacuously; stdout was {proc.stdout!r}"
+    )
+    assert reported["LEAKED"] == "", f"imp {cmd} imported {reported['LEAKED']}"
+    assert reported["PROVIDERS"] == "", f"imp {cmd} imported {reported['PROVIDERS']}"
+
+
 @pytest.mark.parametrize(
     "cmd,handler",
     [("init", "_cmd_init"), ("new", "_cmd_new"),
