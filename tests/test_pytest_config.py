@@ -1,11 +1,22 @@
-"""Locking test: pytest pythonpath must include 'src' so worktree tests import the working tree."""
+"""Locking tests: pytest must import the working tree's `src`, and conftest must strip
+the inherited IMP_STATE_DIR at import."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
+
+_IMPORT_CONFTEST = """\
+import importlib.util, os, sys
+
+spec = importlib.util.spec_from_file_location("conftest_probe", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+sys.stdout.write(os.environ.get("IMP_STATE_DIR", ""))
+"""
 
 
 def test_subprocess_imp_resolves_to_working_tree() -> None:
@@ -52,4 +63,23 @@ def test_pytest_pythonpath_includes_src() -> None:
         f"[tool.pytest.ini_options].pythonpath must contain 'src' (got {pythonpath!r}). "
         "Without this, pytest in a git worktree imports the editable .pth from the main "
         "checkout instead of the worktree's ./src."
+    )
+
+
+def test_conftest_strips_inherited_state_dir_at_import() -> None:
+    """imp builds imp, so pytest inherits the agent's IMP_STATE_DIR. A per-test clear is
+    too late: module-scoped fixtures set up first and would write quest state under the
+    ambient path, which later test bodies then fail to find.
+    """
+    conftest = Path(__file__).resolve().parent / "conftest.py"
+    env = {**os.environ, "IMP_STATE_DIR": "/nonexistent/inherited-state"}
+    out = subprocess.run(
+        [sys.executable, "-c", _IMPORT_CONFTEST, str(conftest)],
+        capture_output=True, text=True, env=env, check=False,
+    )
+    assert out.returncode == 0, f"importing tests/conftest.py standalone failed:\n{out.stderr}"
+    seen = out.stdout.strip()
+    assert not seen, (
+        f"tests/conftest.py did not strip the inherited IMP_STATE_DIR at import (saw {seen}) "
+        "— module-scoped fixtures will resolve state under the ambient path"
     )
