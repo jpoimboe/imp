@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import uuid
 from pathlib import Path
 
@@ -698,22 +699,25 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
 
 # ---------------------------------------------------------------------------
 # PATH resolution (spec §7 / AC 12): the console-script `imp` on PATH runs the
-# worktree's code, because the injected PYTHONPATH shadows imp.cli.main even
+# worktree's code, because the injected PYTHONPATH shadows imp.__main__ even
 # though PATH itself is never modified by the sandbox.
 # ---------------------------------------------------------------------------
 
 def test_sandboxed_imp_console_script_resolves_worktree_code() -> None:
-    """A bash `imp` inside a sandboxed step executes the worktree's imp.cli.main."""
+    """A bash `imp` inside a sandboxed step executes the worktree's imp.__main__."""
     if shutil.which("imp") is None:
         pytest.skip("imp console script not on PATH")
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    entry = tomllib.loads(pyproject.read_text())["project"]["scripts"]["imp"]
+    assert entry == "imp.__main__:main", (
+        f"console-script entry point is now {entry!r} — repoint this test's stub")
     sentinel = "WORKTREE-IMP-SENTINEL-dafu54"
     root = _make_root()
     try:
-        cli = root / "src" / "imp" / "cli"
-        cli.mkdir(parents=True)
-        (root / "src" / "imp" / "__init__.py").write_text("")
-        (cli / "__init__.py").write_text("")
-        (cli / "main.py").write_text(
+        pkg = root / "src" / "imp"
+        pkg.mkdir(parents=True)
+        (pkg / "__init__.py").write_text("")
+        (pkg / "__main__.py").write_text(
             f'def main():\n    print("{sentinel}")\n    return 0\n')
         pol = _active_policy(root)
 
