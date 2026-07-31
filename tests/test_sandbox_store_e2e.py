@@ -39,6 +39,7 @@ from imp.engine.state import State
 from imp.paths import project_state_dir
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
+from tests.conftest import clear_state_dir
 
 pytestmark = pytest.mark.skipif(not sandbox_available(), reason="bwrap unavailable")
 
@@ -185,6 +186,8 @@ def _module_imp_home():
     home = Path(tempfile.mkdtemp(prefix="imp-store-e2e-home-"))
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("IMP_HOME", str(home))
+        # conftest's IMP_STATE_DIR isolation is function-scoped and hasn't run yet here
+        clear_state_dir(mp)
         yield home
     shutil.rmtree(home, ignore_errors=True)
 
