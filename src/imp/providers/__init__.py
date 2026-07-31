@@ -29,7 +29,9 @@ class BuiltinFloor(NamedTuple):
     env_var: str | None
 
 
-# Pinned undated major.minor ids; codex refuses *-codex models (runner preflight M1).
+# Pinned undated major.minor ids: they track dated snapshots of that minor but never
+# jump to a new major/minor release — a bare `sonnet`/`gpt-5` alias would silently
+# upgrade the shipped floor. codex refuses *-codex models (runner preflight M1).
 BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     "anthropic": BuiltinFloor(
         module="anthropic",
