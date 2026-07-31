@@ -2875,8 +2875,10 @@ def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
 
 
 def test_high_tier_floor_defaults_to_opus_1m() -> None:
-    from imp.providers.claude_code import TIER_DEFAULTS
-    assert TIER_DEFAULTS["high"] == "claude-opus-5[1m]"
+    from imp.providers import BUILTIN_FLOOR
+    tiers = BUILTIN_FLOOR["claude_code"].tier_defaults
+    assert tiers is not None
+    assert tiers["high"] == "claude-opus-5[1m]"
 
 
 @pytest.mark.anyio

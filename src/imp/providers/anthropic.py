@@ -638,18 +638,6 @@ class AnthropicProvider:
         )
 
 
-# Tier→model floor (spec 2026-06-08-config-file-split §2). Pinned to undated
-# major.minor ids: they track dated snapshots of that minor but never jump to a
-# new major/minor release (a bare "sonnet" alias would silently upgrade). An
-# operator can still override per tier via any config layer.
-TIER_DEFAULTS: dict[str, str] = {
-    "low": "claude-haiku-4-5",
-    "medium": "claude-sonnet-4-6",
-    "high": "claude-opus-5[1m]",
-}
-ENV_VAR: str | None = "ANTHROPIC_API_KEY"
-
-
 def _env_check() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 

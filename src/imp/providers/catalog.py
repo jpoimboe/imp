@@ -35,7 +35,7 @@ class ModelInfo:
 # fallback uses the separate `_WINDOW_TOKENS` substring map further down. Keep
 # the two in agreement when editing window values.
 CLAUDE_CODE: dict[str, ModelInfo] = {
-    # Undated major.minor ids used by TIER_DEFAULTS; the bare aliases below
+    # Undated major.minor ids used by imp.providers.BUILTIN_FLOOR; the bare aliases below
     # remain resolvable for operator config layers that still use them.
     "claude-haiku-4-5": ModelInfo(window=200_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000),

@@ -1,5 +1,6 @@
-"""Provider registry surface: each provider module declares a TIER_DEFAULTS table
-covering low/medium/high, and the builtins register lazily on first registry read."""
+"""Provider registry surface: imp.providers.BUILTIN_FLOOR is the single floor
+table — each builtin's tier_defaults (low/medium/high for the model-bearing
+providers) and env_var — and the builtins register lazily on first registry read."""
 import importlib
 import subprocess
 import sys
@@ -8,7 +9,7 @@ from typing import ClassVar
 
 import pytest
 
-from imp.providers import register_builtin_providers, resolve
+from imp.providers import BUILTIN_FLOOR, register_builtin_providers, resolve
 from imp.providers.config import ProviderModel
 
 _MODULES = ["anthropic", "openai", "claude_code", "codex"]
@@ -22,27 +23,24 @@ class _Cfg:
     providers: ClassVar[tuple[str, ...]] = ("anthropic",)
 
 
-@pytest.mark.parametrize("mod_name", _MODULES)
-def test_tier_defaults_cover_required_tiers(mod_name: str) -> None:
-    mod = importlib.import_module(f"imp.providers.{mod_name}")
-    assert set(mod.TIER_DEFAULTS) >= _REQUIRED
+@pytest.mark.parametrize("name", _MODULES)
+def test_tier_defaults_cover_required_tiers(name: str) -> None:
+    tiers = BUILTIN_FLOOR[name].tier_defaults
+    assert tiers is not None
+    assert set(tiers) >= _REQUIRED
     for tier in _REQUIRED:
-        assert isinstance(mod.TIER_DEFAULTS[tier], str)
-        assert mod.TIER_DEFAULTS[tier]
+        assert isinstance(tiers[tier], str)
+        assert tiers[tier]
 
 
 def test_env_var_present_for_http_providers() -> None:
-    import imp.providers.anthropic as a
-    import imp.providers.openai as o
-    assert a.ENV_VAR == "ANTHROPIC_API_KEY"
-    assert o.ENV_VAR == "OPENAI_API_KEY"
+    assert BUILTIN_FLOOR["anthropic"].env_var == "ANTHROPIC_API_KEY"
+    assert BUILTIN_FLOOR["openai"].env_var == "OPENAI_API_KEY"
 
 
 def test_env_var_none_for_cli_providers() -> None:
-    import imp.providers.claude_code as c
-    import imp.providers.codex as x
-    assert c.ENV_VAR is None
-    assert x.ENV_VAR is None
+    assert BUILTIN_FLOOR["claude_code"].env_var is None
+    assert BUILTIN_FLOOR["codex"].env_var is None
 
 
 # These tests mutate the module-global registry. An autouse fixture resets it
@@ -229,10 +227,24 @@ def test_registry_env_check_follows_a_module_level_monkeypatch(
 
 def test_builtin_floor_table_names_a_module_for_every_builtin() -> None:
     """Every BUILTIN_FLOOR entry names a real module exposing _env_check and _factory."""
-    from imp.providers import BUILTIN_FLOOR
-
     assert sorted(BUILTIN_FLOOR) == _BUILTINS
     for name, entry in BUILTIN_FLOOR.items():
         mod = importlib.import_module(f"imp.providers.{entry.module}")
         assert callable(mod._env_check), name
         assert callable(mod._factory), name
+
+
+@pytest.mark.parametrize("mod_name", _MODULES)
+def test_provider_modules_no_longer_declare_floor_constants(mod_name: str) -> None:
+    mod = importlib.import_module(f"imp.providers.{mod_name}")
+    assert not hasattr(mod, "TIER_DEFAULTS")
+    assert not hasattr(mod, "ENV_VAR")
+
+
+def test_scripted_keeps_its_runtime_env_var_but_no_floor_table() -> None:
+    """scripted reads ENV_VAR at runtime; floor table's env_var is pinned equal."""
+    from imp.providers import scripted
+
+    assert not hasattr(scripted, "TIER_DEFAULTS")
+    assert scripted.ENV_VAR == "IMP_SCRIPTED_SCRIPT"
+    assert BUILTIN_FLOOR["scripted"].env_var == scripted.ENV_VAR
