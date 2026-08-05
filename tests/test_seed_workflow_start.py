@@ -1,11 +1,17 @@
+import json
 from pathlib import Path
 
+import pytest
+
 from imp.assets import resolve_workflow_dir
+from imp.engine.errors import LoadError
 from imp.engine.loader import load_workflow
 from imp.engine.quest import Quest
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import State
+from imp.engine.types import Workflow
 from imp.paths import project_state_dir
+from imp.providers.config import Config
 from imp.providers.effective import load_effective_config
 from tests.conftest import _git, _seed_control
 
@@ -67,3 +73,91 @@ def test_create_draft_routes_seeded_cursor_and_var_override(tmp_path: Path) -> N
     assert state.step_label is None      # step `s` has no label: → honestly None
     assert state.phase_label == "P"
     assert state.vars["n"] == 42
+
+
+def _loaded(root: Path) -> tuple[Workflow, Config]:
+    """(workflow, config) for the control root seeded by _seed_with_var."""
+    config = load_effective_config(control_root=root).config
+    workflow = load_workflow(
+        resolve_workflow_dir(root, "imp"),
+        configured_tiers=config.tier_names(),
+    )
+    return workflow, config
+
+
+def test_per_quest_override_outranks_config_and_workflow_default(tmp_path: Path) -> None:
+    # Precedence: workflow default 7 -> config override 42 -> per-quest 99.
+    _seed_with_var(tmp_path)
+    workflow, config = _loaded(tmp_path)
+    state = State(id="q", step=None, step_attempt=0, status="new")
+
+    seed_workflow_start(state, workflow, config, quest_vars={"n": 99})
+
+    assert state.vars["n"] == 99
+
+
+def test_empty_per_quest_layer_leaves_the_config_value(tmp_path: Path) -> None:
+    _seed_with_var(tmp_path)
+    workflow, config = _loaded(tmp_path)
+    state = State(id="q", step=None, step_attempt=0, status="new")
+
+    seed_workflow_start(state, workflow, config, quest_vars={})
+
+    assert state.vars["n"] == 42
+
+
+def test_undeclared_per_quest_var_is_rejected(tmp_path: Path) -> None:
+    _seed_with_var(tmp_path)
+    workflow, config = _loaded(tmp_path)
+    state = State(id="q", step=None, step_attempt=0, status="new")
+
+    with pytest.raises(LoadError, match="not declared by the workflow"):
+        seed_workflow_start(state, workflow, config, quest_vars={"nope": 1})
+
+
+def test_mistyped_per_quest_var_is_rejected(tmp_path: Path) -> None:
+    _seed_with_var(tmp_path)
+    workflow, config = _loaded(tmp_path)
+    state = State(id="q", step=None, step_attempt=0, status="new")
+
+    with pytest.raises(LoadError, match="expects int"):
+        seed_workflow_start(state, workflow, config, quest_vars={"n": "many"})
+
+
+def test_create_draft_seeds_and_persists_the_supplied_overrides(tmp_path: Path) -> None:
+    _seed_with_var(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="seedpq", base_branch="main", vars={"n": 99})
+    assert ch.vars == {"n": 99}
+
+    # 99 can only come from the per-quest layer: the workflow declares 7 and the
+    # config layer overrides it to 42.
+    assert State.load(ch.state_dir).vars["n"] == 99
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["vars"] == {"n": 99}          # as supplied, not the effective merge
+    assert Quest.load(tmp_path, "seedpq").vars == {"n": 99}
+
+
+def test_deferred_draft_persists_overrides_without_seeding_them(tmp_path: Path) -> None:
+    # defer_seed loads no workflow, so it validates nothing either: the overrides
+    # are stored verbatim and checked when the first resume seeds them. Callers
+    # that must fail before the home exists validate at their own boundary.
+    _seed_with_var(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="seeddf", base_branch="main",
+        defer_seed=True, vars={"n": 99})
+    assert ch.vars == {"n": 99}
+
+    assert State.load(ch.state_dir).vars == {}    # seeding is deferred to first resume
+    assert Quest.load(tmp_path, "seeddf").vars == {"n": 99}
+
+
+def test_rejected_override_leaves_no_quest_home(tmp_path: Path) -> None:
+    # A quest cannot be un-created, so the rejection must land before the home
+    # survives creation.
+    _seed_with_var(tmp_path)
+    with pytest.raises(LoadError):
+        Quest.create_draft(
+            tmp_path, title="X", quest_id="seedbad", base_branch="main",
+            vars={"n": "many"})
+    assert not (project_state_dir(tmp_path) / "quests" / "seedbad").exists()

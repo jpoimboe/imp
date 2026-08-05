@@ -73,7 +73,10 @@ finished); do not invent quests that the commands did not list.
 
 `imp show <id>` — the overview detail card: id, title, status, timing,
 dependencies, opening intent, and the summary inlined. A quest that completed with a
-recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. Add a
+recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. A running
+quest shows a `vars:` line of its effective workflow variables; one still in the backlog
+shows the overrides it was filed with, or no line at all if it was filed with none. `--json`
+carries the same under a `vars` key. Add a
 subcommand to narrow to one facet: `imp show <id> spec` for the raw spec, or add
 `--json` to get the overview card as a structured object. For the event timeline,
 use `imp events <id>` (below). Read the facet the user asked about and answer from

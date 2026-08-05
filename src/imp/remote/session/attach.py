@@ -10,6 +10,7 @@ from typing import Any
 
 import anyio
 
+from imp.api_errors import DaemonUnreachable
 from imp.engine.env import QUEST_TMP_ENV, overlay_engine_env
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
@@ -64,7 +65,7 @@ def spawn_session_daemon(
         )
 
 
-class DaemonStartupError(RuntimeError):
+class DaemonStartupError(DaemonUnreachable):
     """A spawned session daemon exited before it bound its socket."""
 
     def __init__(
@@ -111,7 +112,8 @@ async def attach_or_spawn(
     try:
         await client.connect()
         return client
-    except OSError:
+    except (OSError, anyio.BrokenResourceError):
+        # handshake send can fail after connect; a half-dead daemon raises BrokenResourceError
         pass
     proc = spawn_fn(quest)
     with anyio.fail_after(_resolve_connect_timeout(connect_timeout)):
@@ -119,7 +121,7 @@ async def attach_or_spawn(
             try:
                 await client.connect()
                 return client
-            except OSError:
+            except (OSError, anyio.BrokenResourceError):
                 if proc is not None and proc.poll() is not None:
                     stderr_path = quest.quest_dir / "daemon.stderr"
                     raise DaemonStartupError(

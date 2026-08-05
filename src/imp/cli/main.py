@@ -985,6 +985,7 @@ async def _clear_loop(
 
 
 def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
+    from imp.cli.var_flags import VarFlagError, resolve_var_flags
     from imp.engine import backlog
     from imp.engine.errors import LoadError, LoadErrors
     from imp.engine.quest import Quest, live_stems
@@ -992,6 +993,13 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     title = args.idea
     if not title.strip():
         _emit_cli_error("--backlog title must be non-empty")
+        return 2
+    try:
+        quest_vars = resolve_var_flags(
+            control, workflow=getattr(args, "workflow", None),
+            raw=getattr(args, "var", None))
+    except (VarFlagError, LoadError, LoadErrors) as e:
+        _emit_cli_error(f"{e}")
         return 2
     description = getattr(args, "opening", None) or ""
     seed = backlog.seed_opening({"title": title, "description": description})
@@ -1001,7 +1009,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
-            origin="backlog", seed_opening=seed, defer_seed=True)
+            origin="backlog", seed_opening=seed, defer_seed=True, vars=quest_vars)
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
@@ -1014,9 +1022,10 @@ def apply_new(
     control: Path, *, opening: str | None, title: str | None,
     workflow: str | None, base: str | None, idea: str | None,
     depends_on: list[str] | None, parent: str | None = None,
-    background: bool = False,
+    background: bool = False, var_flags: list[str] | None = None,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest."""
+    from imp.cli.var_flags import VarFlagError, resolve_var_flags
     from imp.engine import backlog
     from imp.engine.errors import LoadError, LoadErrors
     from imp.engine.quest import Quest, live_stems
@@ -1024,6 +1033,10 @@ def apply_new(
     try:
         resolved_base = _resolve_new_base(control, base)
     except BaseResolutionError as e:
+        return 2, f"imp: {e}"
+    try:
+        quest_vars = resolve_var_flags(control, workflow=workflow, raw=var_flags)
+    except (VarFlagError, LoadError, LoadErrors) as e:
         return 2, f"imp: {e}"
 
     deps = list(depends_on or [])
@@ -1037,7 +1050,7 @@ def apply_new(
                 control, title=title or "", quest_id=quest_id,
                 base_branch=resolved_base, depends_on=deps, workflow=workflow,
                 origin="draft", seed_opening=seed, parent=parent,
-                defer_seed=True)
+                defer_seed=True, vars=quest_vars)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         from imp.remote.daemon import spawn
@@ -1053,7 +1066,7 @@ def apply_new(
             Quest.create_draft(
                 control, title=idea, quest_id=quest_id, base_branch=resolved_base,
                 depends_on=deps, workflow=workflow, origin="backlog",
-                seed_opening=seed, parent=parent, defer_seed=True)
+                seed_opening=seed, parent=parent, defer_seed=True, vars=quest_vars)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         return 0, (f"imp: recorded backlog quest {quest_id} "
@@ -1063,7 +1076,8 @@ def apply_new(
         Quest.create_draft(
             control, title=title or "", quest_id=quest_id,
             base_branch=resolved_base, depends_on=deps, workflow=workflow,
-            origin="backlog", seed_opening=opening, parent=parent, defer_seed=True)
+            origin="backlog", seed_opening=opening, parent=parent,
+            defer_seed=True, vars=quest_vars)
     except (LoadError, LoadErrors) as e:
         return 2, f"imp: {e}"
     return 0, (f"imp: recorded backlog quest {quest_id} "
@@ -1192,6 +1206,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     )
     from imp.cli.signals import install_process_group, prompt_sigint_guard
     from imp.cli.terminal_title import TerminalTitle
+    from imp.cli.var_flags import VarFlagError, resolve_var_flags
     from imp.engine import worktree
     from imp.engine.abandon import discard_conversation
     from imp.engine.errors import LoadError, LoadErrors
@@ -1206,6 +1221,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             "base": getattr(args, "base", None),
             "idea": getattr(args, "idea", None),
             "depends_on": getattr(args, "depends_on", None),
+            "var_flags": getattr(args, "var", None),
             "background": getattr(args, "background", False)}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1234,6 +1250,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             title=getattr(args, "title", None), workflow=wf_arg,
             base=getattr(args, "base", None), idea=None,
             depends_on=list(getattr(args, "depends_on", None) or []),
+            var_flags=list(getattr(args, "var", None) or []),
             background=True)
         print(message, file=sys.stderr if rc else sys.stdout)
         return rc
@@ -1253,6 +1270,13 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             _emit_cli_error("--backlog title must be non-empty")
             return 2
         return _record_idea(args, control, base)
+
+    try:
+        quest_vars = resolve_var_flags(
+            control, workflow=wf_arg, raw=getattr(args, "var", None))
+    except (VarFlagError, LoadError, LoadErrors) as e:
+        _emit_cli_error(f"{e}")
+        return 2
 
     try:
         seed = resolve_spec_seed(args)
@@ -1297,7 +1321,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
             depends_on=list(getattr(args, "depends_on", None) or []),
-            seed_opening=None, create_mode=leave_mode)
+            seed_opening=None, create_mode=leave_mode, vars=quest_vars)
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
@@ -1965,6 +1989,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
     if meta.get("depends_on"):
         lines.append(_card_field("depends_on:", ", ".join(meta["depends_on"]),
                                  12, color=color))
+    if meta.get("vars"):
+        lines.append(_vars_line(meta["vars"], 12, color=color))
     body = meta.get("seed_opening") or ""
     title = meta.get("title") or ""
     if title and (body == title or body.startswith(title + "\n")):
@@ -1974,6 +2000,19 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
         lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(body)
     return lines
+
+
+def _var_value(value: object) -> str:
+    """Renders the value the way `--var` accepts it back."""
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def _vars_line(values: dict[str, object], width: int, *, color: bool) -> str:
+    """The `vars:` card row, clipped like `step:` — a workflow declaring ten vars
+    would otherwise wrap the card across three lines."""
+    body = ", ".join(f"{name}={_var_value(values[name])}" for name in sorted(values))
+    return pal.clip_display(
+        _card_field("vars:", body, width, color=color), _display_width())
 
 
 def _quest_card(control: Path, quest_id: str, *, now: datetime,
@@ -2013,6 +2052,8 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
             f"{d['id']} · {d['title']} ({'merged' if d['merged'] else 'unmerged'})"
             for d in card.depends_on)
         lines.append(_card_field("depends_on:", deps, 15, color=color))
+    if card.vars:
+        lines.append(_vars_line(card.vars, 15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
     if card.intent:
@@ -2050,6 +2091,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "parent": card.parent,
         "depends_on": card.depends_on,
         "intent": card.intent,
+        "vars": dict(card.vars),
         "summary": None,
     }
     if card.status in _INFLIGHT and card.step not in ("", "-"):
@@ -2077,6 +2119,7 @@ def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
         "blocked_on": list(unmerged),
         "created": meta.get("created_at"),
         "depends_on": meta.get("depends_on", []),
+        "vars": dict(meta.get("vars") or {}),
         "body": body or None,
     }
 
@@ -4257,6 +4300,12 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Run this quest on workflow NAME instead of the "
                             "project default. A bundled name needs no commit; a "
                             "committed imp/workflows/NAME fork overrides it.")
+    p_new.add_argument("--var", metavar="NAME=VALUE", action="append",
+                       default=None,
+                       help="Seed a workflow variable for this quest only "
+                            "(repeatable). NAME must be declared by the workflow; "
+                            "VALUE is coerced to its declared type (a bool takes "
+                            "true or false).")
     p_new.add_argument("--base", metavar="BRANCH", default=None,
                        help="Base the quest on an existing BRANCH instead of "
                             "the configured default-base. BRANCH must already "

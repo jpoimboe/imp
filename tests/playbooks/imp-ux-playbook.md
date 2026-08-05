@@ -152,8 +152,8 @@ to score).
     and **provider multi-select** are interactive — theme is
     **auto-detected silently** (no prompt; under a non-truecolor pty it picks `ansi`).
   - `imp new -h` — the flag surface (`--backlog`, `--background`, `--depends-on`,
-    `--workflow`, `--autonomous`, `--headless`/`--message`, `--base`, `--model`): can a new
-    user tell which they need?
+    `--workflow`, `--var`, `--autonomous`, `--headless`/`--message`, `--base`,
+    `--model`): can a new user tell which they need?
   - `imp chat` — the conversation surface (own item below).
   - `imp list` — the overview: zones (in-flight / backlog / merged) legible? ids vs
     titles? Then `imp show <id>` (detail card) and the artifact view `imp show <id> spec`

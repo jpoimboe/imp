@@ -69,7 +69,7 @@ def test_quest_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     assert set(meta) == {"id", "title", "base_branch", "created_at",
                          "create_mode", "depends_on", "project_root", "materialized",
                          "cur_base_head", "layout_version", "imp_commit",
-                         "workflow"}
+                         "workflow", "vars"}
 
 
 def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:
@@ -829,6 +829,18 @@ def test_materialize_forks_from_base_changed_on_disk(tmp_path: Path) -> None:
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["cur_base_head"] == release_tip
     assert head_changed is False              # the chosen branch has not moved since
+
+
+def test_both_creation_paths_write_an_empty_vars_object(tmp_path: Path) -> None:
+    # Every v15 home carries the field regardless of path, so no reader needs a
+    # default: Quest.create (materialized) takes no overrides at all.
+    _seed_control(tmp_path)
+    made = Quest.create(tmp_path, title="X", quest_id="varq1", base_branch="main")
+    drafted = Quest.create_draft(tmp_path, title="X", quest_id="varq2", base_branch="main")
+    for ch in (made, drafted):
+        assert json.loads((ch.quest_dir / "quest.json").read_text())["vars"] == {}
+    assert Quest.load(tmp_path, "varq1").vars == {}
+    assert Quest.load(tmp_path, "varq2").vars == {}
 
 
 def test_materialize_head_changed_measured_against_new_base(tmp_path: Path) -> None:

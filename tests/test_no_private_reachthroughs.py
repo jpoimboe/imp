@@ -45,6 +45,7 @@ def test_no_private_reachthrough_across_providers() -> None:
 
     # Legitimate sites: each runner/provider's own __init__/_get_client where
     # the private attrs are *defined*. Everything else fails the test.
+    # session_controls.py and api.py own _client: a session-daemon socket, not an LLM SDK client.
     allowed_substrings = (
         "src/imp/providers/anthropic.py",
         "src/imp/providers/openai.py",
@@ -52,6 +53,7 @@ def test_no_private_reachthrough_across_providers() -> None:
         "src/imp/providers/codex.py",
         "src/imp/providers/codex_runner.py",
         "src/imp/cli/session_controls.py",
+        "src/imp/api.py",
     )
     offending = [
         line for line in proc.stdout.splitlines()

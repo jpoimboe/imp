@@ -72,7 +72,7 @@ def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:
             "base_branch": c.base_branch, "merge_commit": c.merge_commit,
             "parent": c.parent,
             "depends_on": list(c.depends_on), "intent": c.intent,
-            "summary": _b64e(c.summary)}
+            "summary": _b64e(c.summary), "vars": dict(c.vars)}
 
 
 def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
@@ -85,7 +85,7 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
         base_branch=d["base_branch"], merge_commit=d["merge_commit"],
         parent=d["parent"],
         depends_on=list(d["depends_on"]), intent=d["intent"],
-        summary=_b64d(d["summary"]))
+        summary=_b64d(d["summary"]), vars=dict(d["vars"]))
 
 
 def _hit_to_wire(h: SearchHit) -> dict[str, Any]:

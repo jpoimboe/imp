@@ -43,6 +43,8 @@ class FakeControl:
         resident: frozenset[str] | None = None,
         reply_outcome: DeliveryOutcome = DeliveryOutcome.DELIVERED,
         reply_error: Exception | None = None,
+        create_id: str = "zzzzzz",
+        create_error: Exception | None = None,
     ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
@@ -54,6 +56,8 @@ class FakeControl:
         self._resident = frozenset(resident or ())
         self._reply_outcome = reply_outcome
         self._reply_error = reply_error
+        self._create_id = create_id
+        self._create_error = create_error
 
     def full_history(self, quest_id: str) -> list[dict]:
         return self._histories.get(quest_id, [])
@@ -70,8 +74,11 @@ class FakeControl:
             raise self._reply_error
         return self._reply_outcome
 
-    def create(self, prompt: str) -> None:
+    def create(self, prompt: str) -> str:
         self.created.append(prompt)
+        if self._create_error is not None:
+            raise self._create_error
+        return self._create_id
 
     def list_quests(self) -> list[QuestInfo]:
         return self._quests
@@ -90,12 +97,24 @@ async def test_reply_calls_reply_and_enqueues_nothing() -> None:
 
 
 @pytest.mark.anyio
-async def test_create_calls_create_and_enqueues_a_notice() -> None:
-    control = FakeControl()
+async def test_create_notices_the_id_of_the_quest_it_created() -> None:
+    control = FakeControl(create_id="k3f9qa")
     responses: queue.Queue = queue.Queue()
     await _handle_command(Create("add a foo"), control, responses)
     assert control.created == ["add a foo"]
-    assert isinstance(responses.get_nowait(), Notice)
+    assert responses.get_nowait() == Notice(
+        "Spawning @k3f9qa… watch for its first question")
+
+
+@pytest.mark.anyio
+async def test_a_failed_create_notices_the_reason_instead_of_claiming_a_spawn() -> None:
+    control = FakeControl(
+        create_error=RuntimeError("no `default-base` in imp/config.yaml"))
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Create("add a foo"), control, responses)
+    assert responses.get_nowait() == Notice(
+        "Couldn't create the quest: no `default-base` in imp/config.yaml")
+    assert responses.empty()
 
 
 @pytest.mark.anyio

@@ -15,9 +15,13 @@ def _plane(*, delivered: list, created: list,
     async def _deliver(cid: str, text: str) -> None:
         delivered.append((cid, text))
 
+    def _create(prompt: str) -> str:
+        created.append(prompt)
+        return "k3f9qa"
+
     return ControlPlane(
         deliver=_deliver,
-        create=lambda prompt: created.append(prompt),
+        create=_create,
         list_quests=lambda: infos,
         subscriptions=Subscriptions(),
         snapshot=lambda cid: None,
@@ -37,10 +41,10 @@ async def test_reply_delivers_into_the_changes_session() -> None:
     assert delivered == [("2026-06-13-abc", "approved")]
 
 
-def test_create_spawns_a_change_from_the_prompt() -> None:
+def test_create_returns_the_new_quest_id() -> None:
     created: list = []
     plane = _plane(delivered=[], created=created, infos=[])
-    plane.create("add dark mode")
+    assert plane.create("add dark mode") == "k3f9qa"
     assert created == ["add dark mode"]
 
 

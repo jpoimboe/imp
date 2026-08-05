@@ -348,8 +348,15 @@ async def _handle_command(
                 for text in rendered:
                     responses.put(Notice(text, quest_id=quest_id))
     elif isinstance(command, Create):
-        control.create(command.prompt)
-        responses.put(Notice("Spawning a new quest… watch for its first question"))
+        try:
+            new_id = await anyio.to_thread.run_sync(control.create, command.prompt)
+        except Exception as e:
+            # _dispatch_inbound's blanket catch would leave the user silent here.
+            _log.warning("create failed: %r", command, exc_info=True)
+            responses.put(Notice(f"Couldn't create the quest: {e}"))
+            return
+        responses.put(Notice(
+            f"Spawning @{handle_for(new_id)}… watch for its first question"))
     elif isinstance(command, ListQuests):
         try:
             quests = await anyio.to_thread.run_sync(control.list_quests)
@@ -438,7 +445,7 @@ async def run_daemon(
         Any,
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[DeliveryOutcome]] | None = None,
-    create: Callable[[str], None] | None = None,
+    create: Callable[[str], str] | None = None,
     list_quests: Callable[[], list[discover.QuestInfo]] | None = None,
     resident_ids: Callable[[], frozenset[str]] | None = None,
     resume: Callable[[str], str] | None = None,

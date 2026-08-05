@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 14
+# LAYOUT_VERSION: 15
 [paths]
 events.jsonl
 quest.json
@@ -15,6 +15,7 @@ layout_version
 materialized
 project_root
 title
+vars
 workflow
 [state.json]
 clean_tree_bounces

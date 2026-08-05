@@ -6,16 +6,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from imp.engine.state import State
     from imp.engine.types import Workflow
     from imp.providers.config import Config
 
 
-def seed_workflow_start(state: State, workflow: Workflow, config: Config) -> None:
+def seed_workflow_start(
+    state: State, workflow: Workflow, config: Config,
+    quest_vars: Mapping[str, object] | None = None,
+) -> None:
     """Stamp `state`'s cursor (step, step_label, phase_label) and vars from
     `workflow`'s first flat step, mutating in place. An empty workflow (no steps)
     leaves the cursor null; vars always get the workflow defaults with config
-    overrides folded on top."""
+    overrides and then this quest's own overrides folded on top."""
     from imp.agents.prompts import render_label
     from imp.providers.config import apply_var_overrides
 
@@ -32,4 +37,5 @@ def seed_workflow_start(state: State, workflow: Workflow, config: Config) -> Non
         state.step = None
         state.step_label = None
         state.phase_label = None
-    state.vars = apply_var_overrides(workflow.vars, config.var_overrides)
+    state.vars = apply_var_overrides(
+        workflow.vars, {**config.var_overrides, **(quest_vars or {})})
