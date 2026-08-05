@@ -4,6 +4,7 @@ process without importing imp's internals."""
 from __future__ import annotations
 
 import math
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -41,6 +42,7 @@ __all__ = [
     "QuestNotFound",
     "QuestSummary",
     "Session",
+    "attach",
     "create_quest",
     "list_quests",
 ]
@@ -200,3 +202,58 @@ class Session:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+async def _pump(client: SessionClient, feed: _Feed) -> None:
+    try:
+        await client.receive_events()
+    finally:
+        feed.close()   # EOF for events(): the iterator ends instead of hanging
+
+
+@asynccontextmanager
+async def attach(
+    control_root: Path, quest_id: str | QuestHandle, *, lease: bool = True,
+) -> AsyncIterator[Session]:
+    """Attach to a quest's session daemon, spawning it when none is resident."""
+    from imp.cli.main import _resume_opens_fresh
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest, live_quest_ids
+    from imp.remote.session import attach as attach_mod
+
+    ident = quest_id.id if isinstance(quest_id, QuestHandle) else quest_id
+    if ident not in live_quest_ids(control_root):
+        raise QuestNotFound(f"no such quest {ident!r} under {control_root}")
+    try:
+        quest = Quest.load(control_root, ident)
+    except (LoadError, LoadErrors) as e:
+        raise ImpError(str(e)) from e
+    resume = not _resume_opens_fresh(quest)
+    feed = _Feed()
+    try:
+        client = await attach_mod.attach_or_spawn(
+            quest, on_event=feed.on_event, lease=lease,
+            spawn_fn=lambda q: attach_mod.spawn_session_daemon(q, resume=resume))
+    except OSError as e:   # incl. TimeoutError, an OSError, from the connect budget
+        feed.recv.close()
+        feed.close()
+        # fail_after's TimeoutError stringifies to "", which would otherwise leave a
+        # dangling colon on the single most common failure.
+        reason = str(e) or "timed out waiting for it to come up"
+        raise DaemonUnreachable(
+            f"could not reach the session daemon for {ident}: {reason}") from e
+    session = Session(client, feed)
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_pump, client, feed)
+            try:
+                yield session
+            finally:
+                await session.aclose()
+                feed.recv.close()   # the context owns the feed; leave no half open
+                tg.cancel_scope.cancel()
+    except BaseExceptionGroup as eg:
+        # anyio wraps the caller's own exception; a public API hands back the original.
+        if len(eg.exceptions) == 1:
+            raise eg.exceptions[0] from None
+        raise

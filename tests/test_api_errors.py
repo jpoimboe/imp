@@ -46,8 +46,8 @@ def test_the_public_names_are_importable_from_imp_api() -> None:
     import imp.api as api
 
     for name in (
-        "create_quest", "list_quests", "QuestHandle", "QuestSummary", "Session",
-        "Event", "EVENT_SCHEMA_VERSION",
+        "create_quest", "list_quests", "attach", "QuestHandle", "QuestSummary",
+        "Session", "Event", "EVENT_SCHEMA_VERSION",
         "ImpError", "QuestNotFound", "DaemonUnreachable", "DaemonStartupError",
         "NotAtGate", "InvalidVar",
     ):
