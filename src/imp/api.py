@@ -208,6 +208,9 @@ async def _pump(client: SessionClient, feed: _Feed) -> None:
     try:
         await client.receive_events()
     finally:
+        # Same task as the reader: no concurrent close races an in-progress receive().
+        with anyio.CancelScope(shield=True):
+            await client.aclose()
         feed.close()   # EOF for events(): the iterator ends instead of hanging
 
 
@@ -249,9 +252,8 @@ async def attach(
             try:
                 yield session
             finally:
-                await session.aclose()
-                feed.recv.close()   # the context owns the feed; leave no half open
                 tg.cancel_scope.cancel()
+                feed.recv.close()   # the context owns the feed; leave no half open
     except BaseExceptionGroup as eg:
         # anyio wraps the caller's own exception; a public API hands back the original.
         if len(eg.exceptions) == 1:
