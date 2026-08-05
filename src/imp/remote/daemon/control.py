@@ -14,7 +14,7 @@ class ControlPlane:
         self,
         *,
         deliver: Callable[[str, str], Awaitable[DeliveryOutcome]],
-        create: Callable[[str], None],
+        create: Callable[[str], str],
         list_quests: Callable[[], list[QuestInfo]],
         subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],

@@ -438,7 +438,7 @@ async def run_daemon(
         Any,
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[DeliveryOutcome]] | None = None,
-    create: Callable[[str], None] | None = None,
+    create: Callable[[str], str] | None = None,
     list_quests: Callable[[], list[discover.QuestInfo]] | None = None,
     resident_ids: Callable[[], frozenset[str]] | None = None,
     resume: Callable[[str], str] | None = None,

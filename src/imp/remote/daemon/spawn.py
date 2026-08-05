@@ -7,6 +7,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from imp.create import create_draft_quest
 from imp.engine.env import overlay_engine_env
 
 
@@ -29,11 +30,14 @@ def _imp(*args: str) -> list[str]:
     return [sys.executable, "-m", "imp", *args]
 
 
-def create_quest(control_root: Path, prompt: str) -> None:
+def create_quest(control_root: Path, prompt: str) -> str:
+    """Mint the draft in this process, then detach the interactive resume; returns its id."""
+    quest = create_draft_quest(control_root, prompt)
     env = _base_env()
     env["IMP_REMOTE_AUTOSUBSCRIBE"] = "1"
     _spawn_detached(
-        _imp("new", "--headless", "--message", prompt), env, control_root)
+        _imp("resume", quest.id, "--headless"), env, control_root)
+    return quest.id
 
 
 def resume_quest(control_root: Path, token: str) -> str:

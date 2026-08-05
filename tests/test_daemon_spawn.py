@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from imp.cli.main import BaseResolutionError
+from imp.paths import project_state_dir
 from imp.remote.daemon import spawn
+from tests.conftest import _seed_control
 
 
 def _capture(monkeypatch: Any) -> list[dict[str, Any]]:
@@ -17,13 +23,46 @@ def _capture(monkeypatch: Any) -> list[dict[str, Any]]:
     return calls
 
 
-def test_create_quest_spawns_imp_new(monkeypatch: Any, tmp_path: Path) -> None:
+def test_create_quest_writes_the_draft_before_spawning_an_interactive_resume(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    seen: list[dict[str, Any]] = []
+
+    # Reading quest.json from inside the spawn stub is the assertion that the
+    # draft is on disk *before* the resume is detached, not merely afterwards.
+    def fake(argv: list[str], env: dict[str, str], cwd: Path) -> None:
+        spawned_id = argv[argv.index("resume") + 1]
+        meta = json.loads(
+            (project_state_dir(tmp_path) / "quests" / spawned_id
+             / "quest.json").read_text())
+        seen.append({"argv": argv, "env": env, "cwd": cwd, "meta": meta})
+
+    monkeypatch.setattr(spawn, "_spawn_detached", fake)
+
+    quest_id = spawn.create_quest(tmp_path, "add dark mode")
+
+    assert seen[0]["argv"] == [
+        sys.executable, "-m", "imp", "resume", quest_id, "--headless"]
+    assert "--autonomous" not in seen[0]["argv"]
+    assert seen[0]["env"]["IMP_REMOTE_AUTOSUBSCRIBE"] == "1"
+    assert "IMP_REMOTE_CONTROL_SOCK" not in seen[0]["env"]
+    assert seen[0]["cwd"] == tmp_path
+    assert seen[0]["meta"]["seed_opening"] == "add dark mode"
+
+
+def test_create_quest_raises_and_spawns_nothing_when_the_base_is_unresolvable(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     calls = _capture(monkeypatch)
-    spawn.create_quest(tmp_path, "add dark mode")
-    assert calls[0]["argv"] == [
-        sys.executable, "-m", "imp", "new", "--headless",
-        "--message", "add dark mode"]
-    assert "IMP_REMOTE_CONTROL_SOCK" not in calls[0]["env"]
+
+    with pytest.raises(BaseResolutionError):
+        spawn.create_quest(tmp_path, "add dark mode")
+
+    assert calls == []
+    assert not (project_state_dir(tmp_path) / "quests").exists()
 
 
 def test_resume_quest_spawns_imp_resume_for_a_unique_match(
@@ -74,5 +113,3 @@ def test_start_quest_spawns_autonomous_resume(
     assert calls[0]["cwd"] == tmp_path
     assert "IMP_REMOTE_CONTROL_SOCK" not in calls[0]["env"]
     assert "IMP_REMOTE_AUTOSUBSCRIBE" not in calls[0]["env"]
-
-
