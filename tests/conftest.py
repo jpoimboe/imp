@@ -484,6 +484,21 @@ def _seed_control(root: Path) -> None:
     _git(root, "commit", "-qm", "imp setup")
 
 
+def _seed_control_with_vars(root: Path) -> None:
+    """_seed_control, plus a workflow declaring one var of each type."""
+    _seed_control(root)
+    (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
+        'name: t\ndescription: ""\n'
+        "vars:\n"
+        "  jurisdiction: {type: string, default: eu}\n"
+        "  retries: {type: int, default: 3}\n"
+        "  strict: {type: bool, default: false}\n"
+        "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "declare workflow vars")
+
+
 def write_agent_md(path: Path, frontmatter: str, body: str = "prompt body") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"---\n{frontmatter}\n---\n{body}\n")
