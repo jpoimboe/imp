@@ -52,6 +52,7 @@ class QuestCard:
     depends_on: list[dict[str, Any]]
     intent: str | None
     summary: bytes | None
+    vars: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -179,6 +180,7 @@ class LocalStore:
                 self.control_root, list(meta.get("depends_on", []))),
             intent=_resolve_intent(events),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
+            vars=dict(state.get("vars") or {}),
         )
 
 

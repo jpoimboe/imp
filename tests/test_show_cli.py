@@ -14,7 +14,7 @@ from imp.engine import archive, worktree
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
-from tests.conftest import _seed_control
+from tests.conftest import _seed_control, _seed_control_with_vars
 
 _ID = "feat01"
 
@@ -754,3 +754,100 @@ def test_show_card_step_line_shows_for_error(tmp_path: Path) -> None:
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
     assert "error" in status_line
     assert any(ln.startswith("step:") for ln in card.splitlines())   # error is in-flight
+
+
+def _quest_with_vars(control: Path) -> str:
+    _seed_control_with_vars(control)
+    Quest.create_draft(
+        control, title="Varred", quest_id="varshow", base_branch="main",
+        vars={"retries": 5, "strict": True})
+    return "varshow"
+
+
+def test_show_card_renders_effective_vars_sorted_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The card shows the effective merge, so the workflow's own default for
+    # jurisdiction appears next to the two per-quest overrides; bools render the
+    # way --var accepts them.
+    quest_id = _quest_with_vars(tmp_path)
+
+    out = _run(monkeypatch, tmp_path, "show", quest_id)
+
+    # _display_width() falls back to 80 under the captured stdout, and the line is
+    # 54 columns, so the clip leaves it whole.
+    line = next(ln for ln in out.splitlines() if ln.startswith("vars:"))
+    assert line.split(maxsplit=1)[1] == "jurisdiction=eu, retries=5, strict=true"
+
+
+def test_show_card_clips_a_vars_line_wider_than_the_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A workflow declaring many vars must not blow the card open across three
+    # wrapped lines; the vars line clips like the step line does.
+    quest_id = _quest_with_vars(tmp_path)
+    monkeypatch.setattr("imp.cli.main._display_width", lambda: 40)
+
+    out = _run(monkeypatch, tmp_path, "show", quest_id)
+
+    line = next(ln for ln in out.splitlines() if ln.startswith("vars:"))
+    assert len(line) <= 40
+    assert line.endswith("…")
+
+
+def test_show_backlog_card_renders_the_supplied_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Filed with --var and never run: the overrides live on quest.json, and the
+    # backlog card is where the user looks for them.
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Queued", quest_id="varbk", base_branch="main",
+        origin="backlog", seed_opening="Queued", defer_seed=True,
+        vars={"retries": 5, "strict": True})
+
+    out = _run(monkeypatch, tmp_path, "show", "varbk")
+
+    line = next(ln for ln in out.splitlines() if ln.startswith("vars:"))
+    assert line.split(maxsplit=1)[1] == "retries=5, strict=true"
+    assert json.loads(
+        _run(monkeypatch, tmp_path, "show", "varbk", "--json"))["vars"] == {
+            "retries": 5, "strict": True}
+
+
+def test_show_backlog_card_omits_the_vars_line_when_none_were_supplied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control_with_vars(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Queued", quest_id="plainbk", base_branch="main",
+        origin="backlog", seed_opening="Queued", defer_seed=True)
+
+    out = _run(monkeypatch, tmp_path, "show", "plainbk")
+
+    assert "vars:" not in out
+    assert json.loads(
+        _run(monkeypatch, tmp_path, "show", "plainbk", "--json"))["vars"] == {}
+
+
+def test_show_json_includes_the_effective_vars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest_id = _quest_with_vars(tmp_path)
+
+    data = json.loads(_run(monkeypatch, tmp_path, "show", quest_id, "--json"))
+
+    assert data["vars"] == {"jurisdiction": "eu", "retries": 5, "strict": True}
+
+
+def test_show_omits_the_vars_line_when_the_workflow_declares_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Plain", quest_id="novars", base_branch="main")
+
+    out = _run(monkeypatch, tmp_path, "show", "novars")
+
+    assert "vars:" not in out
+    assert json.loads(
+        _run(monkeypatch, tmp_path, "show", "novars", "--json"))["vars"] == {}

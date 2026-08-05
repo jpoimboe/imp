@@ -1989,6 +1989,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
     if meta.get("depends_on"):
         lines.append(_card_field("depends_on:", ", ".join(meta["depends_on"]),
                                  12, color=color))
+    if meta.get("vars"):
+        lines.append(_vars_line(meta["vars"], 12, color=color))
     body = meta.get("seed_opening") or ""
     title = meta.get("title") or ""
     if title and (body == title or body.startswith(title + "\n")):
@@ -1998,6 +2000,19 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
         lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(body)
     return lines
+
+
+def _var_value(value: object) -> str:
+    """Renders the value the way `--var` accepts it back."""
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def _vars_line(values: dict[str, object], width: int, *, color: bool) -> str:
+    """The `vars:` card row, clipped like `step:` — a workflow declaring ten vars
+    would otherwise wrap the card across three lines."""
+    body = ", ".join(f"{name}={_var_value(values[name])}" for name in sorted(values))
+    return pal.clip_display(
+        _card_field("vars:", body, width, color=color), _display_width())
 
 
 def _quest_card(control: Path, quest_id: str, *, now: datetime,
@@ -2037,6 +2052,8 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
             f"{d['id']} · {d['title']} ({'merged' if d['merged'] else 'unmerged'})"
             for d in card.depends_on)
         lines.append(_card_field("depends_on:", deps, 15, color=color))
+    if card.vars:
+        lines.append(_vars_line(card.vars, 15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
     if card.intent:
@@ -2074,6 +2091,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "parent": card.parent,
         "depends_on": card.depends_on,
         "intent": card.intent,
+        "vars": dict(card.vars),
         "summary": None,
     }
     if card.status in _INFLIGHT and card.step not in ("", "-"):
@@ -2101,6 +2119,7 @@ def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
         "blocked_on": list(unmerged),
         "created": meta.get("created_at"),
         "depends_on": meta.get("depends_on", []),
+        "vars": dict(meta.get("vars") or {}),
         "body": body or None,
     }
 
