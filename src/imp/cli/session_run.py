@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import anyio
@@ -26,6 +27,33 @@ from imp.remote.session.protocol import SkillRequest
 def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
     """Run the CLI Ctrl-D reader only for an interactive tty run (never headless/piped)."""
     return not non_interactive and sys.stdin.isatty()
+
+
+@dataclass(frozen=True)
+class SettledOutcome:
+    """Resolved terminal state; status is None when neither home nor archive can answer."""
+
+    status: str | None
+    events: list[dict[str, Any]]
+
+    @property
+    def completed(self) -> bool:
+        return self.status in ("merged", "done")
+
+
+def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
+    """Read status and events once, live home first, then archive."""
+    from imp.cli.main import _parse_jsonl
+    from imp.engine.archive import read as archive_read
+    try:
+        status: str | None = State.load(quest.state_dir).status
+    except FileNotFoundError:
+        status = archive_read.status_of(quest.control_root, quest.id)
+    events = list(quest.event_log().read())
+    if not events:
+        raw = archive_read.read_events(quest.control_root, quest.id)
+        events = _parse_jsonl(raw) if raw is not None else []
+    return SettledOutcome(status=status, events=events)
 
 
 def infer_session_result(quest: Quest) -> RunResult:
