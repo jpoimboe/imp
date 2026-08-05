@@ -10,6 +10,7 @@ from typing import Any
 
 import anyio
 
+from imp.api_errors import DaemonUnreachable
 from imp.engine.env import QUEST_TMP_ENV, overlay_engine_env
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
@@ -64,7 +65,7 @@ def spawn_session_daemon(
         )
 
 
-class DaemonStartupError(RuntimeError):
+class DaemonStartupError(DaemonUnreachable):
     """A spawned session daemon exited before it bound its socket."""
 
     def __init__(
