@@ -87,7 +87,7 @@ to. Leave it false for anything interactive.
 list_quests(control_root) -> list[QuestSummary]
 ```
 
-Returns in-flight and finished quests — the live quest homes merged with the archive.
+Returns all quests — never-started backlog, in-flight, and finished — by scanning every live quest home and merging in the archive.
 `QuestSummary` is a frozen dataclass of `id`, `title`, `status` and `step` (`None` when
 the quest has not reached a step yet).
 
