@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -121,3 +122,42 @@ def test_mistyped_per_quest_var_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(LoadError, match="expects int"):
         seed_workflow_start(state, workflow, config, quest_vars={"n": "many"})
+
+
+def test_create_draft_seeds_and_persists_the_supplied_overrides(tmp_path: Path) -> None:
+    _seed_with_var(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="seedpq", base_branch="main", vars={"n": 99})
+    assert ch.vars == {"n": 99}
+
+    # 99 can only come from the per-quest layer: the workflow declares 7 and the
+    # config layer overrides it to 42.
+    assert State.load(ch.state_dir).vars["n"] == 99
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["vars"] == {"n": 99}          # as supplied, not the effective merge
+    assert Quest.load(tmp_path, "seedpq").vars == {"n": 99}
+
+
+def test_deferred_draft_persists_overrides_without_seeding_them(tmp_path: Path) -> None:
+    # defer_seed loads no workflow, so it validates nothing either: the overrides
+    # are stored verbatim and checked when the first resume seeds them. Callers
+    # that must fail before the home exists validate at their own boundary.
+    _seed_with_var(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="seeddf", base_branch="main",
+        defer_seed=True, vars={"n": 99})
+    assert ch.vars == {"n": 99}
+
+    assert State.load(ch.state_dir).vars == {}    # seeding is deferred to first resume
+    assert Quest.load(tmp_path, "seeddf").vars == {"n": 99}
+
+
+def test_rejected_override_leaves_no_quest_home(tmp_path: Path) -> None:
+    # A quest cannot be un-created, so the rejection must land before the home
+    # survives creation.
+    _seed_with_var(tmp_path)
+    with pytest.raises(LoadError):
+        Quest.create_draft(
+            tmp_path, title="X", quest_id="seedbad", base_branch="main",
+            vars={"n": "many"})
+    assert not (project_state_dir(tmp_path) / "quests" / "seedbad").exists()

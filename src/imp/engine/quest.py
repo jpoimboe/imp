@@ -8,7 +8,7 @@ import json
 import os
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -674,7 +674,7 @@ class Quest:
         depends_on: list[str] | None = None, workflow: str | None = None,
         origin: str = "draft", seed_opening: str | None = None,
         parent: str | None = None, defer_seed: bool = False,
-        create_mode: str = "new",
+        create_mode: str = "new", vars: Mapping[str, object] | None = None,
     ) -> Quest:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -706,7 +706,7 @@ class Quest:
             "origin": origin,
             "seed_opening": seed_opening,
             "parent": parent,
-            "vars": {},
+            "vars": dict(vars or {}),
         }, indent=2, sort_keys=True))
 
         if defer_seed:
@@ -734,11 +734,11 @@ class Quest:
                     resolve_workflow_dir(control_root, wf_name),
                     configured_tiers=config.tier_names(),
                 )
+                state = State(id=quest_id, step=None, step_attempt=0, status="new")
+                seed_workflow_start(state, loaded_workflow, config, quest_vars=vars)
             except (LoadError, LoadErrors):
                 shutil.rmtree(quest_dir, ignore_errors=True)
                 raise
-            state = State(id=quest_id, step=None, step_attempt=0, status="new")
-            seed_workflow_start(state, loaded_workflow, config)
             state.save(quest_dir / "state")
 
         quest = cls(
@@ -748,6 +748,7 @@ class Quest:
             workflow=workflow, origin=origin, create_mode=create_mode,
             seed_opening=seed_opening, parent=parent,
             depends_on=list(depends_on or []),
+            vars=dict(vars or {}),
         )
         quest.event_log().append(
             agent_id=None, type="quest_created",
