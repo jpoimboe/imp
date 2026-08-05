@@ -218,7 +218,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-interrupted")
-    # Worktree exists + paused status → infer_session_result returns PAUSED.
+    # Worktree exists + paused status → the resolved outcome is not completed.
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
@@ -513,6 +513,34 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
 
 
 @pytest.mark.anyio
+async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The run merged and its home was reaped before the client could attach:
+    # the startup-failure check must take its answer from the archive record.
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-03-fastmerge", status="merged", events=_MERGED_EVENT_LINE)
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _boom)
+
+    coord = InterruptCoordinator()
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=coord,
+        solicit=lambda _p: _never(), leave_mode="new")
+    captured = capsys.readouterr()
+    assert rc == 0                                    # NOT rc=3: the run had completed
+    assert "startup failed" not in (captured.out + captured.err)
+    assert "merged into main" in captured.out         # rendered through the resolver's events
+
+
+@pytest.mark.anyio
 async def test_run_session_client_forwards_new_leave_mode_to_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -633,7 +661,7 @@ async def test_run_session_client_passes_control_root(
 async def test_run_session_client_resets_title_on_daemon_startup_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Worktree exists + non-completed state → infer_session_result returns PAUSED,
+    # Worktree exists + non-completed state → the resolved outcome is not completed,
     # so this is the rc=3 daemon-startup-failure path (not a fast-completed run).
     quest = _make_quest(tmp_path, "2026-06-15-leak")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
@@ -710,7 +738,7 @@ async def test_run_session_client_threads_provided_leave_state(
 async def test_run_session_client_reuses_passed_in_title(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A completed change with no worktree → infer_session_result COMPLETED, rc 0.
+    # A completed change with no worktree → the resolved outcome is completed, rc 0.
     quest = _make_quest(tmp_path, "2026-06-15-reuse")
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
