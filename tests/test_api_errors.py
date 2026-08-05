@@ -39,3 +39,30 @@ def test_daemon_startup_error_keeps_its_structured_fields() -> None:
     assert (err.quest_id, err.exit_code, err.stderr_tail) == ("feat12", 7, "boom")
     assert err.stderr_path == Path("/tmp/daemon.stderr")
     assert "before it came up" in str(err)
+
+
+def test_the_public_names_are_importable_from_imp_api() -> None:
+    # AC 1: a consumer needs no imp.remote.* or imp.engine.* import.
+    import imp.api as api
+
+    for name in (
+        "create_quest", "QuestHandle", "EVENT_SCHEMA_VERSION",
+        "ImpError", "QuestNotFound", "DaemonUnreachable", "DaemonStartupError",
+        "NotAtGate", "InvalidVar",
+    ):
+        assert name in api.__all__, name
+        assert hasattr(api, name), name
+
+
+def test_the_api_errors_are_the_same_objects_imp_api_exports() -> None:
+    import imp.api as api
+
+    assert api.ImpError is ImpError
+    assert api.DaemonUnreachable is DaemonUnreachable
+    assert issubclass(api.DaemonStartupError, api.DaemonUnreachable)
+
+
+def test_event_schema_version_is_the_documented_initial_value() -> None:
+    from imp.api import EVENT_SCHEMA_VERSION
+
+    assert EVENT_SCHEMA_VERSION == 1
