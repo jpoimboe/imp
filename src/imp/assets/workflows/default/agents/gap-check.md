@@ -41,7 +41,7 @@ The AC walk changes none of your levers: you still **read `deferred.md` and neve
 
 ## Anticipated plan total — `plan_total`
 
-`plan_total` is seeded from the spec's `## Plan outline` (via `plan-writer`'s plan-1 echo) and stays fixed through the outline-driven plan loop — you do **not** refine it each lap, because you run only once at quest end. Touch it only when you author a **corrective** plan (`more_plans: true`), where you must bump it.
+`plan_total` is seeded from the spec's `## Plan outline` (counted by the spec gate) and stays fixed through the outline-driven plan loop — you do **not** refine it each lap, because you run only once at quest end. Touch it only when you author a **corrective** plan (`more_plans: true`), where you must bump it.
 
 **Project the corrective scope at natural dependency boundaries**: bundle scope that must land together, split independent slices, with no trivial one-task slivers and no task-count floor — count the resulting plans on top of what is already implemented. The clamp rules:
 

@@ -93,7 +93,7 @@ Scope; the AC is not wrong. A Scope item that no AC tests means an AC is missing
 
 After the spec body is final and self-reviewed, append a `## Plan outline` section
 **inside the spec artifact**. It is the run's **source of truth** for plan count
-and seeds `plan_total` (the first `plan-writer` reads it and echoes the count).
+and seeds `plan_total` (the spec gate counts the outline).
 Decompose the **whole spec** into N plans, each a coarse one-or-two-line statement
 of *what* that plan covers — **not the how** (no tasks, no code, no file lists).
 Size each plan at its **natural dependency boundary**: bundle scope that must land together; split where
@@ -119,6 +119,8 @@ Shape:
 2. <what plan 2 covers — one or two lines>
 …
 ```
+
+Each plan is a top-level numbered item (`1.`, `2.`, …); the spec gate counts them to seed the plan counter the user sees.
 
 On a rework or minors re-commit the `## Plan outline` already lives in the spec —
 keep it, and refresh it only if the rework changed scope (and thus the plan count).

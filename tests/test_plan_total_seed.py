@@ -105,13 +105,23 @@ def test_failing_spec_gate_routes_instead_of_pausing(
     anyio.run(main)
 
 
-def test_plan_writer_documents_first_run_plan_total_estimate() -> None:
+def test_plan_writer_prompt_carries_no_plan_total_contract() -> None:
     text = (AGENTS_DIR / "plan-writer.md").read_text()
     low = text.lower()
-    # A dedicated section states the first-run estimate contract.
-    assert "first-run plan_total estimate" in low
-    # The estimate is gated on the first plan and is an honest count, not boilerplate.
-    assert "plan_index == 1" in text
-    assert "estimate" in low
-    # The complete_step examples carry the plan_total argument.
-    assert "plan_total=" in text
+    # The seeding contract moved to the spec gate: no section, no emitted argument.
+    assert "first-run plan_total estimate" not in low
+    assert "plan_total=" not in text
+    assert "default `plan_total = 1`" not in text
+    # The display references to the counter survive.
+    assert "{{ vars.plan_total }}" in text
+
+
+def test_spec_finalizer_and_gap_check_name_the_spec_gate_as_seeder() -> None:
+    spec_finalizer = (AGENTS_DIR / "spec-finalizer.md").read_text()
+    gap_check = (AGENTS_DIR / "gap-check.md").read_text()
+    assert "the spec gate counts the outline" in spec_finalizer
+    assert "the first `plan-writer` reads it and echoes the count" not in spec_finalizer
+    # The outline's shape is stated where it is authored: top-level numbered items.
+    assert "the spec gate counts them to seed the plan counter" in spec_finalizer
+    assert "counted by the spec gate" in gap_check
+    assert "plan-1 echo" not in gap_check

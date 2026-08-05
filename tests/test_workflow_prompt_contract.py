@@ -318,7 +318,6 @@ def test_plan_writer_states_natural_sizing_no_floor_or_ceiling() -> None:
     assert "natural dependency boundary" in low
     assert "not lines of code" in low
     assert "express" in low and "self-scope" in low
-    assert "default `plan_total = 1`" in text
     assert "outline-driven plan loop" in low
     # The ~5-8 floor, the carve anti-patterns, the per-plan-review motivation, and
     # the ~12/CEILING ceiling cross-reference are all gone.
