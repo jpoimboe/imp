@@ -47,13 +47,11 @@ def _lead_inv(tmp_path: Path, fake: Any) -> AgentInvocation:
 
 @pytest.mark.anyio
 async def test_subagent_backoff_emits_agent_retry(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """A subagent backoff respawn emits one agent_retry under the subagent's agent_id."""
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -89,8 +87,7 @@ async def test_subagent_backoff_emits_agent_retry(
             spawns["n"] += 1
             return _RateLimitThenOkRunner(fail=(i == 0))
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -117,13 +114,11 @@ async def test_subagent_backoff_emits_agent_retry(
 
 
 @pytest.mark.anyio
-async def test_clean_subagent_emits_no_agent_retry(tmp_path: Path) -> None:
+async def test_clean_subagent_emits_no_agent_retry(
+        tmp_path: Path, provider_registry) -> None:
     """A subagent that succeeds on its first drive emits no agent_retry event."""
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     class _OkRunner:
         async def run(self, inv):
@@ -143,8 +138,7 @@ async def test_clean_subagent_emits_no_agent_retry(tmp_path: Path) -> None:
         def create_runner(self, _inv):
             return _OkRunner()
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -165,15 +159,13 @@ async def test_clean_subagent_emits_no_agent_retry(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_subagent_sticky_retry_rides_out_unknown(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """Attempt 1 fails `network` (opens the window), attempt 2 fails `unknown`:
     the subagent keeps retrying (a second agent_retry under sub:) instead of
     handing back after the single retry."""
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -210,8 +202,7 @@ async def test_subagent_sticky_retry_rides_out_unknown(
             spawns["n"] += 1
             return _ScriptedRunner(script[i])
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -235,15 +226,13 @@ async def test_subagent_sticky_retry_rides_out_unknown(
 
 @pytest.mark.anyio
 async def test_subagent_interrupted_teardown_is_not_sticky_retried(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """A mid-transient teardown tagged kind='interrupted' on a sticky category
     never auto-retries: the pre-classification interrupt guard returns before
     decide, so only the first (network) retry is emitted."""
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -286,8 +275,7 @@ async def test_subagent_interrupted_teardown_is_not_sticky_retried(
             spawns["n"] += 1
             return _ScriptedRunner(script[i])
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -311,17 +299,15 @@ async def test_subagent_interrupted_teardown_is_not_sticky_retried(
 
 @pytest.mark.anyio
 async def test_subagent_failed_handback_emits_audit_error(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """A subagent whose drive fails a hard-stop category (config) reaches the
     failed/fatal handback, which appends exactly one audit `error` event under
     the subagent's agent_id carrying category/kind/message — queryable via the
     same filter `imp events --type error --agent sub:<id>` uses."""
     from imp.engine import events_index as ei
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -345,8 +331,7 @@ async def test_subagent_failed_handback_emits_audit_error(
         def create_runner(self, _inv):
             return _ConfigFailRunner()
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -380,18 +365,16 @@ async def test_subagent_failed_handback_emits_audit_error(
 
 @pytest.mark.anyio
 async def test_subagent_budget_exhaustion_emits_audit_error(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """A persistent network flap that exceeds the backoff budget hands back via
     the budget-exhaustion path, which appends exactly one audit `error` event
     under the subagent's agent_id carrying the flapping category and a
     ceiling-marking kind/message. The single retry before exhaustion still emits
     its agent_retry."""
     import imp.engine.error_policy as ep
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -419,8 +402,7 @@ async def test_subagent_budget_exhaustion_emits_audit_error(
         def create_runner(self, _inv):
             return _NetworkFlapRunner()
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -452,15 +434,13 @@ async def test_subagent_budget_exhaustion_emits_audit_error(
 
 @pytest.mark.anyio
 async def test_subagent_interrupted_pause_emits_no_audit_error(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """A human-pause handback (interrupted teardown) appends NO audit error: a
     pause is not an error give-up, and result.error there is a stale retryable
     category."""
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -487,8 +467,7 @@ async def test_subagent_interrupted_pause_emits_no_audit_error(
         def create_runner(self, _inv):
             return _InterruptedTeardownRunner()
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -510,14 +489,12 @@ async def test_subagent_interrupted_pause_emits_no_audit_error(
 
 @pytest.mark.anyio
 async def test_subagent_context_ceiling_emits_no_audit_error(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """A context-ceiling handback appends NO audit error: its terminal state is
     already captured by the [context_exhausted] marker."""
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -544,8 +521,7 @@ async def test_subagent_context_ceiling_emits_no_audit_error(
         def create_runner(self, _inv):
             return _ContextWindowRunner()
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
@@ -567,14 +543,12 @@ async def test_subagent_context_ceiling_emits_no_audit_error(
 
 @pytest.mark.anyio
 async def test_subagent_backoff_ended_clears_top_level_countdown(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        provider_registry) -> None:
     """A subagent's backoff_ended routed into its fold drops the top-level countdown_total."""
     from imp.cli import narrative as nv
-    from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
-
-    resolve.reset_providers_for_tests()
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
@@ -610,8 +584,7 @@ async def test_subagent_backoff_ended_clears_top_level_countdown(
             spawns["n"] += 1
             return _RateLimitThenOkRunner(fail=(i == 0))
 
-    resolve.register_provider("fake", env_check=lambda: True,
-                              factory=lambda _m: _SubProvider())
+    provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
     fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent",
