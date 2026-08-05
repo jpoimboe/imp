@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import anyio
 import pytest
 
+from imp.cli import main
 from imp.cli.session_run import (
     make_headless_solicit,
     make_interactive_solicit,
@@ -911,6 +913,39 @@ def test_resolve_settled_outcome_prefers_live_home_over_archive(tmp_path: Path) 
     assert outcome.status == "paused"                    # live home wins over 'merged'
     assert [e["type"] for e in outcome.events] == ["workflow_paused"]
     assert outcome.completed is False
+
+
+def test_terminal_rendering_merged_from_archive_when_home_reaped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-03-render", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    quest.title = ""                          # untitled, so the identity line shows the intent
+    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert rc == 0
+    assert lines[0] == "merged into main"     # merged=True from the archived quest_merged event
+    assert "done · commits on" not in out     # not the unmerged headline
+    # the opening intent, too, comes from the archived blob
+    assert lines[1] == "2026-07-03-render · > resolve me from archive"
+
+
+def test_terminal_rendering_pauses_when_home_reaped_and_no_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-07-03-norecord")
+    assert not quest.state_dir.exists()
+    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
+    out = capsys.readouterr().out
+    assert rc == 1                            # an unresolvable status renders, never raises
+    assert out.split("\n")[0] == "paused"
+    assert "resume: imp resume 2026-07-03-norecord" in out
 
 
 @pytest.mark.anyio

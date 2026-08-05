@@ -36,9 +36,9 @@ from imp.paths import project_state_dir
 if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
+    from imp.cli.session_run import SettledOutcome
     from imp.cli.store import HomeDigest, SearchHit, Store
     from imp.cli.verify_detect import DetectedTestCommand
-    from imp.engine.executor import RunResult
     from imp.engine.quest import Quest
     from imp.engine.state import State
     from imp.remote.session.attach import DaemonStartupError
@@ -551,35 +551,18 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
 
 
 def _handle_terminal_outcome(
-    quest: Quest, result: RunResult, coord: Any,
+    quest: Quest, outcome: SettledOutcome, coord: Any,
 ) -> int:
-    """Render the terminal outcome of a settled run and return its rc.
-
-    COMPLETED → green completion line (rc 0). PAUSED → merge_blocked exits early
-    (no summary); every other pause falls through to the dim paused summary (rc 1).
-    Shared by `new`/`resume` (relocated verbatim from the post-run `else` arm)."""
-    from imp.engine.archive import read as archive_read
-    from imp.engine.executor import RunResult
-    from imp.engine.state import State
-    if result is RunResult.COMPLETED:
-        _ep = getattr(quest, 'events_path', None)
-        if _ep is not None and not _ep.exists():
-            events: list[dict[str, Any]] = []
-        else:
-            events = list(quest.event_log().read())
-        if not events:
-            raw = archive_read.read_events(quest.control_root, quest.id)
-            events = _parse_jsonl(raw) if raw is not None else []
-        merged = any(ev.get("type") == "quest_merged" for ev in events)
-        _emit_completed(quest, merged=merged, intent=_resolve_intent(events))
+    """Render a settled run's terminal outcome and return its rc; reads nothing."""
+    if outcome.completed:
+        merged = any(ev.get("type") == "quest_merged" for ev in outcome.events)
+        _emit_completed(quest, merged=merged, intent=_resolve_intent(outcome.events))
         return 0
-    # PAUSED — surface merge_blocked; every other pause falls through to the summary.
-    final_state = State.load(quest.state_dir)
-    if final_state.status == "merge_blocked":
+    if outcome.status == "merge_blocked":
         mb_reason: str | None = None
         mb_detail: str | None = None
         mb_note: str | None = None
-        for ev in quest.event_log().read():
+        for ev in outcome.events:
             if ev.get("type") == "merge_blocked":
                 payload = ev.get("payload") or {}
                 mb_reason = payload.get("reason")
@@ -641,13 +624,12 @@ def _print_leave_disposition(
 
 
 def _session_exit_code(quest: Quest, coord: Any) -> int:
-    from imp.cli.session_run import infer_session_result
-    from imp.engine.executor import RunResult
-    result = infer_session_result(quest)
-    outcome = _handle_terminal_outcome(quest, result, coord)
-    if result is RunResult.PAUSED and coord.interrupted:
+    from imp.cli.session_run import resolve_settled_outcome
+    outcome = resolve_settled_outcome(quest)
+    rc = _handle_terminal_outcome(quest, outcome, coord)
+    if not outcome.completed and coord.interrupted:
         return 130
-    return outcome
+    return rc
 
 
 def _project_root() -> Path:
