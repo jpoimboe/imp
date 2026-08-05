@@ -121,7 +121,7 @@ def test_run_mutation_new_records_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     result = run_mutation(tmp_path, "new", {
         "opening": "brief text", "title": None, "workflow": None, "base": None,
-        "idea": "From the agent", "depends_on": None})
+        "idea": "From the agent", "depends_on": None, "var_flags": None})
     assert result["returncode"] == 0
     assert "recorded backlog quest" in result["message"]
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
@@ -220,7 +220,7 @@ def test_run_mutation_new_records_parent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     result = run_mutation(tmp_path, "new", {
         "opening": "x", "title": None, "workflow": None, "base": None,
-        "idea": "Child", "depends_on": None}, "mom99")
+        "idea": "Child", "depends_on": None, "var_flags": None}, "mom99")
     assert result["returncode"] == 0
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     meta = json.loads((quests[-1] / "quest.json").read_text())
@@ -236,7 +236,7 @@ def test_run_mutation_new_background_starts_quest(
         lambda control, qid: started.update(qid=qid))
     result = run_mutation(tmp_path, "new", {
         "opening": "brief", "title": "T", "workflow": None, "base": None,
-        "idea": None, "depends_on": None, "background": True})
+        "idea": None, "depends_on": None, "var_flags": None, "background": True})
     assert result["returncode"] == 0
     assert "started quest" in result["message"]
     assert "qid" in started
@@ -248,7 +248,7 @@ async def test_build_session_handler_threads_parent_id(tmp_path: Path) -> None:
     handler = build_session_handler(tmp_path, parent_id="mom7")
     result = await handler("new", {
         "opening": "x", "title": None, "workflow": None, "base": None,
-        "idea": "Child", "depends_on": None})
+        "idea": "Child", "depends_on": None, "var_flags": None})
     assert result["returncode"] == 0
     quests = sorted((project_state_dir(tmp_path) / "quests").iterdir())
     meta = json.loads((quests[-1] / "quest.json").read_text())
@@ -360,6 +360,26 @@ def test_cmd_abandon_missing_token_in_sandbox_errors(
     rc = main._cmd_abandon(argparse.Namespace(token=token))
     assert rc == 2
     assert "needs a quest token" in capsys.readouterr().err
+
+
+def test_new_mutation_threads_var_flags_to_apply_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_apply_new(control: Path, **kwargs: object) -> tuple[int, str]:
+        seen.update(kwargs)
+        return 0, "imp: recorded backlog quest q1"
+
+    monkeypatch.setattr("imp.cli.main.apply_new", _fake_apply_new)
+
+    result = run_mutation(tmp_path, "new", {
+        "opening": "go", "title": None, "workflow": None, "base": None,
+        "idea": None, "depends_on": None, "var_flags": ["retries=5"],
+        "background": False})
+
+    assert result["returncode"] == 0
+    assert seen["var_flags"] == ["retries=5"]
 
 
 def test_async_cmd_new_proxy_forwards_background(
