@@ -44,6 +44,7 @@ class FakeControl:
         reply_outcome: DeliveryOutcome = DeliveryOutcome.DELIVERED,
         reply_error: Exception | None = None,
         create_id: str = "zzzzzz",
+        create_error: Exception | None = None,
     ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
@@ -56,6 +57,7 @@ class FakeControl:
         self._reply_outcome = reply_outcome
         self._reply_error = reply_error
         self._create_id = create_id
+        self._create_error = create_error
 
     def full_history(self, quest_id: str) -> list[dict]:
         return self._histories.get(quest_id, [])
@@ -74,6 +76,8 @@ class FakeControl:
 
     def create(self, prompt: str) -> str:
         self.created.append(prompt)
+        if self._create_error is not None:
+            raise self._create_error
         return self._create_id
 
     def list_quests(self) -> list[QuestInfo]:
@@ -100,6 +104,17 @@ async def test_create_notices_the_id_of_the_quest_it_created() -> None:
     assert control.created == ["add a foo"]
     assert responses.get_nowait() == Notice(
         "Spawning @k3f9qa… watch for its first question")
+
+
+@pytest.mark.anyio
+async def test_a_failed_create_notices_the_reason_instead_of_claiming_a_spawn() -> None:
+    control = FakeControl(
+        create_error=RuntimeError("no `default-base` in imp/config.yaml"))
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Create("add a foo"), control, responses)
+    assert responses.get_nowait() == Notice(
+        "Couldn't create the quest: no `default-base` in imp/config.yaml")
+    assert responses.empty()
 
 
 @pytest.mark.anyio
