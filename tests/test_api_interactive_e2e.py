@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -18,36 +15,6 @@ from tests.conftest import _git, _init_repo, write_agent_md
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-@pytest.fixture(autouse=True)
-async def _ignore_anyio_teardown_setresult_race() -> AsyncIterator[None]:
-    # anyio 4.8 race: socket fd readable the same loop turn aclose or cancel scope runs
-    loop = asyncio.get_running_loop()
-    previous = loop.get_exception_handler()
-
-    def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
-        exc = context.get("exception")
-        callback = getattr(context.get("handle"), "_callback", None)
-        future = getattr(callback, "__self__", None)
-        if (
-            isinstance(exc, asyncio.InvalidStateError)
-            and getattr(callback, "__name__", "") == "set_result"
-            and isinstance(future, asyncio.Future)
-            and future.done()
-        ):
-            # done() not cancelled(): Session.aclose() from user code resolves the future.
-            return  # the anyio accept/read set_result-on-done-future race
-        if previous is not None:
-            previous(loop, context)
-        else:
-            loop.default_exception_handler(context)
-
-    loop.set_exception_handler(handler)
-    try:
-        yield
-    finally:
-        loop.set_exception_handler(previous)
 
 
 def _seed_scripted_interactive_repo(root: Path) -> None:
