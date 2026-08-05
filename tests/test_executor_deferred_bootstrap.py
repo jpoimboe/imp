@@ -173,3 +173,49 @@ async def test_deferred_and_eager_creation_yield_identical_seeded_state(
     )
     assert deferred_tuple == eager_tuple
     assert st_d.vars == state_eager.vars
+
+
+@pytest.mark.anyio
+async def test_deferred_bootstrap_applies_the_quests_own_overrides(
+    tmp_path: Path,
+) -> None:
+    # The workflow declares n=7 and the config layer overrides it to 42, so 99
+    # can only reach the agent through the quest's own overrides.
+    quest = _seed_var_workflow(tmp_path)
+    quest.vars = {"n": 99}
+    State(id=quest.id, step=None, step_attempt=0, status="new").save(quest.state_dir)
+
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    result = await run_quest(quest)
+
+    assert result is RunResult.COMPLETED
+    assert sink, "provider was never invoked -> cursor was not seeded"
+    assert "n=99" in _task_text(sink[0])
+
+
+@pytest.mark.anyio
+async def test_seeded_override_survives_a_resume_without_backfill(
+    tmp_path: Path,
+) -> None:
+    # The shape of a paused, already-started quest: the cursor is set and
+    # has_started is True, so the bootstrap seed is skipped and only
+    # _backfill_var_defaults runs. It must not pull the value back to 7.
+    quest = _seed_var_workflow(tmp_path)
+    State(id=quest.id, step="w", step_attempt=0, status="paused",
+          vars={"n": 99}, has_started=True).save(quest.state_dir)
+
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    result = await run_quest(quest)
+
+    assert result is RunResult.COMPLETED
+    assert sink, "provider was never invoked -> cursor was not seeded"
+    assert "n=99" in _task_text(sink[0])
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
+    assert State.load(quest.state_dir).vars["n"] == 99
+    types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
+    assert "vars_backfilled" not in types

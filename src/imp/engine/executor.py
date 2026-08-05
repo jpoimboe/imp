@@ -450,7 +450,7 @@ async def run_quest(
         # sentinel skips it and the step-None completion check below stays
         # authoritative.
         if state.step is None and not state.has_started:
-            seed_workflow_start(state, workflow, config)
+            seed_workflow_start(state, workflow, config, quest_vars=quest.vars)
             state.save(quest.state_dir)
         # Seed any workflow var introduced after this quest was created (its
         # default is missing from the persisted vars); otherwise a StrictUndefined
