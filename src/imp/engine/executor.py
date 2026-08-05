@@ -1604,7 +1604,9 @@ async def _route_agent(
         finally:
             coordinator.end_backoff_wait()
         # Consume the retry-now latch so it doesn't leak into the next backoff sleep.
-        coordinator.take_retry_now()
+        resumed_early = coordinator.take_retry_now()
+        _emit(log, "backoff_ended",
+              {"reason": "retry_now" if resumed_early else "elapsed"}, agent_id=None)
         if hinted:
             hint_exempt_sleeps += 1
         else:

@@ -501,8 +501,11 @@ async def dispatch_task(
                     if coord is not None:
                         coord.end_backoff_wait()
                 # Consume the retry-now latch so it doesn't leak into the next backoff sleep.
-                if coord is not None:
-                    coord.take_retry_now()
+                resumed_early = coord.take_retry_now() if coord is not None else False
+                if ctx.event_log is not None:
+                    ctx.event_log.append(
+                        agent_id=sub_inv.agent_id, type="backoff_ended",
+                        payload={"reason": "retry_now" if resumed_early else "elapsed"})
                 if hinted:
                     hint_exempt_sleeps += 1
                 else:

@@ -243,3 +243,54 @@ def test_multiple_running_subagents_none_waiting_shows_count() -> None:
     act = b.current_activity()
     assert act.verb == "running 2 subagents"
     assert act.countdown_total is None
+
+
+def test_backoff_ended_clears_wait_and_countdown() -> None:
+    b = _build_with_wait()
+    assert b.current_activity().countdown_total == 2940.0
+    b.add(ev("4", "backoff_ended", reason="retry_now"))
+    assert b._reset_wait is None
+    # _build() leaves a step on the stack, so the activity survives the wait —
+    # only its countdown goes.
+    act = b.current_activity()
+    assert act is not None
+    assert act.countdown_total is None
+
+
+def test_backoff_ended_removes_press_r_hint_from_activity_line() -> None:
+    from imp.cli.live_driver import compose_activity_line
+
+    b = _build_with_wait()
+    waiting = compose_activity_line(activity=b.current_activity(), frame=0,
+                                    color=False, now_iso="2026-01-01T00:01:00+00:00")
+    assert "press r to retry now" in waiting
+
+    b.add(ev("4", "backoff_ended", reason="elapsed"))
+    act = b.current_activity()
+    assert act is not None
+    resumed = compose_activity_line(activity=act, frame=0, color=False,
+                                    now_iso="2026-01-01T00:01:00+00:00")
+    assert "press r to retry now" not in resumed
+
+
+def test_backoff_ended_renders_no_line() -> None:
+    import json
+
+    from imp.cli.render_text import render_tree
+
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="deferred-sweep", kind="agent",
+           phase="convergence", phase_label="convergence phase",
+           label="sweeping deferred tasks", model="claude"),
+        ev("3", "agent_retry", category="rate_limit", attempt=1,
+           backoff_seconds=2940.0, hinted=True),
+        ev("4", "backoff_ended", reason="retry_now"),
+    ])
+    # No FallbackLine node anywhere in the tree...
+    assert "backoff_ended" not in json.dumps(nv.structural_repr(tree.root), default=str)
+    # ...and nothing on the page, not even in the full view (which DOES print
+    # fallback lines; the lean view hides them).
+    out = "\n".join(render_tree(tree, full=True, color=False, width=80))
+    assert "backoff_ended" not in out
+    assert "retry_now" not in out
