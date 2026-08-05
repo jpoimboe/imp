@@ -51,8 +51,8 @@ class ControlPlane:
         """Deliver a reply into the quest's session daemon, rehydrating if hibernated."""
         return await self._deliver(quest_id, text)
 
-    def create(self, prompt: str) -> None:
-        self._create(prompt)
+    def create(self, prompt: str) -> str:
+        return self._create(prompt)
 
     def list_quests(self) -> list[QuestInfo]:
         return self._list_fn()

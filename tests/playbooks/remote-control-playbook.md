@@ -106,7 +106,7 @@ outbox() { curl -s "$FAKE_URL/_outbox" | python3 -m json.tool; }
 ```
 
 1. **`/new`** the seeded intent: `inject "/new <the §1 intent text with the sentinel>"`. Watch
-   `outbox` for the optimistic "Spawning a new Change…" ack, then for the spawned Change's first
+   `outbox` for the optimistic "Spawning @<id>…" ack naming the new quest, then for its first
    narration arriving as a plain message — narrative events carry no reply footer; the `↩ @<handle>`
    footer appears only on the awaiting-user gate you answer later.
 2. **Narration streams** to the chat as the run proceeds (spec → plan → implement → review). The

@@ -49,6 +49,10 @@ async def test_e2e_chat_commands_round_trip(
     monkeypatch.setenv("IMP_TELEGRAM_API_BASE", fake.url)
 
     created: list[str] = []
+
+    def _fake_create(prompt: str) -> str:
+        created.append(prompt)
+        return "n3wq1d"
     listed = [QuestInfo(id="q1w2e3", title="Listed",
                          status="running", step="plan")]
     spath = socket_path(tmp_path)
@@ -64,7 +68,7 @@ async def test_e2e_chat_commands_round_trip(
             tg.start_soon(functools.partial(
                 run_daemon, tmp_path,
                 env={"IMP_TELEGRAM_TOKEN": "TOK", "IMP_TELEGRAM_CHAT_ID": "4242"},
-                create=created.append,
+                create=_fake_create,
                 list_quests=lambda: listed,
                 resident_ids=lambda: frozenset({"q1w2e3"}),
                 deliver=_capture_deliver,
@@ -94,7 +98,8 @@ async def test_e2e_chat_commands_round_trip(
 
             fake.inject("/new add a foo() helper")
             await _wait(lambda: created == ["add a foo() helper"])
-            await _wait(lambda: _text_in_outbox(fake, "Spawning"))
+            await _wait(lambda: _text_in_outbox(
+                fake, "Spawning @n3wq1d… watch for its first question"))
 
             fake.inject("/list")
             await _wait(lambda: _text_in_outbox(fake, "@q1w2e3  Listed — running · plan"))

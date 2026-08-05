@@ -348,8 +348,9 @@ async def _handle_command(
                 for text in rendered:
                     responses.put(Notice(text, quest_id=quest_id))
     elif isinstance(command, Create):
-        control.create(command.prompt)
-        responses.put(Notice("Spawning a new quest… watch for its first question"))
+        new_id = await anyio.to_thread.run_sync(control.create, command.prompt)
+        responses.put(Notice(
+            f"Spawning @{handle_for(new_id)}… watch for its first question"))
     elif isinstance(command, ListQuests):
         try:
             quests = await anyio.to_thread.run_sync(control.list_quests)
