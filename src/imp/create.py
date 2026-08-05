@@ -23,7 +23,7 @@ def create_draft_quest(
 ) -> Quest:
     """A deferred draft carrying `prompt` as its seed opening. Preflight and variable
     validation run first, so a rejection leaves nothing behind on disk."""
-    from imp.cli.main import _resolve_new_base
+    from imp.cli.main import BaseResolutionError, _resolve_new_base
     from imp.cli.var_flags import validate_var_overrides
     from imp.engine import worktree
     from imp.engine.errors import LoadError
@@ -37,14 +37,19 @@ def create_draft_quest(
     if workflow is not None and not validate_workflow_name(workflow):
         raise LoadError(f"invalid workflow name {workflow!r}")
     quest_vars = validate_var_overrides(control_root, workflow=workflow, values=vars)
-    return Quest.create_draft(
-        control_root,
-        title=title or "",
-        quest_id=new_quest_id(existing_stems=live_stems(control_root)),
-        base_branch=resolved_base,
-        workflow=workflow,
-        origin="draft",
-        seed_opening=prompt,
-        defer_seed=True,
-        vars=quest_vars,
-    )
+    try:
+        return Quest.create_draft(
+            control_root,
+            title=title or "",
+            quest_id=new_quest_id(existing_stems=live_stems(control_root)),
+            base_branch=resolved_base,
+            workflow=workflow,
+            origin="draft",
+            seed_opening=prompt,
+            defer_seed=True,
+            vars=quest_vars,
+        )
+    except RuntimeError as e:
+        # The base branch can vanish between resolution and head_of.
+        raise BaseResolutionError(
+            f"base branch {resolved_base!r} could not be resolved: {e}") from e

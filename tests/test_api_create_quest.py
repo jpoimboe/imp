@@ -109,6 +109,21 @@ def test_invalid_var_is_catchable_as_imp_error(tmp_path: Path) -> None:
         create_quest(tmp_path, "go", vars={"nope": 1})
 
 
+def test_a_vanished_base_branch_raises_imp_error_and_creates_no_quest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The base branch can vanish between _resolve_new_base and head_of.
+    _seed_control(tmp_path)
+    monkeypatch.setattr(
+        "imp.cli.main._resolve_new_base", lambda control, base_flag: "vanished")
+
+    with pytest.raises(ImpError):
+        create_quest(tmp_path, "go")
+
+    quests_dir = project_state_dir(tmp_path) / "quests"
+    assert not quests_dir.exists() or not any(quests_dir.iterdir())
+
+
 def test_no_vars_loads_no_workflow(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

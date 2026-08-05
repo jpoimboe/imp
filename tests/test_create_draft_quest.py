@@ -131,3 +131,18 @@ def test_two_creations_mint_distinct_ids(tmp_path: Path) -> None:
 
     assert first.id != second.id
     assert _meta(tmp_path, second.id)["seed_opening"] == "two"
+
+
+def test_a_vanished_base_branch_raises_base_resolution_error_and_creates_no_quest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The base branch can vanish between _resolve_new_base and head_of.
+    _seed_control(tmp_path)
+    monkeypatch.setattr(
+        "imp.cli.main._resolve_new_base", lambda control, base_flag: "vanished")
+
+    with pytest.raises(BaseResolutionError):
+        create_draft_quest(tmp_path, "go")
+
+    quests_dir = project_state_dir(tmp_path) / "quests"
+    assert not quests_dir.exists() or not any(quests_dir.iterdir())
