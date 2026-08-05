@@ -232,6 +232,29 @@ async def test_replay_prefix_then_one_boundary_then_the_live_gate(
 
 
 @pytest.mark.anyio
+async def test_broken_handshake_surfaces_as_daemon_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.remote.session.client import SessionClient
+
+    handle = _draft(tmp_path)
+    monkeypatch.setattr(
+        "imp.remote.session.attach.spawn_session_daemon", lambda quest, **_kw: None)
+    monkeypatch.setenv("IMP_SESSION_CONNECT_TIMEOUT", "0.5")
+
+    async def _raise_broken(self: object) -> None:
+        raise anyio.BrokenResourceError()
+
+    monkeypatch.setattr(SessionClient, "connect", _raise_broken)
+
+    with pytest.raises(DaemonUnreachable) as excinfo:
+        async with attach(tmp_path, handle):
+            pass
+
+    assert isinstance(excinfo.value, ImpError)
+
+
+@pytest.mark.anyio
 async def test_an_exception_from_the_body_reaches_the_caller_unwrapped(
     tmp_path: Path,
 ) -> None:

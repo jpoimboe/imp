@@ -539,3 +539,30 @@ def test_resolve_connect_timeout_defaults_to_60_when_env_unset(
 ) -> None:
     monkeypatch.delenv("IMP_SESSION_CONNECT_TIMEOUT", raising=False)
     assert _resolve_connect_timeout(None) == 60.0
+
+
+@pytest.mark.anyio
+async def test_broken_handshake_surfaces_as_daemon_startup_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.remote.session.client import SessionClient
+
+    quest = _make_quest(tmp_path, "2026-06-15-brkhs")
+    quest.quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest.quest_dir / "daemon.stderr").write_bytes(b"handshake-died\n")
+
+    class _DeadProc:
+        returncode = 7
+
+        def poll(self) -> int | None:
+            return 7
+
+    async def _raise_broken(self: Any) -> None:
+        raise anyio.BrokenResourceError()
+
+    monkeypatch.setattr(SessionClient, "connect", _raise_broken)
+
+    with pytest.raises(DaemonStartupError):
+        await attach_or_spawn(
+            quest, on_event=lambda _e: None,
+            spawn_fn=lambda _ch: _DeadProc(), connect_timeout=HANG_BACKSTOP)

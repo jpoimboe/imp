@@ -112,7 +112,8 @@ async def attach_or_spawn(
     try:
         await client.connect()
         return client
-    except OSError:
+    except (OSError, anyio.BrokenResourceError):
+        # handshake send can fail after connect; a half-dead daemon raises BrokenResourceError
         pass
     proc = spawn_fn(quest)
     with anyio.fail_after(_resolve_connect_timeout(connect_timeout)):
@@ -120,7 +121,7 @@ async def attach_or_spawn(
             try:
                 await client.connect()
                 return client
-            except OSError:
+            except (OSError, anyio.BrokenResourceError):
                 if proc is not None and proc.poll() is not None:
                     stderr_path = quest.quest_dir / "daemon.stderr"
                     raise DaemonStartupError(
