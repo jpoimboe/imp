@@ -3,8 +3,11 @@ process without importing imp's internals."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import anyio
 
 from imp.api_errors import (
     DaemonUnreachable,
@@ -14,10 +17,15 @@ from imp.api_errors import (
     QuestNotFound,
 )
 from imp.remote.session.attach import DaemonStartupError
+from imp.remote.session.protocol import CONTROL_INTERRUPT
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import AsyncIterator, Mapping
     from pathlib import Path
+
+    from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+
+    from imp.remote.session.client import SessionClient
 
 EVENT_SCHEMA_VERSION = 1
 
@@ -25,12 +33,14 @@ __all__ = [
     "EVENT_SCHEMA_VERSION",
     "DaemonStartupError",
     "DaemonUnreachable",
+    "Event",
     "ImpError",
     "InvalidVar",
     "NotAtGate",
     "QuestHandle",
     "QuestNotFound",
     "QuestSummary",
+    "Session",
     "create_quest",
     "list_quests",
 ]
@@ -118,3 +128,75 @@ def list_quests(control_root: Path) -> list[QuestSummary]:
         if r[0] not in seen:
             out.append(_summary(r[0], r[1], r[2], r[4]))
     return out
+
+
+# anyio's stream errors carry no message, so state the condition rather than wrap them.
+_DAEMON_GONE = "lost the connection to the session daemon; it exited or hibernated"
+
+
+@dataclass(frozen=True)
+class Event:
+    """One event off a quest's stream: its type, its payload, and the whole envelope."""
+
+    type: str
+    payload: Mapping[str, Any]
+    raw: Mapping[str, Any]
+
+
+class _Feed:
+    """Bridges the session client's push callback to an async iterator."""
+
+    def __init__(self) -> None:
+        # Unbounded: on_event runs on the daemon's read loop and must never block or drop.
+        send, recv = anyio.create_memory_object_stream[Event](max_buffer_size=math.inf)
+        self._send: MemoryObjectSendStream[Event] = send
+        self.recv: MemoryObjectReceiveStream[Event] = recv
+        self.at_gate = False
+
+    def on_event(self, raw: dict[str, Any]) -> None:
+        # Track the gate as frames ARRIVE, not as the consumer drains them: a reply is
+        # valid the moment the daemon opens the gate. Replayed history is not a gate.
+        if not raw.get("_replay"):
+            if raw.get("type") == "awaiting_user_input":
+                self.at_gate = True
+            elif raw.get("type") == "user_input_resolved":
+                self.at_gate = False
+        self._send.send_nowait(
+            Event(type=raw.get("type", ""), payload=raw.get("payload") or {}, raw=raw))
+
+    def close(self) -> None:
+        self._send.close()   # EOF for a consumer still draining the buffer, not a cut
+
+
+class Session:
+    """A live attachment to one quest's session daemon."""
+
+    def __init__(self, client: SessionClient, feed: _Feed) -> None:
+        self._client = client
+        self._feed = feed
+
+    async def events(self) -> AsyncIterator[Event]:
+        """Yield events until the daemon's stream ends; unknown types yield like any other."""
+        try:
+            async for event in self._feed.recv:
+                yield event
+        except anyio.ClosedResourceError:
+            return   # the context exited under a concurrent reader: a clean end, not an error
+
+    async def send_input(self, text: str) -> None:
+        if not self._feed.at_gate:
+            raise NotAtGate(
+                "no gate is open — wait for a live awaiting_user_input event")
+        try:
+            await self._client.send_input(text)
+        except (anyio.BrokenResourceError, anyio.ClosedResourceError) as e:
+            raise DaemonUnreachable(_DAEMON_GONE) from e
+
+    async def interrupt(self, reason: str | None = None) -> None:
+        try:
+            await self._client.send_control(CONTROL_INTERRUPT, reason)
+        except (anyio.BrokenResourceError, anyio.ClosedResourceError) as e:
+            raise DaemonUnreachable(_DAEMON_GONE) from e
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
