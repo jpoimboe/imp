@@ -101,7 +101,7 @@ def _read_events(tmp_path: Path) -> list[dict[str, Any]]:
 
 
 def _backoff_ctx(tmp_path: Path, *, log: Any, coord: Any) -> ToolContext:
-    """First drive fails with rate_limit; dispatch_task takes one backoff sleep, then succeeds on re-spawn."""
+    """Build ToolContext: first spawn fails rate_limit, second succeeds after one backoff sleep."""
     calls = {"n": 0}
 
     async def _spawn(_inv: Any) -> Any:

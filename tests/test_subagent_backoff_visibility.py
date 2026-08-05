@@ -563,3 +563,89 @@ async def test_subagent_context_ceiling_emits_no_audit_error(
               if line]
     assert not any(e["type"] == "error" and e["payload"].get("audit")
                    for e in events)
+
+
+@pytest.mark.anyio
+async def test_subagent_backoff_ended_clears_top_level_countdown(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A subagent's backoff_ended routed into its fold drops the top-level countdown_total."""
+    from imp.cli import narrative as nv
+    from imp.providers import resolve
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    resolve.reset_providers_for_tests()
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+    monkeypatch.setattr("imp.agents.subagents._interruptible_sleep", _no_sleep)
+
+    class _RateLimitThenOkRunner:
+        def __init__(self, fail: bool) -> None:
+            self.fail = fail
+
+        async def run(self, inv):
+            from imp.agents.transcript import Transcript
+            Transcript(inv.transcript_dir / "transcript.jsonl").append(
+                Message(role="user", content=(TextBlock(text="work"),)))
+            if self.fail:
+                yield {"type": "error", "payload": {
+                    "category": "rate_limit", "kind": "rate_limit",
+                    "message": "429 rate limited"}}
+            else:
+                yield {"type": "agent_result",
+                       "payload": {"status": "Success", "outcome": "done"}}
+
+        async def interrupt(self) -> None:
+            ...
+
+    spawns = {"n": 0}
+
+    class _SubProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv):
+            i = spawns["n"]
+            spawns["n"] += 1
+            return _RateLimitThenOkRunner(fail=(i == 0))
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _SubProvider())
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "sub_agent",
+                          {"subagent_name": "coder", "task_description": "edit"})),
+        response(tool_use("c1", "complete_step",
+                          {"status": "Success", "outcome": "done"})),
+    ])
+    runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
+
+    async for _ in runner.run(_lead_inv(tmp_path, fake)):
+        pass
+
+    events = [json.loads(line)
+              for line in (tmp_path / "events.jsonl").read_text().splitlines()
+              if line]
+    retry = next(e for e in events if e["type"] == "agent_retry")
+    ended = next(e for e in events if e["type"] == "backoff_ended")
+    assert ended["agent_id"] == retry["agent_id"]        # same subagent scope
+    event_id = retry["agent_id"].removeprefix("sub:")
+
+    b = nv.NarrativeBuilder()
+    b.add({"id": "q", "agent_id": None, "type": "quest_created",
+           "payload": {"quest_id": 1, "title": "x"}})
+    b.add({"id": "s", "agent_id": None, "type": "step_started",
+           "payload": {"step": "impl", "kind": "agent", "phase": "impl",
+                       "phase_label": "implementation phase",
+                       "label": "implementing", "model": "m"}})
+    # Registers the fold under sub:<event_id> — the id the real events carry.
+    b.add({"id": event_id, "agent_id": "step:impl/lead", "type": "tool_call",
+           "payload": {"id": event_id, "name": "sub_agent",
+                       "input": {"subagent_name": "coder",
+                                 "task_description": "edit"}}})
+
+    b.add(retry)
+    assert b.current_activity().countdown_total == retry["payload"]["backoff_seconds"]
+    b.add(ended)
+    assert b.current_activity().countdown_total is None
