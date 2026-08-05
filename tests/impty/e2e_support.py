@@ -175,7 +175,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
             "plan-writer": [{"text": "plan", "tools": [
                 bash(plan_cmd),
                 done(plan_path=".imp/quests/test-quest/artifacts/plans/SCRIPTED-STUB-plan-1.md",
-                     plan_number=1, plan_total=1),
+                     plan_number=1),
             ]}],
             "task-lead": [{"text": "implement", "tools": [
                 bash(lead_cmd),
