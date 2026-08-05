@@ -234,17 +234,20 @@ async def attach(
     resume = not _resume_opens_fresh(quest)
     feed = _Feed()
     try:
-        client = await attach_mod.attach_or_spawn(
-            quest, on_event=feed.on_event, lease=lease,
-            spawn_fn=lambda q: attach_mod.spawn_session_daemon(q, resume=resume))
-    except OSError as e:   # incl. TimeoutError, an OSError, from the connect budget
+        try:
+            client = await attach_mod.attach_or_spawn(
+                quest, on_event=feed.on_event, lease=lease,
+                spawn_fn=lambda q: attach_mod.spawn_session_daemon(q, resume=resume))
+        except OSError as e:   # incl. TimeoutError, an OSError, from the connect budget
+            # fail_after's TimeoutError stringifies to "", which would otherwise leave a
+            # dangling colon on the single most common failure.
+            reason = str(e) or "timed out waiting for it to come up"
+            raise DaemonUnreachable(
+                f"could not reach the session daemon for {ident}: {reason}") from e
+    except BaseException:
         feed.recv.close()
         feed.close()
-        # fail_after's TimeoutError stringifies to "", which would otherwise leave a
-        # dangling colon on the single most common failure.
-        reason = str(e) or "timed out waiting for it to come up"
-        raise DaemonUnreachable(
-            f"could not reach the session daemon for {ident}: {reason}") from e
+        raise
     session = Session(client, feed)
     try:
         async with anyio.create_task_group() as tg:

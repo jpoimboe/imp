@@ -10,6 +10,7 @@ import anyio
 import pytest
 
 from imp.api import (
+    DaemonStartupError,
     DaemonUnreachable,
     ImpError,
     QuestHandle,
@@ -229,6 +230,52 @@ async def test_replay_prefix_then_one_boundary_then_the_live_gate(
 
         assert answered["text"] == "us"
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_daemon_startup_error_surfaces_from_public_attach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.api
+
+    handle = _draft(tmp_path)
+    quest_dir = project_state_dir(tmp_path) / "quests" / handle.id
+    (quest_dir / "daemon.stderr").write_text("daemon-exploded-at-startup\n")
+
+    class _DeadProc:
+        returncode = 7
+
+        def poll(self) -> int | None:
+            return 7
+
+    monkeypatch.setattr(
+        "imp.remote.session.attach.spawn_session_daemon",
+        lambda quest, **_kw: _DeadProc())
+    monkeypatch.setenv("IMP_SESSION_CONNECT_TIMEOUT", "30")  # hang backstop only
+
+    created: list[Any] = []
+    real_feed_cls = imp.api._Feed
+
+    def _record_feed() -> Any:
+        f = real_feed_cls()
+        created.append(f)
+        return f
+
+    monkeypatch.setattr("imp.api._Feed", _record_feed)
+
+    with pytest.raises(DaemonStartupError) as excinfo:
+        async with attach(tmp_path, handle):
+            pass
+
+    err = excinfo.value
+    assert isinstance(err, DaemonUnreachable)
+    assert isinstance(err, ImpError)
+    assert "daemon-exploded-at-startup" in err.stderr_tail
+
+    with pytest.raises(anyio.ClosedResourceError):
+        created[0].recv.receive_nowait()
+    with pytest.raises(anyio.ClosedResourceError):
+        created[0].on_event({"type": "step_started"})
 
 
 @pytest.mark.anyio
