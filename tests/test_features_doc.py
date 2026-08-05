@@ -31,3 +31,9 @@ def test_features_names_every_catalogued_capability() -> None:
     assert "review gate" in low
     # event-log auditability & resumability
     assert "event log" in low
+
+
+def test_features_catalogues_the_embedding_api_and_links_to_its_guide() -> None:
+    body = DOC.read_text()
+    assert "imp.api" in body
+    assert "](embedding.md)" in body, "the catalog entry must link to the guide"

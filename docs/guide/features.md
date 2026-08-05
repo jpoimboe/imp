@@ -48,6 +48,13 @@ Every byte of every run is appended to a per-quest event log. The event log is t
 single source of truth — not a side effect you hope was captured — making every run
 auditable after the fact and resumable if it is interrupted.
 
+## Embed imp in your own application
+
+A supported Python surface, `imp.api`, drives quests from another process: create a
+quest, stream its events, and answer the questions a workflow asks — enough to run an
+interactive workflow behind a web app or a bot without touching imp's internals. The
+guide is [`docs/guide/embedding.md`](embedding.md).
+
 ---
 
 *Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*
