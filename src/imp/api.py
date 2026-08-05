@@ -62,9 +62,11 @@ def create_quest(
     workflow: str | None = None,
     base: str | None = None,
     title: str | None = None,
+    background: bool = False,
     vars: Mapping[str, bool | int | str] | None = None,
 ) -> QuestHandle:
-    """Mint a quest id and write its draft synchronously, in this process."""
+    """Mint a quest id and write its draft synchronously, in this process.
+    `background=True` also starts a detached autonomous run needing no attach."""
     from imp.cli.main import BaseResolutionError
     from imp.cli.var_flags import VarFlagError
     from imp.create import create_draft_quest
@@ -79,6 +81,13 @@ def create_quest(
         raise InvalidVar(str(e)) from e
     except (BaseResolutionError, PreconditionError, LoadError, LoadErrors) as e:
         raise ImpError(str(e)) from e
+    if background:
+        from imp.remote.daemon import spawn
+        try:
+            spawn.start_quest(control_root, quest.id)
+        except OSError as e:
+            raise ImpError(
+                f"quest {quest.id} was created but its run could not start: {e}") from e
     return QuestHandle(id=quest.id, title=quest.title, control_root=control_root)
 
 
