@@ -14,6 +14,46 @@ from imp.api import (
 )
 ```
 
+## A worked example
+
+Create a quest, stream it, answer its first question, and stop when it completes:
+
+```python
+import asyncio
+from pathlib import Path
+
+from imp.api import QuestHandle, attach, create_quest
+
+CONTROL_ROOT = Path("/path/to/the/checkout/imp/manages")
+
+
+async def interview(handle: QuestHandle) -> None:
+    async with attach(CONTROL_ROOT, handle) as session:
+        async for event in session.events():
+            if event.raw.get("_replay"):
+                continue                       # replayed history, not news
+            if event.type == "awaiting_user_input":
+                print(event.payload.get("last_agent_message") or "")
+                reply = await asyncio.to_thread(input, "> ")
+                await session.send_input(reply)
+            elif event.type == "workflow_completed":
+                break
+            # any other type, known or not, is simply ignored
+
+
+# create_quest is synchronous and does git work: call it before the event loop.
+handle = create_quest(
+    CONTROL_ROOT,
+    "interview me about the invention",
+    workflow="invention",
+    vars={"jurisdiction": "us"},
+)
+print(f"created {handle.id}")
+asyncio.run(interview(handle))
+```
+
+The `_replay` filter is not decoration — see the replay handshake below.
+
 ## Creating a quest
 
 ```python
