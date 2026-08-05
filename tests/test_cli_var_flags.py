@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.var_flags import VarFlagError, resolve_var_flags
+from imp.cli.var_flags import VarFlagError, resolve_var_flags, validate_var_overrides
 from tests.conftest import _seed_control, _seed_control_with_vars
 
 
@@ -94,3 +94,50 @@ def test_unknown_name_for_a_workflow_that_declares_nothing(tmp_path: Path) -> No
         resolve_var_flags(tmp_path, workflow=None, raw=["foo=1"])
     assert str(excinfo.value) == (
         "unknown variable 'foo' for workflow 'imp'; it declares no variables")
+
+
+def test_typed_overrides_pass_through_when_the_workflow_declares_them(
+    tmp_path: Path,
+) -> None:
+    _seed_control_with_vars(tmp_path)
+    assert validate_var_overrides(
+        tmp_path, workflow=None,
+        values={"jurisdiction": "us", "retries": 5, "strict": True},
+    ) == {"jurisdiction": "us", "retries": 5, "strict": True}
+
+
+def test_typed_overrides_reject_an_undeclared_name(tmp_path: Path) -> None:
+    _seed_control_with_vars(tmp_path)
+    with pytest.raises(VarFlagError) as excinfo:
+        validate_var_overrides(tmp_path, workflow=None, values={"nope": 1})
+    assert "vars override 'nope' is not declared by the workflow" in str(excinfo.value)
+
+
+def test_typed_overrides_reject_a_mistyped_value_without_coercing(
+    tmp_path: Path,
+) -> None:
+    _seed_control_with_vars(tmp_path)
+    with pytest.raises(VarFlagError) as excinfo:
+        validate_var_overrides(tmp_path, workflow=None, values={"retries": "5"})
+    assert "vars override 'retries' expects int, got str" in str(excinfo.value)
+
+
+def test_typed_overrides_reject_a_bool_where_an_int_is_declared(tmp_path: Path) -> None:
+    # bool is a Python int subclass; the declaration must still say no.
+    _seed_control_with_vars(tmp_path)
+    with pytest.raises(VarFlagError):
+        validate_var_overrides(tmp_path, workflow=None, values={"retries": True})
+
+
+def test_no_typed_overrides_loads_no_workflow_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Same skew tolerance resolve_var_flags gives: no overrides, no load.
+    _seed_control_with_vars(tmp_path)
+
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise AssertionError("the workflow must not be loaded")
+
+    monkeypatch.setattr("imp.engine.loader.load_workflow", _boom)
+    assert validate_var_overrides(tmp_path, workflow=None, values=None) == {}
+    assert validate_var_overrides(tmp_path, workflow=None, values={}) == {}
