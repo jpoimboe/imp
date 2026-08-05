@@ -509,7 +509,7 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "fast_path": False},
-        output={"exit": 0, "stdout": "", "stderr": ""},
+        output={"exit": 0, "stdout": "", "stderr": "", "plan_total": 2},
     )
     assert isinstance(m.action, Continue)
 

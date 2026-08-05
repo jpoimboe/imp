@@ -6,7 +6,6 @@ output:
   status: {type: enum, values: [Success, Error]}
   plan_path: {type: string}
   plan_number: {type: int}
-  plan_total: {type: int}
 ---
 
 You are writing an implementation plan for this quest.
