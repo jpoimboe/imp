@@ -30,7 +30,7 @@ from imp.engine.state import (
 from imp.engine.types import SourceLoc
 from imp.paths import project_state_dir
 
-LAYOUT_VERSION = 14  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 15  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -378,6 +378,22 @@ def _migrate_v13_to_v14(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v14_to_v15(quest_dir: Path) -> None:
+    """v14->v15: quest.json gained `vars`, the per-quest workflow-variable
+    overrides supplied at creation. Backfill an existing home with an empty
+    object — a quest created before the field had no overrides — and stamp the
+    version; both keys land in one atomic quest.json rewrite (os.replace), so a
+    partial failure leaves the home at v14 and the hop re-runs on next load. The
+    setdefault guard makes the re-run lossless. The archive is deliberately
+    untouched: overrides are read only from a live home at seed time, and an
+    archived quest never re-seeds."""
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta.setdefault("vars", {})
+    meta["layout_version"] = 15
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -392,6 +408,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (11, 12): _migrate_v11_to_v12,
     (12, 13): _migrate_v12_to_v13,
     (13, 14): _migrate_v13_to_v14,
+    (14, 15): _migrate_v14_to_v15,
 }
 
 
@@ -431,6 +448,7 @@ class Quest:
     seed_opening: str | None = None  # title+description seed for a fresh resume open
     parent: str | None = None  # parent quest id (create_draft provenance); None when standalone
     depends_on: list[str] = field(default_factory=list)  # dependency quest ids (gates go-live)
+    vars: dict[str, object] = field(default_factory=dict)  # per-quest workflow var overrides
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite quest.json in the
@@ -608,6 +626,7 @@ class Quest:
             "layout_version": LAYOUT_VERSION,
             "imp_commit": _imp_commit(control_root),
             "workflow": workflow,
+            "vars": {},
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -687,6 +706,7 @@ class Quest:
             "origin": origin,
             "seed_opening": seed_opening,
             "parent": parent,
+            "vars": {},
         }, indent=2, sort_keys=True))
 
         if defer_seed:
@@ -770,4 +790,5 @@ class Quest:
             seed_opening=meta.get("seed_opening"),
             parent=meta.get("parent"),
             depends_on=list(meta.get("depends_on") or []),
+            vars=dict(meta.get("vars") or {}),
         )
