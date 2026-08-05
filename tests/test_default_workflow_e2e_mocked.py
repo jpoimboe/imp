@@ -195,11 +195,17 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
     src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
     dst = tmp_path / "imp" / "workflows" / "imp"
     shutil.copytree(src, dst)
-    # Replace script gates with always-pass stubs. plan-finalized declares an
-    # output: schema, so its stub must write $IMP_OUTPUT or the engine hard-pauses.
+    # Replace script gates with always-pass stubs. A gate that declares an output:
+    # schema must write $IMP_OUTPUT or the engine hard-pauses, so those get a real
+    # payload — with the key present, since each gate's rule reads it.
+    payloads = {
+        "plan-finalized.sh": '{"task_total": 1}',
+        "spec-commit-verify.sh": '{"plan_total": 1}',
+    }
     for shell in (dst / "scripts").glob("*.sh"):
-        if shell.name == "plan-finalized.sh":
-            shell.write_text('#!/bin/sh\nprintf \'{"task_total": 1}\' > "$IMP_OUTPUT"\nexit 0\n')
+        payload = payloads.get(shell.name)
+        if payload is not None:
+            shell.write_text(f'#!/bin/sh\nprintf \'{payload}\' > "$IMP_OUTPUT"\nexit 0\n')
         else:
             shell.write_text("#!/bin/sh\nexit 0\n")
         shell.chmod(0o755)

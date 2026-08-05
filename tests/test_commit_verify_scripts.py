@@ -4,6 +4,7 @@ journaling now, so the gates check on-disk presence, not git commit state."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -13,12 +14,22 @@ from imp.assets import bundled_workflow_dir
 SCRIPTS = bundled_workflow_dir("default") / "scripts"
 
 
+def _output_path(quest_dir: Path) -> Path:
+    return quest_dir.parent / "imp-output.json"
+
+
 def _run_capture(script: str, root: Path, quest_dir: Path, quest_id: str):
+    out = _output_path(quest_dir)
+    # The engine creates $IMP_OUTPUT empty (mkstemp) before the script runs.
+    out.write_text("")
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
         env={"IMP_PROJECT_ROOT": str(root), "IMP_QUEST_ID": quest_id,
-             "IMP_QUEST_DIR": str(quest_dir), "PATH": os.environ["PATH"]},
-        capture_output=True, text=True,
+             "IMP_QUEST_DIR": str(quest_dir), "IMP_OUTPUT": str(out),
+             "PATH": os.environ["PATH"]},
+        # encoding, not text=True: the success line carries '·', and env= drops the
+        # locale, so decoding must not depend on the host's default encoding.
+        capture_output=True, encoding="utf-8",
     )
 
 
@@ -32,9 +43,18 @@ def _write(quest_dir: Path, rel: str, body: str) -> None:
     dest.write_text(body)
 
 
+_OUTLINE_SPEC = (
+    "# spec\n\n"
+    "## Plan outline\n\n"
+    "1. first slice\n"
+    "2. second slice\n"
+    "3. third slice\n"
+)
+
+
 def test_spec_verify_passes_when_artifact_present(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    _write(home, "spec/id1.md", "# spec\n")
+    _write(home, "spec/id1.md", _OUTLINE_SPEC)
     assert _run("spec-commit-verify.sh", tmp_path, home, "id1") == 0
 
 
@@ -92,7 +112,7 @@ def test_spec_verify_reads_live_from_quest_dir(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     root.mkdir()
     home = tmp_path / "home"
-    _write(home, "spec/id1.md", "# spec\n")
+    _write(home, "spec/id1.md", _OUTLINE_SPEC)
     proc = _run_capture("spec-commit-verify.sh", root, home, "id1")
     assert proc.returncode == 0, proc.stderr
 
@@ -105,3 +125,65 @@ def test_plan_verify_reads_live_from_quest_dir(tmp_path: Path) -> None:
     _write(home, "plans/id1-plan-1.md", "# plan 1\n")
     proc = _run_capture("plan-commit-verify.sh", root, home, "id1")
     assert proc.returncode == 0, proc.stderr
+
+
+def test_spec_verify_counts_outline_plans(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write(home, "spec/id1.md", _OUTLINE_SPEC)          # three numbered plans
+    proc = _run_capture("spec-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(_output_path(home).read_text()) == {"plan_total": 3}
+    assert "· 3 plans in outline" in proc.stdout
+
+
+def test_spec_verify_ignores_numbered_lines_after_the_outline_section(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write(home, "spec/id1.md",
+           "# spec\n\n## Plan outline\n\n1. the only slice\n\n"
+           "## Notes\n\n1. not a plan\n2. also not a plan\n")
+    proc = _run_capture("spec-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(_output_path(home).read_text()) == {"plan_total": 1}
+
+
+def test_spec_verify_fails_when_outline_section_absent(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write(home, "spec/id1.md", "# spec\n\nbody with no outline\n")
+    proc = _run_capture("spec-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 1
+    assert proc.stderr.strip() == (
+        f"no numbered plans found under '## Plan outline' in "
+        f"{home}/artifacts/spec/id1.md")
+    # Failure still leaves decodable JSON with no plan_total, so the gate ROUTES
+    # (resume: spec-finalizer) instead of hard-pausing on a bad $IMP_OUTPUT.
+    assert json.loads(_output_path(home).read_text()) == {}
+
+
+def test_spec_verify_fails_when_outline_has_no_numbered_items(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write(home, "spec/id1.md",
+           "# spec\n\n## Plan outline\n\n- a bullet, not a numbered plan\n")
+    proc = _run_capture("spec-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 1
+    assert proc.stderr.strip() == (
+        f"no numbered plans found under '## Plan outline' in "
+        f"{home}/artifacts/spec/id1.md")
+    assert json.loads(_output_path(home).read_text()) == {}
+
+
+def test_spec_verify_missing_artifact_still_writes_json_output(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / "artifacts" / "spec").mkdir(parents=True)   # dir exists, file does not
+    proc = _run_capture("spec-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 1
+    assert "not found on disk" in proc.stderr
+    assert json.loads(_output_path(home).read_text()) == {}
+
+
+def test_spec_verify_counts_across_a_subheading_inside_the_outline(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write(home, "spec/id1.md",
+           "# spec\n\n## Plan outline\n\n1. first slice\n\n### aside\n\n2. second slice\n")
+    proc = _run_capture("spec-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(_output_path(home).read_text()) == {"plan_total": 2}

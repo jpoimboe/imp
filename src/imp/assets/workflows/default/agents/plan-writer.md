@@ -6,7 +6,6 @@ output:
   status: {type: enum, values: [Success, Error]}
   plan_path: {type: string}
   plan_number: {type: int}
-  plan_total: {type: int}
 ---
 
 You are writing an implementation plan for this quest.
@@ -119,8 +118,8 @@ red tree.
 **Express carve-out.** On the **express** path threshold routes straight here with
 `fast_path: true` and **no `spec-finalizer`**, so **no `## Plan outline` exists**. Do
 **not** hard-depend on the outline: when it is absent, **self-scope** the single plan
-directly from the spec exactly as `imp` does, and default `plan_total` to `1`. The
-outline-consumption rules apply **only on the full path**.
+directly from the spec exactly as `imp` does. The outline-consumption rules apply
+**only on the full path**.
 
 ## Ask vs. decide
 
@@ -247,7 +246,7 @@ sole coverage backstop.
 
 On the **express / self-scope path** there is no outline, so size the single plan yourself
 by the same principle: one coherent, independently-committable unit at its
-natural dependency boundary; default `plan_total = 1`.
+natural dependency boundary.
 
 ## Scheduling spec-mandated work into a later plan
 
@@ -256,21 +255,6 @@ Slicing spec-mandated work into a later plan is legitimate — the **whether** i
 `- [ ] DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: quest]`
 
 This is the plain **untagged** form — no `— needs-decision:` marker — distinct from the human-decision line under **Surfacing a decision you cannot resolve** above. Prose in the plan's `## Decisions` section does not count; only the untagged line in `{{ quest.home }}/deferred.md` records the scope-out durably. Untagged means the sweep may fix it, `gap-check` enforces it, and the user is never re-asked.
-
-## First-run plan_total estimate
-
-Always emit `plan_total` in your output contract — an integer `>= 1` (a required field). On
-the **first plan** (`plan_index == 1`) it is captured into `vars.plan_total`, seeding the
-`plan N/total` denominator the user sees from the very first plan label, so it is never
-blank and never `1/0`.
-
-- **Full path:** do **not** estimate. Read the spec's `## Plan outline`, **count its
-  plans**, and emit that count — the **outline-derived** value, the source of truth.
-- **Express path:** there is no outline — emit `plan_total = 1`.
-
-On every later plan (`plan_index > 1`) `gap-check` owns the authoritative total — it bumps
-it only when it authors a corrective — and the workflow ignores your emission on those laps,
-so just echo the current `{{ vars.plan_total }}`.
 
 ## Plan Document Format
 
@@ -465,30 +449,25 @@ plan: the newest plan exists and `progress.md` does not mark it complete). On th
    tool-terminal (the engine journals the rewritten file at the step boundary):
 
    ```
-   complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N, plan_total=T)
+   complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N)
    ```
 
 2. **If there is nothing worth integrating,** call the same
-   `complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N, plan_total=T)`
+   `complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N)`
    without changing the file. The verification review still runs on the unchanged plan and
    passes it through.
 
 End the turn tool-terminal with the `complete_step` call. Do not re-solicit the user and
-do not reopen planning — this pass exists only to incorporate the reviewer's advice. Include
-`plan_total` as on any completion (see *First-run plan_total estimate*); on a first-plan
-minors pass this preserves the seed across the re-emit. (Substitute the actual integers for N
-and T.)
+do not reopen planning — this pass exists only to incorporate the reviewer's advice.
+(Substitute the actual integer for N.)
 
 ## Finish
 
 ```
-complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N, plan_total=T)
+complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N)
 ```
 
-Always pass `plan_total=T` (a required output field): on the first plan (`plan_index == 1`)
-it is the outline-derived count (or 1 on express) and seeds the denominator; on later plans
-echo the current `{{ vars.plan_total }}` (see *First-run plan_total estimate*). (Substitute
-the actual integers for N and T.)
+(Substitute the actual integer for N.)
 
 (On a **minors-integration pass** — `blocking: false` — follow the *Minors-integration pass*
 section above; do not also run the steps here.)

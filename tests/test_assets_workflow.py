@@ -509,7 +509,7 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "fast_path": False},
-        output={"exit": 0, "stdout": "", "stderr": ""},
+        output={"exit": 0, "stdout": "", "stderr": "", "plan_total": 2},
     )
     assert isinstance(m.action, Continue)
 
@@ -926,7 +926,7 @@ def test_spec_finalizer_authors_plan_outline() -> None:
     assert "plan count" in low or "plan_total" in low
     # The handoff turn now routes through outline authoring before committing.
     assert "Author the plan outline" in body
-    # spec-finalizer never emits plan_total — the outline (echoed by plan-writer) seeds it.
+    # spec-finalizer never emits plan_total — the spec gate counts the outline to seed it.
     assert "plan_total" not in wf.agents["spec-finalizer"].output_schema.field_names()
 
 
@@ -939,9 +939,7 @@ def test_plan_writer_consumes_outline_with_express_carveout() -> None:
     assert "## Plan outline" in text
     assert "slice" in low
     assert "only the **HOW**" in text or "only the how" in low
-    # plan_total is the outline count, not an estimate, on the full path.
-    assert "outline-derived" in low or "from the outline" in low
-    # Express carve-out: no spec-finalizer / no outline -> self-scope, default to 1.
+    # Express carve-out: no spec-finalizer / no outline -> self-scope.
     assert "express" in low
     assert "hard-depend" in low
     assert "self-scope" in low
