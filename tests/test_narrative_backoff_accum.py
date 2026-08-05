@@ -141,3 +141,18 @@ def test_subagent_closed_row_excludes_backoff_wait() -> None:
     # 14s wall - 12s wait (02..14) = 2s honest working time, not 14s.
     assert "· 2s" in row
     assert "14s" not in row
+
+
+def test_backoff_ended_closes_span_and_stops_accrual() -> None:
+    b = _step_builder()
+    b.add(ev("3", "agent_retry", category="auth", attempt=1,
+             backoff_seconds=600.0, timestamp="2026-01-01T00:00:05+00:00"))
+    b.add(ev("4", "backoff_ended", reason="retry_now",
+             timestamp="2026-01-01T00:00:13+00:00"))
+    # The span is the real sleep (05..13), not the countdown to the 600s reset.
+    assert b.backoff_wait_seconds("2026-01-01T00:01:00+00:00") == 8.0
+    assert b._step_stack[-1].backoff_wait_s == 8.0
+    b.add(ev("5", "thinking", content="back",
+             timestamp="2026-01-01T00:00:45+00:00"))
+    assert b.backoff_wait_seconds("2026-01-01T00:01:00+00:00") == 8.0
+    assert b._step_stack[-1].backoff_wait_s == 8.0

@@ -461,7 +461,7 @@ from collections.abc import Iterable  # noqa: E402  (kept near builder for clari
 
 _RESUMES_WAIT = frozenset({
     "user_message", "agent_message", "thinking", "tool_call",
-    "agent_result", "step_started", "step_completed",
+    "agent_result", "step_started", "step_completed", "backoff_ended",
 })
 
 
@@ -2248,6 +2248,13 @@ def _h_max_tokens_truncated(
     return
 
 
+def _h_backoff_ended(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Wait-state only (cleared in add() via _RESUMES_WAIT); agent_retry left the breadcrumb.
+    return
+
+
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["warning"] = _h_warning
@@ -2256,6 +2263,7 @@ NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["output_validation_nudge"] = _h_output_validation_nudge
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 NarrativeBuilder._HANDLERS["max_tokens_truncated"] = _h_max_tokens_truncated
+NarrativeBuilder._HANDLERS["backoff_ended"] = _h_backoff_ended
 
 
 def _h_script_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
