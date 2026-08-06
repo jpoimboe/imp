@@ -1099,6 +1099,20 @@ def test_sandbox_spawn_failed_marker_absence_guarded():
     assert sandbox_spawn_failed(present, sandbox_active=False) is False
 
 
+def test_sandbox_failure_detail_is_the_first_nonempty_line_clipped():
+    # The payload field is one line of diagnosis: bwrap's own reason, never the
+    # blank padding around it, never more than 200 chars of a pathological line.
+    from imp.engine.sandbox import sandbox_failure_detail
+    stderr = ("\n   \n"
+              "bwrap: Can't bind mount /x: No such file or directory\n"
+              "and a second line that must not be carried\n")
+    assert sandbox_failure_detail(stderr) == (
+        "bwrap: Can't bind mount /x: No such file or directory")
+    assert sandbox_failure_detail("x" * 250 + "\nnext") == "x" * 200
+    assert sandbox_failure_detail("  \n\t\n") == ""      # nothing said → nothing shown
+    assert sandbox_failure_detail("") == ""
+
+
 def test_strip_sandbox_marker_removes_single_line():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER, strip_sandbox_marker
     raw = f"{SANDBOX_ENTERED_MARKER}\nreal line\nsecond"

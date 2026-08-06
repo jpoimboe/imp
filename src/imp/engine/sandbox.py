@@ -189,6 +189,17 @@ def strip_sandbox_marker(stderr: str) -> str:
     return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
 
 
+_SANDBOX_DETAIL_MAX_CHARS = 200    # one-line diagnosis budget in a runner_warning payload
+
+
+def sandbox_failure_detail(stderr: str) -> str:
+    """The sandbox's own first non-empty stderr line, clipped — "" when it said nothing."""
+    for line in stderr.splitlines():
+        if line.strip():
+            return line.strip()[:_SANDBOX_DETAIL_MAX_CHARS]
+    return ""
+
+
 SANDBOX_SPAWN_MAX_ATTEMPTS = 5   # 1 initial + 4 retries
 _SANDBOX_SPAWN_BACKOFF_BASE_S = 0.05
 _SANDBOX_SPAWN_BACKOFF_CAP_S = 0.4
