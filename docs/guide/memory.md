@@ -25,7 +25,9 @@ its own). Pair with `imp-knowledge` for the stable picture.
     it extremely sparingly.
   - `default-workflow` / `default-base` — what new quests default to.
   - `test_cmd_fast` / `test_cmd_slow` (and timeouts) — the commands the verify
-    gates run.
+    gates run. Unset means that gate is a no-op and imp raises it again — when
+    scoping a quest, and at `imp new` once a command becomes detectable; an
+    empty string is a deliberate opt-out that stays silent.
 
   Other config (providers, tiers, sandbox, `default-workflow`, …) layers across
   `floor ← imp/config.yaml ← ~/.imp/config.yaml ← ~/.imp/projects/<slug>/config.yaml`,
