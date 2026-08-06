@@ -24,12 +24,12 @@ from your output.
 
 The setup-context message carries every current value and where it came from. A
 value marked `you set this` is the user's own choice — leave it alone unless they
-raise it. A value shown as `(none)` is empty, never a literal: hand an empty test
-command back as an empty string and empty import roots back as an empty list, but
-never hand back an empty integration branch — settle one with the user instead,
-since imp cannot merge a quest without it. Open by reading the settings back in
-one short line and asking what they want changed; do not re-derive them from
-scratch, and do not walk the list decision by decision.
+raise it. A value shown as `(none)` is empty, never a literal: hand empty import
+roots back as an empty list and handle the test command per **Fast test command**
+below, but never hand back an empty integration branch — settle one with the user
+instead, since imp cannot merge a quest without it. Open by reading the settings
+back in one short line and asking what they want changed; do not re-derive them
+from scratch, and do not walk the list decision by decision.
 
 Ground every proposal in this repository. Read the build files, the packaging,
 and the layout on disk before you propose a change, and name the evidence behind

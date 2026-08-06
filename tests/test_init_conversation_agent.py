@@ -65,15 +65,25 @@ def test_setup_agent_body_revises_the_screens_settings() -> None:
     assert "settle one decision at a time" not in flat
 
 
+# The whole sentence, not fragments: a re-punctuated rewrite must not pass.
+_SENTINEL_SENTENCE = """
+A value shown as `(none)` is empty, never a literal: hand empty import roots back
+as an empty list and handle the test command per **Fast test command** below, but
+never hand back an empty integration branch — settle one with the user instead,
+since imp cannot merge a quest without it.
+"""
+
+
 def test_setup_agent_body_decodes_the_kickoffs_empty_value_sentinel() -> None:
-    """_row_cells renders an empty branch/test-command/roots as `(none)`, and the
-    host writes test_cmd_fast and default_base back unvalidated — so the body says
-    the sentinel means empty, while still refusing the empty branch that `enter`
-    is refused for."""
+    """_row_cells renders an empty branch/test-command/roots as `(none)`, so the
+    body says the sentinel means empty — deferring the test command to its own
+    paragraph, and still refusing the empty branch that `enter` is refused for."""
     flat = _flat_body()
-    assert "`(none)` is empty, never a literal" in flat
-    assert "hand an empty test command back as an empty string" in flat
-    assert "never hand back an empty integration branch" in flat
+    assert " ".join(_SENTINEL_SENTENCE.split()) in flat
+    # the sentences around the rewritten clause survive
+    assert "The setup-context message carries every current value" in flat
+    assert "is the user's own choice" in flat
+    assert "Open by reading the settings back in" in flat
 
 
 def test_setup_agent_body_keeps_the_test_opt_out_deliberate() -> None:
