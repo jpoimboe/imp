@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from imp.cli import narrative as nv
 from imp.cli.narrative import NarrativeBuilder
@@ -171,3 +172,84 @@ def test_hinted_retry_breadcrumb_ignores_the_message() -> None:
 
     assert "[rate_limit] waiting for limit reset — retry 2 in 30m" in out
     assert "claude CLI: usage limit reached" not in out
+
+
+def _sub_retry_events(**payload: Any) -> list[dict[str, Any]]:
+    """A step that dispatches a `code-reviewer` subagent which then hits a retry."""
+    return [
+        {"id": "s1", "parent_id": None, "agent_id": None, "type": "step_started",
+         "payload": {"step": "code-review", "kind": "agent", "phase": "convergence"}},
+        {"id": "tk1", "parent_id": None, "agent_id": "step:convergence/code-review",
+         "type": "tool_call",
+         "payload": {"id": "tk1", "name": "sub_agent",
+                     "input": {"subagent_name": "code-reviewer",
+                               "task_description": "review the diff"}}},
+        {"id": "r1", "parent_id": None, "agent_id": "sub:tk1", "type": "agent_retry",
+         "payload": payload},
+    ]
+
+
+def _lean(events: list[dict[str, Any]]) -> str:
+    from imp.cli.render_text import render_tree
+    return "\n".join(render_tree(nv.build_tree(events), full=False, color=False, width=120))
+
+
+def _full(events: list[dict[str, Any]]) -> str:
+    from imp.cli.render_text import render_tree
+    return "\n".join(render_tree(nv.build_tree(events), full=True, color=False, width=120))
+
+
+PARENT_LINE = ("warning: [rate_limit] code-reviewer waiting for limit reset"
+               " — retry 1 in 2h 45m")
+IN_FOLD_LINE = "warning: [rate_limit] waiting for limit reset — retry 1 in 2h 45m"
+
+
+def test_subagent_limit_wait_leaves_a_parent_level_breadcrumb() -> None:
+    # 9908s is the observed hinted wait: 165 min -> "2h 45m".
+    events = _sub_retry_events(category="rate_limit", attempt=1,
+                               backoff_seconds=9908.0, hinted=True)
+
+    assert _lean(events).count(PARENT_LINE) == 1
+    # lean hides the fold's contents, so the in-fold breadcrumb is NOT what shows.
+    assert IN_FOLD_LINE not in _lean(events)
+
+    # --full is unaffected: the in-fold line has no subagent name, so it is distinct
+    full = _full(events)
+    assert IN_FOLD_LINE in full
+    assert full.count(PARENT_LINE) == 1
+
+
+def test_subagent_limit_breadcrumb_stays_out_of_the_warnings_summary() -> None:
+    events = _sub_retry_events(category="rate_limit", attempt=1,
+                               backoff_seconds=9908.0, hinted=True)
+    events.append({"id": "rw", "parent_id": None,
+                   "agent_id": "step:convergence/code-review",
+                   "type": "runner_warning", "payload": {"message": "an unrelated warning"}})
+    events.append({"id": "w", "parent_id": None, "agent_id": None,
+                   "type": "workflow_completed", "payload": {}})
+
+    tree = nv.build_tree(events)
+    summaries = [c for c in tree.root.children if isinstance(c, nv.WarningsSummaryNode)]
+    # The unrelated warning proves the summary ran; the breadcrumb is absent from it.
+    assert len(summaries) == 1
+    assert summaries[0].lines == [("an unrelated warning", 1)]
+    assert summaries[0].total == 1
+
+
+def test_short_subagent_retry_leaves_no_parent_level_line() -> None:
+    events = _sub_retry_events(category="rate_limit", attempt=2, backoff_seconds=30.0)
+
+    assert "waiting for limit reset" not in _lean(events)
+    assert "warning:" not in _lean(events)
+    # the fold's own plain retry breadcrumb is untouched
+    assert "warning: [rate_limit] retry 2 (30.0s)" in _full(events)
+
+
+def test_stalled_subagent_retry_leaves_no_parent_level_line() -> None:
+    # the only shape error_policy.decide produces for `stalled`: <=60s cap, no hint
+    events = _sub_retry_events(category="stalled", attempt=2, backoff_seconds=60.0)
+
+    lean = _lean(events)
+    assert "code-reviewer" in lean   # the fold's status row is still there
+    assert "warning:" not in lean
+    assert "warning: resuming — verifying prior work, not redoing it" in _full(events)
