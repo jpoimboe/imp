@@ -413,7 +413,7 @@ def test_cmd_log_follow_routes_archived_only_to_follow_log(
         m, "_load_events_for_id",
         lambda c, i: [{"type": "quest_created", "payload": {}}])
     monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
-    monkeypatch.setattr(m, "_follow_log", lambda events, *, cats: 9)
+    monkeypatch.setattr(m, "_follow_log", lambda events, *, cats, project: 9)
     rc = m.main(["log", "-f", "arch"])
     assert rc == 9
 
@@ -435,7 +435,7 @@ def test_cmd_log_follow_archived_only_threads_cats(
     monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
     monkeypatch.setattr(
         m, "_follow_log",
-        lambda events, *, cats: (seen.update(cats=cats), 9)[1])
+        lambda events, *, cats, project: (seen.update(cats=cats), 9)[1])
     rc = m.main(["log", "-f", "--full", "--hide", "tiers", "arch"])
     assert rc == 9
     assert seen["cats"] == frozenset(LOG_CATEGORIES) - {"tiers"}
@@ -633,10 +633,12 @@ def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
     seen: dict[str, object] = {}
     monkeypatch.setattr(
         m, "_follow_log",
-        lambda events, *, cats: (seen.update(events=events), 0)[1])
+        lambda events, *, cats, project: (
+            seen.update(events=events, project=project), 0)[1])
     rc = m.main(["log", "-f", slug])
     assert rc == 0
     assert seen["events"] == snapshot  # the store snapshot went to the one-shot path
+    assert seen["project"] == tmp_path.name
     err = capsys.readouterr().err
     assert "imp: live follow is unavailable inside the sandbox" in err
     assert "imp log:" not in err
@@ -678,3 +680,61 @@ def test_follow_live_threads_cats_into_the_driver(
                         cats=frozenset({"prompts"}))
     assert rc == 0
     assert seen["cats"] == frozenset({"prompts"})
+
+
+def test_follow_log_threads_the_project_into_the_driver() -> None:
+    """The one-shot replay path hands its caller-supplied project to LiveDriver."""
+    import imp.cli.main as m
+    seen: dict[str, object] = {}
+
+    def _fake_driver(**kwargs: object) -> MagicMock:
+        seen.update(kwargs)
+        return MagicMock()
+
+    with (
+        patch("imp.cli.live_driver.LiveDriver", _fake_driver),
+        patch("imp.cli.live_status.LiveStatus"),
+    ):
+        rc = m._follow_log([], cats=frozenset(), project="imp")
+    assert rc == 0
+    assert seen["project"] == "imp"
+
+
+def test_follow_live_threads_the_control_root_name_into_the_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tailing path names the project from the control root it was handed."""
+    import imp.cli.main as m
+    seen: dict[str, object] = {}
+
+    def _fake_driver(**kwargs: object) -> MagicMock:
+        seen.update(kwargs)
+        return MagicMock()
+
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _fake_driver)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", MagicMock())
+    monkeypatch.setattr("anyio.run", lambda *a, **kw: 0)
+    rc = m._follow_live(tmp_path, "id", tmp_path / "home", cats=frozenset())
+    assert rc == 0
+    assert seen["project"] == tmp_path.name
+
+
+def test_cmd_log_follow_archived_only_fills_the_project_from_the_control_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_follow_log takes no control root, so its caller fills project= for it."""
+    import imp.cli.main as m
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "arch")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    monkeypatch.setattr(
+        m, "_load_events_for_id",
+        lambda c, i: [{"type": "quest_created", "payload": {}}])
+    monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(
+        m, "_follow_log",
+        lambda events, *, cats, project: (seen.update(project=project), 9)[1])
+    rc = m.main(["log", "-f", "arch"])
+    assert rc == 9
+    assert seen["project"] == tmp_path.name

@@ -2342,7 +2342,8 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
     return None
 
 
-def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str]) -> int:
+def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str],
+                project: str = "") -> int:
     """Replay a quest's narrative through the live run view's renderer."""
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
@@ -2350,7 +2351,7 @@ def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str]) -> int:
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
         width=_term_width, display_width=_display_width, status=status,
-        cats=cats)
+        project=project, cats=cats)
     for event in events:
         driver.on_event(event)
     driver.finish(exit_block=False)
@@ -2457,7 +2458,7 @@ def _follow_live(control: Path, quest_id: str, home: Path, *,
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
         width=_term_width, display_width=_display_width, status=status,
-        cats=cats)
+        project=control.name, cats=cats)
     tail = _EventTail(home / "events.jsonl")
     try:
         return anyio.run(
@@ -2576,11 +2577,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
         if os.environ.get("IMP_SESSION_SOCKET"):
             _emit_cli_error("live follow is unavailable inside the sandbox; "
                             "showing a one-shot snapshot.")
-            return _follow_log(events, cats=show)
+            return _follow_log(events, cats=show, project=control.name)
         home = _quest_home(control, quest_id)
         if home.exists():
             return _follow_live(control, quest_id, home, cats=show)
-        return _follow_log(events, cats=show)
+        return _follow_log(events, cats=show, project=control.name)
 
     selected = _select_log_events(args, quest_id, events)
     if isinstance(selected, int):
