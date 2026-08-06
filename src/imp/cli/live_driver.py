@@ -147,18 +147,21 @@ def _band_wrap(body: str, bg: str, width: int) -> str:
 
 
 def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
-                             width: int, unsandboxed: bool = False) -> str | None:
-    """Minimal id · title identity bar for the opening prompt, before any activity
-    exists. None only when there is nothing to name: a title alone (the setup
-    conversation, which has no quest id) still gets a band."""
+                             width: int, unsandboxed: bool = False,
+                             project: str = "") -> str | None:
+    """Minimal project · id · title identity bar for the opening prompt, before any
+    activity exists. None only when there is nothing to name: a title alone (the
+    setup conversation, which has no quest id) still gets a band."""
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
+    project_seg = (_paint(project, "gray", color=color, over_bg=over)
+                   if project else None)
     id_seg = (_paint(quest_id, "wordmark", color=color, over_bg=over)
               if quest_id else None)
     title_seg = title if title else None
     unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
                               color=color, over_bg=over) if unsandboxed else None)
-    body = rt.compose_label([id_seg, title_seg, unsandboxed_seg])
+    body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg])
     if not body:
         return None
     return _band_wrap(body, bg, width)

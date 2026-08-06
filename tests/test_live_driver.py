@@ -3080,6 +3080,30 @@ def test_compose_identity_toolbar_unsandboxed_after_title() -> None:
     assert bar == "z9gixx · t · unsandboxed"
 
 
+def test_compose_identity_toolbar_leads_with_the_project_segment() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    bar = compose_identity_toolbar(project="imp", quest_id="vope45", title="t",
+                                   color=False, width=100)
+    assert bar == "imp · vope45 · t"
+    unsandboxed_bar = compose_identity_toolbar(project="imp", quest_id="vope45", title="t",
+                                           color=False, width=100, unsandboxed=True)
+    assert unsandboxed_bar == "imp · vope45 · t · unsandboxed"
+
+
+def test_compose_identity_toolbar_without_project_is_byte_for_byte_unchanged() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    omitted = compose_identity_toolbar(quest_id="vope45", title="t",
+                                       color=False, width=100)
+    empty = compose_identity_toolbar(project="", quest_id="vope45", title="t",
+                                     color=False, width=100)
+    assert omitted == empty == "vope45 · t"      # no leading " · "
+    # A title with no id (the setup conversation) still bands; nothing at all -> None.
+    assert compose_identity_toolbar(project="", quest_id=None, title="imp setup",
+                                    color=False, width=80) == "imp setup"
+    assert compose_identity_toolbar(project="", quest_id=None, title="",
+                                    color=False, width=80) is None
+
+
 def test_compose_identity_toolbar_unsandboxed_after_id_when_no_title() -> None:
     from imp.cli.live_driver import compose_identity_toolbar
     bar = compose_identity_toolbar(quest_id="z9gixx", title="", color=False,
