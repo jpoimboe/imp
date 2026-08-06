@@ -48,6 +48,7 @@ from imp.agents.tools.limits import (
 )
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_FAILED_MESSAGE,
+    sandbox_failure_detail,
     sandbox_spawn_failed,
     strip_sandbox_marker,
 )
@@ -408,7 +409,7 @@ def _emit_cap_warning(ctx: ToolContext, bp: BgProc) -> None:
             })
 
 
-def _emit_overlay_setup_warning(ctx: ToolContext, bp: BgProc) -> None:
+def _emit_overlay_setup_warning(ctx: ToolContext, bp: BgProc, detail: str) -> None:
     """Best-effort event for an overlay mount-setup failure; never crashes the sweep host."""
     if ctx.event_log is None:
         return
@@ -420,6 +421,7 @@ def _emit_overlay_setup_warning(ctx: ToolContext, bp: BgProc) -> None:
                 "message": (f"background process {bp.id} ({cmd}) — the OS sandbox "
                             "could not start the command; it did not run"),
                 "id": bp.id, "command": cmd, "reason": "sandbox-spawn-failed",
+                "detail": detail,
             })
 
 
@@ -437,7 +439,7 @@ def _detect_overlay_setup_failure(ctx: ToolContext, bp: BgProc) -> None:
     if not sandbox_spawn_failed(stderr, sandbox_active=bp.sandbox_active):
         return
     bp.overlay_setup_failed = True
-    _emit_overlay_setup_warning(ctx, bp)
+    _emit_overlay_setup_warning(ctx, bp, sandbox_failure_detail(stderr))
 
 
 async def _sweep_bg(ctx: ToolContext) -> None:

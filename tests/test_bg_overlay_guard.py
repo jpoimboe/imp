@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 import anyio
@@ -21,6 +22,10 @@ _FAIL_CMD = "exit 3"
 # A healthy sandboxed command: emits the entry sentinel (as the real argv builder
 # would) then real output.
 _OK_CMD = f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo real >&2; echo out"
+
+_BWRAP_ERR = "bwrap: Can't bind mount /nope: No such file or directory"
+# A spawn failure that ALSO printed the sandbox's own reason, as real bwrap does.
+_FAIL_NOISY_CMD = f"printf '%s\\n' {shlex.quote(_BWRAP_ERR)} >&2; exit 3"
 
 
 async def _wait_exit(ctx, bg_id: str) -> None:
@@ -48,6 +53,7 @@ def test_background_spawn_failure_detected_and_reported(tmp_path: Path) -> None:
             [w] = log.warnings()
             assert w["reason"] == "sandbox-spawn-failed"
             assert w["id"] == out["id"]
+            assert w["detail"] == ""              # _FAIL_CMD said nothing on stderr
             # a later sweep must NOT re-emit or re-read
             await _sweep_bg(ctx)
             assert len(log.warnings()) == 1
@@ -55,6 +61,28 @@ def test_background_spawn_failure_detected_and_reported(tmp_path: Path) -> None:
                 ctx, {"id": out["id"]}))
             assert r["status"] == "sandbox_setup_failed"
             assert "did NOT run" in r["error"]
+        finally:
+            await _cleanup(ctx)
+    anyio.run(main)
+
+
+def test_background_spawn_failure_warning_carries_the_sandbox_stderr(
+    tmp_path: Path,
+) -> None:
+    # AC 5c: the terminal background warning names the cause, same as foreground.
+    async def main() -> None:
+        from imp.agents.tools.bg import _sweep_bg
+        ctx = _ctx(tmp_path)
+        log = _RecLog()
+        ctx.event_log = log
+        out = await _spawn(ctx, _FAIL_NOISY_CMD)
+        _mark_sandboxed(ctx, out["id"])
+        try:
+            await _wait_exit(ctx, out["id"])
+            await _sweep_bg(ctx)
+            [w] = log.warnings()
+            assert w["reason"] == "sandbox-spawn-failed"
+            assert w["detail"] == _BWRAP_ERR
         finally:
             await _cleanup(ctx)
     anyio.run(main)
