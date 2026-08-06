@@ -2934,7 +2934,7 @@ def test_compose_identity_toolbar_leads_with_the_project_segment() -> None:
                                    color=False, width=100)
     assert bar == "imp · vope45 · t"
     unsandboxed_bar = compose_identity_toolbar(project="imp", quest_id="vope45", title="t",
-                                           color=False, width=100, unsandboxed=True)
+                                               color=False, width=100, unsandboxed=True)
     assert unsandboxed_bar == "imp · vope45 · t · unsandboxed"
 
 
