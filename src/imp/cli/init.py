@@ -898,10 +898,11 @@ def _confirm_init_settings(
                 "Re-run `imp init` when you're ready.")
             return None
         roots = list((output.get("pythonpath") or {}).get("roots", []))
+        test_cmd_fast = output.get("test_cmd_fast")
         return InitSettings(
             default_workflow=str(output["default_workflow"]),
             default_base=str(output["default_base"]),
-            test_cmd_fast=str(output["test_cmd_fast"]),
+            test_cmd_fast=None if test_cmd_fast is None else str(test_cmd_fast),
             pythonpath=validate_detected_roots(project_root, roots))
 
 
