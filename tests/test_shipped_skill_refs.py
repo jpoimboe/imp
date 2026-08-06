@@ -84,3 +84,53 @@ def test_the_two_spiker_prompts_stay_byte_identical() -> None:
     default = Path("src/imp/assets/workflows/default/agents/spiker.md").read_bytes()
     minimal = Path("src/imp/assets/workflows/minimal/agents/spiker.md").read_bytes()
     assert default == minimal
+
+
+_ASSETS = Path("src/imp/assets")
+_WORKFLOWS = _ASSETS / "workflows"
+
+
+def _skill_pools(prompt: Path) -> tuple[Path, ...]:
+    """Global pool always; a workflow's own skills/ only for a prompt inside it."""
+    pools = (_ASSETS / "skills",)
+    if prompt.is_relative_to(_WORKFLOWS):
+        workflow = prompt.relative_to(_WORKFLOWS).parts[0]
+        pools += (_WORKFLOWS / workflow / "skills",)
+    return pools
+
+
+def _resolves(prompt: Path, name: str) -> bool:
+    return any((pool / f"{name}.md").is_file() for pool in _skill_pools(prompt))
+
+
+def _call_sites() -> list[tuple[str, str]]:
+    return [(str(p), name)
+            for p in _shipped_md()
+            for name in _CALL.findall(p.read_text(encoding="utf-8"))]
+
+
+def test_every_shipped_load_skill_name_resolves() -> None:
+    sites = _call_sites()
+    # Non-vacuity: the scan really finds the known call sites, both kinds of pool.
+    assert ("src/imp/assets/partials/imp-grounding.md", "imp-knowledge") in sites
+    assert ("src/imp/assets/workflows/default/agents/coder.md",
+            "test-driven-development") in sites
+    unresolved = [site for site in sites if not _resolves(Path(site[0]), site[1])]
+    assert unresolved == [], f"shipped load_skill names that resolve to nothing: {unresolved}"
+
+
+def test_an_unknown_skill_name_does_not_resolve() -> None:
+    prompt = Path("src/imp/assets/workflows/default/agents/coder.md")
+    assert _resolves(prompt, "test-driven-development")
+    assert not _resolves(prompt, "no-such-skill-anywhere")
+
+
+def test_a_workflow_local_skill_does_not_resolve_for_a_foreign_prompt() -> None:
+    # test-driven-development lives only in workflows/default/skills/.
+    assert _resolves(Path("src/imp/assets/workflows/default/agents/spiker.md"),
+                     "test-driven-development")
+    assert not _resolves(Path("src/imp/assets/workflows/minimal/agents/spiker.md"),
+                         "test-driven-development")
+    partial = Path("src/imp/assets/partials/brainstorm-dialogue.md")
+    assert not _resolves(partial, "test-driven-development")
+    assert _resolves(partial, "imp-driving-web-uis")
