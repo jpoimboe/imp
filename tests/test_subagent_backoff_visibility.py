@@ -633,17 +633,18 @@ async def test_subagent_backoff_ended_clears_top_level_countdown(
 async def test_long_subagent_limit_wait_does_not_stall_parent(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A subagent's hinted rate-limit backoff is silent for far longer than the
-    inactivity window, and the parent must ride it out. Window 0.5s vs. a real
-    2.0s sleep: the 0.5s is measured, not guessed — under CPU oversubscription
-    the pre-backoff phase (spawn + inner drive, which pulses no activity until
-    its final agent_retry append) was observed at up to 0.29s."""
+    inactivity window, and the parent must ride it out. Window 1.0s vs. a real
+    2.0s sleep: under CPU oversubscription the pre-backoff phase (spawn + inner
+    drive, which pulses no activity until its final agent_retry append) was
+    measured at up to 0.29s, so 1.0s leaves ample headroom while still being
+    crossed by the 2.0s sleep — the falsification the test depends on."""
     import imp.agents.subagents as sa
     import imp.engine.agent_run as ar
 
-    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 1.0)
 
     async def _slow_sleep(_delay: float, _coordinator: Any) -> None:
-        await anyio.sleep(2.0)          # ignore the 9908s delay; 4x the window
+        await anyio.sleep(2.0)          # ignore the 9908s delay; 2x the window
     monkeypatch.setattr(sa, "_interruptible_sleep", _slow_sleep)
 
     coord = InterruptCoordinator()
