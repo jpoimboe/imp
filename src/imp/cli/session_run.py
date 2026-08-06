@@ -73,7 +73,8 @@ async def run_session_client(
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state = {} if leave_state is None else leave_state
-    title = title if title is not None else TerminalTitle(sys.stdout, quest.id, quest.title)
+    title = title if title is not None else TerminalTitle(
+        sys.stdout, quest.id, quest.title, project=quest.control_root.name)
     attach = build_session_attach(
         quest, resume=resume,
         non_interactive=non_interactive, autonomous=autonomous, lease=True,
