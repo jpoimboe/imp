@@ -276,13 +276,14 @@ def build_sandbox_argv(
     # 15. optional network isolation
     if not policy.network:
         argv += ["--unshare-net"]
-    # 16. the command, prefixed with the entry sentinel: the inner sh's first act
-    # emits the marker to stderr, so marker PRESENCE proves the inner command ran
-    # and ABSENCE proves the sandbox failed to enter it. printf runs in this outer
-    # sh, so it cannot trip a gate script's own set -e.
-    wrapped = (
-        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; {command}")
-    argv += ["sh", "-c", wrapped]
+    # 16. the command, prefixed with the entry sentinel. The outer sh parses only
+    # this fixed script, then execs an inner sh that parses the command — passed as
+    # an ARGUMENT ($0), never interpolated, so a syntax error there cannot suppress
+    # the marker. exec adds no process, so pgid == pid holds for the group kill.
+    argv += ["sh", "-c",
+             f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
+             'exec sh -c "$0"',
+             command]
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
         # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner

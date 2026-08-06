@@ -44,6 +44,14 @@ def _policy(**over) -> SandboxPolicy:
     return SandboxPolicy(**base)
 
 
+def wrapper_argv(command: str) -> list[str]:
+    """The trailing `sh -c <sentinel script> <command>` argv build_sandbox_argv
+    emits, with the bwrap prefix sliced off — lets a test run the REAL wrapper
+    text on the host, so wrapper semantics are pinned without needing bwrap."""
+    return build_sandbox_argv(
+        command, cwd="/", policy=_policy(), engine_env={})[-4:]
+
+
 def test_inactive_policy_returns_bare_argv():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
@@ -56,8 +64,9 @@ def test_active_policy_wraps_with_bwrap():
     argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[0] == "bwrap"
-    assert argv[-3:-1] == ["sh", "-c"]
-    assert argv[-1].endswith("; echo hi")          # sentinel-prefixed inner command
+    assert argv[-4:-2] == ["sh", "-c"]
+    assert argv[-1] == "echo hi"                  # command is its own argv element
+    assert "echo hi" not in argv[-2]              # never interpolated into the script
     assert argv[1:4] == ["--ro-bind", "/", "/"]   # ro-floor first
 
 
@@ -67,10 +76,12 @@ def test_active_policy_emits_entry_sentinel_in_tail():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
-    assert argv[-3:-1] == ["sh", "-c"]
-    expected_tail = (
-        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; echo hi")
-    assert argv[-1] == expected_tail
+    assert argv[-4:-2] == ["sh", "-c"]
+    expected_script = (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
+        'exec sh -c "$0"')
+    assert argv[-2] == expected_script
+    assert argv[-1] == "echo hi"
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():

@@ -125,16 +125,14 @@ _DENIED_WRITE_STDERR = (
 
 
 def _sandboxed_sh(monkeypatch: pytest.MonkeyPatch, script: str) -> None:
-    """Run `script` under a plain shell while the tool believes the sandbox is
-    active: the entry marker is emitted first, so the spawn-failure guard (which
-    keys on that marker's ABSENCE) stays quiet and the call takes the normal path."""
+    """Run `script` through the REAL wrapper minus bwrap: the trailing
+    `sh -c <sentinel script> <script>` argv build_sandbox_argv emits. The tool
+    believes the sandbox is active, the entry marker is emitted by the outer
+    shell, and these tests move with the wrapper instead of re-encoding it."""
     import imp.agents.tools.bash as bashmod
-    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    monkeypatch.setattr(
-        bashmod, "build_sandbox_argv",
-        lambda command, **kw: [
-            "sh", "-c",
-            f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; {script}"])
+    from tests.test_sandbox import wrapper_argv
+    monkeypatch.setattr(bashmod, "build_sandbox_argv",
+                        lambda command, **kw: wrapper_argv(script))
 
 
 @pytest.mark.parametrize("message", _DENIED_WRITE_STDERR)
@@ -273,6 +271,25 @@ def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
     out = json.loads(_run_bash(_ctx(tmp_path), {"command": "exit 122"}))
     assert "status" not in out
     assert out["returncode"] == 122
+
+
+def test_bash_syntax_error_is_a_plain_result_not_a_spawn_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 1/2: an unterminated backquote cannot suppress the sentinel, so the
+    # command's own exit 2 and stderr are reported and NOTHING is retried.
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    _sandboxed_sh(monkeypatch, 'echo "`')
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    ctx.event_log = _RecLog()
+    out = json.loads(_run_bash(ctx, {"command": 'echo "`'}))
+    assert "status" not in out                       # not a sandbox-setup failure
+    assert "error" not in out                        # no "did NOT run" claim
+    assert out["returncode"] == 2                    # the shell's real exit code
+    assert out["stderr"].strip() != ""               # its own diagnosis survives
+    assert SANDBOX_ENTERED_MARKER not in out["stderr"]
+    assert ctx.event_log.warnings() == []            # spawned exactly once
 
 
 def test_bash_sandbox_spawn_failure_emits_event(
@@ -617,8 +634,8 @@ def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.Monke
     with pytest.raises(RuntimeError):
         _run_bash(ctx, {"command": "echo hi"})
     assert captured["argv"][0] == "bwrap"
-    assert captured["argv"][-3:-1] == ["sh", "-c"]
-    assert captured["argv"][-1].endswith("; echo hi")
+    assert captured["argv"][-4:-2] == ["sh", "-c"]
+    assert captured["argv"][-1] == "echo hi"
 
 
 def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
