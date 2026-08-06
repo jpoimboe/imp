@@ -340,7 +340,7 @@ class ErrorNode:
     message: str
     category: str | None = None
     is_warning: bool = False
-    detail: str = ""                   # §6: full_summary for the --full detail block
+    detail: str = ""                   # error: --full detail block; warning: lean line
     collapsible = False
 
 
@@ -2130,7 +2130,8 @@ def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     # for a dropped block; flushing would split an otherwise-contiguous run).
     message = str(p.get("message", "?"))
     self._warnings.append(message)
-    self._append(ErrorNode(message=message, is_warning=True))
+    self._append(ErrorNode(message=message, is_warning=True,
+                           detail=str(p.get("detail", ""))))
 
 
 def _h_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

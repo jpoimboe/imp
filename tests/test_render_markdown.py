@@ -510,3 +510,17 @@ def test_markdown_pause_keeps_the_raw_reason() -> None:
     ])
     assert "**paused (max_loops)**" in out
     assert "loop limit" not in out
+
+
+def test_markdown_warning_omits_the_sandbox_detail() -> None:
+    # AC 6: the markdown renderer is deliberately unchanged — a warning stays a
+    # one-line blockquote there; only the text renderer gained the detail line.
+    md = _md([
+        _ev("1", "step_started", step="build", kind="agent", phase="implement",
+            model="m", provider="anthropic"),
+        _ev("2", "runner_warning",
+            message="sandbox could not start the command; retrying (2/5)",
+            detail="bwrap: Can't bind mount /x: No such file or directory"),
+    ])
+    assert "> **warning:** sandbox could not start the command; retrying (2/5)" in md
+    assert "bwrap" not in md
