@@ -98,6 +98,26 @@ def test_gate_persistent_failure_pauses_without_routing(tmp_path, monkeypatch):
     assert len(_warn_msgs(log)) == 4               # one breadcrumb per retry (2..5)
 
 
+_BWRAP_ERR = "bwrap: Can't bind mount /nope: No such file or directory"
+
+
+def test_gate_retry_warnings_carry_the_sandbox_stderr(tmp_path, monkeypatch):
+    # AC 5b: the four retry breadcrumbs precede the pause, so bwrap's own reason
+    # is on screen before the quest stops.
+    _no_delay(monkeypatch)
+    monkeypatch.setattr(
+        _executor, "run_script",
+        lambda step, **kw: {"exit": 0, "stdout": "",
+                            "stderr": f"\n{_BWRAP_ERR}\nnoise below"})
+    log = InMemoryEventLog()
+    action, _fb, _m = _run(_step(Continue()), _quest(tmp_path),
+                           SimpleNamespace(active=True), log)
+    assert isinstance(action, Pause)
+    details = [e["payload"]["detail"] for e in log.read()
+               if e["type"] == "runner_warning"]
+    assert details == [_BWRAP_ERR] * 4
+
+
 def test_gate_healthy_nonzero_routes_and_strips_marker(tmp_path, monkeypatch):
     _no_delay(monkeypatch)
     monkeypatch.setattr(
