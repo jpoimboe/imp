@@ -1880,6 +1880,25 @@ def test_compose_activity_line_animates_spinner_and_elapsed_when_verbless() -> N
     assert line == "⠋ 4s"
 
 
+def test_compose_activity_line_spinner_uses_wordmark_and_no_band_bg() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    try:
+        for theme in ("dark", "light", "ansi"):
+            pal.set_theme(theme)
+            act = nv.Activity(verb="thinking", start_ts="2026-01-01T00:00:00+00:00")
+            line = compose_activity_line(activity=act, frame=0, color=True,
+                                         now_iso="2026-01-01T00:00:04+00:00")
+            # The activity line uses the wordmark color for the spinner — never cyan.
+            # No background prefix on the activity line (background is on the position bar).
+            assert pal._ANSI["wordmark"] in line             # wordmark spinner present
+            assert pal._ANSI["cyan"] not in line             # no longer cyan
+            bg = pal.toolbar_bg_open(enabled=True)
+            if bg:  # only check when the theme has a bg color
+                assert not line.startswith(bg)               # no bg prefix on activity line
+    finally:
+        pal.set_theme("ansi")
+
+
 def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
     drv, _ = _driver()
     drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
