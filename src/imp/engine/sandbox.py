@@ -68,6 +68,7 @@ class SandboxPolicy:
     note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
     quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
     state_mask: str = ""                     # fail-closed tmpfs mask ("" → none)
+    projects_ro: str = ""                    # ro bind of imp_home()/projects ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     disposable_tree: bool = False            # agent runs in a disposable git worktree
@@ -91,8 +92,14 @@ class SandboxPolicy:
         when quest_var_tmp_dir is set; empty → no /var/tmp bind, host /var/tmp stays
         on the read-only floor), and the secret masks unconditionally LAST.
 
-        The state tmpfs (state_mask) is a fail-closed mask over every project's
-        state directory; its position is worktree-relative and LOAD-BEARING. Normal
+        The state tmpfs (state_mask) is a fail-closed mask over THIS project's
+        state directory, preceded in the same state_block by the read-only
+        projects_ro bind exposing imp's records of OTHER projects (without it the
+        home_layer rw bind over $HOME would leave them writable). Both sit INSIDE
+        worktree_block: a draft worktree is the control root, which may be an
+        ANCESTOR of imp_home()/projects, so an ro bind emitted before it would lose
+        last-wins to the worktree's rw bind and expose other projects WRITABLE. The
+        block's position is worktree-relative and LOAD-BEARING. Normal
         quest: the worktree is nested at <state>/worktrees/<id> (a DESCENDANT of the
         mask), so the tmpfs precedes the worktree rw bind and last-wins re-exposes the
         nested worktree on top. Draft/degenerate agent: worktree == control_root (which
@@ -111,13 +118,16 @@ class SandboxPolicy:
         .git/worktrees, then the self re-expose (emitted only for a materialized
         worktree) re-binds the current quest's own .git/worktrees/<self> on top so
         its HEAD/index/logs stay writable."""
-        state_tmpfs = [(self.state_mask, "mask_dir")] if self.state_mask else []
+        state_block = [
+            *([(self.projects_ro, "ro")] if self.projects_ro else []),
+            *([(self.state_mask, "mask_dir")] if self.state_mask else []),
+        ]
         nested = bool(self.state_mask) and Path(self.worktree).is_relative_to(
             Path(self.state_mask))
         worktree_block = (
-            [*state_tmpfs, (self.worktree, "rw")] if nested
-            # draft: worktree is OUTSIDE the mask, so bind it BEFORE the tmpfs
-            else [(self.worktree, "rw"), *state_tmpfs])
+            [*state_block, (self.worktree, "rw")] if nested
+            # draft: worktree is OUTSIDE the mask, so bind it BEFORE state_block
+            else [(self.worktree, "rw"), *state_block])
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
             ("/tmp", "rw"),

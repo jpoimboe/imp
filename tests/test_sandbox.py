@@ -2126,6 +2126,82 @@ def test_argv_binds_match_bind_plan_with_worktrees_mask():
     assert ("/ctl/.git/worktrees/abc", "rw") in p.bind_plan()
 
 
+def _cross_project_policy(**over) -> SandboxPolicy:
+    # Nested quest with $HOME writable: without the ro bind, other projects would be WRITABLE.
+    base = dict(
+        projects_ro="/home/u/.imp/projects",
+        state_mask="/home/u/.imp/projects/mine",
+        worktree="/home/u/.imp/projects/mine/worktrees/abc",
+        quest_home="/home/u/.imp/projects/mine/quests/abc",
+        home="/home/u",
+        home_layer=HomeLayer(home="/home/u"),
+    )
+    base.update(over)
+    return _policy(**base)
+
+
+def test_other_projects_readable_never_writable_siblings_still_hidden():
+    p = _cross_project_policy()
+    other = Path("/home/u/.imp/projects/other/quests/zzz/events.jsonl")
+    assert p.allows_read(other) is True
+    assert p.allows_write(other) is False
+    assert p.allows_read(
+        Path("/home/u/.imp/projects/mine/quests/sib/events.jsonl")) is False
+    assert p.allows_write(
+        Path("/home/u/.imp/projects/mine/quests/abc/artifacts/x.md")) is True
+    assert p.allows_write(
+        Path("/home/u/.imp/projects/mine/worktrees/abc/src/x.py")) is True
+    assert p.allows_write(Path("/home/u/notes.txt")) is True
+
+
+def test_projects_ro_bind_sits_between_the_home_bind_and_the_state_tmpfs():
+    p = _cross_project_policy()
+    plan = p.bind_plan()
+    paths = [b for b, _ in plan]
+    assert ("/home/u/.imp/projects", "ro") in plan
+    assert paths.index("/home/u") < paths.index("/home/u/.imp/projects")
+    assert paths.index("/home/u/.imp/projects") < paths.index(
+        "/home/u/.imp/projects/mine")
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index(
+        "/home/u/.imp/projects/mine/worktrees/abc")
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index("/home/u/.ssh")
+
+
+def test_draft_worktree_binds_before_the_projects_ro_bind():
+    # Draft shape: worktree == control root, OUTSIDE the mask, so its rw bind is
+    # emitted first and the whole state_block follows it.
+    p = _cross_project_policy(worktree="/ctl")
+    paths = [b for b, _ in p.bind_plan()]
+    assert paths.index("/ctl") < paths.index("/home/u/.imp/projects")
+    assert paths.index("/home/u/.imp/projects") < paths.index(
+        "/home/u/.imp/projects/mine")
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index(
+        "/home/u/.imp/projects/mine/quests/abc")
+
+
+def test_a_draft_control_root_above_imp_home_cannot_write_other_projects():
+    # A dotfiles-style control root at $HOME is an ANCESTOR of imp_home()/projects,
+    # so its rw bind covers every other project. The state_block must follow it, or
+    # last-wins hands the agent write access to every project's state.
+    p = _cross_project_policy(worktree="/home/u")
+    other = Path("/home/u/.imp/projects/other/quests/zzz/events.jsonl")
+    assert p.allows_write(other) is False
+    assert p.allows_read(other) is True
+    assert p.allows_read(
+        Path("/home/u/.imp/projects/mine/quests/sib/events.jsonl")) is False
+    assert p.allows_write(Path("/home/u/src/x.py")) is True
+
+
+def test_argv_binds_match_bind_plan_with_projects_ro():
+    # Drift guard for all three worktree shapes: an ro bind that does not round-trip
+    # through the argv parser means allows_read/allows_write lie about bwrap.
+    for worktree in ("/home/u/.imp/projects/mine/worktrees/abc", "/ctl", "/home/u"):
+        p = _cross_project_policy(worktree=worktree)
+        argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+        assert _parse_argv_binds(argv) == p.bind_plan()
+        assert ("/home/u/.imp/projects", "ro") in p.bind_plan()
+
+
 def test_retired_overlay_symbols_are_gone():
     import imp.engine.sandbox as sb
     for name in ("OVERLAY_SETUP_FAILED_MARKER", "OVERLAY_SETUP_FAILED_CODE",
