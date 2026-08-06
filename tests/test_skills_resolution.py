@@ -20,6 +20,7 @@ from imp.assets import bundled_skills_dir
 _POOL = (
     "imp-tool-reference",
     "imp-driving-terminal-uis",
+    "imp-driving-web-uis",
     "imp-knowledge",
 )
 
@@ -214,3 +215,28 @@ def test_overlay_global_does_not_clobber_a_workflow_skill(tmp_path: Path) -> Non
     assert (dest / "imp-knowledge.md").read_text() == "WORKFLOW OWN\n"
     # …while the other pool skills are still overlaid alongside it.
     assert (dest / "imp-tool-reference.md").read_text().strip()
+
+
+def test_overlay_global_makes_the_web_ui_skill_loadable_by_name(tmp_path: Path) -> None:
+    dest = tmp_path / "snap" / "skills"
+    overlay_global_skills(dest)
+    # An agent's load_skill(name="imp-driving-web-uis") resolves against a snapshot's
+    # skills/ root and gets the shipped bytes back.
+    assert load_internal_skill(dest, "imp-driving-web-uis") == (
+        bundled_skills_dir() / "imp-driving-web-uis.md"
+    ).read_text()
+
+
+def test_web_ui_skill_teaches_the_headless_render() -> None:
+    body = load_internal_skill(bundled_skills_dir(), "imp-driving-web-uis")
+    assert body.startswith("# Driving web UIs\n")
+    for anchor in (
+        "--headless=new",
+        "--no-sandbox",
+        "--screenshot",
+        "firefox --headless",
+        "~/.cache/ms-playwright/",
+        "`read_file` the PNG",
+        "fall back to drawing the page in ASCII",
+    ):
+        assert anchor in body, anchor

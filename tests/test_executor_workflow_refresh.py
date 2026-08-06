@@ -525,8 +525,8 @@ def test_refresh_overlays_global_skills_into_snapshot(tmp_path: Path) -> None:
     # snapshot can ONLY have arrived via overlay_global_skills.
     assert _refresh_workflow_snapshot(quest) is False        # initial copy
     snap_skills = quest.quest_dir / "workflow" / "skills"
-    for name in ("imp-knowledge",
-                 "imp-tool-reference", "imp-driving-terminal-uis"):
+    for name in ("imp-knowledge", "imp-tool-reference",
+                 "imp-driving-terminal-uis", "imp-driving-web-uis"):
         assert (snap_skills / f"{name}.md").is_file(), name
 
 
