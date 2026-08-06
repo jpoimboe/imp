@@ -292,12 +292,16 @@ def test_bash_syntax_error_is_a_plain_result_not_a_spawn_failure(
     assert ctx.event_log.warnings() == []            # spawned exactly once
 
 
+_BWRAP_ERR = "bwrap: Can't bind mount /nope: No such file or directory"
+
+
 def test_bash_sandbox_spawn_failure_emits_event(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.agents.tools.bash as bashmod
+    script = f"printf '%s\\n' {shlex.quote(_BWRAP_ERR)} >&2; exit 3"
     monkeypatch.setattr(bashmod, "build_sandbox_argv",
-                        lambda command, **kw: ["sh", "-c", "exit 3"])
+                        lambda command, **kw: ["sh", "-c", script])
     monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
@@ -308,6 +312,9 @@ def test_bash_sandbox_spawn_failure_emits_event(
     assert [w["reason"] for w in warns] == ["sandbox-spawn-failed"] * 5
     assert "retrying (2/5)" in warns[0]["message"]
     assert "retrying (5/5)" in warns[3]["message"]
+    # AC 5a: bwrap's reason rides BOTH foreground emit paths — every retry
+    # breadcrumb and the terminal overlay-setup warning.
+    assert [w["detail"] for w in warns] == [_BWRAP_ERR] * 5
 
 
 def test_bash_retries_then_succeeds(
