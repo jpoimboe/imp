@@ -596,3 +596,23 @@ async def test_host_writes_no_footer_escapes_to_a_pipe(
     assert "RENDER-MARKER" in text          # the narrative still lands
     assert "\x1b[" not in text              # no spinner/footer escapes
     assert "thinking" not in text
+
+
+@pytest.mark.anyio
+async def test_host_band_leads_with_the_project_directory_name(
+    tmp_path, provider_registry, monkeypatch,
+):
+    made = _recording_driver(monkeypatch)
+    _register_runner(provider_registry, _ScriptedHostRunner([
+        {"type": "agent_result",
+         "payload": {"status": "Success", "default_workflow": "light"}},
+    ]))
+    await run_interactive_agent(
+        agent_def=_agent_def(), provider_name="fake", model_name="m",
+        initial_message="go", project_root=tmp_path, asset_dir=tmp_path,
+        sandbox_cfg=SandboxConfig(allow_unsandboxed=True),
+        prompt=_FakePrompt(), stream=_NonTTY())
+    row = made[0].compose_toolbar_static()
+    # In a real checkout this reads `imp · imp setup`.
+    assert row is not None
+    assert row.split(" · ")[:2] == [tmp_path.name, "imp setup"]

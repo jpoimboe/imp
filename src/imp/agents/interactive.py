@@ -216,7 +216,8 @@ async def run_interactive_agent(
     status = LiveStatus(stream)
     # init commits a blank (splash gap) before the conversation; footer reuses it, not a second.
     driver = LiveDriver(stream=stream, color=color, width=width, status=status,
-                        title=title, preceded_by_blank=True)
+                        title=title, project=project_root.name,
+                        preceded_by_blank=True)
     driver.set_unsandboxed(unsandboxed)
     event_log = InMemoryEventLog(on_event=driver.on_event)
     coord = InterruptCoordinator()
