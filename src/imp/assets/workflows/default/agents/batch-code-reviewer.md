@@ -64,6 +64,10 @@ single narrowest check that tests it.
 behaves, load `imp-driving-terminal-uis` (`load_skill(name="imp-driving-terminal-uis")`) and
 render the result with your impty tools before judging it — the diff won't show rendered output.
 
+**Browser-UI changes — see them.** When the change alters a browser-rendered surface, load
+`imp-driving-web-uis` (`load_skill(name="imp-driving-web-uis")`) and render the affected pages
+before judging them — neither the diff nor an HTML-string assertion shows a rendered page.
+
 ## Severity Classification
 
 Classify each finding against the canonical severity rubric:

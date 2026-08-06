@@ -38,6 +38,9 @@ in `$HOME`.
 - When the question is about a terminal program's appearance or interactive
   behavior, load `imp-driving-terminal-uis` (`load_skill(name="imp-driving-terminal-uis")`)
   and drive it on a pty with your impty tools to capture what it actually renders.
+- When the question is about a page's rendering or its in-browser behavior, load
+  `imp-driving-web-uis` (`load_skill(name="imp-driving-web-uis")`) and render or
+  drive it to capture what the browser actually does.
 
 ## Your deliverable is findings, never code
 
