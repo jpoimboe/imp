@@ -904,7 +904,8 @@ async def _run_cleared_session(
         print(_run_header_line(quest.id, quest.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
         term_title = TerminalTitle(
-            sys.stdout, quest.id, quest.title, initial="idle")
+            sys.stdout, quest.id, quest.title, initial="idle",
+            project=quest.control_root.name)
         prompt = Prompt(skills_dir=quest.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color, quest=quest)
         # A `/model` typed at this reopened prompt lands here; empty when none.
@@ -934,7 +935,8 @@ async def _run_cleared_session(
         driver = LiveDriver(
             stream=sys.stdout, color=color, width=_term_width,
             display_width=_display_width, status=status,
-            quest_id=quest.id, title=quest.title)
+            quest_id=quest.id, title=quest.title,
+            project=quest.control_root.name)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
@@ -1105,7 +1107,8 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1119,7 +1122,8 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
@@ -1316,7 +1320,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         seed_text=seed.seed_text, interactive=interactive)
     term_title = TerminalTitle(
         sys.stdout, quest.id, quest.title,
-        initial="idle" if show_opening_prompt else "busy")
+        initial="idle" if show_opening_prompt else "busy",
+        project=quest.control_root.name)
 
     # Print the run header before the prompt so erase/reprint causes no layout jump.
     header_printed = False
@@ -1366,7 +1371,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(None, coord)
         return await run_session_client(
@@ -1385,7 +1391,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
@@ -1451,7 +1458,8 @@ def _build_resume_driver(
         width=_term_width, display_width=_display_width, status=status,
         suppress_replay=True, preceded_by_blank=preceded_by_blank,
         startup_verb=state.step_label or random_status_phrase(),
-        quest_id=quest.id, title=quest.title)
+        quest_id=quest.id, title=quest.title,
+        project=quest.control_root.name)
 
 
 def _resume_live_framing(
@@ -1625,13 +1633,14 @@ async def _resume_inert(
     from imp.engine.state import State
 
     color = should_use_color(sys.stdout)
-    term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle")
+    term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle",
+                               project=quest.control_root.name)
     state = State.load(quest.state_dir)
     phase_head, _sep, plan_tail = (state.phase_label or "").partition(" · ")
     toolbar_row = compose_prelaunch_position_row(
         phase=phase_head or None, plan=plan_tail or None,
         step_label=state.step_label, model=_prelaunch_position_model(quest, state),
-        quest_id=quest.id, title=quest.title,
+        quest_id=quest.id, title=quest.title, project=quest.control_root.name,
         color=color, width=_term_width(), unsandboxed=state.unsandboxed)
     _print_resume_opening(quest, marker, notice, color=color)
     question = render_inert_question(question, width=_term_width(), color=color)
@@ -2336,7 +2345,8 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
     return None
 
 
-def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str]) -> int:
+def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str],
+                project: str = "") -> int:
     """Replay a quest's narrative through the live run view's renderer."""
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
@@ -2344,7 +2354,7 @@ def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str]) -> int:
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
         width=_term_width, display_width=_display_width, status=status,
-        cats=cats)
+        project=project, cats=cats)
     for event in events:
         driver.on_event(event)
     driver.finish(exit_block=False)
@@ -2451,7 +2461,7 @@ def _follow_live(control: Path, quest_id: str, home: Path, *,
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
         width=_term_width, display_width=_display_width, status=status,
-        cats=cats)
+        project=control.name, cats=cats)
     tail = _EventTail(home / "events.jsonl")
     try:
         return anyio.run(
@@ -2570,11 +2580,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
         if os.environ.get("IMP_SESSION_SOCKET"):
             _emit_cli_error("live follow is unavailable inside the sandbox; "
                             "showing a one-shot snapshot.")
-            return _follow_log(events, cats=show)
+            return _follow_log(events, cats=show, project=control.name)
         home = _quest_home(control, quest_id)
         if home.exists():
             return _follow_live(control, quest_id, home, cats=show)
-        return _follow_log(events, cats=show)
+        return _follow_log(events, cats=show, project=control.name)
 
     selected = _select_log_events(args, quest_id, events)
     if isinstance(selected, int):

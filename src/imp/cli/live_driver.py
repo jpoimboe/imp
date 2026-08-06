@@ -108,33 +108,6 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
     return f"{spin} " + rt.compose_label([p for p in parts if p])
 
 
-def compose_position_bar(*, activity: nv.Activity, quest_id: str | None,
-                         title: str, prompt_tokens: int | None, color: bool,
-                         width: int, context_pct: float | None = None,
-                         checkpoint_threshold: float | int | None = None,
-                         pad_band: bool = True) -> str:
-    """Position bar: id · title · position · model context-bar (no spinner, no elapsed)."""
-    bg = pal.toolbar_bg_open(enabled=color)
-    over = bool(bg)
-    id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
-    title_seg = title if title else None
-    position_seg = (_paint(activity.position, "blue", color=color, over_bg=over)
-                    if activity.position else None)
-    model_seg = (_paint(activity.model, "magenta", color=color, over_bg=over)
-                 if activity.model else None)
-    bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
-                      checkpoint_threshold=checkpoint_threshold,
-                      color=color, over_bg=over)
-    body = rt.compose_label([id_seg, title_seg, position_seg,
-                             rt.join_space(model_seg, bar)])
-    if pad_band and bg:
-        body_dw = pal.display_width(body)
-        target = width - 2
-        if body_dw < target:
-            body = body + " " * (target - body_dw)
-    return f"{bg}{body}{_RESET}" if bg else body
-
-
 def _band_wrap(body: str, bg: str, width: int) -> str:
     """Pad `body` to width-2 and wrap it in the band bg/reset pair; no-op when bg is empty."""
     if not bg:
@@ -147,18 +120,21 @@ def _band_wrap(body: str, bg: str, width: int) -> str:
 
 
 def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
-                             width: int, unsandboxed: bool = False) -> str | None:
-    """Minimal id · title identity bar for the opening prompt, before any activity
-    exists. None only when there is nothing to name: a title alone (the setup
-    conversation, which has no quest id) still gets a band."""
+                             width: int, unsandboxed: bool = False,
+                             project: str = "") -> str | None:
+    """Minimal project · id · title identity bar for the opening prompt, before any
+    activity exists. None only when there is nothing to name: a title alone (the
+    setup conversation, which has no quest id) still gets a band."""
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
+    project_seg = (_paint(project, "gray", color=color, over_bg=over)
+                   if project else None)
     id_seg = (_paint(quest_id, "wordmark", color=color, over_bg=over)
               if quest_id else None)
     title_seg = title if title else None
     unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
                               color=color, over_bg=over) if unsandboxed else None)
-    body = rt.compose_label([id_seg, title_seg, unsandboxed_seg])
+    body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg])
     if not body:
         return None
     return _band_wrap(body, bg, width)
@@ -168,11 +144,13 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          checkpoint_threshold: float | int | None = None,
-                         unsandboxed: bool = False) -> str:
+                         unsandboxed: bool = False, project: str = "") -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
-    id · title · phase · plan · counter · model context-bar."""
+    project · id · title · phase · plan · counter · model context-bar."""
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
+    project_seg = (_paint(project, "gray", color=color, over_bg=over)
+                   if project else None)
     id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
     title_seg = title if title else None
     unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
@@ -190,22 +168,23 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                           checkpoint_threshold=checkpoint_threshold,
                           color=color, over_bg=over)
-    body = rt.compose_label([id_seg, title_seg, unsandboxed_seg, phase_seg, plan_seg,
-                             counter_seg, rt.join_space(model_seg, bar)])
+    body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
+                             phase_seg, plan_seg, counter_seg,
+                             rt.join_space(model_seg, bar)])
     return _band_wrap(body, bg, width)
 
 
 def compose_prelaunch_position_row(
     *, phase: str | None, plan: str | None, step_label: str | None,
     model: str | None, quest_id: str | None, title: str,
-    color: bool, width: int, unsandboxed: bool = False,
+    color: bool, width: int, unsandboxed: bool = False, project: str = "",
 ) -> str:
     """Pre-launch position row for the inert-resume prompt (no context-usage bar)."""
     activity = nv.Activity(
         phase=phase, plan=plan, counter=step_label, model=model,
         kind=None, lane_wait=False)
     return compose_position_row(
-        activity=activity, quest_id=quest_id, title=title,
+        activity=activity, quest_id=quest_id, title=title, project=project,
         prompt_tokens=None, color=color, width=width, unsandboxed=unsandboxed)
 
 
@@ -254,28 +233,6 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
     return rows
 
 
-def compose_activity_status(
-    builder: nv.NarrativeBuilder, *, frame: int, color: bool,
-    width: int | None = None, now_iso: str | None = None,
-) -> str | None:
-    """Single combined status line: the activity line joined with the position bar.
-    The streaming live view uses the multi-row footer instead."""
-    activity = builder.current_activity()
-    if activity is None:
-        return None
-    if now_iso is None:
-        now_iso = datetime.now(UTC).isoformat()
-    root = builder.tree.root
-    w = term_width() if width is None else width
-    bar = compose_position_bar(
-        activity=activity, quest_id=root.id, title=root.title,
-        prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
-        context_pct=builder.latest_context_pct,
-        checkpoint_threshold=builder.latest_checkpoint_threshold, pad_band=False)
-    line = compose_activity_line(activity=activity, frame=frame, color=color, now_iso=now_iso)
-    return rt.compose_label([line, bar])
-
-
 @dataclass
 class _Cursor:
     container: Any   # WorkflowNode | PhaseNode | StepNode | SubagentFold
@@ -310,12 +267,14 @@ class LiveDriver:
                  preceded_by_blank: bool = False,
                  startup_verb: str | None = None,
                  quest_id: str | None = None, title: str = "",
+                 project: str = "",
                  cats: frozenset[str] = frozenset()) -> None:
         self._builder = nv.NarrativeBuilder()
         if quest_id is not None or title:
             self._builder.seed_identity(quest_id, title)
         self._stream = stream
         self._color = color
+        self._project = project
         # Content categories (render_text.LOG_CATEGORIES). Empty is the lean view:
         # _resolve_cats returns a non-None set unchanged, so it never means "full".
         self._cats = cats
@@ -443,6 +402,7 @@ class LiveDriver:
         w = term_width()
         p_row = compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
+            project=self._project,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
@@ -463,7 +423,7 @@ class LiveDriver:
             frame=frame, color=self._color, now_iso=now_iso)
         root = self._builder.tree.root
         identity_row = compose_identity_toolbar(
-            quest_id=root.id, title=root.title,
+            quest_id=root.id, title=root.title, project=self._project,
             color=self._color, width=term_width(), unsandboxed=self._unsandboxed)
         if identity_row is None:
             return [a_line]
@@ -495,10 +455,11 @@ class LiveDriver:
         root = self._builder.tree.root
         if activity is None:
             return compose_identity_toolbar(
-                quest_id=root.id, title=root.title,
+                quest_id=root.id, title=root.title, project=self._project,
                 color=self._color, width=term_width(), unsandboxed=self._unsandboxed)
         return compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
+            project=self._project,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,

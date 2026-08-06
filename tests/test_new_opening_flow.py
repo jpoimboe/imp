@@ -49,6 +49,7 @@ def stub_new(monkeypatch, tmp_path):
         "imp.engine.quest.Quest.create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: None)))
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
     return main
@@ -72,6 +73,7 @@ async def test_new_persists_finalized_opening_intent(
     def _make_draft(*a: object, **k: object) -> SimpleNamespace:
         return SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: recorded.__setitem__("text", text))
 
     monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_make_draft))
@@ -241,7 +243,7 @@ async def test_seeded_interactive_leads_with_header_before_splash(
 
 
 @pytest.mark.anyio
-async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> None:
+async def test_title_written_before_opening_prompt(stub_new, monkeypatch, tmp_path) -> None:
     m = stub_new
     tty = _TTY()
     monkeypatch.setattr(m.sys, "stdout", tty)        # real TerminalTitle writes here
@@ -274,7 +276,7 @@ async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> Non
     assert rc == 0
     # The idle escape (unnamed draft → "ѱ <id>") is already on stdout:
     # the opening prompt is blocked on the user, so it shows the idle glyph.
-    assert "\x1b]2;ѱ z9y8x7\x07" in at_prompt["value"]
+    assert f"\x1b]2;ѱ {tmp_path.name} · z9y8x7\x07" in at_prompt["value"]
     # The same instance is threaded into run_session_client.
     assert captured["title"]._quest_id == "z9y8x7"
 
@@ -288,6 +290,7 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
     class _FakeTitle:
         def __init__(
             self, stream: object, cid: str, name: str, initial: str = "busy",
+            *, project: str = "",
         ) -> None:
             self._quest_id = cid
             self._name = name
@@ -405,6 +408,7 @@ async def test_new_run_now_forwards_depends_on(
         captured.update(k)
         return SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: None)
 
     monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_cap))
@@ -490,6 +494,7 @@ async def test_create_draft_receives_create_mode_from_leave_mode(
         captured.update(k)
         return SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: None)
 
     monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_cap))

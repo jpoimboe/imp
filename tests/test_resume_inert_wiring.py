@@ -167,7 +167,8 @@ async def test_inert_ask_line_passes_identity_toolbar(
 
     assert line == "go"
     expected = compose_identity_toolbar(
-        quest_id="c", title="C", color=False, width=80)
+        quest_id="c", title="C", project=ch.control_root.name,
+        color=False, width=80)
     assert expected is not None
     assert sink["bottom_toolbar"] == expected
     assert sink["width"] == 80
@@ -216,6 +217,37 @@ async def test_resume_inert_composes_position_row_for_prompt(
 
     assert rc == 0
     assert captured["toolbar"] == "POS-ROW"      # the composed row reached the reader
+
+
+@pytest.mark.anyio
+async def test_resume_inert_prelaunch_row_carries_the_project_name(
+        monkeypatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    seen: dict[str, object] = {}
+
+    async def _cap_ask(quest, *, toolbar=None):
+        return None
+
+    def _cap_row(**kwargs: object) -> str:
+        seen.update(kwargs)
+        return "POS-ROW"
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr("imp.cli.live_driver.compose_prelaunch_position_row", _cap_row)
+    monkeypatch.setattr(m, "_inert_ask_line", _cap_ask)
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        await ask_line()
+        return 0
+
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
+
+    rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming",
+                               notice=None)
+
+    assert rc == 0
+    assert seen["project"] == ch.control_root.name == tmp_path.name
 
 
 def test_prelaunch_position_model_resolves_step_tier_from_state(
@@ -482,6 +514,7 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
     assert rc == 0
     assert isinstance(seen["title"], TerminalTitle)
     assert seen["title"]._idle is True        # created idle for the wait
+    assert seen["title"]._project == ch.control_root.name == tmp_path.name
 
 
 @pytest.mark.anyio

@@ -18,6 +18,7 @@ class _FakeQuest:
     def __init__(self, tmp_path: Path) -> None:
         self.id = "abcd12"
         self.title = "Fake change"
+        self.control_root = tmp_path
         self.workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
         user = self.workflow_dir / "skills" / "user"
         user.mkdir(parents=True)
@@ -528,7 +529,8 @@ def test_ask_line_with_slash_composes_identity_toolbar_when_no_driver(tmp_path: 
     prompt = _FakePrompt(["hi"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "hi"
-    assert prompt.bottom_toolbars == ["abcd12 · Fake change"]    # driver None -> identity bar
+    # driver None -> identity bar, led by the project (control-root basename)
+    assert prompt.bottom_toolbars == [f"{tmp_path.name} · abcd12 · Fake change"]
 
 
 def test_slash_model_valid_returns_literal(tmp_path, monkeypatch) -> None:

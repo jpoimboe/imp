@@ -959,27 +959,6 @@ def test_quiet_pause_surfaces_live_and_matches_log() -> None:
     assert body == _render_body(events)          # live == imp log, line for line
 
 
-def test_compose_activity_status_none_when_idle() -> None:
-    from imp.cli.live_driver import compose_activity_status
-    builder = nv.NarrativeBuilder()
-    assert compose_activity_status(builder, frame=0, color=True) is None
-
-
-def test_compose_activity_status_paints_count_detail_label() -> None:
-    from imp.cli.live_driver import compose_activity_status
-    builder = nv.NarrativeBuilder()
-    builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    builder.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-                   input={"command": "ls"}))
-    line = compose_activity_status(builder, frame=0, color=True)
-    assert line is not None
-    assert "thinking" in line           # verb head for unlabeled agent step
-    assert "1 call" in line
-    assert "bash ls" in line
-    assert "\x1b[90m" in line          # detail painted gray
-    assert "|" not in line             # no old ASCII spinner
-
-
 def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
     """The transient status line renders flush-left — no gutter indent — even
     while a step is streaming at a deeper frontier."""
@@ -1183,42 +1162,6 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
     assert "plan-writer" in body                # step two rendered live (not frozen)
 
 
-def test_status_spinner_uses_braille_glyph() -> None:
-    from imp.cli.live_driver import compose_activity_status
-    from imp.cli.narrative import NarrativeBuilder
-
-    builder = NarrativeBuilder()
-    builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    builder.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-                   input={"command": "ls"}))
-    status = compose_activity_status(builder, frame=0, color=False)
-    assert status is not None
-    assert status[0] == "⠋"          # braille frame 0 is the first character
-    assert "|" not in status          # the "|/-\\" cycle is gone
-    assert "thinking" in status       # verb head for unlabeled agent step
-    assert "1 call" in status         # burst count in detail
-    assert "bash ls" in status        # in-flight tool in detail
-
-
-def test_status_line_shows_step_then_activity_then_elapsed() -> None:
-    from imp.cli.live_driver import compose_activity_status
-
-    b = nv.NarrativeBuilder()
-    for e in [
-        ev("1", "quest_created", quest_id=1, title="x"),
-        ev("2", "step_started", step="plan-review", kind="agent", phase="review",
-           model="m", provider="anthropic", label="reviewing plan",
-           timestamp="2026-01-01T00:00:00+00:00"),
-        ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
-    ]:
-        b.add(e)
-    line = compose_activity_status(b, frame=0, color=False,
-                                   now_iso="2026-01-01T00:00:18+00:00")
-    assert "reviewing plan · 18s" in line
-    assert "thinking" not in line                  # the thinking verb is dropped
-    assert "review · reviewing plan" not in line   # the phase is NOT shown in the status line
-
-
 def test_labeled_route_reason_rides_target_header_in_both_paths() -> None:
     drv, out = _driver()
     events = [
@@ -1314,57 +1257,6 @@ def test_current_activity_detail_anchors_to_in_flight_call() -> None:
     assert act.verb == "searching"
     assert "bash ls" in (act.detail or "")   # in-flight call (c2), not killed c3
     assert "3 calls" in (act.detail or "")   # count basis keeps killed
-
-
-def test_compose_activity_status_has_no_per_call_timer() -> None:
-    from imp.cli.live_driver import compose_activity_status
-
-    b = nv.NarrativeBuilder()
-    b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl",
-             label="implementing", timestamp="2026-01-01T00:00:00+00:00"))
-    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-            input={"command": "sleep 600"}))
-    line = compose_activity_status(b, frame=0, color=False,
-                                   now_iso="2026-01-01T00:15:00+00:00")
-    assert line is not None
-    # Only the single trailing burst timer (900s = 15m 0s); no per-call clock.
-    assert line.split(" ", 1)[1] == "implementing · 1 call · bash sleep 600 · 15m 0s"
-
-
-def test_status_spine_label_activity_elapsed() -> None:
-    from imp.cli.live_driver import compose_activity_status
-
-    # labeled agent step: verb · elapsed in the activity line (no phase, no thinking).
-    b = nv.NarrativeBuilder()
-    for e in [
-        ev("1", "quest_created", quest_id=1, title="x"),
-        ev("2", "step_started", step="plan-reviewer", kind="agent", phase="plan",
-           model="m", provider="anthropic", label="reviewing plan",
-           timestamp="2026-01-01T00:00:00+00:00"),
-        ev("3", "thinking", agent_id="step:plan/plan-reviewer", content="hmm"),
-    ]:
-        b.add(e)
-    line = compose_activity_status(b, frame=0, color=False, width=80,
-                                   now_iso="2026-01-01T00:00:18+00:00")
-    # Activity line: spinner · verb · elapsed. Identity (title/model) is in the
-    # position bar — not in the activity line.
-    assert line.startswith("⠋ reviewing plan · 18s")
-    suffix = line[len("⠋ reviewing plan · 18s"):]
-    assert "x" in suffix   # title appears in position bar (later in combined line)
-    assert "m" in suffix   # model appears in position bar (later in combined line)
-
-    # quiet/unlabeled script step: no display label, no command → bare timer.
-    q = nv.NarrativeBuilder()
-    for e in [
-        ev("1", "quest_created", quest_id=1, title="x"),
-        ev("2", "step_started", step="autosquash", kind="script", phase="implement",
-           show_label=False, timestamp="2026-01-01T00:00:00+00:00"),
-    ]:
-        q.add(e)
-    qline = compose_activity_status(q, frame=0, color=False, width=80,
-                                    now_iso="2026-01-01T00:00:04+00:00")
-    assert qline.startswith("⠋ 4s")     # bare timer leads (no verb, no detail)
-    assert "x" in qline                 # title appears in position bar (joined into combined line)
 
 
 def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
@@ -1759,41 +1651,6 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
     assert out2.getvalue().split("\n")[0] == "> do the thing"
 
 
-def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.live_driver import compose_activity_status
-    try:
-        for theme in ("dark", "light", "ansi"):
-            pal.set_theme(theme)
-            b = nv.NarrativeBuilder()
-            b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-            line = compose_activity_status(b, frame=0, color=True)
-            assert line is not None
-            # The activity line uses the wordmark color for the spinner — never cyan.
-            # No background prefix on the activity line (background is on the position bar).
-            assert pal._ANSI["wordmark"] in line             # wordmark spinner present
-            assert pal._ANSI["cyan"] not in line             # no longer cyan
-            bg = pal.toolbar_bg_open(enabled=True)
-            if bg:  # only check when the theme has a bg color
-                assert not line.startswith(bg)               # no bg prefix on activity line
-    finally:
-        pal.set_theme("ansi")
-
-
-def test_position_bar_paints_toolbar_band_not_user_scrollback_band() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.live_driver import compose_position_bar
-    pal.set_theme("dark")
-    try:
-        act = nv.Activity(position="implementation phase", model="sonnet")
-        line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
-                                    prompt_tokens=26000, color=True, width=120)
-        assert line.startswith(pal.toolbar_bg_open(enabled=True))   # cool blue-gray band
-        assert pal.user_bg_open(enabled=True) not in line           # never the amber band
-    finally:
-        pal.set_theme("ansi")
-
-
 def test_context_bar_renders_filled_track_and_percent_plain() -> None:
     from imp.cli.live_driver import context_bar
     bar = context_bar("sonnet", 26000, color=False, over_bg=False)
@@ -1860,34 +1717,6 @@ def test_context_bar_omitted_for_unknown_model_or_missing_usage() -> None:
     assert context_bar("some-unlisted-model", 1000, color=False, over_bg=False) is None
     assert context_bar(None, 1000, color=False, over_bg=False) is None
     assert context_bar("sonnet", None, color=False, over_bg=False) is None
-
-
-def test_compose_position_bar_includes_quest_id_title_position_model() -> None:
-    import imp.cli.narrative as nv_mod
-    from imp.cli.live_driver import compose_position_bar
-    builder = nv_mod.NarrativeBuilder()
-    builder.add(ev("1", "quest_created", id="z9gixx", title="streaming toolbar"))
-    builder.add(ev("2", "step_started", step="s", kind="agent", phase="p",
-                   model="sonnet", phase_label="implement", label="task-lead"))
-    activity = builder.current_activity()
-    root = builder.tree.root
-    bar = compose_position_bar(activity=activity, quest_id=root.id, title=root.title,
-                               prompt_tokens=None, color=False, width=80)
-    # Identity (id, title) and breadcrumb (position=phase_label, model) all appear.
-    assert "z9gixx" in bar and "streaming toolbar" in bar
-    assert "implement" in bar    # position = phase_label for non-position_label step
-    assert "sonnet" in bar       # model appears in position bar
-
-
-def test_position_bar_separates_model_from_graph_with_a_single_space() -> None:
-    from imp.cli.live_driver import compose_position_bar, context_bar
-    act = nv.Activity(position="implementation phase", model="sonnet")
-    line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
-                                prompt_tokens=26000, color=False, width=120)
-    bar = context_bar("sonnet", 26000, color=False, over_bg=False)
-    assert bar is not None
-    assert f"sonnet {bar}" in line          # single space binds model to graph
-    assert "sonnet · " not in line          # no middle-dot before the graph
 
 
 def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
@@ -2032,28 +1861,6 @@ def test_live_driver_caps_hr_at_display_width() -> None:
     assert not any(ln.count("─") > 40 for ln in body)
 
 
-def test_compose_position_bar_is_flush_left_with_position_and_bar() -> None:
-    from imp.cli.live_driver import compose_position_bar
-    act = nv.Activity(position="implementation phase · plan 1/1 · task 2/3",
-                      model="claude-sonnet-4-5")
-    line = compose_position_bar(activity=act, quest_id="z9gixx", title="Fix bug",
-                                prompt_tokens=1000, color=False, width=120)
-    assert line.lstrip().startswith("z9gixx")
-    assert "implementation phase · plan 1/1 · task 2/3" in line
-    assert "Fix bug" in line
-
-
-def test_compose_position_bar_never_contains_the_verb() -> None:
-    from imp.cli.live_driver import compose_position_bar
-    act = nv.Activity(position="planning phase · plan 2/4", verb="writing plan",
-                      detail="3 calls", model="claude-sonnet-4-5")
-    line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
-                                prompt_tokens=1000, color=False, width=120)
-    assert "writing plan" not in line
-    assert "3 calls" not in line
-    assert "planning phase · plan 2/4" in line
-
-
 def test_compose_activity_line_is_verb_detail_elapsed_with_spinner() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="coding", detail="bash pytest", model="m",
@@ -2073,40 +1880,23 @@ def test_compose_activity_line_animates_spinner_and_elapsed_when_verbless() -> N
     assert line == "⠋ 4s"
 
 
-def test_compose_position_bar_slate_survives_livestatus_clip_under_dark_theme() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.live_driver import compose_position_bar
-    act = nv.Activity(position="planning phase · plan 1/1", model="claude-sonnet-4-5")
+def test_compose_activity_line_spinner_uses_wordmark_and_no_band_bg() -> None:
+    from imp.cli.live_driver import compose_activity_line
     try:
-        pal.set_theme("dark")
-        line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
-                                    prompt_tokens=1000, color=True, width=120)
+        for theme in ("dark", "light", "ansi"):
+            pal.set_theme(theme)
+            act = nv.Activity(verb="thinking", start_ts="2026-01-01T00:00:00+00:00")
+            line = compose_activity_line(activity=act, frame=0, color=True,
+                                         now_iso="2026-01-01T00:00:04+00:00")
+            # The activity line uses the wordmark color for the spinner — never cyan.
+            # No background prefix on the activity line (background is on the position bar).
+            assert pal._ANSI["wordmark"] in line             # wordmark spinner present
+            assert pal._ANSI["cyan"] not in line             # no longer cyan
+            bg = pal.toolbar_bg_open(enabled=True)
+            if bg:  # only check when the theme has a bg color
+                assert not line.startswith(bg)               # no bg prefix on activity line
     finally:
         pal.set_theme("ansi")
-    assert line.startswith("\x1b[48;2;43;47;58m")
-    assert line.endswith("\x1b[0m")
-    assert pal.display_width(line) == 118
-    clipped = pal.clip_display(line, 120 - 1)
-    assert clipped == line
-    assert "…" not in clipped
-
-
-def test_compose_activity_status_combined_line_does_not_overflow_under_slate() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.live_driver import compose_activity_status
-    b = nv.NarrativeBuilder()
-    b.add(ev("1", "quest_created", quest_id=1, title="t"))
-    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
-             model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
-             phase_label="implementation phase · plan 1/1", position_label=True))
-    try:
-        pal.set_theme("dark")
-        line = compose_activity_status(b, frame=0, color=True, width=120)
-    finally:
-        pal.set_theme("ansi")
-    assert line is not None
-    assert pal.display_width(line) <= 120 - 1
-    assert pal.clip_display(line, 120 - 1) == line
 
 
 def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
@@ -2198,15 +1988,21 @@ def test_context_bar_absolute_threshold_warns_against_window() -> None:
     assert "\x1b[31m" in bar
 
 
-def test_compose_position_bar_forwards_checkpoint_threshold() -> None:
+def test_compose_position_row_forwards_checkpoint_threshold() -> None:
     from imp.cli import narrative as nv
-    from imp.cli.live_driver import compose_position_bar
-    activity = nv.Activity(model="sonnet",
-                           position="implementation phase · plan 1/1 · task 1/3")
-    line = compose_position_bar(activity=activity, quest_id="abc", title="t",
-                                prompt_tokens=164000, color=True, width=200,
-                                checkpoint_threshold=0.8)
-    assert "\x1b[31m" in line                    # warn forwarded through to the bar
+    from imp.cli.live_driver import compose_position_row
+    # 164000/200000 = 0.82 — past the configured 0.80 warn, under the 0.85 default.
+    activity = nv.Activity(model="sonnet", kind="agent",
+                           phase="implementation phase", plan="plan 1/1",
+                           counter="task 1/3")
+    warned = compose_position_row(activity=activity, quest_id="abc", title="t",
+                                  prompt_tokens=164000, color=True, width=200,
+                                  checkpoint_threshold=0.8)
+    default = compose_position_row(activity=activity, quest_id="abc", title="t",
+                                   prompt_tokens=164000, color=True, width=200)
+    assert "\x1b[31m" in warned          # red: the threshold reached the bar
+    assert "\x1b[31m" not in default     # unforwarded -> default 0.85 cutoff
+    assert "\x1b[33m" in default         # ...still yellow
 
 
 def test_completed_node_suppressed_in_live_leaf() -> None:
@@ -2516,6 +2312,77 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     assert "\x1b[34m" in parts[3]                                  # plan: step-blue
     assert "\x1b[34m" in parts[4]                                  # counter: step-blue
     assert "\x1b[90m" in parts[5] and "\x1b[34m" not in parts[5]   # model: gray, not blue
+
+
+def test_compose_position_row_leads_with_the_project_segment() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), project="imp",
+                               quest_id="vope45", title="t", prompt_tokens=None,
+                               color=False, width=80)
+    # project first; every existing segment keeps its current relative order.
+    assert row == ("imp · vope45 · t · implementation phase · plan 1/1 · "
+                   "task 1/3 · m")
+
+
+def test_compose_position_row_without_project_is_byte_for_byte_unchanged() -> None:
+    from imp.cli.live_driver import compose_position_row
+    omitted = compose_position_row(activity=_pos_activity(), quest_id="vope45",
+                                   title="t", prompt_tokens=None, color=False,
+                                   width=80)
+    empty = compose_position_row(activity=_pos_activity(), project="",
+                                 quest_id="vope45", title="t", prompt_tokens=None,
+                                 color=False, width=80)
+    assert omitted == empty == ("vope45 · t · implementation phase · plan 1/1 · "
+                                "task 1/3 · m")
+    assert not omitted.startswith(" · ")
+
+
+def test_compose_position_row_project_is_gray_like_the_model_segment() -> None:
+    from imp.cli.live_driver import compose_position_row
+    try:
+        pal.set_theme("ansi")
+        row = compose_position_row(activity=_pos_activity(), project="imp",
+                                   quest_id="z9gixx", title="t", prompt_tokens=None,
+                                   color=True, width=120)
+    finally:
+        pal.set_theme("ansi")
+    parts = row.split(" · ")
+    assert parts[0] == "\x1b[90mimp\x1b[0m"        # project: gray, model's tone
+    assert "\x1b[33m" in parts[1]                  # id: still wordmark gold
+    assert "\x1b[" not in parts[2]                 # title: still unpainted
+    assert "\x1b[34m" in parts[3]                  # phase: still step-blue
+    assert "\x1b[90m" in parts[-1]                 # model: the same gray
+
+
+def test_compose_position_row_bands_and_pads_with_project_under_dark_theme() -> None:
+    from imp.cli.live_driver import compose_position_row
+    try:
+        pal.set_theme("dark")
+        row = compose_position_row(activity=_pos_activity(), project="imp",
+                                   quest_id="z9gixx", title="t", prompt_tokens=None,
+                                   color=True, width=120)
+        gray = pal.sgr("gray", enabled=True)
+        user_bg = pal.user_bg_open(enabled=True)
+        clipped = pal.clip_display(row, 120 - 1)
+    finally:
+        pal.set_theme("ansi")
+    assert row.startswith("\x1b[48;2;43;47;58m")   # cool blue-gray toolbar band survives
+    assert row.endswith("\x1b[0m")
+    assert user_bg not in row                      # never the amber user-scrollback band
+    assert pal.display_width(row) == 118           # still padded to width - 2
+    assert clipped == row                          # survives the LiveStatus clip untouched
+    # fg-only reset after the segment, so the band keeps painting underneath
+    assert f"{gray}imp\x1b[22;39m" in row
+
+
+def test_compose_prelaunch_position_row_forwards_project() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    row = compose_prelaunch_position_row(
+        phase="implementation phase", plan="plan 1/1", step_label="task 1/3",
+        model="m", project="imp", quest_id="vope45", title="t",
+        color=False, width=80)
+    assert row == ("imp · vope45 · t · implementation phase · plan 1/1 · "
+                   "task 1/3 · m")
 
 
 def _sub_builder(*subs, readings=(), start_ts=None):
@@ -3078,6 +2945,30 @@ def test_compose_identity_toolbar_unsandboxed_after_title() -> None:
     bar = compose_identity_toolbar(quest_id="z9gixx", title="t", color=False,
                                    width=80, unsandboxed=True)
     assert bar == "z9gixx · t · unsandboxed"
+
+
+def test_compose_identity_toolbar_leads_with_the_project_segment() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    bar = compose_identity_toolbar(project="imp", quest_id="vope45", title="t",
+                                   color=False, width=100)
+    assert bar == "imp · vope45 · t"
+    unsandboxed_bar = compose_identity_toolbar(project="imp", quest_id="vope45", title="t",
+                                               color=False, width=100, unsandboxed=True)
+    assert unsandboxed_bar == "imp · vope45 · t · unsandboxed"
+
+
+def test_compose_identity_toolbar_without_project_is_byte_for_byte_unchanged() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    omitted = compose_identity_toolbar(quest_id="vope45", title="t",
+                                       color=False, width=100)
+    empty = compose_identity_toolbar(project="", quest_id="vope45", title="t",
+                                     color=False, width=100)
+    assert omitted == empty == "vope45 · t"      # no leading " · "
+    # A title with no id (the setup conversation) still bands; nothing at all -> None.
+    assert compose_identity_toolbar(project="", quest_id=None, title="imp setup",
+                                    color=False, width=80) == "imp setup"
+    assert compose_identity_toolbar(project="", quest_id=None, title="",
+                                    color=False, width=80) is None
 
 
 def test_compose_identity_toolbar_unsandboxed_after_id_when_no_title() -> None:
@@ -3663,3 +3554,44 @@ def test_full_cats_complete_step_keeps_blank_above_a_frameless_step() -> None:
     assert full[i - 1].strip() == ""            # blank above, as render_tree yields
     assert "a · complete" in full[i - 2]
     assert full == _render_body(events, frozenset(LOG_CATEGORIES))
+
+
+def test_driver_project_leads_the_static_toolbar_and_the_footer_row() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     project="imp")
+    drv.on_event(ev("1", "quest_created", id="z9gixx", title="t"))
+    # (a) compose_toolbar_static before any activity -> the identity band
+    assert drv.compose_toolbar_static() == "imp · z9gixx · t"
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                    model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
+                    phase_label="implementation phase · plan 1/1", position_label=True))
+    static = drv.compose_toolbar_static()
+    assert static is not None
+    assert static.startswith(
+        "imp · z9gixx · t · implementation phase · plan 1/1 · task 1/3")
+    # (b) compose_status row 3 is that same position row
+    block = drv.compose_status(0)
+    assert block is not None and len(block) == 3
+    assert block[2].startswith(
+        "imp · z9gixx · t · implementation phase · plan 1/1 · task 1/3")
+
+
+def test_driver_project_leads_the_startup_identity_row() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     startup_verb="resuming", project="imp",
+                     quest_id="lufu50", title="Instant opening identity bar")
+    rows = drv.compose_startup(0)
+    assert rows is not None and len(rows) == 3
+    assert rows[2] == "imp · lufu50 · Instant opening identity bar"
+
+
+def test_driver_without_project_renders_todays_bands_unchanged() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     startup_verb="resuming", quest_id="lufu50", title="t")
+    drv.on_event(ev("1", "quest_created", id="lufu50", title="t"))
+    assert drv.compose_toolbar_static() == "lufu50 · t"
+    rows = drv.compose_startup(0)
+    assert rows is not None and rows[2] == "lufu50 · t"

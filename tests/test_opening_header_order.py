@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +25,8 @@ async def test_read_opening_message_prints_run_header_before_reading(
             seen["before_read"] = capsys.readouterr().out
             return "  add oauth  "
 
-    quest = SimpleNamespace(id="z9y8x7", title="")
+    quest = SimpleNamespace(id="z9y8x7", title="",
+                            control_root=Path("/checkouts/imp"))
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
@@ -44,7 +46,8 @@ async def test_read_opening_message_reprompts_on_empty_reply() -> None:
         async def ask_async(self, **kwargs: object) -> str:
             return next(self._lines)
 
-    quest = SimpleNamespace(id="aa11bb", title="")
+    quest = SimpleNamespace(id="aa11bb", title="",
+                            control_root=Path("/checkouts/imp"))
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
@@ -86,7 +89,8 @@ async def test_read_opening_message_leads_with_header_then_splash_then_prompt(
             seen["before_read"] = capsys.readouterr().out
             return "add oauth"
 
-    quest = SimpleNamespace(id="z9y8x7", title="")
+    quest = SimpleNamespace(id="z9y8x7", title="",
+                            control_root=Path("/checkouts/imp"))
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=True, color=False,
         width=80, editing_mode="emacs", _prompt_factory=lambda: _FakePrompt())
