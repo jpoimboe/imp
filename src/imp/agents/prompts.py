@@ -1,6 +1,6 @@
 """Prompt template rendering for agent .md bodies.
 
-Six namespaces (spec §7.5):
+Seven namespaces (spec §7.5):
   quest.id — stable identity; quest.title — human title
   events.<step-name>.<field> — validated agent_result of prior step;
       missing steps render as empty (lenient-within)
@@ -13,6 +13,9 @@ Six namespaces (spec §7.5):
       step.prior_laps — retained {lap, outcome, head} entries of prior laps
   docs.path — absolute path to imp's repo-root docs/ corpus, resolved in
       place relative to the install (readable in any project via bash/read_file)
+  project.verify_gate_unset — True only when the fast test gate is unwired
+      (Config.test_cmd_fast is None); False for a configured command and False
+      for the deliberate "" opt-out
 
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 """
@@ -109,6 +112,11 @@ class _DocsNamespace:
 
 
 @dataclass(frozen=True, slots=True)
+class _ProjectNamespace:
+    verify_gate_unset: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class PromptContext:
     quest: _QuestNamespace
     events: _EventsNamespace
@@ -116,6 +124,7 @@ class PromptContext:
     run: _RunNamespace
     step: _StepNamespace
     docs: _DocsNamespace
+    project: _ProjectNamespace
 
 
 def build_context(
@@ -129,6 +138,7 @@ def build_context(
     autonomous: bool = False, opening: str = "",
     prior_laps: list[dict[str, Any]] | None = None,
     docs_path: str | None = None,
+    verify_gate_unset: bool = False,
 ) -> PromptContext:
     laps = tuple(prior_laps or ())
     resolved_docs = docs_path if docs_path is not None else str(bundled_docs_dir())
@@ -147,6 +157,7 @@ def build_context(
         step=_StepNamespace(
             lap=(laps[-1]["lap"] + 1 if laps else 1), prior_laps=laps),
         docs=_DocsNamespace(path=resolved_docs),
+        project=_ProjectNamespace(verify_gate_unset=verify_gate_unset),
     )
 
 
@@ -208,7 +219,7 @@ def render_prompt(
     try:
         return _env_for(workflow_dir).from_string(template_source).render(
             quest=ctx.quest, events=ctx.events, vars=ctx.vars,
-            run=ctx.run, step=ctx.step, docs=ctx.docs,
+            run=ctx.run, step=ctx.step, docs=ctx.docs, project=ctx.project,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e
