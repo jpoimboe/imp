@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import anyio
@@ -12,7 +13,6 @@ from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
-from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.attach import (
@@ -28,14 +28,31 @@ def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
     return not non_interactive and sys.stdin.isatty()
 
 
-def infer_session_result(quest: Quest) -> RunResult:
-    """Read persisted status, home first then archive: 'merged'/'done' → COMPLETED, else PAUSED."""
+@dataclass(frozen=True)
+class SettledOutcome:
+    """Resolved terminal state; status is None when neither home nor archive can answer."""
+
+    status: str | None
+    events: list[dict[str, Any]]
+
+    @property
+    def completed(self) -> bool:
+        return self.status in ("merged", "done")
+
+
+def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
+    """Read status and events once, live home first, then archive."""
+    from imp.cli.main import _parse_jsonl
+    from imp.engine.archive import read as archive_read
     try:
         status: str | None = State.load(quest.state_dir).status
     except FileNotFoundError:
-        from imp.engine.archive import read as archive_read
         status = archive_read.status_of(quest.control_root, quest.id)
-    return RunResult.COMPLETED if status in ("merged", "done") else RunResult.PAUSED
+    events = list(quest.event_log().read())
+    if not events:
+        raw = archive_read.read_events(quest.control_root, quest.id)
+        events = _parse_jsonl(raw) if raw is not None else []
+    return SettledOutcome(status=status, events=events)
 
 
 async def run_session_client(
@@ -90,7 +107,7 @@ async def run_session_client(
             startup_error = err
             title.reset()
         tg.cancel_scope.cancel()
-    if startup_failed and infer_session_result(quest) is not RunResult.COMPLETED:
+    if startup_failed and not resolve_settled_outcome(quest).completed:
         if startup_error is not None and startup_error.exit_code == LAYOUT_MISMATCH_EXIT:
             print(startup_error.stderr_tail, file=sys.stderr)
             return 2

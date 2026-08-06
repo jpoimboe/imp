@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from imp.cli import main
-from imp.engine.executor import RunResult
+from imp.cli.session_run import SettledOutcome
 from imp.paths import project_state_dir
 
 
@@ -22,7 +22,6 @@ class _Change:
     title = ""
     base_branch = "master"
     materialized = False                # the real render-seam value (draft never reloaded)
-    state_dir = "/tmp/imp-test-state"   # never touched: State.load is patched
     project_root = "/imp-state/worktrees/2026-06-12-run-x"
 
     def __init__(self, events: list[dict]) -> None:
@@ -32,34 +31,46 @@ class _Change:
         return _Events(self._events)
 
 
-class _State:
-    def __init__(self, status: str, step: str | None = None) -> None:
-        self.status = status
-        self.step = step
+@pytest.fixture(scope="module", autouse=True)
+def _change_home(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Back the stub with a real quest home, as production's Quest always has."""
+    home = tmp_path_factory.mktemp("terminal-outcome")
+    quest_dir = project_state_dir(home) / "quests" / _Change.id
+    (quest_dir / "state").mkdir(parents=True)
+    _Change.control_root = home
+    _Change.quest_dir = quest_dir
+    _Change.state_dir = quest_dir / "state"
 
 
 def test_merge_blocked_outcome_emits_no_paused_summary() -> None:
-    quest = _Change([{"type": "merge_blocked",
-                       "payload": {"reason": "refused", "base": "master",
-                                   "detail": "error: Aborting"}}])
-    with patch("imp.engine.state.State") as State, \
-         patch.object(main, "_emit_merge_blocked") as mb, \
+    events = [{"type": "merge_blocked",
+               "payload": {"reason": "refused", "base": "master",
+                           "detail": "error: Aborting"}}]
+    with patch.object(main, "_emit_merge_blocked") as mb, \
          patch.object(main, "_emit_paused_summary") as ps:
-        State.load.return_value = _State("merge_blocked")
-        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
+        rc = main._handle_terminal_outcome(
+            _Change(events), SettledOutcome(status="merge_blocked", events=events),
+            coord=None)
     assert rc == 1
     mb.assert_called_once()          # the friendly ⚠ block still prints
     ps.assert_not_called()           # the redundant second pause line is gone
 
 
 def test_non_merge_pause_still_emits_paused_summary() -> None:
-    quest = _Change([])
-    with patch("imp.engine.state.State") as State, \
-         patch.object(main, "_emit_paused_summary") as ps:
-        State.load.return_value = _State("paused", step=None)
-        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
+    with patch.object(main, "_emit_paused_summary") as ps:
+        rc = main._handle_terminal_outcome(
+            _Change([]), SettledOutcome(status="paused", events=[]), coord=None)
     assert rc == 1
     ps.assert_called_once()          # ordinary pauses keep the summary line
+
+
+def test_unresolvable_status_routes_to_paused_summary() -> None:
+    # Neither the reaped home nor the archive could answer: render, never raise.
+    with patch.object(main, "_emit_paused_summary") as ps:
+        rc = main._handle_terminal_outcome(
+            _Change([]), SettledOutcome(status=None, events=[]), coord=None)
+    assert rc == 1
+    ps.assert_called_once()
 
 
 def test_emit_merge_blocked_worktree_dirty_three_part_block(capsys) -> None:
@@ -114,11 +125,9 @@ def test_handle_terminal_outcome_does_not_reprint_script_detail(capsys) -> None:
         {"type": "script_blocked",
          "payload": {"step": "verify", "stderr": "err-detail", "stdout": "out-detail", "exit": 3}},
     ]
-    quest = _Change(events)
-    with patch("imp.engine.state.State") as State, \
-         patch.object(main, "_emit_paused_summary") as ps:
-        State.load.return_value = _State("paused", step="verify")
-        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
+    with patch.object(main, "_emit_paused_summary") as ps:
+        rc = main._handle_terminal_outcome(
+            _Change(events), SettledOutcome(status="paused", events=events), coord=None)
     out = capsys.readouterr().out
     assert "err-detail" not in out       # the exit recap no longer reprints script detail
     assert "out-detail" not in out
@@ -128,14 +137,14 @@ def test_handle_terminal_outcome_does_not_reprint_script_detail(capsys) -> None:
 
 def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
     note = "imp attempted 3 recovery passes and the merge still failed."
-    quest = _Change([{"type": "merge_blocked",
-                       "payload": {"reason": "conflict", "base": "master",
-                                   "detail": "merge conflict", "note": note}}])
-    with patch("imp.engine.state.State") as State, \
-         patch.object(main, "_emit_merge_blocked") as mb, \
+    events = [{"type": "merge_blocked",
+               "payload": {"reason": "conflict", "base": "master",
+                           "detail": "merge conflict", "note": note}}]
+    with patch.object(main, "_emit_merge_blocked") as mb, \
          patch.object(main, "_emit_paused_summary"):
-        State.load.return_value = _State("merge_blocked")
-        main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
+        main._handle_terminal_outcome(
+            _Change(events), SettledOutcome(status="merge_blocked", events=events),
+            coord=None)
     mb.assert_called_once()
     assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg
 
@@ -333,36 +342,12 @@ def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
         leave_reason = "ctrl-d"
         escalation_event = _Evt()
 
-    quest = _Change([])
-    with patch("imp.engine.state.State") as State, \
-         patch.object(main, "_emit_paused_summary") as ps:
-        State.load.return_value = _State("paused", step=None)
-        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=_Coord())
+    with patch.object(main, "_emit_paused_summary") as ps:
+        rc = main._handle_terminal_outcome(
+            _Change([]), SettledOutcome(status="paused", events=[]), coord=_Coord())
     assert rc == 1
     ps.assert_called_once()
     assert ps.call_args.args[1] == "ctrl-d"   # the trigger reached the summary
-
-
-def test_handle_terminal_outcome_reads_intent_from_archive(monkeypatch) -> None:
-    quest = _Change([])
-    quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
-    archive_blob = (
-        b'{"type": "user_message", "payload": {"subtype": "intent", '
-        b'"content": [{"type": "text", "text": "resolve me from archive"}]}}\n'
-        b'{"type": "runner_warning", "payload": {"message": "a"}}\n'
-        b'{"type": "runner_warning", "payload": {"message": "b"}}\n'
-        b'{"type": "step_started", "payload": {"step": "s"}}\n'
-    )
-    monkeypatch.setattr(
-        "imp.engine.archive.read.read_events",
-        lambda control_root, quest_id: archive_blob)
-    captured: dict = {}
-    monkeypatch.setattr(
-        main, "_emit_completed",
-        lambda ch, *, merged, intent: captured.update(intent=intent))
-    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
-    assert rc == 0
-    assert captured["intent"] == "resolve me from archive"
 
 
 class _CtrlDCoord:
@@ -380,11 +365,9 @@ def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
     # An in-session Ctrl-D leave prints the retained `> ` caret immediately
     # above the (here mocked) pause banner.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    quest = _Change([])
-    with patch("imp.engine.state.State") as State, \
-         patch.object(main, "_emit_paused_summary") as ps:
-        State.load.return_value = _State("paused", step=None)
-        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _CtrlDCoord())
+    with patch.object(main, "_emit_paused_summary") as ps:
+        rc = main._handle_terminal_outcome(
+            _Change([]), SettledOutcome(status="paused", events=[]), _CtrlDCoord())
     assert rc == 1
     ps.assert_called_once()
     assert capsys.readouterr().out == "> Ctrl-D\n"   # keystroke shadow only (banner mocked out)
@@ -404,10 +387,8 @@ def test_sigterm_leave_prints_no_caret_and_paused_display_head(monkeypatch, caps
     # A signal leave renders NO caret line and a `paused · SIGTERM` head above the
     # unchanged identity and resume lines.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    quest = _Change([])
-    with patch("imp.engine.state.State") as State:
-        State.load.return_value = _State("paused", step=None)
-        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _SigtermCoord())
+    rc = main._handle_terminal_outcome(
+        _Change([]), SettledOutcome(status="paused", events=[]), _SigtermCoord())
     assert rc == 1
     out = capsys.readouterr().out
     lines = out.split("\n")
@@ -435,13 +416,12 @@ def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
                      "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
         {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
     ]
-    quest = _Change(events)
-    quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
         lambda ch, *, merged, intent: captured.update(intent=intent))
-    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
+    rc = main._handle_terminal_outcome(
+        _Change(events), SettledOutcome(status="merged", events=events), coord=None)
     assert rc == 0
     assert captured["intent"] == "add a dark mode toggle"
 
@@ -479,34 +459,25 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
 def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:
     # A pause that was not a Ctrl-D prompt leave retains no caret.
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    quest = _Change([])
-    with patch("imp.engine.state.State") as State, \
-         patch.object(main, "_emit_paused_summary") as ps:
-        State.load.return_value = _State("paused", step=None)
-        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
+    with patch.object(main, "_emit_paused_summary") as ps:
+        rc = main._handle_terminal_outcome(
+            _Change([]), SettledOutcome(status="paused", events=[]), coord=None)
     assert rc == 1
     ps.assert_called_once()
     assert capsys.readouterr().out == ""
 
 
-def test_handle_terminal_outcome_merged_event_yields_merged_true(
-    monkeypatch, tmp_path,
-) -> None:
-    # The worktree dir is still present at render time (the queued / cross-process
-    # case). Pre-fix, the wt_path probe would read merged=False; the event wins now.
-    wt = project_state_dir(tmp_path) / "worktrees" / "2026-06-12-run-x"
-    wt.mkdir(parents=True)
+def test_handle_terminal_outcome_merged_event_yields_merged_true(monkeypatch) -> None:
     events = [
         {"type": "quest_merged", "payload": {"base": "master", "commit": "abc123"}},
         {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
     ]
-    quest = _Change(events)
-    quest.control_root = tmp_path
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
         lambda ch, *, merged, intent: captured.update(merged=merged))
-    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
+    rc = main._handle_terminal_outcome(
+        _Change(events), SettledOutcome(status="merged", events=events), coord=None)
     assert rc == 0
     assert captured["merged"] is True
 
@@ -518,14 +489,14 @@ def test_handle_terminal_outcome_no_merged_event_yields_merged_false(
         {"type": "workflow_completed", "payload": {}},
         {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
     ]
-    quest = _Change(events)
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
         lambda ch, *, merged, intent: captured.update(merged=merged))
-    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
+    rc = main._handle_terminal_outcome(
+        _Change(events), SettledOutcome(status="done", events=events), coord=None)
     assert rc == 0
-    assert captured["merged"] is False
+    assert captured["merged"] is False       # `done` completes without a merge
 
 
 _END_OF_RUN_WARNINGS = ["cache read failed", "cache read failed",
@@ -571,7 +542,8 @@ def _end_of_run_output(warnings: list[str], *, tty: bool) -> str:
     drv.finish()
     with contextlib.redirect_stdout(out):
         assert main._handle_terminal_outcome(
-            _Change(events), RunResult.COMPLETED, coord=None) == 0
+            _Change(events), SettledOutcome(status="merged", events=events),
+            coord=None) == 0
     return out.getvalue()
 
 

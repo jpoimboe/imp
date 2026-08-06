@@ -3,20 +3,21 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import anyio
 import pytest
 
+from imp.cli import main
 from imp.cli.session_run import (
-    infer_session_result,
     make_headless_solicit,
     make_interactive_solicit,
+    resolve_settled_outcome,
     run_session_client,
 )
 from imp.cli.signals import InterruptCoordinator
 from imp.engine import archive
-from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
@@ -42,50 +43,63 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
     )
 
 
-def test_infer_session_result_completed_when_merged_no_worktree(tmp_path: Path) -> None:
+def test_resolve_settled_outcome_completed_when_merged_no_worktree(tmp_path: Path) -> None:
     # A merged change prunes the worktree but its state survives at the root home.
     quest = _make_quest(tmp_path, "2026-06-15-merged")
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
-    assert infer_session_result(quest) is RunResult.COMPLETED
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.status == "merged"
+    assert outcome.completed is True
 
 
-def test_infer_session_result_completed_when_done_no_worktree(tmp_path: Path) -> None:
-    quest = _make_quest(tmp_path, "2026-06-15-doneres")
+def test_resolve_settled_outcome_completed_when_done_no_worktree(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-done")
     State(id=quest.id, step=None, step_attempt=0, status="done").save(quest.state_dir)
-    assert infer_session_result(quest) is RunResult.COMPLETED
+    assert resolve_settled_outcome(quest).completed is True
 
 
-def test_infer_session_result_paused_for_parked_draft_no_worktree(tmp_path: Path) -> None:
+def test_resolve_settled_outcome_not_completed_for_parked_draft(tmp_path: Path) -> None:
     # A parked draft: never materialized (no worktree), spec phase paused.
     quest = _make_quest(tmp_path, "2026-06-15-draft")
     State(id=quest.id, step="spec-writer", step_attempt=0, status="paused").save(
         quest.state_dir)
-    assert infer_session_result(quest) is RunResult.PAUSED
+    assert resolve_settled_outcome(quest).completed is False
 
 
-def test_infer_session_result_completed_when_status_completed(tmp_path: Path) -> None:
-    quest = _make_quest(tmp_path, "2026-06-15-done")
+def test_resolve_settled_outcome_completed_when_merged_with_worktree(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-mergedwt")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
-    assert infer_session_result(quest) is RunResult.COMPLETED
+    assert resolve_settled_outcome(quest).completed is True
 
 
-def test_infer_session_result_paused_when_parked_at_gate(tmp_path: Path) -> None:
+def test_resolve_settled_outcome_not_completed_when_parked_at_gate(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-parked")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
-    assert infer_session_result(quest) is RunResult.PAUSED
+    assert resolve_settled_outcome(quest).completed is False
 
 
-def test_infer_session_result_paused_when_merge_blocked(tmp_path: Path) -> None:
+def test_resolve_settled_outcome_carries_merge_blocked_status(tmp_path: Path) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-blocked")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step=None, step_attempt=0, status="merge_blocked").save(
         quest.state_dir)
-    assert infer_session_result(quest) is RunResult.PAUSED
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.status == "merge_blocked"
+    assert outcome.completed is False
+
+
+def test_resolve_settled_outcome_status_none_when_nothing_persisted(tmp_path: Path) -> None:
+    quest = _make_quest(tmp_path, "2026-06-15-gone")
+    assert not quest.state_dir.exists()
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.status is None              # neither home nor archive can answer
+    assert outcome.events == []
+    assert outcome.completed is False
 
 
 @pytest.mark.anyio
@@ -204,7 +218,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     quest = _make_quest(tmp_path, "2026-06-15-interrupted")
-    # Worktree exists + paused status → infer_session_result returns PAUSED.
+    # Worktree exists + paused status → the resolved outcome is not completed.
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
     State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
         quest.state_dir)
@@ -499,6 +513,34 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
 
 
 @pytest.mark.anyio
+async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The run merged and its home was reaped before the client could attach:
+    # the startup-failure check must take its answer from the archive record.
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-03-fastmerge", status="merged", events=_MERGED_EVENT_LINE)
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _boom)
+
+    coord = InterruptCoordinator()
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=coord,
+        solicit=lambda _p: _never(), leave_mode="new")
+    captured = capsys.readouterr()
+    assert rc == 0                                    # NOT rc=3: the run had completed
+    assert "startup failed" not in (captured.out + captured.err)
+    assert "merged into main" in captured.out         # rendered through the resolver's events
+
+
+@pytest.mark.anyio
 async def test_run_session_client_forwards_new_leave_mode_to_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -619,7 +661,7 @@ async def test_run_session_client_passes_control_root(
 async def test_run_session_client_resets_title_on_daemon_startup_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Worktree exists + non-completed state → infer_session_result returns PAUSED,
+    # Worktree exists + non-completed state → the resolved outcome is not completed,
     # so this is the rc=3 daemon-startup-failure path (not a fast-completed run).
     quest = _make_quest(tmp_path, "2026-06-15-leak")
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
@@ -696,7 +738,7 @@ async def test_run_session_client_threads_provided_leave_state(
 async def test_run_session_client_reuses_passed_in_title(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A completed change with no worktree → infer_session_result COMPLETED, rc 0.
+    # A completed change with no worktree → the resolved outcome is completed, rc 0.
     quest = _make_quest(tmp_path, "2026-06-15-reuse")
     State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
@@ -838,33 +880,100 @@ def test_should_run_ctrl_d_reader_requires_interactive_tty(monkeypatch) -> None:
     assert _should_run_ctrl_d_reader(non_interactive=False) is False
 
 
-def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: Path) -> None:
-    quest_id = "2026-07-03-reaped"
+_MERGED_EVENT_LINE = (
+    b'{"id":"e0","parent_id":null,"agent_id":null,'
+    b'"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_merged",'
+    b'"payload":{"base":"main","commit":"abc123"}}\n'
+)
+
+_INTENT_EVENT_LINE = (
+    b'{"id":"e1","parent_id":null,"agent_id":null,'
+    b'"timestamp":"2026-06-01T00:00:00+00:00","type":"user_message",'
+    b'"payload":{"subtype":"intent",'
+    b'"content":[{"type":"text","text":"resolve me from archive"}]}}\n'
+)
+
+
+def _archive_reaped_quest(
+    tmp_path: Path, quest_id: str, *, status: str, events: bytes,
+) -> Quest:
+    """Archive a record for `quest_id`, then return a Quest whose live home was
+    never created — the post-merge reaped state the client renders from."""
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
-
     events_file = tmp_path / f"{quest_id}.jsonl"
-    events_file.write_bytes(
-        f'{{"id":"{quest_id}-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
-        f'"payload":{{"id":"{quest_id}"}}}}\n'.encode()
-    )
+    events_file.write_bytes(events)
     quest_json = tmp_path / f"{quest_id}-quest.json"
     quest_json.write_text(json.dumps({
         "id": quest_id, "title": "Reaped", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / f"{quest_id}-state.json"
-    state_json.write_text(json.dumps({"id": quest_id, "status": "merged", "step": None}))
+    state_json.write_text(json.dumps(
+        {"id": quest_id, "status": status, "step": None}))
     archive.archive_quest(
         tmp_path, quest_id, events_path=events_file,
         quest_json_path=quest_json, state_json_path=state_json)
-
-    # Build the Quest WITHOUT creating the live home/state dir — State.load raises
-    # FileNotFoundError, forcing the archive fallback branch.
     quest = _make_quest(tmp_path, quest_id)
     assert not quest.state_dir.exists()
-    assert infer_session_result(quest) is RunResult.COMPLETED
+    return quest
+
+
+def test_resolve_settled_outcome_falls_back_to_archive_when_home_reaped(
+    tmp_path: Path,
+) -> None:
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-03-reaped", status="merged", events=_MERGED_EVENT_LINE)
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.status == "merged"                    # from the archived record
+    assert outcome.completed is True
+    assert [e["type"] for e in outcome.events] == ["quest_merged"]   # from the archived blob
+
+
+def test_resolve_settled_outcome_prefers_live_home_over_archive(tmp_path: Path) -> None:
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-03-live", status="merged", events=_MERGED_EVENT_LINE)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+    quest.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.status == "paused"                    # live home wins over 'merged'
+    assert [e["type"] for e in outcome.events] == ["workflow_paused"]
+    assert outcome.completed is False
+
+
+def test_terminal_rendering_merged_from_archive_when_home_reaped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-03-render", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    quest.title = ""                          # untitled, so the identity line shows the intent
+    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert rc == 0
+    assert lines[0] == "merged into main"     # merged=True from the archived quest_merged event
+    assert "done · commits on" not in out     # not the unmerged headline
+    # the opening intent, too, comes from the archived blob
+    assert lines[1] == "2026-07-03-render · > resolve me from archive"
+
+
+def test_terminal_rendering_pauses_when_home_reaped_and_no_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-07-03-norecord")
+    assert not quest.state_dir.exists()
+    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
+    out = capsys.readouterr().out
+    assert rc == 1                            # an unresolvable status renders, never raises
+    assert out.split("\n")[0] == "paused"
+    assert "resume: imp resume 2026-07-03-norecord" in out
 
 
 @pytest.mark.anyio
