@@ -45,16 +45,22 @@ def _capture_leave_mode(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     return captured
 
 
-def _stub_ui(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
-    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(
-        "imp.cli.live_driver.LiveDriver",
-        lambda *a, **k: SimpleNamespace(
+def _stub_ui(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Stub the terminal UI; returns the kwargs the stubbed LiveDriver was built with."""
+    driver_kwargs: dict[str, object] = {}
+
+    def _driver(*a: object, **k: object) -> SimpleNamespace:
+        driver_kwargs.update(k)
+        return SimpleNamespace(
             install_startup_status=lambda: None,
             echo_submitted_reply=lambda _t: None,
-            seed_opening_intent=lambda _t: None))
+            seed_opening_intent=lambda _t: None)
+
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", _driver)
     monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
+    return driver_kwargs
 
 
 @pytest.mark.anyio
@@ -62,15 +68,17 @@ def _stub_ui(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_run_fresh_session_headless_threads_create_mode(
     monkeypatch: pytest.MonkeyPatch, create_mode: str,
 ) -> None:
-    _stub_ui(monkeypatch)
+    driver_kwargs = _stub_ui(monkeypatch)
     monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
     captured = _capture_leave_mode(monkeypatch)
     args = m._build_parser().parse_args(["resume", "--headless"])
     quest = SimpleNamespace(
-        id="x", title="t", create_mode=create_mode, seed_opening=None)
+        id="x", title="t", create_mode=create_mode, seed_opening=None,
+        control_root=Path("/checkouts/imp"))
     rc = await m._run_fresh_session(quest, args=args)
     assert rc == 0
     assert captured["leave_mode"] == create_mode
+    assert driver_kwargs["project"] == quest.control_root.name == "imp"
 
 
 @pytest.mark.anyio

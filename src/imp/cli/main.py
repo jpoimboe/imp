@@ -934,7 +934,8 @@ async def _run_cleared_session(
         driver = LiveDriver(
             stream=sys.stdout, color=color, width=_term_width,
             display_width=_display_width, status=status,
-            quest_id=quest.id, title=quest.title)
+            quest_id=quest.id, title=quest.title,
+            project=quest.control_root.name)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
@@ -1105,7 +1106,8 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1119,7 +1121,8 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
@@ -1366,7 +1369,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(None, coord)
         return await run_session_client(
@@ -1385,7 +1389,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=quest.id, title=quest.title)
+                            quest_id=quest.id, title=quest.title,
+                            project=quest.control_root.name)
         if quest.seed_opening:
             driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
@@ -1451,7 +1456,8 @@ def _build_resume_driver(
         width=_term_width, display_width=_display_width, status=status,
         suppress_replay=True, preceded_by_blank=preceded_by_blank,
         startup_verb=state.step_label or random_status_phrase(),
-        quest_id=quest.id, title=quest.title)
+        quest_id=quest.id, title=quest.title,
+        project=quest.control_root.name)
 
 
 def _resume_live_framing(

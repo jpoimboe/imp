@@ -136,3 +136,13 @@ async def test_inert_resume_derives_verb_and_passes_display_width(
     assert captured["startup_verb"] == "writing plan"       # labeled step → its label
     assert captured["display_width"] is m._display_width     # item 7: inert now passes width
     assert captured["preceded_by_blank"] is False
+
+
+def test_build_resume_driver_carries_the_project_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ch = _seed(tmp_path, step_label="reviewing spec")
+    st = State.load(ch.state_dir)
+    captured = _capture_driver(monkeypatch)
+    m._build_resume_driver(quest=ch, state=st, status=SimpleNamespace(), color=False)
+    assert captured["project"] == ch.control_root.name == tmp_path.name
