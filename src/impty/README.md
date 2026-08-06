@@ -21,7 +21,7 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 
 ## API
 
-- `wait_idle(idle=0.3, hard=3.0) -> bool` — read until quiet; `False` on hard timeout. `hard` is a max-patience ceiling (a settling program returns at `idle`); it only bites on a never-quiet app. Defaults are `DEFAULT_SETTLE_IDLE`/`DEFAULT_SETTLE_HARD`, the single source of truth the MCP tools inherit.
+- `wait_idle(idle=0.3, hard=3.0, *, since=0.0) -> bool` — read until quiet; `False` on hard timeout. `hard` is a max-patience ceiling (a settling program returns at `idle`); it only bites on a never-quiet app. `since` is a monotonic stamp: only output read at or after it qualifies (the 0.0 default counts any output ever read), which is what the tool layer's `for_change` wait is built on. Defaults are `DEFAULT_SETTLE_IDLE`/`DEFAULT_SETTLE_HARD`, the single source of truth the MCP tools inherit for settling; `DEFAULT_CHANGE_HARD` (30.0) is the change-mode ceiling the tool layer also inherits.
 - `run_to_completion(hard=60.0) -> int` — drive the child to exit, draining ALL remaining output into pyte first; returns the exit code, raises `TimeoutExpired` on hard timeout (child still alive). Use this (not `wait()`) when the child floods after your last `send()`.
 - `send(bytes | str)` — raw keystrokes to the program. `\x03` (Ctrl-C) is faithful: a real `SIGINT` to the child's process group in cooked mode (the controlling terminal is set up at spawn), a raw byte in raw mode (the app makes its own `KeyboardInterrupt`), exactly like a real terminal.
 - `send_signal(sig=signal.SIGINT)` — deliver a real signal directly to the child's process group, regardless of tty mode (cooked or raw). The deterministic escape hatch when you don't want to depend on tty mode; a no-op once the child has exited. Reaches only the child's process group — a grandchild that `setsid()`'d into its own session is not signalled, exactly like a real Ctrl-C.
@@ -52,5 +52,7 @@ Two ready-made entry points:
 - **Drive a live program over MCP and screenshot it:** run the stdio MCP server
   (`python -m impty.mcp`, registered in `.mcp.json`). Tools: `start`, `send`,
   `resize` (`(rows, cols)` — resizes the live terminal, delivering a real `SIGWINCH`),
-  `wait`, `view` (`full=True` for the whole strip), `snapshot` (renders the live screen to a PNG and
-  returns its path), `stop`. Adding/removing a tool needs a server restart.
+  `wait` (`for_change=True` blocks until NEW output arrives instead of counting what is
+  already on screen), `view` (`full=True` for the whole strip), `snapshot` (renders the
+  live screen to a PNG and returns its path), `stop`. Adding/removing a tool needs a
+  server restart.
