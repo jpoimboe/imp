@@ -553,7 +553,8 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
 def _handle_terminal_outcome(
     quest: Quest, outcome: SettledOutcome, coord: Any,
 ) -> int:
-    """Render a settled run's terminal outcome and return its rc; reads nothing."""
+    """Render a settled run's terminal outcome and return its rc; re-resolves nothing
+    (never re-reads state.json or re-derives the settled outcome)."""
     if outcome.completed:
         merged = any(ev.get("type") == "quest_merged" for ev in outcome.events)
         _emit_completed(quest, merged=merged, intent=_resolve_intent(outcome.events))
