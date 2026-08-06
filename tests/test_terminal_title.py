@@ -198,3 +198,25 @@ def test_update_name_after_reset_reemits_under_hold_glyph() -> None:
     s.seek(0)
     title.update_name("foo")
     assert s.getvalue() == "\x1b]2;⛙ nagi22 · foo\x07"
+
+
+def test_project_leads_the_title_before_id_and_name() -> None:
+    s = _TTY()
+    TerminalTitle(s, "vope45", "Project name in the toolbar", project="imp")
+    assert s.getvalue() == "\x1b]2;✦ imp · vope45 · Project name in the toolbar\x07"
+
+
+def test_project_with_untitled_quest_drops_the_name_separator() -> None:
+    s = _TTY()
+    TerminalTitle(s, "vope45", "", project="imp")
+    assert s.getvalue() == "\x1b]2;✦ imp · vope45\x07"
+
+
+def test_project_survives_rename_under_the_idle_glyph() -> None:
+    s = _TTY()
+    title = TerminalTitle(s, "vope45", "Old Name", project="imp")
+    title.idle()
+    s.truncate(0)
+    s.seek(0)
+    title.update_name("foo")
+    assert s.getvalue() == f"\x1b]2;{GLYPH_IDLE} imp · vope45 · foo\x07"

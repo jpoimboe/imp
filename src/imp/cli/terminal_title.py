@@ -14,10 +14,13 @@ class TerminalTitle:
         quest_id: str,
         quest_name: str,
         initial: str = "busy",
+        *,
+        project: str = "",
     ) -> None:
         self._stream = stream
         self._quest_id = quest_id
         self._name = quest_name
+        self._project = project
         self._enabled = bool(stream.isatty())
         self._current: str | None = None
         self._idle = initial == "idle"
@@ -66,11 +69,8 @@ class TerminalTitle:
         if glyph == self._current:
             return
         prefix = f"{glyph} " if glyph else ""
-        label = (
-            f"{self._quest_id} · {self._name}"
-            if self._name
-            else self._quest_id
-        )
+        label = " · ".join(
+            p for p in (self._project, self._quest_id, self._name) if p)
         self._stream.write(f"\x1b]2;{prefix}{label}\x07")
         self._stream.flush()
         self._current = glyph
