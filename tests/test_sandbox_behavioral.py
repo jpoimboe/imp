@@ -245,6 +245,39 @@ def test_write_inside_worktree_succeeds() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_syntax_error_reaches_the_agent_as_the_commands_own_failure() -> None:
+    """AC 1/2 end-to-end under real bwrap: an unterminated backquote is an
+    ordinary command failure, not a sandbox-setup failure."""
+    root = _make_root()
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        result = _bash(ctx, 'echo "`')
+        # no status/error also means the retry loop never ran (AC 2)
+        assert "status" not in result
+        assert "error" not in result
+        assert result["returncode"] == 2
+        assert str(result["stderr"]).strip() != ""
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_missing_bind_source_is_still_a_sandbox_setup_failure() -> None:
+    """AC 4: a genuine bwrap setup failure (a bind source that does not exist)
+    is still detected and still reported as a sandbox failure. extra_readable is
+    not existence-pruned by prepare_spawn_policy, so bwrap aborts before exec."""
+    root = _make_root()
+    try:
+        pol = dataclasses.replace(_active_policy(root),
+                                  extra_readable=(str(root / "gone"),))
+        ctx = _ctx(root, pol)
+        result = _bash(ctx, "echo hi")
+        assert result["status"] == "sandbox_setup_failed"
+        assert "did NOT run" in str(result["error"])
+        assert "hi" not in str(result["stdout"])       # the command never ran
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # B10.2  Write-confinement: outside worktree → fails
 # ---------------------------------------------------------------------------
