@@ -1819,6 +1819,7 @@ async def _run_agent_invocation(
             autonomous=autonomous, opening=opening,
             prior_laps=state.outcome_history.get(step_name, []),
             parent=parent_ref, depends_on=depends_refs,
+            verify_gate_unset=test_gates is not None and test_gates.fast_unset,
         )
         rendered = render_prompt(
             agent_def.prompt_template_source, ctx,

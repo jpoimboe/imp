@@ -20,6 +20,7 @@ from imp.cli.init import (
     _screen_state_from_detection,
     _settings_summary,
     run_init,
+    write_init_files,
 )
 from imp.cli.pythonpath_detect import ImportRoots
 from imp.cli.verify_detect import DetectedTestCommand
@@ -161,6 +162,42 @@ def test_talk_writes_the_conversations_values_not_the_screens(
     assert settings.default_base == "develop"
     assert settings.test_cmd_fast == "just check"
     assert settings.pythonpath == ["real"]      # ghost dropped: not on disk
+
+
+def test_a_conversation_omitting_the_test_command_leaves_the_key_unwritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An omitted field is the agent saying "not yet", not the opt-out: the key
+    stays absent so imp can raise the gate again."""
+    payload = dict(_conv_result().output)
+    del payload["test_cmd_fast"]
+    _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
+    _stub_conversation(monkeypatch, InteractiveSuccess(payload))
+    settings = _confirm_init_settings(
+        tmp_path, _detected_state(), providers=["anthropic"],
+        allow_unsandboxed=False, color=False, output_fn=lambda _m: None)
+    assert settings is not None
+    assert settings.test_cmd_fast is None
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    write_init_files(tmp_path, settings)
+    assert "test_cmd_fast" not in (tmp_path / "imp" / "config.yaml").read_text()
+
+
+def test_a_conversation_returning_an_empty_test_command_writes_the_opt_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty string is still the deliberate opt-out, written as an explicit key."""
+    _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
+    _stub_conversation(monkeypatch, _conv_result(test_cmd_fast=""))
+    settings = _confirm_init_settings(
+        tmp_path, _detected_state(), providers=["anthropic"],
+        allow_unsandboxed=False, color=False, output_fn=lambda _m: None)
+    assert settings is not None
+    assert settings.test_cmd_fast == ""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    write_init_files(tmp_path, settings)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["test_cmd_fast"] == ""
 
 
 def test_talk_without_a_credential_prints_the_relocated_message_and_returns(

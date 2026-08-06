@@ -463,7 +463,7 @@ _CONFIRM_HEADER = "Here's how imp will set up this project:"
 _CONFIRM_HINT = "↑↓ move · space change · enter accept · ? talk it through · esc cancel"
 _NO_VALUE = "(none)"
 _YOU_SET_THIS = "you set this"
-_NO_TESTS_DETECTED = "nothing detected — imp will run no tests"
+_NO_TESTS_DETECTED = "nothing detected — imp runs no tests until one is set"
 _NO_BRANCH_DETECTED = "nothing detected"
 _CUSTOM_WORKFLOW = "custom workflow"
 
@@ -898,10 +898,11 @@ def _confirm_init_settings(
                 "Re-run `imp init` when you're ready.")
             return None
         roots = list((output.get("pythonpath") or {}).get("roots", []))
+        test_cmd_fast = output.get("test_cmd_fast")
         return InitSettings(
             default_workflow=str(output["default_workflow"]),
             default_base=str(output["default_base"]),
-            test_cmd_fast=str(output["test_cmd_fast"]),
+            test_cmd_fast=None if test_cmd_fast is None else str(test_cmd_fast),
             pythonpath=validate_detected_roots(project_root, roots))
 
 

@@ -296,6 +296,51 @@ events_path=tmp_path / "events.jsonl",
     assert result == "ok"
 
 
+def test_dispatch_task_renders_this_runs_gate_state(tmp_path) -> None:
+    """Subagent site reads the run's own TestGates: never wired -> True, configured -> False."""
+    import anyio
+
+    from imp.engine.env import TestGates
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="gate_unset={{ project.verify_gate_unset }}|",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    def _rendered(gates: TestGates | None) -> str:
+        ctx = ToolContext(
+            project_root=tmp_path,
+            events_path=tmp_path / "events.jsonl",
+            subagent_defs={"sub": sub_def},
+            provider_name="anthropic", model_name="claude-sonnet-4-6",
+            parent_transcript_dir=tmp_path / "parent",
+            quest_context=QuestContext(
+                id="change-7", title="Quest 7", project_root=tmp_path,
+                workflow_dir=project_state_dir(tmp_path) / "quests" / "q" / "workflow",
+            ),
+        )
+        ctx.coordinator = InterruptCoordinator()
+        ctx.test_gates = gates
+        capture: dict = {}
+        ctx.spawn_subagent = _spawn_yielding(
+            [{"type": "agent_result", "payload": {"text": "ok"}}], capture=capture)
+        anyio.run(dispatch_task, ctx, "sub", "do the thing")
+        return capture["inv"].system_prompt
+
+    assert "gate_unset=True|" in _rendered(TestGates())
+    assert "gate_unset=False|" in _rendered(TestGates(fast="make check"))
+    assert "gate_unset=False|" in _rendered(TestGates(fast=""))
+    assert "gate_unset=False|" in _rendered(None)
+
+
 @pytest.mark.anyio
 async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext

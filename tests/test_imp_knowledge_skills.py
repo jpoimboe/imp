@@ -210,6 +210,14 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     assert "blind spots" in body
 
 
+def test_memory_doc_explains_an_unset_verify_gate() -> None:
+    flat = " ".join(_memory_doc().split())
+    assert ("`test_cmd_fast` / `test_cmd_slow` (and timeouts) — the commands the verify "
+            "gates run. Unset means that gate is a no-op and imp raises it again — when "
+            "scoping a quest, and at `imp new` once a command becomes detectable; an "
+            "empty string is a deliberate opt-out that stays silent.") in flat
+
+
 def test_memory_doc_states_the_settings_memory_root_split() -> None:
     body = _memory_doc()
     flat = " ".join(body.split())

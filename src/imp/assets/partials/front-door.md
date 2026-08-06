@@ -37,6 +37,16 @@ Orientation is lazy — on demand, not reflexive. A pure imp-mechanics question
 to say something specific to this project. Keep the cue invisible: honor
 "Speak plainly" below and surface none of the internal terms.
 
+{% if project.verify_gate_unset %}
+**No test gate is wired here.** `test_cmd_fast` is unset, so the check imp runs
+after each round of coding is a no-op and every acceptance criterion you write
+goes unenforced. If what you scope introduces or already has a test suite, fold
+wiring it into this quest: pin the exact command in the spec (e.g.
+`ruff check . && pytest -q`) for the implementer to set in `imp/config.yaml`
+alongside the code. Raise it once — if the project runs no tests by choice, let
+it go.
+{% endif %}
+
 {% include "partials/spec-design-principles.md" %}
 
 {% include "partials/brainstorm-dialogue.md" %}

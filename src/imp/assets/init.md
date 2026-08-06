@@ -9,7 +9,7 @@ output:
   git_init: {type: bool}
   default_workflow: {type: string}
   default_base: {type: string}
-  test_cmd_fast: {type: string}
+  test_cmd_fast: {type: string, required: false}
   pythonpath:
     type: object
     required: true
@@ -24,12 +24,12 @@ from your output.
 
 The setup-context message carries every current value and where it came from. A
 value marked `you set this` is the user's own choice — leave it alone unless they
-raise it. A value shown as `(none)` is empty, never a literal: hand an empty test
-command back as an empty string and empty import roots back as an empty list, but
-never hand back an empty integration branch — settle one with the user instead,
-since imp cannot merge a quest without it. Open by reading the settings back in
-one short line and asking what they want changed; do not re-derive them from
-scratch, and do not walk the list decision by decision.
+raise it. A value shown as `(none)` is empty, never a literal: hand empty import
+roots back as an empty list and handle the test command per **Fast test command**
+below, but never hand back an empty integration branch — settle one with the user
+instead, since imp cannot merge a quest without it. Open by reading the settings
+back in one short line and asking what they want changed; do not re-derive them
+from scratch, and do not walk the list decision by decision.
 
 Ground every proposal in this repository. Read the build files, the packaging,
 and the layout on disk before you propose a change, and name the evidence behind
@@ -73,9 +73,12 @@ without it.
 **Fast test command** — the lint+test command imp runs after each implement
 loop. Propose a replacement from the project's own build files (Makefile,
 package.json, pyproject.toml, justfile, Cargo.toml, …), naming the target you
-found. The user may also opt out — an empty string means imp runs no tests, so
-hand that empty string back only when they explicitly choose it; when the row reads `(none)`
-because nothing was detected, propose a command rather than leaving it empty.
+found. Three distinct outcomes: a command; an empty string, a deliberate opt-out
+that silences imp about tests for good — hand it back only when the user
+explicitly chooses it; or omit the field, leaving it unwired so imp raises it
+again once the project has a suite. When the row reads `(none)`, propose a
+command if there are build files to read; omit the field if the repo has no
+stack yet, rather than inventing one for a language not yet chosen.
 
 **Python import root** — the worktree-relative directories that must be on
 PYTHONPATH for this project's packages to import: each directory that DIRECTLY
@@ -86,5 +89,7 @@ an empty list.
 
 Read back the whole setup in one short line before you finish, then call
 complete_step with status "Success" and every field set — including the values
-the user never changed. Use "Error" only if you truly cannot proceed (e.g. the
+the user never changed. The sole exception is the fast test command, omitted
+only per **Fast test command** above; hand a detected command back even when
+nobody touched it. Use "Error" only if you truly cannot proceed (e.g. the
 repository is unreadable).

@@ -36,6 +36,8 @@ def test_setup_agent_output_schema() -> None:
     assert fields["default_workflow"].type == "string"
     assert fields["default_base"].type == "string"
     assert fields["test_cmd_fast"].type == "string"
+    assert fields["test_cmd_fast"].required is False   # omitted => leave it unset
+    assert fields["default_base"].required is True
     assert fields["pythonpath"].type == "object"
 
 
@@ -49,7 +51,7 @@ def test_setup_agent_body_states_the_facts_it_must_convey() -> None:
     assert "--workflow" in flat
     assert "name the signal you used" in flat
     assert "load the `imp-knowledge` skill" in flat
-    assert "an empty string means imp runs no tests" in flat   # test-cmd opt-out
+    assert "an empty string, a deliberate opt-out" in flat     # test-cmd opt-out
     assert "gets an empty list" in flat                        # import-root opt-out
 
 
@@ -63,21 +65,35 @@ def test_setup_agent_body_revises_the_screens_settings() -> None:
     assert "settle one decision at a time" not in flat
 
 
+# The whole sentence, not fragments: a re-punctuated rewrite must not pass.
+_SENTINEL_SENTENCE = """
+A value shown as `(none)` is empty, never a literal: hand empty import roots back
+as an empty list and handle the test command per **Fast test command** below, but
+never hand back an empty integration branch — settle one with the user instead,
+since imp cannot merge a quest without it.
+"""
+
+
 def test_setup_agent_body_decodes_the_kickoffs_empty_value_sentinel() -> None:
-    """_row_cells renders an empty branch/test-command/roots as `(none)`, and the
-    host writes test_cmd_fast and default_base back unvalidated — so the body says
-    the sentinel means empty, while still refusing the empty branch that `enter`
-    is refused for."""
+    """_row_cells renders an empty branch/test-command/roots as `(none)`, so the
+    body says the sentinel means empty — deferring the test command to its own
+    paragraph, and still refusing the empty branch that `enter` is refused for."""
     flat = _flat_body()
-    assert "`(none)` is empty, never a literal" in flat
-    assert "hand an empty test command back as an empty string" in flat
-    assert "never hand back an empty integration branch" in flat
+    assert " ".join(_SENTINEL_SENTENCE.split()) in flat
+    # the sentences around the rewritten clause survive
+    assert "The setup-context message carries every current value" in flat
+    assert "is the user's own choice" in flat
+    assert "Open by reading the settings back in" in flat
 
 
 def test_setup_agent_body_keeps_the_test_opt_out_deliberate() -> None:
-    """test_cmd_fast has no null in the schema, so an undetected command would
-    otherwise come back as "" — the opt-out that suppresses the `imp new` nudge."""
-    assert "propose a command rather than leaving it empty" in _flat_body()
+    """The empty string permanently silences imp about tests, so it is the user's
+    explicit choice — never the agent's answer to an undetected command, which
+    omits the field instead."""
+    flat = _flat_body()
+    assert "hand it back only when the user explicitly chooses it" in flat
+    assert "omit the field, leaving it unwired" in flat
+    assert "rather than inventing one for a language not yet chosen" in flat
 
 
 def test_setup_agent_body_pins_git_init_false() -> None:

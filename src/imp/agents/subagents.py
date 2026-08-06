@@ -321,6 +321,7 @@ async def dispatch_task(
             quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
             vars=ctx.quest_state.vars if ctx.quest_state is not None else {},
+            verify_gate_unset=ctx.test_gates is not None and ctx.test_gates.fast_unset,
         )
         rendered_prompt = render_prompt(
             subagent_def.prompt_template_source, prompt_ctx,
