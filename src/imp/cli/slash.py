@@ -399,7 +399,8 @@ async def ask_line_with_slash(
         if toolbar_override is not None:
             return toolbar_override
         return compose_identity_toolbar(
-            quest_id=quest.id, title=quest.title, color=color, width=width)
+            quest_id=quest.id, title=quest.title, color=color, width=width,
+            project=quest.control_root.name)
 
     def _dispatch(line: str) -> object:
         if pre_session and sandbox_sink is not None:

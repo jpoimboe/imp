@@ -49,6 +49,7 @@ def stub_new(monkeypatch, tmp_path):
         "imp.engine.quest.Quest.create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: None)))
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
     return main
@@ -72,6 +73,7 @@ async def test_new_persists_finalized_opening_intent(
     def _make_draft(*a: object, **k: object) -> SimpleNamespace:
         return SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: recorded.__setitem__("text", text))
 
     monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_make_draft))
@@ -405,6 +407,7 @@ async def test_new_run_now_forwards_depends_on(
         captured.update(k)
         return SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: None)
 
     monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_cap))
@@ -490,6 +493,7 @@ async def test_create_draft_receives_create_mode_from_leave_mode(
         captured.update(k)
         return SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            control_root=tmp_path,
             set_seed_opening=lambda text: None)
 
     monkeypatch.setattr("imp.engine.quest.Quest.create_draft", staticmethod(_cap))

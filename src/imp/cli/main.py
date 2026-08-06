@@ -1631,7 +1631,7 @@ async def _resume_inert(
     toolbar_row = compose_prelaunch_position_row(
         phase=phase_head or None, plan=plan_tail or None,
         step_label=state.step_label, model=_prelaunch_position_model(quest, state),
-        quest_id=quest.id, title=quest.title,
+        quest_id=quest.id, title=quest.title, project=quest.control_root.name,
         color=color, width=_term_width(), unsandboxed=state.unsandboxed)
     _print_resume_opening(quest, marker, notice, color=color)
     question = render_inert_question(question, width=_term_width(), color=color)

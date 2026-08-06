@@ -51,6 +51,7 @@ def _fake_quest(tmp_path: Path):
         def __init__(self) -> None:
             self.id = "abcd12"
             self.title = "Fake change"
+            self.control_root = tmp_path
             self.workflow_dir = project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"
             (self.workflow_dir / "skills").mkdir(parents=True)
             self._events = tmp_path / "events.jsonl"

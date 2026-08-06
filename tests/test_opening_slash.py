@@ -87,7 +87,8 @@ def _fake_intent_line(*, model: str, reply: str):
 async def test_opening_prompt_intercepts_help_then_returns_intent(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    quest = SimpleNamespace(id="z9y8x7", title="")
+    quest = SimpleNamespace(id="z9y8x7", title="",
+                            control_root=Path("/checkouts/imp"))
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
@@ -105,7 +106,8 @@ async def test_opening_prompt_intercepts_help_then_returns_intent(
 async def test_opening_prompt_leave_verb_shows_pre_session_redirect(
     command: str, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    quest = SimpleNamespace(id="z9y8x7", title="")
+    quest = SimpleNamespace(id="z9y8x7", title="",
+                            control_root=Path("/checkouts/imp"))
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
@@ -124,7 +126,8 @@ async def test_opening_prompt_leading_slash_path_submits_as_input(
     tmp_path: Path,
 ) -> None:
     # A pasted absolute path is not a command — it must submit verbatim.
-    quest = SimpleNamespace(id="z9y8x7", title="", workflow_dir=tmp_path)
+    quest = SimpleNamespace(id="z9y8x7", title="", workflow_dir=tmp_path,
+                            control_root=Path("/checkouts/imp"))
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
@@ -283,7 +286,8 @@ class _CaptureToolbarPrompt:
 async def test_opening_toolbar_composed_from_change_when_no_driver() -> None:
     from imp.cli.slash import ask_line_with_slash
 
-    quest = SimpleNamespace(id="lufu50", title="Instant opening identity bar")
+    quest = SimpleNamespace(id="lufu50", title="Instant opening identity bar",
+                            control_root=Path("/checkouts/imp"))
     prompt = _CaptureToolbarPrompt("add oauth")
     line = await ask_line_with_slash(prompt, None, quest, color=False, width=80)
     assert line == "add oauth"
@@ -296,12 +300,25 @@ async def test_opening_toolbar_composed_from_change_when_no_driver() -> None:
 async def test_opening_toolbar_id_only_when_title_empty() -> None:
     from imp.cli.slash import ask_line_with_slash
 
-    quest = SimpleNamespace(id="lufu50", title="")
+    quest = SimpleNamespace(id="lufu50", title="",
+                            control_root=Path("/checkouts/imp"))
     prompt = _CaptureToolbarPrompt("add oauth")
     line = await ask_line_with_slash(prompt, None, quest, color=False, width=80)
     assert line == "add oauth"
     assert prompt.toolbar is not None          # empty title still paints the id bar
     assert "lufu50" in prompt.toolbar
+
+
+@pytest.mark.anyio
+async def test_opening_toolbar_leads_with_project_when_no_driver() -> None:
+    from imp.cli.slash import ask_line_with_slash
+
+    quest = SimpleNamespace(id="lufu50", title="t",
+                            control_root=Path("/checkouts/imp"))
+    prompt = _CaptureToolbarPrompt("add oauth")
+    line = await ask_line_with_slash(prompt, None, quest, color=False, width=80)
+    assert line == "add oauth"
+    assert prompt.toolbar == "imp · lufu50 · t"
 
 
 @pytest.mark.anyio
