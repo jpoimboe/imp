@@ -2944,6 +2944,50 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
     assert any("autonomous=True" in i.initial_messages[0].content[0].text for i in sink)
 
 
+def _seed_gate_namespace_workflow(root: Path, *, config_extra: str = "") -> Quest:
+    """Single-step workflow whose body renders the gate boolean."""
+    wf = root / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "gate_unset={{ project.verify_gate_unset }}|\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n  - name: only\n    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+    )
+    _write_fake_config(root)
+    # Overwrite the project-layer config in full; _write_fake_config's state-dir layer is untouched.
+    (root / "imp" / "config.yaml").write_text(f"default-workflow: imp\n{config_extra}")
+    return _make_quest(root)
+
+
+@pytest.mark.anyio
+async def test_step_prompt_reports_an_unwired_fast_gate(tmp_path: Path) -> None:
+    quest = _seed_gate_namespace_workflow(tmp_path)
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    assert "gate_unset=True|" in sink[0].initial_messages[0].content[0].text
+
+
+@pytest.mark.anyio
+async def test_step_prompt_reports_a_configured_fast_gate_as_wired(tmp_path: Path) -> None:
+    quest = _seed_gate_namespace_workflow(
+        tmp_path, config_extra='test_cmd_fast: "make check"\n')
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    assert "gate_unset=False|" in sink[0].initial_messages[0].content[0].text
+
+
 @pytest.mark.anyio
 async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     wf = tmp_path / "imp" / "workflows" / "imp"
