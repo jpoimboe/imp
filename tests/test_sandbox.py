@@ -1144,6 +1144,28 @@ def test_overlay_wrapper_omits_sentinel_on_mount_failure():
     assert script.index("exec bwrap") < script.index(SANDBOX_ENTERED_MARKER)
 
 
+def test_overlay_wrapper_passes_the_command_through_shlex_join():
+    # AC 7b: the unshare/mount form re-quotes the whole argv with shlex.join, so
+    # the command argument must survive it byte-identically — parsing the exec'd
+    # tail back out must yield the same four elements the plain form emits.
+    import shlex
+
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    cmd = 'echo "hi there"; false'
+    argv = build_sandbox_argv(cmd, cwd="/wt", policy=pol, engine_env={})
+    script = argv[6]
+    inner = shlex.split(script.split("exec ", 1)[1])
+    assert inner[0] == "bwrap"
+    assert inner[-4:-2] == ["sh", "-c"]
+    assert inner[-2] == (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
+        'exec sh -c "$0"')
+    assert inner[-1] == cmd
+
+
 def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
     # AC 1 (unit): the overlay layer creates upper/work/merged on disk and returns
     # a HomeLayer that reports is_overlay; the cleanup callable removes all three.
