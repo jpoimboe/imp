@@ -36,6 +36,8 @@ def test_setup_agent_output_schema() -> None:
     assert fields["default_workflow"].type == "string"
     assert fields["default_base"].type == "string"
     assert fields["test_cmd_fast"].type == "string"
+    assert fields["test_cmd_fast"].required is False   # omitted => leave it unset
+    assert fields["default_base"].required is True
     assert fields["pythonpath"].type == "object"
 
 

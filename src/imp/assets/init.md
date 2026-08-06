@@ -9,7 +9,7 @@ output:
   git_init: {type: bool}
   default_workflow: {type: string}
   default_base: {type: string}
-  test_cmd_fast: {type: string}
+  test_cmd_fast: {type: string, required: false}
   pythonpath:
     type: object
     required: true
