@@ -247,6 +247,29 @@ def test_begin_end_request_watchdog_depth_counter_and_listeners() -> None:
     assert fired["n"] == 4  # note_activity fired again on the final end
 
 
+def test_begin_end_backoff_wait_depth_counter_and_listeners() -> None:
+    coord = InterruptCoordinator()
+    assert coord.backoff_wait_active is False  # default
+    fired = {"n": 0}
+    coord.add_activity_listener(lambda: fired.__setitem__("n", fired["n"] + 1))
+
+    coord.begin_backoff_wait()
+    assert coord.backoff_wait_active is True
+    assert fired["n"] == 1  # note_activity fired on begin
+
+    coord.begin_backoff_wait()  # a second concurrent backoff sleep
+    assert coord.backoff_wait_active is True
+    assert fired["n"] == 2
+
+    coord.end_backoff_wait()  # one sleep still in flight
+    assert coord.backoff_wait_active is True  # depth still > 0 -> NOT a bare bool
+    assert fired["n"] == 3
+
+    coord.end_backoff_wait()  # the last sleep ends
+    assert coord.backoff_wait_active is False  # depth back to 0
+    assert fired["n"] == 4  # note_activity fired again on the final end
+
+
 @pytest.mark.anyio
 async def test_leave_mid_run_stamps_reason_and_takes_leave_path() -> None:
     coord = InterruptCoordinator()
