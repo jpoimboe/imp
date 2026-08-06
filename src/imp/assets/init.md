@@ -73,9 +73,12 @@ without it.
 **Fast test command** — the lint+test command imp runs after each implement
 loop. Propose a replacement from the project's own build files (Makefile,
 package.json, pyproject.toml, justfile, Cargo.toml, …), naming the target you
-found. The user may also opt out — an empty string means imp runs no tests, so
-hand that empty string back only when they explicitly choose it; when the row reads `(none)`
-because nothing was detected, propose a command rather than leaving it empty.
+found. Three distinct outcomes: a command; an empty string, a deliberate opt-out
+that silences imp about tests for good — hand it back only when the user
+explicitly chooses it; or omit the field, leaving it unwired so imp raises it
+again once the project has a suite. When the row reads `(none)`, propose a
+command if there are build files to read; omit the field if the repo has no
+stack yet, rather than inventing one for a language not yet chosen.
 
 **Python import root** — the worktree-relative directories that must be on
 PYTHONPATH for this project's packages to import: each directory that DIRECTLY

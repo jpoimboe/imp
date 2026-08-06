@@ -51,7 +51,7 @@ def test_setup_agent_body_states_the_facts_it_must_convey() -> None:
     assert "--workflow" in flat
     assert "name the signal you used" in flat
     assert "load the `imp-knowledge` skill" in flat
-    assert "an empty string means imp runs no tests" in flat   # test-cmd opt-out
+    assert "an empty string, a deliberate opt-out" in flat     # test-cmd opt-out
     assert "gets an empty list" in flat                        # import-root opt-out
 
 
@@ -77,9 +77,13 @@ def test_setup_agent_body_decodes_the_kickoffs_empty_value_sentinel() -> None:
 
 
 def test_setup_agent_body_keeps_the_test_opt_out_deliberate() -> None:
-    """test_cmd_fast has no null in the schema, so an undetected command would
-    otherwise come back as "" — the opt-out that suppresses the `imp new` nudge."""
-    assert "propose a command rather than leaving it empty" in _flat_body()
+    """The empty string permanently silences imp about tests, so it is the user's
+    explicit choice — never the agent's answer to an undetected command, which
+    omits the field instead."""
+    flat = _flat_body()
+    assert "hand it back only when the user explicitly chooses it" in flat
+    assert "omit the field, leaving it unwired" in flat
+    assert "rather than inventing one for a language not yet chosen" in flat
 
 
 def test_setup_agent_body_pins_git_init_false() -> None:
