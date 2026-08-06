@@ -2221,14 +2221,16 @@ def test_setenv_carries_the_state_dir_when_the_spawn_supplies_none():
     assert argv[i + 1] == "/home/u/.imp/projects/widget"
 
 
-def test_resolve_policy_masks_the_whole_projects_dir(tmp_path):
+def test_resolve_policy_masks_only_this_projects_state_dir(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
-    assert pol.state_mask == str((imp_home() / "projects").resolve())
+    assert pol.state_mask == str(project_state_dir(control).resolve())
     assert (pol.state_mask, "mask_dir") in pol.bind_plan()
+    assert pol.projects_ro == str((imp_home() / "projects").resolve())
+    assert (pol.projects_ro, "ro") in pol.bind_plan()
 
 
 def test_a_real_quests_worktree_is_nested_in_the_mask(tmp_path):
@@ -2270,7 +2272,7 @@ def test_a_symlinked_state_path_still_exposes_the_quests_own_home(
         quest_dir.resolve().parent / "sibling" / "quest.json") is False
 
 
-def test_state_mask_hides_other_projects_and_spares_the_global_config(tmp_path):
+def test_other_projects_are_readable_but_never_writable(tmp_path):
     control, wt = _layout(tmp_path)
     quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)
@@ -2279,8 +2281,12 @@ def test_state_mask_hides_other_projects_and_spares_the_global_config(tmp_path):
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
         quest_dir=quest_dir,
     )
-    other = (imp_home() / "projects" / "other-repo" / "quests" / "zzz").resolve()
-    assert pol.allows_read(other) is False
+    other = imp_home() / "projects" / "other-repo" / "quests" / "zzz"
+    other.mkdir(parents=True)
+    assert pol.allows_read(other.resolve()) is True
+    assert pol.allows_write(other.resolve() / "events.jsonl") is False
+    assert pol.allows_read(
+        quest_dir.resolve().parent / "sib" / "quest.json") is False
     assert pol.allows_read((imp_home() / "config.yaml").resolve()) is True
     assert pol.allows_read(wt.resolve() / "src" / "x.py") is True
     assert pol.allows_read(
@@ -2301,9 +2307,41 @@ def test_state_mask_follows_the_override(tmp_path, monkeypatch):
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
     assert pol.state_mask == str(override.resolve())
+    # imp_home()/projects does not exist under this fixture: the ro bind is then
+    # skipped entirely — bwrap aborts setup on a missing bind source.
+    assert pol.projects_ro == ""
+    assert not [b for b, k in pol.bind_plan()
+                if k == "ro" and b.endswith("/projects")]
     paths = [b for b, _ in pol.bind_plan()]
     # nested (AC 28's shape): mask first, worktree re-exposed on top
     assert paths.index(pol.state_mask) < paths.index(str(wt))
+
+
+def test_the_override_is_masked_while_imp_home_projects_stays_readable(
+    tmp_path, monkeypatch,
+):
+    control = tmp_path / "ctl"
+    (control / ".git" / "hooks").mkdir(parents=True)
+    (control / ".git" / "config").write_text("")
+    other = imp_home() / "projects" / "other-repo"
+    other.mkdir(parents=True)
+    override = tmp_path / "elsewhere"
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    wt = override / "worktrees" / "abc"
+    wt.mkdir(parents=True)
+    wt = wt.resolve()          # production always hands resolve_policy a resolved worktree
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    # The ro bind never follows the override's arbitrary parent: it always names
+    # imp_home()/projects, while the tmpfs covers the override directory itself.
+    assert pol.projects_ro == str((imp_home() / "projects").resolve())
+    assert pol.state_mask == str(override.resolve())
+    assert pol.allows_read(other.resolve()) is True
+    assert pol.allows_write(
+        other.resolve() / "quests" / "zzz" / "events.jsonl") is False
+    assert pol.allows_read(override.resolve() / "quests" / "sib") is False
 
 
 def test_draft_ordering_holds_under_the_override(tmp_path, monkeypatch):

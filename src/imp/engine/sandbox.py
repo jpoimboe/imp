@@ -32,7 +32,7 @@ from typing import Any
 
 from imp.engine.env import HEADLESS_ENV, quest_var_tmp_root
 from imp.engine.shim import imp_shim_dir
-from imp.paths import project_state_dir
+from imp.paths import imp_home, project_state_dir
 from imp.remote.session.discover import session_socket_path
 
 
@@ -516,17 +516,25 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 
 
 def _state_mask(control_root: Path) -> Path:
-    """The fail-closed tmpfs root: every project's state under imp_home(), or the
-    pinned override directory itself. Created if absent — bwrap cannot mount a
-    tmpfs over a missing directory. Returned RESOLVED: bind_plan compares it
+    """The fail-closed tmpfs root: THIS project's state directory ($IMP_STATE_DIR
+    when pinned, else imp_home()/projects/<slug>). Created if absent — bwrap cannot
+    mount a tmpfs over a missing directory. Returned RESOLVED: bind_plan compares it
     against the already-resolved worktree, and a symlinked $HOME would otherwise
     make a real quest's worktree read as non-nested and mask it away."""
-    # os.environ, not resolve_policy's `environ` arg: the seam owns this variable
-    # and project_state_dir reads it the same way, so the two cannot disagree.
+    # Both this and _projects_ro read os.environ (via project_state_dir's
+    # IMP_STATE_DIR and imp_home's IMP_HOME), NOT resolve_policy's `environ` arg:
+    # the seam owns those variables, so the two cannot disagree.
     state = project_state_dir(control_root)
-    mask = state if os.environ.get("IMP_STATE_DIR") else state.parent
-    mask.mkdir(parents=True, exist_ok=True)
-    return mask.resolve()
+    state.mkdir(parents=True, exist_ok=True)
+    return state.resolve()
+
+
+def _projects_ro() -> str:
+    """imp's records of OTHER projects, read-only. Always imp_home()'s, never an
+    $IMP_STATE_DIR override's arbitrary parent; "" when absent, since a missing
+    bind source is a bwrap setup failure. Resolved, like _state_mask."""
+    projects = imp_home() / "projects"
+    return str(projects.resolve()) if projects.is_dir() else ""
 
 
 def resolve_policy(
@@ -602,9 +610,9 @@ def resolve_policy(
     # would stall on; events.jsonl is the unbounded footgun log whose sole in-
     # sandbox reader is the CLI (routed through the daemon store). Emitted last (via
     # secret_dirs/secret_files) so they re-mask on top of the quest_home rebind.
-    # The state tmpfs (state_mask) hides every sibling and the archive for
-    # free — no glob, no enumeration — so a sibling appearing or reaping mid-run
-    # changes nothing: the mask TOCTOU race is gone by construction.
+    # The state tmpfs (state_mask) hides every sibling quest of THIS project and
+    # its archive for free — no glob, no enumeration — so a sibling appearing or
+    # reaping mid-run changes nothing: the mask TOCTOU race is gone by construction.
     if quest_dir is not None:
         secret_dirs += list(_existing([str(quest_dir / "steps")]))
         secret_files += list(_existing([str(quest_dir / "events.jsonl")]))
@@ -614,6 +622,9 @@ def resolve_policy(
     readonly_overlays: tuple[str, ...] = ()
     if quest_dir is not None and (quest_dir / "workflow").is_dir():
         readonly_overlays = (str(quest_dir / "workflow"),)
+
+    state_mask = str(_state_mask(control_root))    # creates imp_home()/projects
+    projects_ro = _projects_ro()                   # ...which this then existence-gates
 
     session_sock = session_socket_path(quest_id)
     # TMPDIR: per-quest scratch dir, derived EXACTLY like Quest.tmp_dir
@@ -631,7 +642,8 @@ def resolve_policy(
         worktree=str(worktree),
         git_common_dir=str(git),
         quest_home=str(quest_dir) if quest_dir is not None else "",
-        state_mask=str(_state_mask(control_root)),
+        state_mask=state_mask,
+        projects_ro=projects_ro,
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         git_worktrees_mask=str(git / "worktrees"),

@@ -15,7 +15,7 @@ from imp.engine.sandbox import (
     resolve_policy,
 )
 from imp.engine.state import State
-from imp.paths import imp_home, project_state_dir
+from imp.paths import project_state_dir
 from tests.conftest import _git, _seed_control
 
 
@@ -175,7 +175,7 @@ async def test_bash_argv_chdirs_and_reexposes_new_worktree(tmp_path: Path) -> No
     assert argv[ci + 1] == str(wt)
     # ...and the nested worktree is re-exposed AFTER the state tmpfs mask, so files
     # under it are readable. A stale control-root policy emits no such re-bind.
-    state_mask = str((imp_home() / "projects").resolve())
+    state_mask = str(project_state_dir(tmp_path).resolve())
     ti = argv.index(state_mask)                     # the --tmpfs <mask> operand
     binds = [i for i in range(len(argv) - 2)
              if argv[i] == "--bind" and argv[i + 1] == str(wt) and argv[i + 2] == str(wt)]
