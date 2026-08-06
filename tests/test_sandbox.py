@@ -1,8 +1,10 @@
-"""Always-on sandbox tests — no bwrap needed (pure argv + policy resolution)."""
+"""Always-on sandbox tests — no bwrap needed (argv, policy resolution, and the
+wrapper's own shell semantics under a plain host shell)."""
 from __future__ import annotations
 
 import dataclasses
 import os
+import subprocess
 import tempfile
 import types as _types
 from pathlib import Path
@@ -82,6 +84,51 @@ def test_active_policy_emits_entry_sentinel_in_tail():
         'exec sh -c "$0"')
     assert argv[-2] == expected_script
     assert argv[-1] == "echo hi"
+
+
+def _run_wrapper(command: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run the builder's real wrapper argv on the host (no bwrap needed)."""
+    return subprocess.run(wrapper_argv(command), input=stdin, text=True,
+                          capture_output=True)
+
+
+def test_wrapper_emits_the_sentinel_before_a_syntax_error():
+    # AC 1/7a: the outer shell's printf is not in the command's parse unit, so an
+    # unterminated backquote exits 2 AFTER the sentinel exists.
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    p = _run_wrapper('echo "`')
+    assert p.returncode == 2
+    lines = [ln for ln in p.stderr.splitlines() if ln.strip()]
+    assert lines[0] == SANDBOX_ENTERED_MARKER
+    assert len(lines) > 1                 # the shell's own diagnosis follows it
+
+
+def test_wrapper_preserves_set_e():
+    # AC 8a: `false` under set -e still aborts before the next command.
+    p = _run_wrapper("set -e; echo hello; false; echo unreachable")
+    assert p.returncode == 1
+    assert p.stdout == "hello\n"
+
+
+def test_wrapper_passes_the_exit_code_through():
+    # AC 8b: the inner shell is exec'd, so its status is the wrapper's status.
+    assert _run_wrapper("exit 7").returncode == 7
+
+
+def test_wrapper_pipes_stdin_to_the_command():
+    # AC 8c: exec keeps fd 0 attached to the command.
+    p = _run_wrapper("cat", stdin="piped-in\n")
+    assert p.returncode == 0
+    assert p.stdout == "piped-in\n"
+
+
+def test_wrapper_survives_quotes_backslashes_and_dollars():
+    # AC 8d: behaviour unchanged for quotes, backslashes and `$` — expansion
+    # happens exactly where the command asked for it, and nowhere else.
+    cmd = r"""printf '%s\n' "dq $((1+1))" 'sq' 'lit$eral' 'back\slash'"""
+    p = _run_wrapper(cmd)
+    assert p.returncode == 0
+    assert p.stdout.splitlines() == ["dq 2", "sq", "lit$eral", r"back\slash"]
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
