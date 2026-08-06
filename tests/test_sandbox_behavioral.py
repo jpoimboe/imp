@@ -39,7 +39,7 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
 )
-from imp.paths import project_state_dir
+from imp.paths import imp_home, project_state_dir
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -1487,6 +1487,62 @@ def test_draft_agent_masks_siblings_and_archive_reads_writes_own_spec() -> None:
             f"draft: own spec write failed in-sandbox: {r_write!r}")
         # The rw quest_home bind writes through: the artifact persists on the host.
         assert (spec_dir / "new.md").read_text() == "DWROTE\n"
+    finally:
+        shutil.rmtree(control, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# B10.13  Other projects readable read-only; own siblings still hidden (AC 10)
+# ---------------------------------------------------------------------------
+
+def test_other_projects_state_is_readable_but_never_writable() -> None:
+    """Another project's state dir under IMP_HOME/projects reads inside the sandbox
+    and refuses writes, while THIS project's sibling quests stay invisible."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-xproject-"))
+    try:
+        _init_repo(control)
+        wt_path = wt.create_worktree(control, "q1", "main")
+
+        state = project_state_dir(control)
+        quest_dir = state / "quests" / "q1"
+        quest_dir.mkdir(parents=True)
+
+        other = imp_home() / "projects" / "other-repo" / "quests" / "zzz"
+        other.mkdir(parents=True)
+        (other / "events.jsonl").write_text("OTHERPROJECT\n")
+
+        sib = state / "quests" / "sib"
+        sib.mkdir(parents=True)
+        (sib / "events.jsonl").write_text("SIBSECRET\n")
+
+        pol = resolve_policy(
+            worktree=wt_path, control_root=control, quest_id="q1",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(wt_path)},
+            environ=os.environ, available=True, quest_dir=quest_dir,
+        )
+        ctx = _ctx(wt_path, pol)
+
+        r_read = _bash(ctx, f"cat {other}/events.jsonl")
+        assert "OTHERPROJECT" in r_read["stdout"], (
+            f"other project's event log not readable in-sandbox: {r_read!r}")
+
+        # No exit code asserted: a redirect failure is 1 under bash, 2 under dash.
+        r_write = _bash(ctx, f"echo NOPE > {other}/events.jsonl")
+        assert "Read-only file system" in r_write["stderr"], (
+            f"write to another project's state was not refused in-sandbox: {r_write!r}")
+        assert (other / "events.jsonl").read_text() == "OTHERPROJECT\n"
+
+        scan = _bash(ctx, f"grep -rn SIBSECRET {state} 2>/dev/null; echo SCAN_DONE")
+        assert "SCAN_DONE" in scan["stdout"]
+        assert "SIBSECRET" not in scan["stdout"], (
+            f"sibling events.jsonl leaked inside sandbox: {scan['stdout']!r}")
+
+        r_ls = _bash(ctx, f"ls {state}/quests 2>&1")
+        assert "q1" in r_ls["stdout"], (
+            f"own quest home not visible inside sandbox: {r_ls['stdout']!r}")
+        assert "sib" not in r_ls["stdout"], (
+            f"sibling quest dir visible inside sandbox: {r_ls['stdout']!r}")
     finally:
         shutil.rmtree(control, ignore_errors=True)
 
