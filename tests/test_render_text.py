@@ -2433,9 +2433,10 @@ def test_sandbox_spawn_failed_pause_renders_plain_speak_copy() -> None:
         _ev("1", "workflow_paused", reason="sandbox_spawn_failed"),
     ]))
     assert "the OS sandbox could not start the step" in out
-    assert "a transient setup failure, not a gate result" in out
+    assert "a sandbox-setup failure, not a gate result" in out
     assert "the quest is paused and resumable" in out
-    assert "resume to retry" in out
+    assert "the warnings above name the cause" in out
+    assert "transient" not in out          # five retries already disproved it
     # The raw internal token never reaches the user.
     assert "sandbox_spawn_failed" not in out
 
@@ -2992,7 +2993,7 @@ def test_other_pause_reasons_render_exactly_as_before() -> None:
         "paused — authentication kept failing; the quest is paused and resumable; "
         "re-authenticate to Claude (e.g. re-login), then resume")
     assert line("sandbox_spawn_failed") == (
-        "paused — the OS sandbox could not start the step (a transient setup "
-        "failure, not a gate result); the quest is paused and resumable — resume "
-        "to retry")
+        "paused — the OS sandbox could not start the step (a sandbox-setup "
+        "failure, not a gate result); the quest is paused and resumable — the "
+        "warnings above name the cause")
     assert line("script_blocked") == "paused (script_blocked)"

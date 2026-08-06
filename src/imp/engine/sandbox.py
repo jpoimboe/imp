@@ -175,7 +175,7 @@ def _is_engine_passthrough(key: str) -> bool:
 SANDBOX_ENTERED_MARKER = "__IMP_SANDBOX_ENTERED__"
 SANDBOX_SPAWN_FAILED_MESSAGE = (
     "the OS sandbox could not start your command; it did NOT run "
-    "(a transient sandbox-setup failure, not your command's own exit)"
+    "(a sandbox-setup failure, not your command's own exit)"
 )
 
 

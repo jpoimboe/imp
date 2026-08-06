@@ -1113,6 +1113,14 @@ def test_sandbox_failure_detail_is_the_first_nonempty_line_clipped():
     assert sandbox_failure_detail("") == ""
 
 
+def test_spawn_failed_message_no_longer_claims_transience():
+    # AC 9a: the string only ever prints AFTER five retries proved otherwise.
+    from imp.engine.sandbox import SANDBOX_SPAWN_FAILED_MESSAGE
+    assert SANDBOX_SPAWN_FAILED_MESSAGE == (
+        "the OS sandbox could not start your command; it did NOT run "
+        "(a sandbox-setup failure, not your command's own exit)")
+
+
 def test_strip_sandbox_marker_removes_single_line():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER, strip_sandbox_marker
     raw = f"{SANDBOX_ENTERED_MARKER}\nreal line\nsecond"
