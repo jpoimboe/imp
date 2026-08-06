@@ -559,3 +559,26 @@ def test_resize_pads_and_clips_live_screen() -> None:
         cx, cy = s.cursor()
         assert 0 <= cx <= 19 and 0 <= cy <= 4    # cursor in bounds after shrink
         s.cell(19, 4)                            # bottom-right corner addressable
+
+
+def test_last_output_at_is_none_until_first_output_then_stamps(tmp_path: Path) -> None:
+    # The child stays silent until the flag file appears, so "no output yet" is a
+    # real invariant here rather than a race against interpreter startup.
+    prog = (
+        "import os, sys, time\n"
+        "p = sys.argv[1]\n"
+        "while not os.path.exists(p):\n"
+        "    time.sleep(0.05)\n"
+        "os.write(1, b'PROGRESS\\r\\n')\n"
+        "time.sleep(30)\n"
+    )
+    flag = tmp_path / "go"
+    with TerminalSession([sys.executable, "-c", prog, str(flag)]) as s:
+        assert s.last_output_at is None
+        before = time.monotonic()
+        flag.touch()
+        assert s.wait_idle(idle=0.2, hard=30.0, since=before) is True
+        stamp = s.last_output_at
+        assert stamp is not None
+        assert stamp >= before
+        assert "PROGRESS" in "\n".join(s.lines())
