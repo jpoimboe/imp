@@ -36,7 +36,9 @@ send/react loop for interactive programs.
   return its path; **read it with `read_file` to see color, bold, and box-drawing**
   (`view` is text only). Let `path` default to a temp file — don't point it into the
   worktree. `light=True` previews a light theme.
-- **`wait(idle=…, hard=…)`** — let a still-working program settle before you look.
+- **`wait(idle=…, hard=…, for_change=False)`** — let a still-working program settle
+  before you look; `for_change=True` waits for NEW output instead (30s cap), to follow
+  a long command without polling.
 - **`resize(rows, cols, wait=True)`** — resize the terminal (SIGWINCH) to test reflow.
 - **`send_signal(sig=2)`** — deliver a real signal to the program's group (SIGINT=2,
   SIGTERM=15), independent of tty mode.

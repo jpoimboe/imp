@@ -4,6 +4,7 @@ import contextlib
 import os
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -38,6 +39,16 @@ _ANIMATING_CHILD = (
     "        elif c == b'q': break\n"
     "    os.write(1, b'\\rtick ' + hit + b'   ')\n"
     "    time.sleep(0.02)\n"
+)
+
+_POLL_FOR_FILE_CHILD = (
+    "import os, sys, time\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "p = sys.argv[1]\n"
+    "while not os.path.exists(p):\n"
+    "    time.sleep(0.05)\n"
+    "os.write(1, b'PROGRESS\\r\\n')\n"
+    "time.sleep(30)\n"
 )
 
 _RESIZE_CHILD = (
@@ -274,5 +285,107 @@ def test_resize_numeric_wait_settles_fixed_time() -> None:
         dt = time.monotonic() - t
         assert "WIDTH=100" in screen
         assert dt < 3.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_change_blocks_until_new_output_arrives(tmp_path: Path) -> None:
+    flag = tmp_path / "go"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _POLL_FOR_FILE_CHILD, str(flag)])
+    try:
+        quiet = d.wait(idle=0.2, hard=5.0)
+        assert quiet.startswith("[settled]")
+        assert "READY" in quiet
+        assert "PROGRESS" not in quiet
+        # Arm the touch and only THEN call the wait, so the new output cannot
+        # possibly predate the `since` stamp the call takes.
+        timer = threading.Timer(1.0, flag.touch)
+        timer.start()
+        try:
+            t0 = time.monotonic()
+            # Generous, but under the global 60 s pytest timeout so a genuine
+            # failure reports as an assertion rather than an outer-timeout hang.
+            result = d.wait(idle=0.2, hard=30.0, for_change=True)
+            elapsed = time.monotonic() - t0
+        finally:
+            timer.cancel()
+        assert result.startswith("[settled]")
+        assert "PROGRESS" in result
+        # A plain wait returns on the already-quiet screen in ~idle; this one had
+        # to block for output that did not exist when it was called.
+        assert elapsed >= 0.5
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_change_reports_no_change_after_hard_cap() -> None:
+    prog = "import time; print('READY'); time.sleep(30)"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", prog])
+    try:
+        assert d.wait(idle=0.2, hard=5.0).startswith("[settled]")
+        result = d.wait(idle=0.2, hard=0.5, for_change=True)
+        assert result.startswith("[no change after hard cap]")
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_change_reports_still_busy_when_output_never_quiets() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        # The child sleeps 0.4s after READY before it starts ticking, and change
+        # mode gets no cushion from that stale stamp — so poll until the tick
+        # stream is actually running (the drainer keeps pyte current).
+        deadline = time.monotonic() + 10.0
+        screen = d.view()
+        while "tick" not in screen and time.monotonic() < deadline:
+            time.sleep(0.05)
+            screen = d.view()
+        assert "tick" in screen
+        # idle=5.0 can never be satisfied by a 0.02s tick loop, so the cap fires
+        # however generous `hard` is: output arrived, it just never quieted. Size
+        # `hard` for a saturated runner — the child must land at least one tick
+        # inside the window or the header would (correctly) read "no change".
+        result = d.wait(idle=5.0, hard=6.0, for_change=True)
+        assert result.startswith("[still busy after hard cap]")
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_normal_mode_on_silent_child_still_reports_still_busy() -> None:
+    # last_output_at is None (no byte ever read) and the child has not exited:
+    # normal mode must keep its two headers and never say "no change".
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        result = d.wait(idle=0.2, hard=0.5)
+        assert result.startswith("[still busy after hard cap]")
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_default_hard_resolves_per_mode() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        recorded: list[tuple[float, float]] = []
+
+        def _record(**kwargs: float) -> bool:
+            recorded.append((kwargs["hard"], kwargs["since"]))
+            return True
+
+        d._require().wait_idle = _record  # type: ignore[method-assign]
+        d.wait()
+        d.wait(for_change=True)
+        assert [hard for hard, _ in recorded] == [3.0, 30.0]
+        assert recorded[0][1] == 0.0
+        assert recorded[1][1] > 0.0
     finally:
         d.stop()

@@ -45,6 +45,8 @@ _DRAIN_YIELD = 0.002  # 2 ms — gap the background drainer leaves between reads
 # `hard` (or, for send, a numeric `wait` = fixed settle seconds).
 DEFAULT_SETTLE_IDLE = 0.3
 DEFAULT_SETTLE_HARD = 3.0
+# A change wait blocks for output that hasn't happened yet, so 3 s is useless here.
+DEFAULT_CHANGE_HARD = 30.0
 
 
 def _select_slice(remaining: float) -> float:
@@ -196,6 +198,12 @@ class TerminalSession:
     def cols(self) -> int:
         """Live screen width (authoritative; tracks resize())."""
         return self._screen.columns
+
+    @property
+    def last_output_at(self) -> float | None:
+        """Monotonic timestamp of the most recent output read from the child by any
+        reader (drainer or waiter); None until the first byte."""
+        return self._last_data_t
 
     def _write_reply(self, data: str) -> None:
         """Feed a pyte-generated terminal reply (CPR / device-attribute answer)

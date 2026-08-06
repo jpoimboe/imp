@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 
 from impty import TerminalSession
-from impty.session import DEFAULT_SETTLE_HARD, DEFAULT_SETTLE_IDLE
+from impty.session import DEFAULT_CHANGE_HARD, DEFAULT_SETTLE_HARD, DEFAULT_SETTLE_IDLE
 
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
@@ -199,7 +199,8 @@ class ImptyDriver:
         return self._render(session)
 
     def wait(
-        self, idle: float = DEFAULT_SETTLE_IDLE, hard: float = DEFAULT_SETTLE_HARD,
+        self, idle: float = DEFAULT_SETTLE_IDLE, hard: float | None = None,
+        for_change: bool = False,
     ) -> str:
         """Wait for the program to settle, then return the screen.
 
@@ -207,12 +208,33 @@ class ImptyDriver:
         sending input: blocks until it goes quiet for `idle`, or `hard` elapses.
         Counts output already on screen, so if the program is ALREADY quiet this
         returns the current screen promptly rather than blocking for a next burst.
-        `idle` = quiet window that counts as settled; `hard` = max wall-clock before
-        giving up.
+
+        `for_change=True` counts only output arriving AFTER this call, so an
+        already-quiet program blocks until something new lands and then goes quiet —
+        follow a long command without polling `view`. Any output counts, so an
+        animating TUI returns on its next repaint. `hard` defaults to 3s, or 30s with
+        `for_change=True`; the header is `[settled]`, `[still busy after hard cap]`, or —
+        with `for_change=True` only — `[no change after hard cap]`.
         """
-        settled = self._require().wait_idle(idle=idle, hard=hard)
-        header = "[settled]" if settled else "[still busy after hard cap]"
-        return f"{header}\n{self._render(self._require())}"
+        session = self._require()
+        # Stamp the boundary BEFORE waiting: in change mode only output read at or
+        # after this instant qualifies, so an already-quiet screen can't settle it.
+        since = time.monotonic() if for_change else 0.0
+        if hard is None:
+            hard = DEFAULT_CHANGE_HARD if for_change else DEFAULT_SETTLE_HARD
+        settled = session.wait_idle(idle=idle, hard=hard, since=since)
+        if settled:
+            header = "[settled]"
+        elif for_change and (
+            session.last_output_at is None or session.last_output_at < since
+        ):
+            # The for_change guard is not redundant with the comparison: a child that
+            # has produced NO output has last_output_at None, and normal mode must
+            # keep reporting that as [still busy after hard cap].
+            header = "[no change after hard cap]"
+        else:
+            header = "[still busy after hard cap]"
+        return f"{header}\n{self._render(session)}"
 
     def snapshot(
         self, path: str | None = None, full: bool = False, light: bool = False,
