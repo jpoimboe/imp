@@ -904,7 +904,8 @@ async def _run_cleared_session(
         print(_run_header_line(quest.id, quest.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
         term_title = TerminalTitle(
-            sys.stdout, quest.id, quest.title, initial="idle")
+            sys.stdout, quest.id, quest.title, initial="idle",
+            project=quest.control_root.name)
         prompt = Prompt(skills_dir=quest.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color, quest=quest)
         # A `/model` typed at this reopened prompt lands here; empty when none.
@@ -1319,7 +1320,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         seed_text=seed.seed_text, interactive=interactive)
     term_title = TerminalTitle(
         sys.stdout, quest.id, quest.title,
-        initial="idle" if show_opening_prompt else "busy")
+        initial="idle" if show_opening_prompt else "busy",
+        project=quest.control_root.name)
 
     # Print the run header before the prompt so erase/reprint causes no layout jump.
     header_printed = False
@@ -1631,7 +1633,8 @@ async def _resume_inert(
     from imp.engine.state import State
 
     color = should_use_color(sys.stdout)
-    term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle")
+    term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle",
+                               project=quest.control_root.name)
     state = State.load(quest.state_dir)
     phase_head, _sep, plan_tail = (state.phase_label or "").partition(" · ")
     toolbar_row = compose_prelaunch_position_row(

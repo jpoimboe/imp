@@ -514,6 +514,7 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
     assert rc == 0
     assert isinstance(seen["title"], TerminalTitle)
     assert seen["title"]._idle is True        # created idle for the wait
+    assert seen["title"]._project == ch.control_root.name == tmp_path.name
 
 
 @pytest.mark.anyio
