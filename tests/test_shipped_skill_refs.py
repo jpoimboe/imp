@@ -100,6 +100,7 @@ def _skill_pools(prompt: Path) -> tuple[Path, ...]:
 
 
 def _resolves(prompt: Path, name: str) -> bool:
+    # No skills/user/ fallback on purpose: user skills come from the project, not the ship.
     return any((pool / f"{name}.md").is_file() for pool in _skill_pools(prompt))
 
 
