@@ -171,11 +171,13 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          checkpoint_threshold: float | int | None = None,
-                         unsandboxed: bool = False) -> str:
+                         unsandboxed: bool = False, project: str = "") -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
-    id · title · phase · plan · counter · model context-bar."""
+    project · id · title · phase · plan · counter · model context-bar."""
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
+    project_seg = (_paint(project, "gray", color=color, over_bg=over)
+                   if project else None)
     id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
     title_seg = title if title else None
     unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
@@ -193,22 +195,23 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                           checkpoint_threshold=checkpoint_threshold,
                           color=color, over_bg=over)
-    body = rt.compose_label([id_seg, title_seg, unsandboxed_seg, phase_seg, plan_seg,
-                             counter_seg, rt.join_space(model_seg, bar)])
+    body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
+                             phase_seg, plan_seg, counter_seg,
+                             rt.join_space(model_seg, bar)])
     return _band_wrap(body, bg, width)
 
 
 def compose_prelaunch_position_row(
     *, phase: str | None, plan: str | None, step_label: str | None,
     model: str | None, quest_id: str | None, title: str,
-    color: bool, width: int, unsandboxed: bool = False,
+    color: bool, width: int, unsandboxed: bool = False, project: str = "",
 ) -> str:
     """Pre-launch position row for the inert-resume prompt (no context-usage bar)."""
     activity = nv.Activity(
         phase=phase, plan=plan, counter=step_label, model=model,
         kind=None, lane_wait=False)
     return compose_position_row(
-        activity=activity, quest_id=quest_id, title=title,
+        activity=activity, quest_id=quest_id, title=title, project=project,
         prompt_tokens=None, color=color, width=width, unsandboxed=unsandboxed)
 
 

@@ -2518,6 +2518,77 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     assert "\x1b[90m" in parts[5] and "\x1b[34m" not in parts[5]   # model: gray, not blue
 
 
+def test_compose_position_row_leads_with_the_project_segment() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), project="imp",
+                               quest_id="vope45", title="t", prompt_tokens=None,
+                               color=False, width=80)
+    # project first; every existing segment keeps its current relative order.
+    assert row == ("imp · vope45 · t · implementation phase · plan 1/1 · "
+                   "task 1/3 · m")
+
+
+def test_compose_position_row_without_project_is_byte_for_byte_unchanged() -> None:
+    from imp.cli.live_driver import compose_position_row
+    omitted = compose_position_row(activity=_pos_activity(), quest_id="vope45",
+                                   title="t", prompt_tokens=None, color=False,
+                                   width=80)
+    empty = compose_position_row(activity=_pos_activity(), project="",
+                                 quest_id="vope45", title="t", prompt_tokens=None,
+                                 color=False, width=80)
+    assert omitted == empty == ("vope45 · t · implementation phase · plan 1/1 · "
+                                "task 1/3 · m")
+    assert not omitted.startswith(" · ")
+
+
+def test_compose_position_row_project_is_gray_like_the_model_segment() -> None:
+    from imp.cli.live_driver import compose_position_row
+    try:
+        pal.set_theme("ansi")
+        row = compose_position_row(activity=_pos_activity(), project="imp",
+                                   quest_id="z9gixx", title="t", prompt_tokens=None,
+                                   color=True, width=120)
+    finally:
+        pal.set_theme("ansi")
+    parts = row.split(" · ")
+    assert parts[0] == "\x1b[90mimp\x1b[0m"        # project: gray, model's tone
+    assert "\x1b[33m" in parts[1]                  # id: still wordmark gold
+    assert "\x1b[" not in parts[2]                 # title: still unpainted
+    assert "\x1b[34m" in parts[3]                  # phase: still step-blue
+    assert "\x1b[90m" in parts[-1]                 # model: the same gray
+
+
+def test_compose_position_row_bands_and_pads_with_project_under_dark_theme() -> None:
+    from imp.cli.live_driver import compose_position_row
+    try:
+        pal.set_theme("dark")
+        row = compose_position_row(activity=_pos_activity(), project="imp",
+                                   quest_id="z9gixx", title="t", prompt_tokens=None,
+                                   color=True, width=120)
+        gray = pal.sgr("gray", enabled=True)
+        user_bg = pal.user_bg_open(enabled=True)
+        clipped = pal.clip_display(row, 120 - 1)
+    finally:
+        pal.set_theme("ansi")
+    assert row.startswith("\x1b[48;2;43;47;58m")   # cool blue-gray toolbar band survives
+    assert row.endswith("\x1b[0m")
+    assert user_bg not in row                      # never the amber user-scrollback band
+    assert pal.display_width(row) == 118           # still padded to width - 2
+    assert clipped == row                          # survives the LiveStatus clip untouched
+    # fg-only reset after the segment, so the band keeps painting underneath
+    assert f"{gray}imp\x1b[22;39m" in row
+
+
+def test_compose_prelaunch_position_row_forwards_project() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    row = compose_prelaunch_position_row(
+        phase="implementation phase", plan="plan 1/1", step_label="task 1/3",
+        model="m", project="imp", quest_id="vope45", title="t",
+        color=False, width=80)
+    assert row == ("imp · vope45 · t · implementation phase · plan 1/1 · "
+                   "task 1/3 · m")
+
+
 def _sub_builder(*subs, readings=(), start_ts=None):
     """A builder with an agent step and one running sub_agent fold per (event_id, name)."""
     b = nv.NarrativeBuilder()
