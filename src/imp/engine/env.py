@@ -45,6 +45,11 @@ class TestGates:
             slow_timeout=config.test_cmd_slow_timeout,
         )
 
+    @property
+    def fast_unset(self) -> bool:
+        """No fast gate wired at all — distinct from the deliberate "" opt-out."""
+        return self.fast is None
+
 
 # Headless overrides forced into every engine-spawned subprocess so no git/tool
 # invocation blocks on an interactive child. GIT_EDITOR beats core.editor and
