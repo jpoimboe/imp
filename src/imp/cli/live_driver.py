@@ -108,33 +108,6 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
     return f"{spin} " + rt.compose_label([p for p in parts if p])
 
 
-def compose_position_bar(*, activity: nv.Activity, quest_id: str | None,
-                         title: str, prompt_tokens: int | None, color: bool,
-                         width: int, context_pct: float | None = None,
-                         checkpoint_threshold: float | int | None = None,
-                         pad_band: bool = True) -> str:
-    """Position bar: id · title · position · model context-bar (no spinner, no elapsed)."""
-    bg = pal.toolbar_bg_open(enabled=color)
-    over = bool(bg)
-    id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
-    title_seg = title if title else None
-    position_seg = (_paint(activity.position, "blue", color=color, over_bg=over)
-                    if activity.position else None)
-    model_seg = (_paint(activity.model, "magenta", color=color, over_bg=over)
-                 if activity.model else None)
-    bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
-                      checkpoint_threshold=checkpoint_threshold,
-                      color=color, over_bg=over)
-    body = rt.compose_label([id_seg, title_seg, position_seg,
-                             rt.join_space(model_seg, bar)])
-    if pad_band and bg:
-        body_dw = pal.display_width(body)
-        target = width - 2
-        if body_dw < target:
-            body = body + " " * (target - body_dw)
-    return f"{bg}{body}{_RESET}" if bg else body
-
-
 def _band_wrap(body: str, bg: str, width: int) -> str:
     """Pad `body` to width-2 and wrap it in the band bg/reset pair; no-op when bg is empty."""
     if not bg:
@@ -258,28 +231,6 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
             inner = f"{bg}{inner}{_RESET}"
         rows.append(inner)
     return rows
-
-
-def compose_activity_status(
-    builder: nv.NarrativeBuilder, *, frame: int, color: bool,
-    width: int | None = None, now_iso: str | None = None,
-) -> str | None:
-    """Single combined status line: the activity line joined with the position bar.
-    The streaming live view uses the multi-row footer instead."""
-    activity = builder.current_activity()
-    if activity is None:
-        return None
-    if now_iso is None:
-        now_iso = datetime.now(UTC).isoformat()
-    root = builder.tree.root
-    w = term_width() if width is None else width
-    bar = compose_position_bar(
-        activity=activity, quest_id=root.id, title=root.title,
-        prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
-        context_pct=builder.latest_context_pct,
-        checkpoint_threshold=builder.latest_checkpoint_threshold, pad_band=False)
-    line = compose_activity_line(activity=activity, frame=frame, color=color, now_iso=now_iso)
-    return rt.compose_label([line, bar])
 
 
 @dataclass

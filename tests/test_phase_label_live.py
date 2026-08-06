@@ -18,20 +18,26 @@ def _build(label: str) -> nv.NarrativeBuilder:
 
 
 def test_live_line_prepends_phase_label_no_auto_thinking() -> None:
-    # position_label step: position = phase_label · label; verb = "thinking".
-    # The full breadcrumb appears in the position bar (not the activity line).
+    # position_label step: the breadcrumb rides the row's phase/plan/counter
+    # segments; the verb ("thinking") belongs to the activity line, not the row.
     b = _build("finalizing")
-    line = ld.compose_activity_status(b, frame=0, color=False, width=80)
-    assert line is not None
-    assert "implementation phase · plan 1/3 · finalizing" in line
-    assert line.count("thinking") == 1  # verb on the activity line only, not the position bar
+    activity = b.current_activity()
+    assert activity is not None
+    row = ld.compose_position_row(
+        activity=activity, quest_id=b.tree.root.id, title=b.tree.root.title,
+        prompt_tokens=None, color=False, width=80)
+    assert "implementation phase · plan 1/3 · finalizing" in row
+    assert "thinking" not in row
 
 
 def test_live_line_does_not_double_pushed_thinking() -> None:
     b = _build("task 1/5")
     b.add(ev("3", "step_label_updated", agent_id="step:code/finalize",
              label="task 1/5 · thinking"))
-    line = ld.compose_activity_status(b, frame=0, color=False, width=80)
-    assert line is not None
-    assert "task 1/5 · thinking" in line
-    assert "thinking · thinking" not in line  # pushed label is not doubled
+    activity = b.current_activity()
+    assert activity is not None
+    row = ld.compose_position_row(
+        activity=activity, quest_id=b.tree.root.id, title=b.tree.root.title,
+        prompt_tokens=None, color=False, width=80)
+    assert "task 1/5 · thinking" in row
+    assert "thinking · thinking" not in row  # pushed label is not doubled
