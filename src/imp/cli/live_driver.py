@@ -267,12 +267,14 @@ class LiveDriver:
                  preceded_by_blank: bool = False,
                  startup_verb: str | None = None,
                  quest_id: str | None = None, title: str = "",
+                 project: str = "",
                  cats: frozenset[str] = frozenset()) -> None:
         self._builder = nv.NarrativeBuilder()
         if quest_id is not None or title:
             self._builder.seed_identity(quest_id, title)
         self._stream = stream
         self._color = color
+        self._project = project
         # Content categories (render_text.LOG_CATEGORIES). Empty is the lean view:
         # _resolve_cats returns a non-None set unchanged, so it never means "full".
         self._cats = cats
@@ -400,6 +402,7 @@ class LiveDriver:
         w = term_width()
         p_row = compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
+            project=self._project,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
@@ -420,7 +423,7 @@ class LiveDriver:
             frame=frame, color=self._color, now_iso=now_iso)
         root = self._builder.tree.root
         identity_row = compose_identity_toolbar(
-            quest_id=root.id, title=root.title,
+            quest_id=root.id, title=root.title, project=self._project,
             color=self._color, width=term_width(), unsandboxed=self._unsandboxed)
         if identity_row is None:
             return [a_line]
@@ -452,10 +455,11 @@ class LiveDriver:
         root = self._builder.tree.root
         if activity is None:
             return compose_identity_toolbar(
-                quest_id=root.id, title=root.title,
+                quest_id=root.id, title=root.title, project=self._project,
                 color=self._color, width=term_width(), unsandboxed=self._unsandboxed)
         return compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
+            project=self._project,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,

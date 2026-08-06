@@ -3535,3 +3535,44 @@ def test_full_cats_complete_step_keeps_blank_above_a_frameless_step() -> None:
     assert full[i - 1].strip() == ""            # blank above, as render_tree yields
     assert "a · complete" in full[i - 2]
     assert full == _render_body(events, frozenset(LOG_CATEGORIES))
+
+
+def test_driver_project_leads_the_static_toolbar_and_the_footer_row() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     project="imp")
+    drv.on_event(ev("1", "quest_created", id="z9gixx", title="t"))
+    # (a) compose_toolbar_static before any activity -> the identity band
+    assert drv.compose_toolbar_static() == "imp · z9gixx · t"
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                    model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
+                    phase_label="implementation phase · plan 1/1", position_label=True))
+    static = drv.compose_toolbar_static()
+    assert static is not None
+    assert static.startswith(
+        "imp · z9gixx · t · implementation phase · plan 1/1 · task 1/3")
+    # (b) compose_status row 3 is that same position row
+    block = drv.compose_status(0)
+    assert block is not None and len(block) == 3
+    assert block[2].startswith(
+        "imp · z9gixx · t · implementation phase · plan 1/1 · task 1/3")
+
+
+def test_driver_project_leads_the_startup_identity_row() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     startup_verb="resuming", project="imp",
+                     quest_id="lufu50", title="Instant opening identity bar")
+    rows = drv.compose_startup(0)
+    assert rows is not None and len(rows) == 3
+    assert rows[2] == "imp · lufu50 · Instant opening identity bar"
+
+
+def test_driver_without_project_renders_todays_bands_unchanged() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     startup_verb="resuming", quest_id="lufu50", title="t")
+    drv.on_event(ev("1", "quest_created", id="lufu50", title="t"))
+    assert drv.compose_toolbar_static() == "lufu50 · t"
+    rows = drv.compose_startup(0)
+    assert rows is not None and rows[2] == "lufu50 · t"
