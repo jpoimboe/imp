@@ -463,7 +463,7 @@ _CONFIRM_HEADER = "Here's how imp will set up this project:"
 _CONFIRM_HINT = "↑↓ move · space change · enter accept · ? talk it through · esc cancel"
 _NO_VALUE = "(none)"
 _YOU_SET_THIS = "you set this"
-_NO_TESTS_DETECTED = "nothing detected — imp will run no tests"
+_NO_TESTS_DETECTED = "nothing detected — imp runs no tests until one is set"
 _NO_BRANCH_DETECTED = "nothing detected"
 _CUSTOM_WORKFLOW = "custom workflow"
 

@@ -61,7 +61,7 @@ def test_state_with_nothing_detected_leaves_tests_unset_not_opted_out() -> None:
         roots=ImportRoots([], "not a Python project"))
     # None omits the test_cmd_fast block; "" is the user's explicit opt-out.
     assert state.test_cmd_fast is None
-    assert state.tests_provenance == "nothing detected — imp will run no tests"
+    assert state.tests_provenance == "nothing detected — imp runs no tests until one is set"
     assert state.branch == ""
     assert state.branch_provenance == "nothing detected"
     assert state.pythonpath == []
@@ -157,7 +157,7 @@ def test_confirm_rows_show_none_when_no_command_or_roots_were_detected() -> None
         tests=None, roots=ImportRoots([], "not a Python project"))
     body = _body(state, ScreenRow.WORKFLOW)
     assert "(none)" in body[2] and body[2].endswith(
-        "nothing detected — imp will run no tests")
+        "nothing detected — imp runs no tests until one is set")
     assert "(none)" in body[3] and body[3].endswith("not a Python project")
     assert "new repo" in body[1]
 
