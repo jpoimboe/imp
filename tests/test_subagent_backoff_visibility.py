@@ -4,10 +4,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
-from imp.engine.state import State
+from imp.agents.subagents import dispatch_task
+from imp.agents.tools.context import ToolContext
+from imp.cli.signals import InterruptCoordinator
+from imp.engine.agent_run import build_agent_invocation, drive_invocation
+from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 
@@ -622,3 +627,127 @@ async def test_subagent_backoff_ended_clears_top_level_countdown(
     assert b.current_activity().countdown_total == retry["payload"]["backoff_seconds"]
     b.add(ended)
     assert b.current_activity().countdown_total is None
+
+
+@pytest.mark.anyio
+async def test_long_subagent_limit_wait_does_not_stall_parent(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A subagent's hinted rate-limit backoff is silent for far longer than the
+    inactivity window, and the parent must ride it out. Window 1.0s vs. a real
+    2.0s sleep: under CPU oversubscription the pre-backoff phase (spawn + inner
+    drive, which pulses no activity until its final agent_retry append) was
+    measured at up to 0.29s, so 1.0s leaves ample headroom while still being
+    crossed by the 2.0s sleep — the falsification the test depends on."""
+    import imp.agents.subagents as sa
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 1.0)
+
+    async def _slow_sleep(_delay: float, _coordinator: Any) -> None:
+        await anyio.sleep(2.0)          # ignore the 9908s delay; 2x the window
+    monkeypatch.setattr(sa, "_interruptible_sleep", _slow_sleep)
+
+    coord = InterruptCoordinator()
+    # The executor composes this pulse onto the run's on_event; without it no
+    # event-log append feeds the watchdog.
+    elog = JsonlEventLog(tmp_path / "events.jsonl",
+                         on_event=lambda _e: coord.note_activity())
+    quest_ctx = QuestContext(id="q-1", title="T", project_root=tmp_path,
+                             workflow_dir=tmp_path / "wf")
+
+    ctx = ToolContext(project_root=tmp_path,
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"coder": _agent("coder", tools={"complete_step"})}
+    ctx.provider_name = "fake"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/impl/lead"
+    ctx.coordinator = coord
+    # ctx.event_log (not events_path) is what puts agent_retry into events.jsonl.
+    ctx.event_log = elog
+    ctx.agent_id = "step:impl/lead"
+    ctx.quest_context = quest_ctx
+
+    class _FakeRunner:
+        def __init__(self, events: list[dict[str, Any]]) -> None:
+            self._events = events
+
+        async def run(self, _inv):
+            for e in self._events:
+                yield e
+
+        async def interrupt(self) -> None:
+            ...
+
+    spawns = {"n": 0}
+
+    async def _spawn(_inv):
+        i = spawns["n"]
+        spawns["n"] += 1
+        if i == 0:
+            # retry_after_seconds is what agent_run turns into hinted=True.
+            return _FakeRunner([{"type": "error", "payload": {
+                "category": "rate_limit", "kind": "rate_limit",
+                "message": "429 rate limited",
+                "detail": {"retry_after_seconds": 9908}}}])
+        return _FakeRunner([{"type": "agent_result",
+                             "payload": {"text": "the subagent conclusion"}}])
+
+    ctx.spawn_subagent = _spawn
+
+    returned: dict[str, Any] = {}
+    interrupted = {"parent": False}
+
+    class _ParentRunner:
+        async def run(self, _inv):
+            returned["text"] = await dispatch_task(ctx, "coder", "do it", tool_call_event_id="tc-1")
+            yield {"type": "agent_result",
+                   "payload": {"status": "Success", "outcome": "done"}}
+
+        async def interrupt(self) -> None:
+            interrupted["parent"] = True
+
+    parent_inv = build_agent_invocation(
+        agent_def=_agent("lead", tools={"complete_step", "sub_agent"},
+                         subagents=("coder",)),
+        provider_name="fake", model_name="m",
+        rendered_system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        quest_context=quest_ctx,
+        user_chat_input_fn=None,
+        transcript_dir=ctx.parent_transcript_dir,
+        events_path=tmp_path / "events.jsonl",
+        subagent_defs=ctx.subagent_defs, tiers=(), max_tool_calls=None,
+        agent_id="step:impl/lead", event_log=elog, quest_state=None,
+        first_event_parent_id=None, resolved_tiers=None, coordinator=coord,
+        subagent_depth=0)
+
+    with anyio.fail_after(30):   # deadlock backstop only
+        result = await drive_invocation(
+            parent_inv, _ParentRunner(), coordinator=coord, log=elog,
+            emit_events=True)
+
+    events = [json.loads(line)
+              for line in (tmp_path / "events.jsonl").read_text().splitlines()
+              if line]
+    stalled = [e for e in events
+               if e["type"] == "error"
+               and e["payload"].get("category") == "stalled"]
+    retries = [e for e in events if e["type"] == "agent_retry"]
+
+    # (b) no false stall, and (c) the parent drive returned cleanly
+    assert stalled == []
+    assert interrupted["parent"] is False
+    assert result.errored is False
+    assert result.error is None
+    assert result.output == {"status": "Success", "outcome": "done"}
+
+    # (a) the hinted rate-limit retry landed under the subagent's id
+    assert len(retries) == 1
+    assert retries[0]["agent_id"].startswith("sub:")
+    assert retries[0]["payload"]["category"] == "rate_limit"
+    assert retries[0]["payload"]["hinted"] is True
+    assert retries[0]["payload"]["backoff_seconds"] == 9908
+
+    # (d) dispatch_task's return value reached the parent, after one respawn
+    assert returned["text"] == "the subagent conclusion"
+    assert spawns["n"] == 2

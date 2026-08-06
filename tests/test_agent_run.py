@@ -1179,12 +1179,82 @@ async def test_pull_watchdog_restores_finite_window_after_tool_end(monkeypatch) 
 
 
 @pytest.mark.anyio
+async def test_pull_watchdog_frozen_during_backoff_does_not_stall(monkeypatch) -> None:
+    """While backoff_wait_active is True (a subagent parked in a rate-limit
+    sleep), a pull that blocks far past the window is NOT torn down: the deadline
+    is frozen to inf. A single begin call with NO further activity, then a
+    4x-window sleep, distinguishes the inf-freeze from a one-shot now+window bump
+    (which would expire at ~1 window and stall)."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_backoff_wait()    # freeze (single call, no further activity)
+        await anyio.sleep(0.8)        # 4x window, silent
+        coord.end_backoff_wait()
+        yield {"type": "agent_result", "payload": {"status": "Success"}}
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(30):  # deadlock backstop only
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is False
+    assert interrupted["called"] is False
+    assert events == [{"type": "agent_result", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_restores_finite_window_after_backoff_end(monkeypatch) -> None:
+    """end_backoff_wait (the sleep elapsed or was cut short by `r`) restores an
+    ENFORCEABLE finite deadline: after the frozen interval, a subsequent
+    over-window silence stalls again. Guards against the backoff freeze leaving
+    the deadline at inf — a hung agent must still be reaped once the wait ends."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_backoff_wait()
+        await anyio.sleep(0.4)        # frozen: survives 2x window
+        coord.end_backoff_wait()      # sleep over -> finite window restored
+        await anyio.sleep(3600)       # now silent past the window -> must stall
+        yield {"type": "agent_result", "payload": {}}  # unreached
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(30):  # deadlock backstop only
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+    assert events == []
+
+
+@pytest.mark.anyio
 async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) -> None:
     """The _bump activity listener must NOT mutate the scope deadline once the
     scope's cancellation is already in flight (cancel_called True). When
     cancel_called is False it still resets to a finite window, or freezes to inf
-    under solicit_active/tool_active. Captures the listener via a fake
-    coordinator and drives it with fake scopes — no real anyio timing."""
+    under solicit_active/tool_active/backoff_wait_active. Captures the listener
+    via a fake coordinator and drives it with fake scopes — no real anyio timing."""
     import math
 
     import imp.engine.agent_run as ar
@@ -1196,6 +1266,7 @@ async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) ->
             self.listener = None
             self.solicit_active = False
             self.tool_active = False
+            self.backoff_wait_active = False
 
         def add_activity_listener(self, fn):
             self.listener = fn
@@ -1245,6 +1316,13 @@ async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) ->
         bump(s4)
         results["tool"] = s4.deadline
 
+        # cancel_called False, backoff_wait_active -> frozen to inf.
+        s5 = _FakeScope(cancel_called=False)
+        coord.tool_active = False
+        coord.backoff_wait_active = True
+        bump(s5)
+        results["backoff"] = s5.deadline
+
         yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     stall = {"hit": False}
@@ -1259,6 +1337,7 @@ async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) ->
     assert results["finite"] == pytest.approx(anyio.current_time() + 100.0, abs=1.0)
     assert results["solicit"] == math.inf
     assert results["tool"] == math.inf
+    assert results["backoff"] == math.inf
     assert stall["hit"] is False                    # happy path is not a stall
     assert events == [{"type": "agent_result", "payload": {"status": "Success"}}]
 

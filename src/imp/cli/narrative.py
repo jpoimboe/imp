@@ -908,6 +908,17 @@ class NarrativeBuilder:
             fold = self._sub_by_agent_id[agent_id]
             fold.nested.add(event)
             fold.event_count += 1
+            if etype == "agent_retry":
+                # the lean render hides fold contents, so mirror a long wait onto the parent
+                cat = payload.get("category", "?")
+                secs = payload.get("backoff_seconds", "?")
+                hinted = bool(payload.get("hinted")) or (
+                    isinstance(secs, (int, float)) and secs >= 120)
+                if hinted and isinstance(secs, (int, float)):
+                    self._append(ErrorNode(
+                        message=(f"[{cat}] {fold.subagent_name} waiting for limit reset"
+                                 f" — retry {payload.get('attempt', '?')} in {_fmt_hm(secs)}"),
+                        category=cat, is_warning=True))
             return
 
         # 1b. resume-close fallback. When the PARENT that opened a fold emits its

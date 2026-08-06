@@ -407,13 +407,18 @@ class InterruptCoordinator:
 
     def begin_backoff_wait(self) -> None:
         """Arm the retry-now gesture around a backoff sleep. Depth-counted so
-        concurrent subagent backoff sleeps each hold the arm."""
+        concurrent subagent backoff sleeps each hold the arm. Fires
+        note_activity() so every registered per-pull bump re-evaluates NOW and
+        freezes its in-flight deadline to inf."""
         self._backoff_wait_depth += 1
+        self.note_activity()
 
     def end_backoff_wait(self) -> None:
         """Disarm one backoff sleep. Deliberately does NOT clear _retry_now — the
-        loop consumes it via take_retry_now()."""
+        loop consumes it via take_retry_now(). Fires note_activity() so the
+        per-pull bump re-evaluates and installs a fresh finite window."""
         self._backoff_wait_depth -= 1
+        self.note_activity()
 
     def request_retry_now(self) -> None:
         """Record a live retry-now request. Ignored (never stored) unless a

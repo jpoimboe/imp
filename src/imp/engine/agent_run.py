@@ -232,18 +232,19 @@ async def _pull_with_inactivity_watchdog(
                             return
                         # Read the module globals at call time so monkeypatched
                         # windows (tests) and the live values agree. Three-way
-                        # precedence: solicit_active/tool_active are
-                        # periodic-activity-free blocked awaits -> freeze to inf
-                        # (they win, and end_solicit/end_tool's note_activity then
-                        # re-fires this with the flag cleared, restoring a finite
-                        # window). Else a provider request in flight -> a FINITE
-                        # ceiling, longer than the general window so a healthy wait
-                        # never false-kills, but still finite so a dead-but-open
-                        # connection is eventually torn down. Else the plain general
-                        # window. request_active read via getattr so a partial/None
-                        # coordinator degrades to today's behavior.
+                        # precedence: solicit_active/tool_active/backoff_wait_active
+                        # are periodic-activity-free blocked awaits -> freeze to inf
+                        # (they win, and end_solicit/end_tool/end_backoff_wait's
+                        # note_activity then re-fires this with the flag cleared,
+                        # restoring a finite window). Else a provider request in
+                        # flight -> a FINITE ceiling, longer than the general window
+                        # so a healthy wait never false-kills, but still finite so a
+                        # dead-but-open connection is eventually torn down. Else the
+                        # plain general window. Each read via getattr so a
+                        # partial/None coordinator degrades to today's behavior.
                         if (getattr(coordinator, "solicit_active", False)
-                                or getattr(coordinator, "tool_active", False)):
+                                or getattr(coordinator, "tool_active", False)
+                                or getattr(coordinator, "backoff_wait_active", False)):
                             _scope.deadline = math.inf
                         elif getattr(coordinator, "request_active", False):
                             _scope.deadline = (
