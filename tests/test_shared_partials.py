@@ -69,6 +69,22 @@ def test_refresh_workflow_partial_shadows_shared_on_collision(tmp_path: Path) ->
     assert (snap / "action-care.md").is_file()   # non-colliding shared still overlays
 
 
+def test_browser_coverage_rule_reaches_both_scoping_agents() -> None:
+    wf_dir = bundled_workflow_dir("default")
+    agents = load_workflow(wf_dir).agents
+    ctx = build_context(quest_title="t", event_log=InMemoryEventLog(),
+                        quest_id="abc", quest_home=".imp/quests/abc")
+    # threshold reaches the rule through partials/front-door.md; spec-finalizer directly.
+    for name in ("threshold", "spec-finalizer"):
+        out = render_prompt(agents[name].prompt_template_source, ctx, workflow_dir=wf_dir)
+        flat = " ".join(out.split())
+        assert "{% include" not in out, name
+        assert "**Browser surfaces need browser coverage.**" in flat, name
+        assert ("an acceptance criterion must be satisfiable only by driving a real browser"
+                in flat), name
+        assert "wiring it to `test_cmd_slow` is in scope" in flat, name
+
+
 def test_go_live_worktree_partial_shared_and_included_by_threshold() -> None:
     partial = bundled_partials_dir() / "go-live-worktree.md"
     assert partial.is_file()

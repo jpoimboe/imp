@@ -171,7 +171,8 @@ to ignore it," not "the human chose ignore."
 
 When showing the result would help the human decide — e.g. a change to how a terminal
 program looks — load `imp-driving-terminal-uis` (`load_skill(name="imp-driving-terminal-uis")`)
-and render the final state with your impty tools to describe what you see.
+and render the final state with your impty tools to describe what you see. For a browser
+surface, load `imp-driving-web-uis` (`load_skill(name="imp-driving-web-uis")`) instead.
 
 Then work through the **needs-decision** items. This walk has a **closed set** of inputs:
 the `— needs-decision: <why>` lines in `{{ quest.home }}/deferred.md` (including

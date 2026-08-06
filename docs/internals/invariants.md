@@ -12,7 +12,10 @@ Read this when editing imp's engine/renderer or workflow prompts.
   `integration-review` reading `quest.json`, `finalize`'s `PYTHONPATH`, and the
   impty grants on the review/gate holders (`batch-code-reviewer`, `threshold`,
   `finalize`, `spiker`) whose prompts name the impty tools and the
-  `imp-driving-terminal-uis` skill.
+  `imp-driving-terminal-uis` / `imp-driving-web-uis` skills. Those prompts name
+  the skills and nothing more: browser binaries and their flags live inside
+  `imp-driving-web-uis` itself, never in a workflow prompt, so the invariant
+  holds unweakened.
 - The engine (`executor`) and the renderer (`narrative.py` / `render_text.py` /
   `live_driver.py`) expose only **generic primitives**: step kinds, and phases
   *derived* from each step's declared `phase` string. No hardcoded step, phase,

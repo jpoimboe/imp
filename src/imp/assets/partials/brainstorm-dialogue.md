@@ -87,11 +87,14 @@ Batch the defaults, but show the actual values.
 bar, the scrollback log, a screen — present the complete after-state inventory of that
 surface: every element and its final text, color, and visibility, not only the elements
 the user named. Use concrete mockups where the change is visual; terminal mockups use
-real ANSI SGR colors and never depict a color the codes cannot produce.
+real ANSI SGR colors and never depict a color the codes cannot produce. A web mockup is
+never ASCII — it is real HTML you render and hand the human a path to.
 
 When a design turns on how a terminal surface actually looks, load `imp-driving-terminal-uis`
 (`load_skill(name="imp-driving-terminal-uis")`) and snapshot the *current* appearance with
-your impty tools, so your mockups are grounded in the real rendering, not a guess.
+your impty tools, so your mockups are grounded in the real rendering, not a guess. When it
+turns on a browser surface, load `imp-driving-web-uis`
+(`load_skill(name="imp-driving-web-uis")`) and render it the same way.
 
 **Revise, don't restate.** When the user corrects a design you have already presented,
 present the delta — what changes and what it changes to. Re-present a full surface

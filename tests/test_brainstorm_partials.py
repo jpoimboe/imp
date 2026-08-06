@@ -238,6 +238,19 @@ def test_brainstorm_dialogue_carries_revise_dont_restate() -> None:
     assert flat.index(para) < flat.index("**Enumerated values are spec content.**")
 
 
+def test_spec_design_principles_ends_with_the_browser_coverage_rule() -> None:
+    flat = " ".join((PARTIALS / "spec-design-principles.md").read_text().split())
+    assert flat.endswith(
+        "**Browser surfaces need browser coverage.** When the quest changes what a browser "
+        "renders or how a page behaves, an acceptance criterion must be satisfiable only by "
+        "driving a real browser — response-string assertions never execute the script or lay "
+        "out the page. If the project has no browser automation, establishing it and wiring "
+        "it to `test_cmd_slow` is in scope; since config is read from the main checkout, that "
+        "setting first gates the *next* quest, so this quest's AC proves the suite green by "
+        "running it."
+    )
+
+
 def test_delegate_exploration_carries_explorer_tier_discipline() -> None:
     text = (PARTIALS / "delegate-exploration.md").read_text()
     # The new tier-discipline paragraph, verbatim in its load-bearing parts.
