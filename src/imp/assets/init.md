@@ -89,5 +89,7 @@ an empty list.
 
 Read back the whole setup in one short line before you finish, then call
 complete_step with status "Success" and every field set — including the values
-the user never changed. Use "Error" only if you truly cannot proceed (e.g. the
+the user never changed. The sole exception is the fast test command, omitted
+only per **Fast test command** above; hand a detected command back even when
+nobody touched it. Use "Error" only if you truly cannot proceed (e.g. the
 repository is unreadable).
