@@ -10,21 +10,21 @@ permission.
 Base branches move only by imp's engine or by the user — never by you. Don't attempt
 one: give the user the exact command to run in their own shell.
 
-## Debugging live processes
+## When the sandbox blocks you
 
-imp's bash sandbox runs every shell command in a fresh user namespace, so an
-agent cannot attach a debugger (`gdb`, `py-spy`, `strace`) to any live process —
-not the user's app, not a background process from an earlier shell call, not
-another imp instance's daemon. Two escape hatches exist; recommend the fitting
-one when a task must introspect a live process.
+imp's bash sandbox runs every shell command in a fresh user namespace, so an agent
+cannot attach a debugger (`gdb`, `py-spy`, `strace`) to any live process, and cannot
+read the masked paths (secrets, and this project's imp state outside this quest's own
+home). Two escape hatches exist; recommend the fitting one.
 
-**`/sandbox off` — run this session unsandboxed.** When a task needs a debugger
-on a live host process, tell the user to type `/sandbox off` at the prompt: it
-drops the sandbox for this interactive session and the subagents it dispatches,
-letting `gdb`/`py-spy`/`strace` attach to same-uid processes. It is human-only —
-only the user can type it, and no agent or tool path reaches it. Remind the user
-to type `/sandbox on` afterward to re-confine the shell and file tools to this
-quest's worktree.
+**`/sandbox off` — run this session unsandboxed.** Whenever the sandbox itself is what
+blocks the task — a debugger on a live host process, or a read of a masked path — tell
+the user to type `/sandbox off` at the prompt: it drops the sandbox for this
+interactive session and the subagents it dispatches, so shell **and** file tools run as
+the user, with secrets and every masked path readable and writes unconfined. It is
+human-only — only the user can type it, and no agent or tool path reaches it. It
+re-enables itself when the step ends; remind the user they can type `/sandbox on` to
+re-confine sooner.
 
 **`kill -USR1 <pid>` — dump a wedged imp process's own stacks.** Introspecting
 imp's *own* long-lived processes — especially a session daemon whose event loop

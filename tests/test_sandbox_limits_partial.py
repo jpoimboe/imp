@@ -1,5 +1,5 @@
-"""The sandbox-limits partial states imp's write bounds ahead of the debugging
-hatches, and the old partial name survives nowhere under src/ or tests/."""
+"""The sandbox-limits partial states imp's write bounds ahead of the escape hatches,
+and the old partial name survives nowhere under src/ or tests/."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _flat(text: str) -> str:
     return " ".join(text.split())
 
 
-def test_partial_states_the_write_bounds_ahead_of_the_debugging_section() -> None:
+def test_partial_states_the_write_bounds_ahead_of_the_hatches() -> None:
     flat = _flat(PARTIAL.read_text())
     assert flat.startswith("## What you cannot write")
     assert (
@@ -33,8 +33,8 @@ def test_partial_states_the_write_bounds_ahead_of_the_debugging_section() -> Non
     assert "give the user the exact command to run in their own shell" in flat
     # git's misleading error is called out, so an agent reads a denial correctly.
     assert "blames a write error rather than a permission" in flat
-    # The pre-existing debugging content survives the rename, below the new section.
-    assert flat.index("## What you cannot write") < flat.index("## Debugging live processes")
+    # The escape-hatch section appears below the write-bounds section.
+    assert flat.index("## What you cannot write") < flat.index("## When the sandbox blocks you")
 
 
 def test_no_source_or_test_file_references_the_old_partial_name() -> None:
@@ -73,3 +73,6 @@ def test_interactive_git_writing_agents_render_the_write_bounds(
     # A sentence only the write-bounds section carries: the include resolved here.
     assert "Base branches move only by imp's engine" in out
     assert "{% include" not in out
+    # Fragments only the reframed hatch section carries — the include pulls it in too.
+    assert "or a read of a masked path" in out
+    assert "re-enables itself when the step ends" in out
