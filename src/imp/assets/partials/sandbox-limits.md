@@ -38,7 +38,12 @@ sections.
 ## Another quest's state is invisible on disk
 
 > **Another quest's state is invisible on disk — ask the CLI.** The sandbox masks
-> imp's state directory except this quest's own home, so a sibling quest home beside
-> `{{ quest.home }}` does not exist at all and its `lock`/`state.json` reads as absent.
-> Never infer another quest's liveness from the filesystem — `imp show <id>` /
-> `imp list` report it correctly (resolved by the unsandboxed daemon).
+> **this project's** state directory except this quest's own home, so a sibling quest
+> home beside `{{ quest.home }}` does not exist at all and its `lock`/`state.json`
+> reads as absent. Never infer another quest's liveness from the filesystem —
+> `imp show <id>` / `imp list` report it correctly (resolved by the unsandboxed
+> daemon). Other projects' state directories are readable read-only — grep their
+> `quests/<id>/events.jsonl` or artifacts directly when diagnosing across projects
+> (never `cat` one; it is unbounded). The `imp` CLI reaches another project only with
+> both pins cleared: `cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>`
+> — the socket pins reads to this quest's daemon, the state dir to this project.

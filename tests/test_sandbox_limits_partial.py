@@ -76,3 +76,21 @@ def test_interactive_git_writing_agents_render_the_write_bounds(
     # Fragments only the reframed hatch section carries — the include pulls it in too.
     assert "or a read of a masked path" in out
     assert "re-enables itself when the step ends" in out
+
+
+def test_partial_names_the_cross_project_read_path_and_both_env_pins() -> None:
+    section = PARTIAL.read_text().split("## Another quest's state is invisible on disk\n")[1]
+    lines = [ln for ln in section.splitlines() if ln.strip()]
+    # The section is a markdown blockquote in the file and stays one.
+    assert lines and all(ln.startswith("> ") for ln in lines)
+    # Strip `> ` first: `_flat` alone leaves each `>` as a token, breaking wrap-spanning matches.
+    flat = _flat(" ".join(ln.removeprefix("> ") for ln in lines))
+    # The tmpfs covers this project's state dir only, so the unqualified claim is wrong now.
+    assert "masks **this project's** state directory except this quest's own home" in flat
+    assert "so a sibling quest home beside `{{ quest.home }}` does not exist at all" in flat
+    assert "resolved by the unsandboxed daemon" in flat
+    assert "Other projects' state directories are readable read-only" in flat
+    assert "grep their `quests/<id>/events.jsonl` or artifacts directly" in flat
+    assert "never `cat` one; it is unbounded" in flat
+    # Both pins, together: the socket alone re-routes the read to this quest's daemon.
+    assert "`cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>`" in flat
