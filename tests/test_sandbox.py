@@ -1031,6 +1031,14 @@ def test_argv_binds_match_bind_plan_with_home_layer():
     assert _parse_argv_binds(argv) == pol.bind_plan()
 
 
+_UNSHARE_PREFIX = ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c"]
+
+
+def _unshare_script(argv: list[str]) -> str:
+    assert argv[:len(_UNSHARE_PREFIX)] == _UNSHARE_PREFIX
+    return argv[len(_UNSHARE_PREFIX)]
+
+
 def test_overlay_home_wraps_bwrap_with_unshare_mount():
     # AC 1/2: a COW overlay is composed by wrapping bwrap with an unprivileged
     # overlay mount; the merged view is bound onto the REAL home path.
@@ -1038,9 +1046,7 @@ def test_overlay_home_wraps_bwrap_with_unshare_mount():
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
     argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
-    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
-                        "sh", "-c"]
-    script = argv[6]
+    script = _unshare_script(argv)
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
             "/up/merged") in script
@@ -1059,7 +1065,7 @@ def test_overlay_home_shell_quotes_paths_with_spaces():
                    upper="/a b/upper", work="/a b/work")
     pol = _policy(home="/ho me", home_layer=hl)
     argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
-    script = argv[6]
+    script = _unshare_script(argv)
     assert "lowerdir='/ho me'" in script          # lower (real home) quoted
     assert "upperdir='/a b/upper'" in script       # upper quoted
     assert "workdir='/a b/work'" in script         # work quoted
@@ -1155,9 +1161,7 @@ def test_overlay_wrapper_omits_sentinel_on_mount_failure():
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
     argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
-    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
-                        "sh", "-c"]
-    script = argv[6]
+    script = _unshare_script(argv)
     assert " && exec" not in script
     assert "|| exit" in script
     assert "exec bwrap" in script
@@ -1178,7 +1182,7 @@ def test_overlay_wrapper_passes_the_command_through_shlex_join():
     pol = _policy(home="/home/u", home_layer=hl)
     cmd = 'echo "hi there"; false'
     argv = build_sandbox_argv(cmd, cwd="/wt", policy=pol, engine_env={})
-    script = argv[6]
+    script = _unshare_script(argv)
     inner = shlex.split(script.split("exec ", 1)[1])
     assert inner[0] == "bwrap"
     assert inner[-4:-2] == ["sh", "-c"]
