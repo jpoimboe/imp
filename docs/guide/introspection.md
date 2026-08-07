@@ -110,9 +110,10 @@ answers the question, and never dump the raw log as your default.
 
 To understand a *different* quest — live or archived — reach for the `imp` CLI
 readers rather than cat-ing its files (a raw `read_file` silently fails for an
-archived quest, whose artifacts live in a git ref, not on disk). The bash sandbox
-mounts the whole host read-only, so any quest — current, other, or archived — is
-readable:
+archived quest, whose artifacts live in a git ref, not on disk). This project's
+sibling quest homes are masked inside the bash sandbox and are not readable
+there at all; these readers resolve them anyway, because the unsandboxed daemon
+answers them — not the sandbox floor:
 
 - **`imp show <id>`** — the primary "what is this quest / what did it accomplish"
   read: the quest's detail card (id, title, status, timing, dependencies, the
@@ -123,6 +124,13 @@ readable:
   types with `--type agent_result` (and away from the `tool_call` / `tool_result`
   / `agent_message` churn), or scope to an author with `--agent`. Resolves live and
   archived quests alike.
+
+Other projects' state directories *are* readable read-only inside the sandbox,
+so their `quests/<id>/events.jsonl` and artifacts can be read directly. The
+`imp` CLI reaches another project only with both env pins cleared —
+`cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>` — since
+the socket pins reads to this quest's daemon and `IMP_STATE_DIR` to this
+project.
 
 ## Linking a related backlog quest
 
