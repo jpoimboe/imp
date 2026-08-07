@@ -1,6 +1,6 @@
-"""The live view and `imp log` agree on provider-error prose: a tagged node is
+"""The live view and `imp log` agree on error and warning prose: a tagged node is
 withheld until its turn resolves, so the live cursor can only paint prose that the
-error will not delete."""
+error will not delete, and a warning's detail line renders identically on both."""
 from __future__ import annotations
 
 import io
@@ -65,6 +65,20 @@ def test_live_never_paints_prose_the_error_drops_and_matches_the_log() -> None:
     assert not any(PROSE in ln for ln in body)
     assert any("[auth] retry 2 (2.0s)" in ln for ln in body)
     assert body == _log(events)
+
+
+def test_sandbox_warning_detail_renders_beneath_it_on_both_surfaces() -> None:
+    # AC 6: the captured sandbox stderr shows in the LEAN view of the live TUI
+    # and of `imp log` (no --full), one level deeper than its warning line.
+    detail = "bwrap: Can't bind mount /x: No such file or directory"
+    message = "sandbox could not start the command; retrying (2/5)"
+    events = _step(_ev("w1", "runner_warning", agent_id=AID, message=message,
+                       reason="sandbox-spawn-failed", detail=detail))
+    for body in (_live(events), _log(events)):
+        i = next(n for n, ln in enumerate(body) if ln.endswith(f"warning: {message}"))
+        assert body[i + 1].strip() == detail
+        assert (len(body[i + 1]) - len(body[i + 1].lstrip())
+                == len(body[i]) - len(body[i].lstrip()) + 2)
 
 
 def test_live_holds_a_tagged_node_over_a_pass_through_row_then_paints_on_release() -> None:

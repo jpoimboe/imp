@@ -32,7 +32,7 @@ from typing import Any
 
 from imp.engine.env import HEADLESS_ENV, quest_var_tmp_root
 from imp.engine.shim import imp_shim_dir
-from imp.paths import project_state_dir
+from imp.paths import imp_home, project_state_dir
 from imp.remote.session.discover import session_socket_path
 
 
@@ -68,6 +68,7 @@ class SandboxPolicy:
     note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
     quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
     state_mask: str = ""                     # fail-closed tmpfs mask ("" → none)
+    projects_ro: str = ""                    # ro bind of imp_home()/projects ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     disposable_tree: bool = False            # agent runs in a disposable git worktree
@@ -91,8 +92,14 @@ class SandboxPolicy:
         when quest_var_tmp_dir is set; empty → no /var/tmp bind, host /var/tmp stays
         on the read-only floor), and the secret masks unconditionally LAST.
 
-        The state tmpfs (state_mask) is a fail-closed mask over every project's
-        state directory; its position is worktree-relative and LOAD-BEARING. Normal
+        The state tmpfs (state_mask) is a fail-closed mask over THIS project's
+        state directory, preceded in the same state_block by the read-only
+        projects_ro bind exposing imp's records of OTHER projects (without it the
+        home_layer rw bind over $HOME would leave them writable). Both sit INSIDE
+        worktree_block: a draft worktree is the control root, which may be an
+        ANCESTOR of imp_home()/projects, so an ro bind emitted before it would lose
+        last-wins to the worktree's rw bind and expose other projects WRITABLE. The
+        block's position is worktree-relative and LOAD-BEARING. Normal
         quest: the worktree is nested at <state>/worktrees/<id> (a DESCENDANT of the
         mask), so the tmpfs precedes the worktree rw bind and last-wins re-exposes the
         nested worktree on top. Draft/degenerate agent: worktree == control_root (which
@@ -111,13 +118,16 @@ class SandboxPolicy:
         .git/worktrees, then the self re-expose (emitted only for a materialized
         worktree) re-binds the current quest's own .git/worktrees/<self> on top so
         its HEAD/index/logs stay writable."""
-        state_tmpfs = [(self.state_mask, "mask_dir")] if self.state_mask else []
+        state_block = [
+            *([(self.projects_ro, "ro")] if self.projects_ro else []),
+            *([(self.state_mask, "mask_dir")] if self.state_mask else []),
+        ]
         nested = bool(self.state_mask) and Path(self.worktree).is_relative_to(
             Path(self.state_mask))
         worktree_block = (
-            [*state_tmpfs, (self.worktree, "rw")] if nested
-            # draft: worktree is OUTSIDE the mask, so bind it BEFORE the tmpfs
-            else [(self.worktree, "rw"), *state_tmpfs])
+            [*state_block, (self.worktree, "rw")] if nested
+            # draft: worktree is OUTSIDE the mask, so bind it BEFORE state_block
+            else [(self.worktree, "rw"), *state_block])
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
             ("/tmp", "rw"),
@@ -175,7 +185,7 @@ def _is_engine_passthrough(key: str) -> bool:
 SANDBOX_ENTERED_MARKER = "__IMP_SANDBOX_ENTERED__"
 SANDBOX_SPAWN_FAILED_MESSAGE = (
     "the OS sandbox could not start your command; it did NOT run "
-    "(a transient sandbox-setup failure, not your command's own exit)"
+    "(a sandbox-setup failure, not your command's own exit)"
 )
 
 
@@ -187,6 +197,17 @@ def sandbox_spawn_failed(stderr: str, *, sandbox_active: bool) -> bool:
 def strip_sandbox_marker(stderr: str) -> str:
     """Remove the single entry-sentinel line from captured stderr (display-only, idempotent)."""
     return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
+
+
+_SANDBOX_DETAIL_MAX_CHARS = 200    # one-line diagnosis budget in a runner_warning payload
+
+
+def sandbox_failure_detail(stderr: str) -> str:
+    """The sandbox's own first non-empty stderr line, clipped — "" when it said nothing."""
+    for line in stderr.splitlines():
+        if line.strip():
+            return line.strip()[:_SANDBOX_DETAIL_MAX_CHARS]
+    return ""
 
 
 SANDBOX_SPAWN_MAX_ATTEMPTS = 5   # 1 initial + 4 retries
@@ -276,13 +297,14 @@ def build_sandbox_argv(
     # 15. optional network isolation
     if not policy.network:
         argv += ["--unshare-net"]
-    # 16. the command, prefixed with the entry sentinel: the inner sh's first act
-    # emits the marker to stderr, so marker PRESENCE proves the inner command ran
-    # and ABSENCE proves the sandbox failed to enter it. printf runs in this outer
-    # sh, so it cannot trip a gate script's own set -e.
-    wrapped = (
-        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; {command}")
-    argv += ["sh", "-c", wrapped]
+    # 16. the command, prefixed with the entry sentinel. The outer sh parses only
+    # this fixed script, then execs an inner sh that parses the command — passed as
+    # an ARGUMENT ($0), never interpolated, so a syntax error there cannot suppress
+    # the marker. exec adds no process, so pgid == pid holds for the group kill.
+    argv += ["sh", "-c",
+             f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
+             'exec sh -c "$0"',
+             command]
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
         # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner
@@ -494,17 +516,25 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 
 
 def _state_mask(control_root: Path) -> Path:
-    """The fail-closed tmpfs root: every project's state under imp_home(), or the
-    pinned override directory itself. Created if absent — bwrap cannot mount a
-    tmpfs over a missing directory. Returned RESOLVED: bind_plan compares it
+    """The fail-closed tmpfs root: THIS project's state directory ($IMP_STATE_DIR
+    when pinned, else imp_home()/projects/<slug>). Created if absent — bwrap cannot
+    mount a tmpfs over a missing directory. Returned RESOLVED: bind_plan compares it
     against the already-resolved worktree, and a symlinked $HOME would otherwise
     make a real quest's worktree read as non-nested and mask it away."""
-    # os.environ, not resolve_policy's `environ` arg: the seam owns this variable
-    # and project_state_dir reads it the same way, so the two cannot disagree.
+    # Both this and _projects_ro read os.environ (via project_state_dir's
+    # IMP_STATE_DIR and imp_home's IMP_HOME), NOT resolve_policy's `environ` arg:
+    # the seam owns those variables, so the two cannot disagree.
     state = project_state_dir(control_root)
-    mask = state if os.environ.get("IMP_STATE_DIR") else state.parent
-    mask.mkdir(parents=True, exist_ok=True)
-    return mask.resolve()
+    state.mkdir(parents=True, exist_ok=True)
+    return state.resolve()
+
+
+def _projects_ro() -> str:
+    """imp's records of OTHER projects, read-only. Always imp_home()'s, never an
+    $IMP_STATE_DIR override's arbitrary parent; "" when absent, since a missing
+    bind source is a bwrap setup failure. Resolved, like _state_mask."""
+    projects = imp_home() / "projects"
+    return str(projects.resolve()) if projects.is_dir() else ""
 
 
 def resolve_policy(
@@ -580,9 +610,9 @@ def resolve_policy(
     # would stall on; events.jsonl is the unbounded footgun log whose sole in-
     # sandbox reader is the CLI (routed through the daemon store). Emitted last (via
     # secret_dirs/secret_files) so they re-mask on top of the quest_home rebind.
-    # The state tmpfs (state_mask) hides every sibling and the archive for
-    # free — no glob, no enumeration — so a sibling appearing or reaping mid-run
-    # changes nothing: the mask TOCTOU race is gone by construction.
+    # The state tmpfs (state_mask) hides every sibling quest of THIS project and
+    # its archive for free — no glob, no enumeration — so a sibling appearing or
+    # reaping mid-run changes nothing: the mask TOCTOU race is gone by construction.
     if quest_dir is not None:
         secret_dirs += list(_existing([str(quest_dir / "steps")]))
         secret_files += list(_existing([str(quest_dir / "events.jsonl")]))
@@ -592,6 +622,9 @@ def resolve_policy(
     readonly_overlays: tuple[str, ...] = ()
     if quest_dir is not None and (quest_dir / "workflow").is_dir():
         readonly_overlays = (str(quest_dir / "workflow"),)
+
+    state_mask = str(_state_mask(control_root))    # creates imp_home()/projects
+    projects_ro = _projects_ro()                   # ...which this then existence-gates
 
     session_sock = session_socket_path(quest_id)
     # TMPDIR: per-quest scratch dir, derived EXACTLY like Quest.tmp_dir
@@ -609,7 +642,8 @@ def resolve_policy(
         worktree=str(worktree),
         git_common_dir=str(git),
         quest_home=str(quest_dir) if quest_dir is not None else "",
-        state_mask=str(_state_mask(control_root)),
+        state_mask=state_mask,
+        projects_ro=projects_ro,
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         git_worktrees_mask=str(git / "worktrees"),

@@ -98,8 +98,8 @@ def run_script(
     The command string is an explicit shell expression read live from the
     quest's own worktree (principal-based trust: the quest author and workflow
     author are the same V0 principal). When `policy` is active it is wrapped with
-    bwrap (build_sandbox_argv appends `sh -c <command>`); otherwise the bare
-    `sh -c` runs.
+    bwrap (build_sandbox_argv appends `sh -c <sentinel script> <command>`, the
+    command its own argv element); otherwise the bare `sh -c` runs.
 
     Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a
     timeout must kill the process GROUP, not just the bwrap pid — else the inner

@@ -73,6 +73,7 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
     sandbox_config_from_raw,
+    sandbox_failure_detail,
     sandbox_spawn_backoff_delay,
     sandbox_spawn_failed,
     strip_sandbox_marker,
@@ -1190,7 +1191,8 @@ async def _route_script(
             _emit(log, "runner_warning", {
                 "message": ("sandbox could not start the step; retrying "
                             f"({attempt + 1}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
-                "step": step.name, "reason": "sandbox-spawn-failed"})
+                "step": step.name, "reason": "sandbox-spawn-failed",
+                "detail": sandbox_failure_detail(out["stderr"])})
             await anyio.sleep(sandbox_spawn_backoff_delay(attempt))
         # Loop exited cleanly — strip the sentinel line (if any) before any rule,
         # feedback string, or script_blocked event sees it. No-op on a bare gate.

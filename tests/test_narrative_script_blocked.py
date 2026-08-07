@@ -107,12 +107,23 @@ def test_lean_non_script_error_hides_detail() -> None:
     assert "stack trace details" not in out
 
 
-def test_lean_warning_with_detail_hides_detail() -> None:
+def test_lean_warning_with_detail_shows_detail() -> None:
+    # A warning's detail is diagnostic output the user cannot act without, so it
+    # follows the script-error carve-out: shown lean, indented one level under it.
     nb = NarrativeBuilder()
     nb._append(nv.ErrorNode(message="heads up", is_warning=True, detail="hidden body"))
-    out = "\n".join(render_tree(nb.tree, full=False, color=False, width=80))
-    assert "warning: heads up" in out
-    assert "hidden body" not in out
+    # render_tree opens with a blank spacer line; drop blanks and compare content.
+    out = [ln.rstrip() for ln in render_tree(nb.tree, full=False, color=False,
+                                             width=80) if ln.strip()]
+    assert out == ["warning: heads up", "  hidden body"]
+
+
+def test_lean_warning_without_detail_renders_one_line() -> None:
+    nb = NarrativeBuilder()
+    nb._append(nv.ErrorNode(message="heads up", is_warning=True))
+    out = [ln.rstrip() for ln in render_tree(nb.tree, full=False, color=False,
+                                             width=80) if ln.strip()]
+    assert out == ["warning: heads up"]
 
 
 def _long_stderr(n: int) -> str:

@@ -150,12 +150,18 @@ def test_threshold_concierge_routes_to_corpus_not_removed_spokes() -> None:
 def test_sandbox_limits_partial_documents_both_hatches() -> None:
     text = (PARTIALS / "sandbox-limits.md").read_text()
     # Self-contained section header.
-    assert "## Debugging live processes" in text
+    assert "## When the sandbox blocks you" in text
+    # The hatch is not debugger-only: a masked-path read is a first-class reason to recommend it.
+    assert "or a read of a masked path" in text
+    # The lifecycle: the sandbox re-arms itself at step end; `/sandbox on` only hurries that.
+    assert "re-enables itself when the step ends" in text
+    # The old copy told the user to re-enable it by hand; that clause is gone, not re-wrapped.
+    assert "afterward to re-confine" not in text
     # (a) the /sandbox off escape hatch and its human-only property.
     assert "/sandbox off" in text
     assert "human-only" in text
     assert "only the user can type it" in text
-    # (b) the reminder to re-enable the sandbox afterward.
+    # (b) `/sandbox on` survives as the way to re-confine sooner than step end.
     assert "/sandbox on" in text
     # names a concrete live-process debugger so "when to recommend" is grounded.
     assert "gdb" in text

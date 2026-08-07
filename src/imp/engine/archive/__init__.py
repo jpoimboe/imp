@@ -266,7 +266,13 @@ def ensure_current(control_root: Path) -> None:
     Double-checked locking: lock-free version reads fast-path the steady state;
     the one-time work runs under the writer lock with a re-check so two processes
     never do it twice.
+
+    A read-only archive root is left exactly as it is: a cross-project read cannot
+    migrate, and the stale index still answers every query.
     """
+    root = archive_root(control_root)
+    if root.exists() and not os.access(root, os.W_OK):
+        return
     if (_read_data_version(control_root) >= _DATA_VERSION
             and _read_user_version(control_root) >= index._SCHEMA_VERSION):
         return

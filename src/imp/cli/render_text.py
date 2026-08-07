@@ -39,8 +39,9 @@ _PAUSE_REASON_COPY: dict[str, str] = {
         "authentication kept failing; the quest is paused and resumable; "
         "re-authenticate to Claude (e.g. re-login), then resume",
     "sandbox_spawn_failed":
-        "the OS sandbox could not start the step (a transient setup failure, "
-        "not a gate result); the quest is paused and resumable — resume to retry",
+        "the OS sandbox could not start the step (a sandbox-setup failure, not "
+        "a gate result); the quest is paused and resumable — the warnings above "
+        "name the cause",
     "max_loops":
         "a step kept sending work back and hit its loop limit; the quest is "
         "paused and resumable — resume to continue with a fresh loop budget",
@@ -823,6 +824,10 @@ def _render(node: Any, *, depth: int, full: bool = False,
         if node.is_warning:
             yield _line(f"warning: {_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["warning"], gutters=gutters)
+            # Diagnostic the user cannot act without — shown lean, not behind --full.
+            if node.detail:
+                yield from _wrap(_caret_escape(node.detail), width, depth + 1, color,
+                                 *pal.NODE_COLORS["warning"], gutters=gutters)
         else:
             tag = f"[{node.category}] " if node.category else ""
             yield _line(f"error: {tag}{_caret_escape(node.message)}", depth, color,

@@ -1,8 +1,10 @@
-"""Always-on sandbox tests — no bwrap needed (pure argv + policy resolution)."""
+"""Always-on sandbox tests — no bwrap needed (argv, policy resolution, and the
+wrapper's own shell semantics under a plain host shell)."""
 from __future__ import annotations
 
 import dataclasses
 import os
+import subprocess
 import tempfile
 import types as _types
 from pathlib import Path
@@ -44,6 +46,14 @@ def _policy(**over) -> SandboxPolicy:
     return SandboxPolicy(**base)
 
 
+def wrapper_argv(command: str) -> list[str]:
+    """The trailing `sh -c <sentinel script> <command>` argv build_sandbox_argv
+    emits, with the bwrap prefix sliced off — lets a test run the REAL wrapper
+    text on the host, so wrapper semantics are pinned without needing bwrap."""
+    return build_sandbox_argv(
+        command, cwd="/", policy=_policy(), engine_env={})[-4:]
+
+
 def test_inactive_policy_returns_bare_argv():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
@@ -56,8 +66,9 @@ def test_active_policy_wraps_with_bwrap():
     argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[0] == "bwrap"
-    assert argv[-3:-1] == ["sh", "-c"]
-    assert argv[-1].endswith("; echo hi")          # sentinel-prefixed inner command
+    assert argv[-4:-2] == ["sh", "-c"]
+    assert argv[-1] == "echo hi"                  # command is its own argv element
+    assert "echo hi" not in argv[-2]              # never interpolated into the script
     assert argv[1:4] == ["--ro-bind", "/", "/"]   # ro-floor first
 
 
@@ -67,10 +78,57 @@ def test_active_policy_emits_entry_sentinel_in_tail():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
-    assert argv[-3:-1] == ["sh", "-c"]
-    expected_tail = (
-        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; echo hi")
-    assert argv[-1] == expected_tail
+    assert argv[-4:-2] == ["sh", "-c"]
+    expected_script = (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
+        'exec sh -c "$0"')
+    assert argv[-2] == expected_script
+    assert argv[-1] == "echo hi"
+
+
+def _run_wrapper(command: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run the builder's real wrapper argv on the host (no bwrap needed)."""
+    return subprocess.run(wrapper_argv(command), input=stdin, text=True,
+                          capture_output=True)
+
+
+def test_wrapper_emits_the_sentinel_before_a_syntax_error():
+    # AC 1/7a: the outer shell's printf is not in the command's parse unit, so an
+    # unterminated backquote exits 2 AFTER the sentinel exists.
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    p = _run_wrapper('echo "`')
+    assert p.returncode == 2
+    lines = [ln for ln in p.stderr.splitlines() if ln.strip()]
+    assert lines[0] == SANDBOX_ENTERED_MARKER
+    assert len(lines) > 1                 # the shell's own diagnosis follows it
+
+
+def test_wrapper_preserves_set_e():
+    # AC 8a: `false` under set -e still aborts before the next command.
+    p = _run_wrapper("set -e; echo hello; false; echo unreachable")
+    assert p.returncode == 1
+    assert p.stdout == "hello\n"
+
+
+def test_wrapper_passes_the_exit_code_through():
+    # AC 8b: the inner shell is exec'd, so its status is the wrapper's status.
+    assert _run_wrapper("exit 7").returncode == 7
+
+
+def test_wrapper_pipes_stdin_to_the_command():
+    # AC 8c: exec keeps fd 0 attached to the command.
+    p = _run_wrapper("cat", stdin="piped-in\n")
+    assert p.returncode == 0
+    assert p.stdout == "piped-in\n"
+
+
+def test_wrapper_survives_quotes_backslashes_and_dollars():
+    # AC 8d: behaviour unchanged for quotes, backslashes and `$` — expansion
+    # happens exactly where the command asked for it, and nowhere else.
+    cmd = r"""printf '%s\n' "dq $((1+1))" 'sq' 'lit$eral' 'back\slash'"""
+    p = _run_wrapper(cmd)
+    assert p.returncode == 0
+    assert p.stdout.splitlines() == ["dq 2", "sq", "lit$eral", r"back\slash"]
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
@@ -973,6 +1031,14 @@ def test_argv_binds_match_bind_plan_with_home_layer():
     assert _parse_argv_binds(argv) == pol.bind_plan()
 
 
+_UNSHARE_PREFIX = ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c"]
+
+
+def _unshare_script(argv: list[str]) -> str:
+    assert argv[:len(_UNSHARE_PREFIX)] == _UNSHARE_PREFIX
+    return argv[len(_UNSHARE_PREFIX)]
+
+
 def test_overlay_home_wraps_bwrap_with_unshare_mount():
     # AC 1/2: a COW overlay is composed by wrapping bwrap with an unprivileged
     # overlay mount; the merged view is bound onto the REAL home path.
@@ -980,9 +1046,7 @@ def test_overlay_home_wraps_bwrap_with_unshare_mount():
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
     argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
-    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
-                        "sh", "-c"]
-    script = argv[6]
+    script = _unshare_script(argv)
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
             "/up/merged") in script
@@ -1001,7 +1065,7 @@ def test_overlay_home_shell_quotes_paths_with_spaces():
                    upper="/a b/upper", work="/a b/work")
     pol = _policy(home="/ho me", home_layer=hl)
     argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
-    script = argv[6]
+    script = _unshare_script(argv)
     assert "lowerdir='/ho me'" in script          # lower (real home) quoted
     assert "upperdir='/a b/upper'" in script       # upper quoted
     assert "workdir='/a b/work'" in script         # work quoted
@@ -1041,6 +1105,28 @@ def test_sandbox_spawn_failed_marker_absence_guarded():
     assert sandbox_spawn_failed(present, sandbox_active=False) is False
 
 
+def test_sandbox_failure_detail_is_the_first_nonempty_line_clipped():
+    # The payload field is one line of diagnosis: bwrap's own reason, never the
+    # blank padding around it, never more than 200 chars of a pathological line.
+    from imp.engine.sandbox import sandbox_failure_detail
+    stderr = ("\n   \n"
+              "bwrap: Can't bind mount /x: No such file or directory\n"
+              "and a second line that must not be carried\n")
+    assert sandbox_failure_detail(stderr) == (
+        "bwrap: Can't bind mount /x: No such file or directory")
+    assert sandbox_failure_detail("x" * 250 + "\nnext") == "x" * 200
+    assert sandbox_failure_detail("  \n\t\n") == ""      # nothing said → nothing shown
+    assert sandbox_failure_detail("") == ""
+
+
+def test_spawn_failed_message_no_longer_claims_transience():
+    # AC 9a: the string only ever prints AFTER five retries proved otherwise.
+    from imp.engine.sandbox import SANDBOX_SPAWN_FAILED_MESSAGE
+    assert SANDBOX_SPAWN_FAILED_MESSAGE == (
+        "the OS sandbox could not start your command; it did NOT run "
+        "(a sandbox-setup failure, not your command's own exit)")
+
+
 def test_strip_sandbox_marker_removes_single_line():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER, strip_sandbox_marker
     raw = f"{SANDBOX_ENTERED_MARKER}\nreal line\nsecond"
@@ -1075,15 +1161,35 @@ def test_overlay_wrapper_omits_sentinel_on_mount_failure():
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
     argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
-    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
-                        "sh", "-c"]
-    script = argv[6]
+    script = _unshare_script(argv)
     assert " && exec" not in script
     assert "|| exit" in script
     assert "exec bwrap" in script
     assert ">&2" in script
     assert SANDBOX_ENTERED_MARKER in script
     assert script.index("exec bwrap") < script.index(SANDBOX_ENTERED_MARKER)
+
+
+def test_overlay_wrapper_passes_the_command_through_shlex_join():
+    # AC 7b: the unshare/mount form re-quotes the whole argv with shlex.join, so
+    # the command argument must survive it byte-identically — parsing the exec'd
+    # tail back out must yield the same four elements the plain form emits.
+    import shlex
+
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    cmd = 'echo "hi there"; false'
+    argv = build_sandbox_argv(cmd, cwd="/wt", policy=pol, engine_env={})
+    script = _unshare_script(argv)
+    inner = shlex.split(script.split("exec ", 1)[1])
+    assert inner[0] == "bwrap"
+    assert inner[-4:-2] == ["sh", "-c"]
+    assert inner[-2] == (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
+        'exec sh -c "$0"')
+    assert inner[-1] == cmd
 
 
 def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
@@ -2024,6 +2130,82 @@ def test_argv_binds_match_bind_plan_with_worktrees_mask():
     assert ("/ctl/.git/worktrees/abc", "rw") in p.bind_plan()
 
 
+def _cross_project_policy(**over) -> SandboxPolicy:
+    # Nested quest with $HOME writable: without the ro bind, other projects would be WRITABLE.
+    base = dict(
+        projects_ro="/home/u/.imp/projects",
+        state_mask="/home/u/.imp/projects/mine",
+        worktree="/home/u/.imp/projects/mine/worktrees/abc",
+        quest_home="/home/u/.imp/projects/mine/quests/abc",
+        home="/home/u",
+        home_layer=HomeLayer(home="/home/u"),
+    )
+    base.update(over)
+    return _policy(**base)
+
+
+def test_other_projects_readable_never_writable_siblings_still_hidden():
+    p = _cross_project_policy()
+    other = Path("/home/u/.imp/projects/other/quests/zzz/events.jsonl")
+    assert p.allows_read(other) is True
+    assert p.allows_write(other) is False
+    assert p.allows_read(
+        Path("/home/u/.imp/projects/mine/quests/sib/events.jsonl")) is False
+    assert p.allows_write(
+        Path("/home/u/.imp/projects/mine/quests/abc/artifacts/x.md")) is True
+    assert p.allows_write(
+        Path("/home/u/.imp/projects/mine/worktrees/abc/src/x.py")) is True
+    assert p.allows_write(Path("/home/u/notes.txt")) is True
+
+
+def test_projects_ro_bind_sits_between_the_home_bind_and_the_state_tmpfs():
+    p = _cross_project_policy()
+    plan = p.bind_plan()
+    paths = [b for b, _ in plan]
+    assert ("/home/u/.imp/projects", "ro") in plan
+    assert paths.index("/home/u") < paths.index("/home/u/.imp/projects")
+    assert paths.index("/home/u/.imp/projects") < paths.index(
+        "/home/u/.imp/projects/mine")
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index(
+        "/home/u/.imp/projects/mine/worktrees/abc")
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index("/home/u/.ssh")
+
+
+def test_draft_worktree_binds_before_the_projects_ro_bind():
+    # Draft shape: worktree == control root, OUTSIDE the mask, so its rw bind is
+    # emitted first and the whole state_block follows it.
+    p = _cross_project_policy(worktree="/ctl")
+    paths = [b for b, _ in p.bind_plan()]
+    assert paths.index("/ctl") < paths.index("/home/u/.imp/projects")
+    assert paths.index("/home/u/.imp/projects") < paths.index(
+        "/home/u/.imp/projects/mine")
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index(
+        "/home/u/.imp/projects/mine/quests/abc")
+
+
+def test_a_draft_control_root_above_imp_home_cannot_write_other_projects():
+    # A dotfiles-style control root at $HOME is an ANCESTOR of imp_home()/projects,
+    # so its rw bind covers every other project. The state_block must follow it, or
+    # last-wins hands the agent write access to every project's state.
+    p = _cross_project_policy(worktree="/home/u")
+    other = Path("/home/u/.imp/projects/other/quests/zzz/events.jsonl")
+    assert p.allows_write(other) is False
+    assert p.allows_read(other) is True
+    assert p.allows_read(
+        Path("/home/u/.imp/projects/mine/quests/sib/events.jsonl")) is False
+    assert p.allows_write(Path("/home/u/src/x.py")) is True
+
+
+def test_argv_binds_match_bind_plan_with_projects_ro():
+    # Drift guard for all three worktree shapes: an ro bind that does not round-trip
+    # through the argv parser means allows_read/allows_write lie about bwrap.
+    for worktree in ("/home/u/.imp/projects/mine/worktrees/abc", "/ctl", "/home/u"):
+        p = _cross_project_policy(worktree=worktree)
+        argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+        assert _parse_argv_binds(argv) == p.bind_plan()
+        assert ("/home/u/.imp/projects", "ro") in p.bind_plan()
+
+
 def test_retired_overlay_symbols_are_gone():
     import imp.engine.sandbox as sb
     for name in ("OVERLAY_SETUP_FAILED_MARKER", "OVERLAY_SETUP_FAILED_CODE",
@@ -2043,14 +2225,16 @@ def test_setenv_carries_the_state_dir_when_the_spawn_supplies_none():
     assert argv[i + 1] == "/home/u/.imp/projects/widget"
 
 
-def test_resolve_policy_masks_the_whole_projects_dir(tmp_path):
+def test_resolve_policy_masks_only_this_projects_state_dir(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
-    assert pol.state_mask == str((imp_home() / "projects").resolve())
+    assert pol.state_mask == str(project_state_dir(control).resolve())
     assert (pol.state_mask, "mask_dir") in pol.bind_plan()
+    assert pol.projects_ro == str((imp_home() / "projects").resolve())
+    assert (pol.projects_ro, "ro") in pol.bind_plan()
 
 
 def test_a_real_quests_worktree_is_nested_in_the_mask(tmp_path):
@@ -2092,7 +2276,7 @@ def test_a_symlinked_state_path_still_exposes_the_quests_own_home(
         quest_dir.resolve().parent / "sibling" / "quest.json") is False
 
 
-def test_state_mask_hides_other_projects_and_spares_the_global_config(tmp_path):
+def test_other_projects_are_readable_but_never_writable(tmp_path):
     control, wt = _layout(tmp_path)
     quest_dir = project_state_dir(control) / "quests" / "abc"
     quest_dir.mkdir(parents=True)
@@ -2101,8 +2285,12 @@ def test_state_mask_hides_other_projects_and_spares_the_global_config(tmp_path):
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
         quest_dir=quest_dir,
     )
-    other = (imp_home() / "projects" / "other-repo" / "quests" / "zzz").resolve()
-    assert pol.allows_read(other) is False
+    other = imp_home() / "projects" / "other-repo" / "quests" / "zzz"
+    other.mkdir(parents=True)
+    assert pol.allows_read(other.resolve()) is True
+    assert pol.allows_write(other.resolve() / "events.jsonl") is False
+    assert pol.allows_read(
+        quest_dir.resolve().parent / "sib" / "quest.json") is False
     assert pol.allows_read((imp_home() / "config.yaml").resolve()) is True
     assert pol.allows_read(wt.resolve() / "src" / "x.py") is True
     assert pol.allows_read(
@@ -2123,9 +2311,41 @@ def test_state_mask_follows_the_override(tmp_path, monkeypatch):
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
     assert pol.state_mask == str(override.resolve())
+    # imp_home()/projects does not exist under this fixture: the ro bind is then
+    # skipped entirely — bwrap aborts setup on a missing bind source.
+    assert pol.projects_ro == ""
+    assert not [b for b, k in pol.bind_plan()
+                if k == "ro" and b.endswith("/projects")]
     paths = [b for b, _ in pol.bind_plan()]
     # nested (AC 28's shape): mask first, worktree re-exposed on top
     assert paths.index(pol.state_mask) < paths.index(str(wt))
+
+
+def test_the_override_is_masked_while_imp_home_projects_stays_readable(
+    tmp_path, monkeypatch,
+):
+    control = tmp_path / "ctl"
+    (control / ".git" / "hooks").mkdir(parents=True)
+    (control / ".git" / "config").write_text("")
+    other = imp_home() / "projects" / "other-repo"
+    other.mkdir(parents=True)
+    override = tmp_path / "elsewhere"
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    wt = override / "worktrees" / "abc"
+    wt.mkdir(parents=True)
+    wt = wt.resolve()          # production always hands resolve_policy a resolved worktree
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    # The ro bind never follows the override's arbitrary parent: it always names
+    # imp_home()/projects, while the tmpfs covers the override directory itself.
+    assert pol.projects_ro == str((imp_home() / "projects").resolve())
+    assert pol.state_mask == str(override.resolve())
+    assert pol.allows_read(other.resolve()) is True
+    assert pol.allows_write(
+        other.resolve() / "quests" / "zzz" / "events.jsonl") is False
+    assert pol.allows_read(override.resolve() / "quests" / "sib") is False
 
 
 def test_draft_ordering_holds_under_the_override(tmp_path, monkeypatch):

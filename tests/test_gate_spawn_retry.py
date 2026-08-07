@@ -1,6 +1,7 @@
 # tests/test_gate_spawn_retry.py
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -97,6 +98,26 @@ def test_gate_persistent_failure_pauses_without_routing(tmp_path, monkeypatch):
     assert len(_warn_msgs(log)) == 4               # one breadcrumb per retry (2..5)
 
 
+_BWRAP_ERR = "bwrap: Can't bind mount /nope: No such file or directory"
+
+
+def test_gate_retry_warnings_carry_the_sandbox_stderr(tmp_path, monkeypatch):
+    # AC 5b: the four retry breadcrumbs precede the pause, so bwrap's own reason
+    # is on screen before the quest stops.
+    _no_delay(monkeypatch)
+    monkeypatch.setattr(
+        _executor, "run_script",
+        lambda step, **kw: {"exit": 0, "stdout": "",
+                            "stderr": f"\n{_BWRAP_ERR}\nnoise below"})
+    log = InMemoryEventLog()
+    action, _fb, _m = _run(_step(Continue()), _quest(tmp_path),
+                           SimpleNamespace(active=True), log)
+    assert isinstance(action, Pause)
+    details = [e["payload"]["detail"] for e in log.read()
+               if e["type"] == "runner_warning"]
+    assert details == [_BWRAP_ERR] * 4
+
+
 def test_gate_healthy_nonzero_routes_and_strips_marker(tmp_path, monkeypatch):
     _no_delay(monkeypatch)
     monkeypatch.setattr(
@@ -110,6 +131,31 @@ def test_gate_healthy_nonzero_routes_and_strips_marker(tmp_path, monkeypatch):
     assert SANDBOX_ENTERED_MARKER not in feedback  # marker stripped before feedback
     assert "boom-detail" in feedback               # real stderr survives the strip
     assert _warn_msgs(log) == []                    # marker present → no retry
+
+
+def test_gate_syntax_error_routes_as_a_gate_result(tmp_path, monkeypatch):
+    # AC 3: the gate's command does not parse, but the wrapper's sentinel is
+    # emitted anyway, so the executor evaluates the step's rules on the real exit
+    # code instead of pausing with sandbox_spawn_failed.
+    from tests.test_sandbox import wrapper_argv
+    _no_delay(monkeypatch)
+    raw: dict[str, object] = {}
+
+    def run_through_wrapper(step, **kw):
+        p = subprocess.run(wrapper_argv('echo "`'), capture_output=True, text=True)
+        raw["stderr"], raw["exit"] = p.stderr, p.returncode
+        return {"exit": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
+
+    monkeypatch.setattr(_executor, "run_script", run_through_wrapper)
+    log = InMemoryEventLog()
+    action, feedback, _m = _run(_step(Goto(target="rework")), _quest(tmp_path),
+                                SimpleNamespace(active=True), log)
+    assert isinstance(action, Goto)                   # routed, not paused
+    assert raw["exit"] == 2                           # the shell's own exit code
+    assert SANDBOX_ENTERED_MARKER in str(raw["stderr"])   # sentinel survived the bad parse
+    assert SANDBOX_ENTERED_MARKER not in feedback     # stripped before the agent sees it
+    assert feedback.strip() != ""                     # the shell's diagnosis reached it
+    assert _warn_msgs(log) == []                      # no retries emitted
 
 
 def test_gate_bare_host_never_retries_or_pauses(tmp_path, monkeypatch):

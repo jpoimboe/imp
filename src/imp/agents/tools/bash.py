@@ -15,6 +15,7 @@ import contextlib
 import json
 import os
 import signal
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -37,6 +38,7 @@ from imp.engine.sandbox import (
     SANDBOX_SPAWN_MAX_ATTEMPTS,
     build_sandbox_argv,
     prepare_spawn_policy,
+    sandbox_failure_detail,
     sandbox_spawn_backoff_delay,
     sandbox_spawn_failed,
     strip_sandbox_marker,
@@ -59,7 +61,7 @@ _SANDBOX_DENIAL_NOTE = (
 )
 
 
-def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
+def _emit_overlay_setup_warning(ctx: ToolContext, command: str, detail: str) -> None:
     """Best-effort event for an overlay mount-setup failure; never crashes the tool call."""
     if ctx.event_log is None:
         return
@@ -69,11 +71,13 @@ def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
             payload={
                 "message": ("the OS sandbox could not start the command; it did "
                             "not run (sandbox-setup failure, not a command exit)"),
-                "command": command[:_EVENT_COMMAND_PREVIEW_LEN], "reason": "sandbox-spawn-failed",
+                "command": command[:_EVENT_COMMAND_PREVIEW_LEN],
+                "reason": "sandbox-spawn-failed", "detail": detail,
             })
 
 
-def _emit_spawn_retry_warning(ctx: ToolContext, command: str, next_attempt: int) -> None:
+def _emit_spawn_retry_warning(ctx: ToolContext, command: str, next_attempt: int,
+                              detail: str) -> None:
     """Best-effort per-retry breadcrumb; never crashes the tool call."""
     if ctx.event_log is None:
         return
@@ -84,8 +88,14 @@ def _emit_spawn_retry_warning(ctx: ToolContext, command: str, next_attempt: int)
                 "message": ("sandbox could not start the command; retrying "
                             f"({next_attempt}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
                 "command": command[:_EVENT_COMMAND_PREVIEW_LEN],
-                "reason": "sandbox-spawn-failed",
+                "reason": "sandbox-spawn-failed", "detail": detail,
             })
+
+
+@dataclass(frozen=True)
+class _SpawnRetry:
+    """Retry signal from one foreground attempt, carrying the sandbox's own stderr line."""
+    detail: str
 
 
 def _effective_foreground_timeout(timeout: float | None) -> float:
@@ -208,7 +218,7 @@ async def bash(
     d = _bg_dir(ctx)
     d.mkdir(parents=True, exist_ok=True)
 
-    async def _run_once(attempt: int) -> str | None:
+    async def _run_once(attempt: int) -> str | _SpawnRetry:
         stem = f"fg-{uuid4().hex}"
         out_path = d / f"{stem}.out"
         err_path = d / f"{stem}.err"
@@ -345,7 +355,7 @@ async def bash(
         if spawn_failed and attempt < SANDBOX_SPAWN_MAX_ATTEMPTS:
             # The sandbox never entered the command, so re-spawning is provably safe
             # (the command never ran). Signal the outer loop to retry after backoff.
-            return None
+            return _SpawnRetry(sandbox_failure_detail(stderr))
         # Clip-then-cap, decided ONCE for every branch below: clipping first is what
         # keeps a pathological line from eating the whole 30 KB budget, and routing
         # every return through _finish is what makes the advertised invariant
@@ -375,7 +385,7 @@ async def bash(
         if spawn_failed:
             # Retries exhausted: report distinctly. Such a failure exits immediately,
             # so it never reaches promotion.
-            _emit_overlay_setup_warning(ctx, command)
+            _emit_overlay_setup_warning(ctx, command, sandbox_failure_detail(stderr))
             return _finish(status="sandbox_setup_failed",
                            error=SANDBOX_SPAWN_FAILED_MESSAGE,
                            returncode=proc.returncode)
@@ -401,9 +411,9 @@ async def bash(
         return _finish(returncode=returncode)
 
     for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
-        result = await _run_once(attempt)
-        if result is not None:
-            return result
-        _emit_spawn_retry_warning(ctx, command, attempt + 1)
+        outcome = await _run_once(attempt)
+        if isinstance(outcome, str):
+            return outcome
+        _emit_spawn_retry_warning(ctx, command, attempt + 1, outcome.detail)
         await anyio.sleep(sandbox_spawn_backoff_delay(attempt))
     raise AssertionError("foreground retry loop must return on the final attempt")
