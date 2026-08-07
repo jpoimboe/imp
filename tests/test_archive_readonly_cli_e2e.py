@@ -156,6 +156,7 @@ def _assert_every_read_command_is_clean(
         assert proc.returncode == 0, f"{label} rc={proc.returncode}\n{proc.stderr}"
         for needle in expected:
             assert needle in proc.stdout, f"{label} missing {needle!r}\n{proc.stdout}"
+    # Harness guard: the ro bind makes writes impossible; this fails only if that bind is dropped.
     assert _snapshot(state) == before
 
 
