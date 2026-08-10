@@ -9,8 +9,8 @@ from tests._event_fixtures import ev
 
 
 def _retry_sequence() -> list[dict[str, object]]:
-    """Two rate_limit retries then success — the exact failure pattern from the
-    spec's acceptance criterion 1."""
+    """Two rate_limit retries then success — the re-entry failure pattern. Attempts
+    2 and 3: a first retry renders quiet, and this fixture is about rendered lines."""
     return [
         ev("1", "quest_created", handle="x", title="x"),
         ev("2", "step_started", step="coder", kind="agent", phase="implement",
@@ -18,13 +18,13 @@ def _retry_sequence() -> list[dict[str, object]]:
         ev("3", "error", agent_id="step:implement/coder",
            message="429 …", category="rate_limit"),
         ev("4", "agent_retry",
-           category="rate_limit", attempt=1, backoff_seconds=1.0),
+           category="rate_limit", attempt=2, backoff_seconds=2.0),
         ev("5", "step_started", step="coder", kind="agent", phase="implement",
            model="m", provider="anthropic"),
         ev("6", "error", agent_id="step:implement/coder",
            message="429 …", category="rate_limit"),
         ev("7", "agent_retry",
-           category="rate_limit", attempt=2, backoff_seconds=2.0),
+           category="rate_limit", attempt=3, backoff_seconds=4.0),
         ev("8", "step_started", step="coder", kind="agent", phase="implement",
            model="m", provider="anthropic"),
         ev("9", "step_completed", step="coder", kind="agent",

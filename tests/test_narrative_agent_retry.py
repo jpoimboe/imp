@@ -104,13 +104,13 @@ def test_hinted_retry_with_missing_backoff_falls_through_to_plain_line() -> None
     tree = nv.build_tree([
         {"id": "e1", "parent_id": None, "agent_id": None,
          "type": "agent_retry",
-         "payload": {"category": "rate_limit", "attempt": 1, "hinted": True}},
+         "payload": {"category": "rate_limit", "attempt": 2, "hinted": True}},
         # backoff_seconds absent
     ])
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
 
     assert "waiting for limit reset" not in out
-    assert "[rate_limit] retry 1" in out
+    assert "[rate_limit] retry 2" in out
 
 
 def test_retry_breadcrumb_appends_the_provider_message() -> None:
@@ -150,12 +150,12 @@ def test_retry_breadcrumb_without_a_message_is_unchanged() -> None:
          "payload": {"category": "stalled", "attempt": 2, "backoff_seconds": 4.0}},
         {"id": "e2", "parent_id": None, "agent_id": None,
          "type": "agent_retry",
-         "payload": {"category": "network", "attempt": 1, "backoff_seconds": 1.0}},
+         "payload": {"category": "network", "attempt": 2, "backoff_seconds": 2.0}},
     ])
     out = "\n".join(render_tree(tree, full=False, color=False, width=120))
 
     assert "warning: resuming — verifying prior work, not redoing it" in out
-    assert "warning: [network] retry 1 (1.0s)" in out
+    assert "warning: [network] retry 2 (2.0s)" in out
     assert "—" not in out.split("[network]", 1)[1]
 
 

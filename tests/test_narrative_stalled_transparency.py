@@ -44,9 +44,9 @@ def test_non_stalled_retry_keeps_bracket_format() -> None:
     out = _render([
         {"id": "e1", "parent_id": None, "agent_id": None,
          "type": "agent_retry",
-         "payload": {"category": "network", "attempt": 1, "backoff_seconds": 1.0}},
+         "payload": {"category": "network", "attempt": 2, "backoff_seconds": 2.0}},
     ])
-    assert "warning: [network] retry 1 (1.0s)" in out
+    assert "warning: [network] retry 2 (2.0s)" in out
     assert "resuming" not in out
 
 

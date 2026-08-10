@@ -38,14 +38,14 @@ def test_auth_error_drops_matching_held_prose_and_suppresses_line() -> None:
             category="auth", kind="http_401", message="claude CLI: 401",
             detail={"last_agent_text": AUTH_PROSE}),
         _ev("r1", "agent_retry", agent_id=None,
-            category="auth", attempt=1, backoff_seconds=1.0),
+            category="auth", attempt=2, backoff_seconds=2.0),
     ]
     tree = nv.build_tree(events)
     assert AUTH_PROSE not in _agent_texts(tree.root)   # prose node deleted
     out = _render(events)
     assert "error: [auth]" not in out                  # no red error line
     assert AUTH_PROSE not in out                        # prose never paints
-    assert "warning: [auth] retry 1 (1.0s)" in out      # breadcrumb survives
+    assert "warning: [auth] retry 2 (2.0s)" in out      # breadcrumb survives
 
 
 def test_network_error_keeps_unrelated_narration() -> None:
