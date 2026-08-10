@@ -63,8 +63,21 @@ help: ## Print this help.
 	     $(MAKEFILE_LIST)
 
 .PHONY: install
-install: ## Editable install of imp + dev deps (pytest, ruff, mypy).
+install: ## Bootstrap: editable install of imp + dev deps (pytest, ruff, mypy).
 	$(PYTHON) -m pip install -e '.[dev]' 2>/dev/null || $(PYTHON) -m pip install -e .
+
+# `--user` outside a venv, nothing inside one (pip refuses --user in a venv).
+PIP_SCOPE ?= $(shell $(PYTHON) -c "import sys; print('' if sys.prefix != sys.base_prefix else '--user')")
+
+.PHONY: sync-env
+sync-env: ## Reconcile this interpreter to uv.lock EXACTLY (fixes `make depcheck` drift).
+	@# `make install` resolves pyproject's loose ranges afresh and happily
+	@# installs versions uv.lock never pinned — that is how the environment
+	@# drifts. This installs the locked set instead, then re-links imp itself
+	@# editable (--no-deps so it cannot re-resolve what we just pinned).
+	$(UV) export --frozen --all-extras --no-emit-project --format requirements-txt \
+	    | $(PYTHON) -m pip install $(PIP_SCOPE) -r /dev/stdin
+	$(PYTHON) -m pip install $(PIP_SCOPE) -e . --no-deps
 
 # Scope a run: make test PYTEST_ARGS="tests/foo.py -k name"
 .PHONY: test
