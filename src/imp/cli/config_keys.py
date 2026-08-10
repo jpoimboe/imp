@@ -83,6 +83,7 @@ _FIXED: tuple[SettableKey, ...] = (
     _k("test_cmd_slow_timeout", ("test_cmd_slow_timeout",), "project", _as_int),
     _k("pythonpath", ("pythonpath",), "project", _as_list),
     _k("max_parallel_test_runs", ("max_parallel_test_runs",), "project", _as_int),
+    _k("worktree_setup", ("worktree_setup",), "project", _as_str),
     _k("context.checkpoint_threshold", ("context", "checkpoint_threshold"),
        "global", _as_number),
     _k("context.max_reincarnations", ("context", "max_reincarnations"),

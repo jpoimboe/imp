@@ -490,3 +490,37 @@ def test_config_omits_the_state_line_outside_a_project(
 
     assert out.getvalue().splitlines()[0] == "tiers:"
     assert "project state:" not in out.getvalue()
+
+
+def test_render_shows_unset_worktree_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)  # no layer sets worktree_setup
+    out = io.StringIO()
+    render_config(eff, out, state_dir=None, color=False)
+    settings = _block(out.getvalue().splitlines(), "settings:")
+    line = next((ln.strip() for ln in settings
+                 if ln.strip().startswith("worktree_setup ")), None)
+    assert line is not None and "(unset)" in line
+    assert line.rstrip().endswith("[default]")
+
+
+def test_render_shows_configured_worktree_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text("providers: [openai]\n")
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "config.yaml").write_text(
+        "worktree_setup: uv sync --all-extras\n")
+    eff = load_effective_config(control_root=proj)
+    out = io.StringIO()
+    render_config(eff, out, state_dir=None, color=False)
+    settings = _block(out.getvalue().splitlines(), "settings:")
+    line = next((ln.strip() for ln in settings
+                 if ln.strip().startswith("worktree_setup ")), None)
+    assert line is not None and "uv sync --all-extras" in line
+    assert line.rstrip().endswith("[imp/config.yaml]")

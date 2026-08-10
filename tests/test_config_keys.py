@@ -106,3 +106,12 @@ def test_unshapeable_values_pass_through_for_the_reader_to_reject() -> None:
     assert _parsed("test_cmd_fast_timeout", "abc") == "abc"
     assert _parsed("sandbox.enabled", "maybe") == "maybe"
     assert _parsed("context.checkpoint_threshold", "soon") == "soon"
+
+
+def test_worktree_setup_is_a_project_layer_string_key() -> None:
+    key = resolve_key("worktree_setup")
+    assert key is not None
+    assert (key.path, key.read_path) == (("worktree_setup",), ("worktree_setup",))
+    assert key.home == "project"
+    assert key.project_only is False
+    assert key.parse("uv sync --all-extras") == "uv sync --all-extras"
