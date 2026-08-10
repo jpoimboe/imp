@@ -31,6 +31,7 @@ ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
     "ExitWorktree",
     "Glob",
     "Grep",
+    "ListAgents",
     "Monitor",
     "NotebookEdit",
     "PushNotification",

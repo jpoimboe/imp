@@ -15,6 +15,21 @@ from subprocess import PIPE
 
 import anyio
 
+# Leaf exceptions that mean "the git subprocess went away", not "imp has a bug".
+#
+# One physical event — git exiting without draining stdin — reaches us as one of
+# THREE types, chosen by anyio's StreamWriterWrapper.send() on stream state:
+#   * stream neither closed nor closing -> the bare OSError (BrokenPipeError /
+#     ConnectionResetError) is re-raised as-is;
+#   * stream already closing            -> BrokenResourceError;
+#   * stream closed by us               -> ClosedResourceError.
+# The latter two are anyio's own types and are NOT OSError subclasses, so an
+# OSError-only filter catches the race only when it lands on the first branch.
+# Which branch wins is timing, not semantics: CPython 3.14's asyncio reliably
+# takes the "closing" branch where 3.13 took the bare one, turning what had been
+# a rare flake into a deterministic failure.
+_SUBPROCESS_GONE = (OSError, anyio.BrokenResourceError, anyio.ClosedResourceError)
+
 
 async def _git(root: Path, *args: str,
                stdin: bytes | None = None) -> tuple[int, bytes]:
@@ -24,18 +39,18 @@ async def _git(root: Path, *args: str,
 
     A fast-failing git (e.g. check-ignore in a not-a-repo, which exits without
     reading stdin) can die before the stdin feed finishes; run_process surfaces
-    that BrokenPipeError/ConnectionResetError wrapped in an ExceptionGroup from
-    its internal task group. All-OSError groups are the same fail-soft case;
-    a group with any non-OSError leaf is a real bug and propagates."""
+    that failure wrapped in an ExceptionGroup from its internal task group. A
+    group whose leaves are all `_SUBPROCESS_GONE` is the same fail-soft case; a
+    group with any other leaf is a real bug and propagates."""
     try:
         result = await anyio.run_process(
             ["git", "-C", str(root), *args],
             input=stdin, stdout=PIPE, stderr=PIPE, check=False,
         )
-    except OSError:
+    except _SUBPROCESS_GONE:
         return -1, b""
     except ExceptionGroup as eg:
-        _, rest = eg.split(OSError)
+        _, rest = eg.split(_SUBPROCESS_GONE)
         if rest is not None:
             raise
         return -1, b""

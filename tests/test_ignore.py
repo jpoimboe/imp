@@ -134,6 +134,22 @@ def test_partition_ignored_stdin_write_racing_dead_git_fails_soft(
     assert anyio.run(partition_ignored, tmp_path, paths) is None
 
 
+@pytest.mark.parametrize("leaf", [anyio.BrokenResourceError, anyio.ClosedResourceError])
+def test_git_anyio_stream_errors_fail_soft(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        leaf: type[Exception]) -> None:
+    # The race above picks its leaf type from stream state, so which branch it
+    # lands on is timing (3.13 took the bare-OSError one, 3.14 the anyio one).
+    # Pin BOTH anyio-native branches deterministically so the fail-soft contract
+    # can't regress on whichever branch the host interpreter happens not to take.
+    import imp.agents.tools.ignore as ignore_mod
+
+    async def _raise_group(*args: object, **kwargs: object) -> object:
+        raise ExceptionGroup("git went away", [leaf()])
+    monkeypatch.setattr(ignore_mod.anyio, "run_process", _raise_group)
+    assert anyio.run(repo_root, tmp_path) is None
+
+
 def test_git_non_oserror_group_still_propagates(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Fail-soft covers pipe/spawn OSErrors only: a group carrying a real bug
