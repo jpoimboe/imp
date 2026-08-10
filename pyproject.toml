@@ -5,8 +5,20 @@ build-backend = "hatchling.build"
 [project]
 name = "imp"
 version = "0.0.1"
-description = "Project-local development lifecycle tool"
+description = "A development process that runs itself: one intent in, a reviewed and merged change out"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+keywords = ["ai", "agents", "coding-agent", "llm", "claude", "codex", "workflow", "automation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
   "pyyaml>=6.0",
   "ruamel.yaml>=0.18",
@@ -42,6 +54,12 @@ dev = [
 
 [project.scripts]
 imp = "imp.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/jpoimboe/imp"
+Repository = "https://github.com/jpoimboe/imp"
+Documentation = "https://github.com/jpoimboe/imp/tree/master/docs"
+Issues = "https://github.com/jpoimboe/imp/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/imp", "src/impty"]
