@@ -206,3 +206,29 @@ def test_a_command_outside_a_project_claims_no_slug_directory(
         worktree.find_control_root(scratch)
     main(["list"])
     assert not (tmp_path / "imphome" / "projects").exists()
+
+
+def test_worktree_setup_defaults_to_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))  # no global config
+    assert load_effective_config().config.worktree_setup is None
+
+
+def test_worktree_setup_is_read_from_the_main_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Project-layer keys resolve from control_root, never from the tree the
+    caller happens to be standing in (spec criterion 9d)."""
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    control = tmp_path / "control"
+    (control / "imp").mkdir(parents=True)
+    (control / "imp" / "config.yaml").write_text(
+        "worktree_setup: uv sync --all-extras\n")
+    tree = tmp_path / "wt"
+    (tree / "imp").mkdir(parents=True)
+    (tree / "imp" / "config.yaml").write_text("worktree_setup: echo WRONG-TREE\n")
+    monkeypatch.chdir(tree)
+    eff = load_effective_config(control_root=control)
+    assert eff.config.worktree_setup == "uv sync --all-extras"
+    assert eff.provenance[("worktree_setup",)].file == control / "imp" / "config.yaml"

@@ -12,6 +12,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     test_cmd_slow: "..."                  # complete run; once-per-quest at integration-verify
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
+    worktree_setup: uv sync --all-extras  # command run in each new quest worktree
     pythonpath: [src]                     # import roots prepended to PYTHONPATH; off if unset
     default-workflow: default             # workflow new quests use (default "default")
     max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)
@@ -55,6 +56,7 @@ class Config:
     test_cmd_slow: str | None = field(hash=False, default=None)
     test_cmd_fast_timeout: int | None = field(hash=False, default=None)
     test_cmd_slow_timeout: int | None = field(hash=False, default=None)
+    worktree_setup: str | None = field(hash=False, default=None)
     pythonpath: tuple[str, ...] = field(hash=False, default=())
     max_parallel_test_runs: int = field(hash=False, default=1)
     editing_mode: str = field(hash=False, default="emacs")
@@ -174,6 +176,13 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
                     f"'{timeout_key}' must be a positive integer "
                     "(seconds, e.g. 120)", src)
             out[timeout_key] = v
+    if "worktree_setup" in raw:
+        v = raw["worktree_setup"]
+        if not isinstance(v, str):
+            raise LoadError(
+                "'worktree_setup' must be a string "
+                "(e.g. \"uv sync --all-extras\")", src)
+        out["worktree_setup"] = v
     if raw.get("pythonpath") is not None:
         v = raw["pythonpath"]
         if not isinstance(v, list) or not all(isinstance(e, str) for e in v):
