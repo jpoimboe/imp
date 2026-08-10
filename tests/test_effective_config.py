@@ -215,6 +215,12 @@ def test_worktree_setup_defaults_to_none(
     assert load_effective_config().config.worktree_setup is None
 
 
+def test_repo_config_declares_worktree_setup() -> None:
+    # imp dogfoods the hook: every quest worktree provisions its own .venv.
+    layer, _src = parse_config_layer(_REPO_CONFIG)
+    assert layer["worktree_setup"] == "uv sync --all-extras"
+
+
 def test_worktree_setup_is_read_from_the_main_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -28,6 +28,10 @@ its own). Pair with `imp-knowledge` for the stable picture.
     gates run. Unset means that gate is a no-op and imp raises it again — when
     scoping a quest, and at `imp new` once a command becomes detectable; an
     empty string is a deliberate opt-out that stays silent.
+  - `worktree_setup` — a shell command imp runs in each newly created quest
+    worktree, before the first step, for toolchains that keep dependencies in a
+    gitignored per-tree directory (`.venv`, `node_modules`, `vendor/bundle`) that
+    `git worktree` does not materialize. Unset means no setup command runs.
 
   Other config (providers, tiers, sandbox, `default-workflow`, …) layers across
   `floor ← imp/config.yaml ← ~/.imp/config.yaml ← ~/.imp/projects/<slug>/config.yaml`,
