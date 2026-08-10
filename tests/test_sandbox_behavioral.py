@@ -18,7 +18,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import tomllib
 import uuid
 from pathlib import Path
 
@@ -26,6 +25,7 @@ import anyio
 import pytest
 
 import imp.agents.tools.bash  # noqa: F401 — registers the tool
+from imp import __version__
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
@@ -39,6 +39,7 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
 )
+from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
 
 pytestmark = pytest.mark.skipif(
@@ -731,49 +732,63 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
 
 
 # ---------------------------------------------------------------------------
-# PATH resolution (spec §7 / AC 12): the console-script `imp` on PATH runs the
-# worktree's code, because the injected PYTHONPATH shadows imp.__main__ even
-# though PATH itself is never modified by the sandbox.
+# PATH resolution: inside a sandboxed step a bare `imp` runs the OUTER (running)
+# imp, NOT the worktree's shadowed code. src/imp/engine/shim.py writes a per-run
+# shim that sandbox._build_setenv prepends to PATH; the shim puts the outer src
+# root at sys.path[0], so it beats the injected worktree PYTHONPATH shadow.
 # ---------------------------------------------------------------------------
 
-def test_sandboxed_imp_console_script_resolves_worktree_code() -> None:
-    """A bash `imp` inside a sandboxed step executes the worktree's imp.__main__."""
-    if shutil.which("imp") is None:
-        pytest.skip("imp console script not on PATH")
-    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    entry = tomllib.loads(pyproject.read_text())["project"]["scripts"]["imp"]
-    assert entry == "imp.__main__:main", (
-        f"console-script entry point is now {entry!r} — repoint this test's stub")
-    sentinel = "WORKTREE-IMP-SENTINEL-dafu54"
+def test_sandboxed_imp_resolves_outer_imp_over_worktree_shadow() -> None:
+    """Under a real bwrap policy carrying both the shim dir on PATH and a
+    worktree PYTHONPATH shadow, `imp` runs the outer CLI while a plain
+    `import imp` still resolves to the shadow."""
+    sentinel = "WORKTREE-IMP-SENTINEL-voli59"
     root = _make_root()
     try:
-        pkg = root / "src" / "imp"
+        pkg = root / "src" / "imp"   # sentinel package: deliberately NO `cli` subpackage
         pkg.mkdir(parents=True)
-        (pkg / "__init__.py").write_text("")
+        (pkg / "__init__.py").write_text(f'SENTINEL = "{sentinel}"\n')
         (pkg / "__main__.py").write_text(
             f'def main():\n    print("{sentinel}")\n    return 0\n')
-        pol = _active_policy(root)
 
-        argv_shadow = build_sandbox_argv(
-            "imp --help", cwd=str(root), policy=pol,
-            engine_env={"PYTHONPATH": str(root / "src")})
-        shadowed = subprocess.run(argv_shadow, capture_output=True, text=True)
+        shim_dir = write_imp_shim(root / "qd")
+        base = _active_policy(root)
+        # PATH exactly as _build_setenv composes it: shim dir first, ambient behind.
+        path = os.pathsep.join(
+            [str(shim_dir), *(v for k, v in base.setenv if k == "PATH")])
+        pol = dataclasses.replace(
+            base,
+            setenv=tuple((k, path if k == "PATH" else v) for k, v in base.setenv))
+        engine_env = {"PYTHONPATH": str(root / "src")}
 
-        argv_bare = build_sandbox_argv(
-            "imp --help", cwd=str(root), policy=pol, engine_env={})
-        bare = subprocess.run(argv_bare, capture_output=True, text=True)
+        def _run(cmd: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                build_sandbox_argv(cmd, cwd=str(root), policy=pol,
+                                   engine_env=engine_env),
+                capture_output=True, text=True)
 
-        assert sentinel in shadowed.stdout, (
-            f"sandboxed `imp` ignored the PYTHONPATH shadow — it did not run the "
-            f"worktree stub (rc={shadowed.returncode}) "
-            f"stdout={shadowed.stdout!r} stderr={shadowed.stderr!r}")
-        assert bare.returncode == 0 and "usage" in bare.stdout.lower(), (
-            f"negative control did not actually run the real imp CLI "
-            f"(rc={bare.returncode}) — the `sentinel not in` check would pass "
-            f"vacuously; stdout={bare.stdout!r} stderr={bare.stderr!r}")
-        assert sentinel not in bare.stdout, (
-            f"negative control failed: sentinel leaked with no shadow "
-            f"stdout={bare.stdout!r}")
+        version = _run("imp --version")
+        assert version.returncode == 0, (
+            f"sandboxed `imp --version` failed — the shim did not beat the "
+            f"PYTHONPATH shadow: stdout={version.stdout!r} stderr={version.stderr!r}")
+        assert version.stdout.strip() == f"imp {__version__}", (
+            f"sandboxed `imp` did not run the OUTER imp: "
+            f"stdout={version.stdout!r} stderr={version.stderr!r}")
+        assert sentinel not in version.stdout and sentinel not in version.stderr, (
+            f"worktree sentinel leaked into the outer imp's output: "
+            f"stdout={version.stdout!r} stderr={version.stderr!r}")
+
+        shadow = _run("python3 -c 'import imp; print(imp.__file__)'")
+        assert shadow.returncode == 0, shadow.stderr
+        assert shadow.stdout.strip().startswith(str(pkg) + os.sep), (
+            f"non-vacuity control failed: the PYTHONPATH shadow was NOT armed in "
+            f"this sandbox, so the `imp --version` assertion proves nothing: "
+            f"stdout={shadow.stdout!r} stderr={shadow.stderr!r}")
+
+        which = _run("command -v imp")
+        assert which.returncode == 0, which.stderr
+        assert which.stdout.strip() == str(shim_dir / "imp"), (
+            f"`imp` on PATH is not the test's shim: stdout={which.stdout!r}")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
