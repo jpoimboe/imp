@@ -22,8 +22,16 @@ def _agent_texts(node) -> list[str]:
     return found
 
 
+def _lean(events) -> list[str]:
+    return list(render_tree(nv.build_tree(events), full=False, color=False, width=160))
+
+
+def _full(events) -> list[str]:
+    return list(render_tree(nv.build_tree(events), full=True, color=False, width=160))
+
+
 def _render(events) -> str:
-    return "\n".join(render_tree(nv.build_tree(events), full=False, color=False, width=80))
+    return "\n".join(_lean(events))
 
 
 def test_auth_error_drops_matching_held_prose_and_suppresses_line() -> None:
@@ -110,3 +118,77 @@ def test_api_error_still_renders_hard_error_line() -> None:
             category="api", message="500 upstream"),
     ])
     assert "error: [api] 500 upstream" in out
+
+
+QUIET_PROSE = ("Failed to authenticate. API Error: 401 OAuth access token "
+               "has been revoked.")
+
+
+def _healed_auth_blip() -> list[dict]:
+    return [
+        _ev("e1", "error", agent_id=None, category="auth", kind="http_401",
+            message="claude CLI: 401"),
+        _ev("r1", "agent_retry", agent_id=None, category="auth", attempt=1,
+            backoff_seconds=1.0, message=QUIET_PROSE),
+    ]
+
+
+def test_first_auth_retry_renders_nothing_at_all_in_the_lean_view() -> None:
+    # No warning line, no error line, and no stray blank separator either.
+    assert _lean(_healed_auth_blip()) == []
+
+
+def test_the_quiet_node_is_kept_in_the_tree_and_prints_under_full() -> None:
+    tree = nv.build_tree(_healed_auth_blip())
+    node = next(c for c in tree.root.children if isinstance(c, nv.ErrorNode))
+    assert node.full_only is True
+    assert (f"warning: [auth] retry 1 (1.0s) — {QUIET_PROSE}"
+            in "\n".join(_full(_healed_auth_blip())))
+
+
+def test_second_auth_retry_prints_unchanged_in_the_lean_view() -> None:
+    out = "\n".join(_lean([
+        _ev("r1", "agent_retry", agent_id=None, category="auth", attempt=2,
+            backoff_seconds=2.0, message=QUIET_PROSE)]))
+    assert f"warning: [auth] retry 2 (2.0s) — {QUIET_PROSE}" in out
+
+
+def test_network_and_rate_limit_first_retries_are_quiet_too() -> None:
+    for cat in ("network", "rate_limit"):
+        assert _lean([_ev("r1", "agent_retry", agent_id=None, category=cat,
+                          attempt=1, backoff_seconds=1.0)]) == []
+
+
+def test_a_retry_without_a_numeric_attempt_still_prints() -> None:
+    # `attempt` missing entirely, and the literal "?" — neither is the int 1.
+    assert "warning: [auth] retry ? (1.0s)" in "\n".join(_lean([
+        _ev("r1", "agent_retry", agent_id=None, category="auth",
+            backoff_seconds=1.0)]))
+    assert "warning: [auth] retry ? (1.0s)" in "\n".join(_lean([
+        _ev("r2", "agent_retry", agent_id=None, category="auth", attempt="?",
+            backoff_seconds=1.0)]))
+
+
+def test_hinted_retry_without_a_backoff_is_quiet_at_attempt_one() -> None:
+    # It falls through to the plain breadcrumb, so the rule catches it there.
+    assert _lean([_ev("r1", "agent_retry", agent_id=None, category="rate_limit",
+                      attempt=1, hinted=True)]) == []
+
+
+def test_hinted_long_wait_still_prints_at_attempt_one() -> None:
+    assert "[rate_limit] waiting for limit reset — retry 1 in 2h 13m" in "\n".join(
+        _lean([_ev("r1", "agent_retry", agent_id=None, category="rate_limit",
+                   attempt=1, backoff_seconds=8000.0, hinted=True)]))
+
+
+def test_stalled_resume_line_still_prints_at_attempt_one() -> None:
+    assert "warning: resuming — verifying prior work, not redoing it" in "\n".join(
+        _lean([_ev("r1", "agent_retry", agent_id=None, category="stalled",
+                   attempt=1, backoff_seconds=4.0)]))
+
+
+def test_sticky_unknown_first_retry_still_prints() -> None:
+    # `unknown` is not a retry-with-backoff category, so the rule never applies.
+    assert "warning: [unknown] retry 1 (1.0s)" in "\n".join(
+        _lean([_ev("r1", "agent_retry", agent_id=None, category="unknown",
+                   attempt=1, backoff_seconds=1.0)]))

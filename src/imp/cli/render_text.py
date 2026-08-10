@@ -822,6 +822,8 @@ def _render(node: Any, *, depth: int, full: bool = False,
 
     if isinstance(node, nv.ErrorNode):
         if node.is_warning:
+            if node.full_only and not (cats >= _ALL_CATEGORIES):
+                return
             yield _line(f"warning: {_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["warning"], gutters=gutters)
             # Diagnostic the user cannot act without — shown lean, not behind --full.
