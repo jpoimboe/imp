@@ -27,8 +27,8 @@ Your **first action** is to call `create_and_enter_worktree` (it takes no
 arguments). This forks a fresh worktree off the base-branch tip; your file and
 `bash` tools then operate inside it. Do this before reading or writing any
 project file — without it you cannot persist or commit anything, and the merge
-step has no worktree to land. The call is idempotent, so a resumed turn re-invokes
-it safely.
+step has no worktree to land. The call is idempotent (worktree re-creation is a no-op;
+`worktree_setup` still re-runs), so a resumed turn re-invokes it safely.
 
 ## Resolve the target file(s) — narrowest scope that fits
 
