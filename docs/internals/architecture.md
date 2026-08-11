@@ -351,11 +351,17 @@ These are dispatched via `subagents:` frontmatter and are **never** a workflow s
 
 These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. Spec/plan artifacts are journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
 
+The columns list the **principal** writers and readers, not an exhaustive census —
+`deferred.md` in particular is appended to by many agents (any agent may file a
+`— needs-decision:` item) and read by more still, and enumerating that is drift bait.
+
 | File (relative to the quest home) | Written by | Read by |
 |---|---|---|
-| `artifacts/spec/{slug}.md` | spec-writer | all phases |
-| `artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
-| `progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
+| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases |
+| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer |
+| `artifacts/summary/{id}.md` | summarizer — or threshold itself on an express quest | finalize, `imp show` |
+| `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
+| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |
 
 ---
 

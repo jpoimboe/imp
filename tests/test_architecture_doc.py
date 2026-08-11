@@ -409,3 +409,26 @@ def test_architecture_agent_reference_drops_the_deleted_agents() -> None:
     # the summary artifact is read by `imp show`; `imp log --summary` is a
     # step-timing table built from events, not the artifact
     assert "queryable via `imp log`" not in text
+
+
+def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -> None:
+    text = ARCH.read_text()
+    flat = " ".join(text.split())
+    assert (
+        "The columns list the **principal** writers and readers, not an exhaustive "
+        "census" in flat
+    )
+    for row in (
+        "| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) "
+        "| all phases |",
+        "| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, "
+        "gap-check, batch-code-reviewer, deferred-sweep, summarizer |",
+        "| `artifacts/summary/{id}.md` | summarizer — or threshold itself on an "
+        "express quest | finalize, `imp show` |",
+        "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, "
+        "finalize |",
+    ):
+        assert row in text, row
+    # the last two retired names lived only in this table, unbackticked
+    for retired in ("spec-writer", "plan-cycle-check"):
+        assert retired not in text, retired
