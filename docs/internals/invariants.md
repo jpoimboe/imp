@@ -8,7 +8,7 @@ Read this when editing imp's engine/renderer or workflow prompts.
   targets any language. Say "the project's own test tooling", use
   `$IMP_TEST_COMMAND` / `$IMP_LINT_COMMAND`, and let the agent discover the real
   command. Illustrative code is allowed only with a disclaimer that it is
-  illustrative. Exempt: imp's *own* tooling — `integrator` /
+  illustrative. Exempt: imp's *own* tooling — `reconciler` /
   `integration-review` reading `quest.json`, `finalize`'s `PYTHONPATH`, and the
   impty grants on the review/gate holders (`batch-code-reviewer`, `threshold`,
   `finalize`, `spiker`) whose prompts name the impty tools and the

@@ -57,14 +57,14 @@ flowchart TB
 
 ### Zoom 2 — agent & provider lane
 
-`agent_run.drive_invocation()` resolves the step's tier to a concrete `(provider, model)`, drives the provider's `AgentRunner`, and dispatches tools. A step's tier itself is fixed at load time by `loader._parse_step`: the step's own `tier:` in `workflow.yaml`, else the referenced agent file's frontmatter `tier:`, else `medium`. Tools can spawn subagents (implementer, reviewers), which re-enter the same drive loop one level down.
+`agent_run.drive_invocation()` resolves the step's tier to a concrete `(provider, model)`, drives the provider's `AgentRunner`, and dispatches tools. A step's tier itself is fixed at load time by `loader._parse_step`: the step's own `tier:` in `workflow.yaml`, else the referenced agent file's frontmatter `tier:`, else `medium`. Tools can spawn subagents (coder, code-reviewer), which re-enter the same drive loop one level down.
 
 ```mermaid
 flowchart TB
   AR["agent_run.py<br/>drive_invocation()"] --> RES["providers/resolve.py<br/>tier → provider + model"]
   AR --> PROV["provider (AgentRunner)<br/>anthropic · openai · claude_code · codex"]
   PROV --> TOOLS["agents/tools<br/>bash · fs<br/>complete_step · wait_for_user"]
-  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>implementer · reviewers ·<br/>explorer · researcher"]
+  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>coder · code-reviewer ·<br/>explorer · researcher"]
   SUB -.->|"nested invocation"| AR
   PROV -->|"audit events"| LOG[("event log")]
   TOOLS -->|"audit events"| LOG
@@ -135,7 +135,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop inside *implement*, a single **change-end** code-review pass that covers the whole quest (forward plans are not reviewed individually), and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the spec and plan-document review gates and the supercycle, but still gets the change-end code review.
+Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips the whole spec phase and the `plan-reviewer` gate; everything from `implement` onward is identical.
 
 Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<workflow>/`), so a downstream repo carrying `imp/memory/imp/*.md` renames that directory to `imp/memory/default/` after the `imp` → `default` rename.
 
@@ -143,152 +143,225 @@ Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<wor
 
 ```mermaid
 flowchart LR
-  start([begin / seed]) --> SPEC["① spec"]
-  SPEC --> PLAN["② plan"]
-  PLAN --> IMPL["③ implement"]
-  IMPL --> REVIEW["④ review"]
-  REVIEW --> INTG["⑤ integrate"]
-  INTG --> done([done])
-  IMPL -. "supercycle" .-> PLAN
-  REVIEW -. "rework" .-> PLAN
+  start([intent]) --> TH["threshold"]
+  TH --> SPEC["spec"]
+  SPEC --> PLAN["plan"]
+  PLAN --> IMPL["implement"]
+  IMPL --> CONV["converge"]
+  CONV --> INTG["integrate"]
+  INTG --> done([merged])
+  TH -. "express" .-> PLAN
+  IMPL -. "next outline plan" .-> PLAN
+  CONV -. "coverage gap" .-> PLAN
+  CONV -. "task gap" .-> IMPL
+  INTG -. "rework" .-> PLAN
 ```
 
 Step kinds across all phases:
 
 - **agent** (boxes) — an LLM agent (`agents/<name>.md`); routes on its validated structured output.
 - **script** (`{{ }}` hexagons) — a shell command (`scripts/*.sh`); routes on exit code (`0` continue, `2` recoverable, else **pause to human**).
-- **branch** (`{ }` diamonds) — a pure var router, no execution.
+- **branch** (`{ }` diamonds) — a var router, no agent or script: `check-next-plan` and `wait-for-head` (which also blocks to acquire the merge lane).
 - **merge** — engine-native, lock-protected merge to base.
 
 Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedback), `pause` (human).
 
-### Phase ① spec
+### Phase threshold
 
-Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the quest → write the spec under the quest home's `artifacts/spec/` (the engine journals it to the quest's `refs/imp/artifacts/<id>` ref at the step boundary), verify the artifact is present on disk, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
+One interactive high-tier conversation that answers questions, scouts existing work, or
+scopes a build. On go-live it forks the worktree and writes a draft spec; its ceremony
+sets `fast_path`. `scope-code-check` then guards the hand-off — the threshold agent must
+not have committed code to the branch while scoping; if it did, it is resumed to undo it.
+On an express quest, threshold also writes the summary artifact itself.
 
 ```mermaid
 flowchart TD
-  in([intent / seed]) --> SW["spec-writer<br/>(explorer · researcher)"]
-  SW --> SVC{{"spec-verify-commit"}}
-  SVC -. fail .-> SW
-  SVC -->|fast_path| out([→ plan])
-  SVC --> SR["spec-reviewer"]
-  SR -->|"Critical / Major"| SW
-  SR -->|"minors: one pass"| SW
-  SR -->|clean| out
+  in([intent / seed]) --> TH["threshold<br/>(explorer · researcher · spiker)"]
+  TH --> SCC{{"scope-code-check"}}
+  SCC -->|express| toplan([→ plan-writer])
+  SCC -->|full| tospec([→ spec-finalizer])
+  SCC -. "code committed while scoping" .-> TH
 ```
 
-### Phase ② plan
+### Phase spec
 
-Write the next bite-sized `plan-N` (same read-only helper subagents), verify the commit, then a single **`plan-reviewer`** runs directly, reading the plan's prescribed code like a diff. `fast_path` skips review. Mirrors the spec minors loop.
+`spec-finalizer` adopts the threshold draft and commits the final spec, including its
+`## Plan outline`. The gate counts the outline's numbered plans to seed `plan_total`, so
+the planning label carries the real denominator. The reviewer gets the last word: the
+loop ends only on a clean review with nothing left to integrate, and the writer gets
+exactly one minors-integration pass per settled state.
 
 ```mermaid
 flowchart TD
-  in([from spec]) --> PW["plan-writer<br/>(explorer · researcher)"]
+  in([from threshold]) --> SF["spec-finalizer<br/>(explorer · researcher · spiker)"]
+  SF --> SVC{{"spec-verify-commit"}}
+  SVC -. "no spec / no outline" .-> SF
+  SVC -->|"plan_total = N"| SR["spec-reviewer"]
+  SR -->|"Critical / Major"| SF
+  SR -->|"minors: one pass"| SF
+  SR -->|clean| out([→ plan-writer])
+```
+
+### Phase plan
+
+`plan-writer` is the plan-phase entry: the spec phase, the next-plan loop, a gap-check
+corrective, and a finalize rework all `goto` it directly. It writes this outline plan's
+slice, the gate verifies the artifact, `plan-reviewer` mirrors the spec minors loop, and
+`plan-finalized` counts `## Task N` headers to seed `task_total`.
+
+```mermaid
+flowchart TD
+  in([from spec · outline plan N]) --> PW["plan-writer<br/>(explorer · researcher)"]
   PW --> PVC{{"plan-verify-commit"}}
-  PVC -. fail .-> PW
-  PVC -->|fast_path| out([→ implement])
+  PVC -. "no plan artifact" .-> PW
+  PVC -->|express| PF
   PVC --> PR["plan-reviewer"]
   PR -->|"Critical / Major"| PW
   PR -->|"minors: one pass"| PW
-  PR -->|clean| out
+  PR -->|clean| PF{{"plan-finalized"}}
+  PF -->|"task_total = N"| out([→ task-lead])
 ```
 
-### Phase ③ implement
+### Phase implement
 
-`task-lead` drives one task at a time (dispatching `implementer` + `quality-reviewer`), committing a clean unit each loop. After all tasks: `commit-check`, then `verify` (the project's own test/lint gate — a gate **timeout** pauses to a human rather than looping), autosquash fixups into one-commit-per-task, run the 4-slice review panel, drain deferred followups, re-verify, stamp trailers, then `plan-cycle-check` decides whether the spec needs another plan (supercycle). After the last plan of a multi-plan quest it routes once more through the panel for a **whole-change pass** (`review_scope=change`) before the review phase.
+Three steps. `task-lead` drives one task at a time, dispatching `coder` and
+`code-reviewer` subagents and committing one clean unit per task; `verify` runs the
+project's fast test gate (a gate **timeout** pauses to a human rather than looping);
+`check-next-plan` is a pure router with no execution. There is no code review, no
+autosquash, and no deferred sweep in this phase — all of that moved to `converge`.
 
 ```mermaid
 flowchart TD
-  in([from plan]) --> TL["task-lead<br/>implementer + quality-reviewer"]
-  TL -->|deviation| toplan([→ plan-writer])
-  TL -->|"done = false"| TL
-  TL -->|done| CC{{"commit-check"}}
-  CC -. fail .-> TL
-  CC --> V{{"verify"}}
+  in([from plan]) --> TL["task-lead<br/>coder + code-reviewer"]
+  TL -->|"verify tolerated"| CNP
+  TL --> V{{"verify · fast"}}
   V -. fail .-> TL
-  V -. "timeout" .-> HUMAN([pause → human])
-  V --> AS{{"autosquash"}}
-  AS -->|conflict| ASR["autosquash-resolve"]
-  ASR --> AS
-  AS -. "hard fail" .-> HUMAN
-  AS --> RVW["review panel<br/>code · completeness ·<br/>spec · boundaries"]
-  RVW -->|task_gap| TL
-  RVW -->|plan_gap| toplan
-  RVW --> DS["deferred-sweep"]
-  DS --> ST{{"stamp-trailers"}}
-  ST --> PCC{"plan-cycle-check"}
-  PCC -->|"more_plans (supercycle)"| toplan
-  PCC -->|"whole-change pass"| RVW
-  PCC -->|covered| out([→ review])
+  V -. timeout .-> HUMAN([pause → human])
+  V --> CNP{"check-next-plan"}
+  CNP -->|"more outline plans"| toplan([→ plan-writer])
+  CNP -->|"coverage settled (rework)"| toqr([→ quest-review])
+  CNP -->|"last outline plan"| out([→ gap-check])
 ```
 
-### Phase ④ review (end-of-change)
+### Phase converge
 
-Rebase the branch onto base (`integrate-rebase`); on conflicts the `integrator` agent resolves them and `integrate-verify` re-runs the test gate. Then `finalize` **always** runs: it reviews the base-merge resolution with independent eyes (when one occurred), writes the structured end-of-change summary (queryable via `imp log`), and is the interactive human gate — merge, rework, or pause.
+Runs once per quest, quest-local and off-lock. `gap-check` is the sole coverage backstop;
+a gap authors a corrective plan (the **supercycle**) beyond the outline, and a clean pass
+latches `coverage_settled` so a later rework re-enters at `quest-review` and never
+re-runs the backstop. `quest-review` is the single quest-wide code review over
+`cur_base_head..HEAD`. `deferred-sweep` drains the whole quest's deferred list once.
+`converge-verify` runs the slow gate on the quest's own base; a failure resumes the sweep
+in fix-vs-tolerate triage, and a toleration escapes forward so the gate never re-runs.
 
 ```mermaid
 flowchart TD
-  in([from implement]) --> IR{{"integrate-rebase<br/>branch onto base"}}
-  IR -->|"already current"| FIN
-  IR -->|"clean rebase"| IV
-  IR -->|conflicts| INT["integrator<br/>resolve conflicts"]
-  IR -. "bad ref / dirty" .-> HUMAN([pause → human])
-  INT --> IV{{"integrate-verify"}}
-  IV -. fail .-> INT
+  in([from implement]) --> GC["gap-check"]
+  GC -->|"gap → corrective plan (supercycle)"| toplan([→ plan-writer])
+  GC -->|clean| QR["quest-review<br/>(batch-code-reviewer)"]
+  QR -->|task_gap| totl([→ task-lead])
+  QR -. Error .-> HUMAN([pause → human])
+  QR --> DS["deferred-sweep<br/>coder + code-reviewer"]
+  DS -->|"slow gate tolerated"| out([→ wait-for-head])
+  DS --> CV{{"converge-verify · slow"}}
+  CV -. "fail → triage" .-> DS
+  CV -. timeout .-> HUMAN
+  CV --> out
+```
+
+### Phase integrate
+
+The FIFO merge queue. `wait-for-head` acquires the merge lane and holds it for the rest
+of the phase. `integrate-rebase` routes on four outcomes: base unmoved with the tree
+already cleared skips straight to `summarizer` with no re-review; a clean rebase or an
+uncleared tree goes to `validate-memory`; a conflict hands off to `reconciler`; a bad
+base ref or dirty tree pauses. `validate-memory` re-runs imp's own load-time memory
+validation over the merged tree. `integration-verify` routes to `integration-reviewer` on
+**both** pass and failure — a failure asks the reviewer to adjudicate fix-vs-tolerate
+rather than pausing. `finalize` is the human gate; a rework releases the merge lane on
+its way back to `plan-writer`.
+
+```mermaid
+flowchart TD
+  in([from converge]) --> WFH{"wait-for-head<br/>(merge lane)"}
+  WFH --> IR{{"integrate-rebase"}}
+  IR -->|"base unmoved, tree cleared"| SUM
+  IR -->|"rebased / needs re-verify"| VM
+  IR -->|conflicts| REC["reconciler"]
+  IR -. "bad ref / dirty tree" .-> HUMAN([pause → human])
+  REC --> VM{{"validate-memory"}}
+  REC -. stuck .-> HUMAN
+  VM -. "invalid imp/memory/" .-> REC
+  VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
-  IV --> FIN["finalize<br/>review resolution · summarize ·<br/>HUMAN: merge / rework / pause"]
+  IV --> IRV["integration-reviewer"]
+  IRV -->|"blocking / minors"| REC
+  IRV -. Error .-> HUMAN
+  IRV --> SUM["summarizer"]
+  SUM --> FIN["finalize<br/>HUMAN: merge / rework / pause"]
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN
-  FIN -->|merge| out([→ integrate])
-```
-
-### Phase ⑤ integrate
-
-A cheap freshness check, then the lock-protected engine-native merge. If base moved, loop back to re-integrate.
-
-```mermaid
-flowchart TD
-  in([from review]) --> BFC{"base-fresh-check"}
-  BFC -->|"base unchanged"| M2B{"merge-to-base<br/>(lock-protected)"}
-  BFC -->|"base advanced"| reint([→ integrate-rebase])
+  FIN -->|merge| CM{{"cleanup-merge"}}
+  CM -->|"fixup conflict"| ASR["autosquash-resolve-merge"]
+  ASR --> CM
+  CM --> AST{{"assert-stamped"}}
+  AST -. "unstamped / fixup left" .-> HUMAN
+  AST --> M2B["merge-to-base"]
   M2B -->|MERGED| done([quest complete<br/>worktree removed · archived])
-  M2B -->|STALE| reint
+  M2B -->|CONFLICT| IR
+  M2B -->|DIRTY| REC
+  M2B -. REFUSED .-> HUMAN
 ```
 
 ### Agent reference
 
-| Agent | Tier | Role |
-|---|---|---|
-| `spec-writer` | high | Brainstorm with user, name the quest, write+commit the spec. |
-| `spec-reviewer` | high | Review spec vs captured intent; blocking iff Critical/Major. |
-| `plan-writer` | high | Write the next bite-sized `plan-N` from spec + progress. |
-| `plan-reviewer` | high | Run directly as the `plan-review` step. Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
-| `task-lead` | medium | Implement controller: pick task, dispatch implementer + reviewer, adjudicate, commit one unit, record progress. |
-| `implementer` | medium | Implement one task / apply directed fixes; commit. |
-| `quality-reviewer` | medium | Per-task read-only quality review back to task-lead. |
-| `review-panel` | medium | Whole-diff coordinator; dispatches the four opus reviewers, dedupes/filters their advisory findings, routes approve / task_gap / plan_gap. |
-| `code-reviewer` | high | Generalist whole-change review vs spec (correctness + completeness). |
-| `completeness-slice` | high | Every changed symbol's callers and parallel paths. |
-| `spec-compliance-slice` | high | Does the code do exactly what the spec/task says. |
-| `boundaries-slice` | high | Edge cases: empty/None/overflow, error handling at extremes. |
-| `deferred-sweep` | medium | Drain deferred followups with a 3-way disposition (silent / fix+FYI / surface); may dispatch implementer + quality-reviewer for fixes. |
-| `plan-cycle-check` | medium | Decide if the spec needs another plan (supercycle) or is covered. |
-| `autosquash-resolve` | high | Resolve a fixup-fold rebase conflict, preserving the pre-squash tree. |
-| `integrator` | high | Merge base into the branch; resolve textual + semantic conflicts. |
-| `finalize` | high | Final gate: review the base-merge resolution, write the end-of-change summary (queryable via `imp log`), and decide merge / rework / pause. |
-| `explorer` | — | Read-only helper: fast codebase exploration with file:line citations (dispatched by spec-writer / plan-writer). |
-| `researcher` | — | Read-only helper: web search + fetch (and codebase grounding), reports cited findings. |
+Step agents — the step name is spelled out because three of them differ from the file
+name:
+
+| Agent file | Step | Tier | Role |
+|---|---|---|---|
+| `threshold` | `threshold` | high | Front-door conversation: answer, scout, or scope; set the ceremony and go live. |
+| `spec-finalizer` | `spec-finalizer` | high | Adopt the threshold draft, commit the final spec with its plan outline, service the review loop. |
+| `spec-reviewer` | `spec-reviewer` | high | Review the spec against captured intent; blocking iff Critical/Major. |
+| `plan-writer` | `plan-writer` | high | Write this outline plan's slice — the HOW — and commit it. |
+| `plan-reviewer` | `plan-reviewer` | high | Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
+| `task-lead` | `task-lead` | high | Implement controller: pick a task, dispatch coder + reviewer, adjudicate, commit one unit, record progress. |
+| `gap-check` | `gap-check` | high | Once-per-quest coverage backstop: do the implemented plans cover the spec, or is a corrective plan needed. |
+| `batch-code-reviewer` | `quest-review` | high | The single quest-wide code review of the whole diff vs the spec; routes approve / task_gap. |
+| `deferred-sweep` | `deferred-sweep` | high | Drain the quest's deferred followups once; may dispatch coder + code-reviewer for fixes. |
+| `reconciler` | `reconciler` | high | Reconcile the branch against a moved base: resolve conflicts, fix what the base broke. |
+| `integration-review` | `integration-reviewer` | high | At-head semantic integration review; classifies findings and routes back to the reconciler. |
+| `summarizer` | `summarizer` | medium | Write the quest's intent-level summary artifact. |
+| `finalize` | `finalize` | high | The human gate: merge / rework / pause. |
+| `autosquash-resolve` | `autosquash-resolve-merge` | high | Resolve a fixup-fold rebase conflict, preserving the pre-squash tree. |
+
+Tiers come from `workflow.yaml`, which declares every step `high` except `summarizer`
+(medium).
+
+These are dispatched via `subagents:` frontmatter and are **never** a workflow step:
+
+| Subagent | Dispatched by |
+|---|---|
+| `coder` | `task-lead`, `deferred-sweep` |
+| `code-reviewer` | `task-lead`, `deferred-sweep` |
+| `explorer` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |
+| `researcher` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |
+| `spiker` | `threshold`, `spec-finalizer`, `task-lead`, `finalize` |
 
 ### Data files
 
 These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. Spec/plan artifacts are journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
 
+The columns list the **principal** writers and readers, not an exhaustive census —
+`deferred.md` in particular is appended to by many agents (any agent may file a
+`— needs-decision:` item) and read by more still, and enumerating that is drift bait.
+
 | File (relative to the quest home) | Written by | Read by |
 |---|---|---|
-| `artifacts/spec/{slug}.md` | spec-writer | all phases |
-| `artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
-| `progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
+| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases |
+| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer |
+| `artifacts/summary/{id}.md` | summarizer — or threshold itself on an express quest | finalize, `imp show` |
+| `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
+| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |
 
 ---
 

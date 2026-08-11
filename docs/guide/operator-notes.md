@@ -19,8 +19,9 @@ Runbook for operating a running imp quest.
   The old cherry-pick-onto-branch recipe only works when there is *no* snapshot.
 - **Skew deadlock:** the snapshot is taken once and never auto-refreshed (the
   `--refresh-workflow` re-snapshot is unbuilt — `executor.py` references it only
-  as a hypothetical). A quest that edits its own `plan-writer` / `spec-writer`
-  *and* adds an invariant runs the OLD writers while `review` enforces the NEW
+  as a hypothetical). A quest that edits its own `plan-writer` / `spec-finalizer`
+  *and* adds an invariant runs the OLD writers while `plan-reviewer` /
+  `spec-reviewer` enforce the NEW
   invariant, producing an infinite remove/restore loop; `max_loops` is the only
   backstop. Recognize it when a quest loops on "removing/restoring its own
   plan/workflow file"; unblock by editing the snapshot.
