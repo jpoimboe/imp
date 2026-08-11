@@ -325,7 +325,10 @@ INTEGRATE_DIAGRAM = """flowchart TD
   IV --> IRV["integration-reviewer"]
   IRV -->|"blocking / minors"| REC
   IRV -. Error .-> HUMAN
-  IRV --> SUM["summarizer"]
+  IRV --> CC{{"check-cleared"}}
+  CC -->|"not cleared"| IV
+  CC -. error .-> HUMAN
+  CC --> SUM["summarizer"]
   SUM --> FIN["finalize<br/>HUMAN: merge / rework / pause"]
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN
@@ -368,6 +371,17 @@ def test_architecture_implement_phase_disclaims_the_moved_work() -> None:
         "all of that moved to `converge`." in flat
     )
     assert "`verify` runs the project's fast test gate" in flat
+
+
+def test_architecture_integrate_phase_prose_names_the_merge_door() -> None:
+    # the phase prose is hard-wrapped; compare against a whitespace-flattened copy
+    flat = " ".join(ARCH.read_text().split())
+    assert (
+        "`check-cleared` then re-asks the shared clearance predicate at the merge "
+        "door: a tree the slow gate never passed — an environmental failure the "
+        "reviewer repaired, say — routes back to `integration-verify` instead of "
+        "reaching the human." in flat
+    )
 
 
 def test_architecture_step_agent_table_pairs_files_with_steps_and_tiers() -> None:

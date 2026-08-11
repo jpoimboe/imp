@@ -276,8 +276,11 @@ uncleared tree goes to `validate-memory`; a conflict hands off to `reconciler`; 
 base ref or dirty tree pauses. `validate-memory` re-runs imp's own load-time memory
 validation over the merged tree. `integration-verify` routes to `integration-reviewer` on
 **both** pass and failure — a failure asks the reviewer to adjudicate fix-vs-tolerate
-rather than pausing. `finalize` is the human gate; a rework releases the merge lane on
-its way back to `plan-writer`.
+rather than pausing. `check-cleared` then re-asks the shared clearance predicate at the
+merge door: a tree the slow gate never passed — an environmental failure the reviewer
+repaired, say — routes back to `integration-verify` instead of reaching the human.
+`finalize` is the human gate; a rework releases the merge lane on its way back to
+`plan-writer`.
 
 ```mermaid
 flowchart TD
@@ -295,7 +298,10 @@ flowchart TD
   IV --> IRV["integration-reviewer"]
   IRV -->|"blocking / minors"| REC
   IRV -. Error .-> HUMAN
-  IRV --> SUM["summarizer"]
+  IRV --> CC{{"check-cleared"}}
+  CC -->|"not cleared"| IV
+  CC -. error .-> HUMAN
+  CC --> SUM["summarizer"]
   SUM --> FIN["finalize<br/>HUMAN: merge / rework / pause"]
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN
