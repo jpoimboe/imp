@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from imp.cli import narrative as nv
 from imp.cli.narrative import NarrativeBuilder
 from imp.cli.render_text import render_tree
+from imp.engine.shim import outer_imp_mismatch
 
 
 def _nodes(events: list[dict], cls: type) -> list:
@@ -54,6 +57,27 @@ def test_warning_tallies_into_summary() -> None:
             "payload": {"source": "artifact_harvest",
                         "message": "harvest skipped: git fatal", "detail": {}}})
     assert "harvest skipped: git fatal" in nb._warnings
+
+
+def test_outer_imp_mismatch_renders_as_a_counted_warning(tmp_path: Path) -> None:
+    (tmp_path / "src" / "imp").mkdir(parents=True)
+    (tmp_path / "src" / "imp" / "__init__.py").write_text("")
+    message = outer_imp_mismatch(tmp_path)
+    assert message is not None
+    event = {"type": "warning",
+             "payload": {"source": "outer_imp", "message": message, "detail": {}}}
+
+    errors = _nodes([event], nv.ErrorNode)
+    assert len(errors) == 1
+    assert errors[0].is_warning is True
+    assert errors[0].message == message
+
+    nb = NarrativeBuilder()
+    nb.add(event)
+    assert nb._warnings == [message]
+
+    out = "\n".join(render_tree(nv.build_tree([event]), full=False, color=False, width=200))
+    assert "warning: outer imp mismatch: " in out
 
 
 def test_unrelated_unknown_type_still_falls_back() -> None:

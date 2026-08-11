@@ -80,7 +80,7 @@ from imp.engine.sandbox import (
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.seed import seed_workflow_start
-from imp.engine.shim import imp_shim_dir, write_imp_shim
+from imp.engine.shim import imp_shim_dir, outer_imp_mismatch, write_imp_shim
 from imp.engine.state import (
     CurrentStep,
     EventLog,
@@ -442,6 +442,10 @@ async def run_quest(
                 _emit(log, "warning",
                       {"source": "workflow_load", "message": warning_message,
                        "detail": {}},
+                      agent_id=None)
+            if (message := outer_imp_mismatch(quest.control_root)) is not None:
+                _emit(log, "warning",
+                      {"source": "outer_imp", "message": message, "detail": {}},
                       agent_id=None)
         # First-resume bootstrap for a deferred backlog draft: an unstarted,
         # never-seeded stub (step None, has_started False) had its cursor + vars
