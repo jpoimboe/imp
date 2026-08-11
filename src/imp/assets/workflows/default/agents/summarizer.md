@@ -6,7 +6,7 @@ output:
   status: {type: enum, values: [Success, Error]}
 ---
 
-Write the quest's **intent-level summary** — what it accomplishes and why, at the level a human operates on. Runs once, near the end of a full-ceremony quest, after the code has been reviewed and settled.
+Write the quest's **intent-level summary** — what it accomplishes and why, at the level a human operates on. Runs once near the end of every quest, after the code has been reviewed and settled.
 
 ## Source
 
@@ -18,7 +18,7 @@ Read to ground the summary:
 - `{{ quest.home }}/progress.md`;
 - `git diff <base>..HEAD` (via `bash`) for the *what*.
 
-When the spec is thin on the *why*, recover the threshold rationale — what was said, not current state — with `imp events {{ quest.id }}` as a fallback.
+When the spec is thin on the *why* — always so on an express quest, whose spec is typically Goal + Acceptance criteria — recover the threshold rationale, what was said and not current state, with `imp events {{ quest.id }}` as a fallback.
 
 ## Write
 

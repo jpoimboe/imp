@@ -42,18 +42,8 @@ When the user wants to build, do three things in this turn:
 
 Write the draft spec (Goal + Acceptance criteria at minimum, full four-part structure
 when the quest warrants it) to `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`,
-then finish the turn with `complete_step` (on the full path), emitting the chosen
-`ceremony`. The spec carries across the step boundary on disk for the phase-1
-spec-finalizer to adopt.
-
-On the **express path only** (you are about to emit `ceremony: express`), do this in
-the same go-live turn **before** that `complete_step`: the spec phase and the
-end-of-quest `summarizer` step are both skipped, so **you** author the quest's
-intent-level summary here, drawing the *why* from the just-finished conversation. Write
-`{{ quest.home }}/artifacts/summary/{{ quest.id }}.md` — one tight intent-level headline
-paragraph (what this quest accomplishes and why), plus a text/ASCII diagram **only**
-when the quest genuinely altered structure (omit it otherwise; no mermaid). On the
-full path do **not** write the summary — the `summarizer` step does.
+then finish the turn with `complete_step`, emitting the chosen `ceremony`. The spec
+carries across the step boundary on disk for the phase-1 spec-finalizer to adopt.
 
 ## Building vs. answering inline
 
