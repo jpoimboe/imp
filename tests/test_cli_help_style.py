@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import sys
 from typing import Any
@@ -332,6 +333,35 @@ def test_top_level_help_paints_only_the_taglines_wordmark(
     assert text.count(GOLD) == 1
     assert f"{GOLD}imp{RESET} — multi-agent software development workflow\n" in text
     assert _escapes(text) == {DIM, RESET, GOLD}
+
+
+def test_print_help_styles_follow_destination_stream_not_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.delenv("CLICOLOR_FORCE", raising=False)
+
+    parser = _demo()
+
+    # Destination is a tty; stdout is piped — paint and trailing blank follow destination.
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    dest_tty = io.StringIO()
+    monkeypatch.setattr(dest_tty, "isatty", lambda: True)
+    parser.print_help(dest_tty)
+    tty_output = dest_tty.getvalue()
+
+    # Destination is piped; stdout is a tty — no paint, no trailing blank.
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    dest_piped = io.StringIO()
+    monkeypatch.setattr(dest_piped, "isatty", lambda: False)
+    parser.print_help(dest_piped)
+    piped_output = dest_piped.getvalue()
+
+    assert tty_output.endswith("\n\n") and not tty_output.endswith("\n\n\n")
+    assert piped_output.endswith("\n") and not piped_output.endswith("\n\n")
+    assert "\x1b" in tty_output
+    assert "\x1b" not in piped_output
 
 
 def test_subcommand_descriptions_never_carry_the_wordmark(

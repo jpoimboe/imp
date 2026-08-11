@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from imp.cli import palette as pal
+
+if TYPE_CHECKING:
+    from _typeshed import SupportsWrite
 
 TAGLINE = "imp — multi-agent software development workflow"
 
@@ -30,6 +33,7 @@ class ImpHelpFormatter(argparse.HelpFormatter):
     """Auto-wrapping variant, for flowing-prose descriptions."""
 
     _wordmark = False
+    _target_stream: SupportsWrite[str] | None = None
 
     def add_argument(self, action: argparse.Action) -> None:
         # Skip _decolor: absent before 3.14; imp sets color=False so invocations carry no escapes.
@@ -45,11 +49,12 @@ class ImpHelpFormatter(argparse.HelpFormatter):
             self._add_item(self._format_action, [action])
 
     def format_help(self) -> str:
+        stream = self._target_stream if self._target_stream is not None else sys.stdout
         text = super().format_help()
-        if pal.should_use_color(sys.stdout):
+        if pal.should_use_color(stream):
             text = _paint(text, wordmark=self._wordmark)
         # Probed: add_subparsers() formats at construction, when stdout may lack isatty.
-        if getattr(sys.stdout, "isatty", lambda: False)():
+        if getattr(stream, "isatty", lambda: False)():
             text += "\n"
         return text
 
@@ -67,8 +72,23 @@ class ImpParser(argparse.ArgumentParser):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs.setdefault("formatter_class", ImpHelpFormatter)
+        # Pre-assign before super().__init__: on 3.14, add_argument('-h') triggers _get_formatter.
+        self._help_target: SupportsWrite[str] | None = None
         super().__init__(*args, **kwargs)
         self.color = False
+
+    def _get_formatter(self) -> argparse.HelpFormatter:
+        formatter = super()._get_formatter()
+        if isinstance(formatter, ImpHelpFormatter):
+            formatter._target_stream = self._help_target
+        return formatter
+
+    def print_help(self, file: SupportsWrite[str] | None = None) -> None:
+        self._help_target = file if file is not None else sys.stdout
+        try:
+            super().print_help(file)
+        finally:
+            self._help_target = None
 
     def format_usage(self) -> str:
         # A usage line printed by error() is not help output; no trailing blank.
