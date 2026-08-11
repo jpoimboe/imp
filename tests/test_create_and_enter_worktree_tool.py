@@ -205,3 +205,160 @@ async def test_tool_recomputes_git_worktree_self_after_go_live(tmp_path: Path) -
     assert pol.allows_write(tmp_path / ".git" / "worktrees" / "t9" / "HEAD") is True
     # ...while a sibling admin dir stays masked.
     assert pol.allows_write(tmp_path / ".git" / "worktrees" / "other" / "HEAD") is False
+
+
+def _set_worktree_setup(root: Path, command: str) -> None:
+    """Declare worktree_setup in the MAIN CHECKOUT's project layer."""
+    cfg = root / "imp" / "config.yaml"
+    cfg.write_text(cfg.read_text() + f"worktree_setup: {json.dumps(command)}\n")
+
+
+@pytest.mark.anyio
+async def test_no_setup_command_runs_when_worktree_setup_is_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.create_and_enter_worktree as cew
+
+    calls: list[dict] = []
+
+    def _record(**kw: object) -> dict[str, object]:
+        calls.append(kw)
+        return {"exit": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(cew, "run_command", _record)
+    _seed_control(tmp_path)                       # seeds no worktree_setup
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s1", base_branch="main")
+    await get_registry()["create_and_enter_worktree"].async_invoke(
+        _ctx(ch, State.load(ch.state_dir)), {})
+    assert calls == []                            # no-regression for every other repo
+
+
+@pytest.mark.anyio
+async def test_setup_runs_once_in_the_new_worktree_under_the_quest_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.create_and_enter_worktree as cew
+
+    calls: list[dict] = []
+
+    def _record(**kw: object) -> dict[str, object]:
+        calls.append(kw)
+        return {"exit": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(cew, "run_command", _record)
+    _seed_control(tmp_path)
+    _set_worktree_setup(tmp_path, "uv sync --all-extras")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s2", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    ctx.base_sandbox_policy = _active_policy(str(tmp_path))
+    await get_registry()["create_and_enter_worktree"].async_invoke(ctx, {})
+    wt = project_state_dir(tmp_path) / "worktrees" / "s2"
+    assert len(calls) == 1
+    assert calls[0]["command"] == "uv sync --all-extras"
+    assert calls[0]["cwd"] == str(wt)
+    assert calls[0]["timeout_seconds"] == 600
+    assert calls[0]["policy"] is ctx.sandbox_policy       # the quest's live policy...
+    assert calls[0]["policy"].worktree == str(wt)         # ...already repointed
+
+
+@pytest.mark.anyio
+async def test_setup_is_dispatched_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any
+
+    import anyio.to_thread
+
+    from imp.engine.gates import run_command as real_run_command
+
+    dispatched: list[object] = []
+    real_run_sync = anyio.to_thread.run_sync
+
+    async def _spy(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        dispatched.append(fn)
+        return await real_run_sync(fn, *args, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", _spy)
+    _seed_control(tmp_path)
+    _set_worktree_setup(tmp_path, "true")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s3", base_branch="main")
+    await get_registry()["create_and_enter_worktree"].async_invoke(
+        _ctx(ch, State.load(ch.state_dir)), {})
+    setup = [fn for fn in dispatched
+             if getattr(fn, "func", None) is real_run_command]
+    assert len(setup) == 1
+
+
+@pytest.mark.anyio
+async def test_setup_reruns_on_a_second_call(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _set_worktree_setup(tmp_path, "echo ran >> setup.log")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s4", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    tool = get_registry()["create_and_enter_worktree"]
+    await tool.async_invoke(ctx, {})
+    await tool.async_invoke(ctx, {})              # materialize() is a no-op; setup is not
+    wt = project_state_dir(tmp_path) / "worktrees" / "s4"
+    assert (wt / "setup.log").read_text() == "ran\nran\n"
+
+
+@pytest.mark.anyio
+async def test_setup_failure_raises_fatal_with_stdout_then_stderr(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.tools.errors import FatalToolError
+
+    _seed_control(tmp_path)
+    cmd = "echo OUT; echo ERR >&2; exit 3"
+    _set_worktree_setup(tmp_path, cmd)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s5", base_branch="main")
+    with pytest.raises(FatalToolError) as ei:
+        await get_registry()["create_and_enter_worktree"].async_invoke(
+            _ctx(ch, State.load(ch.state_dir)), {})
+    msg = str(ei.value)
+    assert msg == f"worktree_setup failed (exit 3): {cmd}\n\nOUT\nERR\n"
+    assert msg.index("OUT") < msg.index("ERR")    # stdout first, never interleaved
+
+
+@pytest.mark.anyio
+async def test_setup_failure_reaches_the_provider_fatal_channel(
+    tmp_path: Path,
+) -> None:
+    """A FatalToolError lands on the provider's fatal channel, not a tool result."""
+    from imp.providers.codex_mcp import RunState, dispatch_tool
+
+    _seed_control(tmp_path)
+    _set_worktree_setup(tmp_path, "exit 7")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s6", base_branch="main")
+    state = RunState(cap=10)
+    out = await dispatch_tool(
+        tool=get_registry()["create_and_enter_worktree"], args={},
+        ctx=_ctx(ch, State.load(ch.state_dir)), state=state)
+    assert state.fatal_tool_error is not None
+    tool_name, msg = state.fatal_tool_error
+    assert tool_name == "create_and_enter_worktree"
+    assert msg.startswith("worktree_setup failed (exit 7): exit 7")
+    assert "fatal tool error" in out
+
+
+@pytest.mark.anyio
+async def test_setup_timeout_is_reported_through_the_failure_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.create_and_enter_worktree as cew
+    from imp.agents.tools.errors import FatalToolError
+
+    monkeypatch.setattr(cew, "WORKTREE_SETUP_TIMEOUT_S", 1)
+    _seed_control(tmp_path)
+    _set_worktree_setup(tmp_path, "sleep 30")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s7", base_branch="main")
+    with pytest.raises(FatalToolError) as ei:
+        await get_registry()["create_and_enter_worktree"].async_invoke(
+            _ctx(ch, State.load(ch.state_dir)), {})
+    assert str(ei.value) == "worktree_setup timed out after 1s: sleep 30"
+
+
+def test_setup_ceiling_is_600_seconds() -> None:
+    import imp.agents.tools.create_and_enter_worktree as cew
+
+    assert cew.WORKTREE_SETUP_TIMEOUT_S == 600      # fixed; no second config key
