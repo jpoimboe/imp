@@ -356,6 +356,16 @@ def test_memory_doc_names_the_local_write_scope() -> None:
     assert "Its first line, `project state:`, names this checkout's state directory." in flat
 
 
+def test_memory_doc_documents_worktree_setup() -> None:
+    flat = " ".join(_memory_doc().split())
+    assert (
+        "`worktree_setup` — a shell command imp runs in each newly created quest "
+        "worktree, before the first step, for toolchains that keep dependencies in a "
+        "gitignored per-tree directory (`.venv`, `node_modules`, `vendor/bundle`) that "
+        "`git worktree` does not materialize. Unset means no setup command runs."
+    ) in flat
+
+
 def test_knowledge_cheat_sheet_names_the_local_write_scope() -> None:
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert "led by this checkout's `project state:` directory (not under `--explain`)" in flat

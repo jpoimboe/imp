@@ -21,17 +21,17 @@ GATE_KILL_GRACE_S = 2.0  # SIGTERM-to-SIGKILL grace window for a gate subprocess
 _POLL_INTERVAL_S = 0.5  # max interrupt-to-kill latency: one poll tick
 _READ_CHUNK_BYTES = 64 * 1024  # per os.read() chunk off each stream
 GATE_OUTPUT_CAP_BYTES = 128 * 1024 * 1024  # total stdout+stderr retained before teardown
-GATE_HARD_CEILING_S = 1800  # wall-clock deadline used only when step.timeout_seconds is None
+GATE_HARD_CEILING_S = 1800  # wall-clock deadline used only when timeout_seconds is None
 
 
 class ScriptInterrupted(Exception):
-    """Raised by run_script when its abort predicate fires mid-run. The process
+    """Raised by run_command when its abort predicate fires mid-run. The process
     group has already been torn down gracefully; the caller treats this as a
     pre-navigation pause, not a gate verdict."""
 
 
 class ScriptOutputExceeded(subprocess.SubprocessError):
-    """Raised by run_script when a gate's total stdout+stderr exceeds
+    """Raised by run_command when a gate's total stdout+stderr exceeds
     GATE_OUTPUT_CAP_BYTES. The process group has already been torn down
     gracefully; the caller lets it propagate to the executor's last-resort guard,
     exactly as a gate TimeoutExpired does today (no dedicated pause verb)."""
@@ -88,12 +88,13 @@ def evaluate_rules(
     raise AssertionError("no rule matched and no else (validator should have caught this)")
 
 
-def run_script(
-    step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
-    policy: SandboxPolicy | None = None, command: str | None = None,
+def run_command(
+    *, command: str, cwd: str, timeout_seconds: int | None,
+    env_extra: dict[str, str] | None = None,
+    policy: SandboxPolicy | None = None,
     abort: Callable[[], bool] | None = None, shim_dir: str = "",
 ) -> dict[str, Any]:
-    """Run a script step; return {exit, stdout, stderr} for rule evaluation.
+    """Run one shell command; return {exit, stdout, stderr}.
 
     The command string is an explicit shell expression read live from the
     quest's own worktree (principal-based trust: the quest author and workflow
@@ -105,28 +106,24 @@ def run_script(
     timeout must kill the process GROUP, not just the bwrap pid — else the inner
     `sh` is orphaned. So this uses Popen(start_new_session=True) + an owned
     selectors drain loop and a graceful group kill (SIGTERM -> grace -> SIGKILL)
-    on the timeout, abort, and output-cap paths. A gate's cwd (step.cwd or cwd)
-    must lie inside the writable set (worktree/`/tmp`); a gate pointed at the RO
-    floor fails.
+    on the timeout, abort, and output-cap paths. `cwd` must lie inside the
+    writable set (worktree/`/tmp`); a command pointed at the RO floor fails.
 
     `env_extra` (an engine_env result) is overlaid authoritatively so engine vars
     are visible while a stale inherited engine var cannot leak (engine_env's
     "absent => no gate" contract).
     """
-    cmd = command if command is not None else step.command
-    assert cmd is not None, "script step must have a command"
     env = overlay_engine_env(os.environ, env_extra or {})
     if shim_dir:
         env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
-    run_cwd = step.cwd or str(cwd)
     # The policy's setenv was frozen at run start (possibly with an empty
     # name-on-intent slug), so the live engine_env (env_extra) is the authoritative
     # source that refreshes IMP_* inside the bwrap --clearenv jail.
-    argv = (build_sandbox_argv(cmd, cwd=run_cwd, policy=prepare_spawn_policy(policy),
+    argv = (build_sandbox_argv(command, cwd=cwd, policy=prepare_spawn_policy(policy),
                                engine_env=env_extra or {})
-            if policy is not None else ["sh", "-c", cmd])
+            if policy is not None else ["sh", "-c", command])
     proc = subprocess.Popen(
-        argv, cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env, start_new_session=True,
     )
     # Owned selector drain: os.read chunks off stdout/stderr as they arrive (so a
@@ -144,7 +141,7 @@ def run_script(
     # the child has exited and both streams are drained.
     assert proc.stdout is not None and proc.stderr is not None
     start = time.monotonic()
-    timeout = (step.timeout_seconds if step.timeout_seconds is not None
+    timeout = (timeout_seconds if timeout_seconds is not None
                else GATE_HARD_CEILING_S)
     out_buf = bytearray()
     err_buf = bytearray()
@@ -170,7 +167,11 @@ def run_script(
                     raise ScriptInterrupted from None
                 if now - start >= timeout:
                     _graceful_kill(proc)
-                    raise subprocess.TimeoutExpired(proc.args, timeout) from None
+                    raise subprocess.TimeoutExpired(
+                        proc.args, timeout,
+                        output=out_buf.decode("utf-8", "replace").rstrip(),
+                        stderr=err_buf.decode("utf-8", "replace"),
+                    ) from None
                 next_check = now + _POLL_INTERVAL_S
             if selector.get_map():
                 for key, _mask in selector.select(_POLL_INTERVAL_S):
@@ -202,3 +203,17 @@ def run_script(
         "stdout": out_buf.decode("utf-8", "replace").rstrip(),
         "stderr": err_buf.decode("utf-8", "replace"),
     }
+
+
+def run_script(
+    step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
+    policy: SandboxPolicy | None = None, command: str | None = None,
+    abort: Callable[[], bool] | None = None, shim_dir: str = "",
+) -> dict[str, Any]:
+    """Unpack a script step's command/cwd/timeout and run it via run_command."""
+    cmd = command if command is not None else step.command
+    assert cmd is not None, "script step must have a command"
+    return run_command(
+        command=cmd, cwd=step.cwd or str(cwd),
+        timeout_seconds=step.timeout_seconds, env_extra=env_extra,
+        policy=policy, abort=abort, shim_dir=shim_dir)

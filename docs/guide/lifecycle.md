@@ -54,7 +54,11 @@ decide it: whether it has been **materialized**, and its **origin**.
 A draft has **no branch and no worktree** until the user builds it. Going live
 calls `create_and_enter_worktree`, which forks a fresh branch and worktree from
 the base branch's current tip and switches the quest into it. Before that, a
-draft is just a conversation and its artifacts on disk.
+draft is just a conversation and its artifacts on disk. If the project sets
+`worktree_setup`, imp runs that command in the new worktree before the first
+step — and re-runs it on every `create_and_enter_worktree` call, since a fresh
+worktree has none of the gitignored per-tree directories a toolchain needs. A
+failure pauses the quest with the command's output.
 
 ## Entry points
 

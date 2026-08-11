@@ -63,6 +63,7 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
          else f"{cfg.test_cmd_fast_timeout}s"),
         ("test_cmd_slow_timeout", "(default 300s)" if cfg.test_cmd_slow_timeout is None
          else f"{cfg.test_cmd_slow_timeout}s"),
+        ("worktree_setup", cfg.worktree_setup or "(unset)"),
     ):
         leaf_src = prov.get((key,))
         label = layer_label(leaf_src.file) if leaf_src is not None else "default"

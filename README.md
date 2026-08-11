@@ -301,7 +301,7 @@ imp resume <id>                                 # pick up a paused change
 
 imp is **pre-release** and has built itself since June 2026: 79% of the lines in `src/` arrived on a branch imp specified, reviewed, tested, and merged on its own. The engine and the default workflow are in daily use; interfaces may still shift before a tagged release.
 
-Issues and pull requests are welcome. Start from a clone with `python3 -m pip install -e '.[dev]'` and run `make check` (lint, types, lockfile, tests) before opening a PR.
+Issues and pull requests are welcome. Start from a clone with `make sync-env` (builds a `.venv` from `uv.lock`) and run `make check` (lint, types, lockfile, tests) before opening a PR.
 
 ## License
 

@@ -329,3 +329,19 @@ def test_default_workflow_non_string_rejected(tmp_path: Path) -> None:
     p.write_text("default-workflow: 3\n")
     with pytest.raises(LoadError):
         parse_config_layer(p)
+
+
+def test_worktree_setup_string_is_kept(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("worktree_setup: uv sync --all-extras\n")
+    layer, _src = parse_config_layer(p)  # type: ignore[misc]
+    assert layer["worktree_setup"] == "uv sync --all-extras"
+
+
+def test_worktree_setup_rejects_a_non_string(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("worktree_setup: [uv, sync]\n")
+    with pytest.raises(LoadError) as excinfo:
+        parse_config_layer(p)
+    assert excinfo.value.message == (
+        "'worktree_setup' must be a string (e.g. \"uv sync --all-extras\")")

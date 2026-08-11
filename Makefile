@@ -9,7 +9,7 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-PYTHON   ?= python3
+PYTHON   ?= $(CURDIR)/.venv/bin/python
 PYTEST   ?= $(PYTHON) -m pytest
 RUFF     ?= $(PYTHON) -m ruff
 MYPY     ?= $(PYTHON) -m mypy
@@ -40,14 +40,6 @@ XDIST    ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n auto --d
 # Override: LIVE_XDIST="-n 2" to lighten load; LIVE_XDIST= for serial debugging.
 LIVE_XDIST ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n 4 --dist loadgroup")
 
-# Subprocess tests (`python -m imp ...`, cold-import checks) resolve `imp` via
-# the editable install — which inside a git worktree points at the MAIN checkout,
-# not this tree, so they'd run stale code. Pin spawned subprocesses to THIS
-# checkout's src. Absolute ($(CURDIR)) because a relative path breaks tests that
-# chdir to a tmpdir; prepended so an ambient PYTHONPATH is preserved after it. A
-# no-op in the main checkout (same dir the editable install already resolves).
-PYTEST_PYTHONPATH := PYTHONPATH=$(CURDIR)/src$${PYTHONPATH:+:$$PYTHONPATH}
-
 # Where to source ANTHROPIC_API_KEY from for live tests, when it's not
 # already exported in the shell. Override with KEY_FILE=... if you keep
 # your key somewhere else.
@@ -62,31 +54,28 @@ help: ## Print this help.
 	     /^[a-zA-Z0-9_.-]+:.*?## / { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' \
 	     $(MAKEFILE_LIST)
 
-.PHONY: install
-install: ## Bootstrap: editable install of imp + dev deps (pytest, ruff, mypy).
-	$(PYTHON) -m pip install -e '.[dev]' 2>/dev/null || $(PYTHON) -m pip install -e .
-
-# `--user` outside a venv, nothing inside one (pip refuses --user in a venv).
-PIP_SCOPE ?= $(shell $(PYTHON) -c "import sys; print('' if sys.prefix != sys.base_prefix else '--user')")
-
+# `uv sync` installs exactly what uv.lock pins into this worktree's .venv; nothing re-resolves.
 .PHONY: sync-env
-sync-env: ## Reconcile this interpreter to uv.lock EXACTLY (fixes `make depcheck` drift).
-	@# `make install` resolves pyproject's loose ranges afresh and happily
-	@# installs versions uv.lock never pinned — that is how the environment
-	@# drifts. This installs the locked set instead, then re-links imp itself
-	@# editable (--no-deps so it cannot re-resolve what we just pinned).
-	$(UV) export --frozen --all-extras --no-emit-project --format requirements-txt \
-	    | $(PYTHON) -m pip install $(PIP_SCOPE) -r /dev/stdin
-	$(PYTHON) -m pip install $(PIP_SCOPE) -e . --no-deps
+sync-env: ## Create/reconcile this worktree's .venv to uv.lock EXACTLY (fixes `make depcheck` drift).
+	$(UV) sync --all-extras
+
+# A target, not a parse-time $(error): sync-env and help must work on a fresh clone.
+.PHONY: require-venv
+require-venv:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "ERROR: no Python at $(PYTHON)" >&2; \
+	  echo "create it with: make sync-env" >&2; \
+	  exit 1; \
+	}
 
 # Scope a run: make test PYTEST_ARGS="tests/foo.py -k name"
 .PHONY: test
-test: ## Fast test suite (skips live-API tests). What CI runs.
-	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
+test: require-venv ## Fast test suite (skips live-API tests). What CI runs.
+	$(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
 
 .PHONY: test-verbose
-test-verbose: ## Same as `test` but with -v.
-	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
+test-verbose: require-venv ## Same as `test` but with -v.
+	$(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
 
 _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
@@ -102,50 +91,46 @@ _LIVE_TEST_FILES := \
   tests/test_parallel_elicitation_live.py
 
 .PHONY: test-live
-test-live: ## Run live-API tests (--run-live); providers whose toolchain/creds are present run, the rest skip.
+test-live: require-venv ## Run live-API tests (--run-live); providers whose toolchain/creds are present run, the rest skip.
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) --run-live -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
+	  timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) --run-live -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-verbose
-test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
+test-live-verbose: require-venv ## test-live but with live progress + raw PTY output streamed to your terminal.
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) --run-live -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
+	  timeout --foreground 1800 $(PYTEST) --run-live -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
-test-live-quick: ## One-step live test for each provider whose toolchain/creds are present.
+test-live-quick: require-venv ## One-step live test for each provider whose toolchain/creds are present.
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    $(PYTEST) --run-live -v \
-	      tests/test_default_workflow_e2e_live.py \
-	      tests/test_default_workflow_e2e_live_openai.py \
-	      tests/test_default_workflow_e2e_live_claude_code.py
+	  $(PYTEST) --run-live -v \
+	    tests/test_default_workflow_e2e_live.py \
+	    tests/test_default_workflow_e2e_live_openai.py \
+	    tests/test_default_workflow_e2e_live_claude_code.py
 
 .PHONY: test-live-codex-parallel
-test-live-codex-parallel: ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).
+test-live-codex-parallel: require-venv ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    $(PYTEST) --run-live -v -m codex_parallel \
-	      tests/test_codex_started_keying_live.py
+	  $(PYTEST) --run-live -v -m codex_parallel \
+	    tests/test_codex_started_keying_live.py
 
 .PHONY: test-all
-test-all: test test-live ## Full suite including live tests.
+test-all: require-venv test test-live ## Full suite including live tests.
 
 .PHONY: lint
-lint: ## Check lint with ruff.
+lint: require-venv ## Check lint with ruff.
 	$(RUFF) check .
 
 .PHONY: lint-fix
-lint-fix: ## Auto-fix ruff issues that can be fixed.
+lint-fix: require-venv ## Auto-fix ruff issues that can be fixed.
 	$(RUFF) check --fix .
 
 .PHONY: format
-format: ## Format code with ruff.
+format: require-venv ## Format code with ruff.
 	$(RUFF) format .
 
 .PHONY: typecheck
-typecheck: ## Run mypy on the source tree.
+typecheck: require-venv ## Run mypy on the source tree.
 	$(MYPY) src
 
 .PHONY: lockcheck
@@ -153,14 +138,14 @@ lockcheck: ## Verify uv.lock is in sync with pyproject.toml.
 	$(UV) lock --check
 
 .PHONY: depcheck
-depcheck: ## Verify the test interpreter has every dependency pyproject declares.
+depcheck: require-venv ## Verify the test interpreter has every dependency pyproject declares.
 	$(PYTHON) scripts/check_deps.py
 
 .PHONY: check
-check: depcheck lint typecheck lockcheck test ## Full pre-merge gate: deps + lint + types + lockfile + tests.
+check: require-venv depcheck lint typecheck lockcheck test ## Full pre-merge gate: deps + lint + types + lockfile + tests.
 
 .PHONY: build
-build: ## Build wheel + sdist into dist/.
+build: require-venv ## Build wheel + sdist into dist/.
 	$(PYTHON) -m build
 
 .PHONY: clean
@@ -171,12 +156,12 @@ clean: ## Remove build artifacts and caches.
 	find . -type f -name '*.pyc' -not -path './.git/*' -delete
 
 .PHONY: snap-ui
-snap-ui: ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
-	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
+snap-ui: require-venv ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
+	$(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
 
 .PHONY: snap-ui-light
-snap-ui-light: ## Same as snap-ui but the light theme on a near-white surface.
-	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
+snap-ui-light: require-venv ## Same as snap-ui but the light theme on a near-white surface.
+	$(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
 
 
 # ── private helpers ─────────────────────────────────────────────────────────

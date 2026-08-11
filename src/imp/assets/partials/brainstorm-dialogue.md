@@ -156,5 +156,5 @@ settled through the brainstorm.
 - **Decline:** call `save_and_exit`. Nothing is built; a later resume re-offers this choice. {% endif %}
 
 A genuine intent-fork still parks for a human even under autonomy; only this gate
-auto-resolves. `create_and_enter_worktree` is a harmless no-op once already live, so a
-resumed build is safe.
+auto-resolves. `create_and_enter_worktree` re-runs the project's `worktree_setup` but
+leaves an existing worktree as-is, so a resumed build is safe.

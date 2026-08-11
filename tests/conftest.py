@@ -193,10 +193,9 @@ def _pin_subprocess_imp_to_working_tree() -> None:
     Pinning PYTHONPATH here, at conftest import (before collection spawns
     anything), shadows the global install for every child that inherits
     os.environ — under `pytest`, `python -m pytest`, IDE runners, and `make`
-    alike. This supersedes the Makefile's `PYTEST_PYTHONPATH` pin, which only
-    covered `make test`. Absolute + prepend-safe + idempotent, mirroring
-    engine_env's per-subprocess injection. Scoped to an imp checkout so an
-    unrelated project's `src/` is never forced onto its subprocesses' path.
+    alike. Absolute + prepend-safe + idempotent, mirroring engine_env's
+    per-subprocess injection. Scoped to an imp checkout so an unrelated
+    project's `src/` is never forced onto its subprocesses' path.
 
     Relies on PYTHONPATH preceding site-packages on sys.path — true for imp's
     path-style editable install. A strict PEP 660 editable that registers a

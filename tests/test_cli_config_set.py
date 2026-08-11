@@ -500,6 +500,16 @@ def test_a_local_write_has_nothing_above_it(
         f'{label}: theme commented out (was "dark")\n')
 
 
+def test_set_worktree_setup_lands_in_the_project_layer(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "worktree_setup", "uv sync --all-extras"]) == 0
+    assert capsys.readouterr().out == (
+        'imp/config.yaml: worktree_setup: "uv sync --all-extras" (new)\n')
+    assert read_back(project / "imp" / "config.yaml", ("worktree_setup",)) == (
+        "uv sync --all-extras")
+
+
 def test_help_copy_matches_the_spec() -> None:
     parser = _build_parser()
     config = next(action.choices["config"] for action in parser._actions
