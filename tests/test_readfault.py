@@ -6,8 +6,11 @@ import os
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from imp.engine import readfault
-from imp.paths import imp_home
+from imp.engine.state import InMemoryEventLog
+from imp.paths import display_path, imp_home
 from tests._dac import dac_enforced
 
 _GOOD = b'{"id": "c1", "step": null, "step_attempt": 0, "status": "new"}\n'
@@ -134,3 +137,109 @@ def test_unwritable_diagnostics_dir_is_inert() -> None:
         _diag().chmod(0o700)
     assert blob is None
     assert not (_diag() / "read-faults.jsonl").exists()
+
+
+def _warnings(log: InMemoryEventLog) -> list[dict[str, Any]]:
+    return [e for e in log.read() if e["type"] == "runner_warning"]
+
+
+def _evidence() -> str:
+    return display_path(_diag() / "read-faults.jsonl")
+
+
+def test_recovered_state_fault_emits_exact_warning_copy() -> None:
+    log = InMemoryEventLog()
+    with readfault.event_sink(log):
+        readfault.record(
+            "state", _STATE_PATH, recovered=True, attempt=1, reason=_REASON,
+            bad=_HEAD_DROP, good=_GOOD)
+    warnings = _warnings(log)
+    assert len(warnings) == 1
+    assert warnings[0]["agent_id"] is None
+    payload = warnings[0]["payload"]
+    assert payload["message"] == (
+        "transient read fault recovered — state.json re-read cleanly "
+        "on attempt 1 (head-drop)")
+    assert payload["detail"] == (
+        f"{_STATE_PATH} — bad {len(_HEAD_DROP)}B, good {len(_GOOD)}B; "
+        f"evidence: {_evidence()}")
+    assert len(_lines()) == 1
+
+
+def test_archive_record_recovery_names_the_record_file() -> None:
+    log = InMemoryEventLog()
+    with readfault.event_sink(log):
+        readfault.record(
+            "archive_record", Path("/q/archive/records/sifo63.json"),
+            recovered=True, attempt=1, reason=_REASON, bad=_TAIL_DROP,
+            good=_GOOD)
+    assert _warnings(log)[0]["payload"]["message"] == (
+        "transient read fault recovered — archive record sifo63.json re-read "
+        "cleanly on attempt 1 (tail-drop)")
+
+
+def test_unrecognised_shape_says_other_shape() -> None:
+    log = InMemoryEventLog()
+    with readfault.event_sink(log):
+        readfault.record(
+            "state", _STATE_PATH, recovered=True, attempt=3, reason=_REASON,
+            bad=b"totally unrelated bytes", good=_GOOD)
+    assert _warnings(log)[0]["payload"]["message"] == (
+        "transient read fault recovered — state.json re-read cleanly "
+        "on attempt 3 (other shape)")
+
+
+def test_unrecovered_fault_emits_no_shape_parenthetical() -> None:
+    log = InMemoryEventLog()
+    with readfault.event_sink(log):
+        readfault.record(
+            "state", _STATE_PATH, recovered=False, attempt=None,
+            reason=_REASON, bad=_HEAD_DROP, good=None)
+    payload = _warnings(log)[0]["payload"]
+    assert payload["message"] == (
+        "read fault NOT recovered — state.json still unparseable "
+        "after 4 re-reads")
+    assert "(" not in payload["message"]
+    assert payload["detail"] == (
+        f"{_STATE_PATH} — bad {len(_HEAD_DROP)}B; evidence: {_evidence()}")
+
+
+def test_event_tail_site_records_but_never_emits() -> None:
+    log = InMemoryEventLog()
+    with readfault.event_sink(log):
+        readfault.record(
+            "event_tail", Path("/q/quests/sifo63/events.jsonl"),
+            recovered=False, attempt=None, reason=_REASON, bad=_HEAD_DROP,
+            good=None)
+    assert _warnings(log) == []
+    assert _lines()[0]["site"] == "event_tail"
+
+
+def test_sink_is_cleared_when_the_context_exits() -> None:
+    log = InMemoryEventLog()
+    with readfault.event_sink(log):
+        pass
+    _record_recovered_head_drop()
+    assert _warnings(log) == []
+    assert len(_lines()) == 1
+
+
+def test_sink_is_cleared_when_the_block_raises() -> None:
+    log = InMemoryEventLog()
+    with pytest.raises(RuntimeError, match="boom"), readfault.event_sink(log):
+        raise RuntimeError("boom")
+    _record_recovered_head_drop()          # a crashed run must not leave a dead log installed
+    assert _warnings(log) == []
+    assert len(_lines()) == 1
+
+
+def test_a_raising_sink_does_not_break_the_file_record() -> None:
+    class _Boom:
+        def append(self, **kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError("sink down")
+
+    with readfault.event_sink(_Boom()):        # type: ignore[arg-type]
+        blob = _record_recovered_head_drop()
+    assert blob is not None
+    assert len(_lines()) == 1
+    assert _lines()[0]["head_drop"] is True

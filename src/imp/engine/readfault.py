@@ -25,18 +25,36 @@ import hashlib
 import itertools
 import json
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from imp.paths import imp_home
+from imp.paths import display_path, imp_home
+
+if TYPE_CHECKING:
+    from imp.engine.state import EventLog
 
 Site = Literal["state", "archive_record", "event_tail"]
 
 # Re-reads attempted at a recovery site before the bytes are declared genuinely bad.
 READ_RETRIES = 4
 
-_SEQ = itertools.count(1)     # two faults in the same second must not collide
+_SEQ = itertools.count(1)  # two faults in the same second must not collide
+
+_sink: EventLog | None = None  # one run per process; see executor's os.chdir NOTE
+
+
+@contextmanager
+def event_sink(log: EventLog) -> Iterator[None]:
+    """Emit a runner_warning for every record() made inside this block."""
+    global _sink
+    _sink = log
+    try:
+        yield
+    finally:
+        _sink = None
 
 
 def _preserve(diag: Path, name: str, bad: bytes) -> Path | None:
@@ -58,17 +76,66 @@ def _append_line(diag: Path, line: dict[str, Any]) -> None:
         pass
 
 
-def record(site: Site, path: Path, *, recovered: bool, attempt: int | None,
-           reason: str, bad: bytes, good: bytes | None) -> Path | None:
+def _subject(site: Site, path: Path) -> str | None:
+    if site == "state":
+        return "state.json"
+    if site == "archive_record":
+        return f"archive record {path.name}"
+    return None  # event_tail is the CLI process: no log, no warning
+
+
+def _shape(bad: bytes, good: bytes) -> str:
+    if bad == good[1:]:
+        return "head-drop"
+    if bad == good[:-1]:
+        return "tail-drop"
+    return "other shape"
+
+
+def _emit_warning(
+    site: Site, path: Path, *, attempt: int | None, bad: bytes, good: bytes | None, diag: Path
+) -> None:
+    log, subject = _sink, _subject(site, path)
+    if log is None or subject is None:
+        return
+    # whole body suppressed: display_path's Path.home() raises on unresolvable HOME
+    with suppress(Exception):
+        evidence = display_path(diag / "read-faults.jsonl")
+        if good is None:
+            message = (
+                f"read fault NOT recovered — {subject} still unparseable "
+                f"after {READ_RETRIES} re-reads"
+            )
+            detail = f"{path} — bad {len(bad)}B; evidence: {evidence}"
+        else:
+            message = (
+                f"transient read fault recovered — {subject} re-read cleanly "
+                f"on attempt {attempt} ({_shape(bad, good)})"
+            )
+            detail = f"{path} — bad {len(bad)}B, good {len(good)}B; evidence: {evidence}"
+        log.append(
+            agent_id=None, type="runner_warning", payload={"message": message, "detail": detail}
+        )
+
+
+def record(
+    site: Site,
+    path: Path,
+    *,
+    recovered: bool,
+    attempt: int | None,
+    reason: str,
+    bad: bytes,
+    good: bytes | None,
+) -> Path | None:
     """Append one line to imp_home()/diagnostics/read-faults.jsonl and preserve
     `bad` as a blob beside it; return the blob path, or None if it could not be
     written. Best-effort throughout: never raises."""
     now = datetime.now(UTC)
     diag = imp_home() / "diagnostics"
     blob = _preserve(
-        diag,
-        f"{now.strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}-{site}-{next(_SEQ)}.bad",
-        bad)
+        diag, f"{now.strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}-{site}-{next(_SEQ)}.bad", bad
+    )
     line: dict[str, Any] = {
         "time": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "pid": os.getpid(),
@@ -86,4 +153,5 @@ def record(site: Site, path: Path, *, recovered: bool, attempt: int | None,
         "bytes": None if blob is None else f"bytes/{blob.name}",
     }
     _append_line(diag, line)
+    _emit_warning(site, path, attempt=attempt, bad=bad, good=good, diag=diag)
     return blob
