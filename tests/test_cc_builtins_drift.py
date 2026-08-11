@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -70,10 +71,11 @@ def _resolve_cli(opts: ClaudeAgentOptions) -> str:
         pytest.skip("claude CLI not found")
 
 
-def _probe_advertised_tools(cli: str, deny: list[str]) -> set[str]:
+def _probe_advertised_tools(cli: str, deny: list[str]) -> tuple[set[str], str]:
     """Spawn `cli` in imp's posture with `deny` and return the tool registry it
     advertises in the `init` system message. The init frame precedes the model
-    turn, so no model round-trip occurs."""
+    turn, so no model round-trip occurs. Returns (advertised_tools, stderr_text)
+    — stderr is the only evidence available when the probe comes back empty."""
     # Do NOT skip on CLAUDECODE=1: the CLI advertises an identical registry with
     # or without it, and such a skip would hide real drift.
     user_msg = json.dumps({
@@ -81,63 +83,70 @@ def _probe_advertised_tools(cli: str, deny: list[str]) -> set[str]:
         "message": {"role": "user", "content": "say ok"},
     })
 
-    proc = subprocess.Popen(
-        [
-            cli, "--print",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--setting-sources", "",
-            "--no-session-persistence",
-            "--max-turns", "1",
-            "--strict-mcp-config",
-            "--disallowedTools", ",".join(deny),
-        ],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    )
+    # TemporaryFile, not PIPE: the probe blocks in readline() and never drains
+    # stderr, so a PIPE could fill its OS buffer and deadlock the CLI.
+    with tempfile.TemporaryFile("w+") as stderr_file:
+        proc = subprocess.Popen(
+            [
+                cli, "--print",
+                "--input-format", "stream-json",
+                "--output-format", "stream-json",
+                "--verbose",
+                "--setting-sources", "",
+                "--no-session-persistence",
+                "--max-turns", "1",
+                "--strict-mcp-config",
+                "--disallowedTools", ",".join(deny),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            text=True,
+        )
 
-    advertised: set[str] = set()
-    try:
-        assert proc.stdin is not None and proc.stdout is not None
-        proc.stdin.write(user_msg + "\n")
-        proc.stdin.flush()
-        proc.stdin.close()
+        advertised: set[str] = set()
+        try:
+            assert proc.stdin is not None and proc.stdout is not None
+            proc.stdin.write(user_msg + "\n")
+            proc.stdin.flush()
+            proc.stdin.close()
 
-        # readline() (not `for line in proc.stdout`) so the iterator's
-        # read-ahead buffering never delays delivery of the init line.
-        while True:
-            line = proc.stdout.readline()
-            if line == "":          # EOF: stdout closed before an init message
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if msg.get("type") == "system" and msg.get("subtype") == "init":
-                # `tools` on init may be a list of names or of descriptors.
-                tools = msg.get("tools") or msg.get("data", {}).get("tools") or []
-                for t in tools:
-                    if isinstance(t, str):
-                        advertised.add(t)
-                    elif isinstance(t, dict) and "name" in t:
-                        advertised.add(t["name"])
-                break
-    finally:
-        # Reap so no orphan claude/node process is left running. terminate()
-        # (SIGTERM) is honored promptly by node; the wait() carries no numeric
-        # budget, and the @pytest.mark.timeout marker is the sole backstop for
-        # a genuinely hung process.
-        proc.terminate()
-        proc.wait()
-        if proc.stdout is not None:
-            proc.stdout.close()
-    return advertised
+            # readline() (not `for line in proc.stdout`) so the iterator's
+            # read-ahead buffering never delays delivery of the init line.
+            while True:
+                line = proc.stdout.readline()
+                if line == "":          # EOF: stdout closed before an init message
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("type") == "system" and msg.get("subtype") == "init":
+                    # `tools` on init may be a list of names or of descriptors.
+                    tools = msg.get("tools") or msg.get("data", {}).get("tools") or []
+                    for t in tools:
+                        if isinstance(t, str):
+                            advertised.add(t)
+                        elif isinstance(t, dict) and "name" in t:
+                            advertised.add(t["name"])
+                    break
+        finally:
+            # Reap so no orphan claude/node process is left running. terminate()
+            # (SIGTERM) is honored promptly by node; the wait() carries no numeric
+            # budget, and the @pytest.mark.timeout marker is the sole backstop for
+            # a genuinely hung process.
+            proc.terminate()
+            proc.wait()
+            if proc.stdout is not None:
+                proc.stdout.close()
+
+        stderr_file.seek(0)
+        stderr_text = stderr_file.read()
+
+    return advertised, stderr_text
 
 
 @pytest.mark.timeout(120)   # process-level backstop against a genuinely hung
@@ -145,7 +154,7 @@ def _probe_advertised_tools(cli: str, deny: list[str]) -> set[str]:
 def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
     opts = ClaudeCodeAgentRunner("m")._build_options(
         _invocation(tmp_path), object(), ["bash"])
-    advertised = _probe_advertised_tools(_resolve_cli(opts), list(opts.disallowed_tools))
+    advertised, _ = _probe_advertised_tools(_resolve_cli(opts), list(opts.disallowed_tools))
 
     escapees = advertised - {"ToolSearch"}
     assert not escapees, (
@@ -161,13 +170,14 @@ def test_deny_posture_probe_is_live(tmp_path: Path) -> None:
     opts = ClaudeCodeAgentRunner("m")._build_options(
         _invocation(tmp_path), object(), ["bash"])
     deny = [t for t in opts.disallowed_tools if t != "Bash"]
-    advertised = _probe_advertised_tools(_resolve_cli(opts), deny)
+    advertised, stderr = _probe_advertised_tools(_resolve_cli(opts), deny)
 
     assert "Bash" in advertised, (
         "Probe is inert: expected Bash to be advertised when only ToolSearch "
         f"and Bash are exempt, got {sorted(advertised)}. The probe no longer "
         "reflects the CLI's init output — fix it before trusting the "
         "deny-posture guard."
+        f"\nCLI stderr:\n{stderr}"
     )
 
 
