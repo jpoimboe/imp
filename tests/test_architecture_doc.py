@@ -265,3 +265,86 @@ def test_architecture_front_phase_prose_names_key_steps() -> None:
         "`plan-finalized`",
     ):
         assert step in text, step
+
+
+IMPLEMENT_DIAGRAM = """flowchart TD
+  in([from plan]) --> TL["task-lead<br/>coder + code-reviewer"]
+  TL -->|"verify tolerated"| CNP
+  TL --> V{{"verify · fast"}}
+  V -. fail .-> TL
+  V -. timeout .-> HUMAN([pause → human])
+  V --> CNP{"check-next-plan"}
+  CNP -->|"more outline plans"| toplan([→ plan-writer])
+  CNP -->|"coverage settled (rework)"| toqr([→ quest-review])
+  CNP -->|"last outline plan"| out([→ gap-check])"""
+
+CONVERGE_DIAGRAM = """flowchart TD
+  in([from implement]) --> GC["gap-check"]
+  GC -->|"gap → corrective plan (supercycle)"| toplan([→ plan-writer])
+  GC -->|clean| QR["quest-review<br/>(batch-code-reviewer)"]
+  QR -->|task_gap| totl([→ task-lead])
+  QR -. Error .-> HUMAN([pause → human])
+  QR --> DS["deferred-sweep<br/>coder + code-reviewer"]
+  DS -->|"slow gate tolerated"| out([→ wait-for-head])
+  DS --> CV{{"converge-verify · slow"}}
+  CV -. "fail → triage" .-> DS
+  CV -. timeout .-> HUMAN
+  CV --> out"""
+
+INTEGRATE_DIAGRAM = """flowchart TD
+  in([from converge]) --> WFH{"wait-for-head<br/>(merge lane)"}
+  WFH --> IR{{"integrate-rebase"}}
+  IR -->|"base unmoved, tree cleared"| SUM
+  IR -->|"rebased / needs re-verify"| VM
+  IR -->|conflicts| REC["reconciler"]
+  IR -. "bad ref / dirty tree" .-> HUMAN([pause → human])
+  REC --> VM{{"validate-memory"}}
+  REC -. stuck .-> HUMAN
+  VM -. "invalid imp/memory/" .-> REC
+  VM --> IV{{"integration-verify · slow"}}
+  IV -. timeout .-> HUMAN
+  IV --> IRV["integration-reviewer"]
+  IRV -->|"blocking / minors"| REC
+  IRV -. Error .-> HUMAN
+  IRV --> SUM["summarizer"]
+  SUM --> FIN["finalize<br/>HUMAN: merge / rework / pause"]
+  FIN -->|rework| back([→ plan-writer])
+  FIN -. pause .-> HUMAN
+  FIN -->|merge| CM{{"cleanup-merge"}}
+  CM -->|"fixup conflict"| ASR["autosquash-resolve-merge"]
+  ASR --> CM
+  CM --> AST{{"assert-stamped"}}
+  AST -. "unstamped / fixup left" .-> HUMAN
+  AST --> M2B["merge-to-base"]
+  M2B -->|MERGED| done([quest complete<br/>worktree removed · archived])
+  M2B -->|CONFLICT| IR
+  M2B -->|DIRTY| REC
+  M2B -. REFUSED .-> HUMAN"""
+
+
+def test_architecture_back_phase_sections_are_name_titled() -> None:
+    text = ARCH.read_text()
+    for heading in ("### Phase implement", "### Phase converge", "### Phase integrate"):
+        assert heading in text, heading
+    for stale in (
+        "### Phase ③ implement",
+        "### Phase ④ review",
+        "### Phase ⑤ integrate",
+    ):
+        assert stale not in text, stale
+
+
+def test_architecture_back_phase_diagrams_match_the_workflow() -> None:
+    text = ARCH.read_text()
+    for diagram in (IMPLEMENT_DIAGRAM, CONVERGE_DIAGRAM, INTEGRATE_DIAGRAM):
+        assert diagram in text, diagram.splitlines()[1]
+
+
+def test_architecture_implement_phase_disclaims_the_moved_work() -> None:
+    # the phase prose is hard-wrapped; compare against a whitespace-flattened copy
+    flat = " ".join(ARCH.read_text().split())
+    assert (
+        "There is no code review, no autosquash, and no deferred sweep in this phase — "
+        "all of that moved to `converge`." in flat
+    )
+    assert "`verify` runs the project's fast test gate" in flat

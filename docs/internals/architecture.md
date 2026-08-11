@@ -222,66 +222,94 @@ flowchart TD
   PF -->|"task_total = N"| out([→ task-lead])
 ```
 
-### Phase ③ implement
+### Phase implement
 
-`task-lead` drives one task at a time (dispatching `implementer` + `quality-reviewer`), committing a clean unit each loop. After all tasks: `commit-check`, then `verify` (the project's own test/lint gate — a gate **timeout** pauses to a human rather than looping), autosquash fixups into one-commit-per-task, run the 4-slice review panel, drain deferred followups, re-verify, stamp trailers, then `plan-cycle-check` decides whether the spec needs another plan (supercycle). After the last plan of a multi-plan quest it routes once more through the panel for a **whole-change pass** (`review_scope=change`) before the review phase.
+Three steps. `task-lead` drives one task at a time, dispatching `coder` and
+`code-reviewer` subagents and committing one clean unit per task; `verify` runs the
+project's fast test gate (a gate **timeout** pauses to a human rather than looping);
+`check-next-plan` is a pure router with no execution. There is no code review, no
+autosquash, and no deferred sweep in this phase — all of that moved to `converge`.
 
 ```mermaid
 flowchart TD
-  in([from plan]) --> TL["task-lead<br/>implementer + quality-reviewer"]
-  TL -->|deviation| toplan([→ plan-writer])
-  TL -->|"done = false"| TL
-  TL -->|done| CC{{"commit-check"}}
-  CC -. fail .-> TL
-  CC --> V{{"verify"}}
+  in([from plan]) --> TL["task-lead<br/>coder + code-reviewer"]
+  TL -->|"verify tolerated"| CNP
+  TL --> V{{"verify · fast"}}
   V -. fail .-> TL
-  V -. "timeout" .-> HUMAN([pause → human])
-  V --> AS{{"autosquash"}}
-  AS -->|conflict| ASR["autosquash-resolve"]
-  ASR --> AS
-  AS -. "hard fail" .-> HUMAN
-  AS --> RVW["review panel<br/>code · completeness ·<br/>spec · boundaries"]
-  RVW -->|task_gap| TL
-  RVW -->|plan_gap| toplan
-  RVW --> DS["deferred-sweep"]
-  DS --> ST{{"stamp-trailers"}}
-  ST --> PCC{"plan-cycle-check"}
-  PCC -->|"more_plans (supercycle)"| toplan
-  PCC -->|"whole-change pass"| RVW
-  PCC -->|covered| out([→ review])
+  V -. timeout .-> HUMAN([pause → human])
+  V --> CNP{"check-next-plan"}
+  CNP -->|"more outline plans"| toplan([→ plan-writer])
+  CNP -->|"coverage settled (rework)"| toqr([→ quest-review])
+  CNP -->|"last outline plan"| out([→ gap-check])
 ```
 
-### Phase ④ review (end-of-change)
+### Phase converge
 
-Rebase the branch onto base (`integrate-rebase`); on conflicts the `integrator` agent resolves them and `integrate-verify` re-runs the test gate. Then `finalize` **always** runs: it reviews the base-merge resolution with independent eyes (when one occurred), writes the structured end-of-change summary (queryable via `imp log`), and is the interactive human gate — merge, rework, or pause.
+Runs once per quest, quest-local and off-lock. `gap-check` is the sole coverage backstop;
+a gap authors a corrective plan (the **supercycle**) beyond the outline, and a clean pass
+latches `coverage_settled` so a later rework re-enters at `quest-review` and never
+re-runs the backstop. `quest-review` is the single quest-wide code review over
+`cur_base_head..HEAD`. `deferred-sweep` drains the whole quest's deferred list once.
+`converge-verify` runs the slow gate on the quest's own base; a failure resumes the sweep
+in fix-vs-tolerate triage, and a toleration escapes forward so the gate never re-runs.
 
 ```mermaid
 flowchart TD
-  in([from implement]) --> IR{{"integrate-rebase<br/>branch onto base"}}
-  IR -->|"already current"| FIN
-  IR -->|"clean rebase"| IV
-  IR -->|conflicts| INT["integrator<br/>resolve conflicts"]
-  IR -. "bad ref / dirty" .-> HUMAN([pause → human])
-  INT --> IV{{"integrate-verify"}}
-  IV -. fail .-> INT
+  in([from implement]) --> GC["gap-check"]
+  GC -->|"gap → corrective plan (supercycle)"| toplan([→ plan-writer])
+  GC -->|clean| QR["quest-review<br/>(batch-code-reviewer)"]
+  QR -->|task_gap| totl([→ task-lead])
+  QR -. Error .-> HUMAN([pause → human])
+  QR --> DS["deferred-sweep<br/>coder + code-reviewer"]
+  DS -->|"slow gate tolerated"| out([→ wait-for-head])
+  DS --> CV{{"converge-verify · slow"}}
+  CV -. "fail → triage" .-> DS
+  CV -. timeout .-> HUMAN
+  CV --> out
+```
+
+### Phase integrate
+
+The FIFO merge queue. `wait-for-head` acquires the merge lane and holds it for the rest
+of the phase. `integrate-rebase` routes on four outcomes: base unmoved with the tree
+already cleared skips straight to `summarizer` with no re-review; a clean rebase or an
+uncleared tree goes to `validate-memory`; a conflict hands off to `reconciler`; a bad
+base ref or dirty tree pauses. `validate-memory` re-runs imp's own load-time memory
+validation over the merged tree. `integration-verify` routes to `integration-reviewer` on
+**both** pass and failure — a failure asks the reviewer to adjudicate fix-vs-tolerate
+rather than pausing. `finalize` is the human gate; a rework releases the merge lane on
+its way back to `plan-writer`.
+
+```mermaid
+flowchart TD
+  in([from converge]) --> WFH{"wait-for-head<br/>(merge lane)"}
+  WFH --> IR{{"integrate-rebase"}}
+  IR -->|"base unmoved, tree cleared"| SUM
+  IR -->|"rebased / needs re-verify"| VM
+  IR -->|conflicts| REC["reconciler"]
+  IR -. "bad ref / dirty tree" .-> HUMAN([pause → human])
+  REC --> VM{{"validate-memory"}}
+  REC -. stuck .-> HUMAN
+  VM -. "invalid imp/memory/" .-> REC
+  VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
-  IV --> FIN["finalize<br/>review resolution · summarize ·<br/>HUMAN: merge / rework / pause"]
+  IV --> IRV["integration-reviewer"]
+  IRV -->|"blocking / minors"| REC
+  IRV -. Error .-> HUMAN
+  IRV --> SUM["summarizer"]
+  SUM --> FIN["finalize<br/>HUMAN: merge / rework / pause"]
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN
-  FIN -->|merge| out([→ integrate])
-```
-
-### Phase ⑤ integrate
-
-A cheap freshness check, then the lock-protected engine-native merge. If base moved, loop back to re-integrate.
-
-```mermaid
-flowchart TD
-  in([from review]) --> BFC{"base-fresh-check"}
-  BFC -->|"base unchanged"| M2B{"merge-to-base<br/>(lock-protected)"}
-  BFC -->|"base advanced"| reint([→ integrate-rebase])
+  FIN -->|merge| CM{{"cleanup-merge"}}
+  CM -->|"fixup conflict"| ASR["autosquash-resolve-merge"]
+  ASR --> CM
+  CM --> AST{{"assert-stamped"}}
+  AST -. "unstamped / fixup left" .-> HUMAN
+  AST --> M2B["merge-to-base"]
   M2B -->|MERGED| done([quest complete<br/>worktree removed · archived])
-  M2B -->|STALE| reint
+  M2B -->|CONFLICT| IR
+  M2B -->|DIRTY| REC
+  M2B -. REFUSED .-> HUMAN
 ```
 
 ### Agent reference
