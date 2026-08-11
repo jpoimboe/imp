@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -2645,3 +2646,132 @@ def test_hold_prompt_posts_after_gate_resolved_by_continuation(
     coord = SimpleNamespace(interrupted=True, pause_reason="ctrl-c")
     assert (daemon._hold_prompt(RunResult.PAUSED, coord, log=log)
             == daemon._RESUME_INTERRUPTED_PROMPT)
+
+
+def _reap_home(quest: Quest) -> None:
+    """The tail of executor._complete: the home is gone when run_fn returns."""
+    shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    session_socket_path(quest.id).unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("status", ["merged", "done"])
+@pytest.mark.anyio
+async def test_completed_run_on_reaped_home_returns_cleanly(
+    tmp_path: Path, status: str,
+) -> None:
+    # executor._complete reaps the quest home before returning COMPLETED, so the
+    # daemon must not read state.json on the completed path.
+    quest = _make_quest(tmp_path, "2026-06-15-reap")
+    _seed_step(quest, "verify")
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        st = State.load(quest.state_dir)
+        st.step = None
+        st.status = status
+        st.save(quest.state_dir)
+        _reap_home(quest)
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(HANG_BACKSTOP):
+        result = await serve_quest_session(
+            quest, run_fn=fake_run, hibernate=False)
+
+    assert result is RunResult.COMPLETED
+    assert not quest.quest_dir.exists()   # the reap really happened
+
+
+@pytest.mark.parametrize("status", ["merged", "done"])
+@pytest.mark.anyio
+async def test_hold_loop_completion_on_reaped_home_returns_cleanly(
+    tmp_path: Path, status: str,
+) -> None:
+    # Second eager call site: the run pauses, the user presses enter, and the
+    # re-run completes + reaps. The hold loop's own _hold_prompt must not read
+    # state.json either. "task-lead" is an agent step in the bundled workflow.
+    quest = _make_quest(tmp_path, "2026-06-15-reaphold")
+    _seed_step(quest, "task-lead")
+    sock = str(session_socket_path(quest.id))
+    calls = {"n": 0}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        st = State.load(quest.state_dir)
+        st.step = None
+        st.status = status
+        st.save(quest.state_dir)
+        _reap_home(quest)
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        await wait_until(
+            lambda: any(e.get("type") == "awaiting_user_input" for e in received))
+        # the agent hold copy still resolves while the home exists (AC 3)
+        gate = next(e for e in received if e.get("type") == "awaiting_user_input")
+        assert gate["payload"]["steer_hint"] == (
+            "interrupted · enter to continue · type to redirect · Ctrl-D to leave")
+
+        await client.send_input("")
+        await wait_until(lambda: "r" in result)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2
+        assert not quest.quest_dir.exists()   # the reap really happened
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+def test_main_exits_zero_on_reaped_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A completed run must exit 0, so it is distinguishable from a pause (which
+    # also exits 1). main() returning at all is also what keeps daemon.stderr
+    # traceback-free: the traceback comes from the interpreter's top-level
+    # handler when main() raises.
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    quest = _make_quest(tmp_path, "2026-06-15-mainreap")
+    _seed_step(quest, "verify")
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: quest))
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None, **kw: Any,
+    ) -> RunResult:
+        st = State.load(quest.state_dir)
+        st.step = None
+        st.status = "merged"
+        st.save(quest.state_dir)
+        _reap_home(quest)
+        return RunResult.COMPLETED
+
+    real_serve = daemon.serve_quest_session
+    monkeypatch.setattr(
+        daemon, "serve_quest_session",
+        functools.partial(real_serve, run_fn=fake_run, hibernate=False))
+
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
+    assert rc == 0
