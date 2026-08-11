@@ -156,3 +156,30 @@ def test_the_xdist_probe_stays_recursively_expanded() -> None:
     makefile = (_REPO_ROOT / "Makefile").read_text()
     assert re.search(r"^XDIST\s+\?=", makefile, re.M)
     assert re.search(r"^LIVE_XDIST\s+\?=", makefile, re.M)
+
+
+def test_the_makefile_no_longer_pins_pythonpath() -> None:
+    # One pin, in tests/conftest.py, covering `make test`, bare `pytest` and IDE
+    # runners alike; the Makefile's copy only ever covered `make`.
+    for path in ("Makefile", "tests/conftest.py"):
+        assert "PYTEST_PYTHONPATH" not in (_REPO_ROOT / path).read_text(), path
+
+
+def test_the_sandbox_comment_credits_conftest_for_the_pythonpath_prefix() -> None:
+    # test_sandbox.py never spelled the variable's name, so a token check there
+    # would pass vacuously; the stale claim is prose naming the Makefile as the
+    # thing that sets PYTHONPATH, and after this change conftest is what does.
+    text = (_REPO_ROOT / "tests" / "test_sandbox.py").read_text()
+    assert "Makefile sets PYTHONPATH" not in text
+    assert "tests/conftest.py pins PYTHONPATH for every pytest run" in text
+
+
+def test_conftest_still_pins_this_worktree_on_the_subprocess_path(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    # The surviving pin is the only thing keeping spawned `python -m imp` children
+    # on THIS checkout rather than the global editable install; it must outlive the
+    # Makefile's copy, and it must still PREPEND rather than clobber.
+    from tests import conftest
+    monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+    conftest._pin_subprocess_imp_to_working_tree()
+    assert os.environ["PYTHONPATH"] == f"{_REPO_ROOT / 'src'}{os.pathsep}/somewhere/else"

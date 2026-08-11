@@ -857,10 +857,11 @@ def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch
     log = _CaptureLog()
     pol = ex._build_sandbox_policy(quest, config, log)
     # `_build_sandbox_policy` overlays engine_env onto the real `os.environ`, and
-    # overlay_engine_env APPENDS any ambient PYTHONPATH after the prefix. The
-    # Makefile sets PYTHONPATH for every pytest run, so setenv's PYTHONPATH is a
-    # joined string, not the bare prefix — assert the prefix is FIRST (the robust
-    # idiom the isolated test below also uses), not an exact (key, value) pair.
+    # overlay_engine_env APPENDS any ambient PYTHONPATH after the prefix.
+    # tests/conftest.py pins PYTHONPATH for every pytest run, so setenv's
+    # PYTHONPATH is a joined string, not the bare prefix — assert the prefix is
+    # FIRST (the robust idiom the isolated test below also uses), not an exact
+    # (key, value) pair.
     assert dict(pol.setenv)["PYTHONPATH"].startswith(
         str(quest.project_root / "src"))
 

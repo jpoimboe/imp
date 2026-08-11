@@ -40,14 +40,6 @@ XDIST    ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n auto --d
 # Override: LIVE_XDIST="-n 2" to lighten load; LIVE_XDIST= for serial debugging.
 LIVE_XDIST ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n 4 --dist loadgroup")
 
-# Subprocess tests (`python -m imp ...`, cold-import checks) resolve `imp` via
-# the editable install — which inside a git worktree points at the MAIN checkout,
-# not this tree, so they'd run stale code. Pin spawned subprocesses to THIS
-# checkout's src. Absolute ($(CURDIR)) because a relative path breaks tests that
-# chdir to a tmpdir; prepended so an ambient PYTHONPATH is preserved after it. A
-# no-op in the main checkout (same dir the editable install already resolves).
-PYTEST_PYTHONPATH := PYTHONPATH=$(CURDIR)/src$${PYTHONPATH:+:$$PYTHONPATH}
-
 # Where to source ANTHROPIC_API_KEY from for live tests, when it's not
 # already exported in the shell. Override with KEY_FILE=... if you keep
 # your key somewhere else.
@@ -79,11 +71,11 @@ require-venv:
 # Scope a run: make test PYTEST_ARGS="tests/foo.py -k name"
 .PHONY: test
 test: require-venv ## Fast test suite (skips live-API tests). What CI runs.
-	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
+	$(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
 
 .PHONY: test-verbose
 test-verbose: require-venv ## Same as `test` but with -v.
-	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
+	$(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
 
 _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
@@ -101,30 +93,26 @@ _LIVE_TEST_FILES := \
 .PHONY: test-live
 test-live: require-venv ## Run live-API tests (--run-live); providers whose toolchain/creds are present run, the rest skip.
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) --run-live -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
+	  timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) --run-live -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-verbose
 test-live-verbose: require-venv ## test-live but with live progress + raw PTY output streamed to your terminal.
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) --run-live -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
+	  timeout --foreground 1800 $(PYTEST) --run-live -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
 test-live-quick: require-venv ## One-step live test for each provider whose toolchain/creds are present.
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    $(PYTEST) --run-live -v \
-	      tests/test_default_workflow_e2e_live.py \
-	      tests/test_default_workflow_e2e_live_openai.py \
-	      tests/test_default_workflow_e2e_live_claude_code.py
+	  $(PYTEST) --run-live -v \
+	    tests/test_default_workflow_e2e_live.py \
+	    tests/test_default_workflow_e2e_live_openai.py \
+	    tests/test_default_workflow_e2e_live_claude_code.py
 
 .PHONY: test-live-codex-parallel
 test-live-codex-parallel: require-venv ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).
 	@$(_LOAD_LIVE_KEYS) && \
-	  $(PYTEST_PYTHONPATH) \
-	    $(PYTEST) --run-live -v -m codex_parallel \
-	      tests/test_codex_started_keying_live.py
+	  $(PYTEST) --run-live -v -m codex_parallel \
+	    tests/test_codex_started_keying_live.py
 
 .PHONY: test-all
 test-all: require-venv test test-live ## Full suite including live tests.
@@ -169,11 +157,11 @@ clean: ## Remove build artifacts and caches.
 
 .PHONY: snap-ui
 snap-ui: require-venv ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
-	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
+	$(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
 
 .PHONY: snap-ui-light
 snap-ui-light: require-venv ## Same as snap-ui but the light theme on a near-white surface.
-	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
+	$(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
 
 
 # ── private helpers ─────────────────────────────────────────────────────────
