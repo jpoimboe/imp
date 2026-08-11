@@ -21,10 +21,10 @@ lands stays maintainable.
   (e.g. a follow-up to file).
 - **Draft-first scoping.** A fresh quest is a draft — a conversation with zero
   commitment — that you later build or park.
-- **Adversarial review.** Multiple automated rounds of design review, plan review,
-  code review, and testing — reviewers kept independent by model tier — plus
-  automatic merge-conflict resolution. Front-loading the design and plan review
-  catches the majority of bugs before a line of code is written.
+- **Adversarial review.** Multiple automated rounds of design review, plan
+  review, code review, and testing — reviewers kept independent by model tier —
+  plus automatic merge-conflict resolution. The spec and the plan are each
+  reviewed by a fresh agent that did not write them, before any code exists.
 - **Cleaner code by design.** imp's coding stance pushes back on the reflexive
   fallbacks and dead error-handling agents pile up, so changes stay lean and
   maintainable.
