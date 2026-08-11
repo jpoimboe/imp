@@ -160,7 +160,7 @@ flowchart LR
 Step kinds across all phases:
 
 - **agent** (boxes) — an LLM agent (`agents/<name>.md`); routes on its validated structured output.
-- **script** (`{{ }}` hexagons) — a shell command (`scripts/*.sh`); routes on exit code (`0` continue, `2` recoverable, else **pause to human**).
+- **script** (`{{ }}` hexagons) — a shell command (`scripts/*.sh`); routes on its own per-step exit-code rules: `0` is the pass path, a step may name further codes (`integrate-rebase` `2` → `summarizer`, `check-cleared` `3` → back to `integration-verify`), and an exit no rule matches falls to that step's `else` — a **pause to human** for the deterministic scripts, a rework route for the test gates.
 - **branch** (`{ }` diamonds) — a var router, no agent or script: `check-next-plan` and `wait-for-head` (which also blocks to acquire the merge lane).
 - **merge** — engine-native, lock-protected merge to base.
 
