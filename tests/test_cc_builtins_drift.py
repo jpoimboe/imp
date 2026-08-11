@@ -36,6 +36,28 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 
 
+def _invocation(tmp_path: Path, declared: frozenset[str] = frozenset()) -> AgentInvocation:
+    """A real AgentInvocation for _build_options; `declared` rides on top of complete_step."""
+    loc = SourceLoc(file=Path("a.md"), line=1)
+    agent = AgentDef(
+        name="t", description="",
+        tools=frozenset({"complete_step"}) | declared,
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success",), required=True),),
+            source=loc),
+        prompt_template_source="hi", source_path=Path("a.md"), source=loc)
+    return AgentInvocation(
+        agent_def=agent, provider_name="claude_code", model_name="m",
+        system_prompt="s",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        quest_context=QuestContext(title="t", project_root=tmp_path,
+                                   workflow_dir=tmp_path),
+        transcript_dir=tmp_path,
+        events_path=tmp_path / "events.jsonl")
+
+
 @pytest.mark.timeout(120)   # process-level backstop against a genuinely hung
                             # CLI (a real defect) — NOT a load budget.
 def test_builtin_tools_match_cli() -> None:
@@ -138,24 +160,7 @@ def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) ->
     """WebSearch/WebFetch are deliberately exempted from the deny list and
     allowlisted when an agent declares web_search/web_fetch (spec §5.2). This
     pins that intent so a future deny-all refactor fails here."""
-    loc = SourceLoc(file=Path("a.md"), line=1)
-    agent = AgentDef(
-        name="t", description="",
-        tools=frozenset({"complete_step", "web_search", "web_fetch"}),
-        subagents=(),
-        output_schema=OutputSchema(
-            fields=(OutputField(name="status", type="enum",
-                                values=("Success",), required=True),),
-            source=loc),
-        prompt_template_source="hi", source_path=Path("a.md"), source=loc)
-    inv = AgentInvocation(
-        agent_def=agent, provider_name="claude_code", model_name="m",
-        system_prompt="s",
-        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        quest_context=QuestContext(title="t", project_root=tmp_path,
-                                     workflow_dir=tmp_path),
-        transcript_dir=tmp_path,
-        events_path=tmp_path / "events.jsonl")
+    inv = _invocation(tmp_path, frozenset({"web_search", "web_fetch"}))
     opts = ClaudeCodeAgentRunner("m")._build_options(inv, object(), ["bash"])
     assert {"WebSearch", "WebFetch"} <= set(opts.allowed_tools)
     assert not ({"WebSearch", "WebFetch"} & set(opts.disallowed_tools))
