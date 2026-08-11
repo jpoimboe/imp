@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import multiprocessing as mp
 import os
@@ -20,6 +21,16 @@ from pathlib import Path
 import pytest
 
 from imp.paths import project_state_dir
+
+
+def _command_summaries() -> dict[str, str]:
+    """Each top-level subcommand's `help=` string — the copy the command table shows."""
+    from imp.cli.main import _build_parser
+    parser = _build_parser()
+    action = next(a for a in parser._actions
+                  if isinstance(a, argparse._SubParsersAction))
+    return {a.dest: a.help or "" for a in action._choices_actions}
+
 
 FIXTURES = Path(__file__).parent / "fixtures"
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")

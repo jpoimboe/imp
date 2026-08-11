@@ -4008,36 +4008,6 @@ def _cmd_config_unset(args: argparse.Namespace) -> int:
                      control_root=_settings_root())
 
 
-_OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a quest."),
-    ("new", "Scope a new quest in conversation (optional opening message)."),
-    ("resume", "Continue an in-flight quest (the sole resumable one, else a picker)."),
-    ("list", "List your quests: in-flight, backlog, and merged."),
-    ("show", "Show one quest's detail or a named artifact (imp show <id>)."),
-    ("log", "Show a quest's narrative as plain text."),
-    ("abandon", "Tear down a quest's worktree, branch, and state."),
-    ("config", "Show or edit the effective configuration."),
-)
-
-
-def render_overview(color: bool) -> str:
-    head = ansi("imp", "bold", enabled=color)
-    width = max(len(name) for name, _ in _OVERVIEW_COMMANDS)
-    lines = [
-        f"{head} — multi-agent software development workflow",
-        "",
-        "Common commands:",
-    ]
-    for name, desc in _OVERVIEW_COMMANDS:
-        lines.append(f"  {name.ljust(width)}  {desc}")
-    lines += [
-        "",
-        "New to a project? Run 'imp init' to get started.",
-        "Run 'imp <command> -h' for details.",
-    ]
-    return "\n".join(lines)
-
-
 def _model_arg_type(value: str) -> str:
     """argparse type= for --model: reject malformed provider:model syntax."""
     from imp.providers.model_arg import ModelArgError, parse_model_arg
@@ -4719,10 +4689,15 @@ def _command_names(parser: argparse.ArgumentParser) -> set[str]:
     return set()
 
 
+def _top_level_help(parser: argparse.ArgumentParser) -> str:
+    # IMP_THEME only: reading config would import the yaml stack into every `imp -h`.
+    pal.set_theme(pal.theme_override() or "ansi")
+    return parser.format_help()
+
+
 def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
     if not rest:
-        _apply_theme()
-        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
+        print(_top_level_help(parser), end="")
         return 0
     cmd = rest[0]
     if cmd not in _command_names(parser):
@@ -4735,10 +4710,8 @@ def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
 
 
 def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | None:
-    if not args:
-        _apply_theme()
-        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
-        return 0
+    if not args or args[0] in ("-h", "--help"):
+        return _help_command([], parser)
     if args[0] == "help":
         return _help_command(args[1:], parser)
     first = args[0]

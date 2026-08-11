@@ -209,7 +209,7 @@ def test_overview_ends_with_one_trailing_blank_on_tty(
     rc = m.main([])
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.endswith("details.\n\n")   # overview's last content line + one blank
+    assert out.endswith("options.\n\n")   # last content line + one blank
 
 
 def test_overview_unchanged_when_piped(
@@ -222,8 +222,8 @@ def test_overview_unchanged_when_piped(
     rc = m.main([])
     out = capsys.readouterr().out
     assert rc == 0
-    assert out.endswith("details.\n")
-    assert not out.endswith("details.\n\n")
+    assert out.endswith("options.\n")
+    assert not out.endswith("options.\n\n")
 
 
 def test_abandon_picker_empty_trailing_blank_on_tty(
