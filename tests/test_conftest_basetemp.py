@@ -81,12 +81,14 @@ def test_configure_pins_imp_home_off_the_real_home(monkeypatch):
     monkeypatch.setattr(conftest, "_OWNED_BASETEMP", None)
     monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", None)
     conftest.pytest_configure(_config(basetemp="/custom/bt"))
-    pinned = conftest._OWNED_IMP_HOME
-    assert os.environ["IMP_HOME"] == pinned
-    assert Path(pinned).is_dir()
-    assert Path(pinned) != Path.home() / ".imp"
-    conftest.pytest_unconfigure(_config())
-    assert not Path(pinned).exists()
+    pinned = Path(conftest._OWNED_IMP_HOME)
+    try:
+        assert os.environ["IMP_HOME"] == str(pinned)
+        assert pinned.is_dir()
+        assert pinned != Path.home() / ".imp"
+    finally:
+        conftest.pytest_unconfigure(_config())
+    assert not pinned.exists()
 
 
 def test_configure_leaves_an_existing_imp_home_pin_alone(monkeypatch):
