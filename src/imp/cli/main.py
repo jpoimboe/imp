@@ -29,6 +29,12 @@ from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 from imp import __version__
 from imp.cli import palette as pal
 from imp.cli import quest_row, splash
+from imp.cli.help_format import (
+    TAGLINE,
+    ImpParser,
+    ImpRawHelpFormatter,
+    ImpTopLevelHelpFormatter,
+)
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.paths import project_state_dir
@@ -4002,36 +4008,6 @@ def _cmd_config_unset(args: argparse.Namespace) -> int:
                      control_root=_settings_root())
 
 
-_OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a quest."),
-    ("new", "Scope a new quest in conversation (optional opening message)."),
-    ("resume", "Continue an in-flight quest (the sole resumable one, else a picker)."),
-    ("list", "List your quests: in-flight, backlog, and merged."),
-    ("show", "Show one quest's detail or a named artifact (imp show <id>)."),
-    ("log", "Show a quest's narrative as plain text."),
-    ("abandon", "Tear down a quest's worktree, branch, and state."),
-    ("config", "Show or edit the effective configuration."),
-)
-
-
-def render_overview(color: bool) -> str:
-    head = ansi("imp", "bold", enabled=color)
-    width = max(len(name) for name, _ in _OVERVIEW_COMMANDS)
-    lines = [
-        f"{head} — multi-agent software development workflow",
-        "",
-        "Common commands:",
-    ]
-    for name, desc in _OVERVIEW_COMMANDS:
-        lines.append(f"  {name.ljust(width)}  {desc}")
-    lines += [
-        "",
-        "New to a project? Run 'imp init' to get started.",
-        "Run 'imp <command> -h' for details.",
-    ]
-    return "\n".join(lines)
-
-
 def _model_arg_type(value: str) -> str:
     """argparse type= for --model: reject malformed provider:model syntax."""
     from imp.providers.model_arg import ModelArgError, parse_model_arg
@@ -4158,7 +4134,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
 
 
 def _build_events_search_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = ImpParser(
         prog="imp events search",
         description=(
             "Case-insensitive substring search over structured event content "
@@ -4216,9 +4192,15 @@ def _add_config_scope(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="imp")
+    parser = ImpParser(
+        prog="imp",
+        description=TAGLINE,
+        epilog=("New to a project? Run 'imp init' to get started.\n"
+                "Run 'imp <command> -h' for a command's options."),
+        formatter_class=ImpTopLevelHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
-    sub = parser.add_subparsers(dest="cmd", required=False)
+    sub = parser.add_subparsers(dest="cmd", required=False, metavar="<command>")
 
     p_init = sub.add_parser(
         "init",
@@ -4231,7 +4213,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "(providers and theme). Makes an initial commit of\n"
             "imp/config.yaml and .gitignore."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_init.set_defaults(func=_cmd_init, warm=True)
     p_init.add_argument(
@@ -4441,7 +4422,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "      reasoning). Narrow with --type / --agent; full flags with:\n"
             "      imp events search -h"
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=ImpRawHelpFormatter,
     )
     p_events.add_argument(
         "token", nargs="?", default=None,
@@ -4693,6 +4674,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "stop", help="Stop the running remote-control daemon (SIGTERM).")
     p_rc_stop.set_defaults(func=_cmd_remote_control_stop)
 
+    p_help = sub.add_parser(
+        "help",
+        help="Show this help, or one command's options (imp help <command>).")
+    p_help.add_argument("command", nargs="?", metavar="<command>")
+
     return parser
 
 
@@ -4703,10 +4689,15 @@ def _command_names(parser: argparse.ArgumentParser) -> set[str]:
     return set()
 
 
+def _top_level_help(parser: argparse.ArgumentParser) -> str:
+    # IMP_THEME only: reading config would import the yaml stack into every `imp -h`.
+    pal.set_theme(pal.theme_override() or "ansi")
+    return parser.format_help()
+
+
 def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
     if not rest:
-        _apply_theme()
-        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
+        print(_top_level_help(parser), end="")
         return 0
     cmd = rest[0]
     if cmd not in _command_names(parser):
@@ -4719,10 +4710,8 @@ def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
 
 
 def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | None:
-    if not args:
-        _apply_theme()
-        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
-        return 0
+    if not args or args[0] in ("-h", "--help"):
+        return _help_command([], parser)
     if args[0] == "help":
         return _help_command(args[1:], parser)
     first = args[0]

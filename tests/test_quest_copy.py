@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import _build_parser
+from tests.conftest import _command_summaries
 
 _ASSETS = Path("src/imp/assets/workflows/default")
 
@@ -35,11 +36,10 @@ def test_search_help_names_quests(capsys) -> None:
     assert "change" not in out
 
 
-def test_overview_command_list_names_quests() -> None:
-    from imp.cli.main import _OVERVIEW_COMMANDS
-    descs = " | ".join(d for _verb, d in _OVERVIEW_COMMANDS)
-    assert "scope a quest." in descs
-    assert "Scope a new quest in conversation" in descs
+def test_command_summaries_name_quests() -> None:
+    descs = " | ".join(_command_summaries().values())
+    assert "scope a quest)." in descs
+    assert "Start a new quest: run the workflow from an opening intent." in descs
     assert "List your quests: in-flight, backlog, and merged." in descs
     assert "Show one quest's detail or a named artifact (imp show <id>)." in descs
     assert "change" not in descs

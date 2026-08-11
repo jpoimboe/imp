@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -7,35 +8,60 @@ from pathlib import Path
 import pytest
 
 from imp import __version__
-from imp.cli.main import _OVERVIEW_COMMANDS, _build_parser, _command_names, main, render_overview
+from imp.cli.main import _build_parser, _command_names, _top_level_help, main
+from tests.conftest import _command_summaries
+
+_COLOR_ENV = ("NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE", "IMP_THEME")
+
+_FRONT_DOOR = ([], ["help"], ["-h"], ["--help"])
 
 
-def test_overview_lists_each_common_command_and_footer() -> None:
-    text = render_overview(color=False)
+def _front_door(argv: list[str], cwd: Path,
+                env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    # Strip the ambient color/theme vars: NO_COLOR disables on mere presence.
+    base = {k: v for k, v in os.environ.items() if k not in _COLOR_ENV}
+    return subprocess.run([sys.executable, "-m", "imp", *argv], cwd=cwd,
+                          capture_output=True, text=True, check=False,
+                          env={**base, "COLUMNS": "80", **env})
+
+
+def _rows(text: str) -> set[str]:
+    return {line.split()[0] for line in text.splitlines()
+            if line.startswith("    ") and not line.startswith("     ")}
+
+
+def test_top_level_help_lists_every_command_and_the_new_footer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setenv("NO_COLOR", "1")
+    text = _top_level_help(_build_parser())
     for name in ("chat", "new", "resume", "show", "log", "abandon", "config"):
-        assert name in text
-    # Getting-started pointer and the per-command detail footer.
+        assert name in _rows(text)
     assert "imp init" in text
-    assert "Run 'imp <command> -h' for details." in text
+    assert "Run 'imp <command> -h' for a command's options.\n" in text
 
 
-def test_overview_resume_line_is_accurate_and_unframed() -> None:
-    text = render_overview(color=False)
-    # Accuracy: resume must NOT claim it resumes "the most recent" change.
-    assert "most recent" not in text.lower()
-    # Content, not an argparse error: no usage:/error: framing words.
-    assert "usage" not in text.lower()
-    assert "error" not in text.lower()
+def test_top_level_help_resume_row_is_accurate() -> None:
+    # resume must NOT claim it resumes "the most recent" quest.
+    assert "most recent" not in _top_level_help(_build_parser()).lower()
 
 
-def test_bare_imp_prints_overview_rc0(capsys) -> None:
-    rc = main([])
+@pytest.mark.parametrize("argv", _FRONT_DOOR)
+def test_front_door_prints_the_generated_help_rc0(
+    argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    rc = main(argv)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "Common commands:" in out
-    assert "Run 'imp <command> -h' for details." in out
-    # No argparse usage/error framing on the front door.
-    assert "usage:" not in out.lower()
+    assert out.startswith("usage: imp [-h] [--version] <command> ...\n")
+    assert "\nimp — multi-agent software development workflow\n" in out
+    assert out.endswith("New to a project? Run 'imp init' to get started.\n"
+                        "Run 'imp <command> -h' for a command's options.\n")
+    assert _rows(out) == _command_names(_build_parser())
     assert "error:" not in out.lower()
 
 
@@ -55,16 +81,6 @@ def test_version_flag_prints_version_rc0(tmp_path: Path) -> None:
     assert r.stdout.strip() == f"imp {__version__}"
 
 
-def test_imp_help_prints_overview_rc0(capsys) -> None:
-    rc = main(["help"])
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "Common commands:" in out
-    assert "Run 'imp <command> -h' for details." in out
-    assert "usage:" not in out.lower()
-    assert "error:" not in out.lower()
-
-
 def test_imp_help_command_equals_command_dash_h(tmp_path: Path) -> None:
     helped = subprocess.run(
         [sys.executable, "-m", "imp", "help", "resume"],
@@ -79,12 +95,72 @@ def test_imp_help_command_equals_command_dash_h(tmp_path: Path) -> None:
     assert helped.stdout == direct.stdout
 
 
+def test_help_is_a_registered_subcommand_with_an_optional_command_arg() -> None:
+    parser = _build_parser()
+    assert "help" in _command_names(parser)
+    assert parser.parse_args(["help", "resume"]).command == "resume"
+    assert parser.parse_args(["help"]).command is None
+
+
+def test_imp_help_help_prints_the_help_subparsers_own_usage(tmp_path: Path) -> None:
+    r = _front_door(["help", "help"], tmp_path, {"NO_COLOR": "1"})
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.startswith("usage: imp help [-h] [<command>]\n")
+    assert "  <command>\n" in r.stdout
+
+
+def test_front_door_four_ways_are_byte_identical_piped(tmp_path: Path) -> None:
+    runs = [_front_door(argv, tmp_path, {"NO_COLOR": "1"}) for argv in _FRONT_DOOR]
+    for r in runs:
+        assert r.returncode == 0, r.stderr
+    assert len({r.stdout for r in runs}) == 1, "front door forms disagree"
+    assert runs[0].stdout.startswith("usage: imp [-h] [--version] <command> ...\n")
+
+
+def test_front_door_four_ways_honor_imp_theme(tmp_path: Path) -> None:
+    env = {"FORCE_COLOR": "1", "IMP_THEME": "dark"}
+    runs = [_front_door(argv, tmp_path, env) for argv in _FRONT_DOOR]
+    assert len({r.stdout for r in runs}) == 1, "front door forms disagree"
+    for r in runs:
+        assert r.returncode == 0, r.stderr
+        assert "\x1b[38;2;255;154;60m" in r.stdout
+
+
+def test_front_door_never_reads_the_project_config_theme(tmp_path: Path) -> None:
+    """A project config naming `dark` must not reach the front door: it resolves
+    IMP_THEME or the universal `ansi`, never load_effective_config."""
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("theme: dark\n")
+    env = {"FORCE_COLOR": "1"}
+    runs = [_front_door(argv, tmp_path, env) for argv in _FRONT_DOOR]
+    assert len({r.stdout for r in runs}) == 1, "front door forms disagree"
+    for r in runs:
+        assert r.returncode == 0, r.stderr
+        assert "\x1b[33m" in r.stdout
+        assert "\x1b[38;2;" not in r.stdout
+
+
+@pytest.mark.parametrize("argv", [["help"], ["help", "resume"], ["help", "frobnicate"],
+                                  [], ["-h"], ["--help"]])
+def test_no_help_form_falls_through_to_parse_args(argv: list[str], capsys) -> None:
+    """_dispatch_meta must settle every help form itself (or exit inside argparse),
+    never return None — main() resolves the config-backed theme after parse_args."""
+    import imp.cli.main as m
+
+    try:
+        rc = m._dispatch_meta(argv, m._build_parser())
+    except SystemExit as exc:          # `help <cmd>` exits inside argparse
+        rc = exc.code
+    capsys.readouterr()
+    assert isinstance(rc, int), f"{argv} fell through to parse_args"
+
+
 def test_imp_help_unknown_command_rc2(capsys) -> None:
     rc = main(["help", "frobnicate"])
     err = capsys.readouterr().err
     assert rc == 2
-    assert "unknown command 'frobnicate'" in err
-    assert "imp help" in err
+    assert err == "imp: unknown command 'frobnicate'. Run 'imp help'.\n"
+    assert "invalid choice" not in err.lower()
 
 
 def test_unknown_command_friendly_rc2(capsys) -> None:
@@ -103,20 +179,20 @@ def test_known_command_still_dispatches(tmp_path, monkeypatch) -> None:
     assert rc == 0
 
 
-def test_overview_commands_are_real_subcommands() -> None:
-    """Drift guard: every name in the curated overview must be a live
-    subcommand. Catches a renamed/removed command leaving a stale overview
-    entry. The overview is intentionally a SUBSET (it omits e.g. `eval`,
-    `init`), so this is a subset check, not equality."""
-    real = _command_names(_build_parser())
-    overview = {name for name, _ in _OVERVIEW_COMMANDS}
-    stale = overview - real
-    assert not stale, f"overview lists non-existent command(s): {sorted(stale)}"
+def test_help_rows_match_the_live_subcommands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drift guard, by set equality: no command may be missing from the help."""
+    monkeypatch.setenv("COLUMNS", "80")
+    monkeypatch.setenv("NO_COLOR", "1")
+    parser = _build_parser()
+    assert _rows(_top_level_help(parser)) == _command_names(parser)
+    assert {"events", "search", "edit", "remote-control", "help"} <= _command_names(parser)
 
 
-def test_overview_new_summary_reads_as_opening_message() -> None:
-    summary = dict(_OVERVIEW_COMMANDS)["new"]
-    assert "opening message" in summary
+def test_new_summary_reads_as_an_opening_intent() -> None:
+    summary = _command_summaries()["new"]
+    assert "opening intent" in summary
     assert "title" not in summary
 
 
@@ -130,10 +206,10 @@ def test_main_swallows_broken_pipe_on_overview(monkeypatch) -> None:
 
     import imp.cli.main as m
 
-    def boom(_color: bool) -> str:
+    def boom(_parser: object) -> str:
         raise BrokenPipeError(32, "Broken pipe")
 
-    monkeypatch.setattr(m, "render_overview", boom)
+    monkeypatch.setattr(m, "_top_level_help", boom)
     monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
     monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
 
@@ -227,12 +303,13 @@ def test_artifact_commit_subcommand_is_removed() -> None:
     assert "artifact-commit" not in _command_names(_build_parser())
 
 
-def test_imp_help_pulls_in_no_heavy_dependency(tmp_path: Path) -> None:
-    """`imp --help` must exit inside parse_args without loading the agent stack.
+@pytest.mark.parametrize("argv", _FRONT_DOOR)
+def test_front_door_pulls_in_no_heavy_dependency(argv: list[str], tmp_path: Path) -> None:
+    """Every front-door form must print without loading the agent stack.
     Fresh interpreter: in-process, the suite has already imported all of these."""
     code = (
         "import runpy, sys\n"
-        "sys.argv = ['imp', '--help']\n"
+        f"sys.argv = ['imp', *{argv!r}]\n"
         "try:\n"
         "    runpy.run_module('imp', run_name='__main__')\n"
         "except SystemExit:\n"
@@ -247,7 +324,7 @@ def test_imp_help_pulls_in_no_heavy_dependency(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     marker = [ln for ln in proc.stderr.splitlines() if ln.startswith("LEAKED:")]
     assert marker, f"child did not report; stderr was {proc.stderr!r}"
-    assert marker[0] == "LEAKED:", f"imp --help imported {marker[0][len('LEAKED:'):]}"
+    assert marker[0] == "LEAKED:", f"imp {' '.join(argv)} imported {marker[0][len('LEAKED:'):]}"
 
 
 # yaml/ruamel are absent deliberately: a dispatching command parses config through ruamel.

@@ -14,13 +14,13 @@ from imp.cli.main import (
     _cmd_list,
     _cmd_show,
     _command_names,
+    _top_level_help,
     main,
-    render_overview,
 )
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
-from tests.conftest import _seed_control
+from tests.conftest import _command_summaries, _seed_control
 
 _NOW = datetime(2026, 6, 20, 12, 0, 0, tzinfo=UTC)
 
@@ -108,11 +108,14 @@ def test_list_and_show_both_resolve() -> None:
     assert parser.parse_args(["show", "liveid"]).func is _cmd_show
 
 
-def test_overview_lists_list_then_show_with_copy() -> None:
-    text = render_overview(color=False)
-    assert "List your quests: in-flight, backlog, and merged." in text
-    assert "Show one quest's detail or a named artifact (imp show <id>)." in text
-    assert text.index("List your quests") < text.index("Show one quest's detail")
+def test_help_lists_list_then_show_with_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    summaries = _command_summaries()
+    assert summaries["list"] == "List your quests: in-flight, backlog, and merged."
+    assert summaries["show"] == "Show one quest's detail or a named artifact (imp show <id>)."
+    text = _top_level_help(_build_parser())
+    assert text.index("\n    list ") < text.index("\n    show ")
 
 
 def test_show_status_word_errors_not_found(tmp_path: Path, monkeypatch, capsys) -> None:

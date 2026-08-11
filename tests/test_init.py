@@ -317,7 +317,9 @@ def test_init_help_describes_what_it_does(capsys: pytest.CaptureFixture[str]) ->
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["init", "-h"])
-    help_text = capsys.readouterr().out
+    # argparse fills the description to the terminal width, so collapse
+    # whitespace: a phrase must match wherever the wrap happens to fall.
+    help_text = " ".join(capsys.readouterr().out.split())
     assert "default workflow" in help_text
     assert "never makes a git commit" not in help_text
     assert "initial commit" in help_text.lower()
