@@ -432,7 +432,8 @@ def test_what_is_imp_lists_converge_between_implement_and_integrate() -> None:
     text = Path("docs/guide/what-is-imp.md").read_text()
     assert "- **converge** — reviewing and testing everything built, once." in text
     # user-facing copy uses only imp-canon nouns (docs/internals/conventions.md)
-    assert "change" not in text
+    # canon noun is "quest"; ban the noun sense only — "changes"/"unchanged" are fine
+    assert not re.search(r"(?i)\b(?:a|the|this|each|per|your)\s+changes?\b", text)
     order = [
         text.index(f"- **{phase}**")
         for phase in ("threshold", "spec", "plan", "implement", "converge", "integrate")
@@ -543,6 +544,8 @@ def test_architecture_names_no_retired_agent() -> None:
     assert _retired_names_present("`integration-review` and `code-reviewer` run") == []
     # a plain-substring check would flag both of these; the lookarounds must not
     assert _retired_names_present("integrators and spec-writers") == []
+    # only the `-` in the lookarounds keeps a hyphen-extended name from tripping the ban
+    assert _retired_names_present("`spec-writer-v2` and `pre-spec-writer` shipped") == []
 
 
 def test_architecture_carries_no_circled_numerals() -> None:
