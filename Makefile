@@ -9,7 +9,7 @@
 SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
-PYTHON   ?= python3
+PYTHON   ?= $(CURDIR)/.venv/bin/python
 PYTEST   ?= $(PYTHON) -m pytest
 RUFF     ?= $(PYTHON) -m ruff
 MYPY     ?= $(PYTHON) -m mypy
@@ -67,13 +67,22 @@ help: ## Print this help.
 sync-env: ## Create/reconcile this worktree's .venv to uv.lock EXACTLY (fixes `make depcheck` drift).
 	$(UV) sync --all-extras
 
+# A target, not a parse-time $(error): sync-env and help must work on a fresh clone.
+.PHONY: require-venv
+require-venv:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "ERROR: no Python at $(PYTHON)" >&2; \
+	  echo "create it with: make sync-env" >&2; \
+	  exit 1; \
+	}
+
 # Scope a run: make test PYTEST_ARGS="tests/foo.py -k name"
 .PHONY: test
-test: ## Fast test suite (skips live-API tests). What CI runs.
+test: require-venv ## Fast test suite (skips live-API tests). What CI runs.
 	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
 
 .PHONY: test-verbose
-test-verbose: ## Same as `test` but with -v.
+test-verbose: require-venv ## Same as `test` but with -v.
 	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
 
 _LIVE_TEST_FILES := \
@@ -90,19 +99,19 @@ _LIVE_TEST_FILES := \
   tests/test_parallel_elicitation_live.py
 
 .PHONY: test-live
-test-live: ## Run live-API tests (--run-live); providers whose toolchain/creds are present run, the rest skip.
+test-live: require-venv ## Run live-API tests (--run-live); providers whose toolchain/creds are present run, the rest skip.
 	@$(_LOAD_LIVE_KEYS) && \
 	  $(PYTEST_PYTHONPATH) \
 	    timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) --run-live -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-verbose
-test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
+test-live-verbose: require-venv ## test-live but with live progress + raw PTY output streamed to your terminal.
 	@$(_LOAD_LIVE_KEYS) && \
 	  $(PYTEST_PYTHONPATH) \
 	    timeout --foreground 1800 $(PYTEST) --run-live -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
-test-live-quick: ## One-step live test for each provider whose toolchain/creds are present.
+test-live-quick: require-venv ## One-step live test for each provider whose toolchain/creds are present.
 	@$(_LOAD_LIVE_KEYS) && \
 	  $(PYTEST_PYTHONPATH) \
 	    $(PYTEST) --run-live -v \
@@ -111,29 +120,29 @@ test-live-quick: ## One-step live test for each provider whose toolchain/creds a
 	      tests/test_default_workflow_e2e_live_claude_code.py
 
 .PHONY: test-live-codex-parallel
-test-live-codex-parallel: ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).
+test-live-codex-parallel: require-venv ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).
 	@$(_LOAD_LIVE_KEYS) && \
 	  $(PYTEST_PYTHONPATH) \
 	    $(PYTEST) --run-live -v -m codex_parallel \
 	      tests/test_codex_started_keying_live.py
 
 .PHONY: test-all
-test-all: test test-live ## Full suite including live tests.
+test-all: require-venv test test-live ## Full suite including live tests.
 
 .PHONY: lint
-lint: ## Check lint with ruff.
+lint: require-venv ## Check lint with ruff.
 	$(RUFF) check .
 
 .PHONY: lint-fix
-lint-fix: ## Auto-fix ruff issues that can be fixed.
+lint-fix: require-venv ## Auto-fix ruff issues that can be fixed.
 	$(RUFF) check --fix .
 
 .PHONY: format
-format: ## Format code with ruff.
+format: require-venv ## Format code with ruff.
 	$(RUFF) format .
 
 .PHONY: typecheck
-typecheck: ## Run mypy on the source tree.
+typecheck: require-venv ## Run mypy on the source tree.
 	$(MYPY) src
 
 .PHONY: lockcheck
@@ -141,14 +150,14 @@ lockcheck: ## Verify uv.lock is in sync with pyproject.toml.
 	$(UV) lock --check
 
 .PHONY: depcheck
-depcheck: ## Verify the test interpreter has every dependency pyproject declares.
+depcheck: require-venv ## Verify the test interpreter has every dependency pyproject declares.
 	$(PYTHON) scripts/check_deps.py
 
 .PHONY: check
-check: depcheck lint typecheck lockcheck test ## Full pre-merge gate: deps + lint + types + lockfile + tests.
+check: require-venv depcheck lint typecheck lockcheck test ## Full pre-merge gate: deps + lint + types + lockfile + tests.
 
 .PHONY: build
-build: ## Build wheel + sdist into dist/.
+build: require-venv ## Build wheel + sdist into dist/.
 	$(PYTHON) -m build
 
 .PHONY: clean
@@ -159,11 +168,11 @@ clean: ## Remove build artifacts and caches.
 	find . -type f -name '*.pyc' -not -path './.git/*' -delete
 
 .PHONY: snap-ui
-snap-ui: ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
+snap-ui: require-venv ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
 	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
 
 .PHONY: snap-ui-light
-snap-ui-light: ## Same as snap-ui but the light theme on a near-white surface.
+snap-ui-light: require-venv ## Same as snap-ui but the light theme on a near-white surface.
 	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
 
 
