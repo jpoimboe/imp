@@ -255,24 +255,55 @@ def test_version_gains_the_conventional_trailing_blank_on_a_tty(
     assert tty == piped + "\n"
 
 
-def test_top_level_help_has_the_tagline_epilog_and_command_metavar(
+SPEC_HELP = """\
+usage: imp [-h] [--version] <command> ...
+
+imp — multi-agent software development workflow
+
+positional arguments:
+  <command>
+    init            Set up imp here (initializes git if needed).
+    new             Start a new quest: run the workflow from an opening
+                    intent.
+    chat            Open a conversation with imp (ask questions, scout work,
+                    or scope a quest).
+    resume          Resume a paused or interrupted quest by id or token.
+    log             Show the narrative for a quest.
+    events          Slice and dice a quest's event log (imp events <id>).
+    list            List your quests: in-flight, backlog, and merged.
+    show            Show one quest's detail or a named artifact (imp show
+                    <id>).
+    search          Search quests by id, title, or conversation content.
+    config          Show the effective config and per-setting provenance; set
+                    or unset a value.
+    abandon         Tear down a quest's worktree, branch, and state (logged).
+    edit            Edit a quest's title, backlog membership, dependencies,
+                    base branch, or opening intent.
+    remote-control  Run the optional per-repo daemon that relays all quests to
+                    one transport.
+    help            Show this help, or one command's options (imp help
+                    <command>).
+
+options:
+  -h, --help        show this help message and exit
+  --version         show program's version number and exit
+
+New to a project? Run 'imp init' to get started.
+Run 'imp <command> -h' for a command's options.
+"""
+
+
+def test_top_level_help_matches_the_specified_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setenv("COLUMNS", "80")
-    # endswith() pins the last content line, so ttyness is fixed rather than inherited.
+    # Pin ttyness rather than inherit it: under `pytest -s` on a terminal the
+    # formatter would append its conventional trailing blank.
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-    text = _build_parser().format_help()
-    assert text.startswith("usage: imp [-h] [--version] <command> ...\n")
-    assert f"\n{TAGLINE}\n" in text
-    # The 12-space help column is argparse's own arithmetic, pinned to the CI interpreter.
-    assert ("positional arguments:\n"
-            "  <command>\n"
-            "    init            Set up imp here (initializes git if needed).\n") in text
-    assert text.endswith("New to a project? Run 'imp init' to get started.\n"
-                         "Run 'imp <command> -h' for a command's options.\n")
-    assert "{init,new," not in text        # the brace blob is gone from usage and header
-    assert "\x1b" not in text
+    # The help column is argparse's own arithmetic, which shifted after 3.12
+    # (3.11 renders a 16-space column). This is the CI interpreter's rendering.
+    assert _build_parser().format_help() == SPEC_HELP
 
 
 def test_top_level_help_paints_only_the_taglines_wordmark(

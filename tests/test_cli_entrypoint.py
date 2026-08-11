@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -8,6 +9,17 @@ import pytest
 
 from imp import __version__
 from imp.cli.main import _OVERVIEW_COMMANDS, _build_parser, _command_names, main, render_overview
+
+_COLOR_ENV = ("NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE", "IMP_THEME")
+
+
+def _front_door(argv: list[str], cwd: Path,
+                env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    # Strip the ambient color/theme vars: NO_COLOR disables on mere presence.
+    base = {k: v for k, v in os.environ.items() if k not in _COLOR_ENV}
+    return subprocess.run([sys.executable, "-m", "imp", *argv], cwd=cwd,
+                          capture_output=True, text=True, check=False,
+                          env={**base, "COLUMNS": "80", **env})
 
 
 def test_overview_lists_each_common_command_and_footer() -> None:
@@ -77,6 +89,20 @@ def test_imp_help_command_equals_command_dash_h(tmp_path: Path) -> None:
     assert helped.returncode == 0
     assert direct.returncode == 0
     assert helped.stdout == direct.stdout
+
+
+def test_help_is_a_registered_subcommand_with_an_optional_command_arg() -> None:
+    parser = _build_parser()
+    assert "help" in _command_names(parser)
+    assert parser.parse_args(["help", "resume"]).command == "resume"
+    assert parser.parse_args(["help"]).command is None
+
+
+def test_imp_help_help_prints_the_help_subparsers_own_usage(tmp_path: Path) -> None:
+    r = _front_door(["help", "help"], tmp_path, {"NO_COLOR": "1"})
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.startswith("usage: imp help [-h] [<command>]\n")
+    assert "  <command>\n" in r.stdout
 
 
 def test_imp_help_unknown_command_rc2(capsys) -> None:

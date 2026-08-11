@@ -4704,6 +4704,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "stop", help="Stop the running remote-control daemon (SIGTERM).")
     p_rc_stop.set_defaults(func=_cmd_remote_control_stop)
 
+    p_help = sub.add_parser(
+        "help",
+        help="Show this help, or one command's options (imp help <command>).")
+    p_help.add_argument("command", nargs="?", metavar="<command>")
+
     return parser
 
 
