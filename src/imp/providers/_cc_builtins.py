@@ -6,11 +6,13 @@ in-process MCP server). If claude adds a new built-in and this constant
 doesn't include it, the agent could silently call the new tool and bypass
 imp's strict-MCP-only policy.
 
-The drift guard (`tests/test_cc_builtins_drift.py`) keeps this in sync with
-the installed claude CLI. When the SDK pin bumps, run that test; failures
-mean a built-in was added (or, less likely, removed).
+The drift guard (`tests/test_cc_builtins_drift.py`) spawns the bundled CLI
+under the exact deny list this constant produces and reads the tool registry
+it advertises, rather than syncing against a bare CLI listing. A failure means
+a built-in is reachable from every claude_code step; add it here.
 
-Source of truth: claude-code's Tool.ts registrations at SDK pin time.
+Source of truth: the tool registry advertised by the CLI bundled with the
+pinned SDK — not the `claude` on PATH, which the SDK never spawns.
 Pin: claude-agent-sdk>=0.2.87,<1.0
 """
 
