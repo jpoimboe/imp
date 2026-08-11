@@ -5,8 +5,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import imp
 from imp import __version__
-from imp.engine.shim import imp_shim_dir, write_imp_shim
+from imp.engine.shim import imp_shim_dir, outer_imp_mismatch, write_imp_shim
+
+# The src root the running imp was imported from, and the checkout that owns it.
+_RUNNING_SRC = Path(imp.__file__).resolve().parent.parent
+_CHECKOUT_ROOT = _RUNNING_SRC.parent
 
 
 def test_imp_shim_dir_is_under_quest_dir(tmp_path: Path) -> None:
@@ -28,10 +33,8 @@ def test_write_imp_shim_creates_executable_console_script(tmp_path: Path) -> Non
 
 
 def test_write_imp_shim_embeds_outer_src_root(tmp_path: Path) -> None:
-    import imp
-    outer_root = str(Path(imp.__file__).resolve().parent.parent)
     body = (write_imp_shim(tmp_path) / "imp").read_text()
-    assert f"sys.path.insert(0, {outer_root!r})" in body  # outer imp's src dir, not worktree
+    assert f"sys.path.insert(0, {str(_RUNNING_SRC)!r})" in body  # outer src dir, not worktree
 
 
 def _run_shim(shim: Path, *args: str, cwd: Path,
@@ -123,3 +126,40 @@ def test_shim_dir_precedes_preexisting_imp_on_path(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(shim_dir / "imp")
+
+
+def test_outer_imp_mismatch_silent_when_running_from_this_checkout() -> None:
+    """The suite runs against the checkout's own src (pyproject pythonpath=["src"]),
+    so the real checkout root must produce no message. The name guard keeps this
+    from passing vacuously if imp were ever imported from site-packages instead."""
+    assert _RUNNING_SRC.name == "src"
+    assert outer_imp_mismatch(_CHECKOUT_ROOT) is None
+
+
+def test_outer_imp_mismatch_silent_when_project_is_not_an_imp_checkout(
+        tmp_path: Path) -> None:
+    assert outer_imp_mismatch(tmp_path) is None          # no src/ at all
+    (tmp_path / "src").mkdir()
+    assert outer_imp_mismatch(tmp_path) is None          # src/, but no imp package
+
+
+def test_outer_imp_mismatch_names_both_roots_and_the_fix(tmp_path: Path) -> None:
+    (tmp_path / "src" / "imp").mkdir(parents=True)
+    (tmp_path / "src" / "imp" / "__init__.py").write_text("")
+
+    message = outer_imp_mismatch(tmp_path)
+
+    assert message is not None
+    assert message.startswith("outer imp mismatch: ")
+    assert str(_RUNNING_SRC) in message
+    assert str((tmp_path / "src").resolve()) in message
+    assert f"python3 -m pip install -e {tmp_path}" in message
+
+
+def test_outer_imp_mismatch_silent_through_a_symlinked_checkout(tmp_path: Path) -> None:
+    """A checkout reached by symlink is the same tree: both sides are resolved, so
+    the symlinked path must not read as a mismatch."""
+    link = tmp_path / "checkout-link"
+    link.symlink_to(_CHECKOUT_ROOT, target_is_directory=True)
+
+    assert outer_imp_mismatch(link) is None

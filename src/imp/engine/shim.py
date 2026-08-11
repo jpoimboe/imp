@@ -33,3 +33,18 @@ def write_imp_shim(quest_dir: Path) -> Path:
     )
     shim.chmod(0o755)
     return d
+
+
+def outer_imp_mismatch(control_root: Path) -> str | None:
+    """Message when the running imp is not `control_root`'s own src; None otherwise."""
+    expected_src = (control_root / "src").resolve()
+    if not (expected_src / "imp" / "__init__.py").exists():
+        return None
+    running_src = Path(imp.__file__).resolve().parent.parent
+    if running_src == expected_src:
+        return None
+    return (
+        f"outer imp mismatch: imp is running from {running_src}, not this checkout's "
+        f"{expected_src} — changes merged here take effect only after "
+        f"`python3 -m pip install -e {control_root}`"
+    )
