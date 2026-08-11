@@ -1,15 +1,15 @@
-"""Drift guard: ALL_CLAUDE_CODE_BUILTIN_TOOLS must match the installed CLI.
+"""Security guard: no built-in escapes imp's deny posture.
 
-Mechanism: spawn `claude --print --output-format stream-json --verbose
---input-format stream-json` with a minimal prompt and observe the `init`
-system message — claude advertises its tool registry there.
+Mechanism: resolve the CLI the SDK actually spawns (its bundled binary, not
+whatever `claude` is on PATH), launch it with the exact --disallowedTools
+list _build_options produces, and read the `init` system message, where
+claude advertises its live tool registry. Anything advertised beyond the
+ToolSearch exemption is a built-in the agent could call from every
+claude_code step.
 
-If `claude` is missing (CI without the CLI), skip. The point of the guard is
-to fire when the CLI IS available and a new built-in has appeared.
-
-The spawned `claude -p` reports the same tools whether or not the parent
-process is itself a Claude Code session (verified empirically by scrubbing
-CLAUDECODE/CLAUDE_CODE_* env vars and comparing init output).
+Probing under the deny posture rather than bare is load-bearing: some
+built-ins only materialize once others are denied, so a baseline probe
+never sees them.
 
 WebSearch / WebFetch note (§5.2):
   These two tools ARE included in ALL_CLAUDE_CODE_BUILTIN_TOOLS so that the
@@ -24,15 +24,15 @@ WebSearch / WebFetch note (§5.2):
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from claude_agent_sdk import ClaudeAgentOptions, CLINotFoundError
+from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 
 
@@ -58,20 +58,24 @@ def _invocation(tmp_path: Path, declared: frozenset[str] = frozenset()) -> Agent
         events_path=tmp_path / "events.jsonl")
 
 
-@pytest.mark.timeout(120)   # process-level backstop against a genuinely hung
-                            # CLI (a real defect) — NOT a load budget.
-def test_builtin_tools_match_cli() -> None:
-    # Do NOT skip on CLAUDECODE=1 — the bundled claude CLI advertises an
-    # identical tool registry with or without it; a CLAUDECODE skip hides real
-    # drift. Verify with `env -u CLAUDECODE … claude`.
-    cli = shutil.which("claude")
-    if cli is None:
-        pytest.skip("`claude` CLI not on PATH")
+def _resolve_cli(opts: ClaudeAgentOptions) -> str:
+    """The binary the SDK will spawn. Mirrors connect(): an explicit cli_path
+    wins, else _find_cli() (bundled → PATH → fixed locations). _find_cli() alone
+    ignores cli_path entirely, so both halves are required. The constructor
+    spawns nothing."""
+    transport = SubprocessCLITransport(prompt="", options=opts)
+    try:
+        return transport._cli_path or transport._find_cli()
+    except CLINotFoundError:
+        pytest.skip("claude CLI not found")
 
-    # Minimal stream-json input: one short user prompt. The `init` system
-    # message is emitted at process startup, BEFORE the model turn, so we read
-    # stdout only until `init` is parsed and then kill the subprocess — the
-    # model round-trip (the load-sensitive part) never runs.
+
+def _probe_advertised_tools(cli: str, deny: list[str]) -> set[str]:
+    """Spawn `cli` in imp's posture with `deny` and return the tool registry it
+    advertises in the `init` system message. The init frame precedes the model
+    turn, so no model round-trip occurs."""
+    # Do NOT skip on CLAUDECODE=1: the CLI advertises an identical registry with
+    # or without it, and such a skip would hide real drift.
     user_msg = json.dumps({
         "type": "user",
         "message": {"role": "user", "content": "say ok"},
@@ -86,6 +90,8 @@ def test_builtin_tools_match_cli() -> None:
             "--setting-sources", "",
             "--no-session-persistence",
             "--max-turns", "1",
+            "--strict-mcp-config",
+            "--disallowedTools", ",".join(deny),
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -131,29 +137,22 @@ def test_builtin_tools_match_cli() -> None:
         proc.wait()
         if proc.stdout is not None:
             proc.stdout.close()
+    return advertised
 
-    if not advertised:
-        pytest.skip(
-            "claude CLI did not advertise tools via init message; CLI format "
-            "may have changed. Investigate `claude --print ...` output and "
-            "update this test."
-        )
 
-    declared = set(ALL_CLAUDE_CODE_BUILTIN_TOOLS)
-    missing_in_constant = advertised - declared
-    extra_in_constant = declared - advertised
+@pytest.mark.timeout(120)   # process-level backstop against a genuinely hung
+                            # CLI (a real defect) — NOT a load budget.
+def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
+    opts = ClaudeCodeAgentRunner("m")._build_options(
+        _invocation(tmp_path), object(), ["bash"])
+    advertised = _probe_advertised_tools(_resolve_cli(opts), list(opts.disallowed_tools))
 
-    assert not missing_in_constant, (
-        f"claude advertises built-ins not in ALL_CLAUDE_CODE_BUILTIN_TOOLS: "
-        f"{sorted(missing_in_constant)}. Update _cc_builtins.py."
+    escapees = advertised - {"ToolSearch"}
+    assert not escapees, (
+        f"Built-ins reachable under imp's deny posture: {sorted(escapees)}. "
+        "The agent can call these from every claude_code step. Add them to "
+        "ALL_CLAUDE_CODE_BUILTIN_TOOLS in _cc_builtins.py."
     )
-    # Extras in the constant are non-fatal (claude removed one) but worth a
-    # warning — print and let the test pass.
-    if extra_in_constant:
-        print(
-            f"WARNING: ALL_CLAUDE_CODE_BUILTIN_TOOLS lists tools not in the "
-            f"current CLI: {sorted(extra_in_constant)}. Safe to remove."
-        )
 
 
 def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) -> None:
