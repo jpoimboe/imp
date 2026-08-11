@@ -1190,3 +1190,48 @@ def test_route_script_renders_base_and_checkout_branch(tmp_path) -> None:
 
     anyio.run(main)
     assert (tmp_path / "rendered.txt").read_text().strip() == "main|release-2.0"
+
+
+def test_run_command_runs_a_bare_command_without_a_step(tmp_path) -> None:
+    from imp.engine.gates import run_command
+
+    out = run_command(command="echo hi; echo bad >&2; exit 3",
+                      cwd=str(tmp_path), timeout_seconds=None)
+    assert out["exit"] == 3
+    assert out["stdout"] == "hi"          # rstripped, like run_script's
+    assert out["stderr"] == "bad\n"       # verbatim, like run_script's
+
+
+def test_run_command_timeout_raises_without_a_step(tmp_path) -> None:
+    from imp.engine.gates import run_command
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_command(command="sleep 30", cwd=str(tmp_path), timeout_seconds=1)
+
+
+def test_run_script_delegates_unpacked_step_fields(tmp_path, monkeypatch) -> None:
+    import dataclasses
+
+    import imp.engine.gates as gatesmod
+
+    seen: list[dict] = []
+
+    def _fake(**kw: object) -> dict[str, object]:
+        seen.append(kw)
+        return {"exit": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(gatesmod, "run_command", _fake)
+
+    step = _script_step("echo from-step", timeout_seconds=7)
+    gatesmod.run_script(step, cwd=tmp_path, shim_dir="/q/imp-shim")
+    # cwd falls back to the caller's when the step declares none
+    assert seen[-1]["command"] == "echo from-step"
+    assert seen[-1]["cwd"] == str(tmp_path)
+    assert seen[-1]["timeout_seconds"] == 7
+    assert seen[-1]["shim_dir"] == "/q/imp-shim"
+
+    pinned = dataclasses.replace(step, cwd="/tmp/step-cwd")
+    gatesmod.run_script(pinned, cwd=tmp_path, command="echo override")
+    # step.cwd wins over the caller's cwd; the command override wins over step.command
+    assert seen[-1]["cwd"] == "/tmp/step-cwd"
+    assert seen[-1]["command"] == "echo override"
