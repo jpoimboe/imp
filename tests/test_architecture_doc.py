@@ -225,8 +225,9 @@ def test_architecture_overview_diagram_matches_the_shipped_phase_order() -> None
 
 def test_architecture_legend_names_the_real_branch_steps() -> None:
     assert (
-        "- **branch** (`{ }` diamonds) — a pure var router, no execution: "
-        "`check-next-plan` and `wait-for-head`." in ARCH.read_text()
+        "- **branch** (`{ }` diamonds) — a var router, no agent or script: "
+        "`check-next-plan` and `wait-for-head` "
+        "(which also blocks to acquire the merge lane)." in ARCH.read_text()
     )
 
 

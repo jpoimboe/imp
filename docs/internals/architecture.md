@@ -161,7 +161,7 @@ Step kinds across all phases:
 
 - **agent** (boxes) — an LLM agent (`agents/<name>.md`); routes on its validated structured output.
 - **script** (`{{ }}` hexagons) — a shell command (`scripts/*.sh`); routes on exit code (`0` continue, `2` recoverable, else **pause to human**).
-- **branch** (`{ }` diamonds) — a pure var router, no execution: `check-next-plan` and `wait-for-head`.
+- **branch** (`{ }` diamonds) — a var router, no agent or script: `check-next-plan` and `wait-for-head` (which also blocks to acquire the merge lane).
 - **merge** — engine-native, lock-protected merge to base.
 
 Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedback), `pause` (human).
