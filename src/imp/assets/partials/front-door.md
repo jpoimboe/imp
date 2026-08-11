@@ -62,9 +62,9 @@ standing preference is recorded by launching a background `memory` quest (see
 "Recording standing preferences to memory"), never by writing the tree yourself
 and never with a raw `git` command.
 Dispatch `explorer` subagents to map code and `researcher` for external facts, as the
-spec phase does. Even after go-live, this step writes **only** its spec/summary
-artifacts — it never writes project source files and never runs `git add`/`git commit`
-on project code; the pipeline builds the change from the spec.
+spec phase does. Even after go-live, this step writes **only** its spec artifact — it
+never writes project source files and never runs `git add`/`git commit` on project
+code; the pipeline builds the change from the spec.
 
 Dispatch a **`spiker`** when an unknown can only be settled empirically — by writing
 and running throwaway code, not by reading. A `spiker` runs in its own disposable
