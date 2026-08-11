@@ -1,11 +1,16 @@
-"""docs/internals/architecture.md (a living doc) names the renamed artifact ref and no
-longer mentions the deleted journal-wip ref or the agent-commits-via-CLI command."""
+"""docs/internals/architecture.md and its sibling guides are living docs: they name the
+renamed artifact ref, and their `## Default workflow` narrative, diagrams, and reference
+tables stay reconciled with the shipped default workflow."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+import yaml
+
 ARCH = Path("docs/internals/architecture.md")
+DEFAULT_WORKFLOW = Path("src/imp/assets/workflows/default/workflow.yaml")
 
 
 def test_architecture_uses_renamed_artifact_ref() -> None:
@@ -178,10 +183,7 @@ OVERVIEW_DIAGRAM = """flowchart LR
 
 def test_architecture_default_workflow_intro_is_the_six_phase_text() -> None:
     text = ARCH.read_text()
-    assert (
-        "bundled with the install — a committed `imp/workflows/default` overrides it"
-        in text
-    )
+    assert "bundled with the install — a committed `imp/workflows/default` overrides it" in text
     assert (
         "Six phases. `threshold` is the front door — one conversation that answers "
         "questions, scouts existing work, or scopes a build." in text
@@ -384,10 +386,8 @@ def test_architecture_subagent_table_is_separate_and_names_dispatchers() -> None
     for row in (
         "| `coder` | `task-lead`, `deferred-sweep` |",
         "| `code-reviewer` | `task-lead`, `deferred-sweep` |",
-        "| `explorer` | `threshold`, `spec-finalizer`, `plan-writer`, "
-        "`task-lead`, `finalize` |",
-        "| `researcher` | `threshold`, `spec-finalizer`, `plan-writer`, "
-        "`task-lead`, `finalize` |",
+        "| `explorer` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |",
+        "| `researcher` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |",
         "| `spiker` | `threshold`, `spec-finalizer`, `task-lead`, `finalize` |",
     ):
         assert row in text, row
@@ -416,8 +416,10 @@ def test_what_is_imp_lists_converge_between_implement_and_integrate() -> None:
     assert "- **converge** — reviewing and testing everything built, once." in text
     # user-facing copy uses only imp-canon nouns (docs/internals/conventions.md)
     assert "change" not in text
-    order = [text.index(f"- **{phase}**") for phase in
-             ("threshold", "spec", "plan", "implement", "converge", "integrate")]
+    order = [
+        text.index(f"- **{phase}**")
+        for phase in ("threshold", "spec", "plan", "implement", "converge", "integrate")
+    ]
     assert order == sorted(order), order
 
 
@@ -455,20 +457,57 @@ def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -
     text = ARCH.read_text()
     flat = " ".join(text.split())
     assert (
-        "The columns list the **principal** writers and readers, not an exhaustive "
-        "census" in flat
+        "The columns list the **principal** writers and readers, not an exhaustive census" in flat
     )
     for row in (
-        "| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) "
-        "| all phases |",
+        "| `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases |",
         "| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, "
         "gap-check, batch-code-reviewer, deferred-sweep, summarizer |",
         "| `artifacts/summary/{id}.md` | summarizer — or threshold itself on an "
         "express quest | finalize, `imp show` |",
-        "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, "
-        "finalize |",
+        "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |",
     ):
         assert row in text, row
     # the last two retired names lived only in this table, unbackticked
     for retired in ("spec-writer", "plan-cycle-check"):
         assert retired not in text, retired
+
+
+def _shipped_phase_and_step_names() -> tuple[list[str], list[str]]:
+    wf = yaml.safe_load(DEFAULT_WORKFLOW.read_text())
+    return (
+        [p["name"] for p in wf["phases"]],
+        [s["name"] for p in wf["phases"] for s in p["steps"]],
+    )
+
+
+def _default_workflow_section(text: str) -> str:
+    return text.split("## Default workflow", 1)[1].split("\n## ", 1)[0]
+
+
+def _undocumented_steps(step_names: list[str], section: str) -> list[str]:
+    # `verify`/`finalize` are substrings of longer step names, so a bare-word check would
+    # be satisfied by `converge-verify`/`plan-finalized`; demand the backticked span
+    ambiguous = {n for n in step_names for other in step_names if n != other and n in other}
+    return [n for n in step_names if (f"`{n}`" if n in ambiguous else n) not in section]
+
+
+def test_architecture_documents_every_shipped_phase_and_step() -> None:
+    phases, steps = _shipped_phase_and_step_names()
+    # a parse that silently yielded nothing would make the whole guard vacuous
+    assert {"threshold", "check-next-plan", "merge-to-base"} <= set(steps)
+    text = ARCH.read_text()
+    # exactly the shipped phases, as name-titled headings, in workflow order
+    assert re.findall(r"(?m)^### Phase (.+)$", text) == phases
+    assert _undocumented_steps(steps, _default_workflow_section(text)) == []
+
+
+def test_step_guard_flags_a_step_the_doc_never_mentions() -> None:
+    section = _default_workflow_section(ARCH.read_text())
+    _, steps = _shipped_phase_and_step_names()
+    assert _undocumented_steps([*steps, "brand-new-step"], section) == ["brand-new-step"]
+    # the longer name never satisfies the shorter one's check
+    assert _undocumented_steps(
+        ["verify", "converge-verify", "finalize", "plan-finalized"],
+        "converge-verify runs, then plan-finalized",
+    ) == ["verify", "finalize"]
