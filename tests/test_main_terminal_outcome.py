@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from imp.cli import main
 from imp.cli.session_run import SettledOutcome
-from imp.paths import project_state_dir
 
 
 class _Events:
@@ -23,23 +23,15 @@ class _Change:
     base_branch = "master"
     materialized = False                # the real render-seam value (draft never reloaded)
     project_root = "/imp-state/worktrees/2026-06-12-run-x"
+    control_root = Path("/imp-state")
+    quest_dir = Path("/imp-state/quests/2026-06-12-run-x")
+    state_dir = Path("/imp-state/quests/2026-06-12-run-x/state")
 
     def __init__(self, events: list[dict]) -> None:
         self._events = events
 
     def event_log(self) -> _Events:
         return _Events(self._events)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _change_home(tmp_path_factory: pytest.TempPathFactory) -> None:
-    """Back the stub with a real quest home, as production's Quest always has."""
-    home = tmp_path_factory.mktemp("terminal-outcome")
-    quest_dir = project_state_dir(home) / "quests" / _Change.id
-    (quest_dir / "state").mkdir(parents=True)
-    _Change.control_root = home
-    _Change.quest_dir = quest_dir
-    _Change.state_dir = quest_dir / "state"
 
 
 def test_merge_blocked_outcome_emits_no_paused_summary() -> None:
