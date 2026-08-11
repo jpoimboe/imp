@@ -107,3 +107,11 @@ def test_render_html_end_to_end_neutralizes_hostile_tool_result() -> None:
     assert "&lt;script&gt;" in out                  # escaped / inert
     assert "\x00" not in out                        # control byte neutralized (-> ^@)
     assert "^@" in out
+
+
+def test_quiet_first_retry_is_absent_from_the_lean_html_export() -> None:
+    tree = nv.build_tree([
+        {"id": "r1", "agent_id": None, "type": "agent_retry",
+         "payload": {"category": "auth", "attempt": 1, "backoff_seconds": 1.0}}])
+    assert "retry 1" not in render_html(render_markdown(tree, full=False))
+    assert "retry 1" in render_html(render_markdown(tree, full=True))

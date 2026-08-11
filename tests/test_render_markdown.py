@@ -524,3 +524,17 @@ def test_markdown_warning_omits_the_sandbox_detail() -> None:
     ])
     assert "> **warning:** sandbox could not start the command; retrying (2/5)" in md
     assert "bwrap" not in md
+
+
+def test_quiet_first_retry_is_omitted_from_the_lean_markdown() -> None:
+    events = [_ev("r1", "agent_retry", category="auth", attempt=1,
+                  backoff_seconds=1.0, message="401 revoked")]
+    assert "retry 1" not in _md(events)
+    assert ("> **warning:** [auth] retry 1 (1.0s) — 401 revoked"
+            in _md(events, full=True))
+
+
+def test_second_retry_still_shows_in_the_lean_markdown() -> None:
+    events = [_ev("r1", "agent_retry", category="auth", attempt=2,
+                  backoff_seconds=2.0, message="401 revoked")]
+    assert "> **warning:** [auth] retry 2 (2.0s) — 401 revoked" in _md(events)
