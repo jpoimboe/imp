@@ -163,7 +163,7 @@ def test_every_shown_step_has_its_label() -> None:
     # Quiet plumbing steps stay label-free.
     for name in ("threshold", "spec-verify-commit", "plan-verify-commit",
                  "cleanup-merge", "check-next-plan",
-                 "assert-stamped", "integrate-rebase"):
+                 "assert-stamped", "integrate-rebase", "check-cleared"):
         assert by[name].label is None, name
 
 
@@ -244,10 +244,10 @@ def test_integration_reviewer_accept_edge_records_tolerated() -> None:
     clean = {"status": "Success", "findings": "", "blocking": False,
              "has_minor_findings": False, "tolerated": False}
     m = evaluate_rules(step.rules, vars=base, output=clean)
-    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
+    assert isinstance(m.action, Goto) and m.action.target == "check-cleared"
     assert m.var_mutations == {"slow_verify_tolerated": False}
 
     tol = {**clean, "tolerated": True}
     m2 = evaluate_rules(step.rules, vars=base, output=tol)
-    assert isinstance(m2.action, Goto) and m2.action.target == "summarizer"
+    assert isinstance(m2.action, Goto) and m2.action.target == "check-cleared"
     assert m2.var_mutations == {"slow_verify_tolerated": True}

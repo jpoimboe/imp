@@ -589,8 +589,8 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
 async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None:
     """A clean rebase (the stubbed integrate-rebase.sh exits 0): the reconciler is
     SKIPPED; the integrate tail is wait-for-head → integrate-rebase →
-    integration-verify → integration-reviewer → summarizer → finalize →
-    merge-to-base."""
+    integration-verify → integration-reviewer → check-cleared → summarizer →
+    finalize → merge-to-base."""
     quest = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
@@ -606,13 +606,15 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
     steps = [e["payload"].get("step") for e in _run_events(quest)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     for name in ("wait-for-head", "integrate-rebase", "integration-verify",
-                 "integration-reviewer", "summarizer", "finalize", "merge-to-base"):
+                 "integration-reviewer", "check-cleared", "summarizer",
+                 "finalize", "merge-to-base"):
         assert name in steps, f"{name} did not run"
     assert "reconciler" not in steps, "clean rebase must not call the reconciler"
     assert (steps.index("wait-for-head")
             < steps.index("integrate-rebase")
             < steps.index("integration-verify")
             < steps.index("integration-reviewer")
+            < steps.index("check-cleared")
             < steps.index("summarizer")
             < steps.index("finalize")
             < steps.index("merge-to-base"))

@@ -12,6 +12,7 @@ _QUIET = {
     # review/merge plumbing: mechanical git scripts + pure routing gates
     "assert-stamped",
     "integrate-rebase",
+    "check-cleared",
 }
 
 

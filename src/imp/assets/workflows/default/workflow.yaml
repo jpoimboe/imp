@@ -11,9 +11,11 @@ description: |
 # (drains the whole quest's Deferred list once) -> converge-verify (slow, on the
 # quest's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
-# reviews the integration, and ends at the human gate (summarizer -> finalize) so
-# the human blesses the locked, rebased, slow-tested state. cleanup.sh folds
-# fixups and stamps the Quest: trailer once, over cur_base_head..HEAD.
+# reviews the integration, check-cleared re-checks tree clearance (re-gates if
+# this tree was never verified), and ends at the human gate (summarizer ->
+# finalize) so the human blesses the locked, rebased, slow-tested state.
+# cleanup.sh folds fixups and stamps the Quest: trailer once, over
+# cur_base_head..HEAD.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -292,7 +294,19 @@ phases:
           - {if: {blocking: true}, resume: reconciler, label: "addressing integration review feedback", feedback: "Here's review feedback to address:"}
           - {if: {has_minor_findings: true}, resume: reconciler, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           - {if: {status: Error}, pause: true}
-          - {else: true, set: {slow_verify_tolerated: output.tolerated}, goto: summarizer}
+          - {else: true, set: {slow_verify_tolerated: output.tolerated}, goto: check-cleared}
+
+      # Merge door: the reviewer can accept a tree no slow gate ever passed (an
+      # environmental failure it repaired). Re-ask the shared clearance predicate and
+      # route an uncleared tree back through the gate instead of on to the human. The
+      # backward goto is counted against THIS step, so the inherited max_loops bounds it.
+      - name: check-cleared
+        show_label: false
+        command: ./scripts/check-cleared.sh "{{ vars.slow_verify_tolerated }}"
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {if: {exit: 3}, goto: integration-verify}
+          - {else: true, pause: true}
 
       - name: summarizer
         file: agents/summarizer.md
