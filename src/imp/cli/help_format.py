@@ -31,6 +31,19 @@ class ImpHelpFormatter(argparse.HelpFormatter):
 
     _wordmark = False
 
+    def add_argument(self, action: argparse.Action) -> None:
+        # Skip _decolor: absent before 3.14; imp sets color=False so invocations carry no escapes.
+        if action.help is not argparse.SUPPRESS:
+            invocation_lengths = [
+                len(self._format_action_invocation(action)) + self._current_indent
+            ]
+            for subaction in self._iter_indented_subactions(action):
+                invocation_lengths.append(
+                    len(self._format_action_invocation(subaction)) + self._current_indent
+                )
+            self._action_max_length = max(self._action_max_length, max(invocation_lengths))
+            self._add_item(self._format_action, [action])
+
     def format_help(self) -> str:
         text = super().format_help()
         if pal.should_use_color(sys.stdout):

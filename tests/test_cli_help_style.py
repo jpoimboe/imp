@@ -255,6 +255,20 @@ def test_version_gains_the_conventional_trailing_blank_on_a_tty(
     assert tty == piped + "\n"
 
 
+def test_help_column_is_stable_across_interpreters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    parser = ImpParser(prog="demo")
+    sub = parser.add_subparsers(dest="cmd", metavar="<command>")
+    sub.add_parser("short", help="Short.")
+    sub.add_parser("remote-control", help="Controls a remote.")
+    text = parser.format_help()
+    # On 3.11 without the fix, remote-control overflows its column onto a line of its own.
+    assert "    remote-control  Controls a remote.\n" in text
+
+
 SPEC_HELP = """\
 usage: imp [-h] [--version] <command> ...
 
@@ -301,8 +315,7 @@ def test_top_level_help_matches_the_specified_text(
     # Pin ttyness rather than inherit it: under `pytest -s` on a terminal the
     # formatter would append its conventional trailing blank.
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-    # The help column is argparse's own arithmetic, which shifted after 3.12
-    # (3.11 renders a 16-space column). This is the CI interpreter's rendering.
+    # The help column is interpreter-independent: ImpHelpFormatter pins the 3.12+ arithmetic.
     assert _build_parser().format_help() == SPEC_HELP
 
 
