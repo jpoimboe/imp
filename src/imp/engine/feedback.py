@@ -44,7 +44,7 @@ def _coerce(value: Any) -> str:
     return str(value)
 
 
-def _truncate(text: str, limit: int = _TRUNCATE_LIMIT) -> str:
+def truncate_detail(text: str, limit: int = _TRUNCATE_LIMIT) -> str:
     """Head+tail split: test failures put useful signal at both ends."""
     if len(text) <= limit:
         return text
@@ -58,13 +58,13 @@ def _truncate(text: str, limit: int = _TRUNCATE_LIMIT) -> str:
 def format_script_feedback(
     command: str, exit_code: int, stdout: Any, stderr: Any,
 ) -> str:
-    body = _truncate(f"{_coerce(stdout)}{_coerce(stderr)}")
+    body = truncate_detail(f"{_coerce(stdout)}{_coerce(stderr)}")
     detail = f"Gate `{command}` failed (exit {exit_code})\n{body}"
     return _WRAPPER.format(detail=detail)
 
 
 def format_clean_tree_feedback(paths: str) -> str:
-    body = _truncate(paths)
+    body = truncate_detail(paths)
     detail = (
         "The worktree still has uncommitted changes after your turn:\n"
         f"{body}\n"

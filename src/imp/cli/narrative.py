@@ -19,7 +19,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, ClassVar
 
-from imp.engine.feedback import _truncate
+from imp.engine.feedback import truncate_detail
 
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
@@ -2250,7 +2250,7 @@ def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     detail = stderr
     if stdout:
         detail = f"{detail}\n{stdout}" if detail else stdout
-    detail = _truncate(detail)
+    detail = truncate_detail(detail)
     self._append(ErrorNode(
         message=f"{step} blocked{suffix}", category="script",
         is_warning=False, detail=detail))
@@ -2283,7 +2283,7 @@ NarrativeBuilder._HANDLERS["backoff_ended"] = _h_backoff_ended
 
 def _h_script_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    self._append(LiteralTextNode(text=_truncate(str(p.get("stdout", ""))),
+    self._append(LiteralTextNode(text=truncate_detail(str(p.get("stdout", ""))),
                                  color_role=None, verbatim=False))
 
 

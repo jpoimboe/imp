@@ -364,3 +364,48 @@ def test_setup_ceiling_is_600_seconds() -> None:
     import imp.agents.tools.create_and_enter_worktree as cew
 
     assert cew.WORKTREE_SETUP_TIMEOUT_S == 600      # fixed; no second config key
+
+
+@pytest.mark.anyio
+async def test_setup_timeout_includes_partial_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    import imp.agents.tools.create_and_enter_worktree as cew
+    from imp.agents.tools.errors import FatalToolError
+
+    def _fake_run(**kw: object) -> dict:
+        raise subprocess.TimeoutExpired(
+            kw["command"], kw["timeout_seconds"],
+            output="PARTIAL_OUT", stderr="PARTIAL_ERR",
+        )
+
+    monkeypatch.setattr(cew, "run_command", _fake_run)
+    _seed_control(tmp_path)
+    _set_worktree_setup(tmp_path, "some_hanging_command")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s8", base_branch="main")
+    with pytest.raises(FatalToolError) as ei:
+        await get_registry()["create_and_enter_worktree"].async_invoke(
+            _ctx(ch, State.load(ch.state_dir)), {})
+    msg = str(ei.value)
+    assert "PARTIAL_OUT" in msg
+    assert "PARTIAL_ERR" in msg
+
+
+@pytest.mark.anyio
+async def test_setup_output_cap_raises_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.engine.gates as gatesmod
+    from imp.agents.tools.errors import FatalToolError
+
+    monkeypatch.setattr(gatesmod, "GATE_OUTPUT_CAP_BYTES", 10)
+    _seed_control(tmp_path)
+    cmd = "printf 'this is more than ten bytes of output'"
+    _set_worktree_setup(tmp_path, cmd)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s9", base_branch="main")
+    with pytest.raises(FatalToolError) as ei:
+        await get_registry()["create_and_enter_worktree"].async_invoke(
+            _ctx(ch, State.load(ch.state_dir)), {})
+    assert "output cap exceeded" in str(ei.value)

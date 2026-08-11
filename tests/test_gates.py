@@ -1209,6 +1209,19 @@ def test_run_command_timeout_raises_without_a_step(tmp_path) -> None:
         run_command(command="sleep 30", cwd=str(tmp_path), timeout_seconds=1)
 
 
+def test_run_command_timeout_carries_partial_output(tmp_path) -> None:
+    from imp.engine.gates import run_command
+
+    with pytest.raises(subprocess.TimeoutExpired) as ei:
+        run_command(
+            command="printf 'partial_stdout'; sleep 30",
+            cwd=str(tmp_path),
+            timeout_seconds=3,
+        )
+    assert ei.value.output == "partial_stdout"
+    assert ei.value.stderr == ""
+
+
 def test_run_script_delegates_unpacked_step_fields(tmp_path, monkeypatch) -> None:
     import dataclasses
 

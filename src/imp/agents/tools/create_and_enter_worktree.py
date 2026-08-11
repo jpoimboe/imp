@@ -4,7 +4,7 @@ import dataclasses
 import functools
 import json
 import subprocess
-from typing import Any
+from typing import Any, cast
 
 import anyio.to_thread
 
@@ -14,7 +14,8 @@ from imp.engine import backlog
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.backoff import interruptible_sleep
 from imp.engine.env import engine_env
-from imp.engine.gates import run_command
+from imp.engine.feedback import truncate_detail
+from imp.engine.gates import ScriptOutputExceeded, run_command
 from imp.engine.shim import imp_shim_dir
 
 _DEP_POLL_INTERVAL = 2.0
@@ -52,6 +53,12 @@ async def _await_dependencies(ctx: Any, quest: Any) -> None:
     _emit(ctx, "dependency_ready", {})
 
 
+def _setup_output_body(stdout: str | None, stderr: str | None) -> str:
+    raw = f"{stdout or ''}\n{stderr or ''}"
+    body = truncate_detail(raw)
+    return f"\n\n{body}" if body.strip() else ""
+
+
 async def _run_worktree_setup(ctx: Any, quest: Any) -> None:
     """Run worktree_setup in the fresh worktree; config resolves from the main checkout."""
     from imp.providers.effective import load_effective_config
@@ -72,13 +79,20 @@ async def _run_worktree_setup(ctx: Any, quest: Any) -> None:
     try:
         out = await anyio.to_thread.run_sync(call)
     except subprocess.TimeoutExpired as exc:
+        # run_command attaches both streams already decoded; typeshed types them as bytes
         raise FatalToolError(
             f"worktree_setup timed out after {WORKTREE_SETUP_TIMEOUT_S}s: "
-            f"{command}") from exc
+            f"{command}"
+            + _setup_output_body(
+                cast(str | None, exc.output), cast(str | None, exc.stderr)
+            )) from exc
+    except ScriptOutputExceeded as exc:
+        raise FatalToolError(
+            f"worktree_setup output cap exceeded: {command}: {exc}") from exc
     if out["exit"] != 0:
         raise FatalToolError(
-            f"worktree_setup failed (exit {out['exit']}): {command}\n\n"
-            f"{out['stdout']}\n{out['stderr']}")
+            f"worktree_setup failed (exit {out['exit']}): {command}"
+            + _setup_output_body(out["stdout"], out["stderr"]))
 
 
 @imp_tool(
