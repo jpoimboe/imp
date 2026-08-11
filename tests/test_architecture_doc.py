@@ -159,3 +159,54 @@ def test_operator_notes_document_the_moved_checkout_limitation() -> None:
     assert "imp list" in text
     # in-flight quests record absolute paths that the rename does not rewrite
     assert "Finish or abandon in-flight quests before moving a checkout" in text
+
+
+OVERVIEW_DIAGRAM = """flowchart LR
+  start([intent]) --> TH["threshold"]
+  TH --> SPEC["spec"]
+  SPEC --> PLAN["plan"]
+  PLAN --> IMPL["implement"]
+  IMPL --> CONV["converge"]
+  CONV --> INTG["integrate"]
+  INTG --> done([merged])
+  TH -. "express" .-> PLAN
+  IMPL -. "next outline plan" .-> PLAN
+  CONV -. "coverage gap" .-> PLAN
+  CONV -. "task gap" .-> IMPL
+  INTG -. "rework" .-> PLAN"""
+
+
+def test_architecture_default_workflow_intro_is_the_six_phase_text() -> None:
+    text = ARCH.read_text()
+    assert (
+        "bundled with the install — a committed `imp/workflows/default` overrides it"
+        in text
+    )
+    assert (
+        "Six phases. `threshold` is the front door — one conversation that answers "
+        "questions, scouts existing work, or scopes a build." in text
+    )
+    assert (
+        "The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then "
+        "runs once per outline plan, carrying **no** code review and **no** deferred "
+        "sweep in the per-plan loop." in text
+    )
+    assert "After the last plan of a multi-plan quest, `converge` runs **once**" in text
+    assert (
+        "An **express** quest (chosen at threshold) skips the whole spec phase and the "
+        "`plan-reviewer` gate; everything from `implement` onward is identical." in text
+    )
+    # the five-phase model and the false "fast path skips the supercycle" claim are gone
+    assert "Five phases" not in text
+    assert "skips the spec and plan-document review gates and the supercycle" not in text
+
+
+def test_architecture_overview_diagram_matches_the_shipped_phase_order() -> None:
+    assert OVERVIEW_DIAGRAM in ARCH.read_text()
+
+
+def test_architecture_legend_names_the_real_branch_steps() -> None:
+    assert (
+        "- **branch** (`{ }` diamonds) — a pure var router, no execution: "
+        "`check-next-plan` and `wait-for-head`." in ARCH.read_text()
+    )

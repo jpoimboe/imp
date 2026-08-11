@@ -135,7 +135,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop inside *implement*, a single **change-end** code-review pass that covers the whole quest (forward plans are not reviewed individually), and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the spec and plan-document review gates and the supercycle, but still gets the change-end code review.
+Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **default**; bundled with the install — a committed `imp/workflows/default` overrides it, see the [component reference](#component-reference)). Six phases. `threshold` is the front door — one conversation that answers questions, scouts existing work, or scopes a build. The spec's `## Plan outline` seeds a plan count, and `plan` → `implement` then runs once per outline plan, carrying **no** code review and **no** deferred sweep in the per-plan loop. After the last plan of a multi-plan quest, `converge` runs **once**: the coverage backstop, the single quest-wide code review, the once-per-quest deferred sweep, and a slow test gate on the quest's own base. `integrate` then holds the merge lane while it rebases, re-verifies, reviews the integration, and ends at the human gate. An **express** quest (chosen at threshold) skips the whole spec phase and the `plan-reviewer` gate; everything from `implement` onward is identical.
 
 Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<workflow>/`), so a downstream repo carrying `imp/memory/imp/*.md` renames that directory to `imp/memory/default/` after the `imp` → `default` rename.
 
@@ -143,21 +143,25 @@ Workflow-scoped memory is keyed by the workflow directory name (`imp/memory/<wor
 
 ```mermaid
 flowchart LR
-  start([begin / seed]) --> SPEC["① spec"]
-  SPEC --> PLAN["② plan"]
-  PLAN --> IMPL["③ implement"]
-  IMPL --> REVIEW["④ review"]
-  REVIEW --> INTG["⑤ integrate"]
-  INTG --> done([done])
-  IMPL -. "supercycle" .-> PLAN
-  REVIEW -. "rework" .-> PLAN
+  start([intent]) --> TH["threshold"]
+  TH --> SPEC["spec"]
+  SPEC --> PLAN["plan"]
+  PLAN --> IMPL["implement"]
+  IMPL --> CONV["converge"]
+  CONV --> INTG["integrate"]
+  INTG --> done([merged])
+  TH -. "express" .-> PLAN
+  IMPL -. "next outline plan" .-> PLAN
+  CONV -. "coverage gap" .-> PLAN
+  CONV -. "task gap" .-> IMPL
+  INTG -. "rework" .-> PLAN
 ```
 
 Step kinds across all phases:
 
 - **agent** (boxes) — an LLM agent (`agents/<name>.md`); routes on its validated structured output.
 - **script** (`{{ }}` hexagons) — a shell command (`scripts/*.sh`); routes on exit code (`0` continue, `2` recoverable, else **pause to human**).
-- **branch** (`{ }` diamonds) — a pure var router, no execution.
+- **branch** (`{ }` diamonds) — a pure var router, no execution: `check-next-plan` and `wait-for-head`.
 - **merge** — engine-native, lock-protected merge to base.
 
 Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedback), `pause` (human).
