@@ -57,17 +57,23 @@ def test_configure_skips_xdist_worker(monkeypatch):
 def test_unconfigure_reaps_owned_basetemp(tmp_path, monkeypatch):
     owned = tmp_path / "ipabc123"
     owned.mkdir()
+    live_home = conftest._OWNED_IMP_HOME
     monkeypatch.setattr(conftest, "_OWNED_BASETEMP", str(owned))
+    monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", None)
     conftest.pytest_unconfigure(_config())
     assert not owned.exists()
+    assert Path(live_home).is_dir()
 
 
 def test_unconfigure_noop_when_not_owned(tmp_path, monkeypatch):
     survivor = tmp_path / "user-basetemp"
     survivor.mkdir()
+    live_home = conftest._OWNED_IMP_HOME
     monkeypatch.setattr(conftest, "_OWNED_BASETEMP", None)
+    monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", None)
     conftest.pytest_unconfigure(_config())
     assert survivor.exists()
+    assert Path(live_home).is_dir()
 
 
 def test_configure_pins_imp_home_off_the_real_home(monkeypatch):
