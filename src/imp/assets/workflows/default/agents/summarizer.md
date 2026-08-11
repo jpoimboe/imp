@@ -18,7 +18,7 @@ Read to ground the summary:
 - `{{ quest.home }}/progress.md`;
 - `git diff <base>..HEAD` (via `bash`) for the *what*.
 
-When the spec is thin on the *why* — always so on an express quest, whose spec is Goal + Acceptance criteria only — recover the threshold rationale, what was said and not current state, with `imp events {{ quest.id }}` as a fallback.
+When the spec is thin on the *why* — always so on an express quest, whose spec is typically Goal + Acceptance criteria — recover the threshold rationale, what was said and not current state, with `imp events {{ quest.id }}` as a fallback.
 
 ## Write
 
