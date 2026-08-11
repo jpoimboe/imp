@@ -81,9 +81,9 @@ def test_network_retry_breadcrumb_unaffected() -> None:
     # is a no-op and the breadcrumb still renders.
     events = [
         _ev("e1", "error", category="network", message="connection reset"),
-        _ev("r1", "agent_retry", category="network", attempt=1,
-            backoff_seconds=1.0),
+        _ev("r1", "agent_retry", category="network", attempt=2,
+            backoff_seconds=2.0),
     ]
     out = _render(events)
     assert "error: [network]" not in out
-    assert "warning: [network] retry 1 (1.0s)" in out
+    assert "warning: [network] retry 2 (2.0s)" in out

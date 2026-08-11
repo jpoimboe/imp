@@ -157,8 +157,11 @@ async def test_auth_retry_recovers_through_backoff_loop(
         return found
 
     assert prose not in _texts(tree.root)
-    out = "\n".join(render_tree(tree, full=False, color=False, width=160))
+    out = "\n".join(render_tree(tree, full=True, color=False, width=160))
     assert f"[auth] retry 1 (1.0s) — {prose}" in out
+    # …and the healed first retry stays out of the lean transcript entirely.
+    lean = "\n".join(render_tree(tree, full=False, color=False, width=160))
+    assert "[auth] retry 1" not in lean
 
 
 @pytest.mark.anyio

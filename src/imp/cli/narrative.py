@@ -341,6 +341,7 @@ class ErrorNode:
     category: str | None = None
     is_warning: bool = False
     detail: str = ""                   # error: --full detail block; warning: lean line
+    full_only: bool = False            # built into the tree, rendered only under --full
     collapsible = False
 
 
@@ -2220,9 +2221,11 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
             message=f"[{cat}] waiting for limit reset — retry {attempt} in {_fmt_hm(secs)}",
             category=cat, is_warning=True))
         return
+    # Routine when it heals on retry 1 — the status line already narrates the wait.
     self._append(ErrorNode(
         message=f"[{cat}] retry {attempt} ({secs}s){_retry_message(p.get('message'))}",
-        category=cat, is_warning=True))
+        category=cat, is_warning=True,
+        full_only=backoff and isinstance(attempt, int) and attempt == 1))
 
 
 def _h_output_validation_nudge(

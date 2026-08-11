@@ -273,6 +273,15 @@ def test_backoff_ended_removes_press_r_hint_from_activity_line() -> None:
     assert "press r to retry now" not in resumed
 
 
+def test_quiet_first_auth_retry_still_sets_the_wait_state() -> None:
+    # The breadcrumb is hidden in the lean view; the status line must not be.
+    b = _build()
+    b.add(ev("3", "agent_retry", category="auth", attempt=1, backoff_seconds=1.0))
+    act = b.current_activity()
+    assert act.verb == "waiting for re-authentication"
+    assert act.countdown_total == 1.0
+
+
 def test_backoff_ended_renders_no_line() -> None:
     import json
 

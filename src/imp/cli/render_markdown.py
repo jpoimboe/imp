@@ -216,6 +216,8 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         return
     if isinstance(node, nv.ErrorNode):
         if node.is_warning:
+            if node.full_only and not full:
+                return
             yield "> **warning:** " + _md_escape(node.message)
             return
         tag = f"[{node.category}] " if node.category else ""

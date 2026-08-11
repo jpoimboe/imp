@@ -612,11 +612,6 @@ class LiveDriver:
             self._prev_prose = False
             self._print_lines([""])
             return
-        if rt.spaces_before(node):
-            # A leaf that wants a blank line above it (an error) gets one even when
-            # its predecessor wasn't a spaced block — mirrors render_text's
-            # spaces_before check in _render_children.
-            self._prev_prose = True
         if isinstance(node, nv.UserMessageNode):
             # The interactive prompt uses erase_when_done, so prompt_toolkit leaves
             # NO echo in scroll-back on a real terminal — we reprint the turn here
@@ -633,13 +628,16 @@ class LiveDriver:
                 list(lines), prose=True,
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
-        lines = rt._render(node, depth=depth, cats=self._cats, color=self._color,
-                           width=self._cur_width(),
-                           display_width=self._cur_display_width(),
-                           gutters=gutters)
+        leaf_lines = list(rt._render(node, depth=depth, cats=self._cats, color=self._color,
+                                     width=self._cur_width(),
+                                     display_width=self._cur_display_width(),
+                                     gutters=gutters))
+        # A node that renders nothing must not arm the separator (mirrors _render_children).
+        if leaf_lines and rt.spaces_before(node):
+            self._prev_prose = True
         prose = rt.spaces_after(node, full=self._cats >= rt._ALL_CATEGORIES)
         self._print_lines(
-            list(lines), prose=prose,
+            leaf_lines, prose=prose,
             separator_indent=rt._gutter_indent(depth, gutters, self._color))
 
     def _stream_or_hold(self, line: str, *, depth: int,
