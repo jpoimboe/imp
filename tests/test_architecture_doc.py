@@ -210,3 +210,58 @@ def test_architecture_legend_names_the_real_branch_steps() -> None:
         "- **branch** (`{ }` diamonds) — a pure var router, no execution: "
         "`check-next-plan` and `wait-for-head`." in ARCH.read_text()
     )
+
+
+THRESHOLD_DIAGRAM = """flowchart TD
+  in([intent / seed]) --> TH["threshold<br/>(explorer · researcher · spiker)"]
+  TH --> SCC{{"scope-code-check"}}
+  SCC -->|express| toplan([→ plan-writer])
+  SCC -->|full| tospec([→ spec-finalizer])
+  SCC -. "code committed while scoping" .-> TH"""
+
+SPEC_DIAGRAM = """flowchart TD
+  in([from threshold]) --> SF["spec-finalizer<br/>(explorer · researcher · spiker)"]
+  SF --> SVC{{"spec-verify-commit"}}
+  SVC -. "no spec / no outline" .-> SF
+  SVC -->|"plan_total = N"| SR["spec-reviewer"]
+  SR -->|"Critical / Major"| SF
+  SR -->|"minors: one pass"| SF
+  SR -->|clean| out([→ plan-writer])"""
+
+PLAN_DIAGRAM = """flowchart TD
+  in([from spec · outline plan N]) --> PW["plan-writer<br/>(explorer · researcher)"]
+  PW --> PVC{{"plan-verify-commit"}}
+  PVC -. "no plan artifact" .-> PW
+  PVC -->|express| PF
+  PVC --> PR["plan-reviewer"]
+  PR -->|"Critical / Major"| PW
+  PR -->|"minors: one pass"| PW
+  PR -->|clean| PF{{"plan-finalized"}}
+  PF -->|"task_total = N"| out([→ task-lead])"""
+
+
+def test_architecture_front_phase_sections_are_name_titled() -> None:
+    text = ARCH.read_text()
+    for heading in ("### Phase threshold", "### Phase spec", "### Phase plan"):
+        assert heading in text, heading
+    for stale in ("### Phase ① spec", "### Phase ② plan"):
+        assert stale not in text, stale
+    assert "spec-writer<br/>" not in text
+
+
+def test_architecture_front_phase_diagrams_match_the_workflow() -> None:
+    text = ARCH.read_text()
+    for diagram in (THRESHOLD_DIAGRAM, SPEC_DIAGRAM, PLAN_DIAGRAM):
+        assert diagram in text, diagram.splitlines()[1]
+
+
+def test_architecture_front_phase_prose_names_key_steps() -> None:
+    text = ARCH.read_text()
+    for step in (
+        "`scope-code-check`",
+        "`spec-finalizer`",
+        "`plan-writer`",
+        "`plan-reviewer`",
+        "`plan-finalized`",
+    ):
+        assert step in text, step

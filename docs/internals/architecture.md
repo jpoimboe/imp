@@ -166,36 +166,60 @@ Step kinds across all phases:
 
 Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedback), `pause` (human).
 
-### Phase ① spec
+### Phase threshold
 
-Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the quest → write the spec under the quest home's `artifacts/spec/` (the engine journals it to the quest's `refs/imp/artifacts/<id>` ref at the step boundary), verify the artifact is present on disk, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
+One interactive high-tier conversation that answers questions, scouts existing work, or
+scopes a build. On go-live it forks the worktree and writes a draft spec; its ceremony
+sets `fast_path`. `scope-code-check` then guards the hand-off — the threshold agent must
+not have committed code to the branch while scoping; if it did, it is resumed to undo it.
+On an express quest, threshold also writes the summary artifact itself.
 
 ```mermaid
 flowchart TD
-  in([intent / seed]) --> SW["spec-writer<br/>(explorer · researcher)"]
-  SW --> SVC{{"spec-verify-commit"}}
-  SVC -. fail .-> SW
-  SVC -->|fast_path| out([→ plan])
-  SVC --> SR["spec-reviewer"]
-  SR -->|"Critical / Major"| SW
-  SR -->|"minors: one pass"| SW
-  SR -->|clean| out
+  in([intent / seed]) --> TH["threshold<br/>(explorer · researcher · spiker)"]
+  TH --> SCC{{"scope-code-check"}}
+  SCC -->|express| toplan([→ plan-writer])
+  SCC -->|full| tospec([→ spec-finalizer])
+  SCC -. "code committed while scoping" .-> TH
 ```
 
-### Phase ② plan
+### Phase spec
 
-Write the next bite-sized `plan-N` (same read-only helper subagents), verify the commit, then a single **`plan-reviewer`** runs directly, reading the plan's prescribed code like a diff. `fast_path` skips review. Mirrors the spec minors loop.
+`spec-finalizer` adopts the threshold draft and commits the final spec, including its
+`## Plan outline`. The gate counts the outline's numbered plans to seed `plan_total`, so
+the planning label carries the real denominator. The reviewer gets the last word: the
+loop ends only on a clean review with nothing left to integrate, and the writer gets
+exactly one minors-integration pass per settled state.
 
 ```mermaid
 flowchart TD
-  in([from spec]) --> PW["plan-writer<br/>(explorer · researcher)"]
+  in([from threshold]) --> SF["spec-finalizer<br/>(explorer · researcher · spiker)"]
+  SF --> SVC{{"spec-verify-commit"}}
+  SVC -. "no spec / no outline" .-> SF
+  SVC -->|"plan_total = N"| SR["spec-reviewer"]
+  SR -->|"Critical / Major"| SF
+  SR -->|"minors: one pass"| SF
+  SR -->|clean| out([→ plan-writer])
+```
+
+### Phase plan
+
+`plan-writer` is the plan-phase entry: the spec phase, the next-plan loop, a gap-check
+corrective, and a finalize rework all `goto` it directly. It writes this outline plan's
+slice, the gate verifies the artifact, `plan-reviewer` mirrors the spec minors loop, and
+`plan-finalized` counts `## Task N` headers to seed `task_total`.
+
+```mermaid
+flowchart TD
+  in([from spec · outline plan N]) --> PW["plan-writer<br/>(explorer · researcher)"]
   PW --> PVC{{"plan-verify-commit"}}
-  PVC -. fail .-> PW
-  PVC -->|fast_path| out([→ implement])
+  PVC -. "no plan artifact" .-> PW
+  PVC -->|express| PF
   PVC --> PR["plan-reviewer"]
   PR -->|"Critical / Major"| PW
   PR -->|"minors: one pass"| PW
-  PR -->|clean| out
+  PR -->|clean| PF{{"plan-finalized"}}
+  PF -->|"task_total = N"| out([→ task-lead])
 ```
 
 ### Phase ③ implement
