@@ -250,17 +250,14 @@ def test_threshold_sets_fast_path_from_ceremony() -> None:
     assert full.var_mutations["fast_path"] is False
 
 
-def test_threshold_authors_summary_on_express() -> None:
+def test_threshold_defers_summary_to_summarizer() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     body = wf.agents["threshold"].prompt_template_source
-    assert "imp artifact-commit" not in body
-    assert "{{ quest.home }}/artifacts/summary/{{ quest.id }}.md" in body
-    low = body.lower()
-    # Only on the express path; the full path defers to the end-of-change summarizer.
-    assert "express path" in low
-    assert "summarizer" in low
-    assert "full path do **not** write the summary" in body
+    # `summarizer` is the artifact's single writer on every quest, express included.
+    assert "artifacts/summary/" not in body
+    assert "summarizer" not in body.lower()
+    assert "then finish the turn with `complete_step`, emitting the chosen `ceremony`" in body
 
 
 def test_threshold_rules_route_through_scope_gate() -> None:
