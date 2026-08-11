@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 from imp import __version__
 from imp.cli import palette as pal
 from imp.cli import quest_row, splash
+from imp.cli.help_format import ImpParser, ImpRawHelpFormatter
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.paths import project_state_dir
@@ -4158,7 +4159,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
 
 
 def _build_events_search_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = ImpParser(
         prog="imp events search",
         description=(
             "Case-insensitive substring search over structured event content "
@@ -4216,7 +4217,7 @@ def _add_config_scope(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="imp")
+    parser = ImpParser(prog="imp")
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=False)
 
@@ -4231,7 +4232,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "(providers and theme). Makes an initial commit of\n"
             "imp/config.yaml and .gitignore."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_init.set_defaults(func=_cmd_init, warm=True)
     p_init.add_argument(
@@ -4441,7 +4441,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "      reasoning). Narrow with --type / --agent; full flags with:\n"
             "      imp events search -h"
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=ImpRawHelpFormatter,
     )
     p_events.add_argument(
         "token", nargs="?", default=None,
