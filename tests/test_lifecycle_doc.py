@@ -64,3 +64,8 @@ def test_lifecycle_places_the_quest_home_outside_the_checkout() -> None:
             "outside the checkout") in flat
     # the in-worktree path is named as the symlink it is
     assert "reachable as `.imp/quests/<id>/`, a symlink" in flat
+
+
+def test_lifecycle_documents_worktree_setup_on_go_live() -> None:
+    body = DOC.read_text()
+    assert "re-runs it on every `create_and_enter_worktree` call" in body

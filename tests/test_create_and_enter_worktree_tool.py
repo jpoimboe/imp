@@ -96,7 +96,9 @@ def test_tool_description_mentions_dependency_wait() -> None:
     ) in desc
     assert "an attended wait is interruptible (Ctrl-D pauses; a later resume retries)" in desc
     assert "a background run waits on its own until the dependency lands" in desc
-    assert desc.rstrip().endswith("Idempotent — a no-op once the worktree already exists.")
+    assert desc.rstrip().endswith(
+        "Idempotent — once the worktree exists, creating it again is a no-op, "
+        "but the project's `worktree_setup` command re-runs on every call.")
 
 
 def _active_policy(worktree: str, **over: object) -> SandboxPolicy:

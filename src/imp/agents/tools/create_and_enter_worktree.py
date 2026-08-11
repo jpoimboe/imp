@@ -93,8 +93,9 @@ async def _run_worktree_setup(ctx: Any, quest: Any) -> None:
         "this quest depends on a quest that hasn't merged yet, it first waits "
         "for that merge before forking — an attended wait is interruptible "
         "(Ctrl-D pauses; a later resume retries), and a background run waits "
-        "on its own until the dependency lands. Idempotent — a no-op once the "
-        "worktree already exists."
+        "on its own until the dependency lands. Idempotent — once the worktree "
+        "exists, creating it again is a no-op, but the project's "
+        "`worktree_setup` command re-runs on every call."
     ),
 )
 async def create_and_enter_worktree(ctx: Any) -> str:

@@ -1,1 +1,1 @@
-call `create_and_enter_worktree` (no arguments). It forks the branch and worktree from the base branch's current tip and switches this quest in; your subsequent tools then operate in the new worktree. Harmless no-op if already live.
+call `create_and_enter_worktree` (no arguments). It forks the branch and worktree from the base branch's current tip and switches this quest in; your subsequent tools then operate in the new worktree. If already live, the worktree is left as-is, but the project's `worktree_setup` command re-runs.

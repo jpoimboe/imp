@@ -85,10 +85,18 @@ def test_browser_coverage_rule_reaches_both_scoping_agents() -> None:
         assert "wiring it to `test_cmd_slow` is in scope" in flat, name
 
 
+def test_brainstorm_dialogue_no_harmless_no_op() -> None:
+    text = (bundled_partials_dir() / "brainstorm-dialogue.md").read_text()
+    assert "harmless no-op" not in text.lower()
+
+
 def test_go_live_worktree_partial_shared_and_included_by_threshold() -> None:
     partial = bundled_partials_dir() / "go-live-worktree.md"
     assert partial.is_file()
-    assert "create_and_enter_worktree" in partial.read_text()
+    text = partial.read_text()
+    assert "create_and_enter_worktree" in text
+    assert "`worktree_setup` command re-runs" in text
+    assert "harmless no-op" not in text.lower()     # a second call is no longer free
     threshold_src = (
         bundled_workflow_dir("default") / "agents" / "threshold.md").read_text()
     assert '{% include "partials/go-live-worktree.md" %}' in threshold_src
