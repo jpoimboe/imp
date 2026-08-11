@@ -6,7 +6,6 @@ import json
 import subprocess
 from typing import Any
 
-import anyio
 import anyio.to_thread
 
 from imp.agents.tools import imp_tool
