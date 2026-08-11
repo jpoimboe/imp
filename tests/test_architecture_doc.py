@@ -348,3 +348,64 @@ def test_architecture_implement_phase_disclaims_the_moved_work() -> None:
         "all of that moved to `converge`." in flat
     )
     assert "`verify` runs the project's fast test gate" in flat
+
+
+def test_architecture_step_agent_table_pairs_files_with_steps_and_tiers() -> None:
+    text = ARCH.read_text()
+    assert "| Agent file | Step | Tier | Role |" in text
+    for row in (
+        "| `threshold` | `threshold` | high |",
+        "| `spec-finalizer` | `spec-finalizer` | high |",
+        "| `spec-reviewer` | `spec-reviewer` | high |",
+        "| `plan-writer` | `plan-writer` | high |",
+        "| `plan-reviewer` | `plan-reviewer` | high |",
+        # the three whose step name differs from the agent file name
+        "| `batch-code-reviewer` | `quest-review` | high |",
+        "| `integration-review` | `integration-reviewer` | high |",
+        "| `autosquash-resolve` | `autosquash-resolve-merge` | high |",
+        # workflow.yaml declares task-lead high; the old table claimed medium
+        "| `task-lead` | `task-lead` | high |",
+        "| `gap-check` | `gap-check` | high |",
+        "| `deferred-sweep` | `deferred-sweep` | high |",
+        "| `reconciler` | `reconciler` | high |",
+        "| `finalize` | `finalize` | high |",
+        # the one non-high step in the whole workflow
+        "| `summarizer` | `summarizer` | medium |",
+    ):
+        assert row in text, row
+
+
+def test_architecture_subagent_table_is_separate_and_names_dispatchers() -> None:
+    text = ARCH.read_text()
+    flat = " ".join(text.split())
+    assert "dispatched via `subagents:` frontmatter" in flat
+    assert "**never** a workflow step" in flat
+    assert "| Subagent | Dispatched by |" in text
+    for row in (
+        "| `coder` | `task-lead`, `deferred-sweep` |",
+        "| `code-reviewer` | `task-lead`, `deferred-sweep` |",
+        "| `explorer` | `threshold`, `spec-finalizer`, `plan-writer`, "
+        "`task-lead`, `finalize` |",
+        "| `researcher` | `threshold`, `spec-finalizer`, `plan-writer`, "
+        "`task-lead`, `finalize` |",
+        "| `spiker` | `threshold`, `spec-finalizer`, `task-lead`, `finalize` |",
+    ):
+        assert row in text, row
+
+
+def test_architecture_agent_reference_drops_the_deleted_agents() -> None:
+    text = ARCH.read_text()
+    for retired in (
+        "`spec-writer`",
+        "`review-panel`",
+        "`quality-reviewer`",
+        "`completeness-slice`",
+        "`spec-compliance-slice`",
+        "`boundaries-slice`",
+        "`plan-cycle-check`",
+        "`integrator`",
+    ):
+        assert retired not in text, retired
+    # the summary artifact is read by `imp show`; `imp log --summary` is a
+    # step-timing table built from events, not the artifact
+    assert "queryable via `imp log`" not in text

@@ -314,27 +314,38 @@ flowchart TD
 
 ### Agent reference
 
-| Agent | Tier | Role |
-|---|---|---|
-| `spec-writer` | high | Brainstorm with user, name the quest, write+commit the spec. |
-| `spec-reviewer` | high | Review spec vs captured intent; blocking iff Critical/Major. |
-| `plan-writer` | high | Write the next bite-sized `plan-N` from spec + progress. |
-| `plan-reviewer` | high | Run directly as the `plan-review` step. Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
-| `task-lead` | medium | Implement controller: pick task, dispatch implementer + reviewer, adjudicate, commit one unit, record progress. |
-| `implementer` | medium | Implement one task / apply directed fixes; commit. |
-| `quality-reviewer` | medium | Per-task read-only quality review back to task-lead. |
-| `review-panel` | medium | Whole-diff coordinator; dispatches the four opus reviewers, dedupes/filters their advisory findings, routes approve / task_gap / plan_gap. |
-| `code-reviewer` | high | Generalist whole-change review vs spec (correctness + completeness). |
-| `completeness-slice` | high | Every changed symbol's callers and parallel paths. |
-| `spec-compliance-slice` | high | Does the code do exactly what the spec/task says. |
-| `boundaries-slice` | high | Edge cases: empty/None/overflow, error handling at extremes. |
-| `deferred-sweep` | medium | Drain deferred followups with a 3-way disposition (silent / fix+FYI / surface); may dispatch implementer + quality-reviewer for fixes. |
-| `plan-cycle-check` | medium | Decide if the spec needs another plan (supercycle) or is covered. |
-| `autosquash-resolve` | high | Resolve a fixup-fold rebase conflict, preserving the pre-squash tree. |
-| `integrator` | high | Merge base into the branch; resolve textual + semantic conflicts. |
-| `finalize` | high | Final gate: review the base-merge resolution, write the end-of-change summary (queryable via `imp log`), and decide merge / rework / pause. |
-| `explorer` | — | Read-only helper: fast codebase exploration with file:line citations (dispatched by spec-writer / plan-writer). |
-| `researcher` | — | Read-only helper: web search + fetch (and codebase grounding), reports cited findings. |
+Step agents — the step name is spelled out because three of them differ from the file
+name:
+
+| Agent file | Step | Tier | Role |
+|---|---|---|---|
+| `threshold` | `threshold` | high | Front-door conversation: answer, scout, or scope; set the ceremony and go live. |
+| `spec-finalizer` | `spec-finalizer` | high | Adopt the threshold draft, commit the final spec with its plan outline, service the review loop. |
+| `spec-reviewer` | `spec-reviewer` | high | Review the spec against captured intent; blocking iff Critical/Major. |
+| `plan-writer` | `plan-writer` | high | Write this outline plan's slice — the HOW — and commit it. |
+| `plan-reviewer` | `plan-reviewer` | high | Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
+| `task-lead` | `task-lead` | high | Implement controller: pick a task, dispatch coder + reviewer, adjudicate, commit one unit, record progress. |
+| `gap-check` | `gap-check` | high | Once-per-quest coverage backstop: do the implemented plans cover the spec, or is a corrective plan needed. |
+| `batch-code-reviewer` | `quest-review` | high | The single quest-wide code review of the whole diff vs the spec; routes approve / task_gap. |
+| `deferred-sweep` | `deferred-sweep` | high | Drain the quest's deferred followups once; may dispatch coder + code-reviewer for fixes. |
+| `reconciler` | `reconciler` | high | Reconcile the branch against a moved base: resolve conflicts, fix what the base broke. |
+| `integration-review` | `integration-reviewer` | high | At-head semantic integration review; classifies findings and routes back to the reconciler. |
+| `summarizer` | `summarizer` | medium | Write the quest's intent-level summary artifact. |
+| `finalize` | `finalize` | high | The human gate: merge / rework / pause. |
+| `autosquash-resolve` | `autosquash-resolve-merge` | high | Resolve a fixup-fold rebase conflict, preserving the pre-squash tree. |
+
+Tiers come from `workflow.yaml`, which declares every step `high` except `summarizer`
+(medium).
+
+These are dispatched via `subagents:` frontmatter and are **never** a workflow step:
+
+| Subagent | Dispatched by |
+|---|---|
+| `coder` | `task-lead`, `deferred-sweep` |
+| `code-reviewer` | `task-lead`, `deferred-sweep` |
+| `explorer` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |
+| `researcher` | `threshold`, `spec-finalizer`, `plan-writer`, `task-lead`, `finalize` |
+| `spiker` | `threshold`, `spec-finalizer`, `task-lead`, `finalize` |
 
 ### Data files
 
