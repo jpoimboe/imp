@@ -155,6 +155,22 @@ def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.timeout(120)   # process-level backstop against a genuinely hung
+                            # CLI (a real defect) — NOT a load budget.
+def test_deny_posture_probe_is_live(tmp_path: Path) -> None:
+    opts = ClaudeCodeAgentRunner("m")._build_options(
+        _invocation(tmp_path), object(), ["bash"])
+    deny = [t for t in opts.disallowed_tools if t != "Bash"]
+    advertised = _probe_advertised_tools(_resolve_cli(opts), deny)
+
+    assert "Bash" in advertised, (
+        "Probe is inert: expected Bash to be advertised when only ToolSearch "
+        f"and Bash are exempt, got {sorted(advertised)}. The probe no longer "
+        "reflects the CLI's init output — fix it before trusting the "
+        "deny-posture guard."
+    )
+
+
 def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) -> None:
     """WebSearch/WebFetch are deliberately exempted from the deny list and
     allowlisted when an agent declares web_search/web_fetch (spec §5.2). This
