@@ -10,19 +10,18 @@ from imp.cli import palette as pal
 
 TAGLINE = "imp — multi-agent software development workflow"
 
-_HEADINGS = ("usage:", "positional arguments:", "options:")
+_SECTION_HEADINGS = frozenset({"positional arguments:", "options:"})
 
 
 def _paint(text: str, *, wordmark: bool) -> str:
     painted: list[str] = []
-    for line in text.split("\n"):
+    for i, line in enumerate(text.split("\n")):
         if wordmark and line == TAGLINE:
             line = pal.ansi("imp", "wordmark") + line[len("imp"):]
-        else:
-            for heading in _HEADINGS:
-                if line.startswith(heading):
-                    line = pal.ansi(heading, "dim") + line[len(heading):]
-                    break
+        elif i == 0 and line.startswith("usage:"):
+            line = pal.ansi("usage:", "dim") + line[len("usage:"):]
+        elif line in _SECTION_HEADINGS:
+            line = pal.ansi(line, "dim")
         painted.append(line)
     return "\n".join(painted)
 
