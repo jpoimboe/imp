@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import tests.conftest as conftest
@@ -66,3 +68,26 @@ def test_unconfigure_noop_when_not_owned(tmp_path, monkeypatch):
     monkeypatch.setattr(conftest, "_OWNED_BASETEMP", None)
     conftest.pytest_unconfigure(_config())
     assert survivor.exists()
+
+
+def test_configure_pins_imp_home_off_the_real_home(monkeypatch):
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    monkeypatch.setattr(conftest, "_OWNED_BASETEMP", None)
+    monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", None)
+    conftest.pytest_configure(_config(basetemp="/custom/bt"))
+    pinned = conftest._OWNED_IMP_HOME
+    assert os.environ["IMP_HOME"] == pinned
+    assert Path(pinned).is_dir()
+    assert Path(pinned) != Path.home() / ".imp"
+    conftest.pytest_unconfigure(_config())
+    assert not Path(pinned).exists()
+
+
+def test_configure_leaves_an_existing_imp_home_pin_alone(monkeypatch):
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    monkeypatch.setattr(conftest, "_OWNED_BASETEMP", None)
+    monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", "/tmp/imphome-sentinel")
+    before = os.environ["IMP_HOME"]
+    conftest.pytest_configure(_config(basetemp="/custom/bt"))
+    assert conftest._OWNED_IMP_HOME == "/tmp/imphome-sentinel"
+    assert os.environ["IMP_HOME"] == before

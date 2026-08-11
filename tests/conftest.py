@@ -80,8 +80,24 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 # teardown reap on this being set, so the guard is structural, not re-derived.
 _OWNED_BASETEMP: str | None = None
 
+# The IMP_HOME we pinned this run to, reaped at teardown. `_isolate_global_config`
+# is function-scoped, so collection-time imports and module/session-scoped fixtures
+# run outside its cover — without this pin they resolve imp_home() to the
+# developer's real ~/.imp and write into it.
+_OWNED_IMP_HOME: str | None = None
+
 
 def pytest_configure(config: pytest.Config) -> None:
+    # Pin IMP_HOME for the whole run, unconditionally: an xdist worker starts with
+    # its own _OWNED_IMP_HOME at None, so every process pins and reaps its own and
+    # the teardown never races. Idempotent because
+    # tests/test_conftest_basetemp.py re-enters this hook in-process — re-pinning
+    # there would orphan a /tmp dir once monkeypatch restores the live value.
+    global _OWNED_IMP_HOME
+    if _OWNED_IMP_HOME is None:
+        _OWNED_IMP_HOME = tempfile.mkdtemp(prefix="imphome", dir="/tmp")
+        os.environ["IMP_HOME"] = _OWNED_IMP_HOME
+
     # Numerous tests hand-bind AF_UNIX sockets DIRECTLY under tmp_path
     # (str(tmp_path / "s.sock") / "rc.sock" in test_session_client.py,
     # test_daemon_southhub_*.py, test_daemon_connector_*.py, test_mutation_proxy.py,
@@ -113,6 +129,8 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     # so workers never race the controller's removal.
     if _OWNED_BASETEMP is not None:
         shutil.rmtree(_OWNED_BASETEMP, ignore_errors=True)
+    if _OWNED_IMP_HOME is not None:
+        shutil.rmtree(_OWNED_IMP_HOME, ignore_errors=True)
 
 
 def pytest_collection_modifyitems(
