@@ -50,6 +50,7 @@ dev = [
   "ruff>=0.4",
   "mypy>=1.10",
   "types-PyYAML",
+  "build>=1.2",
 ]
 
 [project.scripts]
@@ -60,6 +61,10 @@ Homepage = "https://github.com/jpoimboe/imp"
 Repository = "https://github.com/jpoimboe/imp"
 Documentation = "https://github.com/jpoimboe/imp/tree/master/docs"
 Issues = "https://github.com/jpoimboe/imp/issues"
+
+# hatchling's default does not skip .imp/ (imp's quest state); without this the sdist carries it.
+[tool.hatch.build.targets.sdist]
+exclude = [".imp"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/imp", "src/impty"]

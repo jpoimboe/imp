@@ -183,3 +183,10 @@ def test_conftest_still_pins_this_worktree_on_the_subprocess_path(
     monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
     conftest._pin_subprocess_imp_to_working_tree()
     assert os.environ["PYTHONPATH"] == f"{_REPO_ROOT / 'src'}{os.pathsep}/somewhere/else"
+
+
+def test_dev_extra_pins_build_and_the_lock_carries_it() -> None:
+    # $(PYTHON) is the venv, carrying only uv.lock pins — declaring without relocking breaks build.
+    data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+    assert "build>=1.2" in data["project"]["optional-dependencies"]["dev"]
+    assert '\nname = "build"\n' in (_REPO_ROOT / "uv.lock").read_text()
