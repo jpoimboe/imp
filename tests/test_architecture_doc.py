@@ -12,6 +12,22 @@ import yaml
 ARCH = Path("docs/internals/architecture.md")
 DEFAULT_WORKFLOW = Path("src/imp/assets/workflows/default/workflow.yaml")
 
+# `implementer` is omitted deliberately: it is the live minimal-workflow agent.
+RETIRED_AGENT_NAMES = (
+    "spec-writer",
+    "integrator",
+    "integrate-verify",
+    "review-panel",
+    "plan-cycle-check",
+    "commit-check",
+    "stamp-trailers",
+    "base-fresh-check",
+    "completeness-slice",
+    "spec-compliance-slice",
+    "boundaries-slice",
+    "quality-reviewer",
+)
+
 
 def test_architecture_uses_renamed_artifact_ref() -> None:
     text = ARCH.read_text()
@@ -511,3 +527,22 @@ def test_step_guard_flags_a_step_the_doc_never_mentions() -> None:
         ["verify", "converge-verify", "finalize", "plan-finalized"],
         "converge-verify runs, then plan-finalized",
     ) == ["verify", "finalize"]
+
+
+def _retired_names_present(text: str) -> list[str]:
+    return [
+        n for n in RETIRED_AGENT_NAMES if re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", text)
+    ]
+
+
+def test_architecture_names_no_retired_agent() -> None:
+    assert _retired_names_present(ARCH.read_text()) == []
+    # boundaries treat `-` as a word character, so the live names never trip the ban
+    assert _retired_names_present("the `integrator` resolves conflicts") == ["integrator"]
+    assert _retired_names_present("`integration-review` and `code-reviewer` run") == []
+    # a plain-substring check would flag both of these; the lookarounds must not
+    assert _retired_names_present("integrators and spec-writers") == []
+
+
+def test_architecture_carries_no_circled_numerals() -> None:
+    assert [c for c in "①②③④⑤⑥" if c in ARCH.read_text()] == []
