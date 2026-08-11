@@ -253,3 +253,49 @@ def test_version_gains_the_conventional_trailing_blank_on_a_tty(
     assert piped.startswith("imp ")
     assert piped.endswith("\n") and not piped.endswith("\n\n")
     assert tty == piped + "\n"
+
+
+def test_top_level_help_has_the_tagline_epilog_and_command_metavar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    # endswith() pins the last content line, so ttyness is fixed rather than inherited.
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    text = _build_parser().format_help()
+    assert text.startswith("usage: imp [-h] [--version] <command> ...\n")
+    assert f"\n{TAGLINE}\n" in text
+    # The 12-space help column is argparse's own arithmetic, pinned to the CI interpreter.
+    assert ("positional arguments:\n"
+            "  <command>\n"
+            "    init            Set up imp here (initializes git if needed).\n") in text
+    assert text.endswith("New to a project? Run 'imp init' to get started.\n"
+                         "Run 'imp <command> -h' for a command's options.\n")
+    assert "{init,new," not in text        # the brace blob is gone from usage and header
+    assert "\x1b" not in text
+
+
+def test_top_level_help_paints_only_the_taglines_wordmark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    pal.set_theme("dark")
+    text = _build_parser().format_help()
+    assert text.startswith(f"{DIM}usage:{RESET} imp ")
+    assert f"{DIM}positional arguments:{RESET}\n" in text
+    assert f"{DIM}options:{RESET}\n" in text
+    assert text.count(GOLD) == 1
+    assert f"{GOLD}imp{RESET} — multi-agent software development workflow\n" in text
+    assert _escapes(text) == {DIM, RESET, GOLD}
+
+
+def test_subcommand_descriptions_never_carry_the_wordmark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # "imp" mid-prose: gold there would read as emphasis, not a wordmark.
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    pal.set_theme("dark")
+    for name in ("init", "log", "events", "config"):
+        assert GOLD not in _sub(name).format_help(), name

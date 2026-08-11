@@ -29,7 +29,12 @@ from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 from imp import __version__
 from imp.cli import palette as pal
 from imp.cli import quest_row, splash
-from imp.cli.help_format import ImpParser, ImpRawHelpFormatter
+from imp.cli.help_format import (
+    TAGLINE,
+    ImpParser,
+    ImpRawHelpFormatter,
+    ImpTopLevelHelpFormatter,
+)
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.paths import project_state_dir
@@ -4217,9 +4222,15 @@ def _add_config_scope(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = ImpParser(prog="imp")
+    parser = ImpParser(
+        prog="imp",
+        description=TAGLINE,
+        epilog=("New to a project? Run 'imp init' to get started.\n"
+                "Run 'imp <command> -h' for a command's options."),
+        formatter_class=ImpTopLevelHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
-    sub = parser.add_subparsers(dest="cmd", required=False)
+    sub = parser.add_subparsers(dest="cmd", required=False, metavar="<command>")
 
     p_init = sub.add_parser(
         "init",
