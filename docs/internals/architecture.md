@@ -303,6 +303,7 @@ flowchart TD
   FIN -->|merge| CM{{"cleanup-merge"}}
   CM -->|"fixup conflict"| ASR["autosquash-resolve-merge"]
   ASR --> CM
+  CM -. "unfoldable fixup / stamp failure" .-> HUMAN
   CM --> AST{{"assert-stamped"}}
   AST -. "unstamped / fixup left" .-> HUMAN
   AST --> M2B["merge-to-base"]
