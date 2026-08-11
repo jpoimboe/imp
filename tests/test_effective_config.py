@@ -150,9 +150,7 @@ def test_repo_config_declares_pythonpath_src() -> None:
 def test_memory_files_do_not_reach_the_merged_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Memory is a worktree payload loaded at its own call sites against a root
-    the caller names — never a Config field, which would let a caller pair it
-    with the wrong root."""
+    """Memory is a worktree payload loaded at its call sites, never a Config field."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     proj = tmp_path / "proj"
     (proj / "imp" / "memory").mkdir(parents=True)
@@ -224,8 +222,7 @@ def test_repo_config_declares_worktree_setup() -> None:
 def test_worktree_setup_is_read_from_the_main_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Project-layer keys resolve from control_root, never from the tree the
-    caller happens to be standing in (spec criterion 9d)."""
+    """Project-layer keys resolve from control_root, not the caller's tree (spec 9d)."""
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     control = tmp_path / "control"
     (control / "imp").mkdir(parents=True)
