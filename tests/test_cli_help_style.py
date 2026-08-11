@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import re
+import sys
+from typing import Any
+
+import pytest
+
+import imp.cli.palette as pal
+from imp.cli.help_format import (
+    TAGLINE,
+    ImpHelpFormatter,
+    ImpParser,
+    ImpRawHelpFormatter,
+    ImpTopLevelHelpFormatter,
+)
+
+DIM = "\x1b[2m"
+RESET = "\x1b[0m"
+GOLD = "\x1b[38;2;255;154;60m"          # palette's `wordmark` under the dark theme
+
+
+def _escapes(text: str) -> set[str]:
+    return set(re.findall(r"\x1b\[[0-9;]*m", text))
+
+
+def _demo(**kwargs: Any) -> ImpParser:
+    parser = ImpParser(prog="demo", **kwargs)
+    parser.add_argument("--flag", help="A flag.")
+    return parser
+
+
+def test_chrome_is_dim_and_content_is_plain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    text = _demo(description="Plain prose about imp.").format_help()
+    assert text.startswith(f"{DIM}usage:{RESET} demo")
+    assert f"{DIM}options:{RESET}\n" in text
+    assert "Plain prose about imp.\n" in text          # description unpainted
+    assert "  --flag FLAG  A flag.\n" in text          # flags and their help unpainted
+    assert _escapes(text) == {DIM, RESET}
+
+
+def test_stock_argparse_color_is_switched_off() -> None:
+    # argparse 3.14 defaults color=True; imp paints its own instead.
+    assert ImpParser(prog="demo").color is False
+
+
+def test_no_color_leaves_help_byte_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert "\x1b" not in _demo(description=TAGLINE,
+                               formatter_class=ImpTopLevelHelpFormatter).format_help()
+
+
+def test_help_gains_one_trailing_blank_line_only_on_a_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    parser = _demo()
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    tty = parser.format_help()
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    piped = parser.format_help()
+    assert tty == piped + "\n"
+    assert tty.endswith("\n\n") and not tty.endswith("\n\n\n")
+    assert piped.endswith("\n") and not piped.endswith("\n\n")
+
+
+def test_help_spacing_survives_a_stdout_without_isatty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # add_subparsers() renders format_help() at construction time to compute the
+    # subparsers' prog, so building a parser must not require a full stdout.
+    class Minimal:
+        def flush(self) -> None: ...
+        def fileno(self) -> int:
+            return 1
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdout", Minimal())
+    parser = ImpParser(prog="demo")
+    parser.add_subparsers(dest="cmd", metavar="<command>")
+    assert parser.format_help().endswith("\n")
+    assert not parser.format_help().endswith("\n\n")
+
+
+def test_usage_alone_never_gains_the_blank_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # argparse's error() prints format_usage() to stderr and then the message;
+    # the help spacing rule must not wedge a blank line in between.
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    usage = _demo().format_usage()
+    assert usage.endswith("[--flag FLAG]\n")
+    assert not usage.endswith("\n\n")
+
+
+def test_wordmark_is_scoped_to_the_top_level_formatter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "80")
+    pal.set_theme("dark")
+    top = _demo(description=TAGLINE,
+                formatter_class=ImpTopLevelHelpFormatter).format_help()
+    assert top.count(GOLD) == 1
+    assert f"{GOLD}imp{RESET} — multi-agent software development workflow\n" in top
+    assert _escapes(top) == {DIM, RESET, GOLD}
+    # Same description, ordinary variant: no wordmark anywhere.
+    assert GOLD not in _demo(description=TAGLINE).format_help()
+
+
+def test_raw_variant_keeps_line_breaks_and_the_default_variant_fills(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "100")
+    body = "one two three\nfour five six"
+    raw = _demo(description=body, formatter_class=ImpRawHelpFormatter).format_help()
+    auto = _demo(description=body).format_help()
+    assert "one two three\nfour five six\n" in raw
+    assert "one two three four five six\n" in auto
+
+
+def test_subparsers_inherit_imp_styling() -> None:
+    parser = ImpParser(prog="demo")
+    sub = parser.add_subparsers(dest="cmd")
+    child = sub.add_parser("alpha", help="Alpha.")
+    grandchild = child.add_subparsers(dest="act").add_parser("beta", help="Beta.")
+    for p in (child, grandchild):
+        assert isinstance(p, ImpParser)
+        assert p.formatter_class is ImpHelpFormatter
+        assert p.color is False
