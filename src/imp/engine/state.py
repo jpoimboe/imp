@@ -138,7 +138,7 @@ def _recover_or_raise(
         return data
     sidecar = _write_corrupt_sidecar(state_dir, raw)
     raise StateDecodeError(
-        live=state_path, sidecar=sidecar, reason=str(err)) from err
+        live=state_path, evidence=sidecar, reason=str(err)) from err
 
 
 @dataclass

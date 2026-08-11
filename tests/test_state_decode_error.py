@@ -10,38 +10,41 @@ from imp.engine.state import State
 from tests._dac import dac_enforced
 
 
+_BLOB = Path("/home/u/.imp/diagnostics/bytes/20260811T180311Z-4127-state-1.bad")
+
+
 def test_state_decode_error_subclasses_loaderror() -> None:
     exc = StateDecodeError(
         live=Path("/ctl/.imp/quests/abc/state/state.json"),
-        sidecar=Path("/ctl/.imp/quests/abc/state/state.json.corrupt-X-1"),
+        evidence=_BLOB,
         reason="Extra data: line 2 column 1 (char 31)",
     )
     assert isinstance(exc, LoadError)
+    assert exc.evidence == _BLOB
+    assert not hasattr(exc, "sidecar")      # hard cutover: no alias left
 
 
-def test_message_names_live_sidecar_and_reason() -> None:
+def test_message_names_live_evidence_and_reason() -> None:
     msg = str(StateDecodeError(
         live=Path("/ctl/.imp/quests/abc/state/state.json"),
-        sidecar=Path("/ctl/.imp/quests/abc/state/state.json.corrupt-X-1"),
+        evidence=_BLOB,
         reason="Extra data: line 2 column 1 (char 31)",
     ))
     assert "/ctl/.imp/quests/abc/state/state.json" in msg            # live file
-    assert "state.json.corrupt-X-1" in msg                           # sidecar
+    assert str(_BLOB) in msg                                         # preserved bytes
     assert "Extra data: line 2 column 1 (char 31)" in msg            # stdlib reason
     assert not msg.startswith("imp:")                                # caller adds prefix
 
 
-def test_message_notes_sidecar_unavailable_when_none() -> None:
+def test_message_notes_evidence_unavailable_when_none() -> None:
     msg = str(StateDecodeError(
         live=Path("/ctl/.imp/quests/abc/state/state.json"),
-        sidecar=None,
+        evidence=None,
         reason="Extra data: line 2 column 1 (char 31)",
     ))
     assert "/ctl/.imp/quests/abc/state/state.json" in msg
     assert "Extra data: line 2 column 1 (char 31)" in msg
-    # When the sidecar write failed, the message says so rather than pointing
-    # at a path that does not exist.
-    assert "could not" in msg.lower() or "unavailable" in msg.lower()
+    assert "  corrupt bytes could NOT be preserved (evidence write failed)" in msg
 
 
 # A complete object on line 1 followed by a second object on line 2 — the
@@ -63,7 +66,7 @@ def test_corrupt_state_writes_byte_identical_sidecar(tmp_path: Path) -> None:
     sidecars = list(tmp_path.glob("state.json.corrupt-*"))
     assert len(sidecars) == 1
     assert sidecars[0].read_bytes() == _TORN
-    assert ei.value.sidecar == sidecars[0]
+    assert ei.value.evidence == sidecars[0]
 
 
 def test_corrupt_state_message_names_both_paths(tmp_path: Path) -> None:
@@ -72,7 +75,7 @@ def test_corrupt_state_message_names_both_paths(tmp_path: Path) -> None:
         State.load(tmp_path)
     msg = str(ei.value)
     assert str(tmp_path / "state.json") in msg
-    assert str(ei.value.sidecar) in msg
+    assert str(ei.value.evidence) in msg
     assert "Extra data: line 2" in msg
 
 
@@ -97,7 +100,7 @@ def test_readonly_state_dir_swallows_sidecar_write(tmp_path: Path) -> None:
             State.load(tmp_path)
     finally:
         tmp_path.chmod(0o700)  # restore so tmp_path cleanup can run
-    assert ei.value.sidecar is None
+    assert ei.value.evidence is None
     assert list(tmp_path.glob("state.json.corrupt-*")) == []
     assert "Extra data: line 2" in ei.value.reason
 
