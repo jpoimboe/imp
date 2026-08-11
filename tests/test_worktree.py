@@ -1,5 +1,6 @@
 # tests/test_worktree.py
 import inspect
+import re
 import subprocess
 from pathlib import Path
 
@@ -806,3 +807,11 @@ def test_create_and_teardown_mid_rebase_control_root_stays_resumable(
     assert resumed.returncode == 0, resumed.stderr
     assert _git(tmp_path, "log", "--format=%s", "main").stdout.splitlines() == [
         "user commit B", "user commit A", "seed"]
+
+
+def test_worktree_module_names_no_toolchain() -> None:
+    """imp learns no toolchains: worktree_setup is config-declared, so this module names none."""
+    src = Path(inspect.getsourcefile(wt)).read_text()
+    for token in ("python", "venv", "uv", "pip", "npm", "node_modules",
+                  "cargo", "bundler", "gradle"):
+        assert not re.search(rf"\b{token}\b", src, re.IGNORECASE), token
