@@ -57,14 +57,14 @@ flowchart TB
 
 ### Zoom 2 — agent & provider lane
 
-`agent_run.drive_invocation()` resolves the step's tier to a concrete `(provider, model)`, drives the provider's `AgentRunner`, and dispatches tools. A step's tier itself is fixed at load time by `loader._parse_step`: the step's own `tier:` in `workflow.yaml`, else the referenced agent file's frontmatter `tier:`, else `medium`. Tools can spawn subagents (implementer, reviewers), which re-enter the same drive loop one level down.
+`agent_run.drive_invocation()` resolves the step's tier to a concrete `(provider, model)`, drives the provider's `AgentRunner`, and dispatches tools. A step's tier itself is fixed at load time by `loader._parse_step`: the step's own `tier:` in `workflow.yaml`, else the referenced agent file's frontmatter `tier:`, else `medium`. Tools can spawn subagents (coder, code-reviewer), which re-enter the same drive loop one level down.
 
 ```mermaid
 flowchart TB
   AR["agent_run.py<br/>drive_invocation()"] --> RES["providers/resolve.py<br/>tier → provider + model"]
   AR --> PROV["provider (AgentRunner)<br/>anthropic · openai · claude_code · codex"]
   PROV --> TOOLS["agents/tools<br/>bash · fs<br/>complete_step · wait_for_user"]
-  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>implementer · reviewers ·<br/>explorer · researcher"]
+  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>coder · code-reviewer ·<br/>explorer · researcher"]
   SUB -.->|"nested invocation"| AR
   PROV -->|"audit events"| LOG[("event log")]
   TOOLS -->|"audit events"| LOG

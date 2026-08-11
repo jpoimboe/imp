@@ -434,6 +434,23 @@ def test_invariants_exempt_the_reconciler_not_the_deleted_integrator() -> None:
     assert "integrator" not in text
 
 
+def test_architecture_engine_half_names_the_current_default_subagents() -> None:
+    text = ARCH.read_text()
+    assert (
+        "Tools can spawn subagents (coder, code-reviewer), which re-enter the same "
+        "drive loop one level down." in text
+    )
+    assert (
+        '  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>'
+        'coder · code-reviewer ·<br/>explorer · researcher"]' in text
+    )
+    # `implementer` is a live minimal-workflow agent, so it survives there and
+    # nowhere else in the doc
+    head, _, minimal = text.partition("## Minimal workflow")
+    assert "implementer" not in head
+    assert "the `implementer` agent reads the spec" in minimal
+
+
 def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -> None:
     text = ARCH.read_text()
     flat = " ".join(text.split())
