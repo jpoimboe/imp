@@ -411,6 +411,29 @@ def test_architecture_agent_reference_drops_the_deleted_agents() -> None:
     assert "queryable via `imp log`" not in text
 
 
+def test_what_is_imp_lists_converge_between_implement_and_integrate() -> None:
+    text = Path("docs/guide/what-is-imp.md").read_text()
+    assert "- **converge** — reviewing and testing everything built, once." in text
+    # user-facing copy uses only imp-canon nouns (docs/internals/conventions.md)
+    assert "change" not in text
+    order = [text.index(f"- **{phase}**") for phase in
+             ("threshold", "spec", "plan", "implement", "converge", "integrate")]
+    assert order == sorted(order), order
+
+
+def test_operator_notes_name_the_spec_finalizer() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    assert "`plan-writer` / `spec-finalizer`" in text
+    assert "spec-writer" not in text
+
+
+def test_invariants_exempt_the_reconciler_not_the_deleted_integrator() -> None:
+    text = Path("docs/internals/invariants.md").read_text()
+    flat = " ".join(text.split())
+    assert "`reconciler` / `integration-review` reading `quest.json`" in flat
+    assert "integrator" not in text
+
+
 def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -> None:
     text = ARCH.read_text()
     flat = " ".join(text.split())

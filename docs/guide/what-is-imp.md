@@ -12,6 +12,7 @@ merged code. Each quest moves through a sequence of phases:
 - **spec** — pinning down what the quest must accomplish.
 - **plan** — turning that into a step-by-step implementation.
 - **implement** — a coder executing the plan.
+- **converge** — reviewing and testing everything built, once.
 - **integrate** — landing the result.
 
 A few things worth knowing:
