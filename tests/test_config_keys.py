@@ -108,10 +108,21 @@ def test_unshapeable_values_pass_through_for_the_reader_to_reject() -> None:
     assert _parsed("context.checkpoint_threshold", "soon") == "soon"
 
 
-def test_worktree_setup_is_a_project_layer_string_key() -> None:
+def test_worktree_setup_is_a_project_layer_key() -> None:
     key = resolve_key("worktree_setup")
     assert key is not None
     assert (key.path, key.read_path) == (("worktree_setup",), ("worktree_setup",))
     assert key.home == "project"
     assert key.project_only is False
     assert key.parse("uv sync --all-extras") == "uv sync --all-extras"
+
+
+def test_command_keys_parse_false_as_a_boolean() -> None:
+    for key in ("test_cmd_fast", "test_cmd_slow", "worktree_setup"):
+        assert _parsed(key, "false") is False, key
+        assert _parsed(key, "make check") == "make check", key
+
+
+def test_pythonpath_parses_false_as_a_boolean_not_a_one_item_list() -> None:
+    assert _parsed("pythonpath", "false") is False
+    assert _parsed("pythonpath", "src,tests") == ["src", "tests"]
