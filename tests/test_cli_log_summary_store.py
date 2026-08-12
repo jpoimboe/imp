@@ -54,6 +54,7 @@ def test_summary_status_from_store_survives_masked_events(
 ) -> None:
     """`imp log <id> -s` (render paths) reads status from quest_card, not masked events.jsonl."""
     import imp.cli.main as m
+    import imp.cli.store as s
     from imp.engine.quest import Quest
     from tests.conftest import _seed_control
 
@@ -64,7 +65,7 @@ def test_summary_status_from_store_survives_masked_events(
         raise PermissionError("events.jsonl is masked")
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_row_for_id", _masked)
+    monkeypatch.setattr(s, "_row_for_id", _masked)
     monkeypatch.setattr("imp.cli.store.make_store", lambda _c: _FakeStore(_EVENTS, "MERGED"))
     monkeypatch.setenv("NO_COLOR", "1")
 

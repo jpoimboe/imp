@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _abandon, _abandon_local, _status_rows
+from imp.cli.main import _abandon, _abandon_local
+from imp.cli.store import _status_rows
 from imp.engine import worktree
 from imp.engine.abandon import discard_conversation, tear_down_quest
 from imp.engine.quest import Quest

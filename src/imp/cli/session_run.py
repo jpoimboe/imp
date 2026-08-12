@@ -42,7 +42,7 @@ class SettledOutcome:
 
 def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
     """Read status and events once, live home first, then archive."""
-    from imp.cli.main import _parse_jsonl
+    from imp.cli.store import _parse_jsonl
     from imp.engine.archive import read as archive_read
     try:
         status: str | None = State.load(quest.state_dir).status

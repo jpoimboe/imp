@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
@@ -32,7 +33,7 @@ def _async_return(value):
 async def test_abandon_picker_empty_prints_and_exits_2(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda c: [])
+    monkeypatch.setattr(s, "_status_rows", lambda c: [])
     rc = await m._pick_abandon_target(tmp_path)
     out = capsys.readouterr().out
     assert rc == 2
@@ -43,7 +44,7 @@ async def test_abandon_picker_empty_prints_and_exits_2(
 async def test_abandon_picker_non_tty_refuses(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda c: [_row("solo01")])
+    monkeypatch.setattr(s, "_status_rows", lambda c: [_row("solo01")])
     monkeypatch.setattr(m, "_interactive", lambda: False)
 
     async def boom(*a, **k):
@@ -60,7 +61,7 @@ async def test_abandon_picker_non_tty_refuses(
 async def test_abandon_picker_tty_lone_auto_selects(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda c: [_row("solo01")])
+    monkeypatch.setattr(s, "_status_rows", lambda c: [_row("solo01")])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def boom(*a, **k):
@@ -76,7 +77,7 @@ async def test_abandon_picker_tty_multiple_uses_selection(
 ) -> None:
     rows = [_row("aaa111", last="2026-06-11T00:00:00+00:00"),
             _row("bbb222", last="2026-06-10T00:00:00+00:00")]
-    monkeypatch.setattr(m, "_status_rows", lambda c: rows)
+    monkeypatch.setattr(s, "_status_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index):

@@ -46,7 +46,7 @@ def _force_bare_sandbox(monkeypatch):
 
 def _run_events(quest):
     """Post-run events read the way production does: home first, archive second."""
-    from imp.cli.main import _load_events_for_id
+    from imp.cli.store import _load_events_for_id
     return _load_events_for_id(quest.control_root, quest.id) or []
 
 

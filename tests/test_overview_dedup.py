@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.cli.store import make_store
 from imp.engine import archive
 from imp.engine.quest import Quest
@@ -58,11 +59,11 @@ def test_status_rows_uses_passed_scan(tmp_path: Path) -> None:
 
     scan = make_store(tmp_path).scan_homes()
     # Threaded scan and internal scan produce identical rows.
-    assert m._status_rows(tmp_path, scan) == m._status_rows(tmp_path)
-    assert {r[0] for r in m._status_rows(tmp_path)} == {"alpha", "beta"}
+    assert s._status_rows(tmp_path, scan) == s._status_rows(tmp_path)
+    assert {r[0] for r in s._status_rows(tmp_path)} == {"alpha", "beta"}
     # The passed scan is actually honored, not ignored: a one-home scan yields one row.
     alpha_only = [h for h in scan if h.quest_id == "alpha"]
-    assert {r[0] for r in m._status_rows(tmp_path, alpha_only)} == {"alpha"}
+    assert {r[0] for r in s._status_rows(tmp_path, alpha_only)} == {"alpha"}
 
 
 def test_backlog_rows_uses_passed_scan(tmp_path: Path) -> None:
@@ -73,10 +74,10 @@ def test_backlog_rows_uses_passed_scan(tmp_path: Path) -> None:
                         base_branch="main", origin="idea", seed_opening="Brief2")
 
     scan = make_store(tmp_path).scan_homes()
-    assert m._backlog_rows(tmp_path, scan) == m._backlog_rows(tmp_path)
-    assert {r[0] for r in m._backlog_rows(tmp_path)} == {"bk1", "bk2"}
+    assert s._backlog_rows(tmp_path, scan) == s._backlog_rows(tmp_path)
+    assert {r[0] for r in s._backlog_rows(tmp_path)} == {"bk1", "bk2"}
     bk1_only = [h for h in scan if h.quest_id == "bk1"]
-    assert {r[0] for r in m._backlog_rows(tmp_path, bk1_only)} == {"bk1"}
+    assert {r[0] for r in s._backlog_rows(tmp_path, bk1_only)} == {"bk1"}
 
 
 def _archive_completed(control: Path, cid: str) -> None:
@@ -172,11 +173,10 @@ def test_shelved_conversation_only_in_all_history(tmp_path: Path) -> None:
 def test_status_row_carries_phase_label() -> None:
     import json
 
-    import imp.cli.main as m
     state = json.dumps({"status": "running", "step": "s", "step_label": "L",
                         "phase_label": "P"}).encode()
     quest = json.dumps({"title": "T", "created_at": "2026-06-20T11:00:00+00:00"}).encode()
-    row = m._status_row("cid", state, quest, "2026-06-20T11:00:00+00:00")
+    row = s._status_row("cid", state, quest, "2026-06-20T11:00:00+00:00")
     assert len(row) == 9
     assert row[7] == "P"
 
@@ -188,7 +188,7 @@ def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(
         "imp.engine.archive.read.completed_rows",
         lambda control: [("cid", "merged", "-", "iso", "Title", "created", None)])
-    monkeypatch.setattr(m, "_status_rows", lambda control: [])
+    monkeypatch.setattr(s, "_status_rows", lambda control: [])
     rows = m._completed_rows(tmp_path)
     assert rows == [("cid", "merged", "-", "iso", "Title", "created", None, None, None)]
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from imp.cli.main import _load_events_for_id
+from imp.cli.store import _load_events_for_id
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from tests.conftest import _seed_control, held_lock
 

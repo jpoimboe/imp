@@ -10,7 +10,9 @@ from typing import Any
 import pytest
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.cli.main import main
+from imp.cli.store import HomeDigest
 from imp.engine import archive
 
 
@@ -114,9 +116,27 @@ def _row(cid: str, title: str, last: str = "2026-06-11T00:00:00+00:00",
             "2026-06-01T00:00:00+00:00", None, None, None)
 
 
+def _digest(quest_id: str, seed: str) -> HomeDigest:
+    """A live backlog home as scan_homes reports it; the seed body lives in meta."""
+    return HomeDigest(
+        quest_id=quest_id, quest_json=b"{}", state_json=None,
+        meta={"id": quest_id, "materialized": False, "origin": "backlog",
+              "seed_opening": seed},
+        last_iso="2026-06-11T00:00:00+00:00", has_user_message=False,
+        prose="", intent_title=None, lock_live=False)
+
+
+class _BacklogStore:
+    def __init__(self, homes: list[HomeDigest]) -> None:
+        self._homes = homes
+
+    def scan_homes(self) -> list[HomeDigest]:
+        return self._homes
+
+
 def test_events_search_active_includes_only_quests_with_matching_events(
         monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda control, scanned=None: [_row("aaa111", "Alpha"),
+    monkeypatch.setattr(s, "_status_rows", lambda control, scanned=None: [_row("aaa111", "Alpha"),
                                                                       _row("bbb222", "Beta")])
     store = _FakeStore({
         "aaa111": [_ev("e0", "tool_call", "step:impl/coder", name="bash",
@@ -132,9 +152,11 @@ def test_events_search_active_includes_only_quests_with_matching_events(
 
 
 def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(m, "_backlog_rows", lambda control: [_row("ccc333", "Payments")])
-    monkeypatch.setattr(m, "_backlog_seed_opening",
-                        lambda control, qid: "add a GREPTARGET to checkout")
+    monkeypatch.setattr(
+        s, "_backlog_rows", lambda control, scanned=None: [_row("ccc333", "Payments")])
+    monkeypatch.setattr(
+        "imp.cli.store.make_store",
+        lambda control: _BacklogStore([_digest("ccc333", "add a GREPTARGET to checkout")]))
     hits = m._events_search_backlog(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["ccc333"]
     assert hits[0].zone == "backlog"
@@ -144,23 +166,33 @@ def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: P
 
 def test_events_search_backlog_matches_on_title(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        m, "_backlog_rows", lambda control: [_row("ccc333", "GREPTARGET dashboard")])
-    monkeypatch.setattr(m, "_backlog_seed_opening", lambda control, qid: "unrelated intent")
+        s, "_backlog_rows",
+        lambda control, scanned=None: [_row("ccc333", "GREPTARGET dashboard")])
+    monkeypatch.setattr(
+        "imp.cli.store.make_store",
+        lambda control: _BacklogStore([_digest("ccc333", "unrelated intent")]))
     hits = m._events_search_backlog(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["ccc333"]
 
 
 def test_events_search_backlog_matches_on_quest_id(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(m, "_backlog_rows", lambda control: [_row("greptarget99", "Some title")])
-    monkeypatch.setattr(m, "_backlog_seed_opening", lambda control, qid: "unrelated intent")
+    monkeypatch.setattr(
+        s, "_backlog_rows",
+        lambda control, scanned=None: [_row("greptarget99", "Some title")])
+    monkeypatch.setattr(
+        "imp.cli.store.make_store",
+        lambda control: _BacklogStore([_digest("greptarget99", "unrelated intent")]))
     hits = m._events_search_backlog(tmp_path, "greptarget", types=None, agents=None)
     assert [h.quest_id for h in hits] == ["greptarget99"]
 
 
 def test_events_search_backlog_skipped_when_type_filter_present(
         monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(m, "_backlog_rows", lambda control: [_row("ccc333", "GREPTARGET")])
-    monkeypatch.setattr(m, "_backlog_seed_opening", lambda control, qid: "GREPTARGET")
+    monkeypatch.setattr(
+        s, "_backlog_rows", lambda control, scanned=None: [_row("ccc333", "GREPTARGET")])
+    monkeypatch.setattr(
+        "imp.cli.store.make_store",
+        lambda control: _BacklogStore([_digest("ccc333", "GREPTARGET")]))
     assert m._events_search_backlog(
         tmp_path, "greptarget", types={"tool_call"}, agents=None) == []
 

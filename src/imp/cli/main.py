@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import SettledOutcome
-    from imp.cli.store import HomeDigest, SearchHit, Store
+    from imp.cli.store import SearchHit, Store, _Row
     from imp.cli.verify_detect import DetectedTestCommand
     from imp.engine.quest import Quest
     from imp.engine.state import State
@@ -451,6 +451,7 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 def _pause_facts(
     quest: Quest, leave_trigger: str | None = None,
 ) -> tuple[str, str, str, _PauseInfo | None, str | None]:
+    from imp.cli.store import _resolve_intent
     name = quest.id
     events = list(quest.event_log().read())
     opening = _resolve_intent(events)
@@ -502,6 +503,7 @@ def _emit_merge_blocked(
     surfaced reason is truthful for every refusal, not just the overwrite one.
     `note` (e.g. the recovery-exhaustion note) renders before git's detail.
     `worktree_dirty` has a precise template and gets no detail."""
+    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
@@ -536,6 +538,7 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
     other terminal exit block, then one trailing blank. Built from
     DaemonStartupError's structured fields, not its message string; degrades to a
     backstop head+body when no error detail is available (the timeout path)."""
+    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
     if error is not None:
         if error.exit_code is not None:
@@ -561,6 +564,7 @@ def _handle_terminal_outcome(
 ) -> int:
     """Render a settled run's terminal outcome and return its rc; re-resolves nothing
     (never re-reads state.json or re-derives the settled outcome)."""
+    from imp.cli.store import _resolve_intent
     if outcome.completed:
         merged = any(ev.get("type") == "quest_merged" for ev in outcome.events)
         _emit_completed(quest, merged=merged, intent=_resolve_intent(outcome.events))
@@ -595,6 +599,7 @@ def _print_leave_disposition(
     here we only echo what was (or is being) done, on the shared spine. Returns 0
     when a leave was handled, None to fall through to the normal exit-code path.
     """
+    from imp.cli.store import _resolve_intent
     color = should_use_color(sys.stdout)
     intent = leave_state.get("intent")
     opening = _resolve_intent(list(quest.event_log().read()))
@@ -1714,16 +1719,6 @@ def _display_width() -> int:
         return 80
 
 
-def _list_quest_homes(control: Path) -> list[str]:
-    """Ids of quests with a permanent home under <state dir>/quests/."""
-    from imp.engine.quest import live_quest_ids
-    return live_quest_ids(control)
-
-
-def _quest_home(control: Path, quest_id: str) -> Path:
-    return project_state_dir(control) / "quests" / quest_id
-
-
 def _iter_quest_ids(control: Path) -> list[str]:
     """Live homes first, then archived ids not in the live set. Live-home ids come
     through the store (scan_homes), not a raw state-dir disk scan, so an
@@ -1743,6 +1738,7 @@ def _iter_quest_ids(control: Path) -> list[str]:
 
 def _title_for_id(control: Path, quest_id: str) -> str | None:
     """Read a quest's current title (worktree home first, archive second)."""
+    from imp.cli.store import _quest_home
     from imp.engine.archive import read as archive_read
     cdir = _quest_home(control, quest_id)
     cj = cdir / "quest.json"
@@ -1796,38 +1792,10 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     raise SystemExit(2)
 
 
-def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
-    """Parse journaled events.jsonl bytes into event dicts, mirroring
-    JsonlEventLog.read: malformed lines become {"_malformed": True, ...}."""
-    out: list[dict[str, Any]] = []
-    for line in raw.decode("utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
-            out.append({"_malformed": True, "raw": line})
-    return out
-
-
-def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
-    from imp.engine.archive import read as archive_read
-    live = _quest_home(control, quest_id) / "artifacts" / rel
-    if live.is_file():
-        return live.read_bytes()
-    return archive_read.read_artifact(control, quest_id, rel)
-
-
-def _user_message_text(payload: dict[str, Any]) -> str:
-    return "".join(
-        b.get("text", "") for b in (payload.get("content") or [])
-        if isinstance(b, dict) and b.get("type") == "text")
-
-
 def _prompt_history_lines(
     seed_opening: str | None, events: Iterable[dict[str, Any]],
 ) -> list[str]:
+    from imp.cli.store import _user_message_text
     lines: list[str] = []
     if seed_opening and seed_opening.strip():
         lines.append(seed_opening)
@@ -1844,6 +1812,7 @@ def _prompt_history_lines(
 
 
 def _first_user_message(events: list[dict[str, Any]]) -> str | None:
+    from imp.cli.store import _user_message_text
     for ev in events:
         if ev.get("type") == "user_message":
             text = _user_message_text(ev.get("payload") or {}).strip()
@@ -1852,111 +1821,25 @@ def _first_user_message(events: list[dict[str, Any]]) -> str | None:
     return None
 
 
-def _first_genuine_human_turn(events: list[dict[str, Any]]) -> str | None:
-    """First reply/interject a human actually typed. The opening intent is
-    resolved separately (by _resolve_intent), so it is skipped here; every
-    non-intent user_message is, by construction, a genuine human turn."""
-    for ev in events:
-        if ev.get("type") != "user_message":
-            continue
-        if (ev.get("payload") or {}).get("subtype") == "intent":
-            continue
-        text = _user_message_text(ev.get("payload") or {}).strip()
-        if text:
-            return text
-    return None
-
-
-def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
-    for ev in events:
-        if ev.get("type") == "user_message" and \
-                (ev.get("payload") or {}).get("subtype") == "intent":
-            text = _user_message_text(ev.get("payload") or {}).strip()
-            if text:
-                return text
-    return _first_genuine_human_turn(events)
-
-
-def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
-    from imp.engine.archive import read as archive_read
-    cdir = _quest_home(control, quest_id)
-    raw: bytes | None
-    if (cdir / "quest.json").exists():
-        raw = (cdir / "quest.json").read_bytes()
-    else:
-        raw = archive_read.read_quest_json(control, quest_id)
-    if raw is None:
-        return None
-    try:
-        result: dict[str, Any] = json.loads(raw)
-        return result
-    except json.JSONDecodeError:
-        return None
-
-
-def _quest_state(control: Path, quest_id: str) -> dict[str, Any] | None:
-    from imp.engine.archive import read as archive_read
-    cdir = _quest_home(control, quest_id)
-    sj = cdir / "state" / "state.json"
-    raw = sj.read_bytes() if sj.exists() else archive_read.read_state_json(control, quest_id)
-    if raw is None:
-        return None
-    try:
-        result: dict[str, Any] = json.loads(raw)
-        return result
-    except json.JSONDecodeError:
-        return None
-
-
-def _is_backlog_home(
-    meta: dict[str, Any], *, conversed: bool, lock_live: Callable[[], bool]
-) -> bool:
-    """Shared zone predicate. A live quest home is Backlog iff it is
-    un-materialized, has a non-draft origin, has never been conversed (no
-    user_message event), and is not lock-live. The detail card
-    (`_unstarted_backlog_meta`) and both overview zone builders (`_status_rows`,
-    `_backlog_rows`) classify through this one helper, so a resumed/lock-live
-    seed leaves Backlog and the three classifiers cannot drift."""
-    return (
-        not meta.get("materialized", True)
-        and meta.get("origin", "draft") != "draft"
-        and not conversed
-        and not lock_live()
-    )
-
-
 def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
     """quest.json of a LIVE un-materialized, non-draft-origin, never-conversed,
-    unlocked Backlog home (origin `backlog`) — sourced from the worktree home
-    only, never the archive: an abandoned home leaves an archived
-    materialized:false quest.json that would otherwise render as a queued
-    `status: backlog` brief instead of a History item. None for any archived-only
-    id or any home the shared backlog predicate rejects (materialized,
-    draft-origin, already-conversed, or lock-live)."""
-    from imp.cli.store import make_store
-    from imp.engine.errors import LoadError, LoadErrors
-    from imp.engine.quest import Quest
-    from imp.engine.state import lock_is_live
-    cdir = _quest_home(control, quest_id)
-    cj = cdir / "quest.json"
-    if not cj.exists():
+    unlocked Backlog home, read through the store so a
+    sandboxed client gets the daemon's answer rather than a masked home. Sourced
+    from the live-home scan only, never the archive: an abandoned home leaves an
+    archived materialized:false quest.json that would otherwise render as a
+    queued `status: backlog` brief instead of a History item. None for an id
+    absent from the scan (archived-only) and for any home the shared backlog
+    predicate rejects (materialized, draft-origin, already-conversed, or
+    lock-live)."""
+    from imp.cli.store import _is_backlog_home, make_store
+    digest = next(
+        (h for h in make_store(control).scan_homes() if h.quest_id == quest_id), None)
+    if digest is None:
         return None
-    try:
-        meta: dict[str, Any] = json.loads(cj.read_bytes())
-    except json.JSONDecodeError:
+    if not _is_backlog_home(digest.meta, conversed=digest.has_user_message,
+                            lock_live=digest.lock_live):
         return None
-    if meta.get("materialized", True):
-        return None  # materialized homes are never Backlog; skip the event-log read
-    try:
-        Quest.load(control, quest_id, migrate_if_lockable=True)
-    except (LoadError, LoadErrors):
-        return None
-    conversed = _first_user_message(
-        make_store(control).get_events(quest_id) or []) is not None
-    if not _is_backlog_home(meta, conversed=conversed,
-                            lock_live=lambda: lock_is_live(cdir / "lock")):
-        return None
-    return meta
+    return digest.meta
 
 
 def _card_field(label: str, value: str, width: int, *, color: bool) -> str:
@@ -2015,7 +1898,7 @@ def _vars_line(values: dict[str, object], width: int, *, color: bool) -> str:
 
 def _quest_card(control: Path, quest_id: str, *, now: datetime,
                 color: bool) -> list[str]:
-    from imp.cli.store import make_store
+    from imp.cli.store import _INFLIGHT, make_store
     card = make_store(control).quest_card(quest_id)
     if card is None:
         return []
@@ -2075,7 +1958,7 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime,
 
 
 def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
-    from imp.cli.store import make_store
+    from imp.cli.store import _INFLIGHT, make_store
     card = make_store(control).quest_card(quest_id)
     if card is None:
         return None
@@ -2200,35 +2083,9 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | None:
-    """Worktree first, archive second. Returns None if the id is in neither.
-
-    Worktree-first is necessary, not merely preferred: an id lives in exactly
-    one place (the archive snapshot is written once, concurrent with worktree
-    removal), so the only overlap is a crash mid-sequence where worktree-first
-    harmlessly returns identical content."""
-    from imp.engine.archive import read as archive_read
-    from imp.engine.errors import LayoutMismatch, LoadError, MigrationLockHeld
-    from imp.engine.quest import Quest
-    try:
-        quest = Quest.load(control, quest_id, migrate_if_lockable=True)
-    except (LayoutMismatch, MigrationLockHeld):
-        ev_path = _quest_home(control, quest_id) / "events.jsonl"
-        if ev_path.exists():
-            return _parse_jsonl(ev_path.read_bytes())
-        quest = None
-    except LoadError:
-        quest = None
-    if quest is not None:
-        return list(quest.event_log().read())
-    raw = archive_read.read_events(control, quest_id)
-    if raw is None:
-        return None
-    return _parse_jsonl(raw)
-
-
 def _resolve_row_intent(control: Path, r: _Row) -> str | None:
     """Fallback display name for a title-less row: its opening prompt, else None."""
+    from imp.cli.store import _load_events_for_id, _resolve_intent
     if r[4].strip():
         return None
     return _resolve_intent(_load_events_for_id(control, r[0]) or [])
@@ -2455,6 +2312,7 @@ def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
                         control: Path, quest_id: str) -> int:
     """The home vanished mid-follow: feed the archived events beyond the count
     already emitted (none if the id is not archived), finish, and exit 0."""
+    from imp.cli.store import _parse_jsonl
     from imp.engine.archive import read as archive_read
     raw = archive_read.read_events(control, quest_id)
     if raw is not None:
@@ -2583,7 +2441,7 @@ def _select_log_events(
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import LOG_CATEGORIES, render_tree
-    from imp.cli.store import make_store
+    from imp.cli.store import _quest_home, make_store
 
     show_names = args.show or []
     hide_names = args.hide or []
@@ -2708,74 +2566,6 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
     return 0
 
 
-def _last_nonempty_line(data: bytes) -> bytes | None:
-    """Last non-empty line of `data` with trailing whitespace removed, or None
-    when there is no non-empty line. Avoids splitting the whole buffer: a single
-    rstrip + rfind, used by the journal path (full blob already in memory) and
-    by the filesystem tail reader."""
-    stripped = data.rstrip()
-    if not stripped:
-        return None
-    nl = stripped.rfind(b"\n")
-    return stripped[nl + 1:]
-
-
-_TAIL_CHUNK = 64 * 1024
-
-
-def _read_last_line(events_path: Path) -> bytes | None:
-    """Last non-empty line of `events_path`, read from the end without loading
-    the whole file. Returns None when the file has no non-empty line. Defined to
-    return exactly `_last_nonempty_line(events_path.read_bytes())` — it reads
-    backward in 64 KiB chunks only until the last line is fully in hand. Raises
-    FileNotFoundError if the file is absent (the caller maps that to '-')."""
-    with events_path.open("rb") as f:
-        f.seek(0, os.SEEK_END)
-        pos = f.tell()
-        buf = b""
-        while pos > 0:
-            step = min(_TAIL_CHUNK, pos)
-            pos -= step
-            f.seek(pos)
-            buf = f.read(step) + buf
-            stripped = buf.rstrip()
-            if not stripped:
-                continue  # only trailing whitespace seen so far
-            nl = stripped.rfind(b"\n")
-            if nl != -1:
-                return stripped[nl + 1:]
-            # No newline yet: the last line starts at or before `pos`; if pos
-            # has reached 0 the loop ends and the final return handles it.
-        return _last_nonempty_line(buf)
-
-
-def _iso_from_line(line: str) -> str | None:
-    if not line.strip():
-        return None
-    try:
-        return str(json.loads(line)["timestamp"])
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
-
-
-def _last_event_iso(events_path: Path) -> str | None:
-    try:
-        line = _read_last_line(events_path)
-    except FileNotFoundError:
-        return None
-    if line is None:
-        return None
-    return _iso_from_line(line.decode("utf-8", errors="replace"))
-
-
-def _journal_last_iso(control: Path, quest_id: str) -> str | None:
-    from imp.cli.store import make_store
-    for r in make_store(control).completed_rows():
-        if r.quest_id == quest_id:
-            return r.last or None
-    return None
-
-
 def _journal_status(control: Path, quest_id: str) -> str | None:
     from imp.engine.archive import read as archive_read
     return archive_read.status_of(control, quest_id)
@@ -2826,138 +2616,14 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
         return quest
 
 
-# Spec §10: in-flight statuses; completed quests live in the archive.
-_INFLIGHT = ("running", "waiting", "error", "new", "paused", "merge_blocked")
 RESUMABLE = ("new", "paused", "error", "merge_blocked", "shelved")
-
-
-def resolve_display_status(
-    status: str, *, lock_live: bool, halt_condition: str | None = None
-) -> str:
-    """The one total map from persisted state to the resolved display word.
-
-    Liveness is resolved by the caller (daemon-side, where the lock is visible)
-    and handed in as `lock_live`: live + a `waiting` halt-condition reads
-    `waiting` (parked at a human gate); live otherwise reads `running`. Not live,
-    every stored word passes through unchanged (stored == displayed). The resolved
-    word is what the membership gates and the STATUS_COLORS key consume, so
-    `merge_blocked` stays underscored here."""
-    return ("waiting" if halt_condition == "waiting" else "running") if lock_live else status
-
-
-# Row = (id, status, step, last_activity, title, created_at, step_label,
-# phase_label, started_at). created_at is a sort key; started_at (persisted,
-# may be None) keys the in-flight ascending sort. step_label + phase_label feed
-# the merged STATUS cell's ` (phase · step)` suffix (see quest_row). The step
-# slot stays the RAW step name so imp list keeps printing it.
-_Row = tuple[str, str, str, str, str, str, str | None, str | None, str | None]
-
-
-
-def _events_have_user_message(events_path: Path) -> bool:
-    """True iff events.jsonl holds at least one user_message event. Read line by
-    line and short-circuit so a long log isn't fully parsed just to classify."""
-    try:
-        with events_path.open("rb") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    ev = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if ev.get("type") == "user_message":
-                    return True
-    except FileNotFoundError:
-        return False
-    return False
-
-
-
-def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
-                last_activity: str) -> _Row | None:
-    """Pure (id, status, step, last_activity, title, created_at) extractor, fed
-    by either worktree file bytes or archive bytes. The archived state.json and
-    quest.json are schema-identical to the in-flight ones (both written by
-    State.save / Quest.create), so the two sections can't silently drift.
-    Returns None on malformed/incomplete JSON so a single corrupt entry can't
-    crash the whole `imp list` listing (callers skip None)."""
-    try:
-        st = json.loads(state_json)
-        meta = json.loads(quest_json)
-        return (quest_id, st["status"], st.get("step") or "-", last_activity,
-                meta["title"], meta["created_at"], st.get("step_label"),
-                st.get("phase_label"), st.get("started_at"))
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
-
-
-def _row_for_id(control: Path, quest_id: str) -> _Row | None:
-    from imp.engine.archive import read as archive_read
-    from imp.engine.state import lock_is_live
-    cdir = _quest_home(control, quest_id)
-    live_home = (cdir / "quest.json").exists()
-    # archive_read returns bytes | None; the live quest-home branch always finds
-    # the files. Annotate so the None-guard below stays reachable (not dead code).
-    state_json: bytes | None
-    quest_json: bytes | None
-    if live_home:
-        # A quest home mid-creation has quest.json written but state.json not
-        # yet (Quest.create is not atomic across the two files). The daemon's
-        # scan loop can hit that window, so tolerate it like scan_homes
-        # rather than crashing the whole listing.
-        try:
-            state_json = (cdir / "state" / "state.json").read_bytes()
-            quest_json = (cdir / "quest.json").read_bytes()
-        except FileNotFoundError:
-            return None
-        last = _last_event_iso(cdir / "events.jsonl") or ""
-    else:
-        state_json = archive_read.read_state_json(control, quest_id)
-        quest_json = archive_read.read_quest_json(control, quest_id)
-        if state_json is None or quest_json is None:
-            return None
-        last = _journal_last_iso(control, quest_id) or ""
-    row = _status_row(quest_id, state_json, quest_json, last)
-    if row is None:
-        return None
-    lock_live = lock_is_live(cdir / "lock")
-    # Archived homes pass the stored status through unchanged and never consult the
-    # halt-condition (readers stay single-version).
-    halt_condition = json.loads(state_json).get("halt_condition") if live_home else None
-    status = resolve_display_status(row[1], lock_live=lock_live, halt_condition=halt_condition)
-    return (row[0], status, *row[2:])
-
-
-def _status_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
-    from imp.cli.store import make_store
-    homes = make_store(control).scan_homes() if scanned is None else scanned
-    rows: list[_Row] = []
-    for h in homes:
-        if h.state_json is None:
-            continue
-        if _is_backlog_home(h.meta, conversed=h.has_user_message,
-                            lock_live=lambda: h.lock_live):  # noqa: B023
-            continue  # un-materialized, never-conversed, unlocked seed -> Backlog
-        row = _status_row(h.quest_id, h.state_json, h.quest_json, h.last_iso)
-        if row is None:
-            continue
-        halt_condition = json.loads(h.state_json).get("halt_condition")
-        status = resolve_display_status(
-            row[1], lock_live=h.lock_live, halt_condition=halt_condition)
-        row = (row[0], status, *row[2:])
-        if row[1] not in _INFLIGHT:
-            continue
-        rows.append(row)
-    return rows
 
 
 def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     """Completed/abandoned quests NOT currently surfaced in-flight, from a
     SINGLE indexed archive query (spec AC 7). `live_ids` lets the overview reuse
     the in-flight id set it already computed instead of re-deriving it."""
-    from imp.cli.store import make_store
+    from imp.cli.store import _INFLIGHT, _status_rows, make_store
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
     for r in make_store(control).completed_rows():
@@ -2970,7 +2636,7 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
 def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     """Shelved conversations — archived final status `shelved` with no live home —
     for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
-    from imp.cli.store import make_store
+    from imp.cli.store import _status_rows, make_store
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None)
             for r in make_store(control).completed_rows()
@@ -2987,12 +2653,14 @@ def _sort_rows_started_first(rows: list[_Row]) -> list[_Row]:
 
 
 def _resumable_rows(control: Path) -> list[_Row]:
+    from imp.cli.store import _backlog_rows, _status_rows
     rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
     rows += _backlog_rows(control)
     return _sort_rows_newest_first(rows)
 
 
 def _abandon_rows(control: Path) -> list[_Row]:
+    from imp.cli.store import _backlog_rows, _status_rows
     return _sort_rows_newest_first(_status_rows(control) + _backlog_rows(control))
 
 
@@ -3004,6 +2672,7 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     "shelved" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
     matches, so a terminal id sharing a stem never joins the menu."""
+    from imp.cli.store import _row_for_id
     from imp.engine.archive import read as archive_read
     from imp.engine.archive import record, records_root
 
@@ -3414,24 +3083,6 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     return rc
 
 
-def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
-    from imp.cli.store import make_store
-    homes = make_store(control).scan_homes() if scanned is None else scanned
-    rows: list[_Row] = []
-    for h in homes:
-        meta = h.meta
-        if not _is_backlog_home(meta, conversed=h.has_user_message,
-                                lock_live=lambda: h.lock_live):  # noqa: B023
-            continue  # materialized / draft-origin / conversed / lock-live -> Active
-        origin = meta.get("origin", "draft")
-        ready = make_store(control).backlog_readiness(meta.get("depends_on", [])).ready
-        created = meta.get("created_at", "")
-        blocked = "" if ready else "blocked"
-        rows.append((h.quest_id, origin, blocked, h.last_iso,
-                     meta.get("title") or "", created, blocked or None, None, None))
-    return rows
-
-
 _HISTORY_CAP = 10
 
 _SINCE_ERROR = (
@@ -3554,7 +3205,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool, name_cap: int | None = None) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    from imp.cli.store import make_store
+    from imp.cli.store import _backlog_rows, _status_rows, make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     inflight = _sort_rows_started_first(status_rows)
@@ -3592,7 +3243,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                               cutoff: datetime | None, now: datetime,
                               color: bool) -> list[str]:
     """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
-    from imp.cli.store import make_store
+    from imp.cli.store import _backlog_rows, _status_rows, make_store
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
@@ -3653,61 +3304,6 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
     return args.active, args.backlog, statuses
 
 
-def _search_active(control: Path, query: str) -> list[SearchHit]:
-    """In-flight + draft-origin quests whose id, title, or conversation prose
-    contains `query` (case-insensitive)."""
-    from imp.cli.store import SearchHit, make_store
-    q = query.lower()
-    scanned = make_store(control).scan_homes()
-    prose_by_id = {d.quest_id: d.prose for d in scanned}
-    hits: list[SearchHit] = []
-    for r in _status_rows(control, scanned):
-        prose = prose_by_id.get(r[0], "")
-        if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
-            hits.append(SearchHit(r[0], r[4], "active", prose, r[3]))
-    return hits
-
-
-def _backlog_seed_opening(control: Path, quest_id: str) -> str:
-    cj = _quest_home(control, quest_id) / "quest.json"
-    try:
-        meta = json.loads(cj.read_bytes())
-    except (OSError, ValueError, TypeError):
-        return ""
-    return str(meta.get("seed_opening") or "")
-
-
-def _search_backlog(control: Path, query: str) -> list[SearchHit]:
-    """Backlog quests whose id, title, or seed_opening body (title + description)
-    contains `query` (case-insensitive)."""
-    from imp.cli.store import SearchHit
-    q = query.lower()
-    hits: list[SearchHit] = []
-    for r in _backlog_rows(control):
-        quest_id, title = r[0], r[4]
-        seed = _backlog_seed_opening(control, quest_id)
-        if q in quest_id.lower() or q in title.lower() or q in seed.lower():
-            hits.append(SearchHit(quest_id, title, "backlog", seed, r[3]))
-    return hits
-
-
-def _search_archived(control: Path, query: str, statuses: set[str],
-                     merged_after: str | None) -> list[SearchHit]:
-    """Archive hits in `statuses`; completed hits also gated by merged_after."""
-    from imp.cli.store import SearchHit
-    from imp.engine.archive import read as archive_read
-    hits: list[SearchHit] = []
-    for cid, title, content, status, last in archive_read.search_archive_content(
-            control, query):
-        if status not in statuses:
-            continue
-        if (status == "merged" and merged_after is not None
-                and not _merged_after(control, cid, merged_after)):
-            continue
-        hits.append(SearchHit(cid, title, "archive", content, last))
-    return hits
-
-
 def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]:
     """(active, backlog, archived) zone flags; none given searches all three."""
     if not (args.active or args.backlog or args.archived):
@@ -3745,7 +3341,7 @@ def _events_search_active(
     control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
 ) -> list[EventSearchHit]:
     """In-flight quests with >=1 event matching query (after type/agent filters)."""
-    from imp.cli.store import make_store
+    from imp.cli.store import _status_rows, make_store
     store = make_store(control)
     scanned = store.scan_homes()
     hits: list[EventSearchHit] = []
@@ -3764,14 +3360,9 @@ def _events_search_backlog(
     """Backlog quests matched on id/title/intent. Skipped when type/agent filter is set."""
     if types is not None or agents is not None:
         return []
-    q = query.lower()
-    hits: list[EventSearchHit] = []
-    for r in _backlog_rows(control):
-        quest_id, title = r[0], r[4]
-        seed = _backlog_seed_opening(control, quest_id)
-        if q in quest_id.lower() or q in title.lower() or q in seed.lower():
-            hits.append(EventSearchHit(quest_id, title, "backlog", r[3], [], {}, 1))
-    return hits
+    from imp.cli.store import _backlog_matches
+    return [EventSearchHit(m.quest_id, m.title, "backlog", m.last_activity, [], {}, 1)
+            for m in _backlog_matches(control, query)]
 
 
 def _events_search_archived(
@@ -3803,19 +3394,6 @@ def _events_search(
     if archived:
         hits += _events_search_archived(control, query, types=types, agents=agents)
     return hits
-
-
-def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
-    """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
-    from imp.engine import worktree
-    from imp.engine.archive import read as archive_read
-    merge_commit = archive_read.merge_commit_of(control, quest_id)
-    if not merge_commit:
-        return False
-    # git exit 1 = not an ancestor (landed after) → keep; exit 0/any-other = exclude (fail-safe).
-    return worktree._git(
-        control, "merge-base", "--is-ancestor", merge_commit, base_commit,
-    ).returncode == 1
 
 
 def _spine_segment(text: str, query: str, *base_codes: str, color: bool) -> str:

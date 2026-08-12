@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.cli.main import main
 
 
@@ -55,7 +56,7 @@ def test_log_ambiguous_token_lists_candidates_exit_2(
     monkeypatch.setattr(m, "_interactive", lambda: True)
     monkeypatch.setattr(
         m, "_iter_quest_ids", lambda c: ["2026-06-10-foo", "2026-06-11-foo"])
-    monkeypatch.setattr(m, "_row_for_id", lambda c, cid: None)
+    monkeypatch.setattr(s, "_row_for_id", lambda c, cid: None)
     rc = main(["log", "foo"])
     err = capsys.readouterr().err
     assert rc == 2

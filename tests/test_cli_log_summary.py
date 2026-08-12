@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.cli.main import main
 from imp.engine.quest import LAYOUT_VERSION
 from imp.paths import project_state_dir
@@ -116,9 +117,9 @@ def test_summary_merged_change_via_journal_status(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: cid)
-    monkeypatch.setattr(m, "_load_events_for_id", lambda control, c: events)
+    monkeypatch.setattr(s, "_load_events_for_id", lambda control, c: events)
     monkeypatch.setattr(
-        m, "_row_for_id",
+        s, "_row_for_id",
         lambda control, c: (cid, "merged", "merge", "2026-01-01T00:00:10+00:00",
                             cid, "2026-01-01T00:00:00+00:00", None, None))
     rc = main(["log", "-s", cid])

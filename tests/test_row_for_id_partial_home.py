@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.cli import main as m
+from imp.cli import store as s
 from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
@@ -14,5 +14,5 @@ def test_row_for_id_tolerates_missing_state_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="X", quest_id="partial", base_branch="main")
     (ch.state_dir / "state.json").unlink()  # simulate the mid-creation window
-    row = m._row_for_id(tmp_path, "partial")
+    row = s._row_for_id(tmp_path, "partial")
     assert row is None

@@ -617,7 +617,7 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
 def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
     """After abandon (permanent change home rmtree'd, worktree gone), _quest_meta
     resolves the Quest's metadata from the archive record, not the retired journal."""
-    import imp.cli.main as m
+    import imp.cli.store as s
 
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Meta One", quest_id="meta-one",
@@ -629,7 +629,7 @@ def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
     assert not home.exists()
     assert not (project_state_dir(tmp_path) / "worktrees" / "meta-one").exists()
 
-    meta = m._quest_meta(tmp_path, "meta-one")
+    meta = s._quest_meta(tmp_path, "meta-one")
     assert meta is not None
     assert meta["base_branch"] == "main"
     assert meta["title"] == "Meta One"

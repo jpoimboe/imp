@@ -5,12 +5,14 @@ import json
 import subprocess
 from pathlib import Path
 
-from imp.cli.main import (
+from imp.cli.main import _selected_search
+from imp.cli.store import (
+    HomeDigest,
+    Readiness,
     _merged_after,
     _search_active,
     _search_archived,
     _search_backlog,
-    _selected_search,
 )
 from imp.engine import archive
 from imp.engine.quest import Quest
@@ -195,3 +197,40 @@ def test_search_archived_applies_merged_after_to_completed(tmp_path: Path) -> No
     assert [h.quest_id for h in
             _search_archived(tmp_path, "dark", {"merged"}, sha_a)] == ["alpha"]
     assert _search_archived(tmp_path, "dark", {"merged"}, sha_b) == []
+
+
+class _ScanOnlyStore:
+    """The two ops the backlog row builder needs, served with no disk at all."""
+
+    def __init__(self, homes: list[HomeDigest]) -> None:
+        self._homes = homes
+
+    def scan_homes(self) -> list[HomeDigest]:
+        return self._homes
+
+    def backlog_readiness(self, depends_on: list[str]) -> Readiness:
+        return Readiness(True, ())
+
+
+def _backlog_digest(quest_id: str, title: str, seed: str) -> HomeDigest:
+    return HomeDigest(
+        quest_id=quest_id, quest_json=b"{}", state_json=None,
+        meta={"id": quest_id, "title": title, "materialized": False,
+              "origin": "backlog", "seed_opening": seed,
+              "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
+        last_iso="2026-06-11T00:00:00+00:00", has_user_message=False,
+        prose="", intent_title=None, lock_live=False)
+
+
+def test_search_backlog_takes_the_body_from_the_store_scan(
+        monkeypatch, tmp_path: Path) -> None:
+    # No quest home exists on disk, so a hit on a term that lives only in the
+    # description body proves the body came from the scanned digest — the route a
+    # sandboxed client gets from the daemon.
+    store = _ScanOnlyStore([_backlog_digest(
+        "bk9", "Flaky tracker", "Flaky tracker\n\ntracking test_widget_timeout")])
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: store)
+    hits = _search_backlog(tmp_path, "test_widget_timeout")
+    assert [h.quest_id for h in hits] == ["bk9"]
+    assert "test_widget_timeout" in hits[0].content
+    assert hits[0].last_activity == "2026-06-11T00:00:00+00:00"

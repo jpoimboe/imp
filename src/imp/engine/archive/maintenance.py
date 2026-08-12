@@ -12,7 +12,7 @@ from imp.paths import project_state_dir
 
 def reap_archived_homes(control_root: Path) -> int:
     """Reap live quest homes already terminal and durable in the archive; return the count."""
-    from imp.cli.main import _INFLIGHT, _list_quest_homes, _quest_home
+    from imp.cli.store import _INFLIGHT, _list_quest_homes, _quest_home
 
     ensure_current(control_root)
     db = index_path(control_root)

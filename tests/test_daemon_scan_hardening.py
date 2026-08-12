@@ -29,7 +29,7 @@ def test_list_quests_skips_a_change_whose_row_read_raises(
         return (cid, "running", "plan", "", "T", "2026-01-01", None, None)
 
     monkeypatch.setattr("imp.cli.main._iter_quest_ids", lambda _c: ids)
-    monkeypatch.setattr("imp.cli.main._row_for_id", _row)
+    monkeypatch.setattr("imp.cli.store._row_for_id", _row)
 
     got = {info.id for info in discover.list_quests(tmp_path)}
     assert got == {"good1", "good2"}  # "boom" skipped, not fatal
@@ -41,7 +41,7 @@ def test_snapshot_returns_none_when_row_read_raises(
     def _boom(_control: Path, _cid: str) -> Any:
         raise OSError("transient")
 
-    monkeypatch.setattr("imp.cli.main._row_for_id", _boom)
+    monkeypatch.setattr("imp.cli.store._row_for_id", _boom)
     assert discover.snapshot(tmp_path, "x") is None
 
 

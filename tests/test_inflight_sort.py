@@ -4,7 +4,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from imp.cli.main import _sort_rows_started_first, _status_row
+from imp.cli.main import _sort_rows_started_first
+from imp.cli.store import _status_row
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.state import State
 from imp.paths import project_state_dir

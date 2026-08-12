@@ -35,7 +35,8 @@ def list_quests(control_root: Path) -> list[QuestInfo]:
     remote `/list` is just noise. Keep only the in-flight statuses
     (running / new / paused / merge_blocked / draft); `running` and
     `draft` are derived at display time — there is no persisted `errored`."""
-    from imp.cli.main import _INFLIGHT, _iter_quest_ids, _row_for_id
+    from imp.cli.main import _iter_quest_ids
+    from imp.cli.store import _INFLIGHT, _row_for_id
     out: list[QuestInfo] = []
     for quest_id in _iter_quest_ids(control_root):
         try:
@@ -58,7 +59,7 @@ def list_quests(control_root: Path) -> list[QuestInfo]:
 
 
 def snapshot(control_root: Path, quest_id: str) -> tuple[str, str, str] | None:
-    from imp.cli.main import _row_for_id
+    from imp.cli.store import _row_for_id
     try:
         row = _row_for_id(control_root, quest_id)
     except Exception:
@@ -75,7 +76,7 @@ def snapshot(control_root: Path, quest_id: str) -> tuple[str, str, str] | None:
 
 def recent_narrative(control_root: Path, quest_id: str, n: int) -> list[dict[str, Any]]:
     """Last n non-empty agent_message events, oldest-first, augmented for /replay."""
-    from imp.cli.main import _load_events_for_id
+    from imp.cli.store import _load_events_for_id
     from imp.remote.curate import EventCurator
     from imp.remote.drivers.telegram import event_body
     if n <= 0:
@@ -113,7 +114,7 @@ def socket_is_live(path: Path | str) -> bool:
 
 def full_history(control_root: Path, quest_id: str) -> list[dict[str, Any]]:
     """Complete events.jsonl as raw, ordered augmented events; empty when the id is unknown."""
-    from imp.cli.main import _load_events_for_id
+    from imp.cli.store import _load_events_for_id
     from imp.remote.curate import EventCurator
     events = _load_events_for_id(control_root, quest_id)
     if events is None:

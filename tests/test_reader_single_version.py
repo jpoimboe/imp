@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from imp.cli import narrative as nv
-from imp.cli.main import _resolve_intent
+from imp.cli.store import _resolve_intent
 from imp.engine.event_migrations import migrate_events
 
 _OLD_TYPES = (
