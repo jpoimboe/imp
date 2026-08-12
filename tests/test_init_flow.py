@@ -86,7 +86,6 @@ def test_accepting_the_screen_writes_the_rows_as_they_stand(
         roots=ImportRoots([], "not a Python project"))
     _stub_screen(monkeypatch, ScreenAccepted(state))
     settings = _confirm_init_settings(tmp_path, state)
-    assert settings is not None
     assert settings.default_workflow == "minimal"
     # None never decided; False is the user's "this project needs none".
     assert settings.test_cmd_fast is None
@@ -101,7 +100,7 @@ def test_accepting_an_edited_empty_tests_row_writes_needs_none(
                     tests_provenance="you set this")
     _stub_screen(monkeypatch, ScreenAccepted(state))
     settings = _confirm_init_settings(tmp_path, state)
-    assert settings is not None and settings.test_cmd_fast is False
+    assert settings.test_cmd_fast is False
 
 
 def test_fresh_init_reaches_the_screen_with_no_model_call(
