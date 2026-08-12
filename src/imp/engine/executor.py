@@ -46,7 +46,7 @@ from imp.engine.agent_run import (
 from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
-from imp.engine.env import TestGates, engine_env, overlay_engine_env
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided, engine_env, overlay_engine_env
 from imp.engine.error_policy import budget_for
 from imp.engine.errors import LoadError, summarize_exception
 from imp.engine.feedback import (
@@ -603,6 +603,7 @@ async def run_quest(
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 test_gates=TestGates.from_config(config),
                 pythonpath=config.pythonpath or (),
+                undecided=Undecided.from_config(config),
                 headless=headless,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy,
@@ -968,6 +969,7 @@ async def _dispatch_step(
     coordinator: Any,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
+    undecided: Undecided = ALL_DECIDED,
     headless: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
@@ -1009,6 +1011,7 @@ async def _dispatch_step(
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
             wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
             pythonpath=pythonpath,
+            undecided=undecided,
             headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed_opening,
@@ -1489,6 +1492,7 @@ async def _route_agent(
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
+    undecided: Undecided = ALL_DECIDED,
     headless: bool = False,  # forwarded to the invocation/child runs
     autonomous: bool = False,
     sandbox_policy: Any = None,
@@ -1560,7 +1564,7 @@ async def _route_agent(
             # nothing to replay — restoring would stream no messages at all and
             # the spawn hangs silently until the next watchdog kill.
             initial_messages=initial, is_resume=keep,
-            test_gates=test_gates, pythonpath=pythonpath, headless=headless,
+            test_gates=test_gates, pythonpath=pythonpath, undecided=undecided, headless=headless,
             interactive=step.interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
@@ -1670,7 +1674,8 @@ async def _route_agent(
                 step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 wrapper_text=wrapper_text, is_resume=False,
-                test_gates=test_gates, pythonpath=pythonpath, headless=headless,
+                test_gates=test_gates, pythonpath=pythonpath, undecided=undecided,
+                headless=headless,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy, seed_opening=seed,
                 memory=memory)
@@ -1697,7 +1702,7 @@ async def _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
             wrapper_text=wrapper_text, is_resume=False,
-            test_gates=test_gates, pythonpath=pythonpath, headless=headless,
+            test_gates=test_gates, pythonpath=pythonpath, undecided=undecided, headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed,
             memory=memory)
@@ -1732,6 +1737,7 @@ async def _route_agent(
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume, test_gates=test_gates,
                                   pythonpath=pythonpath,
+                                  undecided=undecided,
                                   headless=headless,
                                   autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
@@ -1786,6 +1792,7 @@ async def _run_agent_invocation(
     balance_on_resume: bool = False,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
+    undecided: Undecided = ALL_DECIDED,
     headless: bool = False,
     interactive: bool = False,
     autonomous: bool = False,
@@ -1830,7 +1837,7 @@ async def _run_agent_invocation(
             autonomous=autonomous, opening=opening,
             prior_laps=state.outcome_history.get(step_name, []),
             parent=parent_ref, depends_on=depends_refs,
-            verify_gate_unset=test_gates is not None and test_gates.fast_unset,
+            undecided=undecided,
         )
         rendered = render_prompt(
             agent_def.prompt_template_source, ctx,
@@ -1905,6 +1912,7 @@ async def _run_agent_invocation(
         log=log,
         test_gates=test_gates,
         pythonpath=pythonpath,
+        undecided=undecided,
         headless=headless,
         interactive=interactive,
         sandbox_policy=sandbox_policy,

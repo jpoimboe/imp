@@ -46,11 +46,6 @@ class TestGates:
             slow_timeout=config.test_cmd_slow_timeout,
         )
 
-    @property
-    def fast_unset(self) -> bool:
-        """No fast gate wired at all — distinct from the deliberate "" opt-out."""
-        return self.fast is None
-
 
 @dataclass(frozen=True, slots=True)
 class Undecided:

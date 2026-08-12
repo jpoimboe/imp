@@ -174,13 +174,6 @@ def test_test_gates_from_config_reads_test_cmd_fields() -> None:
                               fast_timeout=120, slow_timeout=300)
 
 
-def test_fast_unset_is_true_only_for_a_never_wired_gate() -> None:
-    # None = never wired (imp should raise it); "" = deliberate opt-out (stay quiet).
-    assert TestGates(fast=None).fast_unset is True
-    assert TestGates(fast="make check").fast_unset is False
-    assert TestGates(fast="").fast_unset is False
-
-
 def test_engine_env_injects_zero_timeout() -> None:
     # Guard the `is not None` semantics: a 0 timeout must still be emitted, not
     # dropped by a truthiness check.

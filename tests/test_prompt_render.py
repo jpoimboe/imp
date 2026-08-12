@@ -1,7 +1,7 @@
 """Tests for render_prompt / build_context.
 
 Seven namespaces: quest, events, vars, run, step, docs, project
-(project.verify_gate_unset — the fast test gate is unwired).
+(project.undecided — the stack-dependent settings never decided here).
 """
 
 from __future__ import annotations
@@ -156,14 +156,18 @@ def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
     ) == "Prev: good"
 
 
-def test_renders_project_verify_gate_unset(tmp_path: Path) -> None:
-    """The gate boolean reaches templates and drives a conditional block."""
+def test_renders_project_undecided(tmp_path: Path) -> None:
+    """The three bools reach templates; the object's truthiness gates the block."""
+    from imp.engine.env import Undecided
+
     log = _log(tmp_path / "events.jsonl", [])
-    tmpl = "{% if project.verify_gate_unset %}WIRE IT{% endif %}|{{ project.verify_gate_unset }}"
-    unset = build_context(quest_title="t", event_log=log, verify_gate_unset=True)
-    wired = build_context(quest_title="t", event_log=log)
-    assert render_prompt(tmpl, unset) == "WIRE IT|True"
-    assert render_prompt(tmpl, wired) == "|False"
+    tmpl = ("{% if project.undecided %}RAISE{% endif %}"
+            "|{{ project.undecided.worktree_setup }}")
+    raised = build_context(quest_title="t", event_log=log,
+                           undecided=Undecided(worktree_setup=True))
+    decided = build_context(quest_title="t", event_log=log)
+    assert render_prompt(tmpl, raised) == "RAISE|True"
+    assert render_prompt(tmpl, decided) == "|False"
 
 
 def test_unknown_project_attribute_raises(tmp_path: Path) -> None:
