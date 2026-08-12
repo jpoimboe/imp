@@ -1837,7 +1837,7 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     if digest is None:
         return None
     if not _is_backlog_home(digest.meta, conversed=digest.has_user_message,
-                            lock_live=lambda: digest.lock_live):
+                            lock_live=digest.lock_live):
         return None
     return digest.meta
 

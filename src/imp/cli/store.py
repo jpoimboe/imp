@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
@@ -288,7 +287,7 @@ def _quest_state(control: Path, quest_id: str) -> dict[str, Any] | None:
 
 
 def _is_backlog_home(
-    meta: dict[str, Any], *, conversed: bool, lock_live: Callable[[], bool]
+    meta: dict[str, Any], *, conversed: bool, lock_live: bool
 ) -> bool:
     """Shared zone predicate. A live quest home is Backlog iff it is
     un-materialized, has a non-draft origin, has never been conversed (no
@@ -300,7 +299,7 @@ def _is_backlog_home(
         not meta.get("materialized", True)
         and meta.get("origin", "draft") != "draft"
         and not conversed
-        and not lock_live()
+        and not lock_live
     )
 
 
@@ -506,7 +505,7 @@ def _status_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list
         if h.state_json is None:
             continue
         if _is_backlog_home(h.meta, conversed=h.has_user_message,
-                            lock_live=lambda: h.lock_live):  # noqa: B023
+                            lock_live=h.lock_live):
             continue  # un-materialized, never-conversed, unlocked seed -> Backlog
         row = _status_row(h.quest_id, h.state_json, h.quest_json, h.last_iso)
         if row is None:
@@ -527,7 +526,7 @@ def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> lis
     for h in homes:
         meta = h.meta
         if not _is_backlog_home(meta, conversed=h.has_user_message,
-                                lock_live=lambda: h.lock_live):  # noqa: B023
+                                lock_live=h.lock_live):
             continue  # materialized / draft-origin / conversed / lock-live -> Active
         origin = meta.get("origin", "draft")
         ready = make_store(control).backlog_readiness(meta.get("depends_on", [])).ready
