@@ -346,3 +346,16 @@ def test_the_talk_it_through_path_is_retired() -> None:
     src = Path("src/imp/cli/init.py").read_text()
     assert "imp.agents" not in src                     # no agent machinery at all
     assert "imp.providers.resolve" not in src          # and no credential probe
+
+
+def test_no_source_or_test_file_mentions_a_setup_conversation() -> None:
+    # AC 8(f). The phrase is built from parts so this file does not match itself.
+    phrase = "setup " + "conversation"
+    hits = [
+        str(path)
+        for root in (Path("src"), Path("tests"))
+        for pattern in ("**/*.py", "**/*.md")
+        for path in sorted(root.glob(pattern))
+        if phrase in path.read_text(errors="ignore")
+    ]
+    assert hits == []

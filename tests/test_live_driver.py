@@ -1834,7 +1834,7 @@ def test_compose_identity_toolbar_title_is_unpainted_under_ansi_theme() -> None:
 
 def test_compose_identity_toolbar_bands_a_title_without_a_quest_id() -> None:
     from imp.cli.live_driver import compose_identity_toolbar
-    # The setup conversation has a title and no quest id: the band names it.
+    # A title and no quest id: the band names it.
     assert compose_identity_toolbar(quest_id=None, title="imp setup",
                                     color=False, width=80) == "imp setup"
     # Nothing to name at all -> no band.
@@ -2964,7 +2964,7 @@ def test_compose_identity_toolbar_without_project_is_byte_for_byte_unchanged() -
     empty = compose_identity_toolbar(project="", quest_id="vope45", title="t",
                                      color=False, width=100)
     assert omitted == empty == "vope45 · t"      # no leading " · "
-    # A title with no id (the setup conversation) still bands; nothing at all -> None.
+    # A title with no id still bands; nothing at all -> None.
     assert compose_identity_toolbar(project="", quest_id=None, title="imp setup",
                                     color=False, width=80) == "imp setup"
     assert compose_identity_toolbar(project="", quest_id=None, title="",

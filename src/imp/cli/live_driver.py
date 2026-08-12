@@ -123,8 +123,8 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
                              width: int, unsandboxed: bool = False,
                              project: str = "") -> str | None:
     """Minimal project · id · title identity bar for the opening prompt, before any
-    activity exists. None only when there is nothing to name: a title alone (the
-    setup conversation, which has no quest id) still gets a band."""
+    activity exists. None only when there is nothing to name: a title alone (no
+    quest id) still gets a band."""
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     project_seg = (_paint(project, "gray", color=color, over_bg=over)
