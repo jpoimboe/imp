@@ -22,8 +22,6 @@ from pathlib import Path
 from typing import Any
 
 EMPTY_PROMPT_HINT = "press ctrl-d to pause & exit"
-# Nothing is paused during `imp init`: the setup conversation is cancelled outright.
-SETUP_EMPTY_PROMPT_HINT = "press ctrl-d to cancel setup"
 DEFAULT_HINT = "type a message, or /help"
 
 

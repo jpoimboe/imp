@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -322,3 +323,26 @@ def test_run_init_seeds_the_screen_with_the_detected_worktree_setup(
     assert yaml.safe_load(
         (root / "imp" / "config.yaml").read_text())["worktree_setup"] == (
             "uv sync --all-extras")
+
+
+def test_the_talk_it_through_path_is_retired() -> None:
+    """AC 8(d)/(e): every symbol and file the `?` path owned is gone, and init
+    reaches for no agent or provider machinery."""
+    import imp.cli.init as initmod
+    import imp.cli.prompt as promptmod
+    import imp.cli.pythonpath_detect as ppd
+    from imp.assets import bundled_assets_dir
+
+    assert not Path("src/imp/agents/interactive.py").exists()
+    assert importlib.util.find_spec("imp.agents.interactive") is None
+    assert not (bundled_assets_dir() / "init.md").exists()
+    assert not hasattr(promptmod, "SETUP_EMPTY_PROMPT_HINT")
+    assert not hasattr(ppd, "resolve_detection_provider")
+    assert hasattr(ppd, "validate_detected_roots")     # the module itself stays
+    for name in ("ScreenTalk", "_run_init_conversation", "_build_init_kickoff",
+                 "_conversation_failure_message", "_workflow_choices"):
+        assert not hasattr(initmod, name), name
+    assert not hasattr(initmod._ScreenAction, "TALK")
+    src = Path("src/imp/cli/init.py").read_text()
+    assert "imp.agents" not in src                     # no agent machinery at all
+    assert "imp.providers.resolve" not in src          # and no credential probe
