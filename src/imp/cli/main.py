@@ -3655,15 +3655,6 @@ def _search_active(control: Path, query: str) -> list[SearchHit]:
     return hits
 
 
-def _backlog_seed_opening(control: Path, quest_id: str) -> str:
-    cj = _quest_home(control, quest_id) / "quest.json"
-    try:
-        meta = json.loads(cj.read_bytes())
-    except (OSError, ValueError, TypeError):
-        return ""
-    return str(meta.get("seed_opening") or "")
-
-
 def _search_backlog(control: Path, query: str) -> list[SearchHit]:
     """Backlog quests whose id, title, or seed_opening body (title + description)
     contains `query` (case-insensitive)."""
@@ -3753,11 +3744,14 @@ def _events_search_backlog(
     """Backlog quests matched on id/title/intent. Skipped when type/agent filter is set."""
     if types is not None or agents is not None:
         return []
+    from imp.cli.store import make_store
     q = query.lower()
+    scanned = make_store(control).scan_homes()
+    seed_by_id = {d.quest_id: str(d.meta.get("seed_opening") or "") for d in scanned}
     hits: list[EventSearchHit] = []
-    for r in _backlog_rows(control):
+    for r in _backlog_rows(control, scanned):
         quest_id, title = r[0], r[4]
-        seed = _backlog_seed_opening(control, quest_id)
+        seed = seed_by_id.get(quest_id, "")
         if q in quest_id.lower() or q in title.lower() or q in seed.lower():
             hits.append(EventSearchHit(quest_id, title, "backlog", r[3], [], {}, 1))
     return hits
