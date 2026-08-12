@@ -79,19 +79,19 @@ class MigrationLockHeld(LoadError):
 class StateDecodeError(LoadError):
     """Raised when `State.load` cannot parse `state.json`."""
 
-    def __init__(self, *, live: Path, sidecar: Path | None, reason: str) -> None:
+    def __init__(self, *, live: Path, evidence: Path | None, reason: str) -> None:
         self.live = live
-        self.sidecar = sidecar
+        self.evidence = evidence
         self.reason = reason
-        if sidecar is not None:
-            evidence = f"  preserved corrupt bytes at: {sidecar}"
+        if evidence is not None:
+            preserved = f"  preserved corrupt bytes at: {evidence}"
         else:
-            evidence = (
+            preserved = (
                 "  corrupt bytes could NOT be preserved "
-                "(sidecar write failed)"
+                "(evidence write failed)"
             )
         super().__init__(
-            f"could not parse {live}: {reason}\n{evidence}",
+            f"could not parse {live}: {reason}\n{preserved}",
             hint="restore a good state.json from backup, or "
                  "abandon-and-restart this quest.",
         )

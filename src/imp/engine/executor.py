@@ -21,6 +21,7 @@ import sys
 import tempfile
 import traceback
 from collections.abc import Awaitable, Callable
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -35,7 +36,7 @@ from imp.agents.runner import (
     TextBlock,
 )
 from imp.agents.skills import overlay_global_skills, overlay_project_skills, overlay_shared_partials
-from imp.engine import quest_refs
+from imp.engine import quest_refs, readfault
 from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
     AgentRunResult,
@@ -406,6 +407,8 @@ async def run_quest(
     # NOTE: os.chdir is process-global — this hard-assumes one run_quest per
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
+    # ExitStack, not `with`: the sink needs `log`, built deep inside the body it wraps.
+    sinks = ExitStack()
     try:
         snapshot_key = str(quest.quest_dir)
         captured_this_entry = snapshot_key not in _SNAPSHOT_CAPTURED
@@ -435,6 +438,7 @@ async def run_quest(
         log: EventLog = JsonlEventLog(
             quest.events_path,
             on_event=_liveness_on_event(coordinator, on_event, state, quest.state_dir))
+        sinks.enter_context(readfault.event_sink(log))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
         if captured_this_entry:
@@ -826,6 +830,7 @@ async def run_quest(
         print(tb, file=sys.stderr)
         return RunResult.PAUSED
     finally:
+        sinks.close()
         # prev_cwd may have been removed (e.g. resume from inside a worktree this
         # run merged + tore down). Don't let the restore mask the result/exception.
         try:

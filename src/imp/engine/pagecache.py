@@ -1,10 +1,6 @@
 """Best-effort page-cache eviction for transient read-fault recovery.
 
-Forensics:
-btrfs+zstd can transiently serve a mis-decompressed cached copy of a file that
-is valid on disk — the observed signature is the content minus its first byte
-(head-drop). Dropping the file's cached pages forces the next read to re-fetch
-the extent from disk, which recovers.
+Why a parse failure is a read fault rather than corruption: imp.engine.readfault.
 """
 
 from __future__ import annotations
