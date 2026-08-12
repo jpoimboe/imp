@@ -99,7 +99,8 @@ the routing flags — the reconciler at the held head absorbs every fix:
 - `has_minor_findings: true` on Minor findings with no blocking ones — the reconciler
   integrates them too.
 - both false (Nit-only, clean, or a triaged "not ours" toleration) — the integration
-  proceeds to `summarizer` and on to merge.
+  proceeds to `check-cleared`, which re-runs the gate if this tree was never verified,
+  then to `summarizer`.
 - `tolerated: true` **only** in the "not ours / not worth it" triage branch above; else
   `tolerated: false` — on a clean review or the "worth fixing" branch the tree is green
   or about to be fixed forward, so there is nothing to tolerate.

@@ -110,7 +110,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert [s.name for s in wf.phases[-1].steps] == [
         "wait-for-head", "integrate-rebase", "reconciler",
         "validate-memory", "integration-verify", "integration-reviewer",
-        "summarizer", "finalize",
+        "check-cleared", "summarizer", "finalize",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base"]
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
@@ -533,7 +533,7 @@ def test_max_loops_value_slate() -> None:
     assert wf.defaults.max_loops == 10
     for name in ("scope-code-check", "verify", "quest-review", "converge-verify",
                  "integration-verify", "integration-reviewer", "finalize",
-                 "autosquash-resolve-merge"):
+                 "autosquash-resolve-merge", "check-cleared"):
         assert steps[name].max_loops == 10, name
     # Genuine infra retry keeps its explicit flat cap.
     assert steps["merge-to-base"].max_loops == 3

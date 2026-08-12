@@ -21,7 +21,7 @@ def test_integrate_phase_step_ordering_and_layering() -> None:
     assert names == [
         "wait-for-head", "integrate-rebase", "reconciler",
         "validate-memory", "integration-verify", "integration-reviewer",
-        "summarizer", "finalize",
+        "check-cleared", "summarizer", "finalize",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base",
     ]
@@ -105,8 +105,8 @@ def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
     assert m.action.resume is True
     m = evaluate_rules(rules, vars={},
                        output={**base, "blocking": False, "has_minor_findings": False})
-    # both False -> clean, proceed to the human gate
-    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
+    # both False -> clean, but the merge door re-checks the tree first
+    assert isinstance(m.action, Goto) and m.action.target == "check-cleared"
     m = evaluate_rules(rules, vars={},
                        output={"status": "Error", "findings": "",
                                "blocking": False, "has_minor_findings": False,
@@ -216,3 +216,46 @@ def test_finalize_merge_routes_to_cleanup_merge() -> None:
     m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
                        output={"decision": "other"})
     assert isinstance(m.action, Pause)
+
+
+def test_check_cleared_is_the_merge_door_before_summarizer() -> None:
+    wf = load_workflow(WF)
+    names = [s.name for s in _phase(wf, "integrate").steps]
+    assert names.index("check-cleared") == names.index("summarizer") - 1
+    step = next(s for s in wf.flat_steps() if s.name == "check-cleared")
+    assert step.kind == "script"
+    assert step.command == (
+        './scripts/check-cleared.sh "{{ vars.slow_verify_tolerated }}"')
+    assert step.show_label is False
+    # The re-verify cycle is a backward goto, counted against THIS step.
+    assert step.max_loops == 10
+    m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
+    assert isinstance(m0.action, Continue)                    # -> summarizer
+    m3 = evaluate_rules(step.rules, vars={}, output={"exit": 3})
+    assert isinstance(m3.action, Goto)
+    assert m3.action.target == "integration-verify"
+    m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})
+    assert isinstance(m1.action, Pause)
+
+
+def test_unverified_tree_reruns_the_gate_with_no_human_in_the_loop() -> None:
+    """The lelo51 shape: integration-verify failed, the reviewer diagnosed it as
+    environmental, repaired it and returned clean+untolerated — leaving a tree no
+    gate ever passed. The door sends it back and the second pass reaches the human
+    gate only once the tree is cleared."""
+    wf = load_workflow(WF)
+    names = [s.name for s in _phase(wf, "integrate").steps]
+    clean = {"status": "Success", "findings": "", "blocking": False,
+             "has_minor_findings": False, "tolerated": False}
+    m = evaluate_rules(_rules(wf, "integration-reviewer"), vars={}, output=clean)
+    assert isinstance(m.action, Goto) and m.action.target == "check-cleared"
+    back = evaluate_rules(_rules(wf, "check-cleared"), vars={}, output={"exit": 3})
+    assert isinstance(back.action, Goto)
+    assert back.action.target == "integration-verify"
+    passed = evaluate_rules(_rules(wf, "integration-verify"), vars={},
+                            output={"exit": 0})
+    assert isinstance(passed.action, Continue)
+    assert names[names.index("integration-verify") + 1] == "integration-reviewer"
+    ok = evaluate_rules(_rules(wf, "check-cleared"), vars={}, output={"exit": 0})
+    assert isinstance(ok.action, Continue)
+    assert names[names.index("check-cleared") + 1] == "summarizer"

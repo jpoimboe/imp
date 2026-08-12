@@ -160,7 +160,7 @@ flowchart LR
 Step kinds across all phases:
 
 - **agent** (boxes) — an LLM agent (`agents/<name>.md`); routes on its validated structured output.
-- **script** (`{{ }}` hexagons) — a shell command (`scripts/*.sh`); routes on exit code (`0` continue, `2` recoverable, else **pause to human**).
+- **script** (`{{ }}` hexagons) — a shell command (`scripts/*.sh`); routes on its own per-step exit-code rules: `0` is the pass path, a step may name further codes (`integrate-rebase` `2` → `summarizer`, `check-cleared` `3` → back to `integration-verify`), and an exit no rule matches falls to that step's `else` — a **pause to human** for the deterministic scripts, a rework route for the test gates.
 - **branch** (`{ }` diamonds) — a var router, no agent or script: `check-next-plan` and `wait-for-head` (which also blocks to acquire the merge lane).
 - **merge** — engine-native, lock-protected merge to base.
 
@@ -276,8 +276,11 @@ uncleared tree goes to `validate-memory`; a conflict hands off to `reconciler`; 
 base ref or dirty tree pauses. `validate-memory` re-runs imp's own load-time memory
 validation over the merged tree. `integration-verify` routes to `integration-reviewer` on
 **both** pass and failure — a failure asks the reviewer to adjudicate fix-vs-tolerate
-rather than pausing. `finalize` is the human gate; a rework releases the merge lane on
-its way back to `plan-writer`.
+rather than pausing. `check-cleared` then re-asks the shared clearance predicate at the
+merge door: a tree the slow gate never passed — an environmental failure the reviewer
+repaired, say — routes back to `integration-verify` instead of reaching the human.
+`finalize` is the human gate; a rework releases the merge lane on its way back to
+`plan-writer`.
 
 ```mermaid
 flowchart TD
@@ -295,7 +298,10 @@ flowchart TD
   IV --> IRV["integration-reviewer"]
   IRV -->|"blocking / minors"| REC
   IRV -. Error .-> HUMAN
-  IRV --> SUM["summarizer"]
+  IRV --> CC{{"check-cleared"}}
+  CC -->|"not cleared"| IV
+  CC -. error .-> HUMAN
+  CC --> SUM["summarizer"]
   SUM --> FIN["finalize<br/>HUMAN: merge / rework / pause"]
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN

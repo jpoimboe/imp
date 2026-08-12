@@ -99,12 +99,14 @@ def _interrupt_gate_already_emitted(log: EventLog) -> bool:
 
 
 def _hold_prompt(
-    result: Any, coordinator: Any, *, is_script: bool = False,
+    result: Any, coordinator: Any, *,
+    is_script_fn: Callable[[], bool] = lambda: False,
     log: EventLog | None = None,
 ) -> str | None:
+    """`is_script_fn` runs only on interrupt-pause: a completed run may have reaped the home."""
     if (_is_interrupt_pause(result, coordinator)
             and coordinator.pause_reason not in SIDE_EFFECT_REASONS):
-        if is_script:
+        if is_script_fn():
             return _SCRIPT_HOLD_PROMPT
         if log is not None and _interrupt_gate_already_emitted(log):
             return None
@@ -225,7 +227,7 @@ async def serve_quest_session(
             )
             coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(
-                result, coordinator, is_script=_paused_is_script(),
+                result, coordinator, is_script_fn=_paused_is_script,
                 log=quest.event_log())
         while (prompt is not None
                or _is_side_effect_pause(result, coordinator)):
@@ -288,7 +290,7 @@ async def serve_quest_session(
             )
             coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(
-                result, coordinator, is_script=_paused_is_script(),
+                result, coordinator, is_script_fn=_paused_is_script,
                 log=quest.event_log())
         return result
 
