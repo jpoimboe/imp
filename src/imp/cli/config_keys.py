@@ -48,10 +48,15 @@ def _as_bool(raw: str) -> Any:
     return raw
 
 
-def _as_list_or_bool(raw: str) -> Any:
-    low = raw.lower()
-    if low in ("true", "false"):
-        return low == "true"
+def _as_str_or_false(raw: str) -> Any:
+    if raw.lower() == "false":
+        return False
+    return raw
+
+
+def _as_list_or_false(raw: str) -> Any:
+    if raw.lower() == "false":
+        return False
     return raw.split(",")
 
 
@@ -84,13 +89,13 @@ _FIXED: tuple[SettableKey, ...] = (
     _k("providers", ("providers",), "global", _as_list),
     _k("theme", ("theme",), "global", _as_str),
     _k("editing_mode", ("editing_mode",), "global", _as_str),
-    _k("test_cmd_fast", ("test_cmd_fast",), "project", _as_bool),
-    _k("test_cmd_slow", ("test_cmd_slow",), "project", _as_bool),
+    _k("test_cmd_fast", ("test_cmd_fast",), "project", _as_str_or_false),
+    _k("test_cmd_slow", ("test_cmd_slow",), "project", _as_str_or_false),
     _k("test_cmd_fast_timeout", ("test_cmd_fast_timeout",), "project", _as_int),
     _k("test_cmd_slow_timeout", ("test_cmd_slow_timeout",), "project", _as_int),
-    _k("pythonpath", ("pythonpath",), "project", _as_list_or_bool),
+    _k("pythonpath", ("pythonpath",), "project", _as_list_or_false),
     _k("max_parallel_test_runs", ("max_parallel_test_runs",), "project", _as_int),
-    _k("worktree_setup", ("worktree_setup",), "project", _as_bool),
+    _k("worktree_setup", ("worktree_setup",), "project", _as_str_or_false),
     _k("context.checkpoint_threshold", ("context", "checkpoint_threshold"),
        "global", _as_number),
     _k("context.max_reincarnations", ("context", "max_reincarnations"),

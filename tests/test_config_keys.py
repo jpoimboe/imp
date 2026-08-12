@@ -123,6 +123,16 @@ def test_command_keys_parse_false_as_a_boolean() -> None:
         assert _parsed(key, "make check") == "make check", key
 
 
+def test_command_keys_parse_true_as_a_literal_string() -> None:
+    for key in ("test_cmd_fast", "test_cmd_slow", "worktree_setup"):
+        assert _parsed(key, "true") == "true", key
+        assert _parsed(key, "TRUE") == "TRUE", key
+
+
 def test_pythonpath_parses_false_as_a_boolean_not_a_one_item_list() -> None:
     assert _parsed("pythonpath", "false") is False
     assert _parsed("pythonpath", "src,tests") == ["src", "tests"]
+
+
+def test_pythonpath_parses_true_as_a_one_item_list() -> None:
+    assert _parsed("pythonpath", "true") == ["true"]

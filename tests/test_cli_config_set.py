@@ -532,6 +532,22 @@ def test_set_pythonpath_false_lands_as_a_boolean_not_a_one_item_list(
     assert read_back(project / "imp" / "config.yaml", ("pythonpath",)) is False
 
 
+def test_set_test_cmd_fast_true_stores_the_string_not_a_boolean(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "test_cmd_fast", "true"]) == 0
+    capsys.readouterr()
+    assert read_back(project / "imp" / "config.yaml", ("test_cmd_fast",)) == "true"
+
+
+def test_set_pythonpath_true_stores_a_one_item_list_not_a_boolean(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "pythonpath", "true"]) == 0
+    capsys.readouterr()
+    assert read_back(project / "imp" / "config.yaml", ("pythonpath",)) == ["true"]
+
+
 def test_set_worktree_setup_empty_is_refused_and_leaves_the_file_alone(
     project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
