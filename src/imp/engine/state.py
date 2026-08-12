@@ -88,10 +88,10 @@ def _recover_or_raise(
             data: dict[str, Any] = json.loads(retry_raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError, OSError):
             continue
-        readfault.record("state", state_path, recovered=True, attempt=attempt,
+        readfault.record("state", state_path, attempt=attempt,
                          reason=str(err), bad=raw, good=retry_raw)
         return data
-    evidence = readfault.record("state", state_path, recovered=False, attempt=None,
+    evidence = readfault.record("state", state_path, attempt=None,
                                 reason=str(err), bad=raw, good=None)
     raise StateDecodeError(
         live=state_path, evidence=evidence, reason=str(err)) from err

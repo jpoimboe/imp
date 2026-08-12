@@ -72,10 +72,10 @@ def _reread_or_raise(
             data: dict[str, Any] = json.loads(retry_raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError, OSError):
             continue
-        readfault.record("archive_record", path, recovered=True, attempt=attempt,
+        readfault.record("archive_record", path, attempt=attempt,
                          reason=str(err), bad=raw, good=retry_raw)
         return data
-    readfault.record("archive_record", path, recovered=False, attempt=None,
+    readfault.record("archive_record", path, attempt=None,
                      reason=str(err), bad=raw, good=None)
     raise err   # the bad record file stays put; records are written once, never rewritten
 

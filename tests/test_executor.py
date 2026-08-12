@@ -149,7 +149,7 @@ class _FaultRunner:
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
         readfault.record(
             "state", Path("/q/quests/test-quest/state/state.json"),
-            recovered=True, attempt=1, reason="Expecting value: line 1 column 1 (char 0)",
+            attempt=1, reason="Expecting value: line 1 column 1 (char 0)",
             bad=b"bc", good=b"abc")
         yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 

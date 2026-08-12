@@ -23,7 +23,7 @@ _REASON = "Expecting value: line 1 column 1 (char 0)"
 
 def _record_recovered_head_drop() -> Path | None:
     return readfault.record(
-        "state", _STATE_PATH, recovered=True, attempt=2, reason=_REASON,
+        "state", _STATE_PATH, attempt=2, reason=_REASON,
         bad=_HEAD_DROP, good=_GOOD)
 
 
@@ -54,7 +54,7 @@ def test_recovered_record_line_carries_every_field() -> None:
 def test_tail_drop_shape_is_fingerprinted_distinctly() -> None:
     readfault.record(
         "archive_record", Path("/q/archive/records/sifo63.json"),
-        recovered=True, attempt=1, reason=_REASON, bad=_TAIL_DROP, good=_GOOD)
+        attempt=1, reason=_REASON, bad=_TAIL_DROP, good=_GOOD)
     line = fault_lines()[0]
     assert line["site"] == "archive_record"
     assert line["head_drop"] is False
@@ -64,7 +64,7 @@ def test_tail_drop_shape_is_fingerprinted_distinctly() -> None:
 
 def test_unrecovered_record_line_nulls_the_good_side() -> None:
     readfault.record(
-        "state", _STATE_PATH, recovered=False, attempt=None, reason=_REASON,
+        "state", _STATE_PATH, attempt=None, reason=_REASON,
         bad=_HEAD_DROP, good=None)
     line = fault_lines()[0]
     assert line["recovered"] is False
@@ -140,7 +140,7 @@ def test_recovered_state_fault_emits_exact_warning_copy() -> None:
     log = InMemoryEventLog()
     with readfault.event_sink(log):
         readfault.record(
-            "state", _STATE_PATH, recovered=True, attempt=1, reason=_REASON,
+            "state", _STATE_PATH, attempt=1, reason=_REASON,
             bad=_HEAD_DROP, good=_GOOD)
     warnings = _warnings(log)
     assert len(warnings) == 1
@@ -160,7 +160,7 @@ def test_archive_record_recovery_names_the_record_file() -> None:
     with readfault.event_sink(log):
         readfault.record(
             "archive_record", Path("/q/archive/records/sifo63.json"),
-            recovered=True, attempt=1, reason=_REASON, bad=_TAIL_DROP,
+            attempt=1, reason=_REASON, bad=_TAIL_DROP,
             good=_GOOD)
     assert _warnings(log)[0]["payload"]["message"] == (
         "transient read fault recovered — archive record sifo63.json re-read "
@@ -171,7 +171,7 @@ def test_unrecognised_shape_says_other_shape() -> None:
     log = InMemoryEventLog()
     with readfault.event_sink(log):
         readfault.record(
-            "state", _STATE_PATH, recovered=True, attempt=3, reason=_REASON,
+            "state", _STATE_PATH, attempt=3, reason=_REASON,
             bad=b"totally unrelated bytes", good=_GOOD)
     assert _warnings(log)[0]["payload"]["message"] == (
         "transient read fault recovered — state.json re-read cleanly "
@@ -182,7 +182,7 @@ def test_unrecovered_fault_emits_no_shape_parenthetical() -> None:
     log = InMemoryEventLog()
     with readfault.event_sink(log):
         readfault.record(
-            "state", _STATE_PATH, recovered=False, attempt=None,
+            "state", _STATE_PATH, attempt=None,
             reason=_REASON, bad=_HEAD_DROP, good=None)
     payload = _warnings(log)[0]["payload"]
     assert payload["message"] == (
@@ -198,7 +198,7 @@ def test_event_tail_site_records_but_never_emits() -> None:
     with readfault.event_sink(log):
         readfault.record(
             "event_tail", Path("/q/quests/sifo63/events.jsonl"),
-            recovered=False, attempt=None, reason=_REASON, bad=_HEAD_DROP,
+            attempt=None, reason=_REASON, bad=_HEAD_DROP,
             good=None)
     assert _warnings(log) == []
     assert fault_lines()[0]["site"] == "event_tail"

@@ -2430,14 +2430,14 @@ class _EventTail:
             stuck.polls += 1
             if consumed:                      # the stuck line parsed this poll
                 readfault.record(
-                    "event_tail", self._path, recovered=True,
+                    "event_tail", self._path,
                     attempt=stuck.polls, reason=stuck.reason, bad=stuck.bad,
                     good=data.split(b"\n")[0])
                 self._stuck = None
         if fault is not None and self._stuck is None:
             bad, reason = fault
             self._stuck = _StuckLine(bad=bad, reason=reason, polls=1)
-            readfault.record("event_tail", self._path, recovered=False,
+            readfault.record("event_tail", self._path,
                              attempt=None, reason=reason, bad=bad, good=None)
             pagecache.drop_page_cache(self._path)
 
