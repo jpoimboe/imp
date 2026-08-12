@@ -4,7 +4,9 @@ import argparse
 from pathlib import Path
 
 import imp.cli.main as m
-from imp.cli.main import _cmd_status, _status_rows
+import imp.cli.store as s
+from imp.cli.main import _cmd_status
+from imp.cli.store import _status_rows
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _git, _seed_control
@@ -61,7 +63,7 @@ def test_backlog_rows_carry_provenance_and_empty_step_when_ready(tmp_path: Path)
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="Brief", quest_id="bk1",
                         base_branch="main", origin="idea", seed_opening="Brief")
-    row = next(r for r in m._backlog_rows(tmp_path) if r[0] == "bk1")
+    row = next(r for r in s._backlog_rows(tmp_path) if r[0] == "bk1")
     assert row[1] == "idea"       # provenance in the status slot
     assert row[2] == ""           # ready ⇒ empty step slot, no suffix
     assert row[6] is None
@@ -120,7 +122,7 @@ def test_resolve_intent_prefers_seeded_intent() -> None:
          "payload": {"role": "user",
                      "content": [{"type": "text", "text": "a solicited reply"}]}},
     ]
-    assert m._resolve_intent(events) == "seeded goal"
+    assert s._resolve_intent(events) == "seeded goal"
 
 
 def test_resolve_intent_falls_back_to_solicited_reply() -> None:
@@ -130,7 +132,7 @@ def test_resolve_intent_falls_back_to_solicited_reply() -> None:
          "payload": {"role": "user",
                      "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
     ]
-    assert m._resolve_intent(events) == "add a dark mode toggle"
+    assert s._resolve_intent(events) == "add a dark mode toggle"
 
 
 def test_resolve_intent_returns_interjected_message() -> None:
@@ -139,7 +141,7 @@ def test_resolve_intent_returns_interjected_message() -> None:
          "payload": {"role": "user", "subtype": "interject",
                      "content": [{"type": "text", "text": "wait, use postgres"}]}},
     ]
-    assert m._resolve_intent(events) == "wait, use postgres"
+    assert s._resolve_intent(events) == "wait, use postgres"
 
 
 def test_resolve_intent_skips_synthetic_task_prompt() -> None:
@@ -152,7 +154,7 @@ def test_resolve_intent_skips_synthetic_task_prompt() -> None:
                                   "text": "## Task\nyou are a coder, do X"}]}},
         {"type": "step_started", "payload": {"step": "coder", "phase": "implement"}},
     ]
-    assert m._resolve_intent(events) is None
+    assert s._resolve_intent(events) is None
 
 
 def test_cmd_status_named_row_skips_events_load(
@@ -164,7 +166,7 @@ def test_cmd_status_named_row_skips_events_load(
     def boom(*a, **k):
         raise AssertionError("events loaded for a named row")
 
-    monkeypatch.setattr(m, "_load_events_for_id", boom)
+    monkeypatch.setattr(s, "_load_events_for_id", boom)
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     assert rc == 0
 

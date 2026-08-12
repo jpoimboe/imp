@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.cli import main as m
+from imp.cli import store as s
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -20,43 +21,43 @@ def _park_draft(tmp_path: Path, cid: str, origin: str = "draft") -> Quest:
 def test_paused_draft_is_active_labeled_paused(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _park_draft(tmp_path, "pdraft")
-    row = next((r for r in m._status_rows(tmp_path) if r[0] == "pdraft"), None)
+    row = next((r for r in s._status_rows(tmp_path) if r[0] == "pdraft"), None)
     assert row is not None
     assert row[1] == "paused"
-    assert "pdraft" not in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "pdraft" not in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_fresh_draft_is_active_labeled_new(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="X", quest_id="ldraft",
                         base_branch="main")   # fresh, un-materialized, no lock ⇒ new
-    row = next((r for r in m._status_rows(tmp_path) if r[0] == "ldraft"), None)
+    row = next((r for r in s._status_rows(tmp_path) if r[0] == "ldraft"), None)
     assert row is not None
     assert row[1] == "new"
-    assert "ldraft" not in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "ldraft" not in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_idea_stays_in_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="X", quest_id="anidea",
                         base_branch="main", origin="idea", seed_opening="X")
-    assert "anidea" not in {r[0] for r in m._status_rows(tmp_path)}
-    assert "anidea" in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "anidea" not in {r[0] for r in s._status_rows(tmp_path)}
+    assert "anidea" in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_followup_stays_in_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="X", quest_id="aflwup",
                         base_branch="main", origin="followup", seed_opening="X")
-    assert "aflwup" not in {r[0] for r in m._status_rows(tmp_path)}
-    assert "aflwup" in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "aflwup" not in {r[0] for r in s._status_rows(tmp_path)}
+    assert "aflwup" in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_materialized_change_stays_in_active(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="X", quest_id="matchg", base_branch="main")
-    assert "matchg" in {r[0] for r in m._status_rows(tmp_path)}
-    assert "matchg" not in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "matchg" in {r[0] for r in s._status_rows(tmp_path)}
+    assert "matchg" not in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_resume_picker_lists_paused_draft_exactly_once(tmp_path: Path) -> None:

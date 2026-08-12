@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.cli.main import main
 from imp.cli.store import HomeDigest
 from imp.engine import archive
@@ -135,7 +136,7 @@ class _BacklogStore:
 
 def test_events_search_active_includes_only_quests_with_matching_events(
         monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda control, scanned=None: [_row("aaa111", "Alpha"),
+    monkeypatch.setattr(s, "_status_rows", lambda control, scanned=None: [_row("aaa111", "Alpha"),
                                                                       _row("bbb222", "Beta")])
     store = _FakeStore({
         "aaa111": [_ev("e0", "tool_call", "step:impl/coder", name="bash",
@@ -152,7 +153,7 @@ def test_events_search_active_includes_only_quests_with_matching_events(
 
 def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        m, "_backlog_rows", lambda control, scanned=None: [_row("ccc333", "Payments")])
+        s, "_backlog_rows", lambda control, scanned=None: [_row("ccc333", "Payments")])
     monkeypatch.setattr(
         "imp.cli.store.make_store",
         lambda control: _BacklogStore([_digest("ccc333", "add a GREPTARGET to checkout")]))
@@ -165,7 +166,7 @@ def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: P
 
 def test_events_search_backlog_matches_on_title(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        m, "_backlog_rows",
+        s, "_backlog_rows",
         lambda control, scanned=None: [_row("ccc333", "GREPTARGET dashboard")])
     monkeypatch.setattr(
         "imp.cli.store.make_store",
@@ -176,7 +177,7 @@ def test_events_search_backlog_matches_on_title(monkeypatch, tmp_path: Path) -> 
 
 def test_events_search_backlog_matches_on_quest_id(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        m, "_backlog_rows",
+        s, "_backlog_rows",
         lambda control, scanned=None: [_row("greptarget99", "Some title")])
     monkeypatch.setattr(
         "imp.cli.store.make_store",
@@ -188,7 +189,7 @@ def test_events_search_backlog_matches_on_quest_id(monkeypatch, tmp_path: Path) 
 def test_events_search_backlog_skipped_when_type_filter_present(
         monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
-        m, "_backlog_rows", lambda control, scanned=None: [_row("ccc333", "GREPTARGET")])
+        s, "_backlog_rows", lambda control, scanned=None: [_row("ccc333", "GREPTARGET")])
     monkeypatch.setattr(
         "imp.cli.store.make_store",
         lambda control: _BacklogStore([_digest("ccc333", "GREPTARGET")]))

@@ -64,7 +64,7 @@ def test_live_stems_exclude_the_archive(tmp_path: Path) -> None:
 
 
 def test_list_quest_homes_delegates_to_live_quest_ids(tmp_path: Path) -> None:
-    from imp.cli.main import _list_quest_homes
+    from imp.cli.store import _list_quest_homes
 
     _live_home(tmp_path, "wibo10")
     _live_home(tmp_path, "kobe47")

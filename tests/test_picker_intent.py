@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.cli import resume_select
 
 
@@ -32,7 +33,7 @@ async def test_pick_quest_target_threads_intent(
            "2026-06-01T00:00:00+00:00", None, None)
     monkeypatch.setattr(m, "_interactive", lambda: True)
     monkeypatch.setattr(
-        m, "_load_events_for_id",
+        s, "_load_events_for_id",
         lambda control, cid: [
             {"type": "user_message", "payload": {"subtype": "intent",
              "content": [{"type": "text", "text": "add dark mode"}]}}])
@@ -67,7 +68,7 @@ async def test_pick_quest_target_skips_event_load_for_titled_rows(
         return [{"type": "user_message", "payload": {"subtype": "intent",
                  "content": [{"type": "text", "text": "add dark mode"}]}}]
 
-    monkeypatch.setattr(m, "_load_events_for_id", fake_load_events)
+    monkeypatch.setattr(s, "_load_events_for_id", fake_load_events)
 
     captured: dict[str, list] = {}
 

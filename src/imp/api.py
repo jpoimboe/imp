@@ -112,7 +112,7 @@ def _summary(quest_id: str, status: str, step: str, title: str) -> QuestSummary:
 
 def list_quests(control_root: Path) -> list[QuestSummary]:
     """Every quest under `control_root` — live homes first, then archived ones."""
-    from imp.cli.main import _row_for_id
+    from imp.cli.store import _row_for_id
     from imp.engine.archive import read as archive_read
     from imp.engine.quest import live_quest_ids
 

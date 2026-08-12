@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _last_nonempty_line, _read_last_line
+from imp.cli.store import _last_nonempty_line, _read_last_line
 
 
 @pytest.mark.parametrize(

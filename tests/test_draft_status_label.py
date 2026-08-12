@@ -4,6 +4,7 @@ from pathlib import Path
 
 from imp.cli import main as m
 from imp.cli import quest_row
+from imp.cli import store as s
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -43,7 +44,7 @@ def _park_draft(tmp_path: Path, cid: str) -> Quest:
 def test_row_for_id_labels_parked_draft_as_paused(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _park_draft(tmp_path, "drflbl")
-    row = m._row_for_id(tmp_path, "drflbl")
+    row = s._row_for_id(tmp_path, "drflbl")
     assert row is not None
     assert row[1] == "paused"
 
@@ -54,7 +55,7 @@ def test_materialized_paused_change_is_not_labeled_draft(tmp_path: Path) -> None
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
-    row = m._row_for_id(tmp_path, "matpause")
+    row = s._row_for_id(tmp_path, "matpause")
     assert row is not None
     assert row[1] == "paused"   # materialized ⇒ real status, never relabeled
 
@@ -62,8 +63,8 @@ def test_materialized_paused_change_is_not_labeled_draft(tmp_path: Path) -> None
 def test_parked_draft_is_active_and_resumable(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _park_draft(tmp_path, "drfres")
-    assert "drfres" in {r[0] for r in m._status_rows(tmp_path)}       # Active
-    assert "drfres" not in {r[0] for r in m._backlog_rows(tmp_path)}  # not Backlog
+    assert "drfres" in {r[0] for r in s._status_rows(tmp_path)}       # Active
+    assert "drfres" not in {r[0] for r in s._backlog_rows(tmp_path)}  # not Backlog
     assert "drfres" in {r[0] for r in m._resumable_rows(tmp_path)}    # resumable
 
 
@@ -72,7 +73,7 @@ def test_parked_draft_renders_real_status_word(tmp_path: Path) -> None:
     from datetime import UTC, datetime
     _seed_control(tmp_path)
     _park_draft(tmp_path, "drbare")
-    row = next(r for r in m._status_rows(tmp_path) if r[0] == "drbare")
+    row = next(r for r in s._status_rows(tmp_path) if r[0] == "drbare")
     line = quest_row.format_quest_line(
         quest_id=row[0], title=row[4], status=row[1], step=row[2],
         step_label=row[6], last_iso=row[3], now=datetime.now(UTC), color=False)

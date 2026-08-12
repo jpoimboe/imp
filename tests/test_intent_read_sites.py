@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from imp.cli.main import (
-    _first_genuine_human_turn,
-    _prompt_history_lines,
-    _resolve_intent,
-)
+from imp.cli.main import _prompt_history_lines
+from imp.cli.store import _first_genuine_human_turn, _resolve_intent
 
 
 def _um(subtype: str, text: str) -> dict:

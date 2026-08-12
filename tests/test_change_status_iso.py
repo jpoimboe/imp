@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _iso_from_line, _journal_last_iso, _last_event_iso
+from imp.cli.store import _iso_from_line, _journal_last_iso, _last_event_iso
 from imp.engine import archive
 
 
@@ -57,7 +57,7 @@ def test_journal_last_iso_absent(tmp_path: Path):
 
 
 def test_journal_last_iso_reads_index_not_blob(tmp_path: Path, monkeypatch) -> None:
-    from imp.cli.main import _journal_last_iso
+    from imp.cli.store import _journal_last_iso
     from imp.engine.archive.blobstore import LocalBlobStore
 
     events = tmp_path / "e.jsonl"

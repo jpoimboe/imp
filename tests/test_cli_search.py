@@ -59,7 +59,7 @@ def _archive_conv(tmp_path: Path, quest_id: str, title: str,
 
 
 def test_search_archived_hit_carries_last_activity(tmp_path: Path) -> None:
-    from imp.cli.main import _search_archived
+    from imp.cli.store import _search_archived
     _archive_conv(tmp_path, "darkid", "Dark mode", "2026-06-10T00:00:00+00:00",
                   "a dark note")
     hits = _search_archived(tmp_path, "dark",
@@ -69,7 +69,7 @@ def test_search_archived_hit_carries_last_activity(tmp_path: Path) -> None:
 
 
 def test_search_backlog_hit_carries_last_activity(tmp_path: Path) -> None:
-    from imp.cli.main import _search_backlog
+    from imp.cli.store import _search_backlog
     _seed_control(tmp_path)
     draft = Quest.create_draft(
         tmp_path, title="Dark backlog", quest_id="darkbk", base_branch="main",
@@ -83,7 +83,7 @@ def test_search_backlog_hit_carries_last_activity(tmp_path: Path) -> None:
 
 
 def test_search_active_hit_carries_last_activity(tmp_path: Path) -> None:
-    from imp.cli.main import _search_active
+    from imp.cli.store import _search_active
     _seed_control(tmp_path)
     live = Quest.create(tmp_path, title="Dark mode", quest_id="liveid",
                          base_branch="main")

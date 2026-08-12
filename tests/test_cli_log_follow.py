@@ -498,13 +498,14 @@ def test_cmd_log_follow_routes_archived_only_to_follow_log(
     """`imp log -f <id>` for an id with no live home (archived-only) keeps the
     Part 1 replay-and-exit path _follow_log."""
     import imp.cli.main as m
+    import imp.cli.store as s
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "arch")
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     monkeypatch.setattr(
-        m, "_load_events_for_id",
+        s, "_load_events_for_id",
         lambda c, i: [{"type": "quest_created", "payload": {}}])
-    monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(s, "_quest_home", lambda c, i: tmp_path / "absent")
     monkeypatch.setattr(m, "_follow_log", lambda events, *, cats, project: 9)
     rc = m.main(["log", "-f", "arch"])
     assert rc == 9
@@ -516,15 +517,16 @@ def test_cmd_log_follow_archived_only_threads_cats(
     """The archived-only route hands _follow_log the resolved category set, so
     `imp log -f --full` on a quest with no live home is a full-view replay."""
     import imp.cli.main as m
+    import imp.cli.store as s
     from imp.cli.render_text import LOG_CATEGORIES
     seen: dict[str, object] = {}
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "arch")
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     monkeypatch.setattr(
-        m, "_load_events_for_id",
+        s, "_load_events_for_id",
         lambda c, i: [{"type": "quest_created", "payload": {}}])
-    monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(s, "_quest_home", lambda c, i: tmp_path / "absent")
     monkeypatch.setattr(
         m, "_follow_log",
         lambda events, *, cats, project: (seen.update(cats=cats), 9)[1])
@@ -816,14 +818,15 @@ def test_cmd_log_follow_archived_only_fills_the_project_from_the_control_root(
 ) -> None:
     """_follow_log takes no control root, so its caller fills project= for it."""
     import imp.cli.main as m
+    import imp.cli.store as s
     seen: dict[str, object] = {}
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "arch")
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     monkeypatch.setattr(
-        m, "_load_events_for_id",
+        s, "_load_events_for_id",
         lambda c, i: [{"type": "quest_created", "payload": {}}])
-    monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(s, "_quest_home", lambda c, i: tmp_path / "absent")
     monkeypatch.setattr(
         m, "_follow_log",
         lambda events, *, cats, project: (seen.update(project=project), 9)[1])

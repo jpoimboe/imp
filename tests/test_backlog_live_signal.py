@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import imp.cli.main as m
+import imp.cli.store as s
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from tests.conftest import _seed_control
 
@@ -64,7 +65,7 @@ def test_unstarted_backlog_meta_returns_meta_when_quest_load_would_fail(
     meta = m._unstarted_backlog_meta(tmp_path, "2026-06-20-mism01")
     assert meta is not None
     assert meta["origin"] == "idea"
-    assert "2026-06-20-mism01" in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "2026-06-20-mism01" in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_unstarted_backlog_meta_none_when_only_user_message_is_empty(
@@ -75,31 +76,31 @@ def test_unstarted_backlog_meta_none_when_only_user_message_is_empty(
     ch = _idea_seed(tmp_path, "2026-06-20-emty01")
     _converse(ch, "")
     assert m._unstarted_backlog_meta(tmp_path, "2026-06-20-emty01") is None
-    assert "2026-06-20-emty01" not in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "2026-06-20-emty01" not in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_untouched_seed_stays_in_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _idea_seed(tmp_path, "2026-06-20-bkg01")
-    assert "2026-06-20-bkg01" not in {r[0] for r in m._status_rows(tmp_path)}
-    assert "2026-06-20-bkg01" in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "2026-06-20-bkg01" not in {r[0] for r in s._status_rows(tmp_path)}
+    assert "2026-06-20-bkg01" in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_lock_live_seed_leaves_backlog_and_shows_running(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _idea_seed(tmp_path, "2026-06-20-run01")
     (ch.quest_dir / "lock").write_text(str(os.getpid()))   # live holder pid
-    status_rows = {r[0]: r for r in m._status_rows(tmp_path)}
+    status_rows = {r[0]: r for r in s._status_rows(tmp_path)}
     assert "2026-06-20-run01" in status_rows
     assert status_rows["2026-06-20-run01"][1] == "running"
-    assert "2026-06-20-run01" not in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "2026-06-20-run01" not in {r[0] for r in s._backlog_rows(tmp_path)}
 
 
 def test_conversed_unmaterialized_seed_is_active_new(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _idea_seed(tmp_path, "2026-06-20-drf01")
     _converse(ch, "let's start with the parser")
-    status_rows = {r[0]: r for r in m._status_rows(tmp_path)}
+    status_rows = {r[0]: r for r in s._status_rows(tmp_path)}
     assert "2026-06-20-drf01" in status_rows
     assert status_rows["2026-06-20-drf01"][1] == "new"
-    assert "2026-06-20-drf01" not in {r[0] for r in m._backlog_rows(tmp_path)}
+    assert "2026-06-20-drf01" not in {r[0] for r in s._backlog_rows(tmp_path)}

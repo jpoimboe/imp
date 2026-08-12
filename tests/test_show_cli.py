@@ -590,13 +590,14 @@ def test_show_json_none_quest_prints_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     import imp.cli.main as m
+    import imp.cli.store as s
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["lostid"])
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "lostid")
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: None)
-    monkeypatch.setattr(m, "_row_for_id", lambda control, qid: None)
+    monkeypatch.setattr(s, "_row_for_id", lambda control, qid: None)
     rc = main(["show", "lostid", "--json"])
     assert rc == 2
     assert "no such quest" in capsys.readouterr().err
