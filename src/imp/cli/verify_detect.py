@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, NamedTuple
 
@@ -82,23 +81,6 @@ def detect_test_command(project_root: Path) -> DetectedTestCommand | None:
         if cmd:
             return DetectedTestCommand(cmd, "from justfile")
     return None
-
-
-def resolve_test_cmd_choice(
-    suggested: str,
-    input_fn: Callable[[str], str],
-    output_fn: Callable[[str], None],
-) -> str:
-    output_fn(
-        f"Detected `{suggested}` — use it as your fast test command? [Y / edit / skip]"
-    )
-    ans = input_fn("").strip().lower()
-    if ans in ("e", "edit"):
-        entered = input_fn("fast test command: ").strip()
-        return entered or suggested
-    if ans in ("s", "skip", "n", "no"):
-        return ""
-    return suggested
 
 
 def format_test_cmd_fast_yaml(command: str | Literal[False]) -> str:
