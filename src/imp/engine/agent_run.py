@@ -52,7 +52,7 @@ from imp.engine.completion import (
 from imp.engine.completion import (
     build_inline_solicit as build_inline_solicit,
 )
-from imp.engine.env import TestGates
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided
 from imp.engine.types import AgentDef, OutputField, ResumeCause
 
 if TYPE_CHECKING:
@@ -497,6 +497,7 @@ def build_agent_invocation(
     log: Any = None,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
+    undecided: Undecided = ALL_DECIDED,
     headless: bool = False,
     interactive: bool = False,
     sandbox_policy: Any = None,
@@ -626,6 +627,7 @@ def build_agent_invocation(
         coordinator=coordinator,
         test_gates=test_gates,
         pythonpath=pythonpath,
+        undecided=undecided,
         headless=headless,
         interactive=interactive,
         sandbox_policy=sandbox_policy,

@@ -1,26 +1,11 @@
-"""`imp init`: scaffold imp/ in a project.
-
-Spec §4: split output. A committed imp/config.yaml (workflow ref + empty
-vars — NO bindings, NO theme) and a bootstrapped ~/.imp/config.yaml
-(providers + theme + editing_mode). On a clone that already carries the
-committed imp/config.yaml, init is idempotent: it never overwrites the
-project file and only bootstraps the machine's global config if absent.
-
-Committed config+workflows live under imp/ (tracked by git).
-Runtime state (quests, worktrees, archive) lives outside the checkout, under
-~/.imp/projects/<name>/. The committed `.imp/` gitignore rule stays: each quest
-worktree holds a `.imp/quests/<id>` symlink to its out-of-tree home.
-
-Tier→model bindings come from the provider-code floor now, so init asks no
+"""Tier→model bindings come from the provider-code floor now, so init asks no
 model question — it just records the enabled providers + detected theme. A
 fresh interactive init then detects this project's settings (default workflow,
-integration branch, fast test command, import root) and confirms them on one
-screen, so it needs no model provider — only an OS sandbox (or an accepted
-unsandboxed offer), and stops with an actionable message without one. The
-screen's `?` hands off to the agent-driven setup conversation, which does want a
-provider and says so instead of aborting. The non-interactive path
-(`--use-defaults`, or an auto-selected no-TTY run) writes defaults with no model
-call.
+integration branch, fast test command, worktree setup command, import root) and
+confirms them on one screen. Init needs no model provider on any path — only an
+OS sandbox (or an accepted unsandboxed offer), and it stops with an actionable
+message without one. The non-interactive path (`--use-defaults`, or an
+auto-selected no-TTY run) writes defaults with no model call.
 """
 
 from __future__ import annotations
@@ -32,30 +17,26 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import yaml
 from ruamel.yaml.error import YAMLError
 
-from imp.agents.interactive import (
-    InteractiveFailure,
-    InteractiveResult,
-    run_interactive_agent_sync,
-)
 from imp.assets import (
-    bundled_assets_dir,
-    resolve_workflow_dir,
     selectable_workflow_names,
 )
 from imp.cli import palette as pal
 from imp.cli import splash
-from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT, Prompt
 from imp.cli.pythonpath_detect import (
     ImportRoots,
     detect_import_roots,
     format_pythonpath_yaml,
-    resolve_detection_provider,
     validate_detected_roots,
+)
+from imp.cli.setup_detect import (
+    DetectedSetupCommand,
+    detect_worktree_setup,
+    format_worktree_setup_yaml,
 )
 from imp.cli.verify_detect import (
     DetectedTestCommand,
@@ -64,9 +45,7 @@ from imp.cli.verify_detect import (
 )
 from imp.engine import worktree
 from imp.engine._yaml import load_config_yaml
-from imp.engine.loader import parse_agent_file
-from imp.engine.sandbox import SandboxConfig, sandbox_available
-from imp.engine.types import OutputField
+from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
 _DEFAULT_WORKFLOW = "default"
@@ -117,11 +96,14 @@ class IntegrationBranchUnresolved(Exception):
 
 @dataclass(frozen=True, slots=True)
 class InitSettings:
-    """The settings the shared writer serializes into imp/config.yaml."""
+    """The settings the shared writer serializes into imp/config.yaml. The three
+    stack-dependent fields are three-state: None never decided, False decided as
+    "this project needs none", anything else the value."""
     default_workflow: str
     default_base: str
-    test_cmd_fast: str | None  # None omits the block; "" writes an explicit opt-out
-    pythonpath: list[str]      # validated roots; empty writes the teaching hint
+    test_cmd_fast: str | Literal[False] | None
+    worktree_setup: str | Literal[False] | None
+    pythonpath: list[str] | Literal[False] | None
 
 
 def _in_git_repo(project_root: Path) -> bool:
@@ -266,14 +248,6 @@ def _build_user_config(providers: list[str]) -> dict[str, Any]:
     }
 
 
-_CREDENTIAL_HINTS: dict[str, str] = {
-    "claude_code": "install the Claude CLI and run `claude login`",
-    "anthropic": "set ANTHROPIC_API_KEY in your environment",
-    "openai": "set OPENAI_API_KEY in your environment",
-    "codex": "install the Codex CLI and run `codex login`",
-}
-
-
 def _read_user_config(user_path: Path) -> dict[str, Any] | None:
     if not user_path.exists():
         return None
@@ -303,11 +277,18 @@ def _bootstrap_user_config(
 
 _TEST_CMD_FAST_COMMENT = (
     "\n# Fast test gate: lint + typecheck + fast tests, run after each\n"
-    "# implement loop to catch regressions. Empty string opts out.\n"
+    "# implement loop to catch regressions. false declares the project needs none.\n"
     "# The slow gate (test_cmd_slow) runs the full suite once per quest\n"
     "# and falls back to test_cmd_fast when unset. Timeouts default to\n"
     "# 120s (fast) / 300s (slow) — override with test_cmd_fast_timeout /\n"
     "# test_cmd_slow_timeout.\n"
+)
+
+_WORKTREE_SETUP_COMMENT = (
+    "\n# Command run in each new quest worktree before the first step, for toolchains\n"
+    "# that keep dependencies in a gitignored per-tree directory (.venv,\n"
+    "# node_modules, vendor) that `git worktree` does not materialize. false\n"
+    "# declares the project needs none.\n"
 )
 
 _PYTHONPATH_BLOCK_COMMENT = (
@@ -460,10 +441,13 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
 
 
 _CONFIRM_HEADER = "Here's how imp will set up this project:"
-_CONFIRM_HINT = "↑↓ move · space change · enter accept · ? talk it through · esc cancel"
+_CONFIRM_HINT = "↑↓ move · space change · enter accept · esc cancel"
 _NO_VALUE = "(none)"
+_NONE_NEEDED = "(none needed)"
 _YOU_SET_THIS = "you set this"
 _NO_TESTS_DETECTED = "nothing detected — imp runs no tests until one is set"
+_NO_SETUP_DETECTED = "nothing detected — no command runs in new worktrees"
+_NO_SUCH_ROOTS = "no such directory in this repo — nothing recorded"
 _NO_BRANCH_DETECTED = "nothing detected"
 _CUSTOM_WORKFLOW = "custom workflow"
 
@@ -480,28 +464,33 @@ class ScreenRow(IntEnum):
     WORKFLOW = 0
     BRANCH = 1
     TESTS = 2
-    IMPORT_ROOT = 3
+    WORKTREE_SETUP = 3
+    IMPORT_ROOT = 4
 
 
 _ROW_LABELS: dict[ScreenRow, str] = {
     ScreenRow.WORKFLOW: "workflow",
     ScreenRow.BRANCH: "branch",
     ScreenRow.TESTS: "tests",
+    ScreenRow.WORKTREE_SETUP: "worktree setup",
     ScreenRow.IMPORT_ROOT: "import root",
 }
 
 
 @dataclass(frozen=True, slots=True)
 class InitScreenState:
-    """What the confirmation screen shows and, on accept, writes. `test_cmd_fast`
-    and `pythonpath` carry InitSettings' semantics exactly, so accepting needs no
-    reinterpretation. The workflow row's provenance is derived, never stored."""
+    """What the confirmation screen shows and, on accept, writes. `test_cmd_fast`,
+    `worktree_setup` and `pythonpath` carry InitSettings' semantics exactly, so
+    accepting needs no reinterpretation. The workflow row's provenance is derived,
+    never stored."""
     workflow: str
     branch: str
     branch_provenance: str
-    test_cmd_fast: str | None
+    test_cmd_fast: str | Literal[False] | None
     tests_provenance: str
-    pythonpath: list[str]
+    worktree_setup: str | Literal[False] | None
+    setup_provenance: str
+    pythonpath: list[str] | Literal[False] | None
     roots_provenance: str
 
 
@@ -510,6 +499,7 @@ def _screen_state_from_detection(
     workflow: str,
     base: BaseDetection | None,
     tests: DetectedTestCommand | None,
+    setup: DetectedSetupCommand | None,
     roots: ImportRoots,
 ) -> InitScreenState:
     return InitScreenState(
@@ -518,7 +508,9 @@ def _screen_state_from_detection(
         branch_provenance=base.provenance if base else _NO_BRANCH_DETECTED,
         test_cmd_fast=tests.command if tests else None,
         tests_provenance=tests.provenance if tests else _NO_TESTS_DETECTED,
-        pythonpath=list(roots.roots),
+        worktree_setup=setup.command if setup else None,
+        setup_provenance=setup.provenance if setup else _NO_SETUP_DETECTED,
+        pythonpath=list(roots.roots) or None,
         roots_provenance=roots.provenance,
     )
 
@@ -534,15 +526,24 @@ def _cycle_workflow(state: InitScreenState, workflows: list[str]) -> InitScreenS
         workflow=workflows[(workflows.index(state.workflow) + 1) % len(workflows)])
 
 
+def _display_value(value: str | list[str] | Literal[False] | None) -> str:
+    if value is None:
+        return _NO_VALUE
+    if value is False:
+        return _NONE_NEEDED
+    return ", ".join(value) if isinstance(value, list) else value
+
+
 def _row_cells(state: InitScreenState) -> dict[ScreenRow, tuple[str, str, str]]:
-    """Each row's (label, value, provenance): the screen pads these into columns,
-    the setup-conversation kickoff reads them back to the agent."""
+    """Each row's (label, value, provenance): the screen pads these into columns."""
     values: dict[ScreenRow, tuple[str, str]] = {
         ScreenRow.WORKFLOW: (state.workflow, _workflow_blurb(state.workflow)),
         ScreenRow.BRANCH: (state.branch or _NO_VALUE, state.branch_provenance),
-        ScreenRow.TESTS: (state.test_cmd_fast or _NO_VALUE, state.tests_provenance),
+        ScreenRow.TESTS: (_display_value(state.test_cmd_fast), state.tests_provenance),
+        ScreenRow.WORKTREE_SETUP: (
+            _display_value(state.worktree_setup), state.setup_provenance),
         ScreenRow.IMPORT_ROOT: (
-            ", ".join(state.pythonpath) or _NO_VALUE, state.roots_provenance),
+            _display_value(state.pythonpath), state.roots_provenance),
     }
     return {row: (_ROW_LABELS[row], value, note)
             for row, (value, note) in values.items()}
@@ -555,8 +556,9 @@ def _settings_summary(settings: InitSettings) -> list[str]:
     values: dict[ScreenRow, str] = {
         ScreenRow.WORKFLOW: settings.default_workflow,
         ScreenRow.BRANCH: settings.default_base or _NO_VALUE,
-        ScreenRow.TESTS: settings.test_cmd_fast or _NO_VALUE,
-        ScreenRow.IMPORT_ROOT: ", ".join(settings.pythonpath) or _NO_VALUE,
+        ScreenRow.TESTS: _display_value(settings.test_cmd_fast),
+        ScreenRow.WORKTREE_SETUP: _display_value(settings.worktree_setup),
+        ScreenRow.IMPORT_ROOT: _display_value(settings.pythonpath),
     }
     return [f"  {_ROW_LABELS[row]:<{label_w}}  {values[row]}" for row in ScreenRow]
 
@@ -583,6 +585,7 @@ def _confirm_rows(
 _EDIT_PROMPTS: dict[ScreenRow, str] = {
     ScreenRow.BRANCH: "Integration branch: ",
     ScreenRow.TESTS: "Fast test command: ",
+    ScreenRow.WORKTREE_SETUP: "Worktree setup command: ",
     ScreenRow.IMPORT_ROOT: "Import roots (comma-separated): ",
 }
 
@@ -592,7 +595,9 @@ def _edit_default(state: InitScreenState, row: ScreenRow) -> str:
         return state.branch
     if row is ScreenRow.TESTS:
         return state.test_cmd_fast or ""
-    return ", ".join(state.pythonpath)
+    if row is ScreenRow.WORKTREE_SETUP:
+        return state.worktree_setup or ""
+    return ", ".join(state.pythonpath) if state.pythonpath else ""
 
 
 def _apply_row_edit(
@@ -604,27 +609,28 @@ def _apply_row_edit(
             state, branch=answer.strip(), branch_provenance=_YOU_SET_THIS)
     if row is ScreenRow.TESTS:
         return replace(
-            state, test_cmd_fast=answer.strip(), tests_provenance=_YOU_SET_THIS)
+            state, test_cmd_fast=answer.strip() or False,
+            tests_provenance=_YOU_SET_THIS)
+    if row is ScreenRow.WORKTREE_SETUP:
+        return replace(
+            state, worktree_setup=answer.strip() or False,
+            setup_provenance=_YOU_SET_THIS)
     entered = [part.strip() for part in answer.split(",") if part.strip()]
-    return replace(
-        state, pythonpath=validate_detected_roots(project_root, entered),
-        roots_provenance=_YOU_SET_THIS)
+    if not entered:
+        return replace(state, pythonpath=False, roots_provenance=_YOU_SET_THIS)
+    validated = validate_detected_roots(project_root, entered)
+    if not validated:
+        return replace(state, pythonpath=None, roots_provenance=_NO_SUCH_ROOTS)
+    return replace(state, pythonpath=validated, roots_provenance=_YOU_SET_THIS)
 
 
 class ScreenAccepted(NamedTuple):
-    """`enter` on the confirmation screen: write this state. Discriminate against
-    ScreenTalk with isinstance — as tuples of one equal field, the two compare equal."""
-    state: InitScreenState
-
-
-class ScreenTalk(NamedTuple):
-    """`?` on the confirmation screen: hand these values to the setup conversation."""
+    """`enter` on the confirmation screen: write this state."""
     state: InitScreenState
 
 
 class _ScreenAction(Enum):
     ACCEPT = "accept"
-    TALK = "talk"
     EDIT = "edit"
 
 
@@ -681,10 +687,6 @@ def _run_confirm_app(
             return  # an unwritable config is unreachable
         event.app.exit(result=_ScreenAction.ACCEPT)
 
-    @kb.add("?")
-    def _talk(event: Any) -> None:
-        event.app.exit(result=_ScreenAction.TALK)
-
     @kb.add("c-c")
     @kb.add("escape", eager=True)
     def _cancel(event: Any) -> None:
@@ -710,7 +712,7 @@ def _interactive_confirm_screen(
     *,
     workflows: list[str],
     prompt_fn: Callable[[str, str], str] = _default_row_prompt,
-) -> ScreenAccepted | ScreenTalk:
+) -> ScreenAccepted:
     """The detected-and-confirmed setup screen. Editing a row leaves the screen,
     asks for the value with the current one pre-filled, and re-renders."""
     cursor = ScreenRow.WORKFLOW
@@ -718,8 +720,6 @@ def _interactive_confirm_screen(
         action, state, cursor = _run_confirm_app(state, cursor, workflows)
         if action is _ScreenAction.ACCEPT:
             return ScreenAccepted(state)
-        if action is _ScreenAction.TALK:
-            return ScreenTalk(state)
         state = _apply_row_edit(
             project_root, state, cursor,
             prompt_fn(_EDIT_PROMPTS[cursor], _edit_default(state, cursor)))
@@ -739,13 +739,19 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     else:
         test_block = (
             _TEST_CMD_FAST_COMMENT + format_test_cmd_fast_yaml(settings.test_cmd_fast))
-    if settings.pythonpath:
+    if settings.worktree_setup is None:
+        setup_block = ""
+    else:
+        setup_block = (
+            _WORKTREE_SETUP_COMMENT
+            + format_worktree_setup_yaml(settings.worktree_setup))
+    if settings.pythonpath is None:
+        pythonpath_block = _pythonpath_hint()
+    else:
         pythonpath_block = (
             _PYTHONPATH_BLOCK_COMMENT + format_pythonpath_yaml(settings.pythonpath))
-    else:
-        pythonpath_block = _pythonpath_hint()
     (imp_dir / "config.yaml").write_text(
-        body + test_block + pythonpath_block + _memory_pointer())
+        body + test_block + setup_block + pythonpath_block + _memory_pointer())
     _write_memory_scaffold(imp_dir, settings.default_workflow)
     _ensure_imp_gitignore(project_root)
     return _commit_init_files(
@@ -754,156 +760,24 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     )
 
 
-def _workflow_choices(project_root: Path) -> list[tuple[str, str]]:
-    """(name, description) for every SELECTABLE workflow — the agent's context for
-    framing the default-workflow choice. The description is the FIRST line of each
-    workflow.yaml `description:` block (the pipeline summary): the bundled blocks
-    are multi-paragraph, so taking one line keeps the kickoff compact and free of
-    mid-line newlines. Empty when absent."""
-    out: list[tuple[str, str]] = []
-    for name in selectable_workflow_names(project_root):
-        wf_yaml = resolve_workflow_dir(project_root, name) / "workflow.yaml"
-        desc = ""
-        if wf_yaml.is_file():
-            data = yaml.safe_load(wf_yaml.read_text()) or {}
-            raw = str(data.get("description", "")).strip()
-            desc = raw.splitlines()[0].strip() if raw else ""
-        out.append((name, desc))
-    return out
-
-
-def _build_init_kickoff(
-    *,
-    workflows: list[tuple[str, str]],
-    state: InitScreenState,
-) -> str:
-    """The setup-context kickoff handed to the setup agent: what the confirmation
-    screen is showing right now, so the conversation revises settled values
-    instead of rediscovering them. A row the user edited reads `you set this`."""
-    lines = ["Repository setup context for this conversation:", ""]
-    lines.append("Available workflows (name — internal pipeline summary, in step names):")
-    for name, desc in workflows:
-        lines.append(f"  {name} — {desc}" if desc else f"  {name}")
-    lines.append("")
-    lines.append("This project is already a git repository.")
-    lines.append("")
-    lines.append("Current settings, and where each came from:")
-    for label, value, note in _row_cells(state).values():
-        lines.append(f"  {label}: {value}  ({note})")
-    lines.append("")
-    lines.append("Begin the setup conversation now.")
-    return "\n".join(lines)
-
-
-def _conversation_failure_message(
-    provider_name: str, failure: InteractiveFailure,
-) -> str:
-    if failure.category in ("auth", "config"):
-        hint = _CREDENTIAL_HINTS.get(provider_name, "check its credential")
-        return (f"imp reached {provider_name} but setup couldn't authenticate. "
-                f"{hint[0].upper()}{hint[1:]}, then re-run `imp init`.")
-    return (f"Setup didn't finish ({failure.detail}). "
-            "Re-run `imp init` when you're ready.")
-
-
-def _run_init_conversation(
-    *,
-    project_root: Path,
-    state: InitScreenState,
-    provider_name: str,
-    model_name: str,
-    allow_unsandboxed: bool,
-    color: bool,
-    output_fn: Callable[[str], None],
-) -> InteractiveResult:
-    """Default conversation seam: run the read-only setup agent — bundled outside
-    every workflow, so a project-local imp/workflows/default cannot shadow it — in
-    the foreground host and return its InteractiveResult. Tests monkeypatch this."""
-    assets = bundled_assets_dir()
-    agent_def = parse_agent_file(assets / "init.md")
-    # Pinned at runtime: the per-project valid set (bundled plus committed
-    # imp/workflows/*) can't be declared statically in the agent's frontmatter.
-    schema = agent_def.output_schema
-    fields = tuple(
-        OutputField(name="default_workflow", type="enum",
-                    values=tuple(selectable_workflow_names(project_root)),
-                    required=True)
-        if f.name == "default_workflow" else f
-        for f in schema.fields
-    )
-    agent_def = replace(agent_def, output_schema=replace(schema, fields=fields))
-    kickoff = _build_init_kickoff(
-        workflows=_workflow_choices(project_root), state=state)
-    prompt = Prompt(color=color, empty_hint=SETUP_EMPTY_PROMPT_HINT)
-    return run_interactive_agent_sync(
-        agent_def=agent_def, provider_name=provider_name, model_name=model_name,
-        initial_message=kickoff, project_root=project_root,
-        asset_dir=assets,
-        sandbox_cfg=SandboxConfig(allow_unsandboxed=allow_unsandboxed),
-        prompt=prompt, output_fn=output_fn, color=color, title="imp setup")
-
-
 _GIT_QUESTION = "imp needs a git repository. Initialize one here? [Y/n] "
 _GIT_DECLINED = ("imp needs a git repository to track quests. "
                  "Re-run `imp init` when you're ready.")
 
 
 def _confirm_init_settings(
-    project_root: Path,
-    state: InitScreenState,
-    *,
-    providers: list[str],
-    allow_unsandboxed: bool,
-    color: bool,
-    output_fn: Callable[[str], None],
-) -> InitSettings | None:
-    """The confirmation screen, plus the setup conversation its `?` hands off to.
-    None when the conversation failed and init should stop — its message is
-    already printed. Cancelling the screen raises KeyboardInterrupt."""
-    workflows = selectable_workflow_names(project_root)
-    while True:
-        outcome = _interactive_confirm_screen(
-            project_root, state, workflows=workflows)
-        state = outcome.state
-        if isinstance(outcome, ScreenAccepted):
-            return InitSettings(
-                default_workflow=state.workflow,
-                default_base=state.branch,
-                test_cmd_fast=state.test_cmd_fast,
-                pythonpath=state.pythonpath)
-        setup_tier = parse_agent_file(bundled_assets_dir() / "init.md").tier or "medium"
-        resolved = resolve_detection_provider(providers, tier=setup_tier)
-        if resolved is None:
-            width = max(len(p) for p in providers)
-            output_fn("imp needs a working model provider to talk this through.")
-            output_fn("None of the providers you enabled has a usable credential yet:")
-            for prov in providers:
-                hint = _CREDENTIAL_HINTS.get(prov, "set up its credential")
-                output_fn(f"  {prov:<{width}} → {hint}")
-            output_fn(
-                "Set one up and re-run `imp init`, or fill the fields in yourself.")
-            continue
-        provider_name, model_name = resolved
-        result = _run_init_conversation(
-            project_root=project_root, state=state,
-            provider_name=provider_name, model_name=model_name,
-            allow_unsandboxed=allow_unsandboxed, color=color, output_fn=output_fn)
-        if isinstance(result, InteractiveFailure):
-            output_fn(_conversation_failure_message(provider_name, result))
-            return None
-        output = result.output
-        if output.get("status") != "Success":
-            output_fn(
-                "Setup didn't finish — the assistant reported it couldn't complete. "
-                "Re-run `imp init` when you're ready.")
-            return None
-        roots = list((output.get("pythonpath") or {}).get("roots", []))
-        test_cmd_fast = output.get("test_cmd_fast")
-        return InitSettings(
-            default_workflow=str(output["default_workflow"]),
-            default_base=str(output["default_base"]),
-            test_cmd_fast=None if test_cmd_fast is None else str(test_cmd_fast),
-            pythonpath=validate_detected_roots(project_root, roots))
+    project_root: Path, state: InitScreenState,
+) -> InitSettings:
+    """The confirmation screen. Cancelling it raises KeyboardInterrupt."""
+    outcome = _interactive_confirm_screen(
+        project_root, state, workflows=selectable_workflow_names(project_root))
+    state = outcome.state
+    return InitSettings(
+        default_workflow=state.workflow,
+        default_base=state.branch,
+        test_cmd_fast=state.test_cmd_fast,
+        worktree_setup=state.worktree_setup,
+        pythonpath=state.pythonpath)
 
 
 def run_init(
@@ -957,7 +831,7 @@ def run_init(
             "dim", enabled=color_on))
 
     # --- re-init idempotency: an already-committed project file means no
-    #     conversation; just bootstrap a missing machine config and re-commit ---
+    #     confirmation screen; just bootstrap a missing machine config and re-commit ---
     if already_initialized:
         if wrote_user_config:
             _bootstrap_user_config(
@@ -1004,8 +878,8 @@ def run_init(
                 "proceed without one.")
             return
 
-    # Persist the machine config before the conversation so a re-run never
-    # re-asks the questions already answered.
+    # Persist the machine config before the confirmation screen so a re-run
+    # never re-asks the questions already answered.
     if wrote_user_config:
         _bootstrap_user_config(
             user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
@@ -1029,11 +903,8 @@ def run_init(
             workflow=_DEFAULT_WORKFLOW,
             base=_resolve_init_base(project_root, git_created=git_created),
             tests=detect_test_command(project_root),
-            roots=detect_import_roots(project_root)),
-        providers=providers, allow_unsandboxed=allow_unsandboxed,
-        color=theme in ("dark", "light"), output_fn=output_fn)
-    if settings is None:
-        return
+            setup=detect_worktree_setup(project_root),
+            roots=detect_import_roots(project_root)))
     committed = write_init_files(project_root, settings)
 
     output_fn("")
@@ -1058,7 +929,7 @@ def run_init_noninteractive(
     output_fn: Callable[[str], None],
     workflow: str | None = None,
     base: str | None = None,
-    pythonpath: list[str] | None = None,
+    pythonpath: list[str] | Literal[False] | None = None,
     detect_verify_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
 ) -> None:
     """Provider-free, non-interactive `imp init`: write imp/config.yaml from
@@ -1099,12 +970,27 @@ def run_init_noninteractive(
     detect_cmd = detect_verify_fn or detect_test_command
     detected = detect_cmd(project_root)
     test_cmd_fast = detected.command if detected else None  # None omits the block
-    roots = (validate_detected_roots(project_root, pythonpath) if pythonpath is not None
-             else detect_import_roots(project_root).roots)
+    detected_setup = detect_worktree_setup(project_root)
+    roots: list[str] | Literal[False] | None
+    if pythonpath is None:
+        roots = detect_import_roots(project_root).roots or None
+    elif pythonpath is False:
+        roots = False
+    else:
+        validated = validate_detected_roots(project_root, pythonpath)
+        if not validated:
+            output_fn(
+                f"--pythonpath: no such directory in this repo: "
+                f"{', '.join(pythonpath)} — leaving import roots unset.")
+            roots = None
+        else:
+            roots = validated
 
     settings = InitSettings(
         default_workflow=workflow, default_base=default_base,
-        test_cmd_fast=test_cmd_fast, pythonpath=roots)
+        test_cmd_fast=test_cmd_fast,
+        worktree_setup=detected_setup.command if detected_setup else None,
+        pythonpath=roots)
     committed = write_init_files(project_root, settings)
 
     if wrote_user_config:

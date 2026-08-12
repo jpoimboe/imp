@@ -181,7 +181,7 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
         engine_env(project_root=worktree_path, quest_id=quest.id,
                    quest_title=quest.title, quest_dir=quest.quest_dir,
                    control_root=quest.control_root,
-                   test_gates=test_gates, pythonpath=config.pythonpath),
+                   test_gates=test_gates, pythonpath=config.pythonpath or ()),
     )
     policy = resolve_policy(
         worktree=worktree_path, control_root=quest.control_root,
@@ -321,7 +321,7 @@ async def dispatch_task(
             quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
             vars=ctx.quest_state.vars if ctx.quest_state is not None else {},
-            verify_gate_unset=ctx.test_gates is not None and ctx.test_gates.fast_unset,
+            undecided=ctx.undecided,
         )
         rendered_prompt = render_prompt(
             subagent_def.prompt_template_source, prompt_ctx,
@@ -399,6 +399,7 @@ async def dispatch_task(
                 log=ctx.event_log,
                 test_gates=ctx.test_gates,
                 pythonpath=ctx.pythonpath,
+                undecided=ctx.undecided,
                 headless=ctx.non_interactive,
                 sandbox_policy=dispatch_policy,
                 checkpoint_threshold=ctx.checkpoint_threshold,

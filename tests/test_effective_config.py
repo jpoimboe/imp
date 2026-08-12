@@ -118,12 +118,24 @@ def test_pythonpath_flows_from_project_to_config(
     assert eff.config.pythonpath == ("src", "vendor")
 
 
-def test_pythonpath_defaults_to_empty_tuple_when_unset(
+def test_pythonpath_is_none_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
-    assert eff.config.pythonpath == ()
+    assert eff.config.pythonpath is None
+
+
+def test_pythonpath_false_survives_the_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `tuple(False)` is a TypeError: the assembly must pass False through untouched.
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "config.yaml").write_text("pythonpath: false\n")
+    eff = load_effective_config(control_root=proj)
+    assert eff.config.pythonpath is False
 
 
 def test_repo_config_uses_tiered_test_cmds() -> None:

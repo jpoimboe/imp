@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 if TYPE_CHECKING:
     from imp.agents.transcript import SkillReply
 
-from imp.engine.env import TestGates
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided
 from imp.engine.types import AgentDef, ResumeCause
 
 
@@ -230,6 +230,10 @@ class AgentInvocation:
     # Worktree-relative import roots (Config.pythonpath), copied by each provider
     # onto the child ToolContext so the agent bash tool prepends them to PYTHONPATH.
     pythonpath: tuple[str, ...] = ()
+    # Which stack-dependent settings this project never decided, copied by each
+    # provider onto the child ToolContext so a subagent's front door reads the
+    # run's own answer rather than the all-decided default.
+    undecided: Undecided = ALL_DECIDED
     # §10/§12: when True, the run is headless (no human at the keyboard) and the
     # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
     # Threaded from run_quest → _route_agent → _run_agent_invocation →

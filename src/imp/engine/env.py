@@ -36,19 +36,43 @@ class TestGates:
 
     @classmethod
     def from_config(cls, config: Any) -> TestGates:
-        """Bundle the four `test_cmd_*` config fields. Duck-typed on `config` so
-        this stays free of an `imp.providers.config` import."""
+        """Bundle the four `test_cmd_*` config fields, a `false` command reading as
+        no command. Duck-typed on `config` so this stays free of an
+        `imp.providers.config` import."""
         return cls(
-            fast=config.test_cmd_fast,
-            slow=config.test_cmd_slow,
+            fast=config.test_cmd_fast or None,
+            slow=config.test_cmd_slow or None,
             fast_timeout=config.test_cmd_fast_timeout,
             slow_timeout=config.test_cmd_slow_timeout,
         )
 
-    @property
-    def fast_unset(self) -> bool:
-        """No fast gate wired at all — distinct from the deliberate "" opt-out."""
-        return self.fast is None
+
+@dataclass(frozen=True, slots=True)
+class Undecided:
+    """The stack-dependent settings this project has never decided, read straight
+    off Config — the last place `None` (never decided) is distinguishable from
+    `False` (decided: needs none). No `test_cmd_slow`: unset already means "fall
+    back to test_cmd_fast", so it is never raised. Duck-typed on `config` like
+    TestGates.from_config, to stay free of an `imp.providers.config` import."""
+
+    test_cmd_fast: bool = False
+    worktree_setup: bool = False
+    pythonpath: bool = False
+
+    @classmethod
+    def from_config(cls, config: Any) -> Undecided:
+        return cls(
+            test_cmd_fast=config.test_cmd_fast is None,
+            worktree_setup=config.worktree_setup is None,
+            pythonpath=config.pythonpath is None,
+        )
+
+    def __bool__(self) -> bool:
+        return self.test_cmd_fast or self.worktree_setup or self.pythonpath
+
+
+# The default wherever `undecided` threads: a shared immutable "nothing to raise".
+ALL_DECIDED = Undecided()
 
 
 # Headless overrides forced into every engine-spawned subprocess so no git/tool

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from imp.cli.pythonpath_detect import format_pythonpath_yaml
 
 # --- format_pythonpath_yaml serializer ---
@@ -16,15 +14,16 @@ def test_format_multi_root() -> None:
     assert format_pythonpath_yaml(["src", "."]) == 'pythonpath: ["src", "."]\n'
 
 
+def test_format_needs_none_line() -> None:
+    assert format_pythonpath_yaml(False) == "pythonpath: false\n"
+
+
 from imp.cli.pythonpath_detect import (  # noqa: E402
     ImportRoots,
     detect_import_roots,
     is_python_packaging_project,
-    resolve_detection_provider,
     validate_detected_roots,
 )
-from imp.providers.config import Config  # noqa: E402
-from imp.providers.effective import EffectiveConfig  # noqa: E402
 
 
 def test_is_python_packaging_project_detects_pyproject(tmp_path: Path) -> None:
@@ -44,40 +43,6 @@ def test_is_python_packaging_project_detects_setup_py(tmp_path: Path) -> None:
 
 def test_is_python_packaging_project_false_for_bare_dir(tmp_path: Path) -> None:
     assert is_python_packaging_project(tmp_path) is False
-
-
-def test_resolve_detection_provider_picks_first_usable(
-    monkeypatch, provider_registry
-) -> None:
-    provider_registry("first", env_check=lambda: True, factory=lambda m: None)
-    provider_registry("second", env_check=lambda: True, factory=lambda m: None)
-    cfg = Config(providers=(), tiers={"medium": {"first": "m-first", "second": "m-second"}})
-    import imp.cli.pythonpath_detect as pp
-    monkeypatch.setattr(
-        pp, "load_effective_config",
-        lambda: EffectiveConfig(config=cfg, provenance={}))
-    # Both pass env_check; the first listed provider must win over the second.
-    assert resolve_detection_provider(["first", "second"], tier="medium") == (
-        "first", "m-first")
-
-
-def test_resolve_detection_provider_none_when_no_usable(
-    monkeypatch, provider_registry
-) -> None:
-    provider_registry("nocred", env_check=lambda: False, factory=lambda m: None)
-    cfg = Config(providers=(), tiers={"medium": {"nocred": "m2"}})
-    import imp.cli.pythonpath_detect as pp
-    monkeypatch.setattr(
-        pp, "load_effective_config",
-        lambda: EffectiveConfig(config=cfg, provenance={}))
-    assert resolve_detection_provider(["nocred"], tier="medium") is None
-
-
-def test_resolve_detection_provider_requires_an_explicit_tier() -> None:
-    """No default tier: a caller must name the one it means, so init's
-    declared tier can never silently drift back to medium."""
-    with pytest.raises(TypeError, match="tier"):
-        resolve_detection_provider(["first"])
 
 
 def test_validate_keeps_existing_dirs_and_normalizes(tmp_path: Path) -> None:
@@ -320,7 +285,6 @@ def test_detector_and_agent_are_retired() -> None:
     # The one-shot detector is gone; its validation/format helpers remain.
     assert not hasattr(ppd, "detect_pythonpath_via_agent")
     assert hasattr(ppd, "validate_detected_roots")
-    assert hasattr(ppd, "resolve_detection_provider")
     # The bundled agent file is gone.
     assert not (bundled_workflow_dir("default") / "agents"
                 / "init-pythonpath.md").exists()

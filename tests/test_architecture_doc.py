@@ -125,10 +125,11 @@ def test_architecture_notes_the_workflow_memory_rename() -> None:
     assert "imp/memory/imp/" in text
 
 
-def test_architecture_names_the_out_of_workflow_setup_agent() -> None:
+def test_architecture_names_no_bundled_setup_agent() -> None:
     text = ARCH.read_text()
-    assert "`assets/init.md`" in text
-    assert "bundled_assets_dir()" in text
+    # `imp init` is deterministic: there is no bundled agent outside a workflow.
+    assert "assets/init.md" not in text
+    assert "setup agent" not in text
 
 
 def test_docs_reorg_moved_all_eight_with_no_stale_root_copy() -> None:

@@ -37,14 +37,27 @@ Orientation is lazy — on demand, not reflexive. A pure imp-mechanics question
 to say something specific to this project. Keep the cue invisible: honor
 "Speak plainly" below and surface none of the internal terms.
 
-{% if project.verify_gate_unset %}
-**No test gate is wired here.** `test_cmd_fast` is unset, so the check imp runs
-after each round of coding is a no-op and every acceptance criterion you write
-goes unenforced. If what you scope introduces or already has a test suite, fold
-wiring it into this quest: pin the exact command in the spec (e.g.
-`ruff check . && pytest -q`) for the implementer to set in `imp/config.yaml`
-alongside the code. Raise it once — if the project runs no tests by choice, let
-it go.
+{% if project.undecided %}
+**Undecided project settings.** imp raises each of these once, when the repo can
+answer it. Pin the value in this quest's spec for the implementer to set in
+`imp/config.yaml` alongside the code — or pin `false` when the project genuinely
+needs none, so it stops being raised. If this quest can't answer one, leave it.
+{% if project.undecided.test_cmd_fast %}
+- `test_cmd_fast` — the lint+typecheck+fast-test command run after each round of
+  coding. Unset, that check is a no-op and every acceptance criterion you write
+  goes unenforced (e.g. `ruff check . && pytest -q`).
+{% endif %}
+{% if project.undecided.worktree_setup %}
+- `worktree_setup` — a command run in each new quest worktree before the first
+  step. Unset, a fresh worktree holds only tracked files: no `.venv`,
+  `node_modules` or `vendor`, which `git worktree` does not materialize
+  (e.g. `npm ci`).
+{% endif %}
+{% if project.undecided.pythonpath %}
+- `pythonpath` — worktree-relative import roots. Unset in an editable-installed
+  Python project, imp's test gate imports the stale main checkout instead of the
+  worktree under test (e.g. `[src]`).
+{% endif %}
 {% endif %}
 
 {% include "partials/spec-design-principles.md" %}

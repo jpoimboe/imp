@@ -210,12 +210,17 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     assert "blind spots" in body
 
 
-def test_memory_doc_explains_an_unset_verify_gate() -> None:
+def test_memory_doc_states_the_shared_three_state_shape() -> None:
     flat = " ".join(_memory_doc().split())
     assert ("`test_cmd_fast` / `test_cmd_slow` (and timeouts) — the commands the verify "
-            "gates run. Unset means that gate is a no-op and imp raises it again — when "
-            "scoping a quest, and at `imp new` once a command becomes detectable; an "
-            "empty string is a deliberate opt-out that stays silent.") in flat
+            "gates run. `test_cmd_slow` falls back to `test_cmd_fast` when it names no "
+            "command of its own.") in flat
+    assert ("`pythonpath` — worktree-relative import roots prepended to the gate/agent "
+            "subprocess PYTHONPATH") in flat
+    assert ("**unset** means never decided, and imp raises it once the repo can answer; "
+            "**`false`** means this project needs none, and stays silent forever; "
+            "anything else is the value.") in flat
+    assert "empty string is a deliberate opt-out" not in flat
 
 
 def test_memory_doc_states_the_settings_memory_root_split() -> None:
@@ -362,7 +367,7 @@ def test_memory_doc_documents_worktree_setup() -> None:
         "`worktree_setup` — a shell command imp runs in each newly created quest "
         "worktree, before the first step, for toolchains that keep dependencies in a "
         "gitignored per-tree directory (`.venv`, `node_modules`, `vendor/bundle`) that "
-        "`git worktree` does not materialize. Unset means no setup command runs."
+        "`git worktree` does not materialize."
     ) in flat
 
 
@@ -371,3 +376,9 @@ def test_knowledge_cheat_sheet_names_the_local_write_scope() -> None:
     assert "led by this checkout's `project state:` directory (not under `--explain`)" in flat
     assert "`--project` / `--global` / `--local` forces one" in flat
     assert "`~/.imp/projects/<name>/config.yaml`" in flat
+
+
+def test_knowledge_names_worktree_setup_among_the_settings_init_confirms() -> None:
+    flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert ("detects the default workflow, integration branch, fast test command, "
+            "`worktree_setup`, and import root and confirms them on one screen") in flat

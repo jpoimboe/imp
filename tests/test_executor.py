@@ -3004,7 +3004,7 @@ def _seed_gate_namespace_workflow(root: Path, *, config_extra: str = "") -> Ques
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "gate_unset={{ project.verify_gate_unset }}|\n"
+        "fast_undecided={{ project.undecided.test_cmd_fast }}|\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -3019,18 +3019,18 @@ def _seed_gate_namespace_workflow(root: Path, *, config_extra: str = "") -> Ques
 
 
 @pytest.mark.anyio
-async def test_step_prompt_reports_an_unwired_fast_gate(tmp_path: Path) -> None:
+async def test_step_prompt_reports_an_undecided_fast_gate(tmp_path: Path) -> None:
     quest = _seed_gate_namespace_workflow(tmp_path)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert "gate_unset=True|" in sink[0].initial_messages[0].content[0].text
+    assert "fast_undecided=True|" in sink[0].initial_messages[0].content[0].text
 
 
 @pytest.mark.anyio
-async def test_step_prompt_reports_a_configured_fast_gate_as_wired(tmp_path: Path) -> None:
+async def test_step_prompt_reports_a_configured_fast_gate_as_decided(tmp_path: Path) -> None:
     quest = _seed_gate_namespace_workflow(
         tmp_path, config_extra='test_cmd_fast: "make check"\n')
     sink: list = []
@@ -3038,7 +3038,7 @@ async def test_step_prompt_reports_a_configured_fast_gate_as_wired(tmp_path: Pat
 
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert "gate_unset=False|" in sink[0].initial_messages[0].content[0].text
+    assert "fast_undecided=False|" in sink[0].initial_messages[0].content[0].text
 
 
 @pytest.mark.anyio

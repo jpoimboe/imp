@@ -4,7 +4,6 @@ from imp.cli.verify_detect import (
     DetectedTestCommand,
     detect_test_command,
     format_test_cmd_fast_yaml,
-    resolve_test_cmd_choice,
 )
 
 
@@ -85,51 +84,9 @@ def test_makefile_precedence_over_cargo(tmp_path: Path) -> None:
         "make check", "from Makefile")
 
 
-def _seq(*answers: str):
-    it = iter(answers)
-    return lambda _prompt="": next(it)
-
-
-def test_resolve_yes_uses_suggestion() -> None:
-    assert resolve_test_cmd_choice("make check", _seq("y"), lambda _m: None) == "make check"
-
-
-def test_resolve_blank_defaults_to_suggestion() -> None:
-    assert resolve_test_cmd_choice("make check", _seq(""), lambda _m: None) == "make check"
-
-
-def test_resolve_unrecognized_defaults_to_suggestion() -> None:
-    # A non-explicit opt-out defaults to enabling the suggestion (safer than silently opting out).
-    assert (
-        resolve_test_cmd_choice("make check", _seq("gobbledygook"), lambda _m: None)
-        == "make check"
-    )
-
-
-def test_resolve_edit_uses_entered_command() -> None:
-    got = resolve_test_cmd_choice("make check", _seq("edit", "make ci"), lambda _m: None)
-    assert got == "make ci"
-
-
-def test_resolve_edit_blank_falls_back_to_suggestion() -> None:
-    got = resolve_test_cmd_choice("make check", _seq("edit", ""), lambda _m: None)
-    assert got == "make check"
-
-
-def test_resolve_skip_opts_out() -> None:
-    assert resolve_test_cmd_choice("make check", _seq("skip"), lambda _m: None) == ""
-
-
-def test_resolve_skip_aliases_opt_out() -> None:
-    for ans in ("s", "n", "no"):
-        assert (
-            resolve_test_cmd_choice("make check", _seq(ans), lambda _m: None) == ""
-        ), f"alias {ans!r} should opt out"
-
-
 def test_format_command_line() -> None:
     assert format_test_cmd_fast_yaml("make check") == 'test_cmd_fast: "make check"\n'
 
 
-def test_format_optout_line() -> None:
-    assert format_test_cmd_fast_yaml("") == 'test_cmd_fast: ""\n'
+def test_format_needs_none_line() -> None:
+    assert format_test_cmd_fast_yaml(False) == "test_cmd_fast: false\n"

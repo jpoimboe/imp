@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NoReturn
 
 from imp import __version__
 from imp.cli import palette as pal
@@ -44,7 +44,6 @@ if TYPE_CHECKING:
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import SettledOutcome
     from imp.cli.store import SearchHit, Store, _Row
-    from imp.cli.verify_detect import DetectedTestCommand
     from imp.engine.quest import Quest
     from imp.engine.state import State
     from imp.remote.session.attach import DaemonStartupError
@@ -695,44 +694,6 @@ def _preflight_imp_init(*, control_root: Path) -> str | None:
     return None
 
 
-def _test_cmd_fast_nudge(
-    *, control_root: Path, non_interactive: bool,
-    input_fn: Callable[[str], str], output_fn: Callable[[str], None],
-    err_fn: Callable[[str], None],
-    detect_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
-) -> None:
-    """`imp new` backstop: nudge when test_cmd_fast is absent and a command is detected."""
-    from imp.cli.verify_detect import (
-        detect_test_command,
-        format_test_cmd_fast_yaml,
-        resolve_test_cmd_choice,
-    )
-    from imp.engine.errors import LoadError, LoadErrors
-    from imp.providers.effective import load_effective_config
-    detect = detect_fn or detect_test_command
-    try:
-        cfg = load_effective_config(control_root=control_root).config
-    except (LoadError, LoadErrors):
-        return
-    if cfg.test_cmd_fast is not None:
-        return
-    detected = detect(control_root)
-    if detected is None:
-        return
-    project_file = control_root / "imp" / "config.yaml"
-    if non_interactive:
-        err_fn(
-            f"imp: no test_cmd_fast configured; detected `{detected.command}`. Set "
-            f"test_cmd_fast in {project_file} to gate regressions in-loop.")
-        return
-    chosen = resolve_test_cmd_choice(detected.command, input_fn, output_fn)
-    existing = project_file.read_text()
-    with project_file.open("a") as f:
-        if existing and not existing.endswith("\n"):
-            f.write("\n")
-        f.write(format_test_cmd_fast_yaml(chosen))
-
-
 def _apply_theme() -> None:
     """Pick the active color theme once, before any command renders. `IMP_THEME`
     overrides everything; otherwise the value detected and persisted at `imp init`
@@ -779,11 +740,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
             raw_pythonpath = getattr(args, "pythonpath", None)
-            pythonpath = (
-                [s.strip() for s in raw_pythonpath.split(",") if s.strip()]
-                if raw_pythonpath is not None
-                else None
-            )
+            pythonpath: list[str] | Literal[False] | None
+            if raw_pythonpath is None:
+                pythonpath = None
+            else:
+                pythonpath = [s.strip() for s in raw_pythonpath.split(",")
+                              if s.strip()] or False
             run_init_noninteractive(
                 project,
                 output_fn=print,
@@ -1301,10 +1263,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     non_interactive = bool(getattr(args, "non_interactive", False))
     autonomous = bool(getattr(args, "autonomous", False))
-    _test_cmd_fast_nudge(
-        control_root=control, non_interactive=non_interactive,
-        input_fn=input, output_fn=print,
-        err_fn=lambda m: print(m, file=sys.stderr))
 
     interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text

@@ -440,12 +440,12 @@ class InterruptCoordinator:
     def set_at_prompt(self, value: bool) -> None:
         """Mark whether an interactive prompt is currently being awaited. A plain
         boolean, NOT depth-counted: every caller goes through `solicit_line` (the
-        run loop and the init setup conversation), and prompts are serialized
-        (single controlling tty; `router.begin_solicit`/`end_solicit`; the resume
-        prompt runs only after the run loop returns), so those calls never nest.
-        If a nested prompt site is ever added, make this depth-counted so the
-        inner reset does not clear it early. Routes an out-of-band SIGINT through
-        the exit path while True (see _dispatch_signal)."""
+        run loop's prompt), and prompts are serialized (single controlling tty;
+        `router.begin_solicit`/`end_solicit`; the resume prompt runs only after
+        the run loop returns), so those calls never nest. If a nested prompt site
+        is ever added, make this depth-counted so the inner reset does not clear
+        it early. Routes an out-of-band SIGINT through the exit path while True
+        (see _dispatch_signal)."""
         self._at_prompt = value
 
     def set_ack_hook(self, fn: Any) -> None:

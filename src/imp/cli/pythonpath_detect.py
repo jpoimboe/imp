@@ -3,8 +3,7 @@
 The module validates and formats a project's import roots for the `pythonpath`
 shadow written to `imp/config.yaml` (worktree-relative dirs prepended to
 gate/agent subprocess PYTHONPATH so an editable-installed package resolves to
-the worktree under test, not a stale main checkout), and offers the offline
-provider-credential readiness check (`resolve_detection_provider`).
+the worktree under test, not a stale main checkout).
 """
 
 from __future__ import annotations
@@ -14,36 +13,17 @@ import configparser
 import json
 import tomllib
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path, PurePosixPath
-from typing import Any, NamedTuple
-
-from imp.providers.effective import load_effective_config
-from imp.providers.resolve import available_providers
+from typing import Any, Literal, NamedTuple
 
 _PACKAGING_FILES = ("pyproject.toml", "setup.py", "setup.cfg")
 
 
 def is_python_packaging_project(project_root: Path) -> bool:
     """True when the project declares Python packaging (a pyproject.toml,
-    setup.py, or setup.cfg exists). Gates init's agent detection + readiness
-    checks; a project without any of these keeps init's non-Python behavior."""
+    setup.py, or setup.cfg exists). Gates init's import-root detection;
+    a project without any of these keeps init's non-Python behavior."""
     return any((project_root / name).is_file() for name in _PACKAGING_FILES)
-
-
-def resolve_detection_provider(
-    providers: list[str], *, tier: str,
-) -> tuple[str, str] | None:
-    """The first provider in `providers` (pick order) with a usable credential,
-    paired with its `tier` model. None when no picked provider is usable — the
-    offline credential check for init's readiness gate. `tier` is required: a
-    default here would silently outrank the caller's declared tier."""
-    cfg = load_effective_config().config
-    usable = available_providers(replace(cfg, providers=tuple(providers)))
-    if not usable:
-        return None
-    provider = usable[0]
-    return provider, cfg.tiers[tier][provider]
 
 
 def _normalize_root(entry: str) -> str | None:
@@ -76,9 +56,10 @@ def validate_detected_roots(project_root: Path, roots: list[str]) -> list[str]:
     return out
 
 
-def format_pythonpath_yaml(dirs: list[str]) -> str:
+def format_pythonpath_yaml(dirs: list[str] | Literal[False]) -> str:
     """Serialize a `pythonpath:` YAML line matching `format_test_cmd_fast_yaml`'s
-    json.dumps idiom, e.g. `["src"]` => `pythonpath: ["src"]\\n`."""
+    json.dumps idiom, e.g. `["src"]` => `pythonpath: ["src"]\\n`, `False` =>
+    `pythonpath: false\\n`."""
     return f"pythonpath: {json.dumps(dirs)}\n"
 
 

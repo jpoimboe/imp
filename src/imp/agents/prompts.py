@@ -13,9 +13,9 @@ Seven namespaces (spec §7.5):
       step.prior_laps — retained {lap, outcome, head} entries of prior laps
   docs.path — absolute path to imp's repo-root docs/ corpus, resolved in
       place relative to the install (readable in any project via bash/read_file)
-  project.verify_gate_unset — True only when the fast test gate is unwired
-      (Config.test_cmd_fast is None); False for a configured command and False
-      for the deliberate "" opt-out
+  project.undecided — the stack-dependent settings this project never decided,
+      three bools (test_cmd_fast, worktree_setup, pythonpath); the object is
+      falsy when every one of them is decided
 
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 """
@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import jinja2
 
 from imp.assets import bundled_docs_dir, bundled_partials_dir
+from imp.engine.env import ALL_DECIDED, Undecided
 from imp.engine.state import EventLog, State
 
 if TYPE_CHECKING:
@@ -113,7 +114,7 @@ class _DocsNamespace:
 
 @dataclass(frozen=True, slots=True)
 class _ProjectNamespace:
-    verify_gate_unset: bool = False
+    undecided: Undecided = ALL_DECIDED
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +139,7 @@ def build_context(
     autonomous: bool = False, opening: str = "",
     prior_laps: list[dict[str, Any]] | None = None,
     docs_path: str | None = None,
-    verify_gate_unset: bool = False,
+    undecided: Undecided = ALL_DECIDED,
 ) -> PromptContext:
     laps = tuple(prior_laps or ())
     resolved_docs = docs_path if docs_path is not None else str(bundled_docs_dir())
@@ -157,7 +158,7 @@ def build_context(
         step=_StepNamespace(
             lap=(laps[-1]["lap"] + 1 if laps else 1), prior_laps=laps),
         docs=_DocsNamespace(path=resolved_docs),
-        project=_ProjectNamespace(verify_gate_unset=verify_gate_unset),
+        project=_ProjectNamespace(undecided=undecided),
     )
 
 

@@ -510,6 +510,57 @@ def test_set_worktree_setup_lands_in_the_project_layer(
         "uv sync --all-extras")
 
 
+@pytest.mark.parametrize("key", ["test_cmd_fast", "test_cmd_slow", "worktree_setup"])
+def test_set_a_command_key_false_lands_as_a_boolean(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+    key: str,
+) -> None:
+    assert main(["config", "set", key, "false"]) == 0
+    capsys.readouterr()
+    cfg = project / "imp" / "config.yaml"
+    assert read_back(cfg, (key,)) is False
+    assert main(["config", "unset", key]) == 0
+    capsys.readouterr()
+    assert read_back(cfg, (key,)) is None
+
+
+def test_set_pythonpath_false_lands_as_a_boolean_not_a_one_item_list(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "pythonpath", "false"]) == 0
+    capsys.readouterr()
+    assert read_back(project / "imp" / "config.yaml", ("pythonpath",)) is False
+
+
+def test_set_test_cmd_fast_true_stores_the_string_not_a_boolean(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "test_cmd_fast", "true"]) == 0
+    capsys.readouterr()
+    assert read_back(project / "imp" / "config.yaml", ("test_cmd_fast",)) == "true"
+
+
+def test_set_pythonpath_true_stores_a_one_item_list_not_a_boolean(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "pythonpath", "true"]) == 0
+    capsys.readouterr()
+    assert read_back(project / "imp" / "config.yaml", ("pythonpath",)) == ["true"]
+
+
+def test_set_worktree_setup_empty_is_refused_and_leaves_the_file_alone(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg = project / "imp" / "config.yaml"
+    before = cfg.read_text()
+    assert main(["config", "set", "worktree_setup", ""]) == 2
+    assert capsys.readouterr().err == (
+        "imp: 'worktree_setup' must be a non-empty string "
+        '(e.g. "uv sync --all-extras") '
+        "or false to declare this project needs none\n")
+    assert cfg.read_text() == before
+
+
 def test_help_copy_matches_the_spec() -> None:
     parser = _build_parser()
     config = next(action.choices["config"] for action in parser._actions

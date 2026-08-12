@@ -409,3 +409,26 @@ async def test_setup_output_cap_raises_fatal(
         await get_registry()["create_and_enter_worktree"].async_invoke(
             _ctx(ch, State.load(ch.state_dir)), {})
     assert "output cap exceeded" in str(ei.value)
+
+
+@pytest.mark.anyio
+async def test_no_setup_command_runs_when_worktree_setup_is_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.create_and_enter_worktree as cew
+
+    calls: list[dict] = []
+
+    def _record(**kw: object) -> dict[str, object]:
+        calls.append(kw)
+        return {"exit": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(cew, "run_command", _record)
+    _seed_control(tmp_path)
+    cfg = tmp_path / "imp" / "config.yaml"
+    cfg.write_text(cfg.read_text() + "worktree_setup: false\n")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s9", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    await get_registry()["create_and_enter_worktree"].async_invoke(ctx, {})
+    assert calls == []                            # decided-as-none runs nothing
+    assert ctx.project_root == project_state_dir(tmp_path) / "worktrees" / "s9"

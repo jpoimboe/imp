@@ -37,7 +37,6 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr("imp.engine.worktree.ensure_imp_ignored", lambda *a, **k: None)
     monkeypatch.setattr(main, "_resolve_new_base", lambda *a, **k: "main")
     monkeypatch.setattr(main, "_preflight_imp_init", lambda **k: None)
-    monkeypatch.setattr(main, "_test_cmd_fast_nudge", lambda **k: None)
     monkeypatch.setattr(main, "_is_interactive", lambda **k: True)
     monkeypatch.setattr(main, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr(main, "should_use_color", lambda *a, **k: False)
@@ -545,3 +544,39 @@ async def test_headless_new_threads_leave_mode_to_run_session_client(
 
     assert rc == 0
     assert captured["leave_mode"] == leave_mode
+
+
+@pytest.mark.anyio
+async def test_new_says_nothing_about_test_commands(
+    stub_new, monkeypatch, capsys, tmp_path,
+) -> None:
+    """`imp new` no longer interrogates the user about test_cmd_fast — the front
+    door raises it instead. Detectable command + unset config + no message."""
+    m = stub_new
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    (tmp_path / "imp").mkdir(exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / "Makefile").write_text("test:\n\techo hi\n")
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_print_opening", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_is_interactive", lambda **k: False)
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _ok)
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.session_run.make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.live_driver.LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    args = _new_args()
+    args.non_interactive = True
+    args.opening = "build a parser"
+
+    rc = await m._async_cmd_new(args, leave_mode="new")
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "test_cmd_fast" not in captured.out + captured.err
+    assert "Detected `" not in captured.out + captured.err

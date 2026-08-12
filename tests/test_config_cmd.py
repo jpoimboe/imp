@@ -87,15 +87,17 @@ def test_render_shows_configured_test_cmds(
     assert "600s" in text
 
 
-def test_render_shows_disabled_test_cmds(
+def test_render_shows_none_needed_for_a_decided_false_setting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     imp_home = tmp_path / "imphome"
     imp_home.mkdir(parents=True)
     (imp_home / "config.yaml").write_text(
         "providers: [openai]\n"
-        'test_cmd_fast: ""\n'
-        'test_cmd_slow: ""\n'
+        "test_cmd_fast: false\n"
+        "test_cmd_slow: false\n"
+        "worktree_setup: false\n"
+        "pythonpath: false\n"
     )
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     eff = load_effective_config()
@@ -103,10 +105,26 @@ def test_render_shows_disabled_test_cmds(
     render_config(eff, out, state_dir=None, color=False)
     text = out.getvalue()
     lines = text.splitlines()
-    fast_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_fast ")), None)
-    slow_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_slow ")), None)
-    assert fast_line is not None and "(disabled)" in fast_line
-    assert slow_line is not None and "(disabled)" in slow_line
+    for key in ("test_cmd_fast", "test_cmd_slow", "worktree_setup", "pythonpath"):
+        line = next((ln.strip() for ln in lines
+                     if ln.strip().startswith(f"{key} ")), None)
+        assert line is not None and "(none needed)" in line, key
+    assert "(disabled)" not in text
+
+
+def test_render_shows_a_decided_pythonpath_as_its_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir(parents=True)
+    (imp_home / "config.yaml").write_text(
+        "providers: [openai]\npythonpath: [src, vendor]\n")
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
+    out = io.StringIO()
+    render_config(load_effective_config(), out, state_dir=None, color=False)
+    line = next((ln.strip() for ln in out.getvalue().splitlines()
+                 if ln.strip().startswith("pythonpath ")), None)
+    assert line is not None and "src, vendor" in line
 
 
 def test_explain_traces_one_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

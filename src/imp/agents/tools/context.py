@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.errors import PermissionDenied
-from imp.engine.env import TestGates
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided
 from imp.engine.types import AgentDef
 
 
@@ -115,6 +115,9 @@ class ToolContext:
     # Worktree-relative import roots (Config.pythonpath) prepended onto the
     # subprocess PYTHONPATH by the bash tool. Empty () => no PYTHONPATH prefix.
     pythonpath: tuple[str, ...] = ()
+    # Which stack-dependent settings this project never decided; rendered by the
+    # front door and re-copied onto each nested dispatch by dispatch_task.
+    undecided: Undecided = ALL_DECIDED
     # Tier A proactive-handoff watch threshold, propagated parent -> subagent via
     # this ctx so dispatch_task seeds each subagent's checkpoint_threshold.
     checkpoint_threshold: float | int | None = None

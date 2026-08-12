@@ -262,8 +262,8 @@ async def solicit_line(
 ) -> object:
     """Frame ONE interactive solicit turn and return what the user's line meant.
 
-    The single implementation of the solicit framing, shared by the run loop
-    (ask_line_with_slash) and the setup conversation. Per TURN, around the loop:
+    The single implementation of the solicit framing, used by the run loop
+    (ask_line_with_slash). Per TURN, around the loop:
     the at-prompt mark, the tty quiesce, one status.suspend(), and
     flush_deferred / at-prompt reset / signal re-arm on every exit path. Per
     READ, inside it: driver.prepare_for_prompt(), the composed bottom toolbar

@@ -9,25 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
-from imp.cli.init import (
-    BaseDetection,
-    InitScreenState,
-    _screen_state_from_detection,
-    run_init,
-)
-from imp.cli.init import _run_init_conversation as _real_run_init_conversation
-from imp.cli.pythonpath_detect import ImportRoots
-from imp.cli.verify_detect import DetectedTestCommand
+from imp.cli.init import run_init
 from tests.conftest import _git, _init_repo
-
-
-def _screen_state() -> InitScreenState:
-    return _screen_state_from_detection(
-        workflow="default",
-        base=BaseDetection("master", "from origin/HEAD"),
-        tests=DetectedTestCommand("make check", "from Makefile"),
-        roots=ImportRoots(["src"], "from pyproject.toml"))
 
 
 def _inputs(*answers: str) -> object:
@@ -37,20 +20,6 @@ def _inputs(*answers: str) -> object:
 
 def _picks(*selected: str) -> object:
     return lambda _available: list(selected)
-
-
-def _conv_result(*, status="Success", git_init=False, default_workflow="default",
-                 default_base="main", test_cmd_fast="", roots=()):
-    return InteractiveSuccess({
-        "status": status, "git_init": git_init,
-        "default_workflow": default_workflow, "default_base": default_base,
-        "test_cmd_fast": test_cmd_fast, "pythonpath": {"roots": list(roots)}})
-
-
-def _stub_conv(monkeypatch, result) -> None:
-    import imp.cli.init as initmod
-    monkeypatch.setattr(initmod, "_run_init_conversation",
-                        lambda **kw: result, raising=False)
 
 
 def _stub_screen(monkeypatch, **overrides) -> None:
@@ -64,14 +33,6 @@ def _stub_screen(monkeypatch, **overrides) -> None:
 
     monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen,
                         raising=False)
-
-
-def _stub_screen_talk(monkeypatch) -> None:
-    """Press `?` on the screen: hand the detected state to the conversation."""
-    import imp.cli.init as initmod
-    monkeypatch.setattr(
-        initmod, "_interactive_confirm_screen",
-        lambda _root, state, **_kw: initmod.ScreenTalk(state), raising=False)
 
 
 def _stub_screen_recording_theme(monkeypatch, seen: dict) -> None:
@@ -113,14 +74,9 @@ def _git_repo(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _stub_setup_gate(monkeypatch):
     # Fresh interactive init runs the sandbox gate, then the confirmation screen.
-    # Default them to "ready + accept as detected"; specific tests override. The
-    # conversation is only reachable behind the screen's `?`.
+    # Default them to "ready + accept as detected"; specific tests override.
     import imp.cli.init as initmod
     monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _providers, **_kw: ("anthropic", "m"), raising=False)
-    monkeypatch.setattr(initmod, "_run_init_conversation",
-                        lambda **kw: _conv_result(), raising=False)
     _stub_screen(monkeypatch)
 
 
@@ -269,12 +225,12 @@ def test_init_writes_test_cmd_fast_from_the_screen(tmp_path, monkeypatch):
     assert data["test_cmd_fast"] == "make check"
 
 
-def test_init_writes_optout_when_the_screen_opts_out(tmp_path, monkeypatch):
-    _stub_screen(monkeypatch, test_cmd_fast="", tests_provenance="you set this")
+def test_init_writes_needs_none_when_the_screen_opts_out(tmp_path, monkeypatch):
+    _stub_screen(monkeypatch, test_cmd_fast=False, tests_provenance="you set this")
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["test_cmd_fast"] == ""
+    assert data["test_cmd_fast"] is False
 
 
 def test_init_comment_names_timeout_defaults(tmp_path, monkeypatch):
@@ -285,6 +241,8 @@ def test_init_comment_names_timeout_defaults(tmp_path, monkeypatch):
     assert "120s" in text and "300s" in text
     assert "test_cmd_fast_timeout" in text
     assert "test_cmd_slow" in text and "test_cmd_slow_timeout" in text
+    assert "Empty string opts out" not in text
+    assert "false declares the project needs none" in text
 
 
 def test_init_available_bwrap_is_quiet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -399,11 +357,13 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
     assert inactive.startswith("  ")
 
 
-def test_no_usable_credential_still_finishes_init(tmp_path, monkeypatch):
-    # The hard-stop moved behind `?`: init needs no provider to write the config.
-    import imp.cli.init as initmod
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p, **_kw: None, raising=False)
+def test_init_finishes_with_no_credential_in_the_environment(tmp_path, monkeypatch):
+    # AC 8(a): init is provider-free on every path — no probe, no message.
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(
+        "imp.providers.resolve.available_providers",
+        lambda *_a, **_k: pytest.fail("imp init must not probe provider credentials"))
     msgs: list[str] = []
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=msgs.append)
@@ -411,30 +371,6 @@ def test_no_usable_credential_still_finishes_init(tmp_path, monkeypatch):
     assert "usable credential" not in "\n".join(msgs)
     user = tmp_path / "imphome" / "config.yaml"
     assert yaml.safe_load(user.read_text())["providers"] == ["anthropic"]
-
-
-def test_no_usable_credential_behind_the_talk_key_keeps_the_screen(
-    tmp_path, monkeypatch,
-):
-    import imp.cli.init as initmod
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p, **_kw: None, raising=False)
-    outcomes = iter(["talk", "accept"])
-
-    def _screen(_root, state, **_kw):
-        if next(outcomes) == "talk":
-            return initmod.ScreenTalk(state)
-        return initmod.ScreenAccepted(state)
-
-    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _screen,
-                        raising=False)
-    msgs: list[str] = []
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=msgs.append)
-    assert "imp needs a working model provider to talk this through." in msgs
-    assert ("Set one up and re-run `imp init`, or fill the fields in yourself."
-            in msgs)
-    assert (tmp_path / "imp" / "config.yaml").is_file()   # returned to the screen
 
 
 def test_configured_providers_skip_picker(tmp_path, monkeypatch):
@@ -477,41 +413,6 @@ def test_bwrap_missing_offer_decline_stops(tmp_path, monkeypatch):
     assert "Install bubblewrap for a real filesystem boundary" in "\n".join(msgs)
 
 
-def test_conversation_writes_chosen_workflow_and_pythonpath(tmp_path, monkeypatch):
-    (tmp_path / "src").mkdir()
-    _stub_screen_talk(monkeypatch)
-    _stub_conv(monkeypatch, _conv_result(
-        default_workflow="minimal", default_base="develop",
-        test_cmd_fast="make check", roots=["src"]))
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=lambda _m: None)
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["default-workflow"] == "minimal"      # agent's choice, not hardcoded
-    assert data["default-base"] == "develop"
-    assert data["test_cmd_fast"] == "make check"
-    assert data["pythonpath"] == ["src"]
-
-
-def test_conversation_pythonpath_validated_against_disk(tmp_path, monkeypatch):
-    (tmp_path / "real").mkdir()
-    _stub_screen_talk(monkeypatch)
-    _stub_conv(monkeypatch, _conv_result(roots=["real", "ghost"]))
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=lambda _m: None)
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["pythonpath"] == ["real"]              # ghost dropped: not on disk
-
-
-def test_conversation_empty_roots_writes_hint(tmp_path, monkeypatch):
-    _stub_screen_talk(monkeypatch)
-    _stub_conv(monkeypatch, _conv_result(roots=[]))
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=lambda _m: None)
-    text = (tmp_path / "imp" / "config.yaml").read_text()
-    assert yaml.safe_load(text).get("pythonpath") is None
-    assert "# pythonpath:" in text
-
-
 def test_git_question_accepted_initializes_the_repo(tmp_path_factory, monkeypatch):
     fresh = tmp_path_factory.mktemp("norepo")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(fresh.parent))
@@ -547,26 +448,6 @@ def test_git_question_declined_stops_before_the_screen(
     assert "git repository" in "\n".join(msgs).lower()
 
 
-def test_conversation_failure_stops_without_config_yaml(tmp_path, monkeypatch):
-    _stub_screen_talk(monkeypatch)
-    _stub_conv(monkeypatch, InteractiveFailure("auth", "bad_key"))
-    msgs: list[str] = []
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=msgs.append)
-    assert not (tmp_path / "imp" / "config.yaml").exists()
-    assert "re-run `imp init`" in "\n".join(msgs).lower()
-
-
-def test_conversation_status_error_stops(tmp_path, monkeypatch):
-    _stub_screen_talk(monkeypatch)
-    _stub_conv(monkeypatch, _conv_result(status="Error"))
-    msgs: list[str] = []
-    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
-             output_fn=msgs.append)
-    assert not (tmp_path / "imp" / "config.yaml").exists()
-    assert "didn't finish" in "\n".join(msgs).lower()
-
-
 def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> None:
     from imp.cli.init import InitSettings, write_init_files
     (tmp_path / "src").mkdir()
@@ -574,6 +455,7 @@ def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> N
         default_workflow="light",
         default_base="develop",
         test_cmd_fast="make check",
+        worktree_setup="uv sync --all-extras",
         pythonpath=["src"],
     )
     committed = write_init_files(tmp_path, settings)
@@ -582,6 +464,7 @@ def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> N
     assert data["default-base"] == "develop"
     assert data["vars"] == {}
     assert data["test_cmd_fast"] == "make check"
+    assert data["worktree_setup"] == "uv sync --all-extras"
     assert data["pythonpath"] == ["src"]
     # Memory scaffold written; commit created for a fresh tree.
     assert (tmp_path / "imp" / "memory" / "all.md").is_file()
@@ -599,33 +482,68 @@ def test_write_init_files_omits_test_block_when_none(tmp_path: Path) -> None:
     write_init_files(
         tmp_path,
         InitSettings(default_workflow="default", default_base="main",
-                     test_cmd_fast=None, pythonpath=[]),
+                     test_cmd_fast=None, worktree_setup=None, pythonpath=None),
     )
     text = (tmp_path / "imp" / "config.yaml").read_text()
     assert "test_cmd_fast" not in text          # None => block omitted entirely
-    assert "# pythonpath:" in text              # empty roots => teaching hint
+    assert "worktree_setup" not in text         # same reading for the new key
+    assert "# pythonpath:" in text              # None => teaching hint
     assert ".imp/" in (tmp_path / ".gitignore").read_text()
 
 
-def test_write_init_files_writes_optout_block_for_empty_string(tmp_path: Path) -> None:
+def test_write_init_files_writes_the_needs_none_block_for_false(tmp_path: Path) -> None:
     from imp.cli.init import InitSettings, write_init_files
     write_init_files(
         tmp_path,
         InitSettings(default_workflow="default", default_base="main",
-                     test_cmd_fast="", pythonpath=[]),
+                     test_cmd_fast=False, worktree_setup=False, pythonpath=False),
     )
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["test_cmd_fast"] == ""          # "" => explicit opt-out block written
+    assert data["test_cmd_fast"] is False       # decided: this project needs none
+    assert data["worktree_setup"] is False
+    assert data["pythonpath"] is False
+
+
+def test_write_init_files_places_worktree_setup_between_tests_and_pythonpath(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import InitSettings, write_init_files
+    (tmp_path / "src").mkdir()
+    write_init_files(
+        tmp_path,
+        InitSettings(default_workflow="default", default_base="main",
+                     test_cmd_fast="make check", worktree_setup="npm ci",
+                     pythonpath=["src"]),
+    )
+    text = (tmp_path / "imp" / "config.yaml").read_text()
+    assert (
+        "\n# Command run in each new quest worktree before the first step, for toolchains\n"
+        "# that keep dependencies in a gitignored per-tree directory (.venv,\n"
+        "# node_modules, vendor) that `git worktree` does not materialize. false\n"
+        "# declares the project needs none.\n"
+        'worktree_setup: "npm ci"\n'
+    ) in text
+    assert text.index("test_cmd_fast:") < text.index("worktree_setup:")
+    assert text.index("worktree_setup:") < text.index("pythonpath:")
+
+
+def test_use_defaults_detects_the_worktree_setup_command(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "uv.lock").write_text("")
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    # The non-interactive path uses the same detector the screen does.
+    assert data["worktree_setup"] == "uv sync --all-extras"
 
 
 def test_use_defaults_writes_config_yaml_no_model_call(tmp_path, monkeypatch):
-    import imp.cli.init as initmod
     from imp.cli.init import run_init_noninteractive
 
-    def _boom(*a, **k):
+    def _boom(*_a, **_k):
         raise AssertionError("--use-defaults must make no model/agent/provider call")
 
-    monkeypatch.setattr(initmod, "resolve_detection_provider", _boom, raising=False)
+    monkeypatch.setattr("imp.providers.resolve.available_providers", _boom)
     run_init_noninteractive(
         tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
@@ -655,6 +573,22 @@ def test_use_defaults_pythonpath_drops_absent_dirs(tmp_path):
         pythonpath=["real", "ghost"], detect_verify_fn=lambda _r: None)
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["pythonpath"] == ["real"]   # validated against disk
+
+
+def test_use_defaults_all_invalid_pythonpath_reports_and_leaves_unset(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append,
+        pythonpath=["srcc"], detect_verify_fn=lambda _r: None)
+    # config must NOT record pythonpath: false — that is the deliberate opt-out
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data.get("pythonpath") is None
+    # a report line must name the bad entry and say roots are left unset
+    report = "\n".join(msgs)
+    assert "srcc" in report
+    assert "no such directory" in report
+    assert "leaving import roots unset" in report
 
 
 def test_use_defaults_fills_offline_test_command(tmp_path):
@@ -692,20 +626,19 @@ def test_use_defaults_explicit_pythonpath_overrides_detection(tmp_path):
     assert data["pythonpath"] == ["vendor"]   # the flag wins over detection
 
 
-def test_use_defaults_empty_pythonpath_suppresses_detection(tmp_path):
+def test_use_defaults_false_pythonpath_suppresses_detection(tmp_path):
     from imp.cli.init import run_init_noninteractive
     # Same fixture that triggers detection in test_use_defaults_detects_pythonpath_from_pyproject
     (tmp_path / "pyproject.toml").write_text(
         '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
     (tmp_path / "src" / "app").mkdir(parents=True)
-    # pythonpath=[] explicitly opts out — detector must NOT run
+    # pythonpath=False is the deliberate opt-out — the detector must NOT run
     run_init_noninteractive(
-        tmp_path, output_fn=lambda _m: None, pythonpath=[],
+        tmp_path, output_fn=lambda _m: None, pythonpath=False,
         detect_verify_fn=lambda _r: None)
     text = (tmp_path / "imp" / "config.yaml").read_text()
-    data = yaml.safe_load(text)
-    assert data.get("pythonpath") is None  # empty list => teaching hint, not ["src"]
-    assert "# pythonpath:" in text
+    assert yaml.safe_load(text)["pythonpath"] is False   # not ["src"], not the hint
+    assert "# pythonpath:" not in text
 
 
 def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch):
@@ -825,7 +758,7 @@ def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
     assert called["kw"]["pythonpath"] == ["src", "lib"]   # comma-split, blanks dropped
 
 
-def test_init_empty_pythonpath_flag_passes_empty_list(tmp_path, monkeypatch):
+def test_init_empty_pythonpath_flag_passes_false(tmp_path, monkeypatch):
     import imp.cli.main as m
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
@@ -836,10 +769,10 @@ def test_init_empty_pythonpath_flag_passes_empty_list(tmp_path, monkeypatch):
 
     monkeypatch.setattr("imp.cli.init.run_init_noninteractive", _spy)
 
-    # --pythonpath "" must yield pythonpath=[] (not None)
+    # --pythonpath "" is an explicit instruction: the opt-out, not "detect"
     args = m._build_parser().parse_args(["init", "--use-defaults", "--pythonpath", ""])
     args.func(args)
-    assert called["kw"]["pythonpath"] == []
+    assert called["kw"]["pythonpath"] is False
 
     # absent --pythonpath must yield pythonpath=None
     called.clear()
@@ -955,55 +888,6 @@ def test_cmd_init_use_defaults_without_flag_keeps_the_default_workflow(
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["default-workflow"] == "default"
     assert (tmp_path / "imp" / "memory" / "default" / "all.md").is_file()
-
-
-def test_run_init_passes_the_setup_agents_declared_tier(tmp_path, monkeypatch):
-    """run_init resolves the detection provider at the tier init.md declares."""
-    import imp.cli.init as initmod
-    from imp.assets import bundled_assets_dir
-    from imp.engine.loader import parse_agent_file
-
-    seen: dict[str, object] = {}
-
-    def _capture(_providers, *, tier):
-        seen["tier"] = tier
-        return ("anthropic", "m")
-
-    monkeypatch.setattr(initmod, "resolve_detection_provider", _capture,
-                        raising=False)
-    _stub_screen_talk(monkeypatch)
-    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
-             input_fn=_inputs(), output_fn=lambda _msg: None)
-    declared = parse_agent_file(bundled_assets_dir() / "init.md").tier
-    assert seen["tier"] == declared
-
-
-def test_run_init_declared_tier_follows_the_agent_file(tmp_path, monkeypatch):
-    """The tier is read from init.md's frontmatter, not hardcoded: move the
-    declaration and the tier run_init resolves at moves with it."""
-    from dataclasses import replace
-
-    import imp.cli.init as initmod
-
-    real_parse = initmod.parse_agent_file
-
-    def _declare_high(path):
-        agent = real_parse(path)
-        return replace(agent, tier="high") if path.name == "init.md" else agent
-
-    seen: dict[str, object] = {}
-
-    def _capture(_providers, *, tier):
-        seen["tier"] = tier
-        return ("anthropic", "m")
-
-    monkeypatch.setattr(initmod, "parse_agent_file", _declare_high, raising=False)
-    monkeypatch.setattr(initmod, "resolve_detection_provider", _capture,
-                        raising=False)
-    _stub_screen_talk(monkeypatch)
-    run_init(project_root=tmp_path, picker_fn=_picks("anthropic"),
-             input_fn=_inputs(), output_fn=lambda _msg: None)
-    assert seen["tier"] == "high"
 
 
 def test_fresh_init_applies_the_detected_theme_before_the_screen(
@@ -1326,38 +1210,6 @@ def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
     doc = _interactive_provider_picker.__doc__ or ""
     assert "ansicyan" not in doc
     assert "ansiyellow" in doc
-
-
-def test_setup_conversation_prompt_uses_the_cancel_setup_hint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import imp.cli.init as initmod
-    from imp.cli.prompt import SETUP_EMPTY_PROMPT_HINT
-
-    seen: dict[str, object] = {}
-
-    class _SpyPrompt:
-        def __init__(self, **kwargs: object) -> None:
-            seen.update(kwargs)
-
-    def _fake_host(**kwargs: object) -> object:
-        seen["handed_to_host"] = kwargs["prompt"]
-        return _conv_result()
-
-    monkeypatch.setattr(initmod, "_run_init_conversation", _real_run_init_conversation)
-    monkeypatch.setattr(initmod, "Prompt", _SpyPrompt)
-    monkeypatch.setattr(initmod, "run_interactive_agent_sync", _fake_host)
-
-    initmod._run_init_conversation(
-        project_root=tmp_path, state=_screen_state(),
-        provider_name="anthropic", model_name="m",
-        allow_unsandboxed=False, color=True, output_fn=lambda _m: None)
-
-    assert seen["empty_hint"] == SETUP_EMPTY_PROMPT_HINT
-    assert seen["empty_hint"] == "press ctrl-d to cancel setup"
-    # The host gets the Prompt itself, not a bound read function: the shared
-    # framing composes each read.
-    assert isinstance(seen["handed_to_host"], _SpyPrompt)
 
 
 def test_read_user_config_treats_malformed_yaml_as_empty(tmp_path: Path) -> None:

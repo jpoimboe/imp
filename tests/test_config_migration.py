@@ -13,7 +13,9 @@ import pytest
 
 from imp.cli.config_migrate import (
     migrate_global_config,
+    migrate_opt_out_spelling,
     migrate_project_config,
+    rewrite_opt_out_spelling,
     run_startup_migrations,
 )
 from imp.paths import display_path
@@ -367,3 +369,180 @@ def test_config_paths_module_is_stdlib_only(tmp_path: Path) -> None:
     assert reported["HEAVY"] == "", f"imp.providers.paths pulled in {reported['HEAVY']}"
     assert reported["GLOBAL"] == str(tmp_path / "h" / "config.yaml")
     assert reported["LEGACY"] == str(tmp_path / "x" / "imp" / "config.yaml")
+
+
+_LEGACY_BODY = (
+    "# the gate\n"
+    'test_cmd_fast: ""\n'
+    "test_cmd_slow: make slow\n"
+    "# import roots\n"
+    "pythonpath: []\n"
+)
+
+
+def test_rewrites_both_legacy_spellings_in_one_pass(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.providers.config import parse_config_layer
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_LEGACY_BODY)
+    rewrite_opt_out_spelling(cfg)
+    text = cfg.read_text()
+    assert "test_cmd_fast: false" in text
+    assert "pythonpath: false" in text
+    assert "# the gate" in text and "# import roots" in text     # comments intact
+    assert (text.index("test_cmd_fast") < text.index("test_cmd_slow")
+            < text.index("pythonpath"))                          # key order intact
+    layer, _src = parse_config_layer(cfg)                        # type: ignore[misc]
+    assert layer == {"test_cmd_fast": False, "test_cmd_slow": "make slow",
+                     "pythonpath": False}
+    assert capsys.readouterr().err == (
+        f'imp: rewrote "" to false in {display_path(cfg)} (test_cmd_fast)\n'
+        f"imp: rewrote [] to false in {display_path(cfg)} (pythonpath)\n")
+
+
+def test_rewriting_a_second_time_leaves_the_file_byte_identical(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_LEGACY_BODY)
+    rewrite_opt_out_spelling(cfg)
+    once = cfg.read_text()
+    capsys.readouterr()
+    rewrite_opt_out_spelling(cfg)
+    assert cfg.read_text() == once
+    assert capsys.readouterr().err == ""
+
+
+def test_worktree_setup_and_single_quotes_are_covered(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("worktree_setup: ''  # trailing note\n")
+    rewrite_opt_out_spelling(cfg)
+    assert "worktree_setup: false" in cfg.read_text()
+
+
+def test_a_nested_key_is_left_alone(tmp_path: Path) -> None:
+    # apply_set can only fix a TOP-LEVEL key: matching an indented one would add a
+    # second key beside the untouched legacy value and re-announce it forever.
+    cfg = tmp_path / "config.yaml"
+    body = 'vars:\n  test_cmd_fast: ""\n'
+    cfg.write_text(body)
+    rewrite_opt_out_spelling(cfg)
+    assert cfg.read_text() == body
+
+
+def test_each_key_is_matched_only_against_its_own_legacy_spelling(
+    tmp_path: Path,
+) -> None:
+    # `pythonpath: ""` and `test_cmd_fast: []` are spellings imp never wrote; they
+    # are hand-written errors for the reader to reject, not migrations — and
+    # migrating them would print a notice naming the wrong token.
+    # `test_cmd_fast: ""x` has a non-empty suffix after the quotes: not legacy.
+    cfg = tmp_path / "config.yaml"
+    body = 'pythonpath: ""\ntest_cmd_fast: []\nworktree_setup: ""x\n'
+    cfg.write_text(body)
+    rewrite_opt_out_spelling(cfg)
+    assert cfg.read_text() == body
+
+
+def test_crlf_line_endings_are_rewritten(tmp_path: Path) -> None:
+    from imp.providers.config import parse_config_layer
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_bytes(b'test_cmd_fast: ""\r\ntest_cmd_slow: make check\r\n')
+    rewrite_opt_out_spelling(cfg)
+    text = cfg.read_text()
+    assert "test_cmd_fast: false" in text
+    layer, _src = parse_config_layer(cfg)  # type: ignore[misc]
+    assert layer.get("test_cmd_fast") is False
+
+
+def test_a_clean_file_is_never_parsed_and_a_missing_file_is_not_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("the byte pre-check must short-circuit a clean file")
+
+    monkeypatch.setattr("imp.cli.config_edit.apply_set", _boom)
+    cfg = tmp_path / "config.yaml"
+    body = 'test_cmd_fast: "make check"\npythonpath: [src]\n'
+    cfg.write_text(body)
+    rewrite_opt_out_spelling(cfg)
+    assert cfg.read_text() == body
+    rewrite_opt_out_spelling(tmp_path / "nope.yaml")      # missing: not an error
+
+
+def test_the_rewrite_is_not_staged(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    (repo / "imp").mkdir()
+    (repo / "imp" / "config.yaml").write_text('test_cmd_fast: ""\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "init")
+    rewrite_opt_out_spelling(repo / "imp" / "config.yaml")
+    assert _git(repo, "diff", "--cached", "--name-only").stdout == ""
+    assert _git(repo, "diff", "--name-only").stdout == "imp/config.yaml\n"
+
+
+def test_all_three_config_locations_are_migrated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    (home / "projects" / "proj").mkdir(parents=True)
+    (home / "config.yaml").write_text('test_cmd_slow: ""\n')
+    (home / "projects" / "proj" / "config.yaml").write_text("pythonpath: []\n")
+    monkeypatch.setenv("IMP_HOME", str(home))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "imp").mkdir()
+    (repo / "imp" / "config.yaml").write_text('worktree_setup: ""\n')
+    monkeypatch.chdir(repo)
+
+    migrate_opt_out_spelling(repo)
+
+    assert "worktree_setup: false" in (repo / "imp" / "config.yaml").read_text()
+    assert "test_cmd_slow: false" in (home / "config.yaml").read_text()
+    assert "pythonpath: false" in (
+        home / "projects" / "proj" / "config.yaml").read_text()
+
+
+def test_a_failing_checkout_step_does_not_block_the_home_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Resolving the checkout needs git and can raise; the ~/.imp rewrites must
+    # already have happened, matching this module's step-independent neighbours.
+    from imp.engine.worktree import PreconditionError
+
+    home = tmp_path / "home"
+    home.mkdir(parents=True)
+    (home / "config.yaml").write_text('test_cmd_fast: ""\n')
+    monkeypatch.setenv("IMP_HOME", str(home))
+    outside = tmp_path / "outside"
+    (outside / "imp").mkdir(parents=True)
+    _assert_outside_a_git_work_tree(outside)
+    (outside / "imp" / "config.yaml").write_text("pythonpath: []\n")
+
+    with pytest.raises(PreconditionError):
+        migrate_opt_out_spelling(outside)
+
+    assert (home / "config.yaml").read_text() == "test_cmd_fast: false\n"
+    assert (outside / "imp" / "config.yaml").read_text() == "pythonpath: []\n"
+
+
+def test_run_startup_migrations_rewrites_the_global_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _assert_outside_a_git_work_tree(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "legacy"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.yaml").write_text('test_cmd_fast: ""\n')
+    run_startup_migrations()
+    assert (home / "config.yaml").read_text() == "test_cmd_fast: false\n"
