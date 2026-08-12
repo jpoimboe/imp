@@ -376,3 +376,9 @@ def test_knowledge_cheat_sheet_names_the_local_write_scope() -> None:
     assert "led by this checkout's `project state:` directory (not under `--explain`)" in flat
     assert "`--project` / `--global` / `--local` forces one" in flat
     assert "`~/.imp/projects/<name>/config.yaml`" in flat
+
+
+def test_knowledge_names_worktree_setup_among_the_settings_init_confirms() -> None:
+    flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert ("detects the default workflow, integration branch, fast test command, "
+            "`worktree_setup`, and import root and confirms them on one screen") in flat
