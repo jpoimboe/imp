@@ -105,6 +105,7 @@ class PushSession:
         ctx.tiers = invocation.tiers
         ctx.test_gates = invocation.test_gates
         ctx.pythonpath = invocation.pythonpath
+        ctx.undecided = invocation.undecided
         ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.non_interactive = invocation.headless
         ctx.base_sandbox_policy = invocation.sandbox_policy

@@ -1387,3 +1387,34 @@ def test_dispatch_task_midloop_pause_emits_no_audit_error(tmp_path: Path) -> Non
     assert any(e["type"] == "agent_retry" for e in events)          # log is live
     assert not any(e["type"] == "error" and e["payload"].get("audit")
                    for e in events)                    # no audit on the pause path
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_threads_undecided_to_the_child_invocation(tmp_path) -> None:
+    """Nested dispatch must re-copy undecided; without that line a subagent
+    silently sees the all-decided default and never raises the setting."""
+    from imp.engine.env import Undecided
+
+    capture: dict = {}
+    ctx = ToolContext(
+        project_root=tmp_path,
+        events_path=tmp_path / "events.jsonl",
+        subagent_defs={"helper": _agent("helper")},
+        parent_transcript_dir=tmp_path / "steps" / "p" / "s",
+    )
+    ctx.coordinator = InterruptCoordinator()
+    ctx.undecided = Undecided(worktree_setup=True)
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_result", "payload": {"text": "ok"}}], capture=capture)
+
+    await dispatch_task(ctx, "helper", "do it")
+
+    assert capture["inv"].undecided == Undecided(worktree_setup=True)
+
+
+def test_every_provider_copies_undecided_onto_the_child_context() -> None:
+    """The four provider copy lines are the only route from AgentInvocation to
+    ToolContext; a missing one gives that provider's subagents the default."""
+    for module in ("claude_code", "codex_runner", "push_session", "scripted"):
+        src = Path(f"src/imp/providers/{module}.py").read_text()
+        assert "ctx.undecided = invocation.undecided" in src, module
