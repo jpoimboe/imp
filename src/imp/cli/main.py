@@ -1927,36 +1927,23 @@ def _is_backlog_home(
 
 def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
     """quest.json of a LIVE un-materialized, non-draft-origin, never-conversed,
-    unlocked Backlog home (origin `backlog`) — sourced from the worktree home
-    only, never the archive: an abandoned home leaves an archived
-    materialized:false quest.json that would otherwise render as a queued
-    `status: backlog` brief instead of a History item. None for any archived-only
-    id or any home the shared backlog predicate rejects (materialized,
-    draft-origin, already-conversed, or lock-live)."""
+    unlocked Backlog home, read through the store so a
+    sandboxed client gets the daemon's answer rather than a masked home. Sourced
+    from the live-home scan only, never the archive: an abandoned home leaves an
+    archived materialized:false quest.json that would otherwise render as a
+    queued `status: backlog` brief instead of a History item. None for an id
+    absent from the scan (archived-only) and for any home the shared backlog
+    predicate rejects (materialized, draft-origin, already-conversed, or
+    lock-live)."""
     from imp.cli.store import make_store
-    from imp.engine.errors import LoadError, LoadErrors
-    from imp.engine.quest import Quest
-    from imp.engine.state import lock_is_live
-    cdir = _quest_home(control, quest_id)
-    cj = cdir / "quest.json"
-    if not cj.exists():
+    digest = next(
+        (h for h in make_store(control).scan_homes() if h.quest_id == quest_id), None)
+    if digest is None:
         return None
-    try:
-        meta: dict[str, Any] = json.loads(cj.read_bytes())
-    except json.JSONDecodeError:
+    if not _is_backlog_home(digest.meta, conversed=digest.has_user_message,
+                            lock_live=lambda: digest.lock_live):
         return None
-    if meta.get("materialized", True):
-        return None  # materialized homes are never Backlog; skip the event-log read
-    try:
-        Quest.load(control, quest_id, migrate_if_lockable=True)
-    except (LoadError, LoadErrors):
-        return None
-    conversed = _first_user_message(
-        make_store(control).get_events(quest_id) or []) is not None
-    if not _is_backlog_home(meta, conversed=conversed,
-                            lock_live=lambda: lock_is_live(cdir / "lock")):
-        return None
-    return meta
+    return digest.meta
 
 
 def _card_field(label: str, value: str, width: int, *, color: bool) -> str:

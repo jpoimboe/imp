@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import imp.cli.main as m
-from imp.engine.quest import Quest
+from imp.engine.quest import LAYOUT_VERSION, Quest
 from tests.conftest import _seed_control
 
 
@@ -47,6 +48,34 @@ def test_unstarted_backlog_meta_none_when_draft_origin(tmp_path: Path) -> None:
     Quest.create_draft(tmp_path, title="Draft", quest_id="2026-06-20-drft01",
                         base_branch="main", origin="draft", seed_opening="Draft")
     assert m._unstarted_backlog_meta(tmp_path, "2026-06-20-drft01") is None
+
+
+def test_unstarted_backlog_meta_returns_meta_when_quest_load_would_fail(
+        tmp_path: Path) -> None:
+    # A layout stamped newer than this engine makes Quest.load raise LayoutMismatch.
+    # The scan keeps the raw quest.json, so the detail card now agrees with the
+    # overview's Backlog zone instead of falling through to the active renderer.
+    _seed_control(tmp_path)
+    q = _idea_seed(tmp_path, "2026-06-20-mism01")
+    meta_path = q.quest_dir / "quest.json"
+    stamped = json.loads(meta_path.read_text())
+    stamped["layout_version"] = LAYOUT_VERSION + 100
+    meta_path.write_text(json.dumps(stamped))
+    meta = m._unstarted_backlog_meta(tmp_path, "2026-06-20-mism01")
+    assert meta is not None
+    assert meta["origin"] == "idea"
+    assert "2026-06-20-mism01" in {r[0] for r in m._backlog_rows(tmp_path)}
+
+
+def test_unstarted_backlog_meta_none_when_only_user_message_is_empty(
+        tmp_path: Path) -> None:
+    # Any user_message event counts as conversed, empty text included — the
+    # overview's rule, now the card's too.
+    _seed_control(tmp_path)
+    ch = _idea_seed(tmp_path, "2026-06-20-emty01")
+    _converse(ch, "")
+    assert m._unstarted_backlog_meta(tmp_path, "2026-06-20-emty01") is None
+    assert "2026-06-20-emty01" not in {r[0] for r in m._backlog_rows(tmp_path)}
 
 
 def test_untouched_seed_stays_in_backlog(tmp_path: Path) -> None:
