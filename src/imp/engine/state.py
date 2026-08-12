@@ -9,7 +9,6 @@ Tasks 10/11/12 build this file incrementally:
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import os
 import tempfile
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
 
 import filelock
 
+from imp.engine import readfault
 from imp.engine.errors import StateDecodeError
 from imp.engine.pagecache import drop_page_cache
 from imp.engine.types import ResumeCause
@@ -69,64 +69,20 @@ def classify_pause_halt(
 _LEGACY_STATUS = {"running": "new", "errored": "paused"}
 
 
-def _write_corrupt_sidecar(state_dir: Path, raw: bytes) -> Path | None:
-    """Best-effort preserve corrupt bytes beside state.json; None if the write fails."""
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    sidecar = state_dir / f"state.json.corrupt-{stamp}-{os.getpid()}"
-    try:
-        sidecar.write_bytes(raw)
-        return sidecar
-    except OSError:
-        return None
-
-
 def _read_state_bytes(path: Path) -> bytes:
     """Single seam for every state.json read (initial + retries) so the
     transient-fault recovery path is exercisable in tests."""
     return path.read_bytes()
 
 
-def _write_transient_marker(
-        state_dir: Path, bad: bytes, good: bytes, reason: str, attempt: int) -> None:
-    """A first read of state.json failed to parse but a re-read recovered: the
-    on-disk data was intact, so the first read was a transient fault. Preserve
-    the bad bytes plus a note fingerprinting how they differed (head-drop is the
-    btrfs+zstd signature from the forensics). Best-effort; never raises."""
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    pid = os.getpid()
-    try:
-        (state_dir / f"state.json.corrupt-{stamp}-{pid}").write_bytes(bad)
-        note = {
-            "reason": reason,
-            "recovered_on_attempt": attempt,
-            "bad_len": len(bad),
-            "good_len": len(good),
-            "head_drop": bad == good[1:],     # the observed one-byte head-shift
-            "tail_drop": bad == good[:-1],
-            "bad_sha1": hashlib.sha1(bad).hexdigest(),
-            "good_sha1": hashlib.sha1(good).hexdigest(),
-        }
-        (state_dir / f"state.json.transient-{stamp}-{pid}.json").write_text(
-            json.dumps(note, indent=2, sort_keys=True))
-    except OSError:
-        pass
-
-
-# Retries for a state.json read that failed to parse. The save path is atomic
-# (tmp -> fsync -> os.replace) and the only writer, so a parse failure on a file
-# that is valid on disk is a transient read-path fault, not real corruption; a
-# cold re-read recovers. If every retry also fails the bytes are genuinely bad
-# and StateDecodeError is raised as before.
-_STATE_READ_RETRIES = 4
-
-
+# Why a parse failure here is a read fault rather than corruption: imp.engine.readfault.
 def _recover_or_raise(
-        state_dir: Path, state_path: Path, raw: bytes,
+        state_path: Path, raw: bytes,
         err: json.JSONDecodeError | UnicodeDecodeError) -> dict[str, Any]:
     """Called when the first parse of state.json failed. Re-read up to
-    _STATE_READ_RETRIES times (forcing a cold extent read); return the parsed
-    dict if a re-read succeeds, else preserve the corrupt bytes and raise."""
-    for attempt in range(1, _STATE_READ_RETRIES + 1):
+    readfault.READ_RETRIES times (forcing a cold extent read); return the parsed
+    dict if a re-read succeeds, else record the unrecovered fault and raise."""
+    for attempt in range(1, readfault.READ_RETRIES + 1):
         time.sleep(0.002 * attempt)       # let the transient settle; rare path
         drop_page_cache(state_path)
         try:
@@ -134,11 +90,13 @@ def _recover_or_raise(
             data: dict[str, Any] = json.loads(retry_raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError, OSError):
             continue
-        _write_transient_marker(state_dir, raw, retry_raw, str(err), attempt)
+        readfault.record("state", state_path, recovered=True, attempt=attempt,
+                         reason=str(err), bad=raw, good=retry_raw)
         return data
-    sidecar = _write_corrupt_sidecar(state_dir, raw)
+    evidence = readfault.record("state", state_path, recovered=False, attempt=None,
+                                reason=str(err), bad=raw, good=None)
     raise StateDecodeError(
-        live=state_path, evidence=sidecar, reason=str(err)) from err
+        live=state_path, evidence=evidence, reason=str(err)) from err
 
 
 @dataclass
@@ -215,11 +173,8 @@ class State:
         try:
             data = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            # A parse failure on a file written by the atomic, single-writer save
-            # path points to a transient read-path fault (forensics: btrfs+zstd
-            # returning the file minus its leading byte) rather than real
-            # corruption. Re-read; recover if the on-disk bytes are intact.
-            data = _recover_or_raise(state_dir, state_path, raw, e)
+            # Transient read-path fault, not corruption — see imp.engine.readfault.
+            data = _recover_or_raise(state_path, raw, e)
         cur = data.pop("current_step", None)
         raw_rt = data.pop("resolved_tiers", None)
         # Preserve None (not yet resolved) vs a dict (resolved). A `... or {}`

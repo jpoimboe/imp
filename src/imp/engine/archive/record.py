@@ -58,7 +58,7 @@ def _read_record_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
-# Same rationale as state._STATE_READ_RETRIES: the write path is atomic, so a
+# Same rationale as imp.engine.readfault's docstring: the write path is atomic, so a
 # parse failure on a file that is valid on disk is a transient read-path fault
 # (btrfs+zstd head-drop); a cold re-read recovers. If every retry fails the
 # bytes are genuinely bad — the original error is raised and the record file
