@@ -11,13 +11,13 @@ _SRC = Path(__file__).resolve().parents[1] / "src" / "imp"
 
 # The read primitives LocalStore owns. main.py imports them back one-way.
 _MOVED_TO_STORE = frozenset({
-    "_INFLIGHT", "_Row", "_TAIL_CHUNK", "_backlog_rows", "_events_have_user_message",
-    "_first_genuine_human_turn", "_is_backlog_home", "_iso_from_line", "_journal_last_iso",
-    "_last_event_iso", "_last_nonempty_line", "_list_quest_homes", "_load_events_for_id",
-    "_merged_after", "_parse_jsonl", "_quest_home", "_quest_meta", "_quest_state",
-    "_read_last_line", "_resolve_intent", "_row_for_id", "_search_active", "_search_archived",
-    "_search_backlog", "_show_artifact", "_status_row", "_status_rows", "_user_message_text",
-    "resolve_display_status",
+    "_BacklogMatch", "_INFLIGHT", "_Row", "_TAIL_CHUNK", "_backlog_matches", "_backlog_rows",
+    "_events_have_user_message", "_first_genuine_human_turn", "_is_backlog_home", "_iso_from_line",
+    "_journal_last_iso", "_last_event_iso", "_last_nonempty_line", "_list_quest_homes",
+    "_load_events_for_id", "_merged_after", "_parse_jsonl", "_quest_home", "_quest_meta",
+    "_quest_state", "_read_last_line", "_resolve_intent", "_row_for_id", "_search_active",
+    "_search_archived", "_search_backlog", "_show_artifact", "_status_row", "_status_rows",
+    "_user_message_text", "resolve_display_status",
 })
 
 
