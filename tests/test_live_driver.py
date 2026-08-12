@@ -5,7 +5,6 @@ import asyncio
 import inspect
 import io
 import json
-import re
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
@@ -3332,126 +3331,6 @@ def test_driver_titled_without_a_quest_id_shows_the_identity_band() -> None:
     # No quest_created event will ever arrive during setup, so the title is the
     # whole identity — and it must reach the static toolbar under the field.
     assert drv.compose_toolbar_static() == "imp setup"
-
-
-def _setup_footer(stream):
-    """A driver shaped like the init setup host's: titled, no quest id, a
-    committed blank already above it, footer armed."""
-    status = LiveStatus(stream)
-    status._width_fn = lambda: 80
-    drv = LiveDriver(stream=stream, color=False, width=80, status=status,
-                     title="imp setup", preceded_by_blank=True)
-    drv.begin_standing_activity(verb="thinking", model="claude-sonnet-4-5")
-    return drv, status
-
-
-def test_setup_footer_stays_lit_across_a_step_free_turn() -> None:
-    out = _TTY()
-    drv, status = _setup_footer(out)
-    # Bound methods compare EQUAL (==) for the same instance+function.
-    assert status._compose == drv.compose_status
-    for e in [
-        ev("1", "tool_call", agent_id="a", id="c1", name="read_file",
-           input={"path": "app.py"}),
-        ev("2", "tool_result", agent_id="a", id="c1", content="ok"),
-        ev("3", "agent_message", agent_id="a", provider="anthropic",
-           raw={"content": [{"type": "text", "text": "which theme?"}]},
-           usage={"input_tokens": 40000}),
-    ]:
-        drv.on_event(e)
-        # Without the standing activity _refresh_status resets the footer here,
-        # which is the frozen-screen bug: the spinner lived only inside a burst.
-        assert status._compose == drv.compose_status
-        assert drv.compose_status(0) is not None
-
-
-def test_setup_footer_rows_are_thinking_line_blank_and_position_band() -> None:
-    out = _TTY()
-    drv, _status = _setup_footer(out)
-    drv.on_event(ev("1", "tool_call", agent_id="a", id="c1", name="read_file",
-                    input={"path": "app.py"}))
-    rows = drv.compose_status(0)
-    assert rows is not None and len(rows) == 3
-    assert "thinking · 1 call · read_file app.py" in rows[0]
-    # Elapsed tail; matched by shape, never by a value a slow CI box can change.
-    assert re.fullmatch(r"\d+s", rows[0].split(" · ")[-1])
-    assert rows[1] == ""
-    # No quest id, phase, plan or step counter: title then model, nothing else.
-    assert rows[2].split(" · ") == ["imp setup", "claude-sonnet-4-5"]
-
-
-def test_setup_activity_line_paints_verb_detail_and_elapsed() -> None:
-    out = _TTY()
-    status = LiveStatus(out)
-    status._width_fn = lambda: 80
-    drv = LiveDriver(stream=out, color=True, width=80, status=status,
-                     title="imp setup", preceded_by_blank=True)
-    drv.begin_standing_activity(verb="thinking", model="claude-sonnet-4-5")
-    drv.on_event(ev("1", "tool_call", agent_id="a", id="c1", name="read_file",
-                    input={"path": "app.py"}))
-    try:
-        pal.set_theme("dark")
-        rows = drv.compose_status(0)
-    finally:
-        pal.set_theme("ansi")
-    line, band = rows[0], rows[2]
-    assert "\x1b[38;2;255;154;60mthinking\x1b[0m" in line          # verb: wordmark #FF9A3C
-    assert "\x1b[38;2;85;87;83m1 call · read_file app.py" in line  # detail: gray #555753
-    assert "\x1b[2m" in line.split(" · ")[-1]                      # elapsed tail: dim
-    assert band.startswith("\x1b[48;2;43;47;58m")                  # band: toolbar_bg_open
-    assert "\x1b[38;2;85;87;83mclaude-sonnet-4-5" in band          # model: gray
-
-
-def test_setup_position_band_carries_the_context_bar() -> None:
-    out = _TTY()
-    drv, _status = _setup_footer(out)
-    drv.on_event(ev("1", "agent_message", agent_id="a", provider="anthropic",
-                    raw={"content": [{"type": "text", "text": "hi"}]},
-                    usage={"input_tokens": 40000}))
-    row = drv.compose_status(0)[2]
-    # 40k of the model's 200k catalog window: the run path's context_bar shape.
-    assert "██░░░░░░░░ 20%" in row
-
-
-def test_setup_position_band_puts_unsandboxed_between_title_and_model() -> None:
-    out = _TTY()
-    drv, _status = _setup_footer(out)
-    drv.set_unsandboxed(True)
-    row = drv.compose_status(0)[2]
-    assert row.index("imp setup") < row.index("unsandboxed") < row.index("claude-sonnet-4-5")
-
-
-def test_setup_static_toolbar_is_the_position_band_once_armed() -> None:
-    out = _TTY()
-    drv, _status = _setup_footer(out)
-    # The activity outlives the input read, so the field's bottom toolbar is the
-    # band with the model — not the model-less identity fallback.
-    assert drv.compose_toolbar_static().split(" · ") == ["imp setup", "claude-sonnet-4-5"]
-
-
-def test_setup_footer_reuses_the_blank_committed_above_it() -> None:
-    out = _TTY()
-    _drv, status = _setup_footer(out)                  # preceded_by_blank=True
-    assert status._owns_lead_blank is False            # no second blank under the splash
-    assert "thinking" in out.getvalue()
-
-    plain = _TTY()
-    status2 = LiveStatus(plain)
-    status2._width_fn = lambda: 80
-    drv2 = LiveDriver(stream=plain, color=False, width=80, status=status2,
-                      title="imp setup")
-    drv2.begin_standing_activity(verb="thinking", model="claude-sonnet-4-5")
-    assert status2._owns_lead_blank is True            # nothing above: footer owns one
-
-
-def test_setup_footer_is_inert_on_a_non_tty() -> None:
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
-                     title="imp setup", preceded_by_blank=True)
-    drv.begin_standing_activity(verb="thinking", model="claude-sonnet-4-5")
-    drv.on_event(ev("1", "tool_call", agent_id="a", id="c1", name="read_file",
-                    input={"path": "app.py"}))
-    assert out.getvalue() == ""                        # piped output stays clean
 
 
 def test_finish_clears_the_stop_ack_so_it_cannot_outlive_the_run() -> None:

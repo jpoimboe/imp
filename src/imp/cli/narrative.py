@@ -15,7 +15,7 @@ tree-structure tests pull nothing heavy.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar
 
@@ -554,8 +554,6 @@ class NarrativeBuilder:
         # so the footer spinner shows instantly at Enter, before the daemon's first
         # step_started supersedes it. Stays None on TUI/headless paths.
         self._seed_phrase: str | None = None
-        # init setup host emits no step_started; stands in for step stack so footer never idles.
-        self._standing: Activity | None = None
         # phrase rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
         # Deferred rename: rendered after its narration, not at the quest_renamed position.
@@ -740,11 +738,6 @@ class NarrativeBuilder:
                             kind=top_kind, lane_wait=top_lane_wait,
                             phase=top_phase, plan=top_plan, counter=top_counter,
                             start_ts=p_start, backoff_source=p_src, backoff_base=p_base)
-        if self._standing is not None:
-            # step-free conversation: clock is the working stretch, advanced at each user_message.
-            return replace(
-                self._standing, detail=detail,
-                start_ts=self._stretch_start_ts or self._standing.start_ts)
         # No step on this builder. A dispatched subagent's nested builder reaches
         # here — carry the in-flight tool tail so the PARENT can read `nested.detail`
         # and concatenate it onto the subagent's verb.
@@ -776,15 +769,6 @@ class NarrativeBuilder:
         the verb; superseded naturally once a step starts (the seed branch sits at
         the tail of current_activity(), after the phase/step checks)."""
         self._seed_phrase = _draw_status_phrase()
-
-    def set_standing_activity(self, *, verb: str, model: str | None,
-                              start_ts: str) -> None:
-        """Install the footer activity for a conversation that emits no
-        step_started (the init setup host). Agent-kind, so the position row
-        opens its context bar; `start_ts` seeds the clock until the first
-        user_message advances the working stretch."""
-        self._standing = Activity(verb=verb, model=model, kind="agent",
-                                  start_ts=start_ts)
 
     def seed_pending_reply(self, text: str) -> None:
         """Optimistic echo for a your-turn reply; a second seed while outstanding is a no-op."""
