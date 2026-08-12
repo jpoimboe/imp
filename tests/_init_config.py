@@ -25,5 +25,5 @@ def write_real_init_config(root: Path) -> str:
         subprocess.run(cmd, cwd=root, check=True, capture_output=True)
     write_init_files(root, InitSettings(
         default_workflow="default", default_base="main",
-        test_cmd_fast="make test", pythonpath=None))
+        test_cmd_fast="make test", worktree_setup=None, pythonpath=None))
     return (root / "imp" / "config.yaml").read_text()

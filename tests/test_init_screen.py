@@ -29,10 +29,11 @@ from imp.cli.init import (
     _workflow_blurb,
 )
 from imp.cli.pythonpath_detect import ImportRoots
+from imp.cli.setup_detect import DetectedSetupCommand
 from imp.cli.verify_detect import DetectedTestCommand
 
 _WORKFLOWS = ["default", "minimal", "patent"]
-_LABELS = ["workflow", "branch", "tests", "import root"]
+_LABELS = ["workflow", "branch", "tests", "worktree setup", "import root"]
 
 
 def _detected_state() -> InitScreenState:
@@ -40,6 +41,7 @@ def _detected_state() -> InitScreenState:
         workflow="default",
         base=BaseDetection("master", "from origin/HEAD"),
         tests=DetectedTestCommand("make check", "from Makefile"),
+        setup=DetectedSetupCommand("uv sync --all-extras", "from uv.lock"),
         roots=ImportRoots(["src"], "from pyproject.toml"),
     )
 
@@ -51,17 +53,21 @@ def test_state_from_detection_keeps_each_value_with_its_own_provenance() -> None
     assert state.branch_provenance == "from origin/HEAD"
     assert state.test_cmd_fast == "make check"
     assert state.tests_provenance == "from Makefile"
+    assert state.worktree_setup == "uv sync --all-extras"
+    assert state.setup_provenance == "from uv.lock"
     assert state.pythonpath == ["src"]
     assert state.roots_provenance == "from pyproject.toml"
 
 
 def test_state_with_nothing_detected_leaves_tests_unset_not_opted_out() -> None:
     state = _screen_state_from_detection(
-        workflow="default", base=None, tests=None,
+        workflow="default", base=None, tests=None, setup=None,
         roots=ImportRoots([], "not a Python project"))
     # Nothing detected is nothing decided: None for both, never an empty spelling.
     assert state.test_cmd_fast is None
     assert state.tests_provenance == "nothing detected — imp runs no tests until one is set"
+    assert state.worktree_setup is None
+    assert state.setup_provenance == "nothing detected — no command runs in new worktrees"
     assert state.branch == ""
     assert state.branch_provenance == "nothing detected"
     assert state.pythonpath is None
@@ -98,6 +104,7 @@ def test_cycle_workflow_advances_wraps_and_touches_nothing_else() -> None:
     assert thrice.branch_provenance == "from origin/HEAD"
     assert thrice.test_cmd_fast == "make check"
     assert thrice.tests_provenance == "from Makefile"
+    assert thrice.worktree_setup == "uv sync --all-extras"
     assert thrice.pythonpath == ["src"]
     assert thrice.roots_provenance == "from pyproject.toml"
 
@@ -120,20 +127,21 @@ def test_confirm_rows_header_and_hint_are_verbatim() -> None:
 
 def test_confirm_rows_carry_label_value_and_provenance_in_order() -> None:
     body = _body(_detected_state(), ScreenRow.WORKFLOW)
-    assert len(body) == 4
+    assert len(body) == 5
     assert [line.split("  ")[0] for line in body] == _LABELS
     assert body[0].endswith("full pipeline — spec, plan, implement, review, merge")
     assert "default" in body[0]
     assert body[1].endswith("from origin/HEAD") and "master" in body[1]
     assert body[2].endswith("from Makefile") and "make check" in body[2]
-    assert body[3].endswith("from pyproject.toml") and "src" in body[3]
+    assert body[3].endswith("from uv.lock") and "uv sync --all-extras" in body[3]
+    assert body[4].endswith("from pyproject.toml") and "src" in body[4]
 
 
 def test_confirm_rows_pad_each_column_to_its_widest_entry() -> None:
     body = _body(_detected_state(), ScreenRow.WORKFLOW)
-    values = ["default", "master", "make check", "src"]
+    values = ["default", "master", "make check", "uv sync --all-extras", "src"]
     notes = ["full pipeline — spec, plan, implement, review, merge",
-             "from origin/HEAD", "from Makefile", "from pyproject.toml"]
+             "from origin/HEAD", "from Makefile", "from uv.lock", "from pyproject.toml"]
     value_col = max(len(label) for label in _LABELS) + 2
     note_col = value_col + max(len(value) for value in values) + 2
     for line, value, note in zip(body, values, notes, strict=True):
@@ -145,7 +153,7 @@ def test_confirm_rows_mark_the_cursor_row_with_a_render_safe_caret() -> None:
     rows = _confirm_rows(_detected_state(), ScreenRow.TESTS)
     styles = [style for style, _text in rows[2:-1]]
     texts = [text for _style, text in rows[2:-1]]
-    assert styles == ["", "", "ansiyellow bold", ""]
+    assert styles == ["", "", "ansiyellow bold", "", ""]
     assert texts[2].startswith("> ")
     assert "❯" not in texts[2]
     assert all(t.startswith("  ") for i, t in enumerate(texts) if i != 2)
@@ -154,18 +162,20 @@ def test_confirm_rows_mark_the_cursor_row_with_a_render_safe_caret() -> None:
 def test_confirm_rows_show_none_when_no_command_or_roots_were_detected() -> None:
     state = _screen_state_from_detection(
         workflow="default", base=BaseDetection("main", "new repo"),
-        tests=None, roots=ImportRoots([], "not a Python project"))
+        tests=None, setup=None, roots=ImportRoots([], "not a Python project"))
     body = _body(state, ScreenRow.WORKFLOW)
     assert "(none)" in body[2] and body[2].endswith(
         "nothing detected — imp runs no tests until one is set")
-    assert "(none)" in body[3] and body[3].endswith("not a Python project")
+    assert "(none)" in body[3] and body[3].endswith(
+        "nothing detected — no command runs in new worktrees")
+    assert "(none)" in body[4] and body[4].endswith("not a Python project")
     assert "new repo" in body[1]
 
 
 def test_confirm_rows_comma_join_multiple_import_roots() -> None:
     body = _body(replace(_detected_state(), pythonpath=["src", "lib"]),
                  ScreenRow.WORKFLOW)
-    assert "src, lib" in body[3]
+    assert "src, lib" in body[4]
 
 
 def test_confirm_rows_show_the_cycled_workflow_blurb_in_step() -> None:
@@ -204,13 +214,13 @@ def test_editing_import_roots_drops_entries_that_do_not_validate(tmp_path: Path)
     state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, answer)
     assert state.pythonpath == ["src", "lib"]
     assert state.roots_provenance == "you set this"
-    assert "src, lib" in _body(state, ScreenRow.IMPORT_ROOT)[3]
+    assert "src, lib" in _body(state, ScreenRow.IMPORT_ROOT)[4]
 
 
 def test_editing_import_roots_to_empty_records_needs_none(tmp_path: Path) -> None:
     state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, "  ")
     assert state.pythonpath is False
-    body = _body(state, ScreenRow.IMPORT_ROOT)[3]
+    body = _body(state, ScreenRow.IMPORT_ROOT)[4]
     assert "(none needed)" in body and body.endswith("you set this")
 
 
@@ -218,6 +228,11 @@ def test_edit_prompts_prefill_the_current_row_value() -> None:
     state = _detected_state()
     assert _edit_default(state, ScreenRow.BRANCH) == "master"
     assert _edit_default(state, ScreenRow.TESTS) == "make check"
+    assert _edit_default(state, ScreenRow.WORKTREE_SETUP) == "uv sync --all-extras"
+    assert _edit_default(
+        replace(state, worktree_setup=None), ScreenRow.WORKTREE_SETUP) == ""
+    assert _edit_default(
+        replace(state, worktree_setup=False), ScreenRow.WORKTREE_SETUP) == ""
     assert _edit_default(state, ScreenRow.IMPORT_ROOT) == "src"
     assert _edit_default(
         replace(state, pythonpath=["src", "lib"]), ScreenRow.IMPORT_ROOT) == "src, lib"
@@ -234,6 +249,7 @@ def test_edit_prompts_prefill_the_current_row_value() -> None:
 def test_edit_prompt_labels_are_verbatim() -> None:
     assert _EDIT_PROMPTS[ScreenRow.BRANCH] == "Integration branch: "
     assert _EDIT_PROMPTS[ScreenRow.TESTS] == "Fast test command: "
+    assert _EDIT_PROMPTS[ScreenRow.WORKTREE_SETUP] == "Worktree setup command: "
     assert _EDIT_PROMPTS[ScreenRow.IMPORT_ROOT] == "Import roots (comma-separated): "
     assert ScreenRow.WORKFLOW not in _EDIT_PROMPTS
 
@@ -303,7 +319,7 @@ def test_up_wraps_from_the_first_row_to_import_root(tmp_path: Path) -> None:
 
 def test_enter_is_refused_while_the_branch_is_empty(tmp_path: Path) -> None:
     state = _screen_state_from_detection(
-        workflow="default", base=None, tests=None,
+        workflow="default", base=None, tests=None, setup=None,
         roots=ImportRoots([], "not a Python project"))
     with create_pipe_input() as pipe, create_app_session(
             input=pipe, output=DummyOutput()):
@@ -393,10 +409,34 @@ def test_down_wraps_from_the_last_row_back_to_the_first_landing_on_workflow(
 
 def test_confirm_rows_show_none_when_no_branch_resolved() -> None:
     state = _screen_state_from_detection(
-        workflow="default", base=None, tests=None,
+        workflow="default", base=None, tests=None, setup=None,
         roots=ImportRoots([], "not a Python project"))
     body = _body(state, ScreenRow.WORKFLOW)
     assert "(none)" in body[1] and body[1].endswith("nothing detected")
+
+
+def test_editing_worktree_setup_to_a_command_replaces_the_detected_one(
+    tmp_path: Path,
+) -> None:
+    state = _apply_row_edit(
+        tmp_path, _detected_state(), ScreenRow.WORKTREE_SETUP, "  npm ci  ")
+    assert state.worktree_setup == "npm ci"
+    assert _body(state, ScreenRow.WORKTREE_SETUP)[3].endswith("you set this")
+
+
+def test_editing_worktree_setup_to_empty_records_needs_none(tmp_path: Path) -> None:
+    state = _apply_row_edit(
+        tmp_path, _detected_state(), ScreenRow.WORKTREE_SETUP, "   ")
+    # False is the user's answer "this project needs none"; None would mean never decided.
+    assert state.worktree_setup is False
+    body = _body(state, ScreenRow.WORKTREE_SETUP)[3]
+    assert "(none needed)" in body and body.endswith("you set this")
+
+
+def test_the_worktree_setup_row_sits_between_tests_and_import_root() -> None:
+    assert list(ScreenRow) == [
+        ScreenRow.WORKFLOW, ScreenRow.BRANCH, ScreenRow.TESTS,
+        ScreenRow.WORKTREE_SETUP, ScreenRow.IMPORT_ROOT]
 
 
 def test_screen_accepted_equals_screen_talk_but_isinstance_still_discriminates_them() -> None:

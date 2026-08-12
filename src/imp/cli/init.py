@@ -14,11 +14,11 @@ worktree holds a `.imp/quests/<id>` symlink to its out-of-tree home.
 Tier→model bindings come from the provider-code floor now, so init asks no
 model question — it just records the enabled providers + detected theme. A
 fresh interactive init then detects this project's settings (default workflow,
-integration branch, fast test command, import root) and confirms them on one
-screen, so it needs no model provider — only an OS sandbox (or an accepted
-unsandboxed offer), and stops with an actionable message without one. The
-screen's `?` hands off to the agent-driven setup conversation, which does want a
-provider and says so instead of aborting. The non-interactive path
+integration branch, fast test command, worktree setup command, import root) and
+confirms them on one screen, so it needs no model provider — only an OS sandbox
+(or an accepted unsandboxed offer), and stops with an actionable message without
+one. The screen's `?` hands off to the agent-driven setup conversation, which
+does want a provider and says so instead of aborting. The non-interactive path
 (`--use-defaults`, or an auto-selected no-TTY run) writes defaults with no model
 call.
 """
@@ -56,6 +56,11 @@ from imp.cli.pythonpath_detect import (
     format_pythonpath_yaml,
     resolve_detection_provider,
     validate_detected_roots,
+)
+from imp.cli.setup_detect import (
+    DetectedSetupCommand,
+    detect_worktree_setup,
+    format_worktree_setup_yaml,
 )
 from imp.cli.verify_detect import (
     DetectedTestCommand,
@@ -117,12 +122,13 @@ class IntegrationBranchUnresolved(Exception):
 
 @dataclass(frozen=True, slots=True)
 class InitSettings:
-    """The settings the shared writer serializes into imp/config.yaml. The two
+    """The settings the shared writer serializes into imp/config.yaml. The three
     stack-dependent fields are three-state: None never decided, False decided as
     "this project needs none", anything else the value."""
     default_workflow: str
     default_base: str
     test_cmd_fast: str | Literal[False] | None
+    worktree_setup: str | Literal[False] | None
     pythonpath: list[str] | Literal[False] | None
 
 
@@ -312,6 +318,13 @@ _TEST_CMD_FAST_COMMENT = (
     "# test_cmd_slow_timeout.\n"
 )
 
+_WORKTREE_SETUP_COMMENT = (
+    "\n# Command run in each new quest worktree before the first step, for toolchains\n"
+    "# that keep dependencies in a gitignored per-tree directory (.venv,\n"
+    "# node_modules, vendor) that `git worktree` does not materialize. false\n"
+    "# declares the project needs none.\n"
+)
+
 _PYTHONPATH_BLOCK_COMMENT = (
     "\n# Worktree-relative import roots prepended to gate/agent\n"
     "# subprocess PYTHONPATH, so an editable-installed package resolves\n"
@@ -467,6 +480,7 @@ _NO_VALUE = "(none)"
 _NONE_NEEDED = "(none needed)"
 _YOU_SET_THIS = "you set this"
 _NO_TESTS_DETECTED = "nothing detected — imp runs no tests until one is set"
+_NO_SETUP_DETECTED = "nothing detected — no command runs in new worktrees"
 _NO_BRANCH_DETECTED = "nothing detected"
 _CUSTOM_WORKFLOW = "custom workflow"
 
@@ -483,27 +497,32 @@ class ScreenRow(IntEnum):
     WORKFLOW = 0
     BRANCH = 1
     TESTS = 2
-    IMPORT_ROOT = 3
+    WORKTREE_SETUP = 3
+    IMPORT_ROOT = 4
 
 
 _ROW_LABELS: dict[ScreenRow, str] = {
     ScreenRow.WORKFLOW: "workflow",
     ScreenRow.BRANCH: "branch",
     ScreenRow.TESTS: "tests",
+    ScreenRow.WORKTREE_SETUP: "worktree setup",
     ScreenRow.IMPORT_ROOT: "import root",
 }
 
 
 @dataclass(frozen=True, slots=True)
 class InitScreenState:
-    """What the confirmation screen shows and, on accept, writes. `test_cmd_fast`
-    and `pythonpath` carry InitSettings' semantics exactly, so accepting needs no
-    reinterpretation. The workflow row's provenance is derived, never stored."""
+    """What the confirmation screen shows and, on accept, writes. `test_cmd_fast`,
+    `worktree_setup` and `pythonpath` carry InitSettings' semantics exactly, so
+    accepting needs no reinterpretation. The workflow row's provenance is derived,
+    never stored."""
     workflow: str
     branch: str
     branch_provenance: str
     test_cmd_fast: str | Literal[False] | None
     tests_provenance: str
+    worktree_setup: str | Literal[False] | None
+    setup_provenance: str
     pythonpath: list[str] | Literal[False] | None
     roots_provenance: str
 
@@ -513,6 +532,7 @@ def _screen_state_from_detection(
     workflow: str,
     base: BaseDetection | None,
     tests: DetectedTestCommand | None,
+    setup: DetectedSetupCommand | None,
     roots: ImportRoots,
 ) -> InitScreenState:
     return InitScreenState(
@@ -521,6 +541,8 @@ def _screen_state_from_detection(
         branch_provenance=base.provenance if base else _NO_BRANCH_DETECTED,
         test_cmd_fast=tests.command if tests else None,
         tests_provenance=tests.provenance if tests else _NO_TESTS_DETECTED,
+        worktree_setup=setup.command if setup else None,
+        setup_provenance=setup.provenance if setup else _NO_SETUP_DETECTED,
         pythonpath=list(roots.roots) or None,
         roots_provenance=roots.provenance,
     )
@@ -552,6 +574,8 @@ def _row_cells(state: InitScreenState) -> dict[ScreenRow, tuple[str, str, str]]:
         ScreenRow.WORKFLOW: (state.workflow, _workflow_blurb(state.workflow)),
         ScreenRow.BRANCH: (state.branch or _NO_VALUE, state.branch_provenance),
         ScreenRow.TESTS: (_display_value(state.test_cmd_fast), state.tests_provenance),
+        ScreenRow.WORKTREE_SETUP: (
+            _display_value(state.worktree_setup), state.setup_provenance),
         ScreenRow.IMPORT_ROOT: (
             _display_value(state.pythonpath), state.roots_provenance),
     }
@@ -567,6 +591,7 @@ def _settings_summary(settings: InitSettings) -> list[str]:
         ScreenRow.WORKFLOW: settings.default_workflow,
         ScreenRow.BRANCH: settings.default_base or _NO_VALUE,
         ScreenRow.TESTS: _display_value(settings.test_cmd_fast),
+        ScreenRow.WORKTREE_SETUP: _display_value(settings.worktree_setup),
         ScreenRow.IMPORT_ROOT: _display_value(settings.pythonpath),
     }
     return [f"  {_ROW_LABELS[row]:<{label_w}}  {values[row]}" for row in ScreenRow]
@@ -594,6 +619,7 @@ def _confirm_rows(
 _EDIT_PROMPTS: dict[ScreenRow, str] = {
     ScreenRow.BRANCH: "Integration branch: ",
     ScreenRow.TESTS: "Fast test command: ",
+    ScreenRow.WORKTREE_SETUP: "Worktree setup command: ",
     ScreenRow.IMPORT_ROOT: "Import roots (comma-separated): ",
 }
 
@@ -603,6 +629,8 @@ def _edit_default(state: InitScreenState, row: ScreenRow) -> str:
         return state.branch
     if row is ScreenRow.TESTS:
         return state.test_cmd_fast or ""
+    if row is ScreenRow.WORKTREE_SETUP:
+        return state.worktree_setup or ""
     return ", ".join(state.pythonpath) if state.pythonpath else ""
 
 
@@ -617,6 +645,10 @@ def _apply_row_edit(
         return replace(
             state, test_cmd_fast=answer.strip() or False,
             tests_provenance=_YOU_SET_THIS)
+    if row is ScreenRow.WORKTREE_SETUP:
+        return replace(
+            state, worktree_setup=answer.strip() or False,
+            setup_provenance=_YOU_SET_THIS)
     entered = [part.strip() for part in answer.split(",") if part.strip()]
     return replace(
         state, pythonpath=validate_detected_roots(project_root, entered) or False,
@@ -751,13 +783,19 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     else:
         test_block = (
             _TEST_CMD_FAST_COMMENT + format_test_cmd_fast_yaml(settings.test_cmd_fast))
+    if settings.worktree_setup is None:
+        setup_block = ""
+    else:
+        setup_block = (
+            _WORKTREE_SETUP_COMMENT
+            + format_worktree_setup_yaml(settings.worktree_setup))
     if settings.pythonpath is None:
         pythonpath_block = _pythonpath_hint()
     else:
         pythonpath_block = (
             _PYTHONPATH_BLOCK_COMMENT + format_pythonpath_yaml(settings.pythonpath))
     (imp_dir / "config.yaml").write_text(
-        body + test_block + pythonpath_block + _memory_pointer())
+        body + test_block + setup_block + pythonpath_block + _memory_pointer())
     _write_memory_scaffold(imp_dir, settings.default_workflow)
     _ensure_imp_gitignore(project_root)
     return _commit_init_files(
@@ -882,6 +920,7 @@ def _confirm_init_settings(
                 default_workflow=state.workflow,
                 default_base=state.branch,
                 test_cmd_fast=state.test_cmd_fast,
+                worktree_setup=state.worktree_setup,
                 pythonpath=state.pythonpath)
         setup_tier = parse_agent_file(bundled_assets_dir() / "init.md").tier or "medium"
         resolved = resolve_detection_provider(providers, tier=setup_tier)
@@ -918,6 +957,7 @@ def _confirm_init_settings(
             default_base=str(output["default_base"]),
             test_cmd_fast=(None if test_cmd_fast is None
                            else str(test_cmd_fast) or False),
+            worktree_setup=state.worktree_setup,
             pythonpath=roots)
 
 
@@ -1044,6 +1084,7 @@ def run_init(
             workflow=_DEFAULT_WORKFLOW,
             base=_resolve_init_base(project_root, git_created=git_created),
             tests=detect_test_command(project_root),
+            setup=detect_worktree_setup(project_root),
             roots=detect_import_roots(project_root)),
         providers=providers, allow_unsandboxed=allow_unsandboxed,
         color=theme in ("dark", "light"), output_fn=output_fn)
@@ -1114,6 +1155,7 @@ def run_init_noninteractive(
     detect_cmd = detect_verify_fn or detect_test_command
     detected = detect_cmd(project_root)
     test_cmd_fast = detected.command if detected else None  # None omits the block
+    detected_setup = detect_worktree_setup(project_root)
     roots: list[str] | Literal[False] | None
     if pythonpath is None:
         roots = detect_import_roots(project_root).roots or None
@@ -1124,7 +1166,9 @@ def run_init_noninteractive(
 
     settings = InitSettings(
         default_workflow=workflow, default_base=default_base,
-        test_cmd_fast=test_cmd_fast, pythonpath=roots)
+        test_cmd_fast=test_cmd_fast,
+        worktree_setup=detected_setup.command if detected_setup else None,
+        pythonpath=roots)
     committed = write_init_files(project_root, settings)
 
     if wrote_user_config:

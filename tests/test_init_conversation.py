@@ -14,6 +14,7 @@ def _screen_state() -> InitScreenState:
         workflow="default",
         base=BaseDetection("master", "from origin/HEAD"),
         tests=DetectedTestCommand("make check", "from Makefile"),
+        setup=None,
         roots=ImportRoots(["src"], "from pyproject.toml"))
 
 
@@ -70,7 +71,7 @@ def test_build_init_kickoff_carries_an_edited_row_as_the_users_own() -> None:
 def test_build_init_kickoff_shows_an_unresolved_branch_as_none() -> None:
     from imp.cli.init import _build_init_kickoff
     unresolved = _screen_state_from_detection(
-        workflow="default", base=None, tests=None,
+        workflow="default", base=None, tests=None, setup=None,
         roots=ImportRoots([], "not a Python project"))
     msg = _build_init_kickoff(workflows=[("default", "d")], state=unresolved)
     assert "  branch: (none)  (nothing detected)" in msg

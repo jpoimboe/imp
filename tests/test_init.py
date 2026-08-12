@@ -27,6 +27,7 @@ def _screen_state() -> InitScreenState:
         workflow="default",
         base=BaseDetection("master", "from origin/HEAD"),
         tests=DetectedTestCommand("make check", "from Makefile"),
+        setup=None,
         roots=ImportRoots(["src"], "from pyproject.toml"))
 
 
@@ -576,6 +577,7 @@ def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> N
         default_workflow="light",
         default_base="develop",
         test_cmd_fast="make check",
+        worktree_setup="uv sync --all-extras",
         pythonpath=["src"],
     )
     committed = write_init_files(tmp_path, settings)
@@ -584,6 +586,7 @@ def test_write_init_files_renders_config_yaml_from_settings(tmp_path: Path) -> N
     assert data["default-base"] == "develop"
     assert data["vars"] == {}
     assert data["test_cmd_fast"] == "make check"
+    assert data["worktree_setup"] == "uv sync --all-extras"
     assert data["pythonpath"] == ["src"]
     # Memory scaffold written; commit created for a fresh tree.
     assert (tmp_path / "imp" / "memory" / "all.md").is_file()
@@ -601,10 +604,11 @@ def test_write_init_files_omits_test_block_when_none(tmp_path: Path) -> None:
     write_init_files(
         tmp_path,
         InitSettings(default_workflow="default", default_base="main",
-                     test_cmd_fast=None, pythonpath=None),
+                     test_cmd_fast=None, worktree_setup=None, pythonpath=None),
     )
     text = (tmp_path / "imp" / "config.yaml").read_text()
     assert "test_cmd_fast" not in text          # None => block omitted entirely
+    assert "worktree_setup" not in text         # same reading for the new key
     assert "# pythonpath:" in text              # None => teaching hint
     assert ".imp/" in (tmp_path / ".gitignore").read_text()
 
@@ -614,11 +618,45 @@ def test_write_init_files_writes_the_needs_none_block_for_false(tmp_path: Path) 
     write_init_files(
         tmp_path,
         InitSettings(default_workflow="default", default_base="main",
-                     test_cmd_fast=False, pythonpath=False),
+                     test_cmd_fast=False, worktree_setup=False, pythonpath=False),
     )
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["test_cmd_fast"] is False       # decided: this project needs none
+    assert data["worktree_setup"] is False
     assert data["pythonpath"] is False
+
+
+def test_write_init_files_places_worktree_setup_between_tests_and_pythonpath(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import InitSettings, write_init_files
+    (tmp_path / "src").mkdir()
+    write_init_files(
+        tmp_path,
+        InitSettings(default_workflow="default", default_base="main",
+                     test_cmd_fast="make check", worktree_setup="npm ci",
+                     pythonpath=["src"]),
+    )
+    text = (tmp_path / "imp" / "config.yaml").read_text()
+    assert (
+        "\n# Command run in each new quest worktree before the first step, for toolchains\n"
+        "# that keep dependencies in a gitignored per-tree directory (.venv,\n"
+        "# node_modules, vendor) that `git worktree` does not materialize. false\n"
+        "# declares the project needs none.\n"
+        'worktree_setup: "npm ci"\n'
+    ) in text
+    assert text.index("test_cmd_fast:") < text.index("worktree_setup:")
+    assert text.index("worktree_setup:") < text.index("pythonpath:")
+
+
+def test_use_defaults_detects_the_worktree_setup_command(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    (tmp_path / "uv.lock").write_text("")
+    run_init_noninteractive(
+        tmp_path, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    # The non-interactive path uses the same detector the screen does.
+    assert data["worktree_setup"] == "uv sync --all-extras"
 
 
 def test_use_defaults_writes_config_yaml_no_model_call(tmp_path, monkeypatch):

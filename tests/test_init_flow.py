@@ -57,6 +57,7 @@ def _detected_state() -> InitScreenState:
         workflow="default",
         base=None,
         tests=DetectedTestCommand("make check", "from Makefile"),
+        setup=None,
         roots=ImportRoots(["src"], "from pyproject.toml"))
 
 
@@ -105,7 +106,7 @@ def test_accepting_the_screen_writes_the_rows_as_they_stand(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _screen_state_from_detection(
-        workflow="minimal", base=None, tests=None,
+        workflow="minimal", base=None, tests=None, setup=None,
         roots=ImportRoots([], "not a Python project"))
     _stub_screen(monkeypatch, ScreenAccepted(state))
     settings = _confirm_init_settings(
@@ -115,6 +116,7 @@ def test_accepting_the_screen_writes_the_rows_as_they_stand(
     assert settings.default_workflow == "minimal"
     # None never decided; False is the user's "this project needs none".
     assert settings.test_cmd_fast is None
+    assert settings.worktree_setup is None
     assert settings.pythonpath is None
 
 
@@ -269,6 +271,7 @@ def test_fresh_init_reaches_the_screen_with_no_model_call(
         ("default", "full pipeline — spec, plan, implement, review, merge"),
         ("master", "from origin/HEAD"),
         ("make check", "from Makefile"),
+        ("(none)", "nothing detected — no command runs in new worktrees"),
         ("src", "from pyproject.toml"),
     ]
 
@@ -305,32 +308,37 @@ def test_one_enter_echoes_configured_block_above_created(
     assert "workflow" in msgs[configured_idx + 1] and "default" in msgs[configured_idx + 1]
     assert "branch" in msgs[configured_idx + 2] and "master" in msgs[configured_idx + 2]
     assert "tests" in msgs[configured_idx + 3] and "make check" in msgs[configured_idx + 3]
-    assert "import root" in msgs[configured_idx + 4] and "src" in msgs[configured_idx + 4]
+    assert ("worktree setup" in msgs[configured_idx + 4]
+            and "(none)" in msgs[configured_idx + 4])
+    assert "import root" in msgs[configured_idx + 5] and "src" in msgs[configured_idx + 5]
 
 
 def test_settings_summary_empty_values_render_as_none() -> None:
     settings = InitSettings(
         default_workflow="default", default_base="main",
-        test_cmd_fast=None, pythonpath=None)
+        test_cmd_fast=None, worktree_setup=None, pythonpath=None)
     lines = _settings_summary(settings)
-    assert len(lines) == 4
+    assert len(lines) == 5
     tests_line = next(line for line in lines if "tests" in line)
+    setup_line = next(line for line in lines if "worktree setup" in line)
     roots_line = next(line for line in lines if "import root" in line)
     assert "(none)" in tests_line
+    assert "(none)" in setup_line
     assert "(none)" in roots_line
 
     settings_empty_base = InitSettings(
         default_workflow="default", default_base="",
-        test_cmd_fast=None, pythonpath=None)
+        test_cmd_fast=None, worktree_setup=None, pythonpath=None)
     lines_empty_base = _settings_summary(settings_empty_base)
     branch_line = next(line for line in lines_empty_base if "branch" in line)
     assert "(none)" in branch_line
 
     decided_none = InitSettings(
         default_workflow="default", default_base="main",
-        test_cmd_fast=False, pythonpath=False)
+        test_cmd_fast=False, worktree_setup=False, pythonpath=False)
     lines_false = _settings_summary(decided_none)
     assert "(none needed)" in next(ln for ln in lines_false if "tests" in ln)
+    assert "(none needed)" in next(ln for ln in lines_false if "worktree setup" in ln)
     assert "(none needed)" in next(ln for ln in lines_false if "import root" in ln)
 
 
@@ -423,9 +431,10 @@ def test_an_untouched_nothing_detected_tests_row_writes_no_key(
 
 
 @pytest.mark.parametrize("test_cmd_fast", [None, "make check", False])
+@pytest.mark.parametrize("worktree_setup", [None, "npm ci", False])
 @pytest.mark.parametrize("pythonpath", [None, ["src"], False])
 def test_every_config_an_init_run_can_write_is_loadable(
-    tmp_path: Path, test_cmd_fast: object, pythonpath: object,
+    tmp_path: Path, test_cmd_fast: object, worktree_setup: object, pythonpath: object,
 ) -> None:
     from imp.providers.config import parse_config_layer
 
@@ -434,14 +443,35 @@ def test_every_config_an_init_run_can_write_is_loadable(
     subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
     write_init_files(root, InitSettings(
         default_workflow="default", default_base="main",
-        test_cmd_fast=test_cmd_fast, pythonpath=pythonpath))   # type: ignore[arg-type]
+        test_cmd_fast=test_cmd_fast, worktree_setup=worktree_setup,
+        pythonpath=pythonpath))   # type: ignore[arg-type]
     layer, _src = parse_config_layer(root / "imp" / "config.yaml")  # type: ignore[misc]
     if test_cmd_fast is None:
         assert "test_cmd_fast" not in layer
     else:
         assert layer["test_cmd_fast"] == test_cmd_fast
+    if worktree_setup is None:
+        assert "worktree_setup" not in layer
+    else:
+        assert layer["worktree_setup"] == worktree_setup
     if pythonpath is None:
         assert "pythonpath" not in layer
         assert "# pythonpath: [src]" in (root / "imp" / "config.yaml").read_text()
     else:
         assert layer["pythonpath"] == pythonpath
+
+
+def test_run_init_seeds_the_screen_with_the_detected_worktree_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo_shaped_project(tmp_path)
+    (root / "uv.lock").write_text("")
+    seen = _stub_screen(monkeypatch, ScreenAccepted)
+    run_init(root, picker_fn=lambda _a: ["anthropic"], input_fn=lambda _p: "",
+             output_fn=lambda _m: None, detect_theme_fn=lambda: "ansi")
+    state = seen[0]
+    assert state.worktree_setup == "uv sync --all-extras"
+    assert state.setup_provenance == "from uv.lock"
+    assert yaml.safe_load(
+        (root / "imp" / "config.yaml").read_text())["worktree_setup"] == (
+            "uv sync --all-extras")
