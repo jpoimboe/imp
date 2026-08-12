@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -16,6 +17,7 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.engine.quest import LAYOUT_VERSION
 from imp.paths import project_state_dir
+from tests._faultlog import diag, fault_lines
 from tests.conftest import FIXTURES
 
 
@@ -337,6 +339,96 @@ def test_event_tail_bad_line_halts_then_recovers(tmp_path: Path) -> None:
     p.write_bytes(good + json.dumps({"type": "b"}).encode() + b"\n"
                   + json.dumps({"type": "c"}).encode() + b"\n")
     assert tail.read_new() == [{"type": "b"}, {"type": "c"}]
+
+
+_BAD_LINE = b"{bad json}"
+
+
+def _events_with_bad_line(p: Path) -> bytes:
+    """Write an events.jsonl whose second line is unparseable; return the
+    leading good line so a later write can heal the file at the same offset."""
+    good_first = json.dumps({"type": "a"}).encode() + b"\n"
+    p.write_bytes(good_first + _BAD_LINE + b"\n"
+                  + json.dumps({"type": "c"}).encode() + b"\n")
+    return good_first
+
+
+def test_event_tail_fault_records_once_and_drops_the_page_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The poll that first meets an unparseable line records one unrecovered
+    line and forces the next read to come from disk."""
+    from imp.cli.main import _EventTail
+    p = tmp_path / "events.jsonl"
+    _events_with_bad_line(p)
+    dropped: list[Path] = []
+    monkeypatch.setattr("imp.engine.pagecache.drop_page_cache", dropped.append)
+    tail = _EventTail(p)
+    assert tail.read_new() == [{"type": "a"}]
+    assert dropped == [p]
+    lines = fault_lines()
+    assert len(lines) == 1
+    line = lines[0]
+    assert line["site"] == "event_tail"
+    assert line["path"] == str(p)
+    assert line["recovered"] is False
+    assert line["attempt"] is None
+    assert line["good_len"] is None
+    assert line["head_drop"] is None
+    assert line["bad_len"] == len(_BAD_LINE)
+    assert line["bad_sha1"] == hashlib.sha1(_BAD_LINE).hexdigest()
+    assert (diag() / line["bytes"]).read_bytes() == _BAD_LINE
+
+
+def test_event_tail_stuck_offset_records_nothing_further(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tail stuck at the same offset must not spam the diagnostics log."""
+    from imp.cli.main import _EventTail
+    p = tmp_path / "events.jsonl"
+    _events_with_bad_line(p)
+    dropped: list[Path] = []
+    monkeypatch.setattr("imp.engine.pagecache.drop_page_cache", dropped.append)
+    tail = _EventTail(p)
+    assert tail.read_new() == [{"type": "a"}]
+    for _ in range(10):
+        assert tail.read_new() == []
+    assert len(fault_lines()) == 1
+    assert dropped == [p]
+
+
+def test_event_tail_recovery_records_the_poll_total_and_resumes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the stuck offset finally parses, a second line records the
+    recovery with every poll that saw the offset counted, and the tail resumes
+    with no event lost or duplicated."""
+    from imp.cli.main import _EventTail
+    p = tmp_path / "events.jsonl"
+    good_first = _events_with_bad_line(p)
+    monkeypatch.setattr("imp.engine.pagecache.drop_page_cache", lambda path: None)
+    tail = _EventTail(p)
+    assert tail.read_new() == [{"type": "a"}]        # poll 1: the fault
+    for _ in range(10):                              # polls 2-11: still stuck
+        assert tail.read_new() == []
+    healed = json.dumps({"type": "b"}).encode()
+    p.write_bytes(good_first + healed + b"\n"
+                  + json.dumps({"type": "c"}).encode() + b"\n")
+    assert tail.read_new() == [{"type": "b"}, {"type": "c"}]   # poll 12
+    assert tail.read_new() == []
+    assert tail.emitted == 3                         # a, b, c -- exactly once each
+    lines = fault_lines()
+    assert len(lines) == 2
+    rec = lines[1]
+    assert rec["site"] == "event_tail"
+    assert rec["recovered"] is True
+    assert rec["attempt"] == 12                      # 11 failing polls + the recovering one
+    assert rec["bad_len"] == len(_BAD_LINE)
+    assert rec["bad_sha1"] == hashlib.sha1(_BAD_LINE).hexdigest()
+    assert rec["good_len"] == len(healed)
+    assert rec["good_sha1"] == hashlib.sha1(healed).hexdigest()
+    assert rec["head_drop"] is False
+    assert (diag() / rec["bytes"]).read_bytes() == _BAD_LINE
 
 
 def test_event_tail_missing_file_then_created(tmp_path: Path) -> None:

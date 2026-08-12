@@ -2367,18 +2367,30 @@ def _follow_log(events: list[dict[str, Any]], *, cats: frozenset[str],
     return 0
 
 
+@dataclass
+class _StuckLine:
+    """The event line currently failing to parse: its bytes, the decode error
+    that rejected them, and how many read_new polls have seen it."""
+    bad: bytes
+    reason: str
+    polls: int
+
+
 class _EventTail:
     """Offset-tracked, partial-line-tolerant reader for a live events.jsonl.
 
     Reads only complete, newline-terminated lines from a kept-open descriptor.
     A complete line that fails to parse (a transient btrfs+zstd read fault, or a
     torn append) halts consumption at that byte offset and is retried on the
-    next read — it never raises. `emitted` counts every event handed out."""
+    next read — it never raises. Each such fault is recorded once to the
+    diagnostics log (imp.engine.readfault), and once more if it recovers.
+    `emitted` counts every event handed out."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
         self._fp: Any = None
         self._offset = 0
+        self._stuck: _StuckLine | None = None
         self.emitted = 0
 
     def read_new(self) -> list[dict[str, Any]]:
@@ -2391,15 +2403,43 @@ class _EventTail:
         data = self._fp.read()
         events: list[dict[str, Any]] = []
         consumed = 0
+        fault: tuple[bytes, str] | None = None
         for chunk in data.split(b"\n")[:-1]:
             try:
                 events.append(json.loads(chunk.decode("utf-8")))
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                fault = (chunk, str(e))
                 break
             consumed += len(chunk) + 1
+        if self._stuck is not None or fault is not None:
+            self._note_fault(data, consumed, fault)
         self._offset += consumed
         self.emitted += len(events)
         return events
+
+    def _note_fault(self, data: bytes, consumed: int,
+                    fault: tuple[bytes, str] | None) -> None:
+        """Record this poll's state changes for the line at the current offset:
+        one line when it first fails to parse, one when it finally reads
+        cleanly. While a line is stuck the offset cannot advance, so the slot
+        itself dedupes — a stuck poll loop records nothing. Imports are lazy:
+        this path is rare and CLI startup must not pay for it."""
+        from imp.engine import pagecache, readfault
+        stuck = self._stuck
+        if stuck is not None:
+            stuck.polls += 1
+            if consumed:                      # the stuck line parsed this poll
+                readfault.record(
+                    "event_tail", self._path, recovered=True,
+                    attempt=stuck.polls, reason=stuck.reason, bad=stuck.bad,
+                    good=data.split(b"\n")[0])
+                self._stuck = None
+        if fault is not None and self._stuck is None:
+            bad, reason = fault
+            self._stuck = _StuckLine(bad=bad, reason=reason, polls=1)
+            readfault.record("event_tail", self._path, recovered=False,
+                             attempt=None, reason=reason, bad=bad, good=None)
+            pagecache.drop_page_cache(self._path)
 
 
 _FOLLOW_TERMINAL = frozenset({"merged", "done", "abandoned", "shelved"})
