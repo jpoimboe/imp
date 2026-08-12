@@ -58,6 +58,13 @@ class QuestCard:
     vars: dict[str, object]
 
 
+class _BacklogMatch(NamedTuple):
+    quest_id: str
+    title: str
+    seed: str
+    last_activity: str
+
+
 @dataclass(frozen=True)
 class SearchHit:
     quest_id: str
@@ -551,19 +558,26 @@ def _search_active(control: Path, query: str) -> list[SearchHit]:
     return hits
 
 
-def _search_backlog(control: Path, query: str) -> list[SearchHit]:
+def _backlog_matches(control: Path, query: str) -> list[_BacklogMatch]:
     """Backlog quests whose id, title, or seed_opening body (title + description)
     contains `query` (case-insensitive)."""
     q = query.lower()
     scanned = make_store(control).scan_homes()
     seed_by_id = {d.quest_id: str(d.meta.get("seed_opening") or "") for d in scanned}
-    hits: list[SearchHit] = []
+    out: list[_BacklogMatch] = []
     for r in _backlog_rows(control, scanned):
         quest_id, title = r[0], r[4]
         seed = seed_by_id.get(quest_id, "")
         if q in quest_id.lower() or q in title.lower() or q in seed.lower():
-            hits.append(SearchHit(quest_id, title, "backlog", seed, r[3]))
-    return hits
+            out.append(_BacklogMatch(quest_id, title, seed, r[3]))
+    return out
+
+
+def _search_backlog(control: Path, query: str) -> list[SearchHit]:
+    """Backlog quests whose id, title, or seed_opening body (title + description)
+    contains `query` (case-insensitive)."""
+    return [SearchHit(m.quest_id, m.title, "backlog", m.seed, m.last_activity)
+            for m in _backlog_matches(control, query)]
 
 
 def _search_archived(control: Path, query: str, statuses: set[str],
