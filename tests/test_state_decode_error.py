@@ -3,14 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from imp.engine.errors import LoadError, StateDecodeError
 from imp.engine.state import State
-from imp.paths import imp_home
 from tests._dac import dac_enforced
+from tests._faultlog import diag, fault_lines
 
 _BLOB = Path("/home/u/.imp/diagnostics/bytes/20260811T180311Z-4127-state-1.bad")
 
@@ -54,17 +53,6 @@ def test_message_notes_evidence_unavailable_when_none() -> None:
 _TORN = b'{"id": "c1", "step": null, "step_attempt": 0, "status": "new"}\n{"trailing": true}\n'
 
 
-def _diag() -> Path:
-    return imp_home() / "diagnostics"
-
-
-def _fault_lines() -> list[dict[str, Any]]:
-    log = _diag() / "read-faults.jsonl"
-    if not log.exists():
-        return []
-    return [json.loads(ln) for ln in log.read_text().splitlines() if ln.strip()]
-
-
 def test_corrupt_state_raises_state_decode_error(tmp_path: Path) -> None:
     (tmp_path / "state.json").write_bytes(_TORN)
     with pytest.raises(StateDecodeError) as ei:
@@ -77,7 +65,7 @@ def test_unrecovered_fault_records_one_line_with_the_good_side_null(
     (tmp_path / "state.json").write_bytes(_TORN)
     with pytest.raises(StateDecodeError):
         State.load(tmp_path)
-    lines = _fault_lines()
+    lines = fault_lines()
     assert len(lines) == 1
     line = lines[0]
     assert line["site"] == "state"
@@ -96,7 +84,7 @@ def test_corrupt_state_preserves_byte_identical_evidence(tmp_path: Path) -> None
     (tmp_path / "state.json").write_bytes(_TORN)
     with pytest.raises(StateDecodeError) as ei:
         State.load(tmp_path)
-    blob = _diag() / _fault_lines()[0]["bytes"]
+    blob = diag() / fault_lines()[0]["bytes"]
     assert blob.read_bytes() == _TORN
     assert ei.value.evidence == blob
     # The evidence outlives the quest home: nothing is left in the state dir.
@@ -126,14 +114,14 @@ def test_invalid_utf8_state_raises_and_preserves_evidence(tmp_path: Path) -> Non
 
 
 def test_unwritable_diagnostics_dir_raises_with_no_evidence(tmp_path: Path) -> None:
-    _diag().mkdir(parents=True)
-    _diag().chmod(0o500)  # read+exec only: state.json still readable, diagnostics not writable
+    diag().mkdir(parents=True)
+    diag().chmod(0o500)  # read+exec only: state.json still readable, diagnostics not writable
     (tmp_path / "state.json").write_bytes(_TORN)
     try:
         with dac_enforced(), pytest.raises(StateDecodeError) as ei:
             State.load(tmp_path)
     finally:
-        _diag().chmod(0o700)  # restore so tmp_path cleanup can run
+        diag().chmod(0o700)  # restore so tmp_path cleanup can run
     assert ei.value.evidence is None
     assert "  corrupt bytes could NOT be preserved (evidence write failed)" in str(ei.value)
     assert "Extra data: line 2" in ei.value.reason
@@ -150,4 +138,4 @@ def test_happy_path_still_loads_and_coerces_legacy_status(tmp_path: Path) -> Non
     loaded = State.load(tmp_path)
     assert loaded.status == "new"
     assert loaded.id == "c1"
-    assert _fault_lines() == []
+    assert fault_lines() == []

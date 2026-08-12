@@ -18,8 +18,8 @@ from typing import Any
 from imp.engine import readfault
 from imp.engine import state as state_mod
 from imp.engine.state import InMemoryEventLog, State
-from imp.paths import imp_home
 from tests._dac import dac_enforced
+from tests._faultlog import diag, fault_lines
 
 _VALID = json.dumps({
     "id": "c1", "step": "coder", "step_attempt": 0, "status": "new",
@@ -27,17 +27,6 @@ _VALID = json.dumps({
 }, indent=2, sort_keys=True).encode("utf-8")
 
 _BAD = _VALID[1:]          # the transient one-byte head-drop
-
-
-def _diag() -> Path:
-    return imp_home() / "diagnostics"
-
-
-def _fault_lines() -> list[dict[str, Any]]:
-    log = _diag() / "read-faults.jsonl"
-    if not log.exists():
-        return []
-    return [json.loads(ln) for ln in log.read_text().splitlines() if ln.strip()]
 
 
 def _head_drop_once(monkeypatch) -> dict[str, int]:
@@ -68,7 +57,7 @@ def test_recovered_fault_appends_one_fingerprinted_line(
     (tmp_path / "state.json").write_bytes(_VALID)
     _head_drop_once(monkeypatch)
     State.load(tmp_path)
-    lines = _fault_lines()
+    lines = fault_lines()
     assert len(lines) == 1
     line = lines[0]
     assert line["site"] == "state"
@@ -90,7 +79,7 @@ def test_recovered_fault_preserves_bytes_and_leaves_the_state_dir_clean(
     (tmp_path / "state.json").write_bytes(_VALID)
     _head_drop_once(monkeypatch)
     State.load(tmp_path)
-    blob = _diag() / _fault_lines()[0]["bytes"]
+    blob = diag() / fault_lines()[0]["bytes"]
     assert blob.read_bytes() == _BAD
     # Nothing is written beside state.json any more.
     assert list(tmp_path.glob("state.json.*")) == []
@@ -111,11 +100,11 @@ def test_two_recoveries_in_one_process_land_in_distinct_blobs(
     monkeypatch.setattr(state_mod, "_read_state_bytes", flaky)
     assert State.load(tmp_path).id == "c1"
     assert State.load(tmp_path).id == "c1"
-    lines = _fault_lines()
+    lines = fault_lines()
     assert len(lines) == 2
     assert lines[0]["bytes"] != lines[1]["bytes"]
     for line in lines:
-        assert (_diag() / line["bytes"]).read_bytes() == _BAD
+        assert (diag() / line["bytes"]).read_bytes() == _BAD
 
 
 def test_recovery_under_a_sink_emits_the_runner_warning(
@@ -136,17 +125,17 @@ def test_recovery_under_a_sink_emits_the_runner_warning(
 
 def test_unwritable_diagnostics_dir_still_recovers(
         tmp_path: Path, monkeypatch) -> None:
-    _diag().mkdir(parents=True)
-    _diag().chmod(0o500)                 # readable+executable, not writable
+    diag().mkdir(parents=True)
+    diag().chmod(0o500)                 # readable+executable, not writable
     (tmp_path / "state.json").write_bytes(_VALID)
     _head_drop_once(monkeypatch)
     try:
         with dac_enforced():
             loaded = State.load(tmp_path)    # telemetry failure must be inert
     finally:
-        _diag().chmod(0o700)
+        diag().chmod(0o700)
     assert loaded.id == "c1"
-    assert not (_diag() / "read-faults.jsonl").exists()
+    assert not (diag() / "read-faults.jsonl").exists()
 
 
 def test_a_raising_sink_does_not_break_the_load_or_the_file_record(
@@ -160,4 +149,4 @@ def test_a_raising_sink_does_not_break_the_load_or_the_file_record(
     with readfault.event_sink(_Boom()):      # type: ignore[arg-type]
         loaded = State.load(tmp_path)
     assert loaded.id == "c1"
-    assert len(_fault_lines()) == 1
+    assert len(fault_lines()) == 1

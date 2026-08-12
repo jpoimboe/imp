@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -10,8 +9,9 @@ import pytest
 
 from imp.engine import readfault
 from imp.engine.state import InMemoryEventLog
-from imp.paths import display_path, imp_home
+from imp.paths import display_path
 from tests._dac import dac_enforced
+from tests._faultlog import diag, fault_lines
 
 _GOOD = b'{"id": "c1", "step": null, "step_attempt": 0, "status": "new"}\n'
 _HEAD_DROP = _GOOD[1:]      # the observed btrfs+zstd signature
@@ -19,17 +19,6 @@ _TAIL_DROP = _GOOD[:-1]
 
 _STATE_PATH = Path("/q/projects/imp/quests/sifo63/state/state.json")
 _REASON = "Expecting value: line 1 column 1 (char 0)"
-
-
-def _diag() -> Path:
-    return imp_home() / "diagnostics"
-
-
-def _lines() -> list[dict[str, Any]]:
-    log = _diag() / "read-faults.jsonl"
-    if not log.exists():
-        return []
-    return [json.loads(ln) for ln in log.read_text().splitlines() if ln.strip()]
 
 
 def _record_recovered_head_drop() -> Path | None:
@@ -40,7 +29,7 @@ def _record_recovered_head_drop() -> Path | None:
 
 def test_recovered_record_line_carries_every_field() -> None:
     _record_recovered_head_drop()
-    lines = _lines()
+    lines = fault_lines()
     assert len(lines) == 1
     line = lines[0]
     assert line["site"] == "state"
@@ -66,7 +55,7 @@ def test_tail_drop_shape_is_fingerprinted_distinctly() -> None:
     readfault.record(
         "archive_record", Path("/q/archive/records/sifo63.json"),
         recovered=True, attempt=1, reason=_REASON, bad=_TAIL_DROP, good=_GOOD)
-    line = _lines()[0]
+    line = fault_lines()[0]
     assert line["site"] == "archive_record"
     assert line["head_drop"] is False
     assert line["tail_drop"] is True
@@ -77,7 +66,7 @@ def test_unrecovered_record_line_nulls_the_good_side() -> None:
     readfault.record(
         "state", _STATE_PATH, recovered=False, attempt=None, reason=_REASON,
         bad=_HEAD_DROP, good=None)
-    line = _lines()[0]
+    line = fault_lines()[0]
     assert line["recovered"] is False
     assert line["attempt"] is None
     assert line["good_len"] is None
@@ -91,10 +80,10 @@ def test_unrecovered_record_line_nulls_the_good_side() -> None:
 
 def test_blob_preserves_bad_bytes_and_is_reachable_from_the_line() -> None:
     blob = _record_recovered_head_drop()
-    line = _lines()[0]
+    line = fault_lines()[0]
     assert line["bytes"].startswith("bytes/")
     assert line["bytes"].endswith(".bad")
-    resolved = _diag() / line["bytes"]
+    resolved = diag() / line["bytes"]
     assert resolved.read_bytes() == _HEAD_DROP
     assert blob == resolved
 
@@ -104,39 +93,39 @@ def test_blob_name_carries_pid_site_and_a_per_process_sequence() -> None:
     second = _record_recovered_head_drop()
     assert first is not None and second is not None
     assert first != second
-    lines = _lines()
+    lines = fault_lines()
     assert len(lines) == 2
     assert lines[0]["bytes"] != lines[1]["bytes"]
     for blob in (first, second):
-        assert blob.parent == _diag() / "bytes"
+        assert blob.parent == diag() / "bytes"
         assert f"-{os.getpid()}-state-" in blob.name
         assert blob.read_bytes() == _HEAD_DROP
 
 
 def test_blob_write_failure_records_null_bytes_and_returns_none() -> None:
-    (_diag() / "bytes").mkdir(parents=True)
-    (_diag() / "bytes").chmod(0o500)
+    (diag() / "bytes").mkdir(parents=True)
+    (diag() / "bytes").chmod(0o500)
     try:
         with dac_enforced():
             blob = _record_recovered_head_drop()
     finally:
-        (_diag() / "bytes").chmod(0o700)
+        (diag() / "bytes").chmod(0o700)
     assert blob is None
-    line = _lines()[0]
+    line = fault_lines()[0]
     assert line["bytes"] is None
     assert line["bad_sha1"] == hashlib.sha1(_HEAD_DROP).hexdigest()
 
 
 def test_unwritable_diagnostics_dir_is_inert() -> None:
-    _diag().mkdir(parents=True)
-    _diag().chmod(0o500)
+    diag().mkdir(parents=True)
+    diag().chmod(0o500)
     try:
         with dac_enforced():
             blob = _record_recovered_head_drop()      # must not raise
     finally:
-        _diag().chmod(0o700)
+        diag().chmod(0o700)
     assert blob is None
-    assert not (_diag() / "read-faults.jsonl").exists()
+    assert not (diag() / "read-faults.jsonl").exists()
 
 
 def _warnings(log: InMemoryEventLog) -> list[dict[str, Any]]:
@@ -144,7 +133,7 @@ def _warnings(log: InMemoryEventLog) -> list[dict[str, Any]]:
 
 
 def _evidence() -> str:
-    return display_path(_diag() / "read-faults.jsonl")
+    return display_path(diag() / "read-faults.jsonl")
 
 
 def test_recovered_state_fault_emits_exact_warning_copy() -> None:
@@ -163,7 +152,7 @@ def test_recovered_state_fault_emits_exact_warning_copy() -> None:
     assert payload["detail"] == (
         f"{_STATE_PATH} — bad {len(_HEAD_DROP)}B, good {len(_GOOD)}B; "
         f"evidence: {_evidence()}")
-    assert len(_lines()) == 1
+    assert len(fault_lines()) == 1
 
 
 def test_archive_record_recovery_names_the_record_file() -> None:
@@ -212,7 +201,7 @@ def test_event_tail_site_records_but_never_emits() -> None:
             recovered=False, attempt=None, reason=_REASON, bad=_HEAD_DROP,
             good=None)
     assert _warnings(log) == []
-    assert _lines()[0]["site"] == "event_tail"
+    assert fault_lines()[0]["site"] == "event_tail"
 
 
 def test_sink_is_cleared_when_the_context_exits() -> None:
@@ -221,7 +210,7 @@ def test_sink_is_cleared_when_the_context_exits() -> None:
         pass
     _record_recovered_head_drop()
     assert _warnings(log) == []
-    assert len(_lines()) == 1
+    assert len(fault_lines()) == 1
 
 
 def test_sink_is_cleared_when_the_block_raises() -> None:
@@ -230,7 +219,7 @@ def test_sink_is_cleared_when_the_block_raises() -> None:
         raise RuntimeError("boom")
     _record_recovered_head_drop()          # a crashed run must not leave a dead log installed
     assert _warnings(log) == []
-    assert len(_lines()) == 1
+    assert len(fault_lines()) == 1
 
 
 def test_a_raising_sink_does_not_break_the_file_record() -> None:
@@ -241,5 +230,5 @@ def test_a_raising_sink_does_not_break_the_file_record() -> None:
     with readfault.event_sink(_Boom()):        # type: ignore[arg-type]
         blob = _record_recovered_head_drop()
     assert blob is not None
-    assert len(_lines()) == 1
-    assert _lines()[0]["head_drop"] is True
+    assert len(fault_lines()) == 1
+    assert fault_lines()[0]["head_drop"] is True
