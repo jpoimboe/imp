@@ -61,14 +61,23 @@ BLK = "blk-quest"
 # so the marker appears in stdout. Bare `imp events <id>` (no --all) would instead
 # print only the summary index (header + steps table + types histogram, main.py:3468-
 # 3476) with no payload text — hence every event-path invocation below passes --all.
+# The one exception is `imp events <backlog-id>`, which must never reach the event index
+# at all: it returns early with "hasn't started yet" (main.py:4032-4035), and that early
+# return is exactly what its test pins, so it is invoked bare.
 # Each marker lives ONLY in that quest's masked events.jsonl (or archive blob), except
-# SPEC_MARK which lives only in the current quest's spec artifact — so a sandbox grep
-# that finds a marker means the mask leaked.
+# SPEC_MARK which lives only in the current quest's spec artifact, and BLK_MARK which
+# lives only in the backlog quest's masked quest.json — so a sandbox grep that finds a
+# marker means the mask leaked.
 CUR_MARK = "CURMARK"
 SIB_MARK = "SIBMARK"
 DORM_MARK = "DORMARK"
 ARCH_MARK = "ARCHMARK"
 SPEC_MARK = "SPECMARK"
+BLK_MARK = "BLKMARK"
+
+BLK_TITLE = "Blocked Backlog"
+BLK_BODY = f"{BLK_MARK} the queued description"
+BLK_SEED = f"{BLK_TITLE}\n\n{BLK_BODY}"
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -112,6 +121,7 @@ def _write_quest(
     origin: str = "draft",
     depends_on: tuple[str, ...] = (),
     write_state: bool = True,
+    seed_opening: str | None = None,
 ) -> Path:
     """Write a live quest home under `.imp/quests/<qid>/` (quest.json + optional
     state.json + events.jsonl + optional spec artifact). Returns the home dir."""
@@ -123,6 +133,7 @@ def _write_quest(
         "created_at": "2026-06-01T00:00:00+00:00",
         "materialized": materialized, "origin": origin,
         "depends_on": list(depends_on),
+        "seed_opening": seed_opening,
     }
     (d / "quest.json").write_text(json.dumps(meta))
     if write_state:
@@ -171,9 +182,10 @@ def _build_project(base: Path) -> Path:
     _write_quest(control, LIVE_SIB, title="Live Sibling", events=_events(SIB_MARK))
     _write_quest(control, DORM_SIB, title="Dormant Sibling", events=_events(DORM_MARK))
     _write_archived_quest(control, ARCH, title="Archived Thing", marker=ARCH_MARK)
-    _write_quest(control, BLK, title="Blocked Backlog", events=[],
+    _write_quest(control, BLK, title=BLK_TITLE, events=[],
                  materialized=False, origin="backlog",
-                 depends_on=("ghost-dep",), write_state=False)
+                 depends_on=("ghost-dep",), write_state=False,
+                 seed_opening=BLK_SEED)
     return control
 
 
@@ -291,6 +303,11 @@ def _imp(control: Path, *args: str) -> tuple[int | None, str, str]:
     return anyio.run(_serve_and_run, control, command)
 
 
+def _fields(out: str) -> dict[str, str]:
+    return {k.strip(): v.strip() for k, _, v in
+            (line.partition(":") for line in out.splitlines() if ":" in line)}
+
+
 def test_current_events_served_and_raw_masked(project) -> None:
     """AC 2(a) + AC 1 + AC 8: `imp events <cur>` returns the current quest's events
     THROUGH the daemon-proxied store while the raw events.jsonl is masked in-sandbox,
@@ -394,3 +411,61 @@ def test_backlog_quest_classified_blocked_via_readiness(project) -> None:
     assert rc == 0, f"imp list failed: rc={rc} err={err!r}"
     assert BLK in out, f"backlog quest missing from overview: {out!r}"
     assert "blocked" in out, f"backlog quest not classified blocked: {out!r}"
+
+
+def test_backlog_show_card_served_and_quest_json_masked(project) -> None:
+    """`imp show <backlog>` renders the full queued brief through the daemon while the
+    quest.json it is built from is masked in-sandbox (the sibling home is under the
+    state-dir tmpfs, so the marker must be unreachable to a raw read)."""
+    control = project
+    rc, out, err = _imp(control, "show", BLK)
+    assert rc == 0, f"imp show {BLK} failed: rc={rc} err={err!r}"
+    f = _fields(out)
+    assert f.get("status") == "backlog", out
+    assert f["provenance"] == "backlog", out
+    assert f["readiness"] == "blocked on ghost-dep", out
+    assert out.splitlines()[-2:] == ["intent:", BLK_BODY], out
+
+    _, scan, _ = anyio.run(
+        _serve_and_run, control,
+        'grep -rn BLKMARK "$IMP_STATE_DIR/quests" 2>/dev/null; echo SCAN_DONE')
+    assert "SCAN_DONE" in scan
+    assert BLK_MARK not in scan, "backlog quest.json not masked — mask leaked"
+
+
+def test_backlog_show_json_served(project) -> None:
+    """`imp show <backlog> --json` reports the backlog status and the seed body."""
+    control = project
+    rc, out, err = _imp(control, "show", BLK, "--json")
+    assert rc == 0, f"imp show {BLK} --json failed: rc={rc} err={err!r}"
+    card = json.loads(out)
+    assert card["status"] == "backlog", out
+    assert card["body"] == BLK_BODY, out
+
+
+def test_backlog_log_renders_the_brief(project) -> None:
+    """`imp log <backlog>` prints the queued brief including the body, not a bare
+    header line."""
+    control = project
+    rc, out, err = _imp(control, "log", BLK)
+    assert rc == 0, f"imp log {BLK} failed: rc={rc} err={err!r}"
+    assert _fields(out).get("status") == "backlog", out
+    assert BLK_BODY in out, out
+
+
+def test_backlog_events_reports_not_started(project) -> None:
+    """`imp events <backlog>` says the quest hasn't started rather than rendering an
+    empty event index."""
+    control = project
+    rc, out, err = _imp(control, "events", BLK)
+    assert rc == 0, f"imp events {BLK} failed: rc={rc} err={err!r}"
+    assert f"Quest {BLK} hasn't started yet — no events to show." in out
+
+
+def test_events_search_matches_the_backlog_body(project) -> None:
+    """`imp events search` matches a term that appears only in the backlog quest's
+    seed body, which in-sandbox is reachable only through the daemon."""
+    control = project
+    rc, out, err = _imp(control, "events", "search", BLK_MARK)
+    assert rc == 0, f"imp events search {BLK_MARK} failed: rc={rc} err={err!r}"
+    assert BLK in out, f"events search missed the backlog body: {out!r}"
