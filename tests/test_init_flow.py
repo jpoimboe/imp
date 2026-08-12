@@ -1,4 +1,4 @@
-"""`imp init`'s detected-and-confirmed flow: the screen, and the `?` handoff."""
+"""`imp init`'s detected-and-confirmed flow: the screen, and what accepting it writes."""
 
 from __future__ import annotations
 
@@ -9,12 +9,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from imp.agents.interactive import InteractiveFailure, InteractiveSuccess
 from imp.cli.init import (
     InitScreenState,
     InitSettings,
     ScreenAccepted,
-    ScreenTalk,
     _confirm_init_settings,
     _row_cells,
     _screen_state_from_detection,
@@ -79,29 +77,6 @@ def _stub_screen(monkeypatch: pytest.MonkeyPatch, *outcomes: object) -> list[obj
     return seen
 
 
-def _stub_conversation(
-    monkeypatch: pytest.MonkeyPatch, result: object,
-) -> dict[str, object]:
-    """A credential-ready `?` path; returns the kwargs the conversation got."""
-    import imp.cli.init as initmod
-    captured: dict[str, object] = {}
-
-    def _conv(**kw: object) -> object:
-        captured.update(kw)
-        return result
-
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p, **_kw: ("anthropic", "m"), raising=False)
-    monkeypatch.setattr(initmod, "_run_init_conversation", _conv, raising=False)
-    return captured
-
-
-def _conv_result(**over: object) -> InteractiveSuccess:
-    payload = {"status": "Success", "git_init": False, "default_workflow": "default",
-               "default_base": "main", "test_cmd_fast": "", "pythonpath": {"roots": []}}
-    return InteractiveSuccess({**payload, **over})
-
-
 def test_accepting_the_screen_writes_the_rows_as_they_stand(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -109,9 +84,7 @@ def test_accepting_the_screen_writes_the_rows_as_they_stand(
         workflow="minimal", base=None, tests=None, setup=None,
         roots=ImportRoots([], "not a Python project"))
     _stub_screen(monkeypatch, ScreenAccepted(state))
-    settings = _confirm_init_settings(
-        tmp_path, state, providers=["anthropic"], allow_unsandboxed=False,
-        color=False, output_fn=lambda _m: None)
+    settings = _confirm_init_settings(tmp_path, state)
     assert settings is not None
     assert settings.default_workflow == "minimal"
     # None never decided; False is the user's "this project needs none".
@@ -126,142 +99,17 @@ def test_accepting_an_edited_empty_tests_row_writes_needs_none(
     state = replace(_detected_state(), test_cmd_fast=False,
                     tests_provenance="you set this")
     _stub_screen(monkeypatch, ScreenAccepted(state))
-    settings = _confirm_init_settings(
-        tmp_path, state, providers=["anthropic"], allow_unsandboxed=False,
-        color=False, output_fn=lambda _m: None)
+    settings = _confirm_init_settings(tmp_path, state)
     assert settings is not None and settings.test_cmd_fast is False
-
-
-def test_talk_seeds_the_conversation_with_the_screens_current_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    edited = replace(_detected_state(), branch="trunk",
-                     branch_provenance="you set this")
-    _stub_screen(monkeypatch, ScreenTalk(edited))
-    captured = _stub_conversation(monkeypatch, _conv_result())
-    _confirm_init_settings(
-        tmp_path, _detected_state(), providers=["anthropic"], allow_unsandboxed=False,
-        color=False, output_fn=lambda _m: None)
-    handed = captured["state"]
-    assert isinstance(handed, InitScreenState)
-    assert handed.branch == "trunk"
-    assert handed.branch_provenance == "you set this"
-
-
-def test_talk_writes_the_conversations_values_not_the_screens(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    (tmp_path / "real").mkdir()
-    _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
-    _stub_conversation(monkeypatch, _conv_result(
-        default_workflow="minimal", default_base="develop",
-        test_cmd_fast="just check", pythonpath={"roots": ["real", "ghost"]}))
-    settings = _confirm_init_settings(
-        tmp_path, _detected_state(), providers=["anthropic"],
-        allow_unsandboxed=False, color=False, output_fn=lambda _m: None)
-    assert settings is not None
-    assert settings.default_workflow == "minimal"
-    assert settings.default_base == "develop"
-    assert settings.test_cmd_fast == "just check"
-    assert settings.pythonpath == ["real"]      # ghost dropped: not on disk
-
-
-def test_a_conversation_omitting_the_test_command_leaves_the_key_unwritten(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An omitted field is the agent saying "not yet", not the opt-out: the key
-    stays absent so imp can raise the gate again."""
-    payload = dict(_conv_result().output)
-    del payload["test_cmd_fast"]
-    _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
-    _stub_conversation(monkeypatch, InteractiveSuccess(payload))
-    settings = _confirm_init_settings(
-        tmp_path, _detected_state(), providers=["anthropic"],
-        allow_unsandboxed=False, color=False, output_fn=lambda _m: None)
-    assert settings is not None
-    assert settings.test_cmd_fast is None
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    write_init_files(tmp_path, settings)
-    assert "test_cmd_fast" not in (tmp_path / "imp" / "config.yaml").read_text()
-
-
-def test_a_conversation_returning_an_empty_test_command_writes_the_opt_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty answer is still the deliberate opt-out, now written as false."""
-    _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
-    _stub_conversation(monkeypatch, _conv_result(test_cmd_fast=""))
-    settings = _confirm_init_settings(
-        tmp_path, _detected_state(), providers=["anthropic"],
-        allow_unsandboxed=False, color=False, output_fn=lambda _m: None)
-    assert settings is not None
-    assert settings.test_cmd_fast is False
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    write_init_files(tmp_path, settings)
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["test_cmd_fast"] is False
-
-
-def test_talk_without_a_credential_prints_the_relocated_message_and_returns(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import imp.cli.init as initmod
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p, **_kw: None, raising=False)
-    monkeypatch.setattr(
-        initmod, "_run_init_conversation",
-        lambda **_kw: pytest.fail("no credential must not reach the conversation"),
-        raising=False)
-    seen = _stub_screen(monkeypatch, ScreenTalk(_detected_state()), ScreenAccepted)
-    msgs: list[str] = []
-    settings = _confirm_init_settings(
-        tmp_path, _detected_state(), providers=["anthropic"],
-        allow_unsandboxed=False, color=False, output_fn=msgs.append)
-    assert msgs == [
-        "imp needs a working model provider to talk this through.",
-        "None of the providers you enabled has a usable credential yet:",
-        "  anthropic → set ANTHROPIC_API_KEY in your environment",
-        "Set one up and re-run `imp init`, or fill the fields in yourself.",
-    ]
-    assert len(seen) == 2                 # returned to the screen, init not aborted
-    assert settings is not None and settings.test_cmd_fast == "make check"
-
-
-def test_a_failed_conversation_stops_init(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
-    _stub_conversation(monkeypatch, InteractiveFailure("auth", "bad_key"))
-    msgs: list[str] = []
-    settings = _confirm_init_settings(
-        tmp_path, _detected_state(), providers=["anthropic"],
-        allow_unsandboxed=False, color=False, output_fn=msgs.append)
-    assert settings is None
-    assert "re-run `imp init`" in "\n".join(msgs).lower()
-
-
-def test_a_non_success_conversation_stops_init(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
-    _stub_conversation(monkeypatch, _conv_result(status="Error"))
-    msgs: list[str] = []
-    settings = _confirm_init_settings(
-        tmp_path, _detected_state(), providers=["anthropic"],
-        allow_unsandboxed=False, color=False, output_fn=msgs.append)
-    assert settings is None
-    assert "didn't finish" in "\n".join(msgs).lower()
 
 
 def test_fresh_init_reaches_the_screen_with_no_model_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import imp.cli.init as initmod
     root = _repo_shaped_project(tmp_path)
     monkeypatch.setattr(
-        initmod, "resolve_detection_provider",
-        lambda *_a, **_kw: pytest.fail("init must not resolve a provider"),
-        raising=False)
+        "imp.providers.resolve.available_providers",
+        lambda *_a, **_kw: pytest.fail("init must not resolve a provider"))
     seen = _stub_screen(monkeypatch, ScreenAccepted)
     run_init(root, picker_fn=lambda _a: ["anthropic"], input_fn=lambda _p: "",
              output_fn=lambda _m: None, detect_theme_fn=lambda: "ansi")
@@ -345,10 +193,9 @@ def test_settings_summary_empty_values_render_as_none() -> None:
 def test_init_finishes_with_no_provider_credential_at_all(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import imp.cli.init as initmod
     root = _repo_shaped_project(tmp_path)
-    monkeypatch.setattr(initmod, "resolve_detection_provider",
-                        lambda _p, **_kw: None, raising=False)
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
     _stub_screen(monkeypatch, ScreenAccepted)
     msgs: list[str] = []
     run_init(root, picker_fn=lambda _a: ["anthropic"], input_fn=lambda _p: "",

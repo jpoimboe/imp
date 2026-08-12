@@ -18,7 +18,6 @@ from imp.cli.init import (
     InitScreenState,
     ScreenAccepted,
     ScreenRow,
-    ScreenTalk,
     _apply_row_edit,
     _confirm_rows,
     _cycle_workflow,
@@ -122,7 +121,7 @@ def test_confirm_rows_header_and_hint_are_verbatim() -> None:
     assert rows[1] == ("bold", "Here's how imp will set up this project:\n\n")
     assert rows[-1] == (
         "ansibrightblack",
-        "\n↑↓ move · space change · enter accept · ? talk it through · esc cancel")
+        "\n↑↓ move · space change · enter accept · esc cancel")
 
 
 def test_confirm_rows_carry_label_value_and_provenance_in_order() -> None:
@@ -330,15 +329,16 @@ def test_enter_is_refused_while_the_branch_is_empty(tmp_path: Path) -> None:
                 tmp_path, state, workflows=_WORKFLOWS, prompt_fn=_never_prompts)
 
 
-def test_question_mark_hands_off_carrying_the_current_values(tmp_path: Path) -> None:
+def test_question_mark_does_nothing_on_the_screen(tmp_path: Path) -> None:
     with create_pipe_input() as pipe, create_app_session(
             input=pipe, output=DummyOutput()):
-        pipe.send_text(" ")   # cycle the workflow first
-        pipe.send_text("?")
+        pipe.send_text(" ")    # cycle the workflow first
+        pipe.send_text("?")    # inert: the screen stays open …
+        pipe.send_text("\r")   # … and enter is what accepts
         outcome = _interactive_confirm_screen(
             tmp_path, _detected_state(), workflows=_WORKFLOWS,
             prompt_fn=_never_prompts)
-    assert isinstance(outcome, ScreenTalk)
+    assert isinstance(outcome, ScreenAccepted)
     assert outcome.state.workflow == "minimal"
 
 
@@ -439,12 +439,4 @@ def test_the_worktree_setup_row_sits_between_tests_and_import_root() -> None:
         ScreenRow.WORKTREE_SETUP, ScreenRow.IMPORT_ROOT]
 
 
-def test_screen_accepted_equals_screen_talk_but_isinstance_still_discriminates_them() -> None:
-    state = _detected_state()
-    accepted = ScreenAccepted(state)
-    talk = ScreenTalk(state)
-    assert accepted == talk
-    assert isinstance(accepted, ScreenAccepted)
-    assert not isinstance(accepted, ScreenTalk)
-    assert isinstance(talk, ScreenTalk)
-    assert not isinstance(talk, ScreenAccepted)
+
