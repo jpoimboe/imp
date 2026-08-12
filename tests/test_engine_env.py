@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-from imp.engine.env import TestGates, engine_env, overlay_engine_env
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided, engine_env, overlay_engine_env
 from imp.paths import imp_home
 
 
@@ -302,3 +302,25 @@ def test_engine_env_omits_pythonpath_for_every_undecided_spelling() -> None:
     env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
                      pythonpath=("src",))
     assert env["PYTHONPATH"] == "/wt/src"
+
+
+def test_undecided_flags_only_the_never_decided_settings() -> None:
+    # No test_cmd_slow attribute on the config stand-in: Undecided must not read it.
+    cfg = SimpleNamespace(
+        test_cmd_fast=None, worktree_setup="npm ci", pythonpath=("src",))
+    undecided = Undecided.from_config(cfg)
+    assert undecided == Undecided(test_cmd_fast=True)
+    assert bool(undecided) is True
+
+
+def test_undecided_is_falsy_when_every_setting_is_decided() -> None:
+    # `false` is an answer, not an absence — it must read as decided, like a value.
+    cfg = SimpleNamespace(
+        test_cmd_fast=False, worktree_setup=False, pythonpath=False)
+    assert Undecided.from_config(cfg) == ALL_DECIDED
+    assert not Undecided.from_config(cfg)
+
+
+def test_undecided_carries_no_test_cmd_slow_field() -> None:
+    # An unset slow gate falls back to the fast one, so it is never raised.
+    assert not hasattr(ALL_DECIDED, "test_cmd_slow")
