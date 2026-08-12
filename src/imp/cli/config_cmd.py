@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TextIO
+from typing import Literal, TextIO
 
 from imp.cli import palette as pal
 from imp.paths import display_path, imp_home
@@ -34,6 +34,15 @@ def _emit_section(out: TextIO, rows: list[tuple[str, str, str]], *, width: int,
         out.write(f"  {key:<28} {value:<{width}} {_annotation(label, color=color)}\n")
 
 
+def _setting_display(value: str | tuple[str, ...] | Literal[False] | None) -> str:
+    """The three states the four stack-dependent settings share."""
+    if value is None:
+        return "(unset)"
+    if value is False:
+        return "(none needed)"
+    return ", ".join(value) if isinstance(value, tuple) else value
+
+
 def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
                   color: bool = False, show_all: bool = False) -> None:
     if state_dir is not None:
@@ -54,16 +63,14 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, state_dir: Path | None,
         ("providers", ", ".join(cfg.providers) or "(none)"),
         ("theme", cfg.theme),
         ("editing_mode", cfg.editing_mode),
-        ("pythonpath", ", ".join(cfg.pythonpath) or "(unset)"),
-        ("test_cmd_fast", "(disabled)" if cfg.test_cmd_fast == ""
-         else (cfg.test_cmd_fast or "(unset)")),
-        ("test_cmd_slow", "(disabled)" if cfg.test_cmd_slow == ""
-         else (cfg.test_cmd_slow or "(unset)")),
+        ("pythonpath", _setting_display(cfg.pythonpath)),
+        ("test_cmd_fast", _setting_display(cfg.test_cmd_fast)),
+        ("test_cmd_slow", _setting_display(cfg.test_cmd_slow)),
         ("test_cmd_fast_timeout", "(default 120s)" if cfg.test_cmd_fast_timeout is None
          else f"{cfg.test_cmd_fast_timeout}s"),
         ("test_cmd_slow_timeout", "(default 300s)" if cfg.test_cmd_slow_timeout is None
          else f"{cfg.test_cmd_slow_timeout}s"),
-        ("worktree_setup", cfg.worktree_setup or "(unset)"),
+        ("worktree_setup", _setting_display(cfg.worktree_setup)),
     ):
         leaf_src = prov.get((key,))
         label = layer_label(leaf_src.file) if leaf_src is not None else "default"

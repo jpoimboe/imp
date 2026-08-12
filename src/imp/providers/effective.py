@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from imp.engine.errors import LoadError
 from imp.engine.types import SourceLoc
@@ -100,6 +100,11 @@ def merge_layers(
     return out, prov
 
 
+def _pythonpath(raw: Any) -> tuple[str, ...] | Literal[False] | None:
+    """False and None are answers, not sequences; only a list becomes a tuple."""
+    return tuple(raw) if isinstance(raw, list) else raw
+
+
 def _to_config(merged: dict[str, Any]) -> Config:
     return Config(
         providers=tuple(merged.get("providers", ())),
@@ -112,7 +117,7 @@ def _to_config(merged: dict[str, Any]) -> Config:
         test_cmd_fast_timeout=merged.get("test_cmd_fast_timeout"),
         test_cmd_slow_timeout=merged.get("test_cmd_slow_timeout"),
         worktree_setup=merged.get("worktree_setup"),
-        pythonpath=tuple(merged.get("pythonpath", ())),
+        pythonpath=_pythonpath(merged.get("pythonpath")),
         max_parallel_test_runs=merged.get("max_parallel_test_runs", 1),
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),

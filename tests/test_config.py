@@ -158,10 +158,11 @@ def test_parses_test_cmd_slow(tmp_path: Path) -> None:
     assert layer["test_cmd_slow"] == "make check && make test-live"
 
 
-def test_test_cmd_fast_empty_string_preserved(tmp_path: Path) -> None:
-    # Tri-state opt-out: explicit "" parses to "" (NOT dropped), distinct from absent.
-    layer = _layer(tmp_path, "test_cmd_fast: \"\"\n" + _OK_BODY)
-    assert layer["test_cmd_fast"] == ""
+def test_test_cmd_false_is_kept_as_a_boolean(tmp_path: Path) -> None:
+    # `false` is the decided-as-none answer; "" is no longer a spelling at all.
+    layer = _layer(tmp_path, "test_cmd_fast: false\ntest_cmd_slow: false\n" + _OK_BODY)
+    assert layer["test_cmd_fast"] is False
+    assert layer["test_cmd_slow"] is False
 
 
 def test_test_cmd_absent_omitted(tmp_path: Path) -> None:
@@ -201,11 +202,6 @@ def test_test_cmd_slow_timeout_invalid_raises(tmp_path: Path, bad: str) -> None:
 def test_test_cmd_slow_not_string_raises(tmp_path: Path) -> None:
     with pytest.raises(LoadError, match="test_cmd_slow"):
         _layer(tmp_path, "test_cmd_slow: [make, check]\n" + _OK_BODY)
-
-
-def test_test_cmd_slow_empty_string_preserved(tmp_path: Path) -> None:
-    layer = _layer(tmp_path, "test_cmd_slow: \"\"\n" + _OK_BODY)
-    assert layer["test_cmd_slow"] == ""
 
 
 def test_parses_max_parallel_test_runs(tmp_path: Path) -> None:

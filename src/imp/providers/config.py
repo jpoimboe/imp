@@ -8,23 +8,28 @@ Schema (post 2026-06-04-roles-to-tiers):
       high:   {claude_code: opus,   openai: gpt-5.5}
     provider_envs:                        # optional; default <PROVIDER>_API_KEY
       openai: {env: OPENAI_API_KEY}
-    test_cmd_fast: "..."                  # cheap gate (lint+typecheck+fast tests); per-plan
-    test_cmd_slow: "..."                  # complete run; once-per-quest at integration-verify
+    test_cmd_fast: "..."                  # cheap gate (lint+typecheck+fast); false if none needed
+    test_cmd_slow: "..."                  # full run once per quest; false if none needed
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
-    worktree_setup: uv sync --all-extras  # command run in each new quest worktree
-    pythonpath: [src]                     # import roots prepended to PYTHONPATH; off if unset
+    worktree_setup: uv sync --all-extras  # runs in each new quest worktree; false if none needed
+    pythonpath: [src]                     # import roots on PYTHONPATH; false if none needed
     default-workflow: default             # workflow new quests use (default "default")
     max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
+
+The four stack-dependent settings above — test_cmd_fast, test_cmd_slow, worktree_setup,
+pythonpath — share one three-state shape: an absent key or an explicit YAML null is "never
+decided", `false` is "this project needs none", anything else is the value. `""` and `[]`
+are rejected.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ruamel.yaml.error import YAMLError
 
@@ -34,6 +39,12 @@ from imp.engine.expr import ExprType
 from imp.engine.types import SourceLoc, Vars
 
 _REQUIRED_TIERS: tuple[str, ...] = ("low", "medium", "high")
+
+_COMMAND_KEY_EXAMPLES: dict[str, str] = {
+    "test_cmd_fast": '"ruff check . && pytest -q"',
+    "test_cmd_slow": '"pytest"',
+    "worktree_setup": '"uv sync --all-extras"',
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,12 +63,13 @@ class Config:
         default_factory=lambda: SourceLoc(file=Path("config.yaml"), line=1),
     )
     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
-    test_cmd_fast: str | None = field(hash=False, default=None)
-    test_cmd_slow: str | None = field(hash=False, default=None)
+    test_cmd_fast: str | Literal[False] | None = field(hash=False, default=None)
+    test_cmd_slow: str | Literal[False] | None = field(hash=False, default=None)
     test_cmd_fast_timeout: int | None = field(hash=False, default=None)
     test_cmd_slow_timeout: int | None = field(hash=False, default=None)
-    worktree_setup: str | None = field(hash=False, default=None)
-    pythonpath: tuple[str, ...] = field(hash=False, default=())
+    worktree_setup: str | Literal[False] | None = field(hash=False, default=None)
+    pythonpath: tuple[str, ...] | Literal[False] | None = field(
+        hash=False, default=None)
     max_parallel_test_runs: int = field(hash=False, default=1)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
@@ -160,12 +172,15 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
                 "'default-workflow' must be a single workflow name "
                 "(no path separators)", src)
         out["default-workflow"] = v
-    for cmd_key in ("test_cmd_fast", "test_cmd_slow"):
-        if cmd_key in raw:
+    # `.get(...) is not None`: a valueless `test_cmd_fast:` is YAML null and reads
+    # as never-decided, exactly like an absent key.
+    for cmd_key, example in _COMMAND_KEY_EXAMPLES.items():
+        if raw.get(cmd_key) is not None:
             v = raw[cmd_key]
-            if not isinstance(v, str):
+            if v is not False and (not isinstance(v, str) or not v):
                 raise LoadError(
-                    f"'{cmd_key}' must be a string (e.g. \"make check\")", src)
+                    f"'{cmd_key}' must be a non-empty string (e.g. {example}) "
+                    "or false to declare this project needs none", src)
             out[cmd_key] = v
     for timeout_key in ("test_cmd_fast_timeout", "test_cmd_slow_timeout"):
         if timeout_key in raw:
@@ -176,20 +191,17 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
                     f"'{timeout_key}' must be a positive integer "
                     "(seconds, e.g. 120)", src)
             out[timeout_key] = v
-    if "worktree_setup" in raw:
-        v = raw["worktree_setup"]
-        if not isinstance(v, str):
-            raise LoadError(
-                "'worktree_setup' must be a string "
-                "(e.g. \"uv sync --all-extras\")", src)
-        out["worktree_setup"] = v
     if raw.get("pythonpath") is not None:
         v = raw["pythonpath"]
-        if not isinstance(v, list) or not all(isinstance(e, str) for e in v):
+        if v is not False and (
+            not isinstance(v, list) or not v
+            or not all(isinstance(e, str) and e for e in v)
+        ):
             raise LoadError(
-                "'pythonpath' must be a list of worktree-relative directory "
-                "strings (e.g. [src] or [.])", src)
-        out["pythonpath"] = list(v)
+                "'pythonpath' must be a non-empty list of worktree-relative "
+                "directory names (e.g. [src]) or false to declare this project "
+                "needs none", src)
+        out["pythonpath"] = v if v is False else list(v)
     if "max_parallel_test_runs" in raw:
         v = raw["max_parallel_test_runs"]
         # bool is an int subclass; reject it so `max_parallel_test_runs: true` isn't read as 1.

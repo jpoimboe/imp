@@ -344,4 +344,52 @@ def test_worktree_setup_rejects_a_non_string(tmp_path: Path) -> None:
     with pytest.raises(LoadError) as excinfo:
         parse_config_layer(p)
     assert excinfo.value.message == (
-        "'worktree_setup' must be a string (e.g. \"uv sync --all-extras\")")
+        "'worktree_setup' must be a non-empty string "
+        '(e.g. "uv sync --all-extras") '
+        "or false to declare this project needs none")
+
+
+def test_false_loads_as_a_boolean_for_each_stack_dependent_key(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("test_cmd_fast: false\ntest_cmd_slow: false\n"
+                 "worktree_setup: false\npythonpath: false\n")
+    layer, _src = parse_config_layer(p)  # type: ignore[misc]
+    assert layer == {"test_cmd_fast": False, "test_cmd_slow": False,
+                     "worktree_setup": False, "pythonpath": False}
+
+
+@pytest.mark.parametrize(("body", "message"), [
+    ('test_cmd_fast: ""\n',
+     "'test_cmd_fast' must be a non-empty string "
+     '(e.g. "ruff check . && pytest -q") '
+     "or false to declare this project needs none"),
+    ("test_cmd_slow: ''\n",
+     "'test_cmd_slow' must be a non-empty string (e.g. \"pytest\") "
+     "or false to declare this project needs none"),
+    ('worktree_setup: ""\n',
+     "'worktree_setup' must be a non-empty string "
+     '(e.g. "uv sync --all-extras") '
+     "or false to declare this project needs none"),
+    ("pythonpath: []\n",
+     "'pythonpath' must be a non-empty list of worktree-relative directory "
+     "names (e.g. [src]) or false to declare this project needs none"),
+    ('pythonpath: [""]\n',
+     "'pythonpath' must be a non-empty list of worktree-relative directory "
+     "names (e.g. [src]) or false to declare this project needs none"),
+])
+def test_the_legacy_empty_spelling_is_rejected(
+    tmp_path: Path, body: str, message: str,
+) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text(body)
+    with pytest.raises(LoadError) as excinfo:
+        parse_config_layer(p)
+    assert excinfo.value.message == message
+
+
+def test_a_valueless_command_key_reads_as_absent(tmp_path: Path) -> None:
+    # `test_cmd_fast:` with no value is YAML null — never decided, not an error.
+    p = tmp_path / "config.yaml"
+    p.write_text("test_cmd_fast:\ntest_cmd_slow:\nworktree_setup:\n")
+    layer, _src = parse_config_layer(p)  # type: ignore[misc]
+    assert layer == {}

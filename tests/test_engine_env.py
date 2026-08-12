@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from imp.engine.env import TestGates, engine_env, overlay_engine_env
 from imp.paths import imp_home
@@ -284,3 +285,20 @@ def test_overlay_preserves_an_inherited_state_dir() -> None:
     # dict, and membership would strip the migration's deferral pin.
     merged = overlay_engine_env({"IMP_STATE_DIR": "/pinned/old"}, {})
     assert merged["IMP_STATE_DIR"] == "/pinned/old"
+
+
+def test_from_config_reads_a_false_gate_as_no_command() -> None:
+    gates = TestGates.from_config(SimpleNamespace(
+        test_cmd_fast=False, test_cmd_slow=False,
+        test_cmd_fast_timeout=None, test_cmd_slow_timeout=None))
+    assert gates.fast is None and gates.slow is None
+
+
+def test_engine_env_omits_pythonpath_for_every_undecided_spelling() -> None:
+    for value in ((), None, False):
+        env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                         pythonpath=value)  # type: ignore[arg-type]
+        assert "PYTHONPATH" not in env
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                     pythonpath=("src",))
+    assert env["PYTHONPATH"] == "/wt/src"

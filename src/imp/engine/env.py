@@ -36,11 +36,12 @@ class TestGates:
 
     @classmethod
     def from_config(cls, config: Any) -> TestGates:
-        """Bundle the four `test_cmd_*` config fields. Duck-typed on `config` so
-        this stays free of an `imp.providers.config` import."""
+        """Bundle the four `test_cmd_*` config fields, a `false` command reading as
+        no command. Duck-typed on `config` so this stays free of an
+        `imp.providers.config` import."""
         return cls(
-            fast=config.test_cmd_fast,
-            slow=config.test_cmd_slow,
+            fast=config.test_cmd_fast or None,
+            slow=config.test_cmd_slow or None,
             fast_timeout=config.test_cmd_fast_timeout,
             slow_timeout=config.test_cmd_slow_timeout,
         )

@@ -602,7 +602,7 @@ async def run_quest(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 test_gates=TestGates.from_config(config),
-                pythonpath=config.pythonpath,
+                pythonpath=config.pythonpath or (),
                 headless=headless,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy,
@@ -1968,7 +1968,7 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
                    quest_dir=quest.quest_dir,
                    control_root=quest.control_root,
                    test_gates=TestGates.from_config(config),
-                   pythonpath=config.pythonpath),
+                   pythonpath=config.pythonpath or ()),
     )
     try:
         policy = resolve_policy(
