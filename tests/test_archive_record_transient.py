@@ -9,6 +9,7 @@ atomically so a concurrent reader can never see a torn (empty/prefix) file.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import multiprocessing
 import time
@@ -16,7 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine import readfault
 from imp.engine.archive import record
+from imp.engine.state import InMemoryEventLog
+from tests._faultlog import diag, fault_lines
 
 
 def _quest_meta() -> dict:
@@ -105,3 +109,83 @@ def test_write_record_leaves_no_temp_droppings(tmp_path: Path) -> None:
     records_dir = tmp_path / "records"
     record.write_record(records_dir, _rec())
     assert sorted(p.name for p in records_dir.iterdir()) == ["alpha.json"]
+
+
+def test_recovered_record_fault_appends_one_fingerprinted_line(
+        tmp_path: Path, monkeypatch) -> None:
+    records_dir = tmp_path / "records"
+    record.write_record(records_dir, _rec())
+    path = records_dir / "alpha.json"
+    good = path.read_bytes()
+    real = record._read_record_bytes
+    calls = {"n": 0}
+
+    def flaky(p: Path) -> bytes:
+        calls["n"] += 1
+        return good[1:] if calls["n"] == 1 else real(p)
+
+    monkeypatch.setattr(record, "_read_record_bytes", flaky)
+    assert record.read_record(records_dir, "alpha") == _rec()
+    lines = fault_lines()
+    assert len(lines) == 1
+    line = lines[0]
+    assert line["site"] == "archive_record"
+    assert line["path"] == str(path)
+    assert line["recovered"] is True
+    assert line["attempt"] >= 1
+    assert line["head_drop"] is True
+    assert line["tail_drop"] is False
+    assert line["bad_len"] == len(good) - 1
+    assert line["good_len"] == len(good)
+    assert line["bad_sha1"] == hashlib.sha1(good[1:]).hexdigest()
+    assert line["good_sha1"] == hashlib.sha1(good).hexdigest()
+    assert (diag() / line["bytes"]).read_bytes() == good[1:]
+
+
+def test_unrecovered_record_fault_records_one_line_with_the_good_side_null(
+        tmp_path: Path) -> None:
+    records_dir = tmp_path / "records"
+    records_dir.mkdir(parents=True)
+    bad = b'{"id": "bad"}\n{"trailing": true}\n'
+    (records_dir / "bad.json").write_bytes(bad)
+    with pytest.raises(json.JSONDecodeError):
+        record.read_record(records_dir, "bad")
+    lines = fault_lines()
+    assert len(lines) == 1
+    line = lines[0]
+    assert line["site"] == "archive_record"
+    assert line["recovered"] is False
+    assert line["attempt"] is None
+    assert line["good_len"] is None
+    assert line["head_drop"] is None
+    assert line["tail_drop"] is None
+    assert line["good_sha1"] is None
+    assert line["bad_len"] == len(bad)
+    assert line["bad_sha1"] == hashlib.sha1(bad).hexdigest()
+    assert (diag() / line["bytes"]).read_bytes() == bad
+
+
+def test_record_recovery_under_a_sink_names_the_record_file(
+        tmp_path: Path, monkeypatch) -> None:
+    records_dir = tmp_path / "records"
+    record.write_record(records_dir, _rec())
+    good = (records_dir / "alpha.json").read_bytes()
+    real = record._read_record_bytes
+    calls = {"n": 0}
+
+    def flaky(p: Path) -> bytes:
+        calls["n"] += 1
+        return good[:-1] if calls["n"] == 1 else real(p)
+
+    monkeypatch.setattr(record, "_read_record_bytes", flaky)
+    log = InMemoryEventLog()
+    with readfault.event_sink(log):
+        assert record.read_record(records_dir, "alpha") == _rec()
+    warnings = [e for e in log.read() if e["type"] == "runner_warning"]
+    assert len(warnings) == 1
+    message = warnings[0]["payload"]["message"]
+    assert message.startswith(
+        "transient read fault recovered — archive record alpha.json "
+        "re-read cleanly on attempt ")
+    assert message.endswith("(tail-drop)")
+    assert str(records_dir / "alpha.json") in warnings[0]["payload"]["detail"]
