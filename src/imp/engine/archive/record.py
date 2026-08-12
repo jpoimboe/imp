@@ -63,11 +63,7 @@ def _read_record_bytes(path: Path) -> bytes:
 def _reread_or_raise(
         path: Path, raw: bytes,
         err: json.JSONDecodeError | UnicodeDecodeError) -> dict[str, Any]:
-    """Called when the first parse of a record file failed. Re-read up to
-    readfault.READ_RETRIES times (forcing a cold extent read); return the parsed
-    record if a re-read succeeds, else record the unrecovered fault and re-raise.
-    The record file itself stays on disk as evidence — records are written once,
-    never overwritten by a later run."""
+    """Re-read cold up to readfault.READ_RETRIES times, else record and re-raise."""
     for attempt in range(1, readfault.READ_RETRIES + 1):
         time.sleep(0.002 * attempt)       # let the transient settle; rare path
         drop_page_cache(path)
@@ -81,7 +77,7 @@ def _reread_or_raise(
         return data
     readfault.record("archive_record", path, recovered=False, attempt=None,
                      reason=str(err), bad=raw, good=None)
-    raise err
+    raise err   # the bad record file stays put; records are written once, never rewritten
 
 
 def read_record(records_dir: Path, quest_id: str) -> dict[str, Any] | None:

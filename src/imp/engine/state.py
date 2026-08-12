@@ -79,9 +79,7 @@ def _read_state_bytes(path: Path) -> bytes:
 def _recover_or_raise(
         state_path: Path, raw: bytes,
         err: json.JSONDecodeError | UnicodeDecodeError) -> dict[str, Any]:
-    """Called when the first parse of state.json failed. Re-read up to
-    readfault.READ_RETRIES times (forcing a cold extent read); return the parsed
-    dict if a re-read succeeds, else record the unrecovered fault and raise."""
+    """Re-read cold up to readfault.READ_RETRIES times, else record and raise."""
     for attempt in range(1, readfault.READ_RETRIES + 1):
         time.sleep(0.002 * attempt)       # let the transient settle; rare path
         drop_page_cache(state_path)
