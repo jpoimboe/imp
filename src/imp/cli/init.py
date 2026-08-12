@@ -827,7 +827,7 @@ def run_init(
             "dim", enabled=color_on))
 
     # --- re-init idempotency: an already-committed project file means no
-    #     conversation; just bootstrap a missing machine config and re-commit ---
+    #     confirmation screen; just bootstrap a missing machine config and re-commit ---
     if already_initialized:
         if wrote_user_config:
             _bootstrap_user_config(
@@ -874,8 +874,8 @@ def run_init(
                 "proceed without one.")
             return
 
-    # Persist the machine config before the conversation so a re-run never
-    # re-asks the questions already answered.
+    # Persist the machine config before the confirmation screen so a re-run
+    # never re-asks the questions already answered.
     if wrote_user_config:
         _bootstrap_user_config(
             user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
