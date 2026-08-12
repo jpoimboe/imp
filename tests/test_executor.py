@@ -12,11 +12,13 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
+from imp.engine import readfault
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.feedback import COMPLETION_BACKSTOP
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
+from tests._faultlog import fault_lines
 from tests.conftest import _git, _init_repo
 
 
@@ -134,6 +136,35 @@ def _register_fake(output: dict) -> None:
         "fake", env_check=lambda: True,
         factory=lambda model: _FakeProvider(output, model=model),
     )
+
+
+_FAULT_MESSAGE = (
+    "transient read fault recovered — state.json re-read cleanly on attempt 1 (head-drop)")
+
+
+class _FaultRunner:
+    """Records a recovered read fault from inside the run, so a test can observe
+    whether run_quest had readfault's event sink installed around its body."""
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        readfault.record(
+            "state", Path("/q/quests/test-quest/state/state.json"),
+            recovered=True, attempt=1, reason="Expecting value: line 1 column 1 (char 0)",
+            bad=b"bc", good=b"abc")
+        yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _FaultProvider:
+    name = "fake"
+
+    def __init__(self, model: str = "m") -> None:
+        self.model = model
+
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+        return _FaultRunner()
 
 
 class _CapturingRunner:
@@ -259,6 +290,28 @@ async def test_run_quest_completes_minimal_workflow(tmp_path: Path) -> None:
 
     from imp.engine.archive import read as archive_read
     assert archive_read.status_of(quest.control_root, quest.id) == "done"
+
+
+@pytest.mark.anyio
+async def test_run_quest_installs_the_read_fault_sink_for_its_body(tmp_path: Path) -> None:
+    from imp.providers import resolve
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _FaultProvider(model))
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    assert [ln["site"] for ln in fault_lines()] == ["state"]
+    assert readfault._sink is None          # the stack closed with the run
+
+    from imp.cli.main import _events_search_archived
+    hits = _events_search_archived(quest.control_root, "read fault", types=None, agents=None)
+    assert [h.quest_id for h in hits] == ["test-quest"]
+    matched = [ev for _ordinal, ev in hits[0].events]
+    assert [ev["type"] for ev in matched] == ["runner_warning"]
+    assert matched[0]["payload"]["message"] == _FAULT_MESSAGE
 
 
 @pytest.mark.anyio
