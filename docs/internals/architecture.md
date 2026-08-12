@@ -115,6 +115,7 @@ flowchart LR
 | Layer | Module(s) | Role |
 |---|---|---|
 | Entry / drivers | `cli/main.py`, `cli/live_driver.py` | Command dispatch; live / headless rendering + signal wiring around `run_change`. |
+| CLI reads | `cli/store.py`, `cli/store_proxy.py` | The read seam every CLI command goes through: the `Store` protocol + `LocalStore`'s on-disk reads and row primitives. `make_store()` returns a `ProxyStore` under `IMP_SESSION_SOCKET`, so a sandboxed agent's reads are served by the unsandboxed session daemon instead of the masked state directory. |
 | Executor | `engine/executor.py` | Step loop: load → resolve providers → dispatch → route. Returns `COMPLETED \| PAUSED \| ERRORED`. |
 | Quest / state | `engine/quest.py`, `engine/state.py` | Per-run identity + worktree; execution cursor, vars, resolved tiers (atomic `save()`); append-only `EventLog`. |
 | Workflow load | `engine/loader.py`, `engine/types.py` | Parse `workflow.yaml` + `agents/*.md` into a frozen `Workflow` (phases → steps, agents, vars, rules). |
