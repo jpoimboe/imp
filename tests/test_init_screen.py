@@ -223,6 +223,16 @@ def test_editing_import_roots_to_empty_records_needs_none(tmp_path: Path) -> Non
     assert "(none needed)" in body and body.endswith("you set this")
 
 
+def test_editing_import_roots_all_invalid_leaves_undecided_with_note(tmp_path: Path) -> None:
+    # "srcc" doesn't exist: a typo must not permanently opt out of import roots.
+    state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, "srcc")
+    assert state.pythonpath is None
+    assert state.roots_provenance == "no such directory in this repo — nothing recorded"
+    body = _body(state, ScreenRow.IMPORT_ROOT)[4]
+    assert "(none)" in body
+    assert "no such directory in this repo" in body
+
+
 def test_edit_prompts_prefill_the_current_row_value() -> None:
     state = _detected_state()
     assert _edit_default(state, ScreenRow.BRANCH) == "master"

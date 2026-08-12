@@ -575,6 +575,22 @@ def test_use_defaults_pythonpath_drops_absent_dirs(tmp_path):
     assert data["pythonpath"] == ["real"]   # validated against disk
 
 
+def test_use_defaults_all_invalid_pythonpath_reports_and_leaves_unset(tmp_path):
+    from imp.cli.init import run_init_noninteractive
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append,
+        pythonpath=["srcc"], detect_verify_fn=lambda _r: None)
+    # config must NOT record pythonpath: false — that is the deliberate opt-out
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data.get("pythonpath") is None
+    # a report line must name the bad entry and say roots are left unset
+    report = "\n".join(msgs)
+    assert "srcc" in report
+    assert "no such directory" in report
+    assert "leaving import roots unset" in report
+
+
 def test_use_defaults_fills_offline_test_command(tmp_path):
     from imp.cli.init import run_init_noninteractive
     from imp.cli.verify_detect import DetectedTestCommand

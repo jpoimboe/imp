@@ -447,6 +447,7 @@ _NONE_NEEDED = "(none needed)"
 _YOU_SET_THIS = "you set this"
 _NO_TESTS_DETECTED = "nothing detected — imp runs no tests until one is set"
 _NO_SETUP_DETECTED = "nothing detected — no command runs in new worktrees"
+_NO_SUCH_ROOTS = "no such directory in this repo — nothing recorded"
 _NO_BRANCH_DETECTED = "nothing detected"
 _CUSTOM_WORKFLOW = "custom workflow"
 
@@ -615,9 +616,12 @@ def _apply_row_edit(
             state, worktree_setup=answer.strip() or False,
             setup_provenance=_YOU_SET_THIS)
     entered = [part.strip() for part in answer.split(",") if part.strip()]
-    return replace(
-        state, pythonpath=validate_detected_roots(project_root, entered) or False,
-        roots_provenance=_YOU_SET_THIS)
+    if not entered:
+        return replace(state, pythonpath=False, roots_provenance=_YOU_SET_THIS)
+    validated = validate_detected_roots(project_root, entered)
+    if not validated:
+        return replace(state, pythonpath=None, roots_provenance=_NO_SUCH_ROOTS)
+    return replace(state, pythonpath=validated, roots_provenance=_YOU_SET_THIS)
 
 
 class ScreenAccepted(NamedTuple):
@@ -973,7 +977,14 @@ def run_init_noninteractive(
     elif pythonpath is False:
         roots = False
     else:
-        roots = validate_detected_roots(project_root, pythonpath) or False
+        validated = validate_detected_roots(project_root, pythonpath)
+        if not validated:
+            output_fn(
+                f"--pythonpath: no such directory in this repo: "
+                f"{', '.join(pythonpath)} — leaving import roots unset.")
+            roots = None
+        else:
+            roots = validated
 
     settings = InitSettings(
         default_workflow=workflow, default_base=default_base,
