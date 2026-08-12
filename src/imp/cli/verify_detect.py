@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 
 class DetectedTestCommand(NamedTuple):
@@ -101,5 +101,6 @@ def resolve_test_cmd_choice(
     return suggested
 
 
-def format_test_cmd_fast_yaml(command: str) -> str:
+def format_test_cmd_fast_yaml(command: str | Literal[False]) -> str:
+    """`json.dumps` spells both states YAML accepts: a quoted command, or `false`."""
     return f"test_cmd_fast: {json.dumps(command)}\n"

@@ -16,6 +16,10 @@ def test_format_multi_root() -> None:
     assert format_pythonpath_yaml(["src", "."]) == 'pythonpath: ["src", "."]\n'
 
 
+def test_format_needs_none_line() -> None:
+    assert format_pythonpath_yaml(False) == "pythonpath: false\n"
+
+
 from imp.cli.pythonpath_detect import (  # noqa: E402
     ImportRoots,
     detect_import_roots,

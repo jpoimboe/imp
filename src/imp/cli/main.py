@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NoReturn
 
 from imp import __version__
 from imp.cli import palette as pal
@@ -730,7 +730,7 @@ def _test_cmd_fast_nudge(
     with project_file.open("a") as f:
         if existing and not existing.endswith("\n"):
             f.write("\n")
-        f.write(format_test_cmd_fast_yaml(chosen))
+        f.write(format_test_cmd_fast_yaml(chosen or False))
 
 
 def _apply_theme() -> None:
@@ -779,11 +779,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
             raw_pythonpath = getattr(args, "pythonpath", None)
-            pythonpath = (
-                [s.strip() for s in raw_pythonpath.split(",") if s.strip()]
-                if raw_pythonpath is not None
-                else None
-            )
+            pythonpath: list[str] | Literal[False] | None
+            if raw_pythonpath is None:
+                pythonpath = None
+            else:
+                pythonpath = [s.strip() for s in raw_pythonpath.split(",")
+                              if s.strip()] or False
             run_init_noninteractive(
                 project,
                 output_fn=print,

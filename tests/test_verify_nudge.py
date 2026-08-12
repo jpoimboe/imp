@@ -73,7 +73,7 @@ def test_no_nudge_when_opted_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
-    root = _project(tmp_path, 'default-workflow: imp\ntest_cmd_fast: ""\n')
+    root = _project(tmp_path, "default-workflow: imp\ntest_cmd_fast: false\n")
     errs: list[str] = []
     _test_cmd_fast_nudge(
         control_root=root, non_interactive=True,
@@ -83,7 +83,7 @@ def test_no_nudge_when_opted_out(
     assert errs == []
 
 
-def test_interactive_skip_writes_optout(
+def test_interactive_skip_writes_needs_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
@@ -93,7 +93,7 @@ def test_interactive_skip_writes_optout(
         input_fn=_seq("skip"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: DetectedTestCommand("make check", "from Makefile"),
     )
-    assert 'test_cmd_fast: ""' in (root / "imp" / "config.yaml").read_text()
+    assert "test_cmd_fast: false" in (root / "imp" / "config.yaml").read_text()
 
 
 def test_interactive_edit_writes_custom_command(

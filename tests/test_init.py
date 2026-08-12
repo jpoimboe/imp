@@ -269,12 +269,12 @@ def test_init_writes_test_cmd_fast_from_the_screen(tmp_path, monkeypatch):
     assert data["test_cmd_fast"] == "make check"
 
 
-def test_init_writes_optout_when_the_screen_opts_out(tmp_path, monkeypatch):
-    _stub_screen(monkeypatch, test_cmd_fast="", tests_provenance="you set this")
+def test_init_writes_needs_none_when_the_screen_opts_out(tmp_path, monkeypatch):
+    _stub_screen(monkeypatch, test_cmd_fast=False, tests_provenance="you set this")
     run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
              output_fn=lambda _m: None)
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["test_cmd_fast"] == ""
+    assert data["test_cmd_fast"] is False
 
 
 def test_init_comment_names_timeout_defaults(tmp_path, monkeypatch):
@@ -285,6 +285,8 @@ def test_init_comment_names_timeout_defaults(tmp_path, monkeypatch):
     assert "120s" in text and "300s" in text
     assert "test_cmd_fast_timeout" in text
     assert "test_cmd_slow" in text and "test_cmd_slow_timeout" in text
+    assert "Empty string opts out" not in text
+    assert "false declares the project needs none" in text
 
 
 def test_init_available_bwrap_is_quiet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -599,23 +601,24 @@ def test_write_init_files_omits_test_block_when_none(tmp_path: Path) -> None:
     write_init_files(
         tmp_path,
         InitSettings(default_workflow="default", default_base="main",
-                     test_cmd_fast=None, pythonpath=[]),
+                     test_cmd_fast=None, pythonpath=None),
     )
     text = (tmp_path / "imp" / "config.yaml").read_text()
     assert "test_cmd_fast" not in text          # None => block omitted entirely
-    assert "# pythonpath:" in text              # empty roots => teaching hint
+    assert "# pythonpath:" in text              # None => teaching hint
     assert ".imp/" in (tmp_path / ".gitignore").read_text()
 
 
-def test_write_init_files_writes_optout_block_for_empty_string(tmp_path: Path) -> None:
+def test_write_init_files_writes_the_needs_none_block_for_false(tmp_path: Path) -> None:
     from imp.cli.init import InitSettings, write_init_files
     write_init_files(
         tmp_path,
         InitSettings(default_workflow="default", default_base="main",
-                     test_cmd_fast="", pythonpath=[]),
+                     test_cmd_fast=False, pythonpath=False),
     )
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["test_cmd_fast"] == ""          # "" => explicit opt-out block written
+    assert data["test_cmd_fast"] is False       # decided: this project needs none
+    assert data["pythonpath"] is False
 
 
 def test_use_defaults_writes_config_yaml_no_model_call(tmp_path, monkeypatch):
@@ -692,20 +695,19 @@ def test_use_defaults_explicit_pythonpath_overrides_detection(tmp_path):
     assert data["pythonpath"] == ["vendor"]   # the flag wins over detection
 
 
-def test_use_defaults_empty_pythonpath_suppresses_detection(tmp_path):
+def test_use_defaults_false_pythonpath_suppresses_detection(tmp_path):
     from imp.cli.init import run_init_noninteractive
     # Same fixture that triggers detection in test_use_defaults_detects_pythonpath_from_pyproject
     (tmp_path / "pyproject.toml").write_text(
         '[tool.hatch.build.targets.wheel]\npackages = ["src/app"]\n')
     (tmp_path / "src" / "app").mkdir(parents=True)
-    # pythonpath=[] explicitly opts out — detector must NOT run
+    # pythonpath=False is the deliberate opt-out — the detector must NOT run
     run_init_noninteractive(
-        tmp_path, output_fn=lambda _m: None, pythonpath=[],
+        tmp_path, output_fn=lambda _m: None, pythonpath=False,
         detect_verify_fn=lambda _r: None)
     text = (tmp_path / "imp" / "config.yaml").read_text()
-    data = yaml.safe_load(text)
-    assert data.get("pythonpath") is None  # empty list => teaching hint, not ["src"]
-    assert "# pythonpath:" in text
+    assert yaml.safe_load(text)["pythonpath"] is False   # not ["src"], not the hint
+    assert "# pythonpath:" not in text
 
 
 def test_use_defaults_initializes_missing_git_repo(tmp_path_factory, monkeypatch):
@@ -825,7 +827,7 @@ def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
     assert called["kw"]["pythonpath"] == ["src", "lib"]   # comma-split, blanks dropped
 
 
-def test_init_empty_pythonpath_flag_passes_empty_list(tmp_path, monkeypatch):
+def test_init_empty_pythonpath_flag_passes_false(tmp_path, monkeypatch):
     import imp.cli.main as m
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
@@ -836,10 +838,10 @@ def test_init_empty_pythonpath_flag_passes_empty_list(tmp_path, monkeypatch):
 
     monkeypatch.setattr("imp.cli.init.run_init_noninteractive", _spy)
 
-    # --pythonpath "" must yield pythonpath=[] (not None)
+    # --pythonpath "" is an explicit instruction: the opt-out, not "detect"
     args = m._build_parser().parse_args(["init", "--use-defaults", "--pythonpath", ""])
     args.func(args)
-    assert called["kw"]["pythonpath"] == []
+    assert called["kw"]["pythonpath"] is False
 
     # absent --pythonpath must yield pythonpath=None
     called.clear()

@@ -59,12 +59,12 @@ def test_state_with_nothing_detected_leaves_tests_unset_not_opted_out() -> None:
     state = _screen_state_from_detection(
         workflow="default", base=None, tests=None,
         roots=ImportRoots([], "not a Python project"))
-    # None omits the test_cmd_fast block; "" is the user's explicit opt-out.
+    # Nothing detected is nothing decided: None for both, never an empty spelling.
     assert state.test_cmd_fast is None
     assert state.tests_provenance == "nothing detected — imp runs no tests until one is set"
     assert state.branch == ""
     assert state.branch_provenance == "nothing detected"
-    assert state.pythonpath == []
+    assert state.pythonpath is None
     assert state.roots_provenance == "not a Python project"
 
 
@@ -188,12 +188,13 @@ def test_editing_tests_to_a_command_replaces_the_detected_one(tmp_path: Path) ->
     assert _body(state, ScreenRow.TESTS)[2].endswith("you set this")
 
 
-def test_editing_tests_to_empty_is_the_explicit_opt_out(tmp_path: Path) -> None:
+def test_editing_tests_to_empty_records_needs_none(tmp_path: Path) -> None:
     state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.TESTS, "   ")
-    # "" opts out explicitly; None would omit the key and print the teaching hint.
-    assert state.test_cmd_fast == ""
+    # False is the user's answer "this project needs none"; None would mean the row
+    # was never decided and would have imp raise it again.
+    assert state.test_cmd_fast is False
     body = _body(state, ScreenRow.TESTS)[2]
-    assert "(none)" in body and body.endswith("you set this")
+    assert "(none needed)" in body and body.endswith("you set this")
 
 
 def test_editing_import_roots_drops_entries_that_do_not_validate(tmp_path: Path) -> None:
@@ -206,11 +207,11 @@ def test_editing_import_roots_drops_entries_that_do_not_validate(tmp_path: Path)
     assert "src, lib" in _body(state, ScreenRow.IMPORT_ROOT)[3]
 
 
-def test_editing_import_roots_to_empty_clears_them(tmp_path: Path) -> None:
+def test_editing_import_roots_to_empty_records_needs_none(tmp_path: Path) -> None:
     state = _apply_row_edit(tmp_path, _detected_state(), ScreenRow.IMPORT_ROOT, "  ")
-    assert state.pythonpath == []
+    assert state.pythonpath is False
     body = _body(state, ScreenRow.IMPORT_ROOT)[3]
-    assert "(none)" in body and body.endswith("you set this")
+    assert "(none needed)" in body and body.endswith("you set this")
 
 
 def test_edit_prompts_prefill_the_current_row_value() -> None:
@@ -222,6 +223,12 @@ def test_edit_prompts_prefill_the_current_row_value() -> None:
         replace(state, pythonpath=["src", "lib"]), ScreenRow.IMPORT_ROOT) == "src, lib"
     assert _edit_default(
         replace(state, test_cmd_fast=None), ScreenRow.TESTS) == ""
+    assert _edit_default(
+        replace(state, test_cmd_fast=False), ScreenRow.TESTS) == ""
+    assert _edit_default(
+        replace(state, pythonpath=None), ScreenRow.IMPORT_ROOT) == ""
+    assert _edit_default(
+        replace(state, pythonpath=False), ScreenRow.IMPORT_ROOT) == ""
 
 
 def test_edit_prompt_labels_are_verbatim() -> None:

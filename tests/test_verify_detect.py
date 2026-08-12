@@ -131,5 +131,5 @@ def test_format_command_line() -> None:
     assert format_test_cmd_fast_yaml("make check") == 'test_cmd_fast: "make check"\n'
 
 
-def test_format_optout_line() -> None:
-    assert format_test_cmd_fast_yaml("") == 'test_cmd_fast: ""\n'
+def test_format_needs_none_line() -> None:
+    assert format_test_cmd_fast_yaml(False) == "test_cmd_fast: false\n"

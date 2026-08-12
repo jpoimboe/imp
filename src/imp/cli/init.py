@@ -32,7 +32,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import yaml
 from ruamel.yaml.error import YAMLError
@@ -117,11 +117,13 @@ class IntegrationBranchUnresolved(Exception):
 
 @dataclass(frozen=True, slots=True)
 class InitSettings:
-    """The settings the shared writer serializes into imp/config.yaml."""
+    """The settings the shared writer serializes into imp/config.yaml. The two
+    stack-dependent fields are three-state: None never decided, False decided as
+    "this project needs none", anything else the value."""
     default_workflow: str
     default_base: str
-    test_cmd_fast: str | None  # None omits the block; "" writes an explicit opt-out
-    pythonpath: list[str]      # validated roots; empty writes the teaching hint
+    test_cmd_fast: str | Literal[False] | None
+    pythonpath: list[str] | Literal[False] | None
 
 
 def _in_git_repo(project_root: Path) -> bool:
@@ -303,7 +305,7 @@ def _bootstrap_user_config(
 
 _TEST_CMD_FAST_COMMENT = (
     "\n# Fast test gate: lint + typecheck + fast tests, run after each\n"
-    "# implement loop to catch regressions. Empty string opts out.\n"
+    "# implement loop to catch regressions. false declares the project needs none.\n"
     "# The slow gate (test_cmd_slow) runs the full suite once per quest\n"
     "# and falls back to test_cmd_fast when unset. Timeouts default to\n"
     "# 120s (fast) / 300s (slow) — override with test_cmd_fast_timeout /\n"
@@ -462,6 +464,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
 _CONFIRM_HEADER = "Here's how imp will set up this project:"
 _CONFIRM_HINT = "↑↓ move · space change · enter accept · ? talk it through · esc cancel"
 _NO_VALUE = "(none)"
+_NONE_NEEDED = "(none needed)"
 _YOU_SET_THIS = "you set this"
 _NO_TESTS_DETECTED = "nothing detected — imp runs no tests until one is set"
 _NO_BRANCH_DETECTED = "nothing detected"
@@ -499,9 +502,9 @@ class InitScreenState:
     workflow: str
     branch: str
     branch_provenance: str
-    test_cmd_fast: str | None
+    test_cmd_fast: str | Literal[False] | None
     tests_provenance: str
-    pythonpath: list[str]
+    pythonpath: list[str] | Literal[False] | None
     roots_provenance: str
 
 
@@ -518,7 +521,7 @@ def _screen_state_from_detection(
         branch_provenance=base.provenance if base else _NO_BRANCH_DETECTED,
         test_cmd_fast=tests.command if tests else None,
         tests_provenance=tests.provenance if tests else _NO_TESTS_DETECTED,
-        pythonpath=list(roots.roots),
+        pythonpath=list(roots.roots) or None,
         roots_provenance=roots.provenance,
     )
 
@@ -534,15 +537,23 @@ def _cycle_workflow(state: InitScreenState, workflows: list[str]) -> InitScreenS
         workflow=workflows[(workflows.index(state.workflow) + 1) % len(workflows)])
 
 
+def _display_value(value: str | list[str] | Literal[False] | None) -> str:
+    if value is None:
+        return _NO_VALUE
+    if value is False:
+        return _NONE_NEEDED
+    return ", ".join(value) if isinstance(value, list) else value
+
+
 def _row_cells(state: InitScreenState) -> dict[ScreenRow, tuple[str, str, str]]:
     """Each row's (label, value, provenance): the screen pads these into columns,
     the setup-conversation kickoff reads them back to the agent."""
     values: dict[ScreenRow, tuple[str, str]] = {
         ScreenRow.WORKFLOW: (state.workflow, _workflow_blurb(state.workflow)),
         ScreenRow.BRANCH: (state.branch or _NO_VALUE, state.branch_provenance),
-        ScreenRow.TESTS: (state.test_cmd_fast or _NO_VALUE, state.tests_provenance),
+        ScreenRow.TESTS: (_display_value(state.test_cmd_fast), state.tests_provenance),
         ScreenRow.IMPORT_ROOT: (
-            ", ".join(state.pythonpath) or _NO_VALUE, state.roots_provenance),
+            _display_value(state.pythonpath), state.roots_provenance),
     }
     return {row: (_ROW_LABELS[row], value, note)
             for row, (value, note) in values.items()}
@@ -555,8 +566,8 @@ def _settings_summary(settings: InitSettings) -> list[str]:
     values: dict[ScreenRow, str] = {
         ScreenRow.WORKFLOW: settings.default_workflow,
         ScreenRow.BRANCH: settings.default_base or _NO_VALUE,
-        ScreenRow.TESTS: settings.test_cmd_fast or _NO_VALUE,
-        ScreenRow.IMPORT_ROOT: ", ".join(settings.pythonpath) or _NO_VALUE,
+        ScreenRow.TESTS: _display_value(settings.test_cmd_fast),
+        ScreenRow.IMPORT_ROOT: _display_value(settings.pythonpath),
     }
     return [f"  {_ROW_LABELS[row]:<{label_w}}  {values[row]}" for row in ScreenRow]
 
@@ -592,7 +603,7 @@ def _edit_default(state: InitScreenState, row: ScreenRow) -> str:
         return state.branch
     if row is ScreenRow.TESTS:
         return state.test_cmd_fast or ""
-    return ", ".join(state.pythonpath)
+    return ", ".join(state.pythonpath) if state.pythonpath else ""
 
 
 def _apply_row_edit(
@@ -604,10 +615,11 @@ def _apply_row_edit(
             state, branch=answer.strip(), branch_provenance=_YOU_SET_THIS)
     if row is ScreenRow.TESTS:
         return replace(
-            state, test_cmd_fast=answer.strip(), tests_provenance=_YOU_SET_THIS)
+            state, test_cmd_fast=answer.strip() or False,
+            tests_provenance=_YOU_SET_THIS)
     entered = [part.strip() for part in answer.split(",") if part.strip()]
     return replace(
-        state, pythonpath=validate_detected_roots(project_root, entered),
+        state, pythonpath=validate_detected_roots(project_root, entered) or False,
         roots_provenance=_YOU_SET_THIS)
 
 
@@ -739,11 +751,11 @@ def write_init_files(project_root: Path, settings: InitSettings) -> bool:
     else:
         test_block = (
             _TEST_CMD_FAST_COMMENT + format_test_cmd_fast_yaml(settings.test_cmd_fast))
-    if settings.pythonpath:
+    if settings.pythonpath is None:
+        pythonpath_block = _pythonpath_hint()
+    else:
         pythonpath_block = (
             _PYTHONPATH_BLOCK_COMMENT + format_pythonpath_yaml(settings.pythonpath))
-    else:
-        pythonpath_block = _pythonpath_hint()
     (imp_dir / "config.yaml").write_text(
         body + test_block + pythonpath_block + _memory_pointer())
     _write_memory_scaffold(imp_dir, settings.default_workflow)
@@ -897,13 +909,16 @@ def _confirm_init_settings(
                 "Setup didn't finish — the assistant reported it couldn't complete. "
                 "Re-run `imp init` when you're ready.")
             return None
-        roots = list((output.get("pythonpath") or {}).get("roots", []))
+        roots = validate_detected_roots(
+            project_root,
+            list((output.get("pythonpath") or {}).get("roots", []))) or None
         test_cmd_fast = output.get("test_cmd_fast")
         return InitSettings(
             default_workflow=str(output["default_workflow"]),
             default_base=str(output["default_base"]),
-            test_cmd_fast=None if test_cmd_fast is None else str(test_cmd_fast),
-            pythonpath=validate_detected_roots(project_root, roots))
+            test_cmd_fast=(None if test_cmd_fast is None
+                           else str(test_cmd_fast) or False),
+            pythonpath=roots)
 
 
 def run_init(
@@ -1058,7 +1073,7 @@ def run_init_noninteractive(
     output_fn: Callable[[str], None],
     workflow: str | None = None,
     base: str | None = None,
-    pythonpath: list[str] | None = None,
+    pythonpath: list[str] | Literal[False] | None = None,
     detect_verify_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
 ) -> None:
     """Provider-free, non-interactive `imp init`: write imp/config.yaml from
@@ -1099,8 +1114,13 @@ def run_init_noninteractive(
     detect_cmd = detect_verify_fn or detect_test_command
     detected = detect_cmd(project_root)
     test_cmd_fast = detected.command if detected else None  # None omits the block
-    roots = (validate_detected_roots(project_root, pythonpath) if pythonpath is not None
-             else detect_import_roots(project_root).roots)
+    roots: list[str] | Literal[False] | None
+    if pythonpath is None:
+        roots = detect_import_roots(project_root).roots or None
+    elif pythonpath is False:
+        roots = False
+    else:
+        roots = validate_detected_roots(project_root, pythonpath) or False
 
     settings = InitSettings(
         default_workflow=workflow, default_base=default_base,

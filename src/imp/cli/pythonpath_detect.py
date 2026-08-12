@@ -16,7 +16,7 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from imp.providers.effective import load_effective_config
 from imp.providers.resolve import available_providers
@@ -76,9 +76,10 @@ def validate_detected_roots(project_root: Path, roots: list[str]) -> list[str]:
     return out
 
 
-def format_pythonpath_yaml(dirs: list[str]) -> str:
+def format_pythonpath_yaml(dirs: list[str] | Literal[False]) -> str:
     """Serialize a `pythonpath:` YAML line matching `format_test_cmd_fast_yaml`'s
-    json.dumps idiom, e.g. `["src"]` => `pythonpath: ["src"]\\n`."""
+    json.dumps idiom, e.g. `["src"]` => `pythonpath: ["src"]\\n`, `False` =>
+    `pythonpath: false\\n`."""
     return f"pythonpath: {json.dumps(dirs)}\n"
 
 

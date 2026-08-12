@@ -113,21 +113,21 @@ def test_accepting_the_screen_writes_the_rows_as_they_stand(
         color=False, output_fn=lambda _m: None)
     assert settings is not None
     assert settings.default_workflow == "minimal"
-    # None omits the block + writes the teaching hint; "" is the user's opt-out.
+    # None never decided; False is the user's "this project needs none".
     assert settings.test_cmd_fast is None
-    assert settings.pythonpath == []
+    assert settings.pythonpath is None
 
 
-def test_accepting_an_edited_empty_tests_row_writes_the_explicit_opt_out(
+def test_accepting_an_edited_empty_tests_row_writes_needs_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = replace(_detected_state(), test_cmd_fast="",
+    state = replace(_detected_state(), test_cmd_fast=False,
                     tests_provenance="you set this")
     _stub_screen(monkeypatch, ScreenAccepted(state))
     settings = _confirm_init_settings(
         tmp_path, state, providers=["anthropic"], allow_unsandboxed=False,
         color=False, output_fn=lambda _m: None)
-    assert settings is not None and settings.test_cmd_fast == ""
+    assert settings is not None and settings.test_cmd_fast is False
 
 
 def test_talk_seeds_the_conversation_with_the_screens_current_rows(
@@ -186,18 +186,18 @@ def test_a_conversation_omitting_the_test_command_leaves_the_key_unwritten(
 def test_a_conversation_returning_an_empty_test_command_writes_the_opt_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty string is still the deliberate opt-out, written as an explicit key."""
+    """An empty answer is still the deliberate opt-out, now written as false."""
     _stub_screen(monkeypatch, ScreenTalk(_detected_state()))
     _stub_conversation(monkeypatch, _conv_result(test_cmd_fast=""))
     settings = _confirm_init_settings(
         tmp_path, _detected_state(), providers=["anthropic"],
         allow_unsandboxed=False, color=False, output_fn=lambda _m: None)
     assert settings is not None
-    assert settings.test_cmd_fast == ""
+    assert settings.test_cmd_fast is False
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     write_init_files(tmp_path, settings)
     data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["test_cmd_fast"] == ""
+    assert data["test_cmd_fast"] is False
 
 
 def test_talk_without_a_credential_prints_the_relocated_message_and_returns(
@@ -311,7 +311,7 @@ def test_one_enter_echoes_configured_block_above_created(
 def test_settings_summary_empty_values_render_as_none() -> None:
     settings = InitSettings(
         default_workflow="default", default_base="main",
-        test_cmd_fast=None, pythonpath=[])
+        test_cmd_fast=None, pythonpath=None)
     lines = _settings_summary(settings)
     assert len(lines) == 4
     tests_line = next(line for line in lines if "tests" in line)
@@ -321,10 +321,17 @@ def test_settings_summary_empty_values_render_as_none() -> None:
 
     settings_empty_base = InitSettings(
         default_workflow="default", default_base="",
-        test_cmd_fast=None, pythonpath=[])
+        test_cmd_fast=None, pythonpath=None)
     lines_empty_base = _settings_summary(settings_empty_base)
     branch_line = next(line for line in lines_empty_base if "branch" in line)
     assert "(none)" in branch_line
+
+    decided_none = InitSettings(
+        default_workflow="default", default_base="main",
+        test_cmd_fast=False, pythonpath=False)
+    lines_false = _settings_summary(decided_none)
+    assert "(none needed)" in next(ln for ln in lines_false if "tests" in ln)
+    assert "(none needed)" in next(ln for ln in lines_false if "import root" in ln)
 
 
 def test_init_finishes_with_no_provider_credential_at_all(
@@ -413,3 +420,28 @@ def test_an_untouched_nothing_detected_tests_row_writes_no_key(
     text = (root / "imp" / "config.yaml").read_text()
     assert "test_cmd_fast" not in text          # None omits the block entirely
     assert yaml.safe_load(text)["default-base"] == "main"
+
+
+@pytest.mark.parametrize("test_cmd_fast", [None, "make check", False])
+@pytest.mark.parametrize("pythonpath", [None, ["src"], False])
+def test_every_config_an_init_run_can_write_is_loadable(
+    tmp_path: Path, test_cmd_fast: object, pythonpath: object,
+) -> None:
+    from imp.providers.config import parse_config_layer
+
+    root = tmp_path / "proj"
+    (root / "src").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
+    write_init_files(root, InitSettings(
+        default_workflow="default", default_base="main",
+        test_cmd_fast=test_cmd_fast, pythonpath=pythonpath))   # type: ignore[arg-type]
+    layer, _src = parse_config_layer(root / "imp" / "config.yaml")  # type: ignore[misc]
+    if test_cmd_fast is None:
+        assert "test_cmd_fast" not in layer
+    else:
+        assert layer["test_cmd_fast"] == test_cmd_fast
+    if pythonpath is None:
+        assert "pythonpath" not in layer
+        assert "# pythonpath: [src]" in (root / "imp" / "config.yaml").read_text()
+    else:
+        assert layer["pythonpath"] == pythonpath
