@@ -325,7 +325,7 @@ def test_ensure_current_leaves_non_imp_workflow_untouched(tmp_path: Path) -> Non
     rec = record.build_record(
         {"id": "wf02", "title": "", "base_branch": "main",
          "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
-         "workflow": "patent"},
+         "workflow": "minimal"},
         {"id": "wf02", "status": "merged", "step": "finalize"},
         events_hash)
     record.write_record(archive.records_root(tmp_path), rec)
@@ -335,7 +335,7 @@ def test_ensure_current_leaves_non_imp_workflow_untouched(tmp_path: Path) -> Non
 
     migrated = record.read_record(archive.records_root(tmp_path), "wf02")
     assert migrated is not None
-    assert migrated["quest_meta"]["workflow"] == "patent"
+    assert migrated["quest_meta"]["workflow"] == "minimal"
 
 
 def test_ensure_current_leaves_null_workflow_untouched(tmp_path: Path) -> None:

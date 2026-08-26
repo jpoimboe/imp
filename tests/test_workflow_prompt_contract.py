@@ -747,7 +747,7 @@ def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
     assert "final message reports `NEEDS_CONTEXT` or `BLOCKED`" in text
 
 
-@pytest.mark.parametrize("tree", ["default", "patent"])
+@pytest.mark.parametrize("tree", ["default"])
 def test_dispatched_subagents_have_no_schema_or_complete_step(tree: str) -> None:
     wf = load_workflow(bundled_workflow_dir(tree))
     dispatchable: set[str] = set()

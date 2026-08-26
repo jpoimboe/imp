@@ -46,12 +46,12 @@ def test_both_workflow_dirs_take_the_workflow_name_from_the_control_root(
     monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))
     control = tmp_path / "control"
     worktree = tmp_path / "wt"
-    for root, name in ((control, "patent"), (worktree, "default")):
+    for root, name in ((control, "minimal"), (worktree, "default")):
         (root / "imp").mkdir(parents=True)
         (root / "imp" / "config.yaml").write_text(f"default-workflow: {name}\n")
     # A committed fork of the CONTROL root's chosen name, present only in the
-    # worktree: reachable solely by resolving "patent" against the worktree.
-    (worktree / "imp" / "workflows" / "patent").mkdir(parents=True)
+    # worktree: reachable solely by resolving "minimal" against the worktree.
+    (worktree / "imp" / "workflows" / "minimal").mkdir(parents=True)
     quest = Quest(
         id="2026-06-15-roots1", title="X", base_branch="main",
         control_root=control, project_root=worktree,
@@ -59,9 +59,9 @@ def test_both_workflow_dirs_take_the_workflow_name_from_the_control_root(
     )
     # Worktree dir root, control-root name. Under the old two-root read this was
     # bundled_workflow_dir("default") — the worktree naming its own workflow.
-    assert quest.live_workflow_dir == worktree / "imp" / "workflows" / "patent"
+    assert quest.live_workflow_dir == worktree / "imp" / "workflows" / "minimal"
     # Control dir root: no committed fork there, so the bundled copy.
-    assert quest.control_workflow_dir == bundled_workflow_dir("patent")
+    assert quest.control_workflow_dir == bundled_workflow_dir("minimal")
 
 
 def test_change_create_tears_down_on_an_invalid_default_workflow(
@@ -101,7 +101,7 @@ def test_change_missing_workflow_dir_raises_naming_path(tmp_path: Path) -> None:
                       base_branch="main")
     msg = str(exc.value)
     assert "ghost" in msg
-    assert "imp" in msg and "patent" in msg
+    assert "imp" in msg and "minimal" in msg
 
 
 def test_validate_workflow_name_accepts_plain_segment() -> None:
@@ -136,7 +136,7 @@ def test_resolve_workflow_dir_unknown_names_valid_set(tmp_path: Path) -> None:
         resolve_workflow_dir(tmp_path, "bogus")
     msg = str(exc.value)
     assert "bogus" in msg
-    assert "default" in msg and "patent" in msg  # bundled set is named in the error
+    assert "default" in msg and "minimal" in msg  # bundled set is named in the error
 
 
 def test_resolve_workflow_dir_rejects_invalid_name(tmp_path: Path) -> None:
@@ -197,7 +197,7 @@ def test_available_workflow_names_unions_bundled_and_committed(tmp_path: Path) -
     from imp.assets import available_workflow_names
     (tmp_path / "imp" / "workflows" / "mine").mkdir(parents=True)
     names = available_workflow_names(tmp_path)
-    assert {"default", "patent", "mine"} <= set(names)
+    assert {"default", "minimal", "mine"} <= set(names)
     assert names == sorted(names)
 
 

@@ -98,7 +98,7 @@ def test_resolve_empty_snapshot_is_empty_string() -> None:
 def test_validate_accepts_valid_tree() -> None:
     errors = validate_memory_tree(
         ["all.md", "imp/all.md", "imp/threshold.md"],
-        valid_workflows={"imp", "patent"},
+        valid_workflows={"imp", "minimal"},
         workflow_steps={"imp": frozenset({"threshold", "plan-writer"})},
     )
     assert errors == []
@@ -117,13 +117,13 @@ def test_validate_accepts_workflow_all_md() -> None:
 def test_validate_flags_unknown_workflow_dir() -> None:
     errors = validate_memory_tree(
         ["imp/threshold.md", "bogus/all.md"],
-        valid_workflows={"imp", "patent"},
+        valid_workflows={"imp", "minimal"},
         workflow_steps={"imp": frozenset({"threshold"})},
     )
     assert len(errors) == 1
     assert "bogus" in errors[0]
     # the error names the known workflows so it doubles as discovery
-    assert "imp" in errors[0] and "patent" in errors[0]
+    assert "imp" in errors[0] and "minimal" in errors[0]
 
 
 def test_validate_flags_nonstep_md_and_lists_valid_steps() -> None:

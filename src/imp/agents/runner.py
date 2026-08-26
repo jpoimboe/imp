@@ -239,8 +239,8 @@ class AgentInvocation:
     # Threaded from run_quest → _route_agent → _run_agent_invocation →
     # build_agent_invocation → provider → child ToolContext → dispatch_task.
     headless: bool = False
-    # True for an `interactive: true` workflow step (threshold, finalize, the
-    # patent-workflow gates): human-gated on every turn, so the loop guard's
+    # True for an `interactive: true` workflow step (threshold, finalize,
+    # workflow gates): human-gated on every turn, so the loop guard's
     # runaway detectors can only false-positive. Threaded step.interactive →
     # AgentInvocation → every provider's LoopGuard, where it disables both
     # detectors. Default False for subagents / legacy tests.

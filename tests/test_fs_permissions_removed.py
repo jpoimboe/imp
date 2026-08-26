@@ -25,7 +25,7 @@ def test_step_has_no_fs_permissions_field():
 
 def test_no_fs_permissions_in_bundled_workflows():
     offenders: list[str] = []
-    for wf in ("default", "patent"):
+    for wf in ("default", "minimal"):
         root = Path(bundled_workflow_dir(wf))
         for f in root.rglob("*.yaml"):
             for i, line in enumerate(f.read_text().splitlines(), start=1):

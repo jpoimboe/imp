@@ -173,22 +173,6 @@ def test_task_lead_uses_agent_selector_for_subagent_events() -> None:
     assert "--agent sub:" in body
 
 
-def test_patent_writer_resume_prose_finishes_with_complete_step() -> None:
-    # The six named patent writers must tell a resumed agent to FINISH the turn
-    # with complete_step, not the vague/handoff-implying "and re-emit." tail. The
-    # assertion targets the handoff phrase "and re-emit." rather than the bare
-    # substring "re-emit", because assemble.md legitimately says "your own pre-emit
-    # pass" (which CONTAINS "re-emit") in unrelated, out-of-scope prose (line 57) —
-    # a bare `"re-emit" not in body` check would false-fail on assemble forever.
-    base = pathlib.Path("src/imp/assets/workflows/patent/agents")
-    for name in ("design-spec", "claims", "spec-body", "figures",
-                 "independent-claims", "assemble"):
-        body = (base / f"{name}.md").read_text()
-        assert "and re-emit." not in body, \
-            f"{name} still ends its resume sentence with 'and re-emit.'"
-        assert "finish the same turn with `complete_step`" in body, name
-
-
 def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
     # Regression guard: imp `reconciler` is named in the AC but already ends
     # firmly on complete_step with no "re-emit"/handoff resume sentence. Lock

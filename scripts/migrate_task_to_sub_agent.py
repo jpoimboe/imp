@@ -183,8 +183,8 @@ def migrate_archive(control_root: Path, dry_run: bool) -> tuple[int, int]:
 
 # Targeted, provably-safe substitutions. NOT a blanket task->sub_agent replace:
 # "task" is overloaded in these prompts (## Task <N>, task_description,
-# task-lead). `task(` is always the tool call; the backtick phrase is the patent
-# workflow's generic-tool reference.
+# task-lead). `task(` is always the tool call; the backtick phrase is a workflow's
+# generic-tool reference.
 _SNAPSHOT_SUBS = (
     ("task(", "sub_agent("),
     ("`task` tool", "`sub_agent` tool"),

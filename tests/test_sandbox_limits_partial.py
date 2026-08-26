@@ -49,14 +49,12 @@ def test_no_source_or_test_file_references_the_old_partial_name() -> None:
     assert hits == []
 
 
-# Every interactive agent that runs git writes, across all three workflows.
+# Every interactive agent that runs git writes, across both workflows.
 _SITES = (
     ("default", "threshold", {}),
     ("default", "finalize", {"auto_merge": False}),
     ("minimal", "front-door", {}),
     ("minimal", "finalize", {}),
-    ("patent", "invention-interviewer", {}),
-    ("patent", "finalize-gate", {}),
 )
 
 

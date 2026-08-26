@@ -224,7 +224,7 @@ def _gili38_schema():
 
 
 def _reviewer_schema():
-    # patent-reviewer schema (with_outcome_field applied): every field required.
+    # Reviewer schema (with_outcome_field applied): every field required.
     raw = {
         "status": {"type": "enum", "values": ["Success", "Error"]},
         "findings": {"type": "string"},

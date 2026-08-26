@@ -456,7 +456,6 @@ _CUSTOM_WORKFLOW = "custom workflow"
 _WORKFLOW_BLURBS = {
     "default": "full pipeline — spec, plan, implement, review, merge",
     "minimal": "scope, build on a branch, merge it yourself",
-    "patent": "turns an inventor interview into a patent-spec draft",
 }
 
 

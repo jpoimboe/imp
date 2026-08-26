@@ -31,7 +31,7 @@ from imp.cli.pythonpath_detect import ImportRoots
 from imp.cli.setup_detect import DetectedSetupCommand
 from imp.cli.verify_detect import DetectedTestCommand
 
-_WORKFLOWS = ["default", "minimal", "patent"]
+_WORKFLOWS = ["default", "minimal"]
 _LABELS = ["workflow", "branch", "tests", "worktree setup", "import root"]
 
 
@@ -87,8 +87,6 @@ def test_workflow_blurb_is_the_hand_written_copy_per_workflow() -> None:
     assert _workflow_blurb("default") == (
         "full pipeline — spec, plan, implement, review, merge")
     assert _workflow_blurb("minimal") == "scope, build on a branch, merge it yourself"
-    assert _workflow_blurb("patent") == (
-        "turns an inventor interview into a patent-spec draft")
     assert _workflow_blurb("housekeeping") == "custom workflow"
 
 
@@ -98,7 +96,7 @@ def test_cycle_workflow_advances_wraps_and_touches_nothing_else() -> None:
     twice = _cycle_workflow(once, _WORKFLOWS)
     thrice = _cycle_workflow(twice, _WORKFLOWS)
     assert [once.workflow, twice.workflow, thrice.workflow] == [
-        "minimal", "patent", "default"]
+        "minimal", "default", "minimal"]
     assert thrice.branch == "master"
     assert thrice.branch_provenance == "from origin/HEAD"
     assert thrice.test_cmd_fast == "make check"

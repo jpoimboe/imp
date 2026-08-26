@@ -1198,19 +1198,12 @@ def test_interactive_steps_are_exactly_the_conversational_gates() -> None:
         ("default", "finalize"),
         ("minimal", "front-door"),
         ("minimal", "finalize"),
-        ("patent", "invention-interviewer"),
-        ("patent", "disclosure-gate"),
-        ("patent", "independent-claims-gate"),
-        ("patent", "figures-gate"),
-        ("patent", "finalize-gate"),
     }, sorted(interactive)
 
     # The deliberately-unflagged autonomous escalation steps must NOT opt in.
     default = {s.name: s for s in load_workflow(bundled_workflow_dir("default")).flat_steps()}
     assert default["spec-finalizer"].interactive is False
     assert default["plan-writer"].interactive is False
-    patent = {s.name: s for s in load_workflow(bundled_workflow_dir("patent")).flat_steps()}
-    assert patent["ids"].interactive is False
 
 
 def test_wait_for_head_has_no_hold_glyph(tmp_path: Path) -> None:
@@ -1261,7 +1254,7 @@ def test_bundled_agent_steps_resolve_to_their_declared_tier() -> None:
     """Every shipped agent step declares tier: in workflow.yaml and resolves to
     exactly that, so frontmatter-defaulting cannot move a bundled workflow."""
     names = bundled_workflow_names()
-    assert set(names) >= {"default", "memory", "minimal", "patent"}
+    assert set(names) >= {"default", "memory", "minimal"}
     for name in names:
         wf_dir = bundled_workflow_dir(name)
         raw = yaml.safe_load((wf_dir / "workflow.yaml").read_text())

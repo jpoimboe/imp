@@ -143,8 +143,8 @@ def test_the_quest_less_subagent_fallback_reads_no_project_layer(
 
     # Both layers under ctx.project_root name a DIFFERENT bundled workflow.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: patent\n")
-    (project_state_dir(tmp_path) / "config.yaml").write_text("default-workflow: patent\n")
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: minimal\n")
+    (project_state_dir(tmp_path) / "config.yaml").write_text("default-workflow: minimal\n")
 
     ctx = _dispatch_ctx(tmp_path)
     ctx.quest_context = None          # the quest-less path that synthesizes one
@@ -154,7 +154,7 @@ def test_the_quest_less_subagent_fallback_reads_no_project_layer(
 
     anyio.run(dispatch_task, ctx, "reviewer", "do x")
 
-    # The floor default, NOT the `patent` both project-root layers asked for.
+    # The floor default, NOT the `minimal` both project-root layers asked for.
     assert capture["inv"].quest_context.workflow_dir == bundled_workflow_dir("default")
 
 

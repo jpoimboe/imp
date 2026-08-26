@@ -40,9 +40,9 @@ def test_null_workflow_is_untouched(tmp_path: Path) -> None:
 
 def test_other_workflow_is_untouched(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    qd = _seed_v12(tmp_path, "mv3", workflow="patent")
+    qd = _seed_v12(tmp_path, "mv3", workflow="minimal")
     _migrate_v12_to_v13(qd)
-    assert _meta(qd)["workflow"] == "patent"
+    assert _meta(qd)["workflow"] == "minimal"
     assert _meta(qd)["layout_version"] == 13
 
 
