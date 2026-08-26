@@ -30,12 +30,6 @@ load_skill(name="test-driven-development")
 Follow RED-GREEN-REFACTOR.
 {% endif %}
 
-If you encounter a test failure or unexpected behavior during implementation, load:
-
-```
-load_skill(name="systematic-debugging")
-```
-
 You have **no user to ask** — you run non-interactively. Do not end your turn with a bare question. If anything is unclear, **escalate in your final message** with `NEEDS_CONTEXT`, naming exactly what you need, before sinking effort into a guess.
 
 ## Your Job

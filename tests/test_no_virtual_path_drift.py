@@ -14,7 +14,7 @@ from imp.assets import bundled_workflow_dir
 #     path like `/project-backup/` is NOT (the hyphen exclusion prevents that
 #     false positive; a plain substring list would miss both distinctions).
 #   - leading edge: NOT preceded by `~` or a word char — so the legitimate
-#     home-relative example `~/project/...` in skills/systematic-debugging.md
+#     home-relative example `~/project/...` that skills may legitimately carry
 #     (an unrelated string the spec says to leave) does NOT false-positive, while
 #     `"/project`, `` `/project ``, ` /project`, and start-of-line `/project` do.
 _FORBIDDEN = re.compile(r"(?<![~\w])/(?:project|scratch)(?![A-Za-z0-9_-])")

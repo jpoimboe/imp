@@ -45,7 +45,7 @@ def test_supercycle_back_edges_present() -> None:
 
 def test_skills_shipped() -> None:
     skills = bundled_workflow_dir("default") / "skills"
-    for name in ("test-driven-development", "systematic-debugging",
+    for name in ("test-driven-development",
                  "verification-before-completion", "receiving-code-review"):
         assert load_internal_skill(skills, name).strip(), f"{name} missing/empty"
 

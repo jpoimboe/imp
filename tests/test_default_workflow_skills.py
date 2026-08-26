@@ -11,7 +11,6 @@ from imp.assets import bundled_workflow_dir
 
 _SKILLS = [
     "test-driven-development",
-    "systematic-debugging",
     "verification-before-completion",
     "receiving-code-review",
 ]
@@ -21,7 +20,7 @@ def _skills_dir():
     return bundled_workflow_dir("default") / "skills"
 
 
-def test_all_four_skills_present_via_internal_path() -> None:
+def test_all_bundled_skills_present_via_internal_path() -> None:
     for name in _SKILLS:
         assert load_internal_skill(_skills_dir(), name).strip(), f"{name} missing/empty"
 
