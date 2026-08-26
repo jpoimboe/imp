@@ -107,7 +107,27 @@ with the code.
 
 ## More depth
 
-imp's full self-knowledge lives at `{{ docs.path }}`.
+imp's full self-knowledge corpus is at `{{ docs.path }}`, read in place from any
+project. Go straight to the file whose line below matches the question — don't
+list the directory.
+
+Using imp — relevant in any project:
+
+- `guide/what-is-imp.md` — the quest model and the six phases, end to end.
+- `guide/lifecycle.md` — statuses, zones, drafts, and what a left conversation becomes.
+- `guide/features.md` — the capability catalog, one section per capability.
+- `guide/introspection.md` — answering a live-state question from ground truth: the workflow snapshot, event timelines, keeping output bounded.
+- `guide/memory.md` — what imp remembers, where it lives, how to inspect it.
+- `guide/operator-notes.md` — runbook for a running quest: unblocking a pause, snapshot skew.
+- `guide/remote-control.md` — driving a run from a chat surface.
+- `guide/embedding.md` — the `imp.api` surface for driving quests from another process.
+
+Working on imp's own source — skip these unless the project under change *is* imp:
+
+- `internals/architecture.md` — engine and executor step loop, the event log, where state lives.
+- `internals/conventions.md` — terminal output, user-facing copy, code comments.
+- `internals/invariants.md` — what must hold when editing the engine, renderer, or workflow prompts.
+- `internals/knowledge-map.md` — which layer new knowledge belongs in: skill, corpus, or workflow prompt.
 
 ## Glossary
 

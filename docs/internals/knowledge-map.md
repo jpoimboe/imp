@@ -66,6 +66,13 @@ depth**, naming where to look rather than reproducing the detail. Keep the inlin
 to the everyday essentials; push anything deeper to the `docs/` files it points at, so
 the hub stays lean and drift-free.
 
+## See also
+
+- `internals/architecture.md` — how the snapshot and overlay machinery actually runs.
+- `internals/conventions.md` and `internals/invariants.md` — the two corpus docs
+  `imp/memory/all.md` routes to by name, and the most-read pair in the corpus.
+- The full corpus index is the `imp-knowledge` skill's *More depth* section.
+
 ---
 
 *Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

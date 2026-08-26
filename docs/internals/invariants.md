@@ -26,6 +26,19 @@ Read this when editing imp's engine/renderer or workflow prompts.
   messages[:resume_base]))`, overwritten wholesale. Records the CLI wrote are
   never merged in or counted; imp's transcript is the only source of truth for
   resumed context.
+- **Subagents must be restart-safe.** A subagent can be paused and resumed at
+  any time, and resume **re-runs it from scratch** — the engine does not continue
+  a paused subagent from its transcript, it restarts the affected subtree. This
+  holds today because a subagent's durable work is its git commit and it grounds
+  in current reality on entry (reads the repo, `progress.md`, the tag ledger). A
+  subagent that acquires non-idempotent, in-transcript state — work that exists
+  only in the conversation and would be lost or double-applied on a fresh run —
+  breaks the invariant, and it fails as a silent double-effect on resume, not a
+  loud error. No engine assertion guards this. Applies to every agent spawned
+  under a parent, including the deeply-nested ones `MAX_SUBAGENT_DEPTH` allows.
+  (If the invariant ever genuinely can't be met, that is the trigger to revisit
+  the deferred re-descent / `State` frame-stack machinery, not a reason to ship a
+  non-idempotent subagent.)
 
 ## Future / unbuilt
 
@@ -40,6 +53,13 @@ Read this when editing imp's engine/renderer or workflow prompts.
   Candidate feature: a user-level memory dir (e.g. under `~/.imp/`) whose
   `all.md` layers into every agent's `## Project memory` section alongside the
   project's.
+
+## See also
+
+- `internals/architecture.md` — the structures these invariants constrain.
+- `internals/conventions.md` — terminal output, user-facing copy, code comments.
+- `internals/knowledge-map.md` — which layer a new rule belongs in.
+- The full corpus index is the `imp-knowledge` skill's *More depth* section.
 
 ---
 

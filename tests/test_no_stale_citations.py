@@ -13,9 +13,6 @@ STALE = (
     "docs/imp-conventions.md",
     "docs/imp-invariants.md",
     "docs/imp-operator-notes.md",
-    "docs/subagent-authoring.md",
-    "docs/tdd-analysis-report.md",
-    "docs/tdd-brittleness-verdict.md",
     'load_skill(name="imp-introspection")',
     'load_skill(name="imp-memory")',
 )

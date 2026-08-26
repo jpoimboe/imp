@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tests._corpus import tracked
 
-# Only the two corpus areas — NOT docs/ideas/, which holds non-corpus scratch notes.
+# The corpus is exactly these two areas; docs/ holds nothing else.
 CORPUS_DIRS = ("docs/guide", "docs/internals")
 SENTINEL = "Part of imp's self-knowledge corpus"
 

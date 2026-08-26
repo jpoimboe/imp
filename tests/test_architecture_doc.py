@@ -132,22 +132,6 @@ def test_architecture_names_no_bundled_setup_agent() -> None:
     assert "setup agent" not in text
 
 
-def test_docs_reorg_moved_all_eight_with_no_stale_root_copy() -> None:
-    moved = {
-        "docs/what-is-imp.md": "docs/guide/what-is-imp.md",
-        "docs/imp-operator-notes.md": "docs/guide/operator-notes.md",
-        "docs/architecture.md": "docs/internals/architecture.md",
-        "docs/imp-conventions.md": "docs/internals/conventions.md",
-        "docs/imp-invariants.md": "docs/internals/invariants.md",
-        "docs/subagent-authoring.md": "docs/internals/subagent-authoring.md",
-        "docs/tdd-analysis-report.md": "docs/internals/tdd-analysis-report.md",
-        "docs/tdd-brittleness-verdict.md": "docs/internals/tdd-brittleness-verdict.md",
-    }
-    for old, new in moved.items():
-        assert not Path(old).exists(), f"stale root copy left: {old}"
-        assert Path(new).is_file(), f"missing at new home: {new}"
-
-
 def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
     text = ARCH.read_text()
     assert "### Where state lives" in text

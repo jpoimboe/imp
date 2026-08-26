@@ -1,6 +1,7 @@
 # imp conventions
 
-Read this when working on imp's terminal output or any user-facing copy.
+Read this when working on imp's terminal output or any user-facing copy. Code
+style is a separate layer — see **Code comments** below.
 
 ## Visual identity
 
@@ -16,6 +17,16 @@ step, spec, plan. Coined brainstorm terms (e.g. "express") may exist only as
 internal engine values — never user-facing. The runtime agents `threshold` and
 `finalize` already self-enforce plain terms; this doc is the canonical reference
 for new copy, so no agent edits are needed to honor it.
+
+## Code comments
+
+Comment and docstring style is coding stance, not copy, so the operative rule
+lives in the shared partial `src/imp/assets/partials/coding-stance.md` (overlaid
+into every quest as `workflow/partials/coding-stance.md`) and the coding agents
+already carry it. The short form: default to no comments, add one only when the
+WHY is non-obvious, and never write multi-paragraph docstrings or multi-line
+comment blocks — one short line max. To change the rule, edit the partial; this
+section only says where it lives.
 
 ## Seeing imp's own UI
 
@@ -62,6 +73,13 @@ traceback, `daemon.py`, the archive progress indicator, `loader.py` warnings,
 `validate_memory_cli.py`, `daemon_connector.py`) — a raw Python traceback stays
 raw to keep its diagnostic value, reaching the user via the crash-banner
 mechanism.
+
+## See also
+
+- `internals/architecture.md` — the engine and renderer these surfaces are built on.
+- `internals/invariants.md` — the layering rules that constrain renderer changes.
+- `guide/introspection.md` — reading a quest's live state rather than styling it.
+- The full corpus index is the `imp-knowledge` skill's *More depth* section.
 
 ---
 
