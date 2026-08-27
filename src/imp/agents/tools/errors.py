@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Exception types raised by tools to signal different failure modes."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Best-effort page-cache eviction for transient read-fault recovery.
 
 Why a parse failure is a read fault rather than corruption: imp.engine.readfault.

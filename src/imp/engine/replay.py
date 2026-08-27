@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared raw → assistant Message parse dispatch for the LLM event audit trail.
 
 parse_message is the single shared raw→assistant-Message function, also used

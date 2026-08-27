@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Attach to or spawn a per-quest session daemon."""
 from __future__ import annotations
 

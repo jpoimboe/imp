@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """TTY-only terminal-title writer: emits OSC window-title escapes; inert on non-TTY."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Config-file locations. Stdlib-only, importing nothing beyond the equally
 stdlib-only `imp.paths` leaf: the startup migration in `imp.__main__` runs before
 any command dispatch, so resolving these paths must not drag in the yaml/provider

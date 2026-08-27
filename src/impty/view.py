@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Pure rendering helpers over a pyte screen. No pty/process/IO here, so these
 are trivially unit-testable by feeding bytes to a screen."""
 

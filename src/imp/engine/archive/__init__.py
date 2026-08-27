@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Per-quest archive: content-addressed blobs + SQLite index + record files."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """imp-daemon-connector — bridges a quest's NDJSON stdio to the per-repo daemon socket.
 
 The connector owns daemon liveness. It polls for the socket, attaches whenever the

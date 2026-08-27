@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Wire codec + socket transport for the read-only introspection Store.
 
 `run_query` is the daemon-side dispatcher (one op -> one LocalStore call ->

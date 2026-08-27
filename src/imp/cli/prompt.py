@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Prompt abstraction backed by prompt_toolkit.
 
 One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises

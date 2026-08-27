@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """V1 provider registry. Importing this package registers NOTHING: the builtins
 land in providers.resolve._PROVIDERS on the first registry read, via
 resolve._ensure_builtins(). Registration binds lazy thunks over BUILTIN_FLOOR, so

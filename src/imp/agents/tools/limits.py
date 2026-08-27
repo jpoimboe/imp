@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Bounded-output / cooperative-cancel primitives shared by the tool layer
 (spec: runaway-and-interrupt hardening).
 

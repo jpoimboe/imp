@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Immutable quest identity (spec AC 1): a 6-char pronounceable id — a
 consonant, vowel, consonant, vowel, then two digits (e.g. kobe47) — drawn with
 secrets. Ref-safe, coordination-free, no date prefix. The CVCV stem has no

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """The hello-frame codec shared by the south-side connector and the daemon hub.
 
 A south connection opens with exactly one hello frame — a single JSON line naming

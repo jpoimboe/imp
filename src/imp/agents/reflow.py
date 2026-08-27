@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Block-aware soft-wrap reflow for assembled system prompts.
 
 Source markdown is hard-wrapped at ~80 columns for readable diffs, but those

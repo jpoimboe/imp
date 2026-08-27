@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Vi-mode display-row motion for imp's prompt.
 
 Pure core: ``display_line_move`` moves a cursor by display row given a uniform

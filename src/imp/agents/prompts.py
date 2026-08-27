@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Prompt template rendering for agent .md bodies.
 
 Seven namespaces (spec §7.5):

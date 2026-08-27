@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """task tool (spec §6.13) — async dispatch.
 
 `task` is special: the runner doesn't call `.invoke()` on it. The runner's

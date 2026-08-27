@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Resume-state classifier (spec §6.8).
 
 Examines the last persisted Message in transcript.jsonl and decides what

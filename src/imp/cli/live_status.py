@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 # src/imp/cli/live_status.py
 """Fixed multi-row footer block for the live run view.
 

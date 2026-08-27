@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Provider-side model catalog: the single source of model metadata.
 
 Each provider owns its own alias→metadata table here (kept in the providers

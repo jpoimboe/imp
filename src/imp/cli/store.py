@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Read-only introspection seam the CLI routes its reads through."""
 
 from __future__ import annotations

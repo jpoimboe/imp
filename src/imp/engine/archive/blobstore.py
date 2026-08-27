@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Pluggable content-addressed blob store (spec: blob store).
 
 The interface keeps the team/server door open; only the local-directory backend

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Best-effort refresh of the canonical Claude OAuth access token.
 
 Keeps <canonical>/.credentials.json fresh so imp-spawned (redacted) claude

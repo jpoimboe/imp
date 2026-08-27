@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """TerminalScreen — a pyte HistoryScreen that implements the alternate screen
 and is the single source of truth for which *regime* the session is in.
 

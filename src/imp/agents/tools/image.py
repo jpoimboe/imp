@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Provider-agnostic image processing for read_file's vision branch (spec §2).
 
 Pillow does the single resize/re-encode in imp; the processed bytes are reused

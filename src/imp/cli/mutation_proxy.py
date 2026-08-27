@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Client + daemon transport for mutating `imp` CLI commands inside the sandbox.
 
 Mirrors `store_proxy`: the in-sandbox command ships `(op, args)` to the quest

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Transport-agnostic control plane: list / reply / create, routed by quest_id."""
 from __future__ import annotations
 

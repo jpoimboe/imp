@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Vim-style ``.`` (dot) repeat-last-change for imp's vi-mode prompt.
 
 prompt_toolkit 3.0.52 ships no ``.`` command. This module records the

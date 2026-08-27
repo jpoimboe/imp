@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """The single in-process quest-creation path: `imp new`'s preflight, then a deferred
 draft minted in the caller's own process."""
 

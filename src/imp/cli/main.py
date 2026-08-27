@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """imp CLI entrypoint.
 
 Plan 1: minimal commands (new, resume, log, status). No streaming, no signals,

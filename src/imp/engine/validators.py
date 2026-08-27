@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """All workflow validators. Accumulate errors and warnings; caller decides whether to raise."""
 
 from __future__ import annotations

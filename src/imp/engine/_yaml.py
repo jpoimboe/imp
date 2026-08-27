@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared YAML helpers (line-tracking loader, config-layer loader, source-loc
 derivation, scrub)."""
 

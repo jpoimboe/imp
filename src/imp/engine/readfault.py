@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Durable record of a transient read fault: a JSONL log plus the bad bytes.
 
 Forensics:

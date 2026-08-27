@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Parse a single config layer: the project, global, or local config file.
 Schema (post 2026-06-04-roles-to-tiers):
 

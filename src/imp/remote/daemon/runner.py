@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Daemon runner: event parsing, outbound drain, pidfile, single-daemon guard, and run_daemon."""
 from __future__ import annotations
 

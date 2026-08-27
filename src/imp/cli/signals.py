@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Signal handling for the session client: two intents, cleanly separated.
 
 The client's signals map to two distinct intents (the keep-alive-lease design):

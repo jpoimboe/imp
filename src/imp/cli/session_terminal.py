@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Thin terminal session client: render the daemon's event stream, answer its gates.
 
 Composes the Plan 1-7 primitives into the client half of the per-quest session

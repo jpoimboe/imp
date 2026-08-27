@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Render an ANSI text blob (read from a file) into a color PNG via impty.
 
 Usage:

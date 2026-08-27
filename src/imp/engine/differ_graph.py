@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Cycle/self-reference detection on per-step `differ_from:` edges.
 
 Reuses a WHITE/GRAY/BLACK DFS for cycle detection over step-name edges.

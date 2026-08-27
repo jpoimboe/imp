@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """read_file, write_file, edit_file (spec §6.6).
 
 Every call funnels through ToolContext.authorize_fs, which bounds the path by the

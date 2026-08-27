@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Read side of the per-quest archive: index/record/blob store."""
 
 from __future__ import annotations

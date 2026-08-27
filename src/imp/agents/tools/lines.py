@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Line semantics shared by read_file and grep (tool-ergonomics spec).
 
 `\\n`-ONLY splitting with `cat -n` counting rules, so the two tools' line

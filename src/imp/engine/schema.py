@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Parse output-schema YAML into OutputSchema; validate agent outputs."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Render imp's terminal UI to the screen so it can be captured as an image.
 
 A *scene player*: run as a subprocess on a real pty (e.g. under impty), it

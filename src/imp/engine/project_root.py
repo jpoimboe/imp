@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Walk-up search for the nearest `imp/config.yaml` marker file.
 
 `imp` is project-local; every command beyond `init` needs to find the root

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Background process execution (spec: 2026-06-09-background-execution-design).
 
 `bash(run_in_background=True)` spawns a long-lived child with stdout/stderr

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Recursive strict-mode schema transform for OpenAI function-call tools.
 
 OpenAI's strict mode (spec §6.14) requires:

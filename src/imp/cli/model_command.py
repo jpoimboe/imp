@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Validate a /model or --model argument at the point of entry."""
 from __future__ import annotations
 

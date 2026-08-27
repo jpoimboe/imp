@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Per-invocation loop detector (spec Fix H).
 
 Replaces the cumulative tool-call ceiling as the default loop signal. Holds

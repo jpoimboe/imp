@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """impty — drive any interactive CLI/TUI on a real pty and read its
 faithfully-rendered screen. Provisional name (see plan); the product name is
 an open item. Deterministic plumbing only: spawn, send raw keystrokes, read

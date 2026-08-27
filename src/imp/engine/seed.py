@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared quest-start seeding: the single home for stamping a State's cursor and
 vars from a loaded workflow's first step, so the eager and deferred paths can't drift."""
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """One-off migration: rename the stale model-facing spawn tool `task` ->
 `sub_agent` across local, gitignored runtime stores.
 

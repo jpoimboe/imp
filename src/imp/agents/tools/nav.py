@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """glob, grep (spec §6.6).
 
 Read-only navigation. Both glob and grep route their search root through

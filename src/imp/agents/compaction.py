@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """/compact core: rewrite a step's transcript.jsonl to shed tool-result bodies.
 
 Provider-agnostic core; delegates claude_code native-store cleanup to

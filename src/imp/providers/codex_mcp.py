@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """In-process streamable-HTTP MCP server for the codex provider (design
 "Components → codex_mcp.py", "Concurrency / threading model — VALIDATED").
 

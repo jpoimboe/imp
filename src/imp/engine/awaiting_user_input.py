@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """AwaitingUserInput: the no-human pause signal for a bare-turn-end yield.
 
 Raised by an input channel that has no human to take the yield — a subagent, a

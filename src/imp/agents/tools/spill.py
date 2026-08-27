@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Spill-to-disk on truncation (spec: workstream E).
 
 Writes an over-cap tool output to a file under the run directory and returns a

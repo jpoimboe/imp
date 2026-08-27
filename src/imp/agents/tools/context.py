@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """ToolContext (spec §6.6) — per-invocation state passed to every tool.
 
 Path model: in-worktree files are addressed by paths RELATIVE to the worktree

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Per-category executor policy for provider errors.
 
 Pure functions + data. No I/O. Consumed by ``imp.engine.executor`` to

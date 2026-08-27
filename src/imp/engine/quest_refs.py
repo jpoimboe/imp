@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Resolve a quest's parent/dependency ids into display shapes for prompts and imp show."""
 
 from __future__ import annotations

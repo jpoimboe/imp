@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Session keystroke mapper: forwards interrupt, abandon, and detach gestures as control frames."""
 
 from __future__ import annotations

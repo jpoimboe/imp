@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Provider-agnostic push-`Session` base for `run_agent_loop`.
 
 `PushSession` owns the discrete-turn mechanics extracted from the anthropic

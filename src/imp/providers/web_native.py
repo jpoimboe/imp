@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Reserved provider-native web tool names, capability map, and spec builders
 (spec §3, §4, §5, §8).
 

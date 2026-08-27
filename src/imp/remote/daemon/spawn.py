@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Detached imp subprocess spawners: resume and create for the control plane."""
 from __future__ import annotations
 

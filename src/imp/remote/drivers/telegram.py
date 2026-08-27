@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """imp-telegram — Telegram Bot API helpers backing the daemon's north adapter.
 
 Originally a standalone per-run remote driver, this module is now a library: the

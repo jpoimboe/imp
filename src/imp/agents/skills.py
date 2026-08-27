@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Skill resolution shared by the load_skill tool (internal path) and the
 interactive slash dispatcher (human path).
 

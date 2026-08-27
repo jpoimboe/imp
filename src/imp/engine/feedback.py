@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Format gate-failure detail into framed feedback prose for a productive retry.
 
 Pure functions: each gate runner's failure detail → a single string that the

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Ephemeral alert-all mode: deliver buzz alerts for every quest while the
 daemon runs (no persistence across restarts).
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Derived SQLite index/catalog: rebuildable from record files + blobs."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Internal message shapes + AgentRunner protocol (spec §6.1, §6.3, §6.4).
 
 All three V1 runners (Anthropic this plan; OpenAI + Claude Code in Plan 2)

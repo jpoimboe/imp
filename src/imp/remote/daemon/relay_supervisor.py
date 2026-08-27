@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """RelaySupervisor — the router's read side: relay every resident session's curated
 events to a sink."""
 from __future__ import annotations

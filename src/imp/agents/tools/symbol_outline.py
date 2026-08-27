@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Language-agnostic structural outline of a file or directory (the symbol_outline tool)."""
 
 from __future__ import annotations

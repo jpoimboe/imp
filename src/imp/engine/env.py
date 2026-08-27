@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Engine-provided environment variables.
 
 These are the variables the engine guarantees to every subprocess it spawns on

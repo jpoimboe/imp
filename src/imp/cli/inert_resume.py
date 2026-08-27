@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Inert resume of a quest parked at a bare-turn-end yield (spec AC8) — cheap local reads only."""
 
 from __future__ import annotations

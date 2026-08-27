@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Read-only `imp config` provenance resolver (spec §5). Never mutates."""
 
 from __future__ import annotations

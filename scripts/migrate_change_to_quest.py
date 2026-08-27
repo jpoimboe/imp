@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """One-off migration: rename imp's on-disk/global Change concept -> Quest.
 
 Shipping code (Parts 1-2) already knows ONLY `quest`. This throwaway script

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """raw → assistant Message parsers, one per provider wire format.
 
 They live outside the provider modules so imp.engine.replay can build its

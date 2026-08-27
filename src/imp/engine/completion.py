@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Render an OutputSchema into a 'call complete_step' instruction.
 
 Single source of truth, consumed by the shared `engine.agent_run` builder

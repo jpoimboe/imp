@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """imp-backed claude_code SessionStore adapter (design §1).
 
 Persists claude-p session entries under the quest so a resumed step can drive

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """FIFO merge queue, partitioned by base_branch, ordered by enqueued_at.
 
 A single shared file at <control_root>/.git/imp/merge-queue.json, mutated only

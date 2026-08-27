@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Lock-free leave-disposition decision for a phase-0 conversation.
 
 The foreground decides which daemon-applied disposition a leave maps to; the

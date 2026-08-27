@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Thin FastMCP adapter over `ImptyDriver`.
 
 Standalone (`python -m impty.mcp`): a stdio MCP server hosting one

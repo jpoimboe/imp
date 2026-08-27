@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Read-only, lockless gitignore helpers for the nav tools.
 
 Imports ONLY stdlib + anyio (no `imp` imports) so `nav` can import this without

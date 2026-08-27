@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Per-quest session-daemon: bind run_quest behind a SessionServer."""
 from __future__ import annotations
 

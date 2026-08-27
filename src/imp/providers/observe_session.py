@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Provider-agnostic observe-`Session` base for `run_agent_loop`.
 
 `ObserveSession` owns the observe control skeleton extracted from the

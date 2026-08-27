@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """`imp config set` / `imp config unset`: pick the layer, edit the file, and land
 only bytes imp's own readers accept."""
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """bash tool (spec §6.6 + §6.15).
 
 Runs a shell command via anyio.run_process in its own session (POSIX), so the

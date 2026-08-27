@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared rendering of agent_message / user_message payloads. Both the `imp log`
 renderer and the live ChatRenderer derive the assistant Message from
 agent_message.raw via parse_message, so factor the extraction here."""

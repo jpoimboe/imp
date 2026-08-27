@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Read-time analysis of a quest's events.jsonl for `imp events`: 1-based
 `#N` ordinals (physical line position), suppression of non-rendering rows,
 range coalescing/formatting/parsing, step windows, subagent handles, index

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """@imp_tool decorator + global tool registry (spec §6.5).
 
 Tools are Python functions registered once, on the first get_registry()

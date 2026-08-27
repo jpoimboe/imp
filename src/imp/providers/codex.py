@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Codex backend provider (spec: `2026-06-05-add-codex-provider`).
 
 Drives the OpenAI Codex CLI via `openai-codex-sdk` as a brain that calls imp's

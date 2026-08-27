@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 # src/imp/cli/render_text.py
 """Plain-text narrative view (imp log / non-TTY). Walks a NarrativeTree and
 yields wrapped ANSI lines. Finalized prose blocks are rendered through

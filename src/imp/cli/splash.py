@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """The startup splash: a once-printed, randomly-chosen compact pixel-art scene.
 
 A verbatim port of the v5 gallery (gallery-50-v5.html): the engine math, the ~89-role

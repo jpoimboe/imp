@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Claude Code built-in tool names (spec §6.11).
 
 The Claude Code runner passes this list as `--disallowedTools` so the agent

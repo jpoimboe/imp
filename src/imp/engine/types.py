@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Frozen workflow domain model.
 
 Every node parsed from workflow.yaml or agent .md carries a SourceLoc so error

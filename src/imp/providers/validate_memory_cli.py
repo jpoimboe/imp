@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Thin CLI entrypoint: validate a project's `imp/memory/` tree off a worktree root.
 
 Invoked by the bundled `memory` workflow's validation gate. Loads the memory

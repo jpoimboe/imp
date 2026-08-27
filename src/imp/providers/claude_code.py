@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Claude Code provider + runner (spec §6.11).
 
 Drives `claude -p` via claude_agent_sdk. Differences from the direct-SDK

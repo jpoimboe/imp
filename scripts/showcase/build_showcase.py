@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Assemble a self-contained before/after showcase HTML page from a manifest.
 
 This is the generic, change-agnostic builder used by

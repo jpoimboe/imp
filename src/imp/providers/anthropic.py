@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Anthropic provider + runner (spec §6.9). Direct anthropic.AsyncAnthropic.
 
 Loop:

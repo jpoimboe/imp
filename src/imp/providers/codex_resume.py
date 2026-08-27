@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 # src/imp/providers/codex_resume.py
 """Resume-state derivation for codex from imp's own events.jsonl.
 

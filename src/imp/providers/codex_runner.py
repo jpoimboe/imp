@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """CodexAgentRunner — the heavy lifting for the `codex` provider.
 
 Implements: interrupt() with four effects, fail-fast preflight(),

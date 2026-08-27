@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Best-effort reader of Claude Code's local model cache (spec: roster discovery).
 
 Reads `additionalModelOptionsCache` (a list of dicts; only each entry's `value`

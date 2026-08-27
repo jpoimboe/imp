@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Watchdog / teardown timing constants shared by the engine drive loop and the
 tool layer.
 

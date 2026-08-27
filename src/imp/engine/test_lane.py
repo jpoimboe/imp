@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Per-control-root counting semaphore for verify-gate serialization.
 
 N slots (N = config.max_parallel_test_runs) are lock files under

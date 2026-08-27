@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Persist and restore codex's native on-disk rollout across an imp pause.
 
 codex is stateful via a rollout file at

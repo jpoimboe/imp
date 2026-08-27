@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared backoff helper (§10/§12).
 
 Extracted from executor.py so that both executor and subagents can use

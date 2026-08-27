@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Preflight: this interpreter's packages match what the project pins.
 
 The test interpreter (`make` runs under whatever `python3` is active) is

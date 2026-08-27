@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared agent-invocation construction + drive loop.
 
 One builder (`build_agent_invocation`) and one consumer (`drive_invocation`)

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """complete_step (spec §6.14). Synthesized per-agent from the agent's
 output_schema. Args ARE the schema. Body raises StepComplete; runner catches.
 """

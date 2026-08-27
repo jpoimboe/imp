@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Provider protocol. Resolved from config.providers: list and config.tiers: table."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared decision point for a malformed top-level complete_step.
 
 Returns Ok (args valid), Nudge (recoverable — provider delivers `message`

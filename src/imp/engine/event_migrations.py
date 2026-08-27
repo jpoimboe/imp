@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """One-shot old→new event-log transform (pre-triad → triad schema)."""
 
 from __future__ import annotations

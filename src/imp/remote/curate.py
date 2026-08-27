@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Curate raw engine events: filter by allowlist, track step/status, augment with quest context."""
 from __future__ import annotations
 

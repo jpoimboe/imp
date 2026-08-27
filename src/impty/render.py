@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Render a pyte screen to a PNG — the faithful *visual*, not just the glyphs.
 
 view.py answers "what characters are on screen"; this answers "what does it

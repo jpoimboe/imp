@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shell sandbox (bubblewrap) — pure policy core + argv builder (spec Part B).
 
 Two spawn points consume this: the `bash` tool (agents/tools/bash.py) and script

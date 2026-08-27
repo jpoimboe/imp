@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 # src/imp/cli/remote_channel.py
 """The imp-side host (channel) for an external driver process (spec §A).
 

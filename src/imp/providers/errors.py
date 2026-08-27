@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Typed exception hierarchy + error-event helpers (taxonomy single source).
 
 Providers raise the appropriate `ProviderError` subclass when they can

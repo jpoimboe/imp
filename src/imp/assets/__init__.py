@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Static assets shipped with imp (workflows, agent definitions, scripts).
 
 Resolved via importlib.resources so the bundled workflow is findable inside

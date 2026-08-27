@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Two-pass per-run resolution (spec §6 + Decisions).
 
 Pass 1 — Tier map: for each configured tier name, walk `config.providers` in

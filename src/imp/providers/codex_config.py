@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Per-run CODEX_HOME provisioning + auth handling (spec §3, design "run() flow"
 step 3, "Lifecycle / teardown", and "Auth copy-in").
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Lockfile-keyed detection of a project's worktree-setup command (suggestions only)."""
 
 from __future__ import annotations

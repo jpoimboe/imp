@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Best-effort refresh of the canonical codex OAuth access token.
 
 Keeps <CODEX_HOME|~/.codex>/auth.json fresh so imp-spawned codex subprocesses

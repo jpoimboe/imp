@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Slash command dispatcher for interactive steps (spec §4).
 
 Flat namespace: built-ins (/help, /skills) take precedence; a /<name> that

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Text→text edits to one config file. ruamel renders values and round-trips the
 parse; line placement is done on text, so `set` and `unset` stay in one register."""
 

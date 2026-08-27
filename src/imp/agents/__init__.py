@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """V1 agent layer: protocol, transcript, classifier, tool registry, runners."""
 
 from imp.agents.classify import ResumeState, classify_resume, count_tool_uses

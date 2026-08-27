@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared agent-text error classifier for the observe runners (claude_code, codex)."""
 
 from __future__ import annotations

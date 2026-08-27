@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Transport-neutral driver for one interactive program over an impty
 `TerminalSession`. Owns the session and exposes the eight tool bodies (start,
 view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The tool

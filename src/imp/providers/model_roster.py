@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Discover the selectable-model roster for bare /model (spec: roster discovery).
 
 For each env-available provider the roster is the de-duplicated union of:

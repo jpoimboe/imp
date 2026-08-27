@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """OpenAI provider + runner (spec §6.10). Direct openai.AsyncOpenAI.
 
 Loop:

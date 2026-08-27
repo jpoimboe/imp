@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Per-quest persistence: state.json (cursor) + events.jsonl (audit log) + locks.
 
 Tasks 10/11/12 build this file incrementally:

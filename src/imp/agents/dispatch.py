@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Shared per-tool_use dispatch body for the in-process providers.
 
 anthropic and openai run verbatim-sibling tool loops that have already shipped

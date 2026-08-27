@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Workflow-agnostic slim digests of engine events for the imp events command.
 
 One event -> one line: envelope (timestamp, type, agent_id) + a per-type

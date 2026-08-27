@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """The attach-protocol frame codec for a per-quest session daemon.
 
 Each frame is a single JSON line. Client -> daemon frames carry a "kind" of

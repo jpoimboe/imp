@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """SouthHub — the per-repo Unix-socket multiplexer for live quest connections."""
 from __future__ import annotations
 

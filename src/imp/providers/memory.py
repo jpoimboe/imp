@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Josh Poimboeuf
 """Filesystem memory (imp/memory/): human-authored markdown standing
 instructions, layered onto agents broad->narrow (global -> workflow -> step).
 
