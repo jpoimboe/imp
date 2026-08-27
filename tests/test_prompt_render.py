@@ -131,9 +131,9 @@ def test_coder_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
     assert "do **not** create or modify tests" in fast
     assert "IMP_LINT_COMMAND" not in fast
     assert "phase-level" in fast
-    assert "test-driven-development" not in fast
-    # standard path: TDD skill loaded; fast-path constraints absent.
-    assert "test-driven-development" in slow
+    assert "failing test first" not in fast
+    # standard path: the test-first partial is rendered in; fast-path text absent.
+    assert "No production code without a failing test first" in slow
     assert "do **not** create or modify tests" not in slow
 
 

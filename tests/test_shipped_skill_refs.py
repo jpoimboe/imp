@@ -114,24 +114,24 @@ def test_every_shipped_load_skill_name_resolves() -> None:
     sites = _call_sites()
     # Non-vacuity: the scan really finds the known call sites, both kinds of pool.
     assert ("src/imp/assets/partials/imp-grounding.md", "imp-knowledge") in sites
-    assert ("src/imp/assets/workflows/default/agents/coder.md",
-            "test-driven-development") in sites
+    assert ("src/imp/assets/workflows/default/agents/batch-code-reviewer.md",
+            "receiving-code-review") in sites
     unresolved = [site for site in sites if not _resolves(Path(site[0]), site[1])]
     assert unresolved == [], f"shipped load_skill names that resolve to nothing: {unresolved}"
 
 
 def test_an_unknown_skill_name_does_not_resolve() -> None:
     prompt = Path("src/imp/assets/workflows/default/agents/coder.md")
-    assert _resolves(prompt, "test-driven-development")
+    assert _resolves(prompt, "receiving-code-review")
     assert not _resolves(prompt, "no-such-skill-anywhere")
 
 
 def test_a_workflow_local_skill_does_not_resolve_for_a_foreign_prompt() -> None:
-    # test-driven-development lives only in workflows/default/skills/.
+    # receiving-code-review lives only in workflows/default/skills/.
     assert _resolves(Path("src/imp/assets/workflows/default/agents/spiker.md"),
-                     "test-driven-development")
+                     "receiving-code-review")
     assert not _resolves(Path("src/imp/assets/workflows/minimal/agents/spiker.md"),
-                         "test-driven-development")
+                         "receiving-code-review")
     partial = Path("src/imp/assets/partials/brainstorm-dialogue.md")
-    assert not _resolves(partial, "test-driven-development")
+    assert not _resolves(partial, "receiving-code-review")
     assert _resolves(partial, "imp-driving-web-uis")

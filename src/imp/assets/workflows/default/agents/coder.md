@@ -14,20 +14,14 @@ You are implementing a task. The task-lead's dispatch message contains the full 
 
 {% if vars.fast_path %}
 This quest was classified **trivial**: do **not** create or modify tests, and do
-**not** load the TDD skill. Make exactly the task's edits, then commit. Do **not**
+**not** load a testing skill. Make exactly the task's edits, then commit. Do **not**
 run the project's full test suite or any lint/typecheck yourself — the phase-level
 `verify` gate runs the project's combined checks after this phase and routes back
 to fix anything that fails. If your edit could plausibly affect behavior that a
 specific existing test covers, run just **that focused test** with the project's
 own test tooling; otherwise commit and let the gate verify.
 {% else %}
-Load the TDD discipline first:
-
-```
-load_skill(name="test-driven-development")
-```
-
-Follow RED-GREEN-REFACTOR.
+{% include "partials/test-first.md" %}
 {% endif %}
 
 You have **no user to ask** — you run non-interactively. Do not end your turn with a bare question. If anything is unclear, **escalate in your final message** with `NEEDS_CONTEXT`, naming exactly what you need, before sinking effort into a guess.
@@ -36,7 +30,7 @@ You have **no user to ask** — you run non-interactively. Do not end your turn 
 
 Once clear on requirements:
 1. Implement exactly what the task specifies
-2. If the task calls for tests, write them test-first per TDD; if the plan waives tests, do **not** add them
+2. If the task calls for tests, write them test-first; if the plan waives tests, do **not** add them
 3. Verify with **focused tests only** — not the full suite or lint/typecheck (the `verify` gate owns that)
 4. Commit with `git` (see Committing)
 5. Self-review (see below)

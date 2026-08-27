@@ -10,7 +10,6 @@ from imp.agents.skills import list_user_skills, load_internal_skill
 from imp.assets import bundled_workflow_dir
 
 _SKILLS = [
-    "test-driven-development",
     "verification-before-completion",
     "receiving-code-review",
 ]

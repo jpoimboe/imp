@@ -205,9 +205,9 @@ This is the trade at the center of imp's design. An agent that writes 1,200 line
 
 ## Tests come first, and they have to be able to fail
 
-Every non-trivial change is implemented test-first. The coder loads a test-driven-development discipline whose first rule is unambiguous —
+Every non-trivial change is implemented test-first. The coder carries the rule in its standing instructions, and it is unambiguous —
 
-> **NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.** Wrote code before its test? Delete it, start over.
+> **No production code without a failing test first** — wrote the code before its test? Delete it and implement fresh from the test.
 
 — and the plan is structured to match: each task is a sequence of *write the failing test, run it, watch it fail, write the minimal implementation, run it again, commit.* One task, one commit, tests included.
 
