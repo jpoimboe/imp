@@ -303,6 +303,11 @@ imp is **pre-release** and has built itself since June 2026: 79% of the lines in
 
 Issues and pull requests are welcome. Start from a clone with `make sync-env` (builds a `.venv` from `uv.lock`) and run `make check` (lint, types, lockfile, tests) before opening a PR.
 
+## Contributing
+
+Pull requests welcome. Commits need a DCO sign-off (`git commit -s`) — see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [DCO](DCO).
+
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE). Third-party attribution is in [NOTICE](NOTICE).
