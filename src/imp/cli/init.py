@@ -96,6 +96,19 @@ class IntegrationBranchUnresolved(Exception):
     """imp init needs an integration branch but git offers none (detached HEAD)."""
 
 
+class GitIdentityUnavailable(Exception):
+    """git can build no author identity here, so imp init cannot commit."""
+
+
+_GIT_NO_IDENTITY = (
+    "git has no author identity here, so imp can't commit. "
+    "Set one, then re-run `imp init`:\n"
+    "\n"
+    "  git config user.name 'Your Name'\n"
+    "  git config user.email 'you@example.com'"
+)
+
+
 @dataclass(frozen=True, slots=True)
 class InitSettings:
     """The settings the shared writer serializes into imp/config.yaml. The three
@@ -947,7 +960,8 @@ def run_init_noninteractive(
     defaults (+ overrides) with no model call. Both `--use-defaults` and the
     no-TTY auto-headless fallback land here. Never prompts — resolves the
     integration branch from git, or raises IntegrationBranchUnresolved when git
-    offers none."""
+    offers none, and raises GitIdentityUnavailable when git can build no author
+    identity to commit with."""
     from imp.providers.paths import global_config_path
 
     workflow = workflow or _DEFAULT_WORKFLOW
@@ -958,6 +972,8 @@ def run_init_noninteractive(
 
     if already_initialized:
         _ensure_git_repo_silent(project_root)  # a copied config.yaml may sit in a non-git dir
+        if not _git_can_commit(project_root):
+            raise GitIdentityUnavailable(_GIT_NO_IDENTITY)
         if wrote_user_config:
             _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
         _ensure_imp_gitignore(project_root)
@@ -966,6 +982,8 @@ def run_init_noninteractive(
         return
 
     git_created = _ensure_git_repo_silent(project_root)
+    if not _git_can_commit(project_root):
+        raise GitIdentityUnavailable(_GIT_NO_IDENTITY)
     if base is not None:
         default_base = base
     else:

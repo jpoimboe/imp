@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.init import _git_can_commit
+from imp.cli.init import (
+    GitIdentityUnavailable,
+    _git_can_commit,
+    run_init_noninteractive,
+)
 from tests.conftest import _git
 
 
@@ -74,3 +78,37 @@ def test_probe_true_when_email_env_supplies_the_address(
     assert _git(root, "config", "--get", "user.email").returncode != 0
 
     assert _git_can_commit(root) is True
+
+
+# The verbatim refusal copy, duplicated here on purpose: these tests pin the
+# message a human reads, not whatever the constant happens to say.
+_EXPECTED_REMEDY = (
+    "git has no author identity here, so imp can't commit. "
+    "Set one, then re-run `imp init`:\n"
+    "\n"
+    "  git config user.name 'Your Name'\n"
+    "  git config user.email 'you@example.com'"
+)
+
+
+def test_noninteractive_fresh_path_refuses_and_writes_nothing(broken_repo: Path) -> None:
+    with pytest.raises(GitIdentityUnavailable) as excinfo:
+        run_init_noninteractive(
+            broken_repo, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+
+    assert str(excinfo.value) == _EXPECTED_REMEDY
+    assert not (broken_repo / "imp").exists()
+
+
+def test_noninteractive_already_initialized_path_refuses(broken_repo: Path) -> None:
+    (broken_repo / "imp").mkdir()
+    (broken_repo / "imp" / "config.yaml").write_text(
+        "default-workflow: default\ndefault-base: master\n")
+
+    with pytest.raises(GitIdentityUnavailable) as excinfo:
+        run_init_noninteractive(
+            broken_repo, output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+
+    assert str(excinfo.value) == _EXPECTED_REMEDY
+    # The refusal must land before `git commit` runs, so the repo stays unborn.
+    assert _git(broken_repo, "rev-parse", "--verify", "HEAD").returncode != 0
