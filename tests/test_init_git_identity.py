@@ -42,8 +42,11 @@ def broken_repo(tmp_path: Path, isolated_git_config: Path) -> Path:
 
 
 @pytest.fixture
-def ordinary_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The everyday case: no repo-local identity, but the environment supplies one."""
+def ordinary_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_git_config: Path
+) -> Path:
+    """The everyday case: no repo-local identity and no config file; the environment
+    supplies the identity, so the probe passes without config."""
     root = tmp_path / "ordinary"
     root.mkdir()
     _git(root, "init", "-q")
