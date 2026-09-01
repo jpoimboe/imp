@@ -788,6 +788,32 @@ _GIT_QUESTION = "imp needs a git repository. Initialize one here? [Y/n] "
 _GIT_DECLINED = ("imp needs a git repository to track quests. "
                  "Re-run `imp init` when you're ready.")
 
+_GIT_IDENTITY_LEAD_IN = (
+    "git has no author identity here, so imp can't commit.\n"
+    "imp will set one for this repo only — it goes in .git/config, not your machine."
+)
+
+
+def _ensure_git_identity_interactive(
+    project_root: Path, *,
+    input_fn: Callable[[str], str],
+    output_fn: Callable[[str], None],
+) -> None:
+    """Ask for a name and email and write them repo-locally when git can build no
+    author identity. Both are asked before either is written — the probe is
+    all-or-nothing — and an empty answer to either writes nothing and raises."""
+    if _git_can_commit(project_root):
+        return
+    output_fn(_GIT_IDENTITY_LEAD_IN)
+    name = input_fn("  Your name: ").strip()
+    email = input_fn("  Your email: ").strip()
+    if not name or not email:
+        raise GitIdentityUnavailable(_GIT_NO_IDENTITY)
+    for key, value in (("user.name", name), ("user.email", email)):
+        subprocess.run(["git", "config", key, value],
+                       cwd=project_root, check=True, capture_output=True, text=True)
+    output_fn(f"Set {name} <{email}> in .git/config.")
+
 
 def _confirm_init_settings(
     project_root: Path, state: InitScreenState,
@@ -921,6 +947,8 @@ def run_init(
             output_fn(_GIT_DECLINED)
             return
     git_created = _ensure_git_repo_silent(project_root)
+    _ensure_git_identity_interactive(
+        project_root, input_fn=input_fn, output_fn=output_fn)
     settings = _confirm_init_settings(
         project_root,
         _screen_state_from_detection(

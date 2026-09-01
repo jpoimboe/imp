@@ -10,6 +10,7 @@ import pytest
 from imp.cli.init import (
     GitIdentityUnavailable,
     _git_can_commit,
+    run_init,
     run_init_noninteractive,
 )
 from tests.conftest import _git
@@ -135,3 +136,110 @@ def test_cmd_init_exits_2_with_the_remedy_on_stderr(
         "  git config user.email 'you@example.com'",
     ]
     assert not (broken_repo / "imp").exists()
+
+
+# The verbatim interactive copy, duplicated here on purpose: these tests pin the
+# text a human reads, not whatever the constants happen to say.
+_LEAD_IN = (
+    "git has no author identity here, so imp can't commit.\n"
+    "imp will set one for this repo only — it goes in .git/config, not your machine."
+)
+_PROMPTS = ["  Your name: ", "  Your email: "]
+
+
+class _Prompter:
+    """An input_fn that hands back canned answers and records the prompts verbatim."""
+
+    def __init__(self, *replies: str) -> None:
+        self.replies = list(replies)
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.replies.pop(0)
+
+
+def _local_config(root: Path, key: str) -> str:
+    """The repo-local value of `key`, or "" when unset."""
+    return _git(root, "config", "--local", "--get", key).stdout.strip()
+
+
+def _stub_interactive_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fresh interactive init runs the sandbox gate then the confirmation screen.
+    Default them to "ready + accept as detected" so input_fn sees only the
+    identity prompts."""
+    import imp.cli.init as initmod
+
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(
+        initmod, "_interactive_confirm_screen",
+        lambda _root, state, **_kw: initmod.ScreenAccepted(state), raising=False)
+
+
+def _run_interactive_init(root: Path, ask: _Prompter, msgs: list[str]) -> None:
+    run_init(root, picker_fn=lambda _a: ["anthropic"], input_fn=ask,
+             output_fn=msgs.append, detect_theme_fn=lambda: "ansi")
+
+
+def test_fresh_interactive_init_asks_for_an_identity_and_commits(
+    broken_repo: Path, isolated_git_config: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_interactive_gates(monkeypatch)
+    ask = _Prompter("Ada Lovelace", "ada@example.org")
+    msgs: list[str] = []
+
+    _run_interactive_init(broken_repo, ask, msgs)
+
+    assert _LEAD_IN in msgs
+    assert ask.prompts == _PROMPTS
+    assert _local_config(broken_repo, "user.name") == "Ada Lovelace"
+    assert _local_config(broken_repo, "user.email") == "ada@example.org"
+    assert not isolated_git_config.exists()
+    assert "Set Ada Lovelace <ada@example.org> in .git/config." in msgs
+    # The whole point: the init commit now succeeds, authored by the typed identity.
+    author = _git(broken_repo, "log", "-1", "--format=%an <%ae>").stdout.strip()
+    assert author == "Ada Lovelace <ada@example.org>"
+    assert (broken_repo / "imp" / "config.yaml").is_file()
+
+
+@pytest.mark.parametrize(
+    ("name", "email"),
+    [("", "ada@example.org"), ("Ada Lovelace", ""), ("   ", "ada@example.org")],
+    ids=["empty-name", "empty-email", "blank-name"],
+)
+def test_an_empty_answer_refuses_and_writes_nothing(
+    broken_repo: Path, monkeypatch: pytest.MonkeyPatch, name: str, email: str,
+) -> None:
+    _stub_interactive_gates(monkeypatch)
+    ask = _Prompter(name, email)
+    msgs: list[str] = []
+
+    with pytest.raises(GitIdentityUnavailable) as excinfo:
+        _run_interactive_init(broken_repo, ask, msgs)
+
+    assert str(excinfo.value) == _EXPECTED_REMEDY
+    assert _local_config(broken_repo, "user.name") == ""
+    assert _local_config(broken_repo, "user.email") == ""
+
+
+def test_identity_is_asked_before_the_confirmation_screen(
+    broken_repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Cancelling the screen must leave the human-typed identity behind, not a
+    # half-applied setup — which only holds while the probe runs before it.
+    import imp.cli.init as initmod
+
+    def _cancel(_root: Path, _state: object, **_kw: object) -> object:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "_interactive_confirm_screen", _cancel, raising=False)
+    ask = _Prompter("Ada Lovelace", "ada@example.org")
+    msgs: list[str] = []
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_interactive_init(broken_repo, ask, msgs)
+
+    assert ask.prompts == _PROMPTS
+    assert _local_config(broken_repo, "user.name") == "Ada Lovelace"
+    assert _local_config(broken_repo, "user.email") == "ada@example.org"
