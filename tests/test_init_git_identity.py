@@ -243,3 +243,24 @@ def test_identity_is_asked_before_the_confirmation_screen(
     assert ask.prompts == _PROMPTS
     assert _local_config(broken_repo, "user.name") == "Ada Lovelace"
     assert _local_config(broken_repo, "user.email") == "ada@example.org"
+
+
+def test_reinit_asks_for_an_identity_and_commits(
+    broken_repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_interactive_gates(monkeypatch)
+    (broken_repo / "imp").mkdir()
+    (broken_repo / "imp" / "config.yaml").write_text(
+        "default-workflow: default\ndefault-base: master\n")
+    ask = _Prompter("Ada Lovelace", "ada@example.org")
+    msgs: list[str] = []
+
+    _run_interactive_init(broken_repo, ask, msgs)
+
+    assert ask.prompts == _PROMPTS
+    assert _local_config(broken_repo, "user.name") == "Ada Lovelace"
+    assert _local_config(broken_repo, "user.email") == "ada@example.org"
+    assert "Project already initialized (imp/config.yaml is committed)." in msgs
+    assert "Committed imp/config.yaml." in msgs
+    author = _git(broken_repo, "log", "-1", "--format=%an <%ae>").stdout.strip()
+    assert author == "Ada Lovelace <ada@example.org>"

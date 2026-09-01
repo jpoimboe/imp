@@ -887,6 +887,8 @@ def run_init(
             _bootstrap_user_config(
                 user_path, providers, theme, allow_unsandboxed=False)
         _ensure_git_repo_silent(project_root)
+        _ensure_git_identity_interactive(
+            project_root, input_fn=input_fn, output_fn=output_fn)
         _ensure_imp_gitignore(project_root)
         committed = _commit_init_files(project_root)
         output_fn("")
