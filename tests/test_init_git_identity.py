@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -112,3 +113,25 @@ def test_noninteractive_already_initialized_path_refuses(broken_repo: Path) -> N
     assert str(excinfo.value) == _EXPECTED_REMEDY
     # The refusal must land before `git commit` runs, so the repo stays unborn.
     assert _git(broken_repo, "rev-parse", "--verify", "HEAD").returncode != 0
+
+
+def test_cmd_init_exits_2_with_the_remedy_on_stderr(
+    broken_repo: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: broken_repo)
+    rc = m._cmd_init(argparse.Namespace(
+        non_interactive=True, workflow=None, base=None, pythonpath=None))
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert captured.err.splitlines() == [
+        "imp: git has no author identity here, so imp can't commit. "
+        "Set one, then re-run `imp init`:",
+        "",
+        "  git config user.name 'Your Name'",
+        "  git config user.email 'you@example.com'",
+    ]
+    assert not (broken_repo / "imp").exists()
