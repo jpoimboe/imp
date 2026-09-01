@@ -125,6 +125,16 @@ def _ensure_git_repo_silent(project_root: Path) -> bool:
     return True
 
 
+def _git_can_commit(project_root: Path) -> bool:
+    """True when git can resolve an author identity. `git var` walks the same
+    chain `git commit` does — GIT_AUTHOR_* env, then config, then $EMAIL/GECOS —
+    so a config-only check would call an ordinary host unconfigured."""
+    return subprocess.run(
+        ["git", "var", "GIT_AUTHOR_IDENT"],
+        cwd=project_root, capture_output=True, text=True,
+    ).returncode == 0
+
+
 def _repo_is_unborn(project_root: Path) -> bool:
     """True when the repo has no commits yet — `git rev-parse --verify HEAD` fails."""
     return subprocess.run(
