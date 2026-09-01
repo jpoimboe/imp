@@ -716,7 +716,12 @@ def _apply_theme() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     from imp.assets import selectable_workflow_names
-    from imp.cli.init import IntegrationBranchUnresolved, run_init, run_init_noninteractive
+    from imp.cli.init import (
+        GitIdentityUnavailable,
+        IntegrationBranchUnresolved,
+        run_init,
+        run_init_noninteractive,
+    )
     from imp.engine import worktree
     project = _project_root()
     if worktree.head_detached(project):
@@ -757,7 +762,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
             )
         else:
             run_init(project, input_fn=input, output_fn=print)
-    except IntegrationBranchUnresolved as e:
+    except (IntegrationBranchUnresolved, GitIdentityUnavailable) as e:
         _emit_cli_error(f"{e}")
         return 2
     except FileExistsError as e:
