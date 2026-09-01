@@ -264,3 +264,47 @@ def test_reinit_asks_for_an_identity_and_commits(
     assert "Committed imp/config.yaml." in msgs
     author = _git(broken_repo, "log", "-1", "--format=%an <%ae>").stdout.strip()
     assert author == "Ada Lovelace <ada@example.org>"
+
+
+def _no_prompt(prompt: str) -> str:
+    raise AssertionError(f"init prompted unexpectedly: {prompt!r}")
+
+
+def test_ordinary_repo_interactive_init_never_asks_or_writes_an_identity(
+    ordinary_repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_interactive_gates(monkeypatch)
+    msgs: list[str] = []
+
+    run_init(ordinary_repo, picker_fn=lambda _a: ["anthropic"], input_fn=_no_prompt,
+             output_fn=msgs.append, detect_theme_fn=lambda: "ansi")
+
+    assert _local_config(ordinary_repo, "user.name") == ""
+    assert _local_config(ordinary_repo, "user.email") == ""
+
+    # The second run takes the already-initialized branch.
+    msgs.clear()
+    run_init(ordinary_repo, picker_fn=lambda _a: ["anthropic"], input_fn=_no_prompt,
+             output_fn=msgs.append, detect_theme_fn=lambda: "ansi")
+
+    assert "Project already initialized (imp/config.yaml is committed)." in msgs
+    assert _local_config(ordinary_repo, "user.name") == ""
+    assert _local_config(ordinary_repo, "user.email") == ""
+
+
+def test_ordinary_repo_noninteractive_init_writes_no_identity(ordinary_repo: Path) -> None:
+    msgs: list[str] = []
+
+    run_init_noninteractive(
+        ordinary_repo, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    assert _local_config(ordinary_repo, "user.name") == ""
+    assert _local_config(ordinary_repo, "user.email") == ""
+
+    msgs.clear()
+    run_init_noninteractive(
+        ordinary_repo, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    assert "Project already initialized (imp/config.yaml is committed)." in msgs
+    assert _local_config(ordinary_repo, "user.name") == ""
+    assert _local_config(ordinary_repo, "user.email") == ""
