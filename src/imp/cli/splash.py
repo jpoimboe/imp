@@ -731,6 +731,25 @@ def _terminal_win(g: Grid, x: int, y: int) -> None:
     _px(g, x + 4, y + 5, _P["bright"])
 
 
+def _diff_panel(g: Grid, x: int, y: int) -> None:
+    """A compact diff: one removed line above one added line. Both gutter marks sit
+    on the same three columns and both code bars on the same four, so the pair reads
+    as two rows of one hunk rather than as loose bars."""
+    _rect(g, x, y, 12, 10, _P["bookSpine"])
+    _rect(g, x + 1, y + 1, 10, 8, _P["ground"])
+    _rect(g, x + 1, y + 1, 10, 1, _P["metalD"])
+    _px(g, x + 2, y + 1, _P["bookPageD"])
+
+    # Removed line: a minus in the gutter and warm code to its right.
+    _rect(g, x + 2, y + 3, 3, 1, _P["fire1"])
+    _rect(g, x + 6, y + 3, 4, 1, _P["fire1"])
+    # Added line: a three-stroke plus on the minus's columns, green code beside it.
+    _px(g, x + 3, y + 5, _P["green"])
+    _rect(g, x + 2, y + 6, 3, 1, _P["green"])
+    _px(g, x + 3, y + 7, _P["green"])
+    _rect(g, x + 6, y + 6, 4, 1, _P["green"])
+
+
 def _desk(g: Grid, x: int, by: int) -> None:
     """A desk: a top on two legs, the book on the imp's side and the candle beyond
     it. The full-height `_candle` overwhelms a desk this size, so it is a stub."""
@@ -1013,6 +1032,14 @@ def _s_terminal(g: Grid) -> None:
     _L(g)
 
 
+def _s_diff(g: Grid) -> None:
+    # The panel sits low, its foot level with the imp's, which leaves the sky above it
+    # deep enough for a real scatter; `pad` keeps those stars off the panel's roof.
+    _diff_panel(g, 18, 5)
+    _stars(g, 5, 0.16, pad=1, seed=35)
+    _L(g)
+
+
 def _s_desk_book(g: Grid) -> None:
     _desk(g, 19, 11)
     _stars(g, 6, 0.2, pad=1, seed=33)
@@ -1107,6 +1134,7 @@ SCENES: list[tuple[SceneBuilder, str]] = [
     (_s_black_cat, "be still, the night brings counsel."),
     (_s_coffee, "another night, another diff."),
     (_s_terminal, "mischief, compiled."),
+    (_s_diff, "summon your next diff."),
     (_s_desk_book, "coding, by candlelight."),
     (_s_the_bug, "something stirs, waiting expectantly."),
     (_s_open_tome, "the tome is open. choose a spell."),

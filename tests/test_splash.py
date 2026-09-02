@@ -568,7 +568,7 @@ def test_dice_and_sunrise_close_the_curated_pool() -> None:
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    assert len(splash.SCENES) == 36
+    assert len(splash.SCENES) == 37
     names = [b.__name__ for b, _p in splash.SCENES]
     assert names == [
         "_s_crescent_stars", "_s_full_moon_cloud", "_s_constellation", "_s_ringed_planet",
@@ -579,7 +579,7 @@ def test_dice_and_sunrise_close_the_curated_pool() -> None:
         "_s_crystal_cluster", "_s_will_o_wisp", "_s_quill_ink", "_s_glowing_mushrooms",
         "_s_campfire", "_s_fireflies", "_s_spider_web", "_s_bats",
         "_s_raven", "_s_mirror", "_s_black_cat",
-        "_s_coffee", "_s_terminal", "_s_desk_book", "_s_the_bug", "_s_open_tome",
+        "_s_coffee", "_s_terminal", "_s_diff", "_s_desk_book", "_s_the_bug", "_s_open_tome",
         "_s_loaded_dice", "_s_sunrise",
     ]
 
@@ -591,6 +591,16 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
     g = splash._make_grid()
     splash._terminal_win(g, 19, 3)
     assert g[8][23] == splash._P["bright"]        # px(x+4,y+5) cursor blink at (23,8)
+    g = splash._make_grid()
+    splash._diff_panel(g, 18, 2)
+    assert g[5][20] == splash._P["fire1"]         # removed-line minus at (x+2,y+3)
+    assert g[8][21] == splash._P["green"]         # added-line plus at (x+3,y+6)
+    # The two gutter marks share their three columns and the two code bars their
+    # four, which is what makes the pair read as one hunk.
+    assert [g[5][x] for x in range(20, 23)] == [splash._P["fire1"]] * 3
+    assert [g[8][x] for x in range(20, 23)] == [splash._P["green"]] * 3
+    assert [g[5][x] for x in range(24, 28)] == [splash._P["fire1"]] * 4
+    assert [g[8][x] for x in range(24, 28)] == [splash._P["green"]] * 4
     g = splash._make_grid()
     splash._desk(g, 19, 11)
     assert g[11][24] == splash._P["wood"]         # the desk top
@@ -605,6 +615,7 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
     expect = [
         (splash._s_coffee, "another night, another diff."),
         (splash._s_terminal, "mischief, compiled."),
+        (splash._s_diff, "summon your next diff."),
         (splash._s_desk_book, "coding, by candlelight."),
         (splash._s_the_bug, "something stirs, waiting expectantly."),
         (splash._s_open_tome, "the tome is open. choose a spell."),

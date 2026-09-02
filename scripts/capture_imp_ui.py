@@ -15,6 +15,7 @@ iterate on imp's *look*, not its behavior.
 Usage (run from repo root):
     python scripts/capture_imp_ui.py prompt              # interactive input field
     python scripts/capture_imp_ui.py stream [--limit N]  # replay first N events
+    python scripts/capture_imp_ui.py splash --all-scenes # render the splash pool
     python scripts/capture_imp_ui.py --list
 
 Scenes that wait for input (prompt) block until driven; replay scenes print and
@@ -98,14 +99,20 @@ def scene_prompt(*, color: bool) -> None:
 
 
 def scene_splash(*, color: bool, width: int, theme: str = "dark",
-                index: int = 0) -> None:
+                 index: int = 0, all_scenes: bool = False) -> None:
     from imp.cli import palette as pal
     from imp.cli import splash
 
     pal.set_theme(theme)
-    lines = splash.scene_lines(index, theme=theme, color=color)
-    phrase = splash.SCENES[index][1]
-    sys.stdout.write("\n".join(lines) + "\n" + phrase + "\n")
+    indices = range(len(splash.SCENES)) if all_scenes else (index,)
+    for position, scene_index in enumerate(indices):
+        builder, phrase = splash.SCENES[scene_index]
+        lines = splash.scene_lines(scene_index, theme=theme, color=color)
+        if all_scenes:
+            if position:
+                sys.stdout.write("\n")
+            sys.stdout.write(f"[{scene_index:02d}] {builder.__name__}\n")
+        sys.stdout.write("\n".join(lines) + "\n" + phrase + "\n")
     sys.stdout.flush()
 
 
@@ -121,8 +128,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--width", type=int, default=100, help="render width (cols)")
     ap.add_argument("--no-color", dest="color", action="store_false")
     ap.add_argument("--theme", default="dark", help="splash: theme (dark/light/ansi)")
-    ap.add_argument("--scene-index", type=int, default=0,
-                    help="splash: index into splash.SCENES")
+    splash_choice = ap.add_mutually_exclusive_group()
+    splash_choice.add_argument("--scene-index", type=int, default=0,
+                               help="splash: index into splash.SCENES")
+    splash_choice.add_argument("--all-scenes", action="store_true",
+                               help="splash: render every scene in gallery order")
     ap.set_defaults(color=True)
     a = ap.parse_args(argv)
 
@@ -130,12 +140,15 @@ def main(argv: list[str] | None = None) -> int:
         for name, desc in _SCENES.items():
             print(f"  {name:8s} {desc}")
         return 0
+    if a.all_scenes and a.scene != "splash":
+        ap.error("--all-scenes requires the splash scene")
     if a.scene == "stream":
         scene_stream(color=a.color, width=a.width, limit=a.limit)
     elif a.scene == "prompt":
         scene_prompt(color=a.color)
     elif a.scene == "splash":
-        scene_splash(color=a.color, width=a.width, theme=a.theme, index=a.scene_index)
+        scene_splash(color=a.color, width=a.width, theme=a.theme,
+                     index=a.scene_index, all_scenes=a.all_scenes)
     return 0
 
 
