@@ -27,12 +27,12 @@ imp new "add rate limiting to the public API"    # state intent; imp takes it fr
 
 ## Why imp
 
-- It interviews you first.  imp reads your code before it asks you anything, proposes two or three approaches with tradeoffs, writes out the exact strings and values you'll end up seeing, and spikes throwaway code when a question can only be settled by running it.
-- The review happens before the code exists.  Plans contain the verbatim code they intend to produce, so a bug is sitting in the plan already, where it costs a paragraph to fix instead of a diff.
-- Reviewers are strangers.  Every artifact is reviewed by a different agent with a clean context, which never sees the reasoning that produced it and is told to verify every claim by opening the source.
-- Tests come first, and they have to be able to fail.  imp's own codebase is 10,189 tests across 850 files, 194,000 lines of test code against 60,000 lines of source, nearly all of it written by imp under this rule.
-- The workflow is a file you own.  The phases, the gates, the reviewers, the model tiers: one YAML file plus agent prompts, in your repo, under git.  The engine has no opinion of its own.
-- Nothing touches your checkout.  Every change runs in its own git worktree, and every agent shell command runs under [bubblewrap](https://github.com/containers/bubblewrap) with credentials masked.
+- **It interviews you first.**  imp reads your code before it asks you anything, proposes two or three approaches with tradeoffs, writes out the exact strings and values you'll end up seeing, and spikes throwaway code when a question can only be settled by running it.
+- **The review happens before the code exists.**  Plans contain the verbatim code they intend to produce, so a bug is sitting in the plan already, where it costs a paragraph to fix instead of a diff.
+- **Reviewers are strangers.**  Every artifact is reviewed by a different agent with a clean context, which never sees the reasoning that produced it and is told to verify every claim by opening the source.
+- **Tests come first, and they have to be able to fail.**  imp's own codebase is 10,189 tests across 850 files, 194,000 lines of test code against 60,000 lines of source, nearly all of it written by imp under this rule.
+- **The workflow is a file you own.**  The phases, the gates, the reviewers, the model tiers: one YAML file plus agent prompts, in your repo, under git.  The engine has no opinion of its own.
+- **Nothing touches your checkout.**  Every change runs in its own git worktree, and every agent shell command runs under [bubblewrap](https://github.com/containers/bubblewrap) with credentials masked.
 
 ## What a change looks like
 
