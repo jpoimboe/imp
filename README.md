@@ -18,7 +18,7 @@ LLM "dumb zone", and to enable focused work and adversarial review.  Files are
 used to communicate between steps.  Work can be split across different models
 or providers as needed.
 
-Human effort is concentrated up front, at the beginning of the quest, during
+**Human effort is concentrated up front**, at the beginning of the quest, during
 the interview with the "threshold" agent.  Once it has picked your brain
 sufficiently, the workflow typically runs unattended all the way through merge,
 so you're free to step away.  Or, kick off another quest in parallel!
