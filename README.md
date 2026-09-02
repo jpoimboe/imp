@@ -8,16 +8,49 @@
 
 ![license](https://img.shields.io/badge/license-Apache--2.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
 
-imp is a batteries-included, declarative agent workflow that interviews you to
-settle the design, then takes a code change from spec to merge without needing
-you to supervise every step.  Detailed specs and implementation plans carry your
-decisions across a fresh context for every step.  Tests are written first, every
-artifact is independently reviewed, and the finished change is checked against
-its acceptance criteria before merge.
+imp is a declarative agent workflow engine for software development.  Each
+change (feature or bug) for a given project gets built as part of an isolated,
+resumable **quest**, which tracks the change's history from inception through
+design, planning, coding, review, testing, and integration.
 
-Every change runs as its own isolated, resumable **quest**.  The complete agent
-conversation is archived with it, so you can trace the code back to the reasoning
-that produced it.
+Each step is performed with fresh agent context, to avoid entering the dreaded
+LLM "dumb zone", and to enable focused work and adversarial review.  Files are
+used to communicate between steps.  Work can be split across different models
+or providers as needed.
+
+Human effort is concentrated up front, at the beginning of the quest, during
+the interview with the "threshold" agent.  Once it has picked your brain
+sufficiently, the workflow typically runs unattended all the way through merge,
+so you're free to step away.  Or, kick off another quest in parallel!
+
+Detailed specs, implementation plans, and progress files carry your decisions
+between steps.  Tests are written first (TDD), every artifact is independently
+reviewed, and the final code is checked against acceptance criteria before
+merge.
+
+Every conversation is archived, so you can easily trace any line of code back
+to the full conversation which produced it.
+
+Based on my experiences with imp, I am starting to believe that, for the
+majority of projects, we are at the point where humans don't need to write *or*
+review code.  But they do still need to be heavily involved in the up-front
+interview/design phase, and testing.
+
+Once I got past the early bootstrap phase of development, all of imp's
+remaining code was written by imp itself, with no human code review.  Its use
+of heavy up-front design and review, and its strong reliance on TDD and
+integration testing has resulted in an impressive degree of quality and
+maintainability, IMO.
+
+Note my day job is an upstream Linux kernel developer/maintainer, which is a
+very large distributed human-oriented project, for which imp is not (yet?) a
+good fit.
+
+Imp ships with an opinionated default workflow which follows best practices for
+producing high quality, TDD, fully AI-written code in a fast-moving greenfield
+solo or small team project, but it can be easily customized or replaced to
+match your project's needs.  The engine is flexible enough that it can also be
+used for non-coding projects or even business processes.
 
 ## Try it
 
