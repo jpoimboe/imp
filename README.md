@@ -6,57 +6,56 @@
 
 imp is a batteries-included, declarative agent workflow that interviews you to
 settle the design, then takes a code change from spec to merge without needing
-you to supervise every step. Detailed specs and implementation plans carry your
-decisions across a fresh context for every step. Tests are written first, every
+you to supervise every step.  Detailed specs and implementation plans carry your
+decisions across a fresh context for every step.  Tests are written first, every
 artifact is independently reviewed, and the finished change is checked against
 its acceptance criteria before merge.
 
-Every change runs as its own isolated, resumable **quest**. The complete agent
+Every change runs as its own isolated, resumable **quest**.  The complete agent
 conversation is archived with it, so you can trace the code back to the reasoning
 that produced it.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/imp-interview-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/imp-interview-light.png">
-  <img alt="imp interviewing the user about a change: it reads the code, proposes a design, and asks the one question it cannot answer itself" src="docs/images/imp-interview-dark.png">
-</picture>
-
-I am a Linux kernel maintainer, so I have fairly boring ideas about what makes a
-change trustworthy: a written contract, review by somebody who did not write it,
-tests that were seen failing before they passed, and a record I can inspect
-afterward. imp turns those habits into an executable workflow.
-
-It does not make the models smarter. It gives them a process that makes mistakes
-harder to hide and easier to send back.
-
-imp has built itself since June 2026. At the time of writing, 79% of the lines in
-`src/` arrived on a branch that imp specified, planned, implemented, reviewed,
-tested, and merged.
 
 ## Try it
 
 imp needs Linux, Git, Python 3.11 or newer, and
-[bubblewrap](https://github.com/containers/bubblewrap). It can use an existing
-Claude Code or Codex subscription, or call the Anthropic and OpenAI APIs directly.
+[bubblewrap](https://github.com/containers/bubblewrap).  For model access, either
+install and sign in to the `claude` or `codex` CLI with an existing subscription,
+or export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.
 
 ```bash
 git clone https://github.com/jpoimboe/imp
 cd imp
-python3 -m pip install -e .
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 
-cd /path/to/your/project
+mkdir ../taskboard
+cd ../taskboard
 imp init
-imp new "add rate limiting to the public API"
+imp new "build a local-first task tracker with a web UI"
 ```
 
-`imp init` inspects the repository and confirms the base branch, workflow, test
-commands, worktree setup, and provider. `imp new` starts the interview. imp reads
-the code before asking questions, proposes concrete approaches and tradeoffs, and
-spikes throwaway code when the answer needs an experiment rather than an opinion.
+`imp init` works in an empty directory: it initializes Git if needed, then
+confirms the base branch, workflow, test commands, worktree setup, and provider.
+`imp new` starts the interview.  imp turns the idea into concrete design options,
+pushes on tradeoffs, and spikes throwaway code when the answer needs an
+experiment rather than an opinion.
 
-When the design is settled, tell it to build. The quest leaves draft state, gets
-its own branch and worktree, and runs to the next explicit human gate. You can
-watch it, leave it alone, interrupt it, or resume it later from the event log.
+Brownfield works too.  Run `imp init` and `imp new` from an existing checkout;
+imp reads the code before asking questions and fits the design to what is already
+there.
+
+When the design is settled, tell it to "build it" in the conversation; there is
+no second shell command.  The quest leaves draft state, gets its own branch and
+worktree, and runs on its own.  It surfaces again if something genuinely needs
+your call.  You can watch it, leave it alone, interrupt it, or resume it later
+from the event log.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/imp-interview-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/imp-interview-light.png">
+  <img alt="During the spec phase, imp reads the repository, proposes a concrete design, and asks the user to settle one unresolved decision" src="docs/images/imp-interview-dark.png">
+</picture>
 
 ## What the default workflow does
 
@@ -79,46 +78,58 @@ flowchart LR
 The shipped workflow is deliberately opinionated:
 
 - **Interview before implementation.** Your judgment goes in while changing the
-  design is still cheap. imp asks about decisions it cannot make from the code,
+  design is still cheap.  imp asks about decisions it cannot make from the code,
   not facts it can discover itself.
 - **Write the contract down.** A spec defines the result and its acceptance
-  criteria. An implementation plan names the code and tests needed to get there.
+  criteria.  An implementation plan names the code and tests needed to get there.
   Both are reviewed before implementation starts.
 - **Use fresh context.** Every step is a separate model invocation with only the
-  context it needs. The spec and plan carry decisions forward; reviewers do not
-  inherit the author's reasoning or assumptions.
+  context it needs.  The spec and plan carry decisions forward; reviewers do not
+  inherit the author's reasoning or assumptions, and there is no long-running
+  session to drift.
 - **Write tests first.** New tests must be observed failing for the expected
-  reason before implementation. A test that never proved it could fail is not
+  reason before implementation.  A test that never proved it could fail is not
   evidence.
+- **Keep the code lean.** Coders and reviewers push back on speculative
+  fallbacks, dead error handling, and compatibility shims that the design did not
+  ask for.
 - **Make reviewers independent.** The agents reviewing the spec, plan, and code
-  did not write them. They are told to inspect the repository and verify claims,
+  did not write them.  They are told to inspect the repository and verify claims,
   not agree with the previous agent.
 - **Converge on the spec.** After implementation, imp checks the whole change
   against the acceptance criteria, runs the slow tests, and routes gaps back into
   planning or implementation.
 - **Verify at the integration point.** imp takes a merge-queue slot, rebases onto
-  the current base, reruns verification, reviews the integrated result, and stops
-  at the merge gate.
+  the current base, resolves conflicts, reruns verification, reviews the
+  integrated result, and merges it.  If something still needs your judgment, it
+  surfaces at the merge gate instead.
 
-This is the batteries-included workflow, not engine policy. Its phases, routes,
+This is the batteries-included workflow, not engine policy.  Its phases, routes,
 gates, model tiers, scripts, and agent prompts are ordinary files in your
-repository. Keep it, change it, or replace it. The engine only executes the graph
+repository.  Keep it, change it, or replace it.  The engine only executes the graph
 and records what happened.
+
+Model choice is per role, so one quest can use different model tiers or vendors
+for planning, coding, and review.  Standing project instructions are applied to
+every run, so architectural decisions and local conventions do not have to be
+restated for each quest.
 
 ## A quest leaves a trail
 
-A quest is one unit of work from the opening intent to the final merge. Before
+A quest is one unit of work from the opening intent to the final merge.  Before
 you choose to build, it is only a conversation and some notes: no branch and no
-worktree. You can build it, park it in the backlog, or discard it.
+worktree.  You can build it, park it in the backlog, or discard it.
 
 Once live, the quest owns its worktree, artifacts, workflow snapshot, and
-append-only event log. Every prompt, response, tool call, result, decision, test
-run, and gate outcome goes into that log. State is rebuilt from the log rather
-than held only in memory, which is why an interrupted run can resume without
-pretending the interrupted step never happened.
+append-only event log.  Prompts, responses, and the tool events exposed to imp go
+into that local log alongside decisions, test runs, and gate outcomes.  State is
+rebuilt from the log rather than held only in memory, which is why an interrupted
+run can resume without pretending the interrupted step never happened.  The log
+can contain source code and command output; treat the archive as source-sensitive
+data.
 
 When the quest finishes, its conversation and artifacts are archived and remain
-searchable. The commit is not the only surviving explanation of the change:
+searchable.  The commit is not the only surviving explanation of the change:
 
 ```bash
 imp list                         # active work, drafts, and backlog
@@ -129,14 +140,23 @@ imp search "rate limit"          # live and archived conversations
 imp events search "pytest"       # tool calls, results, and agent reasoning
 ```
 
-That is what makes provenance useful here. You can start from a line of code,
-find the quest that introduced it, and read the archived conversation that led
-to it.
+Every non-merge commit produced by the default workflow carries a `Quest: <id>`
+trailer.  That makes the provenance path concrete:
+
+```bash
+git blame path/to/file
+git log -1 --format='%(trailers:key=Quest,valueonly)' <commit>
+imp log <quest-id>
+```
+
+Start with a line, find its commit, read the quest ID, then inspect the archived
+conversation that produced it.
 
 ## What happens when a test fails
 
-Here is a real excerpt from `imp log`. A verification gate went red partway
-through a change:
+A green test run is not an interesting test of the process.  Here is a real
+excerpt from `imp log` where a verification gate went red partway through a
+change:
 
 ```text
 ↩ verify → task-lead  (Gate `./scripts/run-verify.sh fast` failed (exit 2))
@@ -150,16 +170,16 @@ through a change:
 ```
 
 It did not edit the unrelated test, invent a fix, or keep retrying until
-something happened to turn green. It recorded the toleration, which forced the
-failure to surface again at the merge gate. There it found the existing backlog
+something happened to turn green.  It recorded the toleration, which forced the
+failure to surface again at the merge gate.  There it found the existing backlog
 quest tracking that failure before closing the change and merging it.
 
-That run took 26 minutes, 21 steps, and two keystrokes from me. It cost $6.10 at
-provider API list prices. Across imp's 40 most recent merged changes when these
-numbers were collected, the median was $46, the middle half ranged from $27 to
-$96, and the largest was $339. Those prices cover the whole process: interview,
-specification, planning, independent reviews, implementation, tests, rebase,
-integration review, and merge.
+That run took 26 minutes and 21 steps.  It cost $6.10 at provider API list prices.
+Across the 40 merged changes in the same sample, the median was $46, the middle
+half ranged from $27 to $96, and the largest was $339.  These are measurements of
+imp developing this repository, not a cost forecast for another project.  They
+cover the whole process: interview, specification, planning, independent
+reviews, implementation, tests, rebase, integration review, and merge.
 
 <details>
 <summary><code>imp log --summary</code> for that run</summary>
@@ -203,18 +223,18 @@ Run `imp log --summary <id>` to get the same accounting for your own quest.
 
 ## Isolation and security boundaries
 
-Each live quest uses a separate git worktree. Nothing touches your checkout,
+Each live quest uses a separate git worktree.  Nothing touches your checkout,
 index, or stash, and several quests can run at once.
 
-A worktree is not a security boundary because worktrees share one `.git`. imp
+A worktree is not a security boundary because worktrees share one `.git`.  imp
 therefore runs agent shell commands under bubblewrap, in separate user, IPC, and
-UTS namespaces. The filesystem is read-only outside an explicit writable set;
+UTS namespaces.  The filesystem is read-only outside an explicit writable set;
 credentials are replaced with empty mounts; and shared Git escape paths such as
 hooks, config, the index, and refs outside the quest's namespace are remounted
-read-only. This fails closed: no `bwrap`, no run.
+read-only.  This fails closed: no `bwrap`, no run.
 
-Two limits are worth stating plainly. Network access is allowed by default; set
-`sandbox.network: false` to disable it. File-editing tools enforce the same path
+Two limits are worth stating plainly.  Network access is allowed by default; set
+`sandbox.network: false` to disable it.  File-editing tools enforce the same path
 policy in-process, so the kernel-level guarantee applies to shell commands.
 
 ## Documentation
@@ -232,19 +252,19 @@ policy in-process, so the kernel-level guarantee applies to shell commands.
 
 ## Status and contributing
 
-imp is pre-release. The engine and default workflow are in daily use, but
+imp is pre-release.  The engine and default workflow are in daily use, but
 interfaces may change before the first tagged release.
 
 imp drives the official `claude` and `codex` binaries through their published
-agent SDKs, or uses the Anthropic and OpenAI APIs directly. It is an independent
+agent SDKs, or uses the Anthropic and OpenAI APIs directly.  It is an independent
 harness, not an Anthropic or OpenAI product, and carries no endorsement from
-either. Most production use so far has been with Claude Code.
+either.  Most production use so far has been with Claude Code.
 
-Issues and pull requests are welcome. From a clone, run `make sync-env` to build
+Issues and pull requests are welcome.  From a clone, run `make sync-env` to build
 the development environment from `uv.lock`, then run `make check` before opening
 a pull request.
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE). Third-party attribution is in
+Apache 2.0.  See [LICENSE](LICENSE).  Third-party attribution is in
 [NOTICE](NOTICE).
