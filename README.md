@@ -38,7 +38,7 @@ match your project's needs.  The engine is flexible enough that it can also be
 used for non-coding projects or even business processes.
 
 Once it got past the early bootstrap phase of development, all of imp's
-remaining code was written by imp itself, with no human code review.  That has
+remaining code was written by imp itself, with **no human code review**.  That has
 worked out much better than I expected, both in code quality and maintainability.
 I think it works because imp front-loads the design, uses fresh agents to review
 the work, and leans heavily on TDD and integration testing.
