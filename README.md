@@ -50,7 +50,7 @@ recommend a Claude Max or ChatGPT Pro subscription.
 
 ## Try it
 
-imp needs Linux, Git, Python 3.11 or newer, and
+imp needs Linux, Git, Python 3.11 or newer, GNU Make, `uv`, and
 [bubblewrap](https://github.com/containers/bubblewrap).  For model access, either
 install and sign in to the `claude` or `codex` CLI with an existing subscription,
 or export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.
@@ -58,9 +58,8 @@ or export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.
 ```bash
 git clone https://github.com/jpoimboe/imp
 cd imp
-python3 -m venv .venv
+make sync-env
 . .venv/bin/activate
-python -m pip install -e .
 
 mkdir /path/to/my-app
 cd /path/to/my-app
@@ -68,7 +67,7 @@ imp init
 imp new "build a local-first task tracker with a web UI"
 ```
 
-After initializing the repository with `imp init`', `imp new` starts the
+After initializing the repository with `imp init`, `imp new` starts the
 interview.  It asks questions, proposes options, pushes on tradeoffs, and
 spikes throwaway code when the answer needs an experiment rather than an
 opinion.
@@ -76,18 +75,21 @@ opinion.
 When the design is settled, it creates a git worktree and runs off on its own.
 You can pause it at any time with Ctrl-D for resuming later with `imp resume`,
 or interrupt the agent at any time with Ctrl-C to ask a question or send it in
-a different direction.  .
+a different direction.
 
 Brownfield development works too.  Run `imp init` and `imp new` from an
 existing checkout; imp reads the code before asking questions and fits the
 feature to the existing code.
 
-## What the default workflow does
+## Features
+
+### Default workflow
 
 ```mermaid
 flowchart LR
   intent([intent]) --> interview[interview]
   interview --> spec[spec]
+  interview -. express .-> plan
   spec --> plan[plan]
   plan --> implement[implement]
   implement --> converge[converge]
@@ -96,62 +98,116 @@ flowchart LR
   spec -. review .-> spec
   plan -. review .-> plan
   implement -. test or review failure .-> implement
+  implement -. next plan .-> plan
   converge -. gap found .-> plan
   integrate -. rework .-> plan
 ```
 
-The shipped workflow is deliberately opinionated:
+The default workflow is deliberately opinionated and built around these rules:
 
-- **Interview before implementation.** Your judgment goes in while changing the
-  design is still cheap.  imp asks about decisions it cannot make from the code,
-  not facts it can discover itself.
-- **Write the contract down.** A spec defines the result and its acceptance
+- **Put human judgment up front.** imp asks about decisions it cannot make from
+  the code, while changing the design is still cheap.  Once the design is
+  settled, it typically drives the rest of the quest through merge on its own.
+- **Save questions for the end.** During the unattended run, agents resolve what
+  they safely can and record genuine judgment calls instead of stopping to ask.
+  The merge gate presents the remaining decisions together before anything
+  lands.
+- **Start every step fresh.** Each step is a separate model invocation with only
+  the context it needs.  Specs, plans, and progress files carry decisions
+  forward; reviewers do not inherit the author's reasoning or assumptions.
+- **Spec-driven development.** A spec defines the result and its acceptance
   criteria.  An implementation plan names the code and tests needed to get there.
-  Both are reviewed before implementation starts.
-- **Use fresh context.** Every step is a separate model invocation with only the
-  context it needs.  The spec and plan carry decisions forward; reviewers do not
-  inherit the author's reasoning or assumptions, and there is no long-running
-  session to drift.
-- **Write tests first.** New tests must be observed failing for the expected
-  reason before implementation.  A test that never proved it could fail is not
-  evidence.
-- **Keep the code lean.** Coders and reviewers push back on speculative
-  fallbacks, dead error handling, and compatibility shims that the design did not
-  ask for.
-- **Make reviewers independent.** The agents reviewing the spec, plan, and code
-  did not write them.  They are told to inspect the repository and verify claims,
-  not agree with the previous agent.
+  On the full path, both are reviewed before implementation starts.
+- **Adversarial review.** The agents reviewing the spec, plan, and code
+  did not write them.  They inspect the repository and verify claims instead of
+  inheriting the previous agent's assumptions.
+- **Test-driven development.** New tests must be observed failing for the
+  expected reason before implementation.  A test that never proved it could fail
+  is not evidence.
 - **Converge on the spec.** After implementation, imp checks the whole change
   against the acceptance criteria, runs the slow tests, and routes gaps back into
   planning or implementation.
-- **Verify at the integration point.** imp takes a merge-queue slot, rebases onto
+- **Verify the integrated result.** imp takes a merge-queue slot, rebases onto
   the current base, resolves conflicts, reruns verification, reviews the
-  integrated result, and merges it.  If something still needs your judgment, it
-  surfaces at the merge gate instead.
+  integrated result, and merges it.
+- **Sweep up non-blocking review comments.** Correctness blockers loop back for
+  an immediate, re-reviewed fix.  Everything else worth considering goes through
+  a separate, once-per-quest quality sweep, which fixes low-risk improvements,
+  filters out noise, and saves genuine judgment calls for the merge gate.
+- **Triage failures instead of chasing green.** Failures caused by the change are
+  fixed and retested.  Unrelated or environmental failures are recorded and
+  surfaced at the merge gate instead of provoking an invented fix.
+- **Keep the code lean and maintainable.** Coders and reviewers push back on
+  speculative fallbacks, dead error handling, and compatibility shims that the
+  design did not ask for.
+- **Work through big changes one plan at a time.** imp implements and fast-tests
+  each plan before starting the next, then reviews the whole quest as one change.
+- **Use the express path for small changes.** The full path writes and reviews a
+  spec and each implementation plan.  Small corrective quests can skip the spec
+  and plan review while keeping implementation, convergence, and integration
+  intact.
 
-This is the batteries-included workflow, not engine policy.  Its phases, routes,
-gates, model tiers, scripts, and agent prompts are ordinary files in your
-repository.  Keep it, change it, or replace it.  The engine only executes the graph
-and records what happened.
+### Engine features
 
-Model choice is per role, so one quest can use different model tiers or vendors
-for planning, coding, and review.  Standing project instructions are applied to
-every run, so architectural decisions and local conventions do not have to be
-restated for each quest.
+The workflow sits on top of engine features that keep quests isolated,
+resumable, and inspectable:
+
+- **Isolate each quest.** Once live, every quest gets its own git worktree and
+  sandboxed agent tools, so several can run at once without breaking your
+  system or touching your checkout, index, or stash.
+- **Pause, resume, or redirect.** Pause a quest at any time with Ctrl-D, or
+  interrupt a running agent with Ctrl-C to ask a question or send it in a
+  different direction.  The append-only event log lets the run resume without
+  throwing away the in-flight step or pretending it never happened.
+- **Get notified and steer from Telegram.** imp can alert your phone when a quest
+  needs input, pauses, fails, or finishes.  From the same chat, you can follow
+  multiple quests, reply to them, and start or resume work.  See
+  [remote-control setup](docs/guide/remote-control.md).
+- **Keep the whole history searchable.** Conversations, artifacts, and tool
+  events remain searchable after a quest finishes, and every line of code can
+  be traced back to the conversation that produced it.
+- **Inspect everything from the CLI.** See active, draft, backlog, and archived
+  quests, then drill into any quest's current state, decisions, summary, readable
+  log, or event stream.
+- **Let agents work across quests.** Agents can inspect earlier steps and search
+  or read other live and archived sibling quests.  With your approval, they can
+  link related backlog items or open new ones for work they discover.
+- **Non-committal chat.** Use `imp chat` to ask questions about imp or your
+  codebase, explore an idea, or scout existing work.  It remains just a
+  conversation -- with no branch or worktree -- unless you decide to build,
+  when it continues into the normal workflow.
+- **Keep a real backlog.** Park ideas for later, or let agents file follow-up work
+  they discover while building something else.
+- **Choose models per role.** A project or quest can use different model tiers
+  or vendors for planning, coding, and review.
+- **Keep agents consistent across backends.** imp supplies its own system prompt
+  and agent tools, and disables Claude's and Codex's native equivalents.  Every
+  backend gets the same instructions, tool interface, and permission checks.
+- **Carry project memory forward.** Standing, human-approved instructions in
+  `imp/memory/` carry architectural decisions, local conventions, and
+  cross-quest preferences into future quests.  See
+  [project memory](docs/guide/memory.md).
+- **Change the process.** Workflows, gates, model tiers, scripts, and agent
+  prompts are ordinary files in your repo.  Customize the default workflow or
+  replace it entirely.
+- **Embed it in your own application.** A supported Python API can create quests,
+  stream events, and answer the questions a workflow asks.  See the
+  [embedding guide](docs/guide/embedding.md).
+- **Not just for code.** The engine can drive other structured processes, not
+  just software development.
 
 ## A quest leaves a trail
 
-A quest is one unit of work from the opening intent to the final merge.  Before
-you choose to build, it is only a conversation and some notes: no branch and no
-worktree.  You can build it, park it in the backlog, or discard it.
+A quest represents a unit of work, from the opening intent to the final merge.
+Before going live, it's only a conversation: no branch or worktree.  You can
+build it, park it in the backlog, or discard it.
 
 Once live, the quest owns its worktree, artifacts, workflow snapshot, and
-append-only event log.  Prompts, responses, and the tool events exposed to imp go
-into that local log alongside decisions, test runs, and gate outcomes.  State is
-rebuilt from the log rather than held only in memory, which is why an interrupted
-run can resume without pretending the interrupted step never happened.  The log
-can contain source code and command output; treat the archive as source-sensitive
-data.
+append-only event log.  Prompts, responses, and the tool events exposed to imp
+go into that local log alongside decisions, test runs, and gate outcomes.
+State is rebuilt from the log rather than held only in memory, so an
+interrupted run can resume in the middle of a step.  The log can contain source
+code and command output; treat the archive as source-sensitive data.
 
 When the quest finishes, its conversation and artifacts are archived and remain
 searchable.  The commit is not the only surviving explanation of the change:
@@ -177,75 +233,6 @@ imp log <quest-id>
 Start with a line, find its commit, read the quest ID, then inspect the archived
 conversation that produced it.
 
-## What happens when a test fails
-
-A green test run is not an interesting test of the process.  Here is a real
-excerpt from `imp log` where a verification gate went red partway through a
-change:
-
-```text
-↩ verify → task-lead  (Gate `./scripts/run-verify.sh fast` failed (exit 2))
-
-• The failing test spawns a real sandbox and asserts that imp --help resolves the
-  worktree's CLI via a PYTHONPATH shadow. My diff only changes bytes the archive
-  progress helper writes to a TTY stderr; this test never touches the archive and
-  captures a non-TTY subprocess, where the helper was and remains silent. Not
-  attributable to my change either way, so I'm recording it as a tolerated
-  failure rather than inventing a fix.
-```
-
-It did not edit the unrelated test, invent a fix, or keep retrying until
-something happened to turn green.  It recorded the toleration, which forced the
-failure to surface again at the merge gate.  There it found the existing backlog
-quest tracking that failure before closing the change and merging it.
-
-That run took 26 minutes and 21 steps.  It cost $6.10 at provider API list prices.
-Across the 40 merged changes in the same sample, the median was $46, the middle
-half ranged from $27 to $96, and the largest was $339.  These are measurements of
-imp developing this repository, not a cost forecast for another project.  They
-cover the whole process: interview, specification, planning, independent
-reviews, implementation, tests, rebase, integration review, and merge.
-
-<details>
-<summary><code>imp log --summary</code> for that run</summary>
-
-```text
-default  ·  fori10  ·  merged  ·  26m 25s  ·  4.2M  ·  $6.10
-threshold
-  threshold                           7m 50s  790.3k  $2.21
-  scope-code-check                        0s       —      —
-plan
-  plan-writer                          2m 8s  726.1k  $0.76
-  plan-verify-commit                      0s       —      —
-  plan-finalized                          0s       —      —
-implement
-  task-lead                           4m 32s  435.8k  $0.51
-    ↳ coder (writing code)            1m 10s  173.2k  $0.14
-    ↳ code-reviewer (reviewing code)  1m 40s  177.5k  $0.19
-  verify                              2m 13s       —      —
-  task-lead                              57s  186.5k  $0.36
-  check-next-plan                         0s       —      —
-converge
-  gap-check                           1m 11s  260.2k  $0.32
-  quest-review                         3m 0s  945.3k  $0.87
-  deferred-sweep                         19s   57.6k  $0.14
-  converge-verify                     1m 28s       —      —
-  deferred-sweep                         40s  101.5k  $0.17
-integrate
-  wait-for-head                           0s       —      —
-  integrate-rebase                        0s       —      —
-  summarizer                             22s   62.6k  $0.06
-  finalize                            1m 20s  286.8k  $0.36
-  cleanup-merge                           0s       —      —
-  assert-stamped                          0s       —      —
-  merge-to-base                           0s       —      —
-```
-
-Script steps that only route on an exit code cost nothing, and appear that way.
-Run `imp log --summary <id>` to get the same accounting for your own quest.
-
-</details>
-
 ## Isolation and security boundaries
 
 Each live quest uses a separate git worktree.  Nothing touches your checkout,
@@ -258,36 +245,20 @@ credentials are replaced with empty mounts; and shared Git escape paths such as
 hooks, config, the index, and refs outside the quest's namespace are remounted
 read-only.  This fails closed: no `bwrap`, no run.
 
-Two limits are worth stating plainly.  Network access is allowed by default; set
-`sandbox.network: false` to disable it.  File-editing tools enforce the same path
-policy in-process, so the kernel-level guarantee applies to shell commands.
-
-## Documentation
-
-- [What is imp?](docs/guide/what-is-imp.md) explains quests, phases, and drafts.
-- [Features](docs/guide/features.md) covers review gates, project memory,
-  per-role model selection, and remote control.
-- [Lifecycle](docs/guide/lifecycle.md) covers statuses, the backlog, the archive,
-  and what happens when you leave a conversation.
-- [Introspection](docs/guide/introspection.md) covers logs, events, history, and
-  search.
-- [Embedding](docs/guide/embedding.md) documents the supported Python API.
-- [Architecture](docs/internals/architecture.md) describes the engine and the
-  bundled workflows.
+Network access is allowed by default; set `sandbox.network: false` to disable it.
+File-editing tools enforce the same path policy in-process, so the kernel-level
+guarantee applies to shell commands.
 
 ## Status and contributing
 
 imp is pre-release.  The engine and default workflow are in daily use, but
 interfaces may change before the first tagged release.
 
-imp drives the official `claude` and `codex` binaries through their published
-agent SDKs, or uses the Anthropic and OpenAI APIs directly.  It is an independent
-harness, not an Anthropic or OpenAI product, and carries no endorsement from
-either.  Most production use so far has been with Claude Code.
+See [Architecture](docs/internals/architecture.md) for an overview of the engine
+and bundled workflows.
 
-Issues and pull requests are welcome.  From a clone, run `make sync-env` to build
-the development environment from `uv.lock`, then run `make check` before opening
-a pull request.
+Issues and pull requests are welcome.  Run `make check` before opening a pull
+request.
 
 ## License
 
