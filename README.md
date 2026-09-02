@@ -31,26 +31,22 @@ merge.
 Every conversation is archived, so you can easily trace any line of code back
 to the full conversation which produced it.
 
-Based on my experiences with imp, I am starting to believe that, for the
-majority of projects, we are at the point where humans don't need to write *or*
-review code.  But they do still need to be heavily involved in the up-front
-interview/design phase, and testing.
-
-Once I got past the early bootstrap phase of development, all of imp's
-remaining code was written by imp itself, with no human code review.  Its use
-of heavy up-front design and review, and its strong reliance on TDD and
-integration testing has resulted in an impressive degree of quality and
-maintainability, IMO.
-
-Note my day job is an upstream Linux kernel developer/maintainer, which is a
-very large distributed human-oriented project, for which imp is not (yet?) a
-good fit.
-
 Imp ships with an opinionated default workflow which follows best practices for
 producing high quality, TDD, fully AI-written code in a fast-moving greenfield
 solo or small team project, but it can be easily customized or replaced to
 match your project's needs.  The engine is flexible enough that it can also be
 used for non-coding projects or even business processes.
+
+Once it got past the early bootstrap phase of development, all of imp's
+remaining code was written by imp itself, with no human code review.  That has
+worked out much better than I expected, both in code quality and maintainability.
+I think it works because imp front-loads the design, uses fresh agents to review
+the work, and leans heavily on TDD and integration testing.
+
+Humans still need to be heavily involved in the up-front interview/design
+phase, and in judging whether the result actually works.  The resulting code
+quality and maintainability don't come cheap though, so for serious use I
+recommend a Claude Max or ChatGPT Pro subscription.
 
 ## Try it
 
@@ -66,33 +62,25 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
 
-mkdir ../taskboard
-cd ../taskboard
+mkdir /path/to/my-app
+cd /path/to/my-app
 imp init
 imp new "build a local-first task tracker with a web UI"
 ```
 
-`imp init` works in an empty directory: it initializes Git if needed, then
-confirms the base branch, workflow, test commands, worktree setup, and provider.
-`imp new` starts the interview.  imp turns the idea into concrete design options,
-pushes on tradeoffs, and spikes throwaway code when the answer needs an
-experiment rather than an opinion.
+After initializing the repository with `imp init`', `imp new` starts the
+interview.  It asks questions, proposes options, pushes on tradeoffs, and
+spikes throwaway code when the answer needs an experiment rather than an
+opinion.
 
-Brownfield works too.  Run `imp init` and `imp new` from an existing checkout;
-imp reads the code before asking questions and fits the design to what is already
-there.
+When the design is settled, it creates a git worktree and runs off on its own.
+You can pause it at any time with Ctrl-D for resuming later with `imp resume`,
+or interrupt the agent at any time with Ctrl-C to ask a question or send it in
+a different direction.  .
 
-When the design is settled, tell it to "build it" in the conversation; there is
-no second shell command.  The quest leaves draft state, gets its own branch and
-worktree, and runs on its own.  It surfaces again if something genuinely needs
-your call.  You can watch it, leave it alone, interrupt it, or resume it later
-from the event log.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/imp-interview-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/imp-interview-light.png">
-  <img alt="During the spec phase, imp reads the repository, proposes a concrete design, and asks the user to settle one unresolved decision" src="docs/images/imp-interview-dark.png">
-</picture>
+Brownfield development works too.  Run `imp init` and `imp new` from an
+existing checkout; imp reads the code before asking questions and fits the
+feature to the existing code.
 
 ## What the default workflow does
 
