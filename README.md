@@ -1,44 +1,144 @@
 # imp
 
-Tell imp what you want changed.  It interviews you until the design is settled, then specs it, plans it, reviews the plan, writes it test-first, reviews the diff, runs the tests, and merges.
+**Stop babysitting your coding agent.**
 
 ![license](https://img.shields.io/badge/license-Apache--2.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
+
+imp is a batteries-included, declarative agent workflow that interviews you to
+settle the design, then takes a code change from spec to merge without needing
+you to supervise every step. Detailed specs and implementation plans carry your
+decisions across a fresh context for every step. Tests are written first, every
+artifact is independently reviewed, and the finished change is checked against
+its acceptance criteria before merge.
+
+Every change runs as its own isolated, resumable **quest**. The complete agent
+conversation is archived with it, so you can trace the code back to the reasoning
+that produced it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/imp-interview-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/images/imp-interview-light.png">
-  <img alt="imp interviewing the user about a change: it reads the code, proposes a design, and asks the one question it can't answer itself" src="docs/images/imp-interview-dark.png">
+  <img alt="imp interviewing the user about a change: it reads the code, proposes a design, and asks the one question it cannot answer itself" src="docs/images/imp-interview-dark.png">
 </picture>
 
-Coding agents give you two settings today: approve every step, or hand over the keys.  imp is a third.  Your judgment goes in at the front, in a design conversation, and the structure carries it from there.  imp needs you at the front, not over its shoulder.
+I am a Linux kernel maintainer, so I have fairly boring ideas about what makes a
+change trustworthy: a written contract, review by somebody who did not write it,
+tests that were seen failing before they passed, and a record I can inspect
+afterward. imp turns those habits into an executable workflow.
 
-It has built itself since June 2026.  79% of the lines in `src/` arrived on a branch imp specified, reviewed, tested and merged on its own.
+It does not make the models smarter. It gives them a process that makes mistakes
+harder to hide and easier to send back.
 
-## Quickstart
+imp has built itself since June 2026. At the time of writing, 79% of the lines in
+`src/` arrived on a branch that imp specified, planned, implemented, reviewed,
+tested, and merged.
+
+## Try it
+
+imp needs Linux, Git, Python 3.11 or newer, and
+[bubblewrap](https://github.com/containers/bubblewrap). It can use an existing
+Claude Code or Codex subscription, or call the Anthropic and OpenAI APIs directly.
 
 ```bash
-git clone https://github.com/jpoimboe/imp && cd imp
-python3 -m pip install -e .                      # needs Python 3.11+
-imp init                                         # detects your base branch, workflow and test commands
-imp new "add rate limiting to the public API"    # state intent; imp takes it from there
+git clone https://github.com/jpoimboe/imp
+cd imp
+python3 -m pip install -e .
+
+cd /path/to/your/project
+imp init
+imp new "add rate limiting to the public API"
 ```
 
-`imp new` opens the design conversation.  Work through it (it'll push back, propose options, and ask about the details it can't decide for you), then tell it to build.  From there it runs to the merge gate on its own, and surfaces again only if something genuinely needs your call.
+`imp init` inspects the repository and confirms the base branch, workflow, test
+commands, worktree setup, and provider. `imp new` starts the interview. imp reads
+the code before asking questions, proposes concrete approaches and tradeoffs, and
+spikes throwaway code when the answer needs an experiment rather than an opinion.
 
-## Why imp
+When the design is settled, tell it to build. The quest leaves draft state, gets
+its own branch and worktree, and runs to the next explicit human gate. You can
+watch it, leave it alone, interrupt it, or resume it later from the event log.
 
-- **It interviews you first.**  imp reads your code before it asks you anything, proposes two or three approaches with tradeoffs, writes out the exact strings and values you'll end up seeing, and spikes throwaway code when a question can only be settled by running it.
-- **The review happens before the code exists.**  Plans contain the verbatim code they intend to produce, so a bug is sitting in the plan already, where it costs a paragraph to fix instead of a diff.
-- **Reviewers are strangers.**  Every artifact is reviewed by a different agent with a clean context, which never sees the reasoning that produced it and is told to verify every claim by opening the source.
-- **Tests come first, and they have to be able to fail.**  imp's own codebase is 10,189 tests across 850 files, 194,000 lines of test code against 60,000 lines of source, nearly all of it written by imp under this rule.
-- **The workflow is a file you own.**  The phases, the gates, the reviewers, the model tiers: one YAML file plus agent prompts, in your repo, under git.  The engine has no opinion of its own.
-- **Nothing touches your checkout.**  Every change runs in its own git worktree, and every agent shell command runs under [bubblewrap](https://github.com/containers/bubblewrap) with credentials masked.
+## What the default workflow does
 
-## What a change looks like
-
-Quoted from `imp log` on a real change, with `…` where I cut for length.  Partway through, the test suite goes red:
-
+```mermaid
+flowchart LR
+  intent([intent]) --> interview[interview]
+  interview --> spec[spec]
+  spec --> plan[plan]
+  plan --> implement[implement]
+  implement --> converge[converge]
+  converge --> integrate[integrate]
+  integrate --> merged([merged])
+  spec -. review .-> spec
+  plan -. review .-> plan
+  implement -. test or review failure .-> implement
+  converge -. gap found .-> plan
+  integrate -. rework .-> plan
 ```
+
+The shipped workflow is deliberately opinionated:
+
+- **Interview before implementation.** Your judgment goes in while changing the
+  design is still cheap. imp asks about decisions it cannot make from the code,
+  not facts it can discover itself.
+- **Write the contract down.** A spec defines the result and its acceptance
+  criteria. An implementation plan names the code and tests needed to get there.
+  Both are reviewed before implementation starts.
+- **Use fresh context.** Every step is a separate model invocation with only the
+  context it needs. The spec and plan carry decisions forward; reviewers do not
+  inherit the author's reasoning or assumptions.
+- **Write tests first.** New tests must be observed failing for the expected
+  reason before implementation. A test that never proved it could fail is not
+  evidence.
+- **Make reviewers independent.** The agents reviewing the spec, plan, and code
+  did not write them. They are told to inspect the repository and verify claims,
+  not agree with the previous agent.
+- **Converge on the spec.** After implementation, imp checks the whole change
+  against the acceptance criteria, runs the slow tests, and routes gaps back into
+  planning or implementation.
+- **Verify at the integration point.** imp takes a merge-queue slot, rebases onto
+  the current base, reruns verification, reviews the integrated result, and stops
+  at the merge gate.
+
+This is the batteries-included workflow, not engine policy. Its phases, routes,
+gates, model tiers, scripts, and agent prompts are ordinary files in your
+repository. Keep it, change it, or replace it. The engine only executes the graph
+and records what happened.
+
+## A quest leaves a trail
+
+A quest is one unit of work from the opening intent to the final merge. Before
+you choose to build, it is only a conversation and some notes: no branch and no
+worktree. You can build it, park it in the backlog, or discard it.
+
+Once live, the quest owns its worktree, artifacts, workflow snapshot, and
+append-only event log. Every prompt, response, tool call, result, decision, test
+run, and gate outcome goes into that log. State is rebuilt from the log rather
+than held only in memory, which is why an interrupted run can resume without
+pretending the interrupted step never happened.
+
+When the quest finishes, its conversation and artifacts are archived and remain
+searchable. The commit is not the only surviving explanation of the change:
+
+```bash
+imp list                         # active work, drafts, and backlog
+imp show <id>                    # intent, status, timing, and result
+imp log <id>                     # readable story of the run
+imp events <id> --agent coder    # the coder's event stream
+imp search "rate limit"          # live and archived conversations
+imp events search "pytest"       # tool calls, results, and agent reasoning
+```
+
+That is what makes provenance useful here. You can start from a line of code,
+find the quest that introduced it, and read the archived conversation that led
+to it.
+
+## What happens when a test fails
+
+Here is a real excerpt from `imp log`. A verification gate went red partway
+through a change:
+
+```text
 ↩ verify → task-lead  (Gate `./scripts/run-verify.sh fast` failed (exit 2))
 
 • The failing test spawns a real sandbox and asserts that imp --help resolves the
@@ -49,14 +149,22 @@ Quoted from `imp log` on a real change, with `…` where I cut for length.  Part
   failure rather than inventing a fix.
 ```
 
-So it didn't invent a fix, edit the test, or loop until something turned green.  It also didn't quietly swallow the failure.  The toleration goes in the record, so it has to surface at the merge gate, and at the gate it went and found the backlog quest already tracking that test before closing the item and merging.
+It did not edit the unrelated test, invent a fix, or keep retrying until
+something happened to turn green. It recorded the toleration, which forced the
+failure to surface again at the merge gate. There it found the existing backlog
+quest tracking that failure before closing the change and merging it.
 
-That change took twenty-six minutes, twenty-one steps, and two keystrokes from me.  It cost $6.10.  Across imp's forty most recent merged changes the median was $46, the middle half fell between $27 and $96, and the largest was $339.  Those are API list prices from the provider SDK, and they buy a merged change: specified, reviewed, planned, reviewed again, implemented, code-reviewed, tested, rebased, tested again, and reviewed once more at the integration point.
+That run took 26 minutes, 21 steps, and two keystrokes from me. It cost $6.10 at
+provider API list prices. Across imp's 40 most recent merged changes when these
+numbers were collected, the median was $46, the middle half ranged from $27 to
+$96, and the largest was $339. Those prices cover the whole process: interview,
+specification, planning, independent reviews, implementation, tests, rebase,
+integration review, and merge.
 
 <details>
 <summary><code>imp log --summary</code> for that run</summary>
 
-```
+```text
 default  ·  fori10  ·  merged  ·  26m 25s  ·  4.2M  ·  $6.10
 threshold
   threshold                           7m 50s  790.3k  $2.21
@@ -88,55 +196,55 @@ integrate
   merge-to-base                           0s       —      —
 ```
 
-The script steps that just route on an exit code cost nothing, and they show up that way.  Run `imp log --summary <id>` on a change of your own for the same breakdown.
+Script steps that only route on an exit code cost nothing, and appear that way.
+Run `imp log --summary <id>` to get the same accounting for your own quest.
 
 </details>
 
-## How it works
+## Isolation and security boundaries
 
-imp is a deterministic engine driving a declarative workflow.  The engine decides nothing about your code.  It sequences steps, routes on their results, and records what happened.  Each step is a separate model invocation with its own context, its own tools and its own tier, so there's no long session to drift.
+Each live quest uses a separate git worktree. Nothing touches your checkout,
+index, or stash, and several quests can run at once.
 
-```mermaid
-flowchart LR
-  intent([your intent]) --> SPEC["spec"]
-  SPEC --> PLAN["plan"]
-  PLAN --> IMPL["implement"]
-  IMPL --> CONV["converge"]
-  CONV --> INTG["integrate"]
-  INTG --> merged([merged])
-  IMPL -. "next plan" .-> PLAN
-  CONV -. "gap found" .-> PLAN
-  INTG -. "rework" .-> PLAN
-```
+A worktree is not a security boundary because worktrees share one `.git`. imp
+therefore runs agent shell commands under bubblewrap, in separate user, IPC, and
+UTS namespaces. The filesystem is read-only outside an explicit writable set;
+credentials are replaced with empty mounts; and shared Git escape paths such as
+hooks, config, the index, and refs outside the quest's namespace are remounted
+read-only. This fails closed: no `bwrap`, no run.
 
-`plan` and `implement` repeat per plan.  `converge` checks the finished work against the spec's acceptance criteria and sends it back if anything is missing.  `integrate` takes a merge-queue slot, rebases onto the current base, re-runs the slow tests, and merges locally.  No force pushes, no PR left open.
+Two limits are worth stating plainly. Network access is allowed by default; set
+`sandbox.network: false` to disable it. File-editing tools enforce the same path
+policy in-process, so the kernel-level guarantee applies to shell commands.
 
-Underneath all of it is an append-only event log, and that log is the single source of truth.  Every step, tool call and decision gets recorded, and state is a cursor rebuilt from the log, so a run interrupted in the middle of a model call resumes without losing the thread.  That same log renders the live view, `imp log`, and the summary above, which is why every claim on this page is one you can print for yourself.
+## Documentation
 
-## Isolation and sandboxing
+- [What is imp?](docs/guide/what-is-imp.md) explains quests, phases, and drafts.
+- [Features](docs/guide/features.md) covers review gates, project memory,
+  per-role model selection, and remote control.
+- [Lifecycle](docs/guide/lifecycle.md) covers statuses, the backlog, the archive,
+  and what happens when you leave a conversation.
+- [Introspection](docs/guide/introspection.md) covers logs, events, history, and
+  search.
+- [Embedding](docs/guide/embedding.md) documents the supported Python API.
+- [Architecture](docs/internals/architecture.md) describes the engine and the
+  bundled workflows.
 
-The worktree isolates the change: nothing touches your checkout, your index or your stash, and several changes can be in flight at once.  But a worktree isn't a security boundary, since worktrees share one `.git`.  So imp also runs every agent shell command under bubblewrap in its own user, IPC and UTS namespaces, with the filesystem read-only apart from an explicit writable set, credentials replaced by empty mounts rather than merely left unread, and the escape paths in the shared `.git` (`hooks`, `config`, `index`, and every ref outside the agent's own namespace) re-mounted read-only.  This fails closed: no `bwrap`, no run.
+## Status and contributing
 
-Two limits worth stating plainly.  Network access is *not* namespaced by default, so set `sandbox.network: false` to cut it off.  And imp's file-editing tools enforce the same path policy in-process rather than through the kernel, so the kernel-level guarantee covers shell commands.
+imp is pre-release. The engine and default workflow are in daily use, but
+interfaces may change before the first tagged release.
 
-## Going deeper
+imp drives the official `claude` and `codex` binaries through their published
+agent SDKs, or uses the Anthropic and OpenAI APIs directly. It is an independent
+harness, not an Anthropic or OpenAI product, and carries no endorsement from
+either. Most production use so far has been with Claude Code.
 
-- [`docs/guide/what-is-imp.md`](docs/guide/what-is-imp.md): the model behind imp, and what a quest, phase and draft are
-- [`docs/guide/features.md`](docs/guide/features.md): review gates, project memory, per-step model tiers, running on your subscription
-- [`docs/guide/introspection.md`](docs/guide/introspection.md): reading logs, events and history
-- [`docs/guide/lifecycle.md`](docs/guide/lifecycle.md): statuses, zones, drafts, and what happens when you leave one
-- [`docs/guide/remote-control.md`](docs/guide/remote-control.md): drive a run from Telegram
-- [`docs/guide/embedding.md`](docs/guide/embedding.md): the `imp.api` surface for embedding imp
-- [`docs/internals/architecture.md`](docs/internals/architecture.md): the engine, and the default and minimal workflows
-
-## Status
-
-imp is pre-release.  The engine and the default workflow are in daily use, but interfaces may still shift before a tagged release.
-
-It runs on the coding-agent subscription you already pay for, driving the official `claude` and `codex` binaries through the vendors' published agent SDKs (or the Anthropic and OpenAI APIs directly, with a key).  To be precise about what that is: imp is an independent harness that spawns those binaries.  It isn't an Anthropic or OpenAI product and carries no endorsement from either.
-
-Issues and pull requests are welcome.  Start from a clone with `make sync-env` (builds a `.venv` from `uv.lock`) and run `make check` (lint, types, lockfile, tests) before opening a PR.
+Issues and pull requests are welcome. From a clone, run `make sync-env` to build
+the development environment from `uv.lock`, then run `make check` before opening
+a pull request.
 
 ## License
 
-Apache 2.0.  See [LICENSE](LICENSE).  Third-party attribution is in [NOTICE](NOTICE).
+Apache 2.0. See [LICENSE](LICENSE). Third-party attribution is in
+[NOTICE](NOTICE).
