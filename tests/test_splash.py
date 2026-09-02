@@ -184,53 +184,16 @@ def test_cell_colour_off_uses_a_bare_half_block_with_no_escapes() -> None:
     assert "\x1b[" not in splash._cell((1, 2, 3), (4, 5, 6), color=False)
     assert splash._cell((1, 2, 3), (4, 5, 6), color=False) == "▀"
 
-
-def test_encode_row_pairs_top_and_bottom_and_rstrips_trailing_space() -> None:
-    g = splash._make_grid()
-    g[0][0] = (255, 0, 0)
-    g[1][0] = (0, 255, 0)
-    row = splash._encode_row(g, 0, 1, color=True)
-    assert row == "\x1b[38;2;255;0;0m\x1b[48;2;0;255;0m▀\x1b[0m"
-
-
-def test_encode_grid_yields_eight_lines_and_handles_the_odd_last_row() -> None:
-    g = splash._make_grid()
-    g[14][19] = (1, 2, 3)  # last row has no paired bottom row (index 15 is absent)
-    lines = splash._encode_grid(g, color=False)
-    assert len(lines) == 8
-    assert lines[7].endswith("▀")
-
-
-@pytest.mark.parametrize("hour,period", [
-    (20, "night"), (23, "night"), (4, "night"), (0, "night"),
-    (5, "day"), (12, "day"), (19, "day"),
-])
-def test_period_splits_night_at_2000_and_day_at_0500(hour, period) -> None:
-    assert splash._period(hour) == period
-
-
-def test_eligible_includes_every_any_scene_in_both_periods(monkeypatch) -> None:
-    any_idx = {i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.ANY}
-    monkeypatch.setattr(splash, "_now_hour", lambda: 23)  # night
-    night = set(splash._eligible())
-    monkeypatch.setattr(splash, "_now_hour", lambda: 12)  # day
-    day = set(splash._eligible())
-    assert any_idx and any_idx <= night and any_idx <= day
-
-
-def test_choose_index_only_returns_eligible_indices(monkeypatch) -> None:
-    monkeypatch.setattr(splash, "_now_hour", lambda: 12)
-    eligible = set(splash._eligible())
+def test_choose_index_stays_inside_the_pool() -> None:
     for _ in range(200):
-        assert splash.choose_index() in eligible
+        assert 0 <= splash.choose_index() < len(splash.SCENES)
 
 
-def test_scenes_are_builder_phrase_when_triples() -> None:
+def test_scenes_are_builder_phrase_pairs() -> None:
     assert splash.SCENES
-    for builder, phrase, when in splash.SCENES:
+    for builder, phrase in splash.SCENES:
         assert callable(builder)
         assert isinstance(phrase, str)
-        assert when in (splash.ANY, splash.DAY, splash.NIGHT)
 
 
 def test_scene_lines_is_deterministic() -> None:
@@ -253,7 +216,7 @@ def test_ansi_render_emits_only_named_codes_never_truecolor() -> None:
 @pytest.mark.parametrize("theme", ["dark", "light", "ansi"])
 def test_every_scene_paints_imp_and_accent_in_bounds(theme) -> None:
     splash._use_theme(theme)
-    for builder, _phrase, _when in splash.SCENES:
+    for builder, _phrase in splash.SCENES:
         g = splash._make_grid()
         builder(g)  # must not raise (all drawing is bounds-clamped)
         assert len(g) == splash.H and all(len(r) == splash.W for r in g)
@@ -336,28 +299,20 @@ def test_arcane_item_scenes_are_wired_and_props_paint() -> None:
     splash._wisps(g)
     assert g[3][20] == splash._P["wisp"]       # first wisp core at (20,3)
     g = splash._make_grid()
-    splash._potions(g, 12)
-    assert g[5][20] == splash._P["rune"]        # spark(x+1,by-7) of bottle 0 at (20,5)
-    g = splash._make_grid()
     splash._wand(g, 19, 12)
     assert g[4][27] == splash._P["flame2"]      # spark(x+8,by-8) tip at (27,4)
     g = splash._make_grid()
     splash._hourglass(g, 24, 3)
     assert g[9][24] == splash._P["flame2"]      # px(cx,top_y+6) lower sand at (24,9)
-    g = splash._make_grid()
-    splash._scroll(g, 24, 7)
-    assert g[12][24] == splash._P["O"]          # disc(cx,cy+5) seal at (24,12)
     expect = [
-        (splash._s_floating_wisps, "the wisps know the way. follow them in.", splash.ANY),
-        (splash._s_potion_shelf, "every spell has a price — name yours.", splash.ANY),
-        (splash._s_magic_wand, "speak, and it shall be built.", splash.ANY),
-        (splash._s_hourglass, "time's a construct. ship anyway.", splash.ANY),
-        (splash._s_scroll, "the ink is wet. dictate.", splash.ANY),
+        (splash._s_floating_wisps, "the wisps know the way."),
+        (splash._s_magic_wand, "speak, and it shall be built."),
+        (splash._s_hourglass, "the sand is falling. time to begin."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p in expect]
     assert idx == sorted(idx)
     assert names.index("_s_rune_sigil") < idx[0]
 
@@ -389,37 +344,17 @@ def test_cloud_fills_its_centre_with_the_given_colour() -> None:
     assert g[8][24] == splash._P["steam"]
 
 
-def test_meteor_head_is_bright_and_tail_trends_to_star() -> None:
-    splash._use_theme("dark")
-    g = splash._make_grid()
-    splash._meteor(g, 19, 3, 5)
-    assert g[3][19] == splash._P["bright"]  # spark head at (x,y)
-    assert g[1][21] == splash._P["star"]    # tail pixel k=2 (t=0.4) -> star
-
-
 def test_cosmic_batch_a_scenes_are_wired_in_gallery_order() -> None:
     expect = [
-        (splash._s_crescent_stars, "the familiar awakens.", splash.ANY),
-        (splash._s_crescent_perch, "perched. where to?", splash.ANY),
-        (splash._s_full_moon_cloud, "what are we building tonight?", splash.NIGHT),
-        (splash._s_meteor_shower, "make a wish — i'll bend it your way.", splash.ANY),
+        (splash._s_crescent_stars, "the familiar awakens."),
+        (splash._s_full_moon_cloud, "the night is thine."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    order = ["_s_crescent_stars", "_s_crescent_perch", "_s_full_moon_cloud",
-             "_s_meteor_shower", "_s_constellation"]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    order = ["_s_crescent_stars", "_s_full_moon_cloud", "_s_constellation"]
     positions = [names.index(n) for n in order]
     assert positions == sorted(positions)
-
-
-def test_full_moon_scene_is_eligible_only_at_night(monkeypatch) -> None:
-    idx = next(i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.NIGHT)
-    monkeypatch.setattr(splash, "_now_hour", lambda: 23)
-    assert idx in splash._eligible()
-    monkeypatch.setattr(splash, "_now_hour", lambda: 12)
-    assert idx not in splash._eligible()
-
 
 def test_planet_paints_a_body_and_a_ring() -> None:
     splash._use_theme("dark")
@@ -428,56 +363,23 @@ def test_planet_paints_a_body_and_a_ring() -> None:
     assert any(c == splash._P["planetA"] for row in g for c in row)
     assert any(c == splash._P["ring"] for row in g for c in row)
 
-
-def test_mountains_cap_snow_above_the_mid_fill() -> None:
-    splash._use_theme("dark")
-    g = splash._make_grid()
-    splash._mountains(g, 14, 15)
-    snow = [y for y, row in enumerate(g) for c in row if c == splash._P["snow"]]
-    mid = [y for y, row in enumerate(g) for c in row if c == splash._P["mtnMid"]]
-    assert snow and mid
-    assert min(snow) <= min(mid)
-
-
-def test_aurora_uses_three_hues_confined_to_the_accent_columns() -> None:
-    splash._use_theme("dark")
-    g = splash._make_grid()
-    splash._aurora(g)
-    painted = [(x, c) for _y, row in enumerate(g) for x, c in enumerate(row) if c is not None]
-    hues = {c for _x, c in painted}
-    assert splash._P["green"] in hues
-    assert splash._P["teal"] in hues
-    assert splash._P["violet"] in hues
-    assert all(x >= 18 for x, _c in painted)
-
-
 def test_comet_scene_paints_a_bright_head() -> None:
     splash._use_theme("dark")
     g = splash._make_grid()
     splash._s_comet(g)
-    assert g[2][28] == splash._P["bright"]  # head disc centred at (28,2)
+    assert g[3][27] == splash._P["bright"]  # head nucleus at (27,3)
 
 
 def test_cosmic_batch_b_scenes_are_wired_in_gallery_order() -> None:
     expect = [
-        (splash._s_ringed_planet, "a world — from nothing.", splash.ANY),
-        (splash._s_mountain_moon, "the mountains waited. so did i.", splash.ANY),
-        (splash._s_comet, "something wicked this way ships.", splash.ANY),
-        (splash._s_aurora, "the sky's showing off — let's match it.", splash.ANY),
+        (splash._s_ringed_planet, "a world, from nothing."),
+        (splash._s_comet, "the heavens blaze forth. name your wish."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    names = [b.__name__ for b, _p in splash.SCENES]
     assert names.index("_s_constellation") < names.index("_s_ringed_planet")
     assert names.index("_s_ringed_planet") < names.index("_s_starfield")
-
-
-def test_galaxy_paints_a_bright_core_and_a_mirrored_arm() -> None:
-    splash._use_theme("dark")
-    g = splash._make_grid()
-    splash._galaxy(g, 24, 6)
-    assert g[6][24] == splash._P["bright"]  # core disc centre
-    assert any(c == splash._P["port"] for row in g for c in row)  # mirrored arm hue
 
 
 def test_void_hole_paints_a_dark_core_inside_an_ember_glow() -> None:
@@ -496,20 +398,17 @@ def test_summoning_circle_scene_paints_a_portal_ring_and_runes() -> None:
     assert any(c == splash._P["rune"] for row in g for c in row)
 
 
-def test_cosmic_batch_c_scenes_complete_the_thirteen_scene_pool() -> None:
+def test_cosmic_scenes_open_the_pool_in_order() -> None:
     expect = [
-        (splash._s_galaxy, "lost in the spiral? i know the way out.", splash.ANY),
-        (splash._s_void, "conjured from the void.", splash.ANY),
-        (splash._s_summoning_circle, "the circle's drawn. name what we summon.", splash.ANY),
+        (splash._s_void, "conjured from the void."),
+        (splash._s_summoning_circle, "the circle's drawn. what do we summon?"),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    assert len(splash.SCENES) >= 13
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    assert names[:13] == [
-        "_s_crescent_stars", "_s_crescent_perch", "_s_full_moon_cloud", "_s_meteor_shower",
-        "_s_constellation", "_s_ringed_planet", "_s_mountain_moon", "_s_comet", "_s_aurora",
-        "_s_galaxy", "_s_void", "_s_starfield", "_s_summoning_circle",
+    names = [b.__name__ for b, _p in splash.SCENES]
+    assert names[:8] == [
+        "_s_crescent_stars", "_s_full_moon_cloud", "_s_constellation", "_s_ringed_planet",
+        "_s_comet", "_s_starfield", "_s_void", "_s_summoning_circle",
     ]
 
 
@@ -522,21 +421,19 @@ def test_ritual_vessel_scenes_are_wired_and_props_paint() -> None:
     splash._orb(g, 24, 7, 4)
     assert g[5][22] == splash._P["orbHi"]    # px(cx-2,cy-2) highlight
     g = splash._make_grid()
-    splash._cauldron(g, 24, 8, 9)
-    assert g[0][24] == splash._P["steam"]    # px(cx,top_y-8) steam plume top
-    g = splash._make_grid()
-    splash._spellbook(g, 23, 11)
-    assert g[6][23] == splash._P["rune"]     # spark(cx,by-5) sigil at (23,6)
+    splash._cauldron(g, 23, 7)
+    assert g[1][24] == splash._P["steam"]    # px(cx+1,top_y-6) upper steam wisp
+    assert g[12][20] == splash._P["potD"]    # px(cx-3,top_y+5) left leg
+    assert g[12][23] == splash._P["fire3"]   # the fire under the pot
     expect = [
-        (splash._s_portal, "the portal is open. step through.", splash.ANY),
-        (splash._s_crystal_ball, "gaze in — what shall we build?", splash.ANY),
-        (splash._s_cauldron, "stir the cauldron — what's brewing?", splash.ANY),
-        (splash._s_grimoire, "the grimoire's open. pick a spell.", splash.ANY),
+        (splash._s_portal, "the portal is open. step through."),
+        (splash._s_crystal_ball, "gaze in — what shall we build?"),
+        (splash._s_cauldron, "stir the cauldron — what's brewing?"),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p in expect]
     assert idx == sorted(idx)
     assert names.index("_s_summoning_circle") < idx[0]
 
@@ -546,6 +443,8 @@ def test_flame_and_sigil_scenes_are_wired_and_props_paint() -> None:
     g = splash._make_grid()
     splash._lantern(g, 21, 13)
     assert g[12][21] == splash._P["lanMetal"]  # rect(x,by-1,4,1) base at (21,12)
+    assert g[9][18] == splash._P["lanGlow"]    # widest glow mark, left of the frame
+    assert g[9][27] == splash._P["lanGlow"]    # its mirror on the right
     g = splash._make_grid()
     splash._candle(g, 21, 13)
     assert g[7][21] == splash._P["W"]          # px(x,by-6) wick glint at (21,7)
@@ -554,19 +453,20 @@ def test_flame_and_sigil_scenes_are_wired_and_props_paint() -> None:
     assert g[4][20] == splash._P["W"]          # px(x,by-9) flame tip at (20,4)
     g = splash._make_grid()
     splash._rune_sigil(g, 24, 7)
-    assert g[7][24] == splash._P["rune"]        # px(cx,cy) centre rune
+    assert g[6][24] == splash._P["rune"]        # a carved stroke on the slab
+    assert g[3][24] == splash._P["metalD"]      # the arched top of the stone
     expect = [
-        (splash._s_lantern, "the lantern's lit. lead the way.", splash.ANY),
-        (splash._s_twin_candles, "lean in. whisper it to the flame.", splash.ANY),
-        (splash._s_twin_torches, "let's raise a little hell.", splash.ANY),
-        (splash._s_rune_sigil, "the runes are carved. speak the word.", splash.ANY),
+        (splash._s_lantern, "the lantern's lit. lead the way."),
+        (splash._s_twin_candles, "lean in. whisper into the flame."),
+        (splash._s_twin_torches, "the torches are lit. let's begin."),
+        (splash._s_rune_sigil, "the runes are ready. what shall we carve?"),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p in expect]
     assert idx == sorted(idx)
-    assert names.index("_s_grimoire") < idx[0]
+    assert names.index("_s_cauldron") < idx[0]
 
 
 def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
@@ -574,9 +474,6 @@ def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
     g = splash._make_grid()
     splash._crystals(g, 13, [(20, 5), (23, 7), (27, 6), (30, 4)])
     assert g[8][20] == splash._P["crysTip"]    # tip of the (20,5) crystal at (20,8)
-    g = splash._make_grid()
-    splash._tarot(g, 21, 2)
-    assert g[9][25] == splash._P["star"]        # disc(x+4,y+7) emblem at (25,9)
     g = splash._make_grid()
     splash._quill(g, 20, 12)
     assert g[3][28] == splash._P["white"]       # feather tip at (28,3)
@@ -586,27 +483,28 @@ def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
     splash._use_theme("dark")
     g = splash._make_grid()
     splash._s_will_o_wisp(g)
-    assert g[4][22] == splash._P["wisp"]         # spark at (22,4) survives the scene
+    assert g[8][24] == splash._P["bright"]       # the lone wisp's hot core at (24,8)
+    assert g[7][24] == splash._P["wisp"]         # spark arm above the core
     expect = [
-        (splash._s_crystal_cluster, "small imp. sharp edges.", splash.ANY),
-        (splash._s_will_o_wisp, "one light in the dark. stay close.", splash.ANY),
-        (splash._s_tarot, "pick a card. any card.", splash.ANY),
-        (splash._s_quill_ink, "name it. i'll put it to ink.", splash.ANY),
-        (splash._s_glowing_mushrooms, "toadstool glow's up. trouble's brewing.", splash.ANY),
+        (splash._s_crystal_cluster, "from nothing, something."),
+        (splash._s_will_o_wisp, "a light beckons in the dark."),
+        (splash._s_quill_ink, "the quill is dipped. say the word."),
+        (splash._s_glowing_mushrooms, "the toadstools are glowing. take your pick."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p in expect]
     assert idx == sorted(idx)
-    assert names.index("_s_scroll") < idx[0]
+    assert names.index("_s_hourglass") < idx[0]
 
 
 def test_nocturnal_scenes_one_are_wired_and_props_paint() -> None:
     splash._use_theme("dark")
     g = splash._make_grid()
     splash._campfire(g, 24, 13)
-    assert g[4][23] == splash._P["ember"]      # first rising ember at (23,4)
+    assert g[7][24] == splash._P["fireTip"]    # the flame's tip at (24,7)
+    assert g[5][23] == splash._P["wax"]        # marshmallow on the stick at (23,5)
     g = splash._make_grid()
     splash._s_fireflies(g)
     assert g[3][20] == splash._P["spark"]       # firefly core at (20,3)
@@ -617,15 +515,15 @@ def test_nocturnal_scenes_one_are_wired_and_props_paint() -> None:
     splash._s_bats(g)
     assert g[3][22] == splash._P["ravenC"]      # first bat body centre at (22,3)
     expect = [
-        (splash._s_campfire, "by emberlight, we code.", splash.ANY),
-        (splash._s_fireflies, "the lights are out to play.", splash.ANY),
-        (splash._s_spider_web, "caught in a bug? i'll cut it loose.", splash.ANY),
-        (splash._s_bats, "creatures of the night, assemble.", splash.ANY),
+        (splash._s_campfire, "by emberlight, we code."),
+        (splash._s_fireflies, "daemons, at your command."),
+        (splash._s_spider_web, "what shall we catch?"),
+        (splash._s_bats, "creatures of the night, assemble."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p in expect]
     assert idx == sorted(idx)
     assert names.index("_s_glowing_mushrooms") < idx[0]
 
@@ -636,40 +534,28 @@ def test_nocturnal_scenes_two_are_wired_and_props_paint() -> None:
     splash._raven(g, 24, 12)
     assert g[8][28] == splash._P["beak"]        # px(x+4,by-4) beak at (28,8)
     g = splash._make_grid()
-    splash._ouroboros(g, 24, 7)
-    assert g[7][29] == splash._P["green"]        # disc(cx+5,cy) head at (29,7)
-    g = splash._make_grid()
-    splash._jack(g, 24, 8)
-    assert g[8][24] == splash._P["pumpkinGlow"]  # px(cx,cy) mouth glow at (24,8)
+    splash._mirror(g, 24, 7)
+    assert g[6][24] == splash._P["o"]            # the reflected imp's body
+    assert g[4][22] == splash._P["O"]            # its left horn
+    assert g[9][26] == splash._P["orbHi"]        # the shine across the glass
     g = splash._make_grid()
     splash._cat(g, 25, 12)
     assert g[9][24] == splash._P["catEye"]       # px(x-1,by-3) left eye at (24,9)
-    g = splash._make_grid()
-    splash._fairy_ring(g)
-    assert g[12][29] == splash._P["cap2"]  # a=0 cap disc (29,11) overwrites node (29,12)
     expect = [
-        (splash._s_raven, "tell me what haunts your codebase.", splash.ANY),
-        (splash._s_ouroboros, "round and round the refactor goes.", splash.ANY),
-        (splash._s_jack_o_lantern, "trouble? my specialty.", splash.ANY),
-        (splash._s_black_cat, "back so soon? good.", splash.ANY),
-        (splash._s_fairy_ring, "step inside the ring. rules optional.", splash.ANY),
+        (splash._s_raven, "tell me what haunts your codebase."),
+        (splash._s_mirror, "the abyss gazes. what do you see?"),
+        (splash._s_black_cat, "be still, the night brings counsel."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p in expect]
     assert idx == sorted(idx)
     assert names.index("_s_bats") < idx[0]
 
 
-def test_trick_and_sunrise_scenes_complete_the_fifty_scene_pool() -> None:
+def test_dice_and_sunrise_close_the_curated_pool() -> None:
     splash._use_theme("dark")
-    g = splash._make_grid()
-    splash._key(g, 21, 7)
-    assert g[5][18] == splash._P["spark"]        # spark(cx-3,cy-2) sparkle at (18,5)
-    g = splash._make_grid()
-    splash._hat(g, 24, 11)
-    assert g[4][29] == splash._P["flame2"]        # spark(cx+5,by-7) at (29,4)
     g = splash._make_grid()
     splash._dice(g, 19, 13)
     assert g[10][21] == splash._P["b"]            # centre pip of the first die at (21,10)
@@ -677,43 +563,25 @@ def test_trick_and_sunrise_scenes_complete_the_fifty_scene_pool() -> None:
     splash._s_sunrise(g)
     assert g[10][24] == splash._P["sun"]          # sun disc centre at (24,10)
     expect = [
-        (splash._s_skeleton_key, "i know a shortcut — only slightly cursed.", splash.ANY),
-        (splash._s_top_hat, "now you see it. now you ship it.", splash.ANY),
-        (splash._s_loaded_dice, "the dice are loaded in your favor.", splash.ANY),
-        (splash._s_sunrise, "what are we building today?", splash.DAY),
+        (splash._s_loaded_dice, "the dice are cast."),
+        (splash._s_sunrise, "the day is thine."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    assert len(splash.SCENES) == 50
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    assert len(splash.SCENES) == 36
+    names = [b.__name__ for b, _p in splash.SCENES]
     assert names == [
-        "_s_crescent_stars", "_s_crescent_perch", "_s_full_moon_cloud", "_s_meteor_shower",
-        "_s_constellation", "_s_ringed_planet", "_s_mountain_moon", "_s_comet", "_s_aurora",
-        "_s_galaxy", "_s_void", "_s_starfield", "_s_summoning_circle",
-        "_s_portal", "_s_crystal_ball", "_s_cauldron", "_s_grimoire",
+        "_s_crescent_stars", "_s_full_moon_cloud", "_s_constellation", "_s_ringed_planet",
+        "_s_comet", "_s_starfield", "_s_void", "_s_summoning_circle",
+        "_s_portal", "_s_crystal_ball", "_s_cauldron",
         "_s_lantern", "_s_twin_candles", "_s_twin_torches", "_s_rune_sigil",
-        "_s_floating_wisps", "_s_potion_shelf", "_s_magic_wand", "_s_hourglass", "_s_scroll",
-        "_s_crystal_cluster", "_s_will_o_wisp", "_s_tarot", "_s_quill_ink",
-        "_s_glowing_mushrooms",
+        "_s_floating_wisps", "_s_magic_wand", "_s_hourglass",
+        "_s_crystal_cluster", "_s_will_o_wisp", "_s_quill_ink", "_s_glowing_mushrooms",
         "_s_campfire", "_s_fireflies", "_s_spider_web", "_s_bats",
-        "_s_raven", "_s_ouroboros", "_s_jack_o_lantern", "_s_black_cat", "_s_fairy_ring",
-        "_s_coffee", "_s_terminal", "_s_desk_book", "_s_clockwork", "_s_the_bug",
-        "_s_stacked_tomes",
-        "_s_skeleton_key", "_s_top_hat", "_s_loaded_dice", "_s_sunrise",
+        "_s_raven", "_s_mirror", "_s_black_cat",
+        "_s_coffee", "_s_terminal", "_s_desk_book", "_s_the_bug", "_s_open_tome",
+        "_s_loaded_dice", "_s_sunrise",
     ]
-
-
-def test_sunrise_scene_is_eligible_only_during_day(monkeypatch) -> None:
-    idx = next(i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.DAY)
-    night_idx = next(i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.NIGHT)
-    monkeypatch.setattr(splash, "_now_hour", lambda: 12)  # day
-    day_pool = splash._eligible()
-    assert idx in day_pool and night_idx not in day_pool
-    monkeypatch.setattr(splash, "_now_hour", lambda: 23)  # night
-    night_pool = splash._eligible()
-    assert idx not in night_pool and night_idx in night_pool
-    assert len(day_pool) == len(night_pool) == 49
-
 
 def test_workshop_scenes_are_wired_and_props_paint() -> None:
     splash._use_theme("dark")
@@ -724,31 +592,29 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
     splash._terminal_win(g, 19, 3)
     assert g[8][23] == splash._P["bright"]        # px(x+4,y+5) cursor blink at (23,8)
     g = splash._make_grid()
-    splash._books(g, 21, 12)
-    assert g[4][23] == splash._P["W"]             # px(x+2,by-8) candle glint at (23,4)
-    g = splash._make_grid()
-    splash._gears(g, 23, 6)
-    assert g[6][27] == splash._P["metal"]         # a=0 tooth of the big gear at (27,6)
+    splash._desk(g, 19, 11)
+    assert g[11][24] == splash._P["wood"]         # the desk top
+    assert g[8][26] == splash._P["W"]             # candle glint, beyond the book
     g = splash._make_grid()
     splash._beetle(g, 24, 7)
     assert g[3][24] == splash._P["O"]             # px(cx,cy-4) head at (24,3)
     g = splash._make_grid()
-    splash._s_stacked_tomes(g)
-    assert g[3][29] == splash._P["flame2"]        # px(29,3) shelf spark
+    splash._s_open_tome(g)
+    assert g[10][21] == splash._P["ink"]          # a line of text on the left page
+    assert g[9][24] == splash._P["wood"]          # the spine down the middle
     expect = [
-        (splash._s_coffee, "another night, another diff.", splash.ANY),
-        (splash._s_terminal, "mischief, compiled.", splash.ANY),
-        (splash._s_desk_book, "light the candles. we begin.", splash.ANY),
-        (splash._s_clockwork, "gears are turning. let's make it tick.", splash.ANY),
-        (splash._s_the_bug, "show me the bug. i'll deal with it.", splash.ANY),
-        (splash._s_stacked_tomes, "i've read everything. ask.", splash.ANY),
+        (splash._s_coffee, "another night, another diff."),
+        (splash._s_terminal, "mischief, compiled."),
+        (splash._s_desk_book, "coding, by candlelight."),
+        (splash._s_the_bug, "something stirs, waiting expectantly."),
+        (splash._s_open_tome, "the tome is open. choose a spell."),
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    names = [b.__name__ for b, _p, _w in splash.SCENES]
-    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    names = [b.__name__ for b, _p in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p in expect]
     assert idx == sorted(idx)
-    assert names.index("_s_fairy_ring") < idx[0]
+    assert names.index("_s_black_cat") < idx[0]
 
 
 def test_print_splash_banner_omits_leading_blank_when_lead_blank_false(monkeypatch) -> None:

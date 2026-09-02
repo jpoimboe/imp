@@ -121,7 +121,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--width", type=int, default=100, help="render width (cols)")
     ap.add_argument("--no-color", dest="color", action="store_false")
     ap.add_argument("--theme", default="dark", help="splash: theme (dark/light/ansi)")
-    ap.add_argument("--scene-index", type=int, default=0, help="splash: scene 0-19")
+    ap.add_argument("--scene-index", type=int, default=0,
+                    help="splash: index into splash.SCENES")
     ap.set_defaults(color=True)
     a = ap.parse_args(argv)
 
