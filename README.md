@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/imp-logo.svg" alt="imp terminal splash with pixel-art mascot and prompt" width="640">
+</p>
+
 # imp
 
 **Stop babysitting your coding agent.**

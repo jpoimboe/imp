@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="title description">
+  <title id="title">imp terminal splash</title>
+  <desc id="description">A terminal window showing the orange pixel-art imp, the phrase “mischief, at your command.”, and an input prompt.</desc>
+
+  <rect x="8" y="8" width="624" height="404" rx="16" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <path d="M9 52.5h622" stroke="#30363d"/>
+  <circle cx="30" cy="30" r="6" fill="#ff5f57"/>
+  <circle cx="50" cy="30" r="6" fill="#febc2e"/>
+  <circle cx="70" cy="30" r="6" fill="#28c840"/>
+  <text x="320" y="35" fill="#7d8590" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" text-anchor="middle">imp</text>
+
+  <g transform="translate(224 72) scale(12)" shape-rendering="crispEdges">
+  <g fill="#c2611f">
+    <rect x="3" y="0" width="1" height="1"/>
+    <rect x="12" y="0" width="1" height="1"/>
+    <rect x="2" y="1" width="1" height="2"/>
+    <rect x="13" y="1" width="1" height="2"/>
+    <rect x="3" y="3" width="1" height="1"/>
+    <rect x="12" y="3" width="1" height="1"/>
+    <rect x="4" y="4" width="2" height="1"/>
+    <rect x="10" y="4" width="2" height="1"/>
+  </g>
+  <g fill="#ff9a3c">
+    <rect x="4" y="5" width="8" height="1"/>
+    <rect x="3" y="6" width="10" height="1"/>
+    <rect x="2" y="7" width="3" height="2"/>
+    <rect x="7" y="7" width="2" height="2"/>
+    <rect x="11" y="7" width="3" height="2"/>
+    <rect x="2" y="9" width="12" height="2"/>
+    <rect x="3" y="11" width="10" height="1"/>
+    <rect x="4" y="12" width="8" height="1"/>
+    <rect x="4" y="13" width="2" height="1"/>
+    <rect x="10" y="13" width="2" height="1"/>
+    <rect x="3" y="14" width="2" height="1"/>
+    <rect x="11" y="14" width="2" height="1"/>
+  </g>
+  <g fill="#ffe9c8">
+    <rect x="5" y="7" width="1" height="1"/>
+    <rect x="9" y="7" width="1" height="1"/>
+  </g>
+  <g fill="#2a1606">
+    <rect x="6" y="7" width="1" height="1"/>
+    <rect x="10" y="7" width="1" height="1"/>
+    <rect x="5" y="8" width="2" height="1"/>
+    <rect x="9" y="8" width="2" height="1"/>
+  </g>
+  </g>
+
+  <text x="320" y="303" fill="#9aa0a8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" font-style="italic" text-anchor="middle">mischief, at your command.</text>
+  <text x="48" y="368" fill="#ff9a3c" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="24">&gt; </text>
+  <rect x="77" y="348" width="12" height="24" fill="#ff9a3c" opacity="0.9"/>
+</svg>
