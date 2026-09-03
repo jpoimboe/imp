@@ -2735,14 +2735,13 @@ def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:
         {"provider": "claude_code", "stop_reason": None}) is False
 
 
-def test_builder_captures_checkpoint_threshold_from_tiers_resolved() -> None:
-    from imp.cli.narrative import NarrativeBuilder
-    b = NarrativeBuilder()
-    # None before the run-start event arrives.
-    assert b.latest_checkpoint_threshold is None
+def test_builder_has_no_checkpoint_threshold_capture() -> None:
+    # The cutoff is model-derived now; nothing reads a configured threshold.
+    b = nv.NarrativeBuilder()
     b.add({"type": "tiers_resolved", "agent_id": None,
            "payload": {"tiers": {}, "steps": {}, "checkpoint_threshold": 0.65}})
-    assert b.latest_checkpoint_threshold == 0.65
+    assert not hasattr(b, "latest_checkpoint_threshold")
+    assert not hasattr(b, "_latest_checkpoint_threshold")
 
 
 def test_usage_prompt_tokens_sums_input_and_both_cache_buckets() -> None:

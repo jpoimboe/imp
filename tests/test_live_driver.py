@@ -1652,23 +1652,67 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
 
 def test_context_bar_renders_filled_track_and_percent_plain() -> None:
     from imp.cli.live_driver import context_bar
-    bar = context_bar("sonnet", 26000, color=False, over_bg=False)
+    bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
     assert bar == "█░░░░░░░░░ 13%"        # 26000/200000 = 0.13 -> 1 of 10 filled
 
 
-def test_context_bar_color_thresholds_green_yellow_red() -> None:
+def test_context_bar_bands_are_relative_to_the_cutoff() -> None:
     from imp.cli.live_driver import context_bar
-    green = context_bar("sonnet", 100000, color=True, over_bg=False)   # 50% < 60
-    yellow = context_bar("sonnet", 140000, color=True, over_bg=False)  # 70% < 85
-    red = context_bar("sonnet", 180000, color=True, over_bg=False)     # 90% >= 85
-    assert "\x1b[32m" in green                                          # green fill
-    assert "\x1b[33m" in yellow                                         # yellow fill
-    assert "\x1b[31m" in red                                            # red fill
-    # boundary checks: exactly 60% is yellow (not green), exactly 85% is red (not yellow)
-    boundary_yellow = context_bar("sonnet", 120000, color=True, over_bg=False)
-    boundary_red = context_bar("sonnet", 170000, color=True, over_bg=False)
-    assert "\x1b[33m" in boundary_yellow and "\x1b[32m" not in boundary_yellow
+    # sonnet has no soft_cap: the cutoff is the 0.8 default, so amber starts at
+    # 0.75 * 0.8 = 0.60 (today's green boundary) and red at the 0.8 handoff.
+    green = context_bar("anthropic", "sonnet", 100000, color=True, over_bg=False)
+    amber = context_bar("anthropic", "sonnet", 140000, color=True, over_bg=False)
+    red = context_bar("anthropic", "sonnet", 180000, color=True, over_bg=False)
+    assert green is not None and amber is not None and red is not None
+    assert "\x1b[32m" in green                     # 50% -> green fill
+    assert "\x1b[33m" in amber                     # 70% -> wordmark fill
+    assert "\x1b[31m" in red                       # 90% -> red fill
+    # Boundaries: 0.595 is green, 0.605 is amber, 0.80 (the cutoff itself) is
+    # red. Both boundary bars LABEL "60%" and differ only in hue — the amber
+    # edge is asserted off the exact 0.6 ratio on purpose, since `0.75 * 0.8` is
+    # 0.6000000000000001 in doubles, so a bar at precisely 0.6 falls green by
+    # one ulp. Behaviourally invisible, and only at that one exact ratio.
+    just_green = context_bar("anthropic", "sonnet", 119000, color=True, over_bg=False)
+    boundary_amber = context_bar("anthropic", "sonnet", 121000, color=True, over_bg=False)
+    boundary_red = context_bar("anthropic", "sonnet", 160000, color=True, over_bg=False)
+    assert just_green is not None and boundary_amber is not None
+    assert boundary_red is not None
+    assert "\x1b[32m" in just_green and "\x1b[33m" not in just_green
+    assert "\x1b[33m" in boundary_amber and "\x1b[32m" not in boundary_amber
     assert "\x1b[31m" in boundary_red and "\x1b[33m" not in boundary_red
+
+
+# AC 9(a)
+def test_context_bar_bands_follow_a_capped_model_down() -> None:
+    from imp.cli.live_driver import context_bar
+    # The regression this quest exists for: gpt-5.6-sol hands off at 260k of a
+    # 1.05M window (~24.8%), so 30% and 50% are RED (they rendered green before,
+    # because the old green band was tested first and swallowed any lower mark).
+    at_30 = context_bar("openai", "gpt-5.6-sol", 315_000, color=True, over_bg=False)
+    at_50 = context_bar("openai", "gpt-5.6-sol", 525_000, color=True, over_bg=False)
+    at_19 = context_bar("openai", "gpt-5.6-sol", 199_500, color=True, over_bg=False)
+    at_10 = context_bar("openai", "gpt-5.6-sol", 105_000, color=True, over_bg=False)
+    assert at_30 is not None and at_50 is not None
+    assert at_19 is not None and at_10 is not None
+    assert "\x1b[31m" in at_30 and at_30.endswith(" 30%")
+    assert "\x1b[31m" in at_50
+    assert "\x1b[33m" in at_19 and "\x1b[31m" not in at_19   # 19% >= 0.75 * 24.8%
+    assert "\x1b[32m" in at_10
+
+
+# AC 9(b)
+def test_context_bar_uncapped_1m_model_keeps_the_default_bands() -> None:
+    from imp.cli.live_driver import context_bar
+    green = context_bar("anthropic", "claude-opus-5[1m]", 500_000,
+                        color=True, over_bg=False)
+    amber = context_bar("anthropic", "claude-opus-5[1m]", 700_000,
+                        color=True, over_bg=False)
+    red = context_bar("anthropic", "claude-opus-5[1m]", 800_000,
+                      color=True, over_bg=False)
+    assert green is not None and amber is not None and red is not None
+    assert "\x1b[32m" in green                     # 50%: the OpenAI cap must not leak
+    assert "\x1b[33m" in amber                     # 70%
+    assert "\x1b[31m" in red                       # 80% = the handoff point
 
 
 def test_context_bar_midrange_fill_is_wordmark_under_dark_theme() -> None:
@@ -1676,31 +1720,31 @@ def test_context_bar_midrange_fill_is_wordmark_under_dark_theme() -> None:
     from imp.cli.live_driver import context_bar
     try:
         pal.set_theme("dark")
-        bar = context_bar("sonnet", 140000, color=True, over_bg=False)  # 70% -> mid-range
+        bar = context_bar("anthropic", "sonnet", 140000, color=True, over_bg=False)
+        assert bar is not None
         assert pal.sgr("wordmark", enabled=True) in bar   # \x1b[38;2;255;154;60m
         assert pal.sgr("yellow", enabled=True) not in bar  # not the muted yellow role
     finally:
         pal.set_theme("ansi")
 
 
-def test_context_bar_falls_back_to_catalog_window() -> None:
+def test_context_bar_resolves_a_dated_id_through_limits_for() -> None:
     from imp.cli.live_driver import context_bar
-    from imp.providers.catalog import window_for_model
-    assert window_for_model("claude-sonnet-4-5") == 200_000
-    assert window_for_model("opus") == 200_000
-    assert window_for_model("claude-opus-4-8[1m]") == 1_000_000
-    assert window_for_model("gpt-5.5") == 400_000
+    from imp.providers.catalog import limits_for
+    dated = limits_for("anthropic", "claude-opus-5-20260315")
+    assert dated is not None
+    assert dated.window == 200_000                 # longest-prefix, not substring
     # 40000/200000 = 0.2 -> round(0.2*10) = 2 filled cells, 8 track.
-    assert context_bar("claude-opus-4-1", 40000, color=False, over_bg=False) == \
-        "██░░░░░░░░ 20%"
+    assert context_bar("anthropic", "claude-opus-5-20260315", 40000,
+                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
 
 
 def test_context_bar_prefers_sdk_percentage_over_tokens() -> None:
     from imp.cli.live_driver import context_bar
     # context_pct is rendered directly: a huge prompt_tokens that would imply
     # ~100% is ignored when the SDK percentage is present.
-    bar = context_bar("claude-opus-4-8[1m]", 999_999, context_pct=42.0,
-                      color=False, over_bg=False)
+    bar = context_bar("claude_code", "claude-opus-4-8[1m]", 999_999,
+                      context_pct=42.0, color=False, over_bg=False)
     # 42% -> round(0.42*10) = 4 filled cells, 6 track.
     assert bar == "████░░░░░░ 42%"
 
@@ -1711,19 +1755,38 @@ def test_live_driver_has_no_context_windows_symbol() -> None:
     assert not hasattr(ld, "context_window")
 
 
-def test_context_bar_omitted_for_unknown_model_or_missing_usage() -> None:
+def test_context_bar_omitted_for_unknown_pair_or_missing_usage() -> None:
     from imp.cli.live_driver import context_bar
-    assert context_bar("some-unlisted-model", 1000, color=False, over_bg=False) is None
-    assert context_bar(None, 1000, color=False, over_bg=False) is None
-    assert context_bar("sonnet", None, color=False, over_bg=False) is None
+    assert context_bar("openai", "some-unlisted-model", 1000,
+                       color=False, over_bg=False) is None
+    assert context_bar("anthropic", None, 1000, color=False, over_bg=False) is None
+    assert context_bar("anthropic", "sonnet", None, color=False, over_bg=False) is None
+
+
+# AC 9(c)
+def test_context_bar_unresolvable_provider_draws_nothing_on_the_tokens_path() -> None:
+    from imp.cli.live_driver import context_bar
+    # No provider -> no window -> no bar, rather than a bar whose mark comes
+    # from a guessed window. The live context_pct path needs no window and
+    # still draws, at the 60/80 default bands.
+    assert context_bar(None, "sonnet", 100000, color=False, over_bg=False) is None
+    assert context_bar("mystery", "sonnet", 100000, color=False, over_bg=False) is None
+    amber = context_bar(None, "sonnet", None, context_pct=70.0,
+                        color=True, over_bg=False)
+    red = context_bar(None, "sonnet", None, context_pct=80.0,
+                      color=True, over_bg=False)
+    assert amber is not None and red is not None
+    assert "\x1b[33m" in amber
+    assert "\x1b[31m" in red
 
 
 def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
     from imp.cli.live_driver import compose_position_row, context_bar
-    act = nv.Activity(kind="agent", model="sonnet", phase="review")
+    act = nv.Activity(kind="agent", model="sonnet", provider="anthropic",
+                      phase="review")
     line = compose_position_row(activity=act, quest_id="z9gixx", title="t",
                                 prompt_tokens=26000, color=False, width=200)
-    bar = context_bar("sonnet", 26000, color=False, over_bg=False)
+    bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
     assert bar is not None
     assert f"sonnet {bar}" in line
     assert "sonnet · " not in line
@@ -1739,6 +1802,8 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
              name="sub_agent", input={"subagent_name": "coder"},
              timestamp="2026-01-01T00:00:00+00:00"))
+    b.add(ev("c1", "step_context", agent_id="sub:t1", provider="anthropic",
+             model="sonnet", tools_schema=[], params={}, max_tool_calls=None))
     b.add(ev("r1", "agent_message", agent_id="sub:t1", provider="anthropic",
              model="sonnet", stop_reason="end_turn",
              raw={"content": [{"type": "text", "text": "hi"}]},
@@ -1748,8 +1813,9 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
              context_pct=42.0, context_window=200_000))
     f = b.running_subagents()[0]
     model = rt.subagent_model(f)
-    assert model == "sonnet"                # sanity: model resolvable in this row
-    bar = context_bar(model, f.nested.latest_prompt_tokens,
+    provider = rt.subagent_provider(f)
+    assert (provider, model) == ("anthropic", "sonnet")   # sanity: pair resolvable
+    bar = context_bar(provider, model, f.nested.latest_prompt_tokens,
                       context_pct=f.nested.latest_context_pct,
                       color=False, over_bg=False)
     assert bar is not None
@@ -1967,41 +2033,45 @@ def test_verb_step_label_push_emits_no_header() -> None:
     assert _body(out) == []                       # position unchanged → no header
 
 
-def test_context_bar_warn_cutoff_follows_checkpoint_threshold() -> None:
-    from imp.cli.live_driver import context_bar
-    # 164000/200000 = 0.82 — above the 0.80 checkpoint but below the 0.85 default.
-    warned = context_bar("sonnet", 164000, checkpoint_threshold=0.8,
-                         color=True, over_bg=False)
-    default = context_bar("sonnet", 164000, color=True, over_bg=False)
-    assert "\x1b[31m" in warned                 # red: past the configured 0.80 warn
-    assert "\x1b[31m" not in default            # default 0.85 cutoff -> still yellow
-    assert "\x1b[33m" in default
-
-
-def test_context_bar_absolute_threshold_warns_against_window() -> None:
-    from imp.cli.live_driver import context_bar
-    # Absolute cap 150000 on a 200000 window -> warn fraction 0.75. 160000 = 0.80
-    # is past it -> red.
-    bar = context_bar("sonnet", 160000, checkpoint_threshold=150000,
-                      color=True, over_bg=False)
-    assert "\x1b[31m" in bar
-
-
-def test_compose_position_row_forwards_checkpoint_threshold() -> None:
-    from imp.cli import narrative as nv
+# AC 9(d): the step-row surface
+def test_position_row_bands_the_bar_from_the_activity_provider() -> None:
     from imp.cli.live_driver import compose_position_row
-    # 164000/200000 = 0.82 — past the configured 0.80 warn, under the 0.85 default.
-    activity = nv.Activity(model="sonnet", kind="agent",
-                           phase="implementation phase", plan="plan 1/1",
-                           counter="task 1/3")
-    warned = compose_position_row(activity=activity, quest_id="abc", title="t",
-                                  prompt_tokens=164000, color=True, width=200,
-                                  checkpoint_threshold=0.8)
-    default = compose_position_row(activity=activity, quest_id="abc", title="t",
-                                   prompt_tokens=164000, color=True, width=200)
-    assert "\x1b[31m" in warned          # red: the threshold reached the bar
-    assert "\x1b[31m" not in default     # unforwarded -> default 0.85 cutoff
-    assert "\x1b[33m" in default         # ...still yellow
+    # Same model, same occupancy (30% of the 1.05M window): with the provider
+    # the cap resolves and the bar is red; without it nothing resolves and the
+    # tokens path draws no bar at all.
+    banded = compose_position_row(
+        activity=nv.Activity(kind="agent", model="gpt-5.6-sol", provider="openai",
+                             phase="implementation phase"),
+        quest_id="abc", title="t", prompt_tokens=315_000, color=True, width=200)
+    unresolved = compose_position_row(
+        activity=nv.Activity(kind="agent", model="gpt-5.6-sol", phase="implementation phase"),
+        quest_id="abc", title="t", prompt_tokens=315_000, color=True, width=200)
+    assert "\x1b[31m" in banded and "30%" in banded
+    assert "%" not in unresolved
+
+
+# AC 9(d): the subagent-row surface
+def test_subagent_row_bands_identically_to_its_step_row() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="gpt-5.6-sol", provider="openai"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
+             name="sub_agent", input={"subagent_name": "coder"},
+             timestamp="2026-01-01T00:00:00+00:00"))
+    b.add(ev("c1", "step_context", agent_id="sub:t1", provider="openai",
+             model="gpt-5.6-sol", tools_schema=[], params={},
+             max_tool_calls=None))
+    b.add(ev("r1", "agent_message", agent_id="sub:t1", provider="openai",
+             model="gpt-5.6-sol", stop_reason="end_turn",
+             raw={"content": [{"type": "text", "text": "hi"}]},
+             usage={"input_tokens": 315_000, "output_tokens": 5}))
+    rows = compose_subagent_rows(b, color=True, width=200,
+                                 now_iso="2026-01-01T00:00:05+00:00")
+    # 315000 / 1.05M = 30%, past the 260k cap -> red on the subagent row too.
+    assert "30%" in rows[0]
+    assert "\x1b[31m" in rows[0]
 
 
 def test_completed_node_suppressed_in_live_leaf() -> None:

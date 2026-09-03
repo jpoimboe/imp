@@ -498,7 +498,6 @@ class NarrativeBuilder:
         # reincarnating line so it can report the context that actually crossed
         # the checkpoint, which is frequently a subagent's turn (see loko19).
         self._last_agent_context: tuple[int, int] | None = None
-        self._latest_checkpoint_threshold: float | int | None = None
         # The "sub:<event_id>" this builder represents (a dispatched subagent's own
         # turns); None on the top-level builder. Gates which agent_message readings move
         # THIS builder's context gauge: the top level records its own (non-sub:) turns;
@@ -585,11 +584,6 @@ class NarrativeBuilder:
         """SDK-reported raw context window of the most recent agent_message turn,
         or None before any has arrived."""
         return self._latest_context_window
-
-    @property
-    def latest_checkpoint_threshold(self) -> float | int | None:
-        """Configured context-checkpoint threshold; None before tiers_resolved arrives."""
-        return self._latest_checkpoint_threshold
 
     @property
     def current_burst(self) -> ToolBurstFold | None:
@@ -2286,9 +2280,7 @@ NarrativeBuilder._HANDLERS["script_output"] = _h_script_output
 def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Fires once at run start with agent_id=None, BEFORE any step_started, so the
     # step stack is empty and _append lands this at the workflow root.
-    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}},
-    #           "checkpoint_threshold": ...}
-    self._latest_checkpoint_threshold = p.get("checkpoint_threshold")
+    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}}}
     tiers = p.get("tiers") or {}
     rows = [
         {"tier": tier, "provider": d.get("provider"), "model": d.get("model"),
