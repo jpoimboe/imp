@@ -35,11 +35,6 @@ class ModelInfo:
     soft_cap: int | None = None
 
 
-# NOTE on two window surfaces: the structured catalogs below carry the
-# per-alias `window` (the spec mandates seeding ANTHROPIC/OPENAI even though
-# only claude_code's _build_options reads a catalog table today); the renderer
-# fallback uses the separate `_WINDOW_TOKENS` substring map further down. Keep
-# the two in agreement when editing window values.
 CLAUDE_CODE: dict[str, ModelInfo] = {
     # Undated major.minor ids used by imp.providers.BUILTIN_FLOOR; the bare aliases below
     # remain resolvable for operator config layers that still use them.
@@ -180,33 +175,6 @@ def limits_for(provider: str | None, model: str | None) -> ModelInfo | None:
     return catalog[max(prefixes, key=len)]
 
 
-# Provider-agnostic substring fallback for the renderer: an arbitrary model id
-# string (alias or dated id) maps to a window. Ordered so the "[1m]" marker
-# wins over the base-model tokens it always accompanies. This is the renderer's
-# ONLY window source (the old _CONTEXT_WINDOWS dict from live_driver.py).
-_WINDOW_TOKENS: tuple[tuple[str, int], ...] = (
-    ("[1m]", 1_000_000),
-    ("haiku", 200_000),
-    ("sonnet", 200_000),
-    ("opus", 200_000),
-    ("fable", 200_000),
-    # Before the "gpt-5" catch-all: these are SUBSTRING matches and first wins,
-    # so "gpt-5.6-sol" would otherwise resolve to 400k.
-    ("gpt-5.6", 1_050_000),
-    ("gpt-5", 400_000),
-)
-
-
-def window_for_model(model: str | None) -> int | None:
-    if not model:
-        return None
-    lowered = model.lower()
-    for token, size in _WINDOW_TOKENS:
-        if token in lowered:
-            return size
-    return None
-
-
 def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | None:
     """The handoff cutoff as a fraction of `window`; None without a usable window."""
     if not window or window <= 0:
@@ -215,19 +183,6 @@ def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | Non
     if cap is None:
         return DEFAULT_CHECKPOINT_FRACTION
     return min(DEFAULT_CHECKPOINT_FRACTION, cap / window)
-
-
-def checkpoint_fraction(
-    threshold: float | int | None, window: int | None
-) -> float | None:
-    """The context-checkpoint cutoff as a fraction of the model window (None if unresolvable)."""
-    if threshold is None or threshold <= 0:
-        return None
-    if threshold <= 1:
-        return float(threshold)
-    if window is None or window <= 0:
-        return None
-    return threshold / window
 
 
 def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:

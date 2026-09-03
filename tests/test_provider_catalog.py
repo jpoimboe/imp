@@ -10,12 +10,10 @@ from imp.providers.catalog import (
     ModelInfo,
     catalog_aliases,
     checkpoint_cutoff,
-    checkpoint_fraction,
     context_tokens_from_usage,
     limits_for,
     model_info,
     model_supports_vision,
-    window_for_model,
 )
 
 
@@ -56,39 +54,6 @@ def test_unknown_alias_yields_conservative_default() -> None:
 def test_other_providers_seed_their_windows() -> None:
     assert model_info(ANTHROPIC, "opus").window == 200_000
     assert model_info(OPENAI, "gpt-5.5").window == 400_000
-
-
-def test_window_for_model_substring_fallback() -> None:
-    # The "[1m]" marker must win over the base-model token it accompanies.
-    assert window_for_model("claude-opus-4-8[1m]") == 1_000_000
-    assert window_for_model("opus") == 200_000
-    assert window_for_model("haiku") == 200_000
-    assert window_for_model("claude-opus-4-1") == 200_000
-    assert window_for_model("claude-sonnet-4-5") == 200_000
-    assert window_for_model("gpt-5.5") == 400_000
-    assert window_for_model("some-unlisted-model") is None
-    assert window_for_model(None) is None
-
-
-def test_checkpoint_fraction_fractional_threshold_passes_through() -> None:
-    # A window fraction is window-independent: returned unchanged.
-    assert checkpoint_fraction(0.8, 200_000) == 0.8
-    assert checkpoint_fraction(0.8, None) == 0.8
-    assert checkpoint_fraction(1.0, 1_000_000) == 1.0
-
-
-def test_checkpoint_fraction_absolute_threshold_divides_by_window() -> None:
-    # An absolute token cap becomes a fraction of the model window.
-    assert checkpoint_fraction(150_000, 200_000) == 0.75
-    assert checkpoint_fraction(500_000, 1_000_000) == 0.5
-
-
-def test_checkpoint_fraction_unresolvable_returns_none() -> None:
-    assert checkpoint_fraction(None, 200_000) is None       # no threshold
-    assert checkpoint_fraction(0, 200_000) is None          # non-positive
-    assert checkpoint_fraction(150_000, None) is None        # absolute cap, unknown window
-    assert checkpoint_fraction(150_000, 0) is None           # absolute cap, zero window
-    assert checkpoint_fraction(-1, 200_000) is None        # negative threshold
 
 
 def test_context_threshold_crossed_fires_at_the_default_fraction() -> None:
@@ -316,12 +281,20 @@ def test_anthropic_catalog_has_opus_5_entries() -> None:
     )
 
 
-def test_window_for_model_covers_fable() -> None:
-    # The "[1m]" marker still wins; the plain fable alias resolves to 200k via
-    # the new substring token (keeping _WINDOW_TOKENS in agreement with the
-    # structured tables per the module NOTE).
-    assert window_for_model("claude-fable-5[1m]") == 1_000_000
-    assert window_for_model("claude-fable-5") == 200_000
+def test_limits_for_covers_fable() -> None:
+    # The bracketed 1M form and the plain alias are both exact catalog keys.
+    one_m = limits_for("anthropic", "claude-fable-5[1m]")
+    plain = limits_for("claude_code", "claude-fable-5")
+    assert one_m is not None and plain is not None
+    assert (one_m.window, plain.window) == (1_000_000, 200_000)
+
+
+def test_catalog_has_exactly_one_window_surface() -> None:
+    # The substring map was a second window surface that duplicated the
+    # per-alias `window`; limits_for is now the only lookup.
+    import imp.providers.catalog as catalog
+    for gone in ("_WINDOW_TOKENS", "window_for_model", "checkpoint_fraction"):
+        assert not hasattr(catalog, gone)
 
 
 def test_catalog_aliases_lists_provider_table_keys() -> None:
