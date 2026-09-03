@@ -62,8 +62,17 @@ Documentation = "https://github.com/jpoimboe/imp/tree/master/docs"
 Issues = "https://github.com/jpoimboe/imp/issues"
 
 # hatchling's default does not skip .imp/ (imp's quest state); without this the sdist carries it.
+# /imp (imp's own dogfood config) must go too, and skip-excluded-dirs must be on for it to
+# work: imp/workflows/default is a SYMLINK to src/imp/assets/workflows/default, and hatchling
+# walks with followlinks=True while skipping any directory whose (st_dev, st_ino) it already
+# visited. Excluding a path only filters files by default -- the directory is still walked --
+# so imp/ (sorting before src/) was traversed first and the real package copy was then skipped
+# as already-seen, silently dropping the whole default workflow from the sdist and from any
+# wheel built off it. skip-excluded-dirs prunes imp/ from the walk instead, so the real copy
+# is the one that gets seen. /imp is anchored with a leading slash so it cannot match src/imp.
 [tool.hatch.build.targets.sdist]
-exclude = [".imp"]
+exclude = [".imp", "/imp"]
+skip-excluded-dirs = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/imp", "src/impty"]
