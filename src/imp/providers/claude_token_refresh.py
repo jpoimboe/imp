@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 import stat
 import tempfile
@@ -198,6 +199,26 @@ def refresh_canonical_token(
         return RefreshOutcome(FAILED_TRANSIENT)
     except OSError:
         return RefreshOutcome(FAILED_TRANSIENT)
+
+
+def login_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
+    """The /login window's expiry; never raises, and reads no token material."""
+    env = os.environ if env is None else env
+    if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return None
+    try:
+        base = _canonical_dir(env)
+    except RuntimeError:
+        return None
+    oauth = _oauth_of(_load_credentials(base / ".credentials.json"))
+    if oauth is None:
+        return None
+    value = oauth.get("refreshTokenExpiresAt")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return int(value)
 
 
 def login_expiry_warning(now_ms: int, expires_at_ms: int | None) -> str | None:
