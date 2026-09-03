@@ -524,42 +524,34 @@ def header_line(node: Any, *, depth: int, color: bool,
     return indent + "".join(parts) + route
 
 
-def subagent_model(sub: nv.SubagentFold) -> str | None:
-    """The subagent's model, dug out of its nested narrative (its step_context /
-    step carries provider+model). Returns the first model found, or None."""
+def _subagent_field(sub: nv.SubagentFold, field: str) -> str | None:
     def find(nodes: list[Any]) -> str | None:
         for n in nodes:
             if isinstance(n, nv.StepNode):
-                if n.model:
-                    return n.model
+                value = getattr(n, field)
+                if value:
+                    return str(value)
                 inner = find(n.children)
                 if inner:
                     return inner
             elif isinstance(n, (nv.StepContextNode, nv.AgentTextNode)):
-                m = n.payload.get("model")
-                if m:
-                    return str(m)
+                value = n.payload.get(field)
+                if value:
+                    return str(value)
         return None
     return find(sub.tree.root.children)
+
+
+def subagent_model(sub: nv.SubagentFold) -> str | None:
+    """The subagent's model, dug out of its nested narrative (its step_context /
+    step carries provider+model). Returns the first model found, or None."""
+    return _subagent_field(sub, "model")
 
 
 def subagent_provider(sub: nv.SubagentFold) -> str | None:
     """The subagent's provider, dug out of its nested narrative (its step_context /
     step carries provider+model). Returns the first provider found, or None."""
-    def find(nodes: list[Any]) -> str | None:
-        for n in nodes:
-            if isinstance(n, nv.StepNode):
-                if n.provider:
-                    return n.provider
-                inner = find(n.children)
-                if inner:
-                    return inner
-            elif isinstance(n, (nv.StepContextNode, nv.AgentTextNode)):
-                p = n.payload.get("provider")
-                if p:
-                    return str(p)
-        return None
-    return find(sub.tree.root.children)
+    return _subagent_field(sub, "provider")
 
 
 def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
