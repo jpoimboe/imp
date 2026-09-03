@@ -18,6 +18,7 @@ from typing import Literal
 
 Category = Literal[
     "auth",
+    "auth_terminal",
     "config",
     "quota",
     "content_filter",
@@ -45,6 +46,14 @@ class ProviderError(Exception):
 
 class AuthError(ProviderError):
     category: Category = "auth"
+
+
+class AuthTerminalError(ProviderError):
+    """A login the provider CLI has already given up on: it cleared the saved
+    credentials and stops each request locally, so no request is sent and no
+    retry can heal it. Deliberately NOT an AuthError subclass — a bare 401 is
+    still retried. Maps to Pause."""
+    category: Category = "auth_terminal"
 
 
 class ConfigError(ProviderError):

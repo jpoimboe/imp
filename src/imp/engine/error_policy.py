@@ -55,6 +55,10 @@ _POLICY: dict[str, _Policy] = {
     # after its own refresh attempts transiently fail. Same budget as network /
     # rate_limit, not a tight one that gives up mid-heal.
     "auth":                 _Policy(RetryWithBackoff, 1800.0),
+    # Terminal: the CLI already cleared the saved credentials and fails each
+    # request locally, before it reaches the API. Nothing to wait out — pause at
+    # once, no budget.
+    "auth_terminal":        _Policy(Pause, None),
     "config":               _Policy(Pause, None),
     "quota":                _Policy(Pause, None),
     "content_filter":       _Policy(Pause, None),

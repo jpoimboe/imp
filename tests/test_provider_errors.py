@@ -80,3 +80,18 @@ def test_terminated_error_is_first_class_pause_category() -> None:
     event = perr.make_error_event(err, kind="terminated")
     assert event["payload"]["category"] == "terminated"
     assert event["payload"]["detail"] == {"is_error": True}
+
+
+def test_auth_terminal_is_a_sibling_of_auth_not_a_subclass() -> None:
+    exc = perr.AuthTerminalError("claude: OAuth refresh token is dead")
+    assert exc.category == "auth_terminal"
+    assert isinstance(exc, perr.ProviderError)
+    # A sibling, never a subclass: an existing isinstance(..., AuthError) guard
+    # must not silently swallow the terminal case.
+    assert not isinstance(exc, perr.AuthError)
+
+
+def test_auth_terminal_error_event_kind_defaults_to_class_name() -> None:
+    ev = perr.make_error_event(perr.AuthTerminalError("dead login"))
+    assert ev["payload"]["category"] == "auth_terminal"
+    assert ev["payload"]["kind"] == "AuthTerminalError"

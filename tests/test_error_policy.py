@@ -291,3 +291,17 @@ def test_sticky_ambiguous_honors_hint_delay() -> None:
         assert isinstance(small, ep.RetryWithBackoff)
         assert small.delay_seconds == 30.0
         assert small.hinted is False
+
+
+def test_auth_terminal_pauses_cold_and_never_upgrades() -> None:
+    # Not sticky: a terminal login failure stays Pause even inside an open
+    # transient window, so it can never be upgraded into a backoff retry.
+    for attempts in (0, 5):
+        assert isinstance(
+            ep.decide("auth_terminal", prior_backoff_attempts=attempts), ep.Pause)
+    assert "auth_terminal" not in ep._STICKY_CATEGORIES
+
+
+def test_auth_terminal_is_not_a_backoff_category_and_has_no_budget() -> None:
+    assert ep.is_retry_with_backoff("auth_terminal") is False
+    assert ep.budget_for("auth_terminal") is None
