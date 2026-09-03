@@ -141,7 +141,7 @@ async def test_native_resume_refreshes_without_materializing(
 
 
 @pytest.mark.anyio
-async def test_dead_token_raises_auth_error_without_materializing(
+async def test_dead_token_raises_terminal_auth_without_materializing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "art").mkdir()
@@ -163,7 +163,8 @@ async def test_dead_token_raises_auth_error_without_materializing(
 
     err = events[-1]
     assert err["type"] == "error"
-    assert err["payload"]["category"] == "auth"
+    assert err["payload"]["category"] == "auth_terminal"
+    assert err["payload"]["kind"] == "AuthTerminalError"
     # Config dir was never materialized — no claude -p spawn was built.
     refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
     assert refreshes[0]["payload"] == {"outcome": "failed_invalid_grant"}
