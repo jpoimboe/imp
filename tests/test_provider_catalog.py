@@ -3,11 +3,13 @@ from __future__ import annotations
 from imp.providers.catalog import (
     ANTHROPIC,
     CLAUDE_CODE,
+    DEFAULT_CHECKPOINT_FRACTION,
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_WINDOW,
     OPENAI,
     ModelInfo,
     catalog_aliases,
+    checkpoint_cutoff,
     checkpoint_fraction,
     context_tokens_from_usage,
     limits_for,
@@ -375,3 +377,28 @@ def test_limits_for_is_case_sensitive() -> None:
     # case here would make the two surfaces disagree about what is a known model.
     assert limits_for("openai", "GPT-5.6-Sol") is None
     assert limits_for("anthropic", "Opus") is None
+
+
+def test_checkpoint_cutoff_caps_at_the_soft_cap() -> None:
+    # 260k of a 1.05M window ~= 0.248 — far below the 0.8 default share.
+    info = OPENAI["gpt-5.6-sol"]
+    assert checkpoint_cutoff(info, info.window) == 260_000 / 1_050_000
+
+
+def test_checkpoint_cutoff_without_a_soft_cap_is_the_default_fraction() -> None:
+    assert DEFAULT_CHECKPOINT_FRACTION == 0.8
+    assert checkpoint_cutoff(ANTHROPIC["claude-opus-5[1m]"], 1_000_000) == 0.8
+    assert checkpoint_cutoff(None, 200_000) == 0.8
+
+
+def test_checkpoint_cutoff_never_loosens_the_default_share() -> None:
+    # A cap ABOVE 0.8 of the window must not push the handoff later.
+    assert checkpoint_cutoff(
+        ModelInfo(window=200_000, soft_cap=190_000), 200_000) == 0.8
+
+
+def test_checkpoint_cutoff_without_a_window_is_none() -> None:
+    assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], None) is None
+    assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], 0) is None
+    assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], -1) is None
+    assert checkpoint_cutoff(None, None) is None

@@ -20,6 +20,7 @@ from typing import Any
 
 DEFAULT_WINDOW = 200_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_000
+DEFAULT_CHECKPOINT_FRACTION = 0.8
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,16 @@ def window_for_model(model: str | None) -> int | None:
         if token in lowered:
             return size
     return None
+
+
+def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | None:
+    """The handoff cutoff as a fraction of `window`; None without a usable window."""
+    if not window or window <= 0:
+        return None
+    cap = info.soft_cap if info else None
+    if cap is None:
+        return DEFAULT_CHECKPOINT_FRACTION
+    return min(DEFAULT_CHECKPOINT_FRACTION, cap / window)
 
 
 def checkpoint_fraction(
