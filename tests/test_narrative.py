@@ -540,7 +540,8 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == nv.Activity(verb="thinking", model="m", kind="agent")
+    assert b.current_activity() == nv.Activity(
+        verb="thinking", model="m", provider="anthropic", kind="agent")
 
 
 def test_current_activity_carries_agent_step_kind() -> None:
@@ -594,7 +595,8 @@ def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(verb="thinking", model="m", kind="agent")
+    assert b.current_activity() == nv.Activity(
+        verb="thinking", model="m", provider="anthropic", kind="agent")
 
 
 
@@ -1702,6 +1704,7 @@ def test_current_activity_several_running_subagents_show_a_count() -> None:
     two = b.current_activity()
     assert two.verb == "running 2 subagents"              # several -> a count
     assert "subagent(reviewer)" not in (two.verb or "")
+    assert (two.provider, two.model) == ("anthropic", "m")
 
     b.add(_task("tk3", "b3", "researcher"))
     three = b.current_activity()
@@ -1887,7 +1890,8 @@ def test_agent_step_activity_has_no_step_prefix() -> None:
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(verb="thinking", model="m", kind="agent")
+    assert b.current_activity() == nv.Activity(
+        verb="thinking", model="m", provider="anthropic", kind="agent")
 
 
 def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
@@ -3135,3 +3139,35 @@ def test_agent_prompt_seeds_burst_span_from_body_ts():
     step = tree.root.children[0].children[0]
     burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
     assert burst.span_start_ts == t2
+
+
+def test_activity_provider_defaults_to_none() -> None:
+    assert nv.Activity(model="sonnet").provider is None
+
+
+def test_current_activity_carries_the_step_provider_beside_the_model() -> None:
+    # The gauge resolves limits per (provider, model), so the provider has to
+    # ride the same Activity the model does.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="gpt-5.6-sol", provider="openai"))
+    act = b.current_activity()
+    assert act is not None
+    assert (act.provider, act.model) == ("openai", "gpt-5.6-sol")
+
+
+def test_current_activity_keeps_the_provider_while_a_subagent_runs() -> None:
+    # The running-subagent branch builds a different Activity; the footer still
+    # shows the parent step's bar, so the provider must survive that path too.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="gpt-5.6-sol", provider="openai"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
+             name="sub_agent", input={"subagent_name": "coder"},
+             timestamp="2026-01-01T00:00:00+00:00"))
+    act = b.current_activity()
+    assert act is not None
+    assert act.verb == "subagent(coder)"        # sanity: the subagent branch ran
+    assert (act.provider, act.model) == ("openai", "gpt-5.6-sol")

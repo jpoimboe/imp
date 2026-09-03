@@ -249,6 +249,7 @@ class Activity:
     verb: str | None = None
     detail: str | None = None
     model: str | None = None
+    provider: str | None = None
     countdown_total: float | None = None
     kind: str | None = None            # active step kind, for context-bar gating at compose time
     lane_wait: bool = False            # active step parked in a lane semaphore wait (test or merge)
@@ -632,6 +633,7 @@ class NarrativeBuilder:
                 position=position,
                 verb=self._reset_wait.verb,
                 model=top.model if top else None,
+                provider=top.provider if top else None,
                 countdown_total=self._reset_wait.total_seconds,
                 kind=top_kind, lane_wait=top_lane_wait,
                 phase=top_phase, plan=top_plan, counter=top_counter,
@@ -648,6 +650,7 @@ class NarrativeBuilder:
                 position=position,
                 verb=f"waiting for {', '.join(self._dep_wait.ids)} to merge",
                 model=top.model if top else None,
+                provider=top.provider if top else None,
                 kind=top_kind, lane_wait=top_lane_wait,
                 phase=top_phase, plan=top_plan, counter=top_counter,
                 start_ts=self._dep_wait.start_ts,
@@ -655,6 +658,7 @@ class NarrativeBuilder:
             )
         if top is not None:
             model = top.model
+            provider = top.provider
             if top.position_label:
                 # A position_label step's label is a counter that rides the
                 # position row and the composed `position`, never the spinner verb
@@ -667,6 +671,7 @@ class NarrativeBuilder:
                 static_verb = top.lane_wait_label or top.rotated_phrase or top.label
         else:
             model = None
+            provider = None
             position = None
             static_verb = None
 
@@ -680,6 +685,7 @@ class NarrativeBuilder:
                 if nested is not None and nested.countdown_total is not None:
                     return Activity(position=position, verb=nested.verb,
                                     detail=nested.detail, model=model,
+                                    provider=provider,
                                     countdown_total=nested.countdown_total,
                                     kind=top_kind, lane_wait=top_lane_wait,
                                     phase=top_phase, plan=top_plan, counter=top_counter,
@@ -688,7 +694,7 @@ class NarrativeBuilder:
             if n > 1:
                 earliest = min(running, key=lambda fld: fld.start_ts or "9999")
                 return Activity(position=position, verb=f"running {n} subagents",
-                                model=model,
+                                model=model, provider=provider,
                                 kind=top_kind, lane_wait=top_lane_wait,
                                 phase=top_phase, plan=top_plan, counter=top_counter,
                                 start_ts=earliest.start_ts, backoff_source=earliest.nested)
@@ -697,6 +703,7 @@ class NarrativeBuilder:
             nested = f.nested.current_activity()
             detail = nested.detail if nested is not None else None
             return Activity(position=position, verb=verb, detail=detail, model=model,
+                            provider=provider,
                             kind=top_kind, lane_wait=top_lane_wait,
                             phase=top_phase, plan=top_plan, counter=top_counter,
                             start_ts=f.start_ts, backoff_source=f.nested)
@@ -731,12 +738,12 @@ class NarrativeBuilder:
                 p_src, p_base = self, self._stretch_backoff_base
             if top.kind in CHROME_KINDS:
                 return Activity(position=position, verb=static_verb or top.command,
-                                detail=detail, model=model,
+                                detail=detail, model=model, provider=provider,
                                 kind=top_kind, lane_wait=top_lane_wait,
                                 phase=top_phase, plan=top_plan, counter=top_counter,
                                 start_ts=p_start, backoff_source=p_src, backoff_base=p_base)
             return Activity(position=position, verb=static_verb or "thinking",
-                            detail=detail, model=model,
+                            detail=detail, model=model, provider=provider,
                             kind=top_kind, lane_wait=top_lane_wait,
                             phase=top_phase, plan=top_plan, counter=top_counter,
                             start_ts=p_start, backoff_source=p_src, backoff_base=p_base)
