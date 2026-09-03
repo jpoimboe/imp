@@ -100,6 +100,17 @@ ANTHROPIC: dict[str, ModelInfo] = {
 }
 
 OPENAI: dict[str, ModelInfo] = {
+    # 5.6 flavors (imp.providers.BUILTIN_FLOOR): one generation, three sizes —
+    # luna < terra < sol. All three share a 1.05M window and a 128k output cap.
+    # Note the bare `gpt-5.6` alias routes to Sol, so it is deliberately absent:
+    # an operator writing it into a `tiers:` block would get the flagship at
+    # every tier. Beware the 272k billing breakpoint — prompts above it bill the
+    # WHOLE request at 2x input / 1.5x output, so a run wants an absolute
+    # `context.checkpoint_threshold` under 272k, not the default window fraction
+    # (0.8 of 1.05M is 840k, deep into the surcharge).
+    "gpt-5.6-sol": ModelInfo(window=1_050_000, max_output_tokens=128_000),
+    "gpt-5.6-terra": ModelInfo(window=1_050_000, max_output_tokens=128_000),
+    "gpt-5.6-luna": ModelInfo(window=1_050_000, max_output_tokens=128_000),
     "gpt-5": ModelInfo(window=400_000),
     "gpt-5.5": ModelInfo(window=400_000),
     "gpt-5.4": ModelInfo(window=400_000),
@@ -149,6 +160,11 @@ _WINDOW_TOKENS: tuple[tuple[str, int], ...] = (
     ("sonnet", 200_000),
     ("opus", 200_000),
     ("fable", 200_000),
+    # Before the "gpt-5" catch-all: these are SUBSTRING matches and first wins,
+    # so "gpt-5.6-sol" would otherwise resolve to 400k. Not cosmetic — this map
+    # is what context_threshold_crossed() divides by, so an undersized window
+    # fires the reincarnation handoff early on every 5.6 step.
+    ("gpt-5.6", 1_050_000),
     ("gpt-5", 400_000),
 )
 

@@ -33,7 +33,15 @@ class BuiltinFloor(NamedTuple):
 
 # Pinned undated major.minor ids: they track dated snapshots of that minor but never
 # jump to a new major/minor release — a bare `sonnet`/`gpt-5` alias would silently
-# upgrade the shipped floor. codex refuses *-codex models (runner preflight M1).
+# upgrade the shipped floor. The OpenAI-side ids name the 5.6 flavor explicitly for
+# the same reason: the bare `gpt-5.6` alias routes to Sol, so a floor written as
+# `gpt-5.6` would make every tier the flagship. codex refuses *-codex models (runner
+# preflight M1); the 5.6 flavors carry no -codex variant, so they are unaffected.
+# The OpenAI ladder is one generation wide (luna < terra < sol), mirroring the
+# claude small/mid/large shape rather than mixing a size step with a version step.
+# GPT-5.4 and 5.4-mini retired from Codex on 2026-08-31 for ChatGPT-login sessions
+# (they survive under API-key auth and on the raw OpenAI API), which is why the
+# codex floor could not stay on them.
 BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     "anthropic": BuiltinFloor(
         module="anthropic",
@@ -46,7 +54,11 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     ),
     "openai": BuiltinFloor(
         module="openai",
-        tier_defaults={"low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5"},
+        tier_defaults={
+            "low": "gpt-5.6-luna",
+            "medium": "gpt-5.6-terra",
+            "high": "gpt-5.6-sol",
+        },
         env_var="OPENAI_API_KEY",
     ),
     "claude_code": BuiltinFloor(
@@ -60,7 +72,11 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
     ),
     "codex": BuiltinFloor(
         module="codex",
-        tier_defaults={"low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5"},
+        tier_defaults={
+            "low": "gpt-5.6-luna",
+            "medium": "gpt-5.6-terra",
+            "high": "gpt-5.6-sol",
+        },
         env_var=None,  # CLI-authenticated (codex login); no env var
     ),
     # Duplicates scripted.ENV_VAR (read at runtime there); a test pins the two equal.

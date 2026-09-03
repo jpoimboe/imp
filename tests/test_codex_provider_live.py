@@ -68,7 +68,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
             tier=None,
         ),
         provider_name="codex",
-        model_name="gpt-5.4-mini",
+        model_name="gpt-5.6-luna",
         system_prompt=(
             'Reply by calling complete_step with word="banana". Do not call '
             "any other tools and do not write any files."
@@ -89,7 +89,9 @@ def _inv(tmp_path: Path) -> AgentInvocation:
 # all MCP tools behind its `tool_search` discovery tool (imp's `mcp__imp__*` tools
 # aren't in the model's initial list); `_build_prompt` now tells the model to load
 # them via `tool_search` first, which drove first-turn complete_step success from
-# 4/10 to ~30/30 on gpt-5.4-mini. So the round-trip is reliable in production now
+# 4/10 to ~30/30 on gpt-5.4-mini (measured pre-5.6; the pin moved to
+# gpt-5.6-luna when 5.4-mini retired from Codex, reliability not re-measured).
+# So the round-trip is reliable in production now
 # via that prompt guidance plus the nudge backstop (continuation_fn) and the
 # engine's RetryNow policy for `agent_output_missing`. The multi-attempt loop
 # stays as cheap belt-and-suspenders against residual LLM nondeterminism — it
@@ -100,7 +102,7 @@ _ROUND_TRIP_ATTEMPTS = 5
 @pytest.mark.anyio
 async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> None:
     _git_init(tmp_path)
-    runner = CodexAgentRunner(model_name="gpt-5.4-mini")
+    runner = CodexAgentRunner(model_name="gpt-5.6-luna")
     # Nudge backstop, exactly as the engine wires it in production: a turn that
     # ends without complete_step is re-prompted rather than pausing for input.
     nudge = build_continuation_fn(
@@ -199,7 +201,7 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     real codex turn terminates under cap pressure rather than looping."""
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
-    runner = CodexAgentRunner(model_name="gpt-5.4-mini")
+    runner = CodexAgentRunner(model_name="gpt-5.6-luna")
     inv = _inv(tmp_path)
     # Give the agent a second (read-only) tool so it can make two calls, and
     # order them so the SECOND call (complete_step) is the one that trips cap=1.

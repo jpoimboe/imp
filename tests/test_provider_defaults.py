@@ -148,7 +148,7 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         "ANTHROPIC_API_KEY",
     ),
     "openai": (
-        {"low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5"},
+        {"low": "gpt-5.6-luna", "medium": "gpt-5.6-terra", "high": "gpt-5.6-sol"},
         "OPENAI_API_KEY",
     ),
     "claude_code": (
@@ -160,7 +160,7 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         None,
     ),
     "codex": (
-        {"low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5"},
+        {"low": "gpt-5.6-luna", "medium": "gpt-5.6-terra", "high": "gpt-5.6-sol"},
         None,
     ),
     "scripted": (None, "IMP_SCRIPTED_SCRIPT"),
