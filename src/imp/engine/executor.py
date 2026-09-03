@@ -426,10 +426,6 @@ async def run_quest(
             # Work is resuming: drop a stale gate/error halt so the run reads running.
             state.halt_condition = None
             state.save(quest.state_dir)
-        # Transient: re-set on EVERY run_quest entry (fresh + resume) so the
-        # Tier A handoff watch always sees the configured threshold without
-        # persisting it (the resolved_tiers block below is skipped on resume).
-        state.checkpoint_threshold = config.context_checkpoint_threshold()
         # Freeze once per quest: resume reuses the memory the first run saw.
         if state.memory is None:
             memory = load_memory_snapshot(quest.project_root / "imp" / "memory")
@@ -484,8 +480,7 @@ async def run_quest(
             state.max_reincarnations = config.context_max_reincarnations()
             state.save(quest.state_dir)
             _emit(log, "tiers_resolved",
-                  {"tiers": details["tiers"], "steps": details["steps"],
-                   "checkpoint_threshold": config.context_checkpoint_threshold()},
+                  {"tiers": details["tiers"], "steps": details["steps"]},
                   agent_id=None)
             if quest.seed_opening:
                 log.append_user_message(
@@ -1918,7 +1913,6 @@ async def _run_agent_invocation(
         headless=headless,
         interactive=interactive,
         sandbox_policy=sandbox_policy,
-        checkpoint_threshold=state.checkpoint_threshold,
         inject_outcome_field=True,
     )
 

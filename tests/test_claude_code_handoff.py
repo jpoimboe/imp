@@ -38,8 +38,7 @@ def _agent_def() -> AgentDef:
         source=SourceLoc(file=Path("a.md"), line=1))
 
 
-def _inv(tmp_path: Path, log: InMemoryEventLog, *,
-         threshold: float | int | None) -> AgentInvocation:
+def _inv(tmp_path: Path, log: InMemoryEventLog) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(), provider_name="claude_code",
         model_name="claude-sonnet-4-5", system_prompt="be terse",
@@ -48,7 +47,7 @@ def _inv(tmp_path: Path, log: InMemoryEventLog, *,
             title="Test", project_root=tmp_path,
             workflow_dir=project_state_dir(tmp_path) / "wf"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
-        agent_id="step:p/s", event_log=log, checkpoint_threshold=threshold)
+        agent_id="step:p/s", event_log=log)
 
 
 @pytest.mark.anyio
@@ -88,7 +87,7 @@ async def test_threshold_crossing_continues_with_instruction_increment(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
-    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
     handoff = [e for e in events if e["type"] == "handoff"]
     assert len(handoff) == 1
@@ -147,7 +146,7 @@ async def test_threshold_watchdog_does_not_refire_mid_interrupt(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
-    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
     assert holder["client"].interrupts == 1
     handoff = [e for e in events if e["type"] == "handoff"]
@@ -189,7 +188,7 @@ async def test_handoff_reported_even_when_note_missing_and_error(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
-    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
     handoff = [e for e in events if e["type"] == "handoff"]
     assert len(handoff) == 1
@@ -222,7 +221,7 @@ async def test_below_threshold_completing_turn_interrupts_and_completes(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
-    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
     assert not [e for e in events if e["type"] == "handoff"]
     assert any(e["type"] == "agent_result" for e in events)
@@ -263,7 +262,7 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
-    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
     assert not [e for e in events if e["type"] == "handoff"]
     assert any(e["type"] == "agent_result" for e in events)

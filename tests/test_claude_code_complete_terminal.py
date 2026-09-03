@@ -36,8 +36,7 @@ def _agent_def() -> AgentDef:
         source=SourceLoc(file=Path("a.md"), line=1))
 
 
-def _inv(tmp_path: Path, log: InMemoryEventLog, *,
-         threshold: float | int | None = None) -> AgentInvocation:
+def _inv(tmp_path: Path, log: InMemoryEventLog) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(), provider_name="claude_code",
         model_name="claude-sonnet-4-5", system_prompt="be terse",
@@ -46,7 +45,7 @@ def _inv(tmp_path: Path, log: InMemoryEventLog, *,
             title="Test", project_root=tmp_path,
             workflow_dir=project_state_dir(tmp_path) / "wf"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
-        agent_id="step:p/s", event_log=log, checkpoint_threshold=threshold)
+        agent_id="step:p/s", event_log=log)
 
 
 @pytest.mark.anyio
@@ -91,8 +90,8 @@ async def test_completing_turn_is_interrupted_then_completes(tmp_path: Path) -> 
 @pytest.mark.anyio
 async def test_completing_turn_interrupt_is_unconditional(tmp_path: Path) -> None:
     """Part A: the completion-interrupt fires from the complete_step detection
-    itself — independent of any checkpoint threshold (threshold=None here) and
-    distinct from the handoff mechanism. A plain (non-error_during_execution)
+    itself — independent of any context occupancy, and distinct from the
+    handoff mechanism. A plain (non-error_during_execution)
     close still resets the flag and yields agent_output."""
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
@@ -110,7 +109,7 @@ async def test_completing_turn_interrupt_is_unconditional(tmp_path: Path) -> Non
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
 
-    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=None))]
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
     assert holder["client"].interrupts == 1
     assert [e["type"] for e in events

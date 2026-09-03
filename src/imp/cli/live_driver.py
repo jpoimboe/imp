@@ -41,8 +41,7 @@ _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
 _CONTEXT_WIDTH = 10
-_BAR_GREEN_MAX = 0.60
-_BAR_YELLOW_MAX = 0.85
+_AMBER_AT = 0.75          # of the cutoff
 
 
 def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
@@ -53,31 +52,35 @@ def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
     return pal.ansi(text, *codes, enabled=True)
 
 
-def context_bar(model: str | None, prompt_tokens: int | None, *,
+def context_bar(provider: str | None, model: str | None,
+                prompt_tokens: int | None, *,
                 context_pct: float | None = None,
-                checkpoint_threshold: float | int | None = None,
                 color: bool, over_bg: bool) -> str | None:
     # Lazy import keeps `import live_driver` free of the providers package; the
     # catalog is the renderer's only window source.
-    from imp.providers.catalog import checkpoint_fraction, window_for_model
-    window = window_for_model(model)
+    from imp.providers.catalog import (
+        DEFAULT_CHECKPOINT_FRACTION,
+        checkpoint_cutoff,
+        limits_for,
+    )
+    info = limits_for(provider, model)
+    window = info.window if info else None
     if context_pct is not None:
         frac = context_pct / 100
     else:
         if window is None or prompt_tokens is None:
             return None
         frac = prompt_tokens / window
-    # The warn (red) cutoff tracks the configured checkpoint threshold when one is
-    # known; otherwise the static yellow->red band applies. `window` here is the
-    # static catalog window — an absolute-token threshold is resolved against it
-    # even on the live `context_pct` path (a slight mismatch if the windows differ).
-    warn = checkpoint_fraction(checkpoint_threshold, window)
+    # Red begins exactly at the handoff cutoff, so the bar always marks the real
+    # point; the live context_pct path has no window to cap against.
+    warn = checkpoint_cutoff(info, window)
     if warn is None:
-        warn = _BAR_YELLOW_MAX
+        warn = DEFAULT_CHECKPOINT_FRACTION
     filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
     pct = round(frac * 100)
-    hue = ("green" if frac < _BAR_GREEN_MAX
-           else "wordmark" if frac < warn else "red")
+    hue = ("red" if frac >= warn
+           else "wordmark" if frac >= _AMBER_AT * warn
+           else "green")
     fill = _paint("█" * filled, hue, color=color, over_bg=over_bg) if filled else ""
     track = (_paint("░" * (_CONTEXT_WIDTH - filled), "gray", color=color, over_bg=over_bg)
              if filled < _CONTEXT_WIDTH else "")
@@ -145,7 +148,6 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
 def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
-                         checkpoint_threshold: float | int | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
     project · id · title · phase · plan · counter · model context-bar."""
@@ -167,9 +169,8 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                  if activity.model else None)
     bar = None
     if activity.kind == "agent" and not activity.lane_wait:
-        bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
-                          checkpoint_threshold=checkpoint_threshold,
-                          color=color, over_bg=over)
+        bar = context_bar(activity.provider, activity.model, prompt_tokens,
+                          context_pct=context_pct, color=color, over_bg=over)
     body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
                              phase_seg, plan_seg, counter_seg,
                              rt.join_space(model_seg, bar)])
@@ -214,8 +215,9 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
             role = name
         role_seg = _paint(role, *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
         model = rt.subagent_model(f)
+        provider = rt.subagent_provider(f)
         model_seg = _paint(model, "gray", color=color, over_bg=over) if model else None
-        bar = context_bar(model, f.nested.latest_prompt_tokens,
+        bar = context_bar(provider, model, f.nested.latest_prompt_tokens,
                           context_pct=f.nested.latest_context_pct,
                           color=color, over_bg=over)
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
@@ -408,7 +410,6 @@ class LiveDriver:
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
-            checkpoint_threshold=self._builder.latest_checkpoint_threshold,
             unsandboxed=self._unsandboxed)
         rows = [a_line, "", p_row]
         rows += compose_subagent_rows(
@@ -454,7 +455,6 @@ class LiveDriver:
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
-            checkpoint_threshold=self._builder.latest_checkpoint_threshold,
             unsandboxed=self._unsandboxed)
 
     # -- emission -------------------------------------------------------------

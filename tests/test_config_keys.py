@@ -86,8 +86,6 @@ def test_value_parsing_follows_the_value_column() -> None:
     assert _parsed("sandbox.enabled", "TRUE") is True
     assert _parsed("sandbox.network", "false") is False
     assert _parsed("sandbox.extra_readable", "x,y") == ["x", "y"]
-    assert _parsed("context.checkpoint_threshold", "0.8") == 0.8
-    assert _parsed("context.checkpoint_threshold", "120000") == 120000
     assert _parsed("context.max_reincarnations", "3") == 3
     assert _parsed("vars.x", "true") is True
     assert _parsed("vars.x", "12") == 12
@@ -105,7 +103,6 @@ def test_unshapeable_values_pass_through_for_the_reader_to_reject() -> None:
     # and imp's own validator produces the message.
     assert _parsed("test_cmd_fast_timeout", "abc") == "abc"
     assert _parsed("sandbox.enabled", "maybe") == "maybe"
-    assert _parsed("context.checkpoint_threshold", "soon") == "soon"
 
 
 def test_worktree_setup_is_a_project_layer_key() -> None:
@@ -136,3 +133,8 @@ def test_pythonpath_parses_false_as_a_boolean_not_a_one_item_list() -> None:
 
 def test_pythonpath_parses_true_as_a_one_item_list() -> None:
     assert _parsed("pythonpath", "true") == ["true"]
+
+
+def test_the_retired_context_key_is_not_settable() -> None:
+    assert resolve_key("context.checkpoint_threshold") is None
+    assert resolve_key("context.max_reincarnations") is not None

@@ -20,6 +20,7 @@ from typing import Any
 
 DEFAULT_WINDOW = 200_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_000
+DEFAULT_CHECKPOINT_FRACTION = 0.8
 
 
 @dataclass(frozen=True)
@@ -29,13 +30,11 @@ class ModelInfo:
     cli_model: str | None = None
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     supports_vision: bool = True
+    # Absolute prompt-token handoff ceiling (a billing breakpoint), beside the
+    # hard cap `window`. None -> the default window fraction applies.
+    soft_cap: int | None = None
 
 
-# NOTE on two window surfaces: the structured catalogs below carry the
-# per-alias `window` (the spec mandates seeding ANTHROPIC/OPENAI even though
-# only claude_code's _build_options reads a catalog table today); the renderer
-# fallback uses the separate `_WINDOW_TOKENS` substring map further down. Keep
-# the two in agreement when editing window values.
 CLAUDE_CODE: dict[str, ModelInfo] = {
     # Undated major.minor ids used by imp.providers.BUILTIN_FLOOR; the bare aliases below
     # remain resolvable for operator config layers that still use them.
@@ -101,16 +100,21 @@ ANTHROPIC: dict[str, ModelInfo] = {
 
 OPENAI: dict[str, ModelInfo] = {
     # 5.6 flavors (imp.providers.BUILTIN_FLOOR): one generation, three sizes —
-    # luna < terra < sol. All three share a 1.05M window and a 128k output cap.
-    # Note the bare `gpt-5.6` alias routes to Sol, so it is deliberately absent:
-    # an operator writing it into a `tiers:` block would get the flagship at
-    # every tier. Beware the 272k billing breakpoint — prompts above it bill the
-    # WHOLE request at 2x input / 1.5x output, so a run wants an absolute
-    # `context.checkpoint_threshold` under 272k, not the default window fraction
-    # (0.8 of 1.05M is 840k, deep into the surcharge).
-    "gpt-5.6-sol": ModelInfo(window=1_050_000, max_output_tokens=128_000),
-    "gpt-5.6-terra": ModelInfo(window=1_050_000, max_output_tokens=128_000),
-    "gpt-5.6-luna": ModelInfo(window=1_050_000, max_output_tokens=128_000),
+    # luna < terra < sol. All four share a 1.05M window and a 128k output cap.
+    # The bare `gpt-5.6` alias routes to Sol; it is here only so limits
+    # resolution can cap it, and is hidden from the /model roster
+    # (model_command._HIDDEN_ALIASES) because an operator writing it into a
+    # `tiers:` block would get the flagship at every tier.
+    # `soft_cap` encodes the 272k billing breakpoint: a prompt above it bills
+    # the WHOLE request at 2x input / 1.5x output.
+    "gpt-5.6-sol": ModelInfo(
+        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
+    "gpt-5.6-terra": ModelInfo(
+        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
+    "gpt-5.6-luna": ModelInfo(
+        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
+    "gpt-5.6": ModelInfo(
+        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
     "gpt-5": ModelInfo(window=400_000),
     "gpt-5.5": ModelInfo(window=400_000),
     "gpt-5.4": ModelInfo(window=400_000),
@@ -150,46 +154,35 @@ def catalog_aliases(provider_name: str) -> tuple[str, ...]:
     return tuple(catalog) if catalog is not None else ()
 
 
-# Provider-agnostic substring fallback for the renderer: an arbitrary model id
-# string (alias or dated id) maps to a window. Ordered so the "[1m]" marker
-# wins over the base-model tokens it always accompanies. This is the renderer's
-# ONLY window source (the old _CONTEXT_WINDOWS dict from live_driver.py).
-_WINDOW_TOKENS: tuple[tuple[str, int], ...] = (
-    ("[1m]", 1_000_000),
-    ("haiku", 200_000),
-    ("sonnet", 200_000),
-    ("opus", 200_000),
-    ("fable", 200_000),
-    # Before the "gpt-5" catch-all: these are SUBSTRING matches and first wins,
-    # so "gpt-5.6-sol" would otherwise resolve to 400k. Not cosmetic — this map
-    # is what context_threshold_crossed() divides by, so an undersized window
-    # fires the reincarnation handoff early on every 5.6 step.
-    ("gpt-5.6", 1_050_000),
-    ("gpt-5", 400_000),
-)
+def limits_for(provider: str | None, model: str | None) -> ModelInfo | None:
+    """Exact alias, else the longest catalog key `model` starts with.
 
-
-def window_for_model(model: str | None) -> int | None:
-    if not model:
+    None when the provider or model is unknown — callers never guess. Prefix,
+    never substring: `"claude-opus-5".startswith("opus")` is false, so the bare
+    aliases cannot false-hit a dated id, and `[1m]` keys match exactly.
+    """
+    if not provider or not model:
         return None
-    lowered = model.lower()
-    for token, size in _WINDOW_TOKENS:
-        if token in lowered:
-            return size
-    return None
+    catalog = _CATALOGS.get(provider)
+    if catalog is None:
+        return None
+    exact = catalog.get(model)
+    if exact is not None:
+        return exact
+    prefixes = [key for key in catalog if model.startswith(key)]
+    if not prefixes:
+        return None
+    return catalog[max(prefixes, key=len)]
 
 
-def checkpoint_fraction(
-    threshold: float | int | None, window: int | None
-) -> float | None:
-    """The context-checkpoint cutoff as a fraction of the model window (None if unresolvable)."""
-    if threshold is None or threshold <= 0:
+def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | None:
+    """The handoff cutoff as a fraction of `window`; None without a usable window."""
+    if not window or window <= 0:
         return None
-    if threshold <= 1:
-        return float(threshold)
-    if window is None or window <= 0:
-        return None
-    return threshold / window
+    cap = info.soft_cap if info else None
+    if cap is None:
+        return DEFAULT_CHECKPOINT_FRACTION
+    return min(DEFAULT_CHECKPOINT_FRACTION, cap / window)
 
 
 def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
@@ -208,37 +201,36 @@ def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
 
 
 def context_threshold_crossed(
-    usage: dict[str, Any] | None, model: str | None,
-    threshold: float | int | None,
+    usage: dict[str, Any] | None, provider: str | None, model: str | None,
 ) -> bool:
-    """True when a turn's prompt-token occupancy has reached the checkpoint cutoff.
+    """True when a turn's prompt-token occupancy has reached the model's cutoff.
 
     Occupancy is `input + cache_read + cache_creation` (the prompt side of the
-    window, matching the context gauge's `usage_prompt_tokens`). The cutoff is
-    `checkpoint_fraction(threshold, window)` of the model window. Returns False
-    whenever the threshold, window, or usage is unavailable — the watch simply
-    never fires rather than guessing.
+    window, matching the context gauge's `usage_prompt_tokens`), divided by the
+    catalog window. Returns False when the provider/model pair is unknown or
+    usage is absent — the watch never fires rather than guessing.
     """
-    window = window_for_model(model)
-    frac = checkpoint_fraction(threshold, window)
-    if frac is None or window is None or window <= 0 or not usage:
+    info = limits_for(provider, model)
+    if info is None or not usage:
         return False
-    occupancy = context_tokens_from_usage(usage)
-    return occupancy / window >= frac
+    frac = checkpoint_cutoff(info, info.window)
+    if frac is None:
+        return False
+    return context_tokens_from_usage(usage) / info.window >= frac
 
 
 def sdk_context_threshold_crossed(
     context_tokens: int | None, context_window: int | None,
-    threshold: float | int | None,
+    provider: str | None, model: str | None,
 ) -> bool:
     """True when claude_code's SDK-reported LIVE context occupancy has reached
     the checkpoint cutoff. Unlike context_threshold_crossed (which sums prompt
     tokens against the static catalog window), this divides the SDK's own live
-    context_tokens / context_window from get_context_usage(). Returns False
-    whenever any input is unavailable — the watch never fires rather than
-    guessing.
+    context_tokens / context_window from get_context_usage(), and applies the
+    model's soft cap to that window. Returns False whenever a live number is
+    unavailable — the watch never fires rather than guessing.
     """
-    frac = checkpoint_fraction(threshold, context_window)
+    frac = checkpoint_cutoff(limits_for(provider, model), context_window)
     if (frac is None or not context_window or context_window <= 0
             or not context_tokens or context_tokens <= 0):
         return False

@@ -62,15 +62,6 @@ def _as_list_or_false(raw: str) -> Any:
     return raw.split(",")
 
 
-def _as_number(raw: str) -> Any:
-    if raw.isdigit():
-        return int(raw)
-    try:
-        return float(raw)
-    except ValueError:
-        return raw
-
-
 def _as_scalar(raw: str) -> Any:
     low = raw.lower()
     if low in ("true", "false"):
@@ -98,8 +89,6 @@ _FIXED: tuple[SettableKey, ...] = (
     _k("pythonpath", ("pythonpath",), "project", _as_list_or_false),
     _k("max_parallel_test_runs", ("max_parallel_test_runs",), "project", _as_int),
     _k("worktree_setup", ("worktree_setup",), "project", _as_str_or_false),
-    _k("context.checkpoint_threshold", ("context", "checkpoint_threshold"),
-       "global", _as_number),
     _k("context.max_reincarnations", ("context", "max_reincarnations"),
        "global", _as_int),
     _k("remote.driver", ("remote", "driver"), "global", _as_str,

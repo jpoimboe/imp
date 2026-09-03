@@ -1192,7 +1192,6 @@ class ClaudeCodeSession(ObserveSession):
         ctx.undecided = invocation.undecided
         ctx.non_interactive = invocation.headless
         ctx.base_sandbox_policy = invocation.sandbox_policy
-        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.event_log = elog
         if runner._user_input_fn is not None:
             ctx.user_input_fn = runner._user_input_fn
@@ -1593,26 +1592,26 @@ class ClaudeCodeSession(ObserveSession):
                         self._llm_stop_reason = frag["stop_reason"]
                     if frag.get("usage"):
                         self._llm_usage = frag["usage"]
-                    # Tier A proactive handoff (Mechanism 3): on the configured
-                    # context-threshold crossing, route through the cooperative-
+                    # Tier A proactive handoff (Mechanism 3): on the model's
+                    # context-cutoff crossing, route through the cooperative-
                     # interrupt path — signal the running query and let the SDK
                     # close this turn balanced, then continue with a plain
                     # handoff-instruction increment (handled in _is_terminal).
+                    # A completing turn wins over a crossing, and probing the
+                    # SDK costs a round trip, so skip the probe on one.
                     if (self._handoff_phase is None
-                            and invocation.checkpoint_threshold is not None):
+                            and not any(
+                                isinstance(b, ToolUseBlock)
+                                and _canon_tool_name(b.name) == "complete_step"
+                                for b in imp_msg.content)):
                         from imp.providers.catalog import (
                             sdk_context_threshold_crossed,
                         )
-                        completing = any(
-                            isinstance(b, ToolUseBlock)
-                            and _canon_tool_name(b.name) == "complete_step"
-                            for b in imp_msg.content)
                         cu_fields = await _context_usage_fields(client)
-                        if (not completing
-                                and sdk_context_threshold_crossed(
-                                    cu_fields.get("context_tokens"),
-                                    cu_fields.get("context_window"),
-                                    invocation.checkpoint_threshold)):
+                        if sdk_context_threshold_crossed(
+                                cu_fields.get("context_tokens"),
+                                cu_fields.get("context_window"),
+                                invocation.provider_name, self.runner.model):
                             await self._flush_llm_group()
                             self.runner._handoff_requested = True
                             self._handoff_phase = "interrupt_requested"

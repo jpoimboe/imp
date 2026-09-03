@@ -12,10 +12,10 @@ from pathlib import Path
 import pytest
 
 from imp.cli.config_migrate import (
+    migrate_config_layers,
     migrate_global_config,
-    migrate_opt_out_spelling,
     migrate_project_config,
-    rewrite_opt_out_spelling,
+    rewrite_config_file,
     run_startup_migrations,
 )
 from imp.paths import display_path
@@ -379,6 +379,18 @@ _LEGACY_BODY = (
     "pythonpath: []\n"
 )
 
+_RETIRED_BODY = "default-workflow: imp\ncontext:\n  checkpoint_threshold: 260000\n"
+
+
+def _removed(path: Path) -> str:
+    return ("imp: removed the retired context.checkpoint_threshold setting "
+            f"from {display_path(path)}\n")
+
+
+def _by_hand(path: Path) -> str:
+    return ("imp: remove the retired context.checkpoint_threshold setting "
+            f"from {display_path(path)} by hand\n")
+
 
 def test_rewrites_both_legacy_spellings_in_one_pass(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
@@ -387,7 +399,7 @@ def test_rewrites_both_legacy_spellings_in_one_pass(
 
     cfg = tmp_path / "config.yaml"
     cfg.write_text(_LEGACY_BODY)
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     text = cfg.read_text()
     assert "test_cmd_fast: false" in text
     assert "pythonpath: false" in text
@@ -407,10 +419,10 @@ def test_rewriting_a_second_time_leaves_the_file_byte_identical(
 ) -> None:
     cfg = tmp_path / "config.yaml"
     cfg.write_text(_LEGACY_BODY)
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     once = cfg.read_text()
     capsys.readouterr()
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     assert cfg.read_text() == once
     assert capsys.readouterr().err == ""
 
@@ -418,7 +430,7 @@ def test_rewriting_a_second_time_leaves_the_file_byte_identical(
 def test_worktree_setup_and_single_quotes_are_covered(tmp_path: Path) -> None:
     cfg = tmp_path / "config.yaml"
     cfg.write_text("worktree_setup: ''  # trailing note\n")
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     assert "worktree_setup: false" in cfg.read_text()
 
 
@@ -428,7 +440,7 @@ def test_a_nested_key_is_left_alone(tmp_path: Path) -> None:
     cfg = tmp_path / "config.yaml"
     body = 'vars:\n  test_cmd_fast: ""\n'
     cfg.write_text(body)
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     assert cfg.read_text() == body
 
 
@@ -442,7 +454,7 @@ def test_each_key_is_matched_only_against_its_own_legacy_spelling(
     cfg = tmp_path / "config.yaml"
     body = 'pythonpath: ""\ntest_cmd_fast: []\nworktree_setup: ""x\n'
     cfg.write_text(body)
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     assert cfg.read_text() == body
 
 
@@ -451,7 +463,7 @@ def test_crlf_line_endings_are_rewritten(tmp_path: Path) -> None:
 
     cfg = tmp_path / "config.yaml"
     cfg.write_bytes(b'test_cmd_fast: ""\r\ntest_cmd_slow: make check\r\n')
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     text = cfg.read_text()
     assert "test_cmd_fast: false" in text
     layer, _src = parse_config_layer(cfg)  # type: ignore[misc]
@@ -465,12 +477,13 @@ def test_a_clean_file_is_never_parsed_and_a_missing_file_is_not_an_error(
         raise AssertionError("the byte pre-check must short-circuit a clean file")
 
     monkeypatch.setattr("imp.cli.config_edit.apply_set", _boom)
+    monkeypatch.setattr("imp.cli.config_edit.apply_unset", _boom)
     cfg = tmp_path / "config.yaml"
     body = 'test_cmd_fast: "make check"\npythonpath: [src]\n'
     cfg.write_text(body)
-    rewrite_opt_out_spelling(cfg)
+    rewrite_config_file(cfg)
     assert cfg.read_text() == body
-    rewrite_opt_out_spelling(tmp_path / "nope.yaml")      # missing: not an error
+    rewrite_config_file(tmp_path / "nope.yaml")      # missing: not an error
 
 
 def test_the_rewrite_is_not_staged(tmp_path: Path) -> None:
@@ -483,7 +496,7 @@ def test_the_rewrite_is_not_staged(tmp_path: Path) -> None:
     (repo / "imp" / "config.yaml").write_text('test_cmd_fast: ""\n')
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "init")
-    rewrite_opt_out_spelling(repo / "imp" / "config.yaml")
+    rewrite_config_file(repo / "imp" / "config.yaml")
     assert _git(repo, "diff", "--cached", "--name-only").stdout == ""
     assert _git(repo, "diff", "--name-only").stdout == "imp/config.yaml\n"
 
@@ -500,12 +513,15 @@ def test_all_three_config_locations_are_migrated(
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
     (repo / "imp").mkdir()
-    (repo / "imp" / "config.yaml").write_text('worktree_setup: ""\n')
+    (repo / "imp" / "config.yaml").write_text(
+        'worktree_setup: ""\ncontext:\n  checkpoint_threshold: 260000\n')
     monkeypatch.chdir(repo)
 
-    migrate_opt_out_spelling(repo)
+    migrate_config_layers(repo)
 
-    assert "worktree_setup: false" in (repo / "imp" / "config.yaml").read_text()
+    checkout = (repo / "imp" / "config.yaml").read_text()
+    assert "worktree_setup: false" in checkout
+    assert "# context:" in checkout          # the widened checkout gate found it
     assert "test_cmd_slow: false" in (home / "config.yaml").read_text()
     assert "pythonpath: false" in (
         home / "projects" / "proj" / "config.yaml").read_text()
@@ -528,7 +544,7 @@ def test_a_failing_checkout_step_does_not_block_the_home_files(
     (outside / "imp" / "config.yaml").write_text("pythonpath: []\n")
 
     with pytest.raises(PreconditionError):
-        migrate_opt_out_spelling(outside)
+        migrate_config_layers(outside)
 
     assert (home / "config.yaml").read_text() == "test_cmd_fast: false\n"
     assert (outside / "imp" / "config.yaml").read_text() == "pythonpath: []\n"
@@ -546,3 +562,178 @@ def test_run_startup_migrations_rewrites_the_global_config(
     (home / "config.yaml").write_text('test_cmd_fast: ""\n')
     run_startup_migrations()
     assert (home / "config.yaml").read_text() == "test_cmd_fast: false\n"
+
+
+def test_the_retired_key_is_stripped_and_announced(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.providers.config import parse_config_layer
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_RETIRED_BODY)
+    rewrite_config_file(cfg)
+    # apply_unset comments the key out and climbs: a `context:` left with no live
+    # child goes too, or the file keeps an empty mapping the reader must judge.
+    assert cfg.read_text() == (
+        "default-workflow: imp\n# context:\n#   checkpoint_threshold: 260000\n")
+    layer, _src = parse_config_layer(cfg)                        # type: ignore[misc]
+    assert layer == {"default-workflow": "imp"}                  # loads clean
+    assert capsys.readouterr().err == _removed(cfg)
+
+
+def test_every_commented_shape_migrates_and_loads_clean(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.providers.config import parse_config_layer
+
+    shapes = {
+        "block": ("context:\n  checkpoint_threshold: 260000\n"
+                  "  max_reincarnations: 3\n", {"max_reincarnations": 3}),
+        "flow": ("default-workflow: imp\n"
+                 "context: {checkpoint_threshold: 260000}\n", None),
+        "quoted": ('context:\n  "checkpoint_threshold": 260000\n', None),
+    }
+    for name, (body, expected) in shapes.items():
+        cfg = tmp_path / name / "config.yaml"
+        cfg.parent.mkdir()
+        cfg.write_text(body)
+        rewrite_config_file(cfg)
+        layer, _src = parse_config_layer(cfg)                    # type: ignore[misc]
+        assert layer.get("context") == expected, name
+        assert capsys.readouterr().err == _removed(cfg), name
+
+
+def test_a_second_run_over_a_migrated_file_is_a_silent_no_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The commented-out line still contains the identifier: the pre-check asks
+    # for a LIVE key, so coverage and idempotence are the same predicate.
+    def _boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("a migrated file must never be parsed again")
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_RETIRED_BODY)
+    rewrite_config_file(cfg)
+    once = cfg.read_text()
+    capsys.readouterr()
+    monkeypatch.setattr("imp.cli.config_edit.apply_unset", _boom)
+    monkeypatch.setattr("imp.cli.config_edit.apply_set", _boom)
+    rewrite_config_file(cfg)
+    assert cfg.read_text() == once
+    assert capsys.readouterr().err == ""
+
+
+def test_the_pre_check_ignores_lookalikes_and_commented_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _boom(*_a: object, **_k: object) -> None:
+        raise AssertionError("a file with no live retired key must not be parsed")
+
+    monkeypatch.setattr("imp.cli.config_edit.apply_unset", _boom)
+    cfg = tmp_path / "config.yaml"
+    for body in ("vars:\n  my_checkpoint_threshold: 1\n",
+                 "vars:\n  a.checkpoint_threshold: 2\n",
+                 "context:\n#   checkpoint_threshold: 260000\n"):
+        cfg.write_text(body)
+        rewrite_config_file(cfg)
+        assert cfg.read_text() == body
+    assert capsys.readouterr().err == ""
+
+
+def test_an_unstrippable_key_is_left_alone_with_a_manual_edit_notice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    shapes = {
+        "flow_multi": "context: {\n  checkpoint_threshold: 260000}\n",
+        "shared": "context: {checkpoint_threshold: 260000, max_reincarnations: 3}\n",
+    }
+    for name, body in shapes.items():
+        cfg = tmp_path / name / "config.yaml"
+        cfg.parent.mkdir()
+        cfg.write_text(body)
+        rewrite_config_file(cfg)
+        assert cfg.read_text() == body, name
+        assert capsys.readouterr().err == _by_hand(cfg), name
+        # The key is still live, so the pointer repeats until a human fixes it.
+        rewrite_config_file(cfg)
+        assert cfg.read_text() == body, name
+        assert capsys.readouterr().err == _by_hand(cfg), name
+
+
+def test_a_legacy_spelling_beside_an_unstrippable_key_lands_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    cfg = tmp_path / "config.yaml"
+    body = ('test_cmd_fast: ""\n'
+            "context: {checkpoint_threshold: 260000, max_reincarnations: 3}\n")
+    cfg.write_text(body)
+    rewrite_config_file(cfg)
+    # One gate: the spelling fix cannot land over text the reader still rejects.
+    assert cfg.read_text() == body
+    assert capsys.readouterr().err == _by_hand(cfg)
+
+    cfg.write_text('test_cmd_fast: ""\ncontext: {max_reincarnations: 3}\n')
+    rewrite_config_file(cfg)
+    assert "test_cmd_fast: false" in cfg.read_text()
+    assert capsys.readouterr().err == (
+        f'imp: rewrote "" to false in {display_path(cfg)} (test_cmd_fast)\n')
+
+
+def test_a_layer_carrying_both_defects_heals_in_one_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The regression guard for the shared landing gate: verify_readable parses
+    # the WHOLE candidate, so with a gate per transform each one aborts on the
+    # other's defect, order-independently, and the install never self-heals.
+    from imp.providers.config import parse_config_layer
+
+    monkeypatch.chdir(tmp_path)
+    _assert_outside_a_git_work_tree(tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "legacy"))
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    home.mkdir()
+    cfg = home / "config.yaml"
+    cfg.write_text('test_cmd_fast: ""\ncontext:\n  checkpoint_threshold: 260000\n'
+                   "  max_reincarnations: 3\n")
+
+    run_startup_migrations()
+
+    layer, _src = parse_config_layer(cfg)                        # type: ignore[misc]
+    assert layer == {"test_cmd_fast": False, "context": {"max_reincarnations": 3}}
+    assert capsys.readouterr().err == (
+        _removed(cfg)
+        + f'imp: rewrote "" to false in {display_path(cfg)} (test_cmd_fast)\n')
+
+
+def test_a_quest_worktrees_own_config_is_never_rewritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("IMP_HOME", str(home))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    (repo / "imp").mkdir()
+    (repo / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    (repo / ".gitignore").write_text(".imp/\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "init")
+    wt = repo / ".imp" / "worktrees" / "x"
+    _git(repo, "worktree", "add", "-q", "-b", "wt", str(wt), "main")
+    (wt / "imp" / "config.yaml").write_text(_RETIRED_BODY)
+
+    migrate_config_layers(wt)
+
+    # The checkout layer resolves through find_control_root, so a worktree's own
+    # copy is never the file that gets rewritten mid-run.
+    assert (wt / "imp" / "config.yaml").read_text() == _RETIRED_BODY
+    assert (repo / "imp" / "config.yaml").read_text() == "default-workflow: imp\n"
+    assert capsys.readouterr().err == ""

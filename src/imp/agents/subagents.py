@@ -404,7 +404,6 @@ async def dispatch_task(
                 undecided=ctx.undecided,
                 headless=ctx.non_interactive,
                 sandbox_policy=dispatch_policy,
-                checkpoint_threshold=ctx.checkpoint_threshold,
             )
 
         sub_inv = _build_sub_inv(

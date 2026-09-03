@@ -137,6 +137,25 @@ def test_validate_model_arg_still_rejects_unavailable_via_delegation(
     assert "not available" in reason
 
 
+def test_render_roster_hides_the_bare_gpt_5_6_alias() -> None:
+    from imp.cli.model_command import render_roster
+    from imp.providers.catalog import catalog_aliases
+    from imp.providers.config import ProviderModel
+    from imp.providers.model_roster import ProviderRoster
+
+    # The bare alias is a catalog key (so limits resolution can cap it) but must
+    # never be suggested: an operator writing it into a `tiers:` block would get
+    # the flagship at every tier.
+    assert "gpt-5.6" in catalog_aliases("openai")
+    current = ProviderModel("openai", "gpt-5.6-sol")
+    rosters = [ProviderRoster("openai", tuple(catalog_aliases("openai")))]
+    lines = render_roster(current, rosters)
+    assert "    gpt-5.6" not in lines
+    assert "    gpt-5.6-sol" in lines
+    assert "    gpt-5.6-terra" in lines
+    assert "    gpt-5" in lines
+
+
 def test_roster_model_names_flattens_dedups_and_keeps_aliases(
     monkeypatch, tmp_path,
 ) -> None:

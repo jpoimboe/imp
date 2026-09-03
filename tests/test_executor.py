@@ -1488,9 +1488,8 @@ async def test_run_quest_computes_and_persists_resolved_tiers(tmp_path):
     assert len(resolved_events) == 1
     assert "tiers" in resolved_events[0]["payload"]
     assert "steps" in resolved_events[0]["payload"]
-    # The run-start event carries the configured checkpoint threshold so the
-    # renderer/engine can resolve a warn/checkpoint cutoff. Default config -> 0.8.
-    assert resolved_events[0]["payload"]["checkpoint_threshold"] == 0.8
+    # The cutoff is model-derived now — the run-start event carries no threshold.
+    assert "checkpoint_threshold" not in resolved_events[0]["payload"]
 
 
 @pytest.mark.anyio
@@ -3607,22 +3606,6 @@ async def test_clean_tree_bounce_does_not_refill_reincarnation_budget(tmp_path):
     assert recorded == [1], recorded      # bounce did NOT refill the budget
 
 
-@pytest.mark.anyio
-async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
-    """run_quest re-derives config.context_checkpoint_threshold() onto State on
-    every entry (transient, not persisted) and the executor carries it onto each
-    AgentInvocation, so the runner's Tier A watch sees the configured value."""
-    quest, _, _ = _seed_minimal_workflow(tmp_path)
-    # Non-default threshold so the assertion is falsifiable (0.65 != default 0.8).
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "default-workflow: imp\ncontext:\n  checkpoint_threshold: 0.65\n")
-    sink: list = []
-    _register_invocation_capturing({"status": "Success"}, sink)
-
-    await run_quest(quest, on_event=lambda _e: None)
-
-    assert sink and sink[0].checkpoint_threshold == 0.65
-
 
 @pytest.mark.anyio
 async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
@@ -5099,3 +5082,17 @@ async def test_step_prompt_reports_a_detached_head_as_the_checkout_branch(
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
     body = sink[0].initial_messages[0].content[0].text
     assert "base=main checkout=a detached HEAD|" in body
+
+
+def test_no_checkpoint_threshold_field_survives_on_the_run_types() -> None:
+    # AC 8, structurally: nothing between run_quest and a provider session
+    # carries a configured threshold any more. Task 2 adds the literal-level
+    # grep (which also covers comments and imp/config.yaml).
+    from dataclasses import fields
+
+    from imp.agents.runner import AgentInvocation
+    from imp.agents.tools.context import ToolContext
+    from imp.engine.state import State
+
+    for cls in (AgentInvocation, ToolContext, State):
+        assert "checkpoint_threshold" not in {f.name for f in fields(cls)}

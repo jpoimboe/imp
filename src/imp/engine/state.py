@@ -160,10 +160,6 @@ class State:
     clean_tree_bounces: dict[str, int] = field(default_factory=dict)  # per-step
     # (step-keyed) dirty-worktree bounce counter; the enforcement hook caps it.
     max_clean_tree_bounces: int = 3  # dirty-worktree bounce cap before pausing.
-    # Transient: NOT written to state.json (so no LAYOUT_VERSION bump). Re-set
-    # from config.context_checkpoint_threshold() on every run_quest entry and
-    # carried onto each AgentInvocation for the Tier A proactive-handoff watch.
-    checkpoint_threshold: float | int | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:

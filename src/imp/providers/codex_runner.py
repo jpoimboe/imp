@@ -318,7 +318,6 @@ class CodexSession(ObserveSession):
         ctx.undecided = invocation.undecided
         ctx.non_interactive = invocation.headless
         ctx.base_sandbox_policy = invocation.sandbox_policy
-        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.event_log = elog
         if runner._user_input_fn is not None:
             ctx.user_input_fn = runner._user_input_fn
@@ -699,10 +698,9 @@ class CodexSession(ObserveSession):
         # branch returned before the crossing check), so gate on not-completed.
         if (self._handoff_phase is None
                 and not self._complete_step_called
-                and invocation.checkpoint_threshold is not None
                 and context_threshold_crossed(
-                    self._proc_state.get("pending_usage"), self.runner.model,
-                    invocation.checkpoint_threshold)):
+                    self._proc_state.get("pending_usage"),
+                    invocation.provider_name, self.runner.model)):
             instr = handoff_instruction(self._handoff_path_obj)
             self.elog.append_engine_message(
                 agent_id=self.aid,

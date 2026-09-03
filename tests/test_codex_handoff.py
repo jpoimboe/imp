@@ -46,7 +46,7 @@ def _agent_def() -> AgentDef:
 
 @pytest.mark.anyio
 async def test_threshold_crossing_elicits_codex_handoff(tmp_path: Path) -> None:
-    """A codex turn whose occupancy crosses 0.8 * 400000 = 320000 without
+    """A codex turn whose occupancy crosses the model cutoff, 0.8 * 400000 = 320000 without
     completing the step elicits the handoff instruction as the next prompt; the
     following turn yields the terminal `handoff` event."""
     _seed_git_and_auth(tmp_path)
@@ -73,7 +73,7 @@ async def test_threshold_crossing_elicits_codex_handoff(tmp_path: Path) -> None:
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
-        agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)
+        agent_id="step:t", event_log=elog)
 
     events = [ev async for ev in runner.run(inv)]
 
@@ -114,7 +114,7 @@ async def test_silent_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
-        agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)
+        agent_id="step:t", event_log=elog)
 
     events = [ev async for ev in runner.run(inv)]
 
@@ -148,7 +148,7 @@ async def test_below_threshold_does_not_elicit_codex_handoff(tmp_path: Path) -> 
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
-        agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)
+        agent_id="step:t", event_log=elog)
 
     events = [ev async for ev in runner.run(inv)]
 
@@ -185,7 +185,7 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
-        agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)
+        agent_id="step:t", event_log=elog)
 
     events = [ev async for ev in runner.run(inv)]
 

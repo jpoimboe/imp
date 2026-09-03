@@ -126,31 +126,16 @@ def test_parse_context_block(tmp_path: Path) -> None:
     p.write_text(
         "default-workflow: imp\n"
         "context:\n"
-        "  checkpoint_threshold: 0.8\n"
         "  max_reincarnations: 3\n"
     )
     out, _ = parse_config_layer(p)  # type: ignore[misc]
-    assert out["context"] == {"checkpoint_threshold": 0.8, "max_reincarnations": 3}
-
-
-def test_context_absolute_threshold_allowed(tmp_path: Path) -> None:
-    p = tmp_path / "c.yaml"
-    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: 150000\n")
-    out, _ = parse_config_layer(p)  # type: ignore[misc]
-    assert out["context"]["checkpoint_threshold"] == 150000
+    assert out["context"] == {"max_reincarnations": 3}
 
 
 def test_context_unknown_key_rejected(tmp_path: Path) -> None:
     p = tmp_path / "c.yaml"
     p.write_text("default-workflow: imp\ncontext:\n  bogus: 1\n")
     with pytest.raises(LoadError, match="not a known context setting"):
-        parse_config_layer(p)
-
-
-def test_context_bad_threshold_rejected(tmp_path: Path) -> None:
-    p = tmp_path / "c.yaml"
-    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: 0\n")
-    with pytest.raises(LoadError, match="checkpoint_threshold"):
         parse_config_layer(p)
 
 
@@ -168,24 +153,10 @@ def test_context_non_mapping_rejected(tmp_path: Path) -> None:
         parse_config_layer(p)
 
 
-def test_context_checkpoint_threshold_bool_rejected(tmp_path: Path) -> None:
-    p = tmp_path / "c.yaml"
-    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: true\n")
-    with pytest.raises(LoadError, match="checkpoint_threshold"):
-        parse_config_layer(p)
-
-
 def test_context_max_reincarnations_bool_rejected(tmp_path: Path) -> None:
     p = tmp_path / "c.yaml"
     p.write_text("default-workflow: imp\ncontext:\n  max_reincarnations: true\n")
     with pytest.raises(LoadError, match="max_reincarnations"):
-        parse_config_layer(p)
-
-
-def test_context_checkpoint_threshold_negative_rejected(tmp_path: Path) -> None:
-    p = tmp_path / "c.yaml"
-    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: -1\n")
-    with pytest.raises(LoadError, match="checkpoint_threshold"):
         parse_config_layer(p)
 
 
@@ -283,14 +254,20 @@ def test_test_cmd_fast_in_tiers_less_layer(tmp_path: Path) -> None:
     assert src.file == p
 
 
-def test_context_merges_one_level(tmp_path: Path) -> None:
-    # user layer sets max_reincarnations; project sets checkpoint_threshold — both survive.
+def test_context_max_reincarnations_merges_across_layers(tmp_path: Path) -> None:
+    # `context` merges rather than being replaced wholesale: a layer that sets
+    # nothing leaves the earlier value standing, and a later value wins.
     src = SourceLoc(file=tmp_path / "x", line=1)
-    merged, _ = merge_layers([
-        ({"context": {"checkpoint_threshold": 0.75}}, src),
+    kept, _ = merge_layers([
         ({"context": {"max_reincarnations": 4}}, src),
+        ({"theme": "dark"}, src),
     ])
-    assert merged["context"] == {"checkpoint_threshold": 0.75, "max_reincarnations": 4}
+    assert kept["context"] == {"max_reincarnations": 4}
+    later, _ = merge_layers([
+        ({"context": {"max_reincarnations": 4}}, src),
+        ({"context": {"max_reincarnations": 7}}, src),
+    ])
+    assert later["context"] == {"max_reincarnations": 7}
 
 
 def test_config_exposes_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -298,7 +275,6 @@ def test_config_exposes_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     eff = load_effective_config()
     assert isinstance(eff.config.context, dict)
     # With no config files, accessors fall back to documented defaults.
-    assert eff.config.context_checkpoint_threshold() == 0.8
     assert eff.config.context_max_reincarnations() == 2
 
 
@@ -393,3 +369,26 @@ def test_a_valueless_command_key_reads_as_absent(tmp_path: Path) -> None:
     p.write_text("test_cmd_fast:\ntest_cmd_slow:\nworktree_setup:\n")
     layer, _src = parse_config_layer(p)  # type: ignore[misc]
     assert layer == {}
+
+
+def test_the_retired_checkpoint_threshold_is_a_load_error(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: 260000\n")
+    with pytest.raises(LoadError) as excinfo:
+        parse_config_layer(p)
+    assert excinfo.value.message == (
+        "context.'checkpoint_threshold' is not a known context setting "
+        "(allowed: max_reincarnations)")
+
+
+def test_the_retired_setting_is_gone_from_the_sources() -> None:
+    # AC 8: comments included, so the stale advice and the field comments went
+    # with the fields. config_migrate.py is the one module spec §6 requires to
+    # name the retired key; tests name it deliberately and are out of scope.
+    root = Path(__file__).resolve().parents[1]
+    targets = [p for p in sorted((root / "src").rglob("*.py"))
+               if p.name != "config_migrate.py"]
+    targets.append(root / "imp" / "config.yaml")
+    offenders = [str(p.relative_to(root)) for p in targets
+                 if "checkpoint_threshold" in p.read_text()]
+    assert offenders == []

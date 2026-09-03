@@ -82,60 +82,94 @@ def _legacy_keys(text: str) -> list[str]:
     return found
 
 
-def rewrite_opt_out_spelling(path: Path) -> None:
-    """Rewrite one config file's `""` / `[]` opt-outs to `false`, comments intact.
-    Every key in a single pass: verifying a per-key write would hand the rejecting
-    reader a file still carrying a sibling legacy spelling, aborting the rewrite."""
+# Not an anchored key matcher: `context: {checkpoint_threshold: N}` puts the key
+# after `context: {` on its line, and a pre-check that misses it never rewrites
+# the file at all. "Live key present" is also exactly "not yet migrated", since
+# apply_unset strips by commenting out.
+_LIVE_CHECKPOINT_KEY = re.compile(
+    r"""^[^#\n]*(?<![\w.-])["']?checkpoint_threshold["']?[ \t]*:""",
+    re.MULTILINE,
+)
+
+
+def _has_pending(text: str) -> bool:
+    """Whether any transform has work to do — the byte pre-check, before any
+    ruamel import or parse."""
+    return bool(_LEGACY_OPT_OUT.search(text)) or bool(_LIVE_CHECKPOINT_KEY.search(text))
+
+
+def rewrite_config_file(path: Path) -> None:
+    """Every pending transform for one config file, composed into one candidate
+    behind ONE landing gate. verify_readable parses the whole file, so a gate per
+    transform makes each abort on the other's un-migrated defect — permanently,
+    and whichever runs first."""
     if not path.is_file():
         return
     text = path.read_text()
-    keys = _legacy_keys(text)
-    if not keys:
+    if not _has_pending(text):
         return
     # Deferred past the byte pre-check: the post-migration steady state pays no
     # ruamel import and no parse.
-    from imp.cli.config_edit import apply_set
+    from imp.cli.config_edit import UnsetOutcome, apply_set, apply_unset
     from imp.cli.config_write import land, scratch_seam, verify_readable
 
+    keys = _legacy_keys(text)
+    retired = _LIVE_CHECKPOINT_KEY.search(text) is not None
+    notices: list[str] = []
+    if retired:
+        result = apply_unset(text, ("context", "checkpoint_threshold"))
+        if result.outcome in (UnsetOutcome.SHARED_LINE, UnsetOutcome.FLOW_BLOCKED):
+            # The key stays live, so nothing may land: the reader would reject the
+            # whole file. Point at it instead of leaving a bare LoadError.
+            print("imp: remove the retired context.checkpoint_threshold setting "
+                  f"from {display_path(path)} by hand", file=sys.stderr)
+            return
+        if result.outcome is UnsetOutcome.COMMENTED:
+            text = result.text
+            notices.append("imp: removed the retired context.checkpoint_threshold "
+                           f"setting from {display_path(path)}")
     for key in keys:
         text = apply_set(text, (key,), False).text
+        spelling = "[]" if key == "pythonpath" else '""'
+        notices.append(
+            f"imp: rewrote {spelling} to false in {display_path(path)} ({key})")
+    if not notices:
+        return                     # a pre-check over-match: apply_unset said ABSENT
     with scratch_seam(path.parent / f".config-migrate-{os.getpid()}",
                       path.name) as scratch:
         verify_readable(scratch, text)
         land(scratch, path)
-    for key in keys:
-        spelling = "[]" if key == "pythonpath" else '""'
-        print(f"imp: rewrote {spelling} to false in {display_path(path)} ({key})",
-              file=sys.stderr)
+    for line in notices:
+        print(line, file=sys.stderr)
 
 
 def _checkout_config(cwd: Path) -> Path | None:
     """The MAIN checkout's imp/config.yaml, resolved through git only when a
-    config.yaml at or above `cwd` carries a legacy spelling — a quest worktree
-    must never have its own copy rewritten, and the steady state pays no spawn."""
+    config.yaml at or above `cwd` has pending work — a quest worktree must never
+    have its own copy rewritten, and the steady state pays no spawn."""
     from imp.engine.worktree import find_control_root
 
     nearby = next((p / "imp" / "config.yaml" for p in (cwd, *cwd.parents)
                    if (p / "imp" / "config.yaml").is_file()), None)
-    if nearby is None or not _legacy_keys(nearby.read_text()):
+    if nearby is None or not _has_pending(nearby.read_text()):
         return None
     return find_control_root(cwd) / "imp" / "config.yaml"
 
 
-def migrate_opt_out_spelling(cwd: Path) -> None:
-    """`""` / `[]` -> `false` across every config layer imp reads. The two ~/.imp
-    locations go first: only the checkout needs git to resolve, and resolving it
-    can raise outside a work tree — which under the caller's one `suppress` would
-    otherwise take the machine-wide files down with it."""
+def migrate_config_layers(cwd: Path) -> None:
+    """Every pending config-file transform across every layer imp reads. The two
+    ~/.imp locations go first: only the checkout needs git to resolve, and
+    resolving it can raise outside a work tree — which under the caller's one
+    `suppress` would otherwise take the machine-wide files down with it."""
     from imp.paths import imp_home
     from imp.providers.paths import global_config_path
 
-    rewrite_opt_out_spelling(global_config_path())
+    rewrite_config_file(global_config_path())
     for local in sorted((imp_home() / "projects").glob("*/config.yaml")):
-        rewrite_opt_out_spelling(local)
+        rewrite_config_file(local)
     checkout = _checkout_config(cwd)
     if checkout is not None:
-        rewrite_opt_out_spelling(checkout)
+        rewrite_config_file(checkout)
 
 
 def run_startup_migrations() -> None:
@@ -152,7 +186,7 @@ def run_startup_migrations() -> None:
     with suppress(Exception):
         migrate_project_config(Path.cwd())
     with suppress(Exception):
-        migrate_opt_out_spelling(Path.cwd())
+        migrate_config_layers(Path.cwd())
     # Lazy: state_migrate imports _git_toplevel from here, so a module-scope import
     # would be circular.
     from imp.cli.state_migrate import migrate_project_state

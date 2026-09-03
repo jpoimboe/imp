@@ -11,7 +11,7 @@ from imp.providers.model_arg import ModelArgError, parse_model_arg
 from imp.providers.model_roster import ProviderRoster
 
 # Hidden from the roster but still resolvable; exact-name match keeps dated ids listed.
-_HIDDEN_ALIASES = frozenset({"haiku", "sonnet", "opus"})
+_HIDDEN_ALIASES = frozenset({"haiku", "sonnet", "opus", "gpt-5.6"})
 
 
 def render_roster(
