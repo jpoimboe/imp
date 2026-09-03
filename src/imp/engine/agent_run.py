@@ -503,7 +503,6 @@ def build_agent_invocation(
     headless: bool = False,
     interactive: bool = False,
     sandbox_policy: Any = None,
-    checkpoint_threshold: float | int | None = None,
     inject_outcome_field: bool = False,
 ) -> AgentInvocation:
     """Construct one AgentInvocation, owning the completion-contract invariant
@@ -633,7 +632,6 @@ def build_agent_invocation(
         headless=headless,
         interactive=interactive,
         sandbox_policy=sandbox_policy,
-        checkpoint_threshold=checkpoint_threshold,
     )
 
 

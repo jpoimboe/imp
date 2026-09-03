@@ -298,7 +298,6 @@ def test_config_exposes_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     eff = load_effective_config()
     assert isinstance(eff.config.context, dict)
     # With no config files, accessors fall back to documented defaults.
-    assert eff.config.context_checkpoint_threshold() == 0.8
     assert eff.config.context_max_reincarnations() == 2
 
 

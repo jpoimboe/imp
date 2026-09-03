@@ -88,11 +88,6 @@ class Config:
         else `<PROVIDER>_API_KEY`."""
         return self.provider_envs.get(provider, f"{provider.upper()}_API_KEY")
 
-    def context_checkpoint_threshold(self) -> float | int:
-        """Window fraction (0 < x <= 1) or absolute token cap (x > 1). Default 0.8."""
-        threshold: float | int = self.context.get("checkpoint_threshold", 0.8)
-        return threshold
-
     def context_max_reincarnations(self) -> int:
         reincarnations: int = self.context.get("max_reincarnations", 2)
         return reincarnations

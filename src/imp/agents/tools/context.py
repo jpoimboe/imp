@@ -120,9 +120,6 @@ class ToolContext:
     # Which stack-dependent settings this project never decided; rendered by the
     # front door and re-copied onto each nested dispatch by dispatch_task.
     undecided: Undecided = ALL_DECIDED
-    # Tier A proactive-handoff watch threshold, propagated parent -> subagent via
-    # this ctx so dispatch_task seeds each subagent's checkpoint_threshold.
-    checkpoint_threshold: float | int | None = None
     # Stored BASE policy (home-layer-attached); None => bare sh -c (no sandbox).
     # Tools read the effective policy via the sandbox_policy property below.
     base_sandbox_policy: Any = None

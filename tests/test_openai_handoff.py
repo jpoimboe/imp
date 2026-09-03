@@ -32,7 +32,7 @@ def _agent(name: str, *, tools) -> AgentDef:
         source=SourceLoc(file=Path("a.md"), line=1))
 
 
-def _invocation(tmp_path: Path, *, threshold: float | int | None) -> AgentInvocation:
+def _invocation(tmp_path: Path) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent("w", tools={"complete_step", "write_file"}),
         provider_name="openai", model_name="gpt-5.4",
@@ -42,15 +42,14 @@ def _invocation(tmp_path: Path, *, threshold: float | int | None) -> AgentInvoca
                                     workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
-        agent_id="step:impl/w",
-        checkpoint_threshold=threshold)
+        agent_id="step:impl/w")
 
 
 @pytest.mark.anyio
 async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) -> None:
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 crosses 0.8 * 400000 = 320000 (330000) on a tool-using turn.
+        # Turn 1 crosses the model cutoff, 0.8 * 400000 = 320000 (330000) on a tool-using turn.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
@@ -64,7 +63,7 @@ async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) ->
     ])
     runner = OpenAIAgentRunner(model_name="gpt-5.4", client_factory=lambda: fake)
 
-    events = [e async for e in runner.run(_invocation(tmp_path, threshold=0.8))]
+    events = [e async for e in runner.run(_invocation(tmp_path))]
 
     handoff = [e for e in events if e["type"] == "handoff"]
     assert len(handoff) == 1
@@ -88,7 +87,7 @@ async def test_below_threshold_does_not_elicit_handoff(tmp_path: Path) -> None:
     ])
     runner = OpenAIAgentRunner(model_name="gpt-5.4", client_factory=lambda: fake)
 
-    events = [e async for e in runner.run(_invocation(tmp_path, threshold=0.8))]
+    events = [e async for e in runner.run(_invocation(tmp_path))]
 
     assert not [e for e in events if e["type"] == "handoff"]
     assert any(e["type"] == "agent_result" for e in events)
@@ -103,7 +102,7 @@ async def test_empty_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
     # fires so the engine can reincarnate.
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 crosses 0.8 * 400000 = 320000 (330000); also carries prose so a
+        # Turn 1 crosses the model cutoff, 0.8 * 400000 = 320000 (330000); also carries prose so a
         # walk-back helper would have stale text to pick up.
         resp_response(
             resp_message("I will write the files"),
@@ -115,7 +114,7 @@ async def test_empty_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
     ])
     runner = OpenAIAgentRunner(model_name="gpt-5.4", client_factory=lambda: fake)
 
-    events = [e async for e in runner.run(_invocation(tmp_path, threshold=0.8))]
+    events = [e async for e in runner.run(_invocation(tmp_path))]
 
     handoff = [e for e in events if e["type"] == "handoff"]
     assert len(handoff) == 1
@@ -129,7 +128,7 @@ async def test_handoff_fires_on_tool_less_writing_turn(tmp_path: Path) -> None:
     # the runner still emits exactly one terminal `handoff` and stops.
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 crosses 0.8 * 400000 = 320000 (330000) on a tool-using turn.
+        # Turn 1 crosses the model cutoff, 0.8 * 400000 = 320000 (330000) on a tool-using turn.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
@@ -139,7 +138,7 @@ async def test_handoff_fires_on_tool_less_writing_turn(tmp_path: Path) -> None:
     ])
     runner = OpenAIAgentRunner(model_name="gpt-5.4", client_factory=lambda: fake)
 
-    events = [e async for e in runner.run(_invocation(tmp_path, threshold=0.8))]
+    events = [e async for e in runner.run(_invocation(tmp_path))]
 
     handoff = [e for e in events if e["type"] == "handoff"]
     assert len(handoff) == 1

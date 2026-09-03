@@ -1192,7 +1192,6 @@ class ClaudeCodeSession(ObserveSession):
         ctx.undecided = invocation.undecided
         ctx.non_interactive = invocation.headless
         ctx.base_sandbox_policy = invocation.sandbox_policy
-        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.event_log = elog
         if runner._user_input_fn is not None:
             ctx.user_input_fn = runner._user_input_fn

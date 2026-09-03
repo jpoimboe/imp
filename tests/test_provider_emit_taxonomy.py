@@ -119,8 +119,7 @@ async def test_anthropic_handoff_injection_emits_engine_message_continuation(
             title="T", project_root=tmp_path,
             workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
-        agent_id="step:p/h", event_log=log,
-        checkpoint_threshold=0.8)
+        agent_id="step:p/h", event_log=log)
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake)
 
