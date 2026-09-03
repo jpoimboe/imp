@@ -561,6 +561,18 @@ def test_set_worktree_setup_empty_is_refused_and_leaves_the_file_alone(
     assert cfg.read_text() == before
 
 
+def test_the_retired_context_key_is_rejected_and_the_sibling_still_sets(
+    project: Path, imp_home: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["config", "set", "context.checkpoint_threshold", "260000"]) == 2
+    assert capsys.readouterr().err.startswith(
+        "imp: unknown setting 'context.checkpoint_threshold'")
+    assert not (imp_home / "config.yaml").exists()
+
+    assert main(["config", "set", "context.max_reincarnations", "3"]) == 0
+    assert read_back(imp_home / "config.yaml", ("context", "max_reincarnations")) == 3
+
+
 def test_help_copy_matches_the_spec() -> None:
     parser = _build_parser()
     config = next(action.choices["config"] for action in parser._actions

@@ -23,18 +23,3 @@ pythonpath: [src]
 # Command imp runs in each newly created quest worktree, before the first step:
 # `git worktree` materializes only tracked files, so a new tree has no .venv.
 worktree_setup: uv sync --all-extras
-
-# Context checkpoint: an absolute prompt-token cap, not the default 0.8 window
-# fraction. OpenAI bills a prompt above 272k input tokens at 2x input / 1.5x
-# output for the WHOLE request, and the 5.6 window is 1.05M — so the fractional
-# default would hand off at ~840k, i.e. surcharged for most of a step. The cap
-# sits below 272k with headroom for the handoff turns themselves (the watch
-# fires on a completed turn, and the instruction + note capture that follow are
-# billed at that same occupancy).
-#
-# This key's `imp config set` scope is global, but the parser honours a
-# `context:` block in any layer, so writing it here keeps the cap scoped to this
-# project. It is provider-agnostic: it also clamps claude-opus-5[1m] handoffs
-# from ~800k down to 260k.
-context:
-  checkpoint_threshold: 260000

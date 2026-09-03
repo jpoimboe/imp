@@ -386,14 +386,7 @@ def _parse_context(raw: Any, src: SourceLoc) -> dict[str, Any]:
         raise LoadError(f"{src.file.name} 'context:' must be a mapping", src)
     out: dict[str, Any] = {}
     for k, v in items(raw):
-        if k == "checkpoint_threshold":
-            # bool is an int subclass; reject it so `checkpoint_threshold: true` isn't read as 1.
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
-                raise LoadError(
-                    "context.checkpoint_threshold must be a positive number "
-                    "(a fraction like 0.8, or an absolute token count)", src)
-            out[k] = v
-        elif k == "max_reincarnations":
+        if k == "max_reincarnations":
             if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 raise LoadError(
                     "context.max_reincarnations must be a non-negative integer", src)
@@ -401,7 +394,7 @@ def _parse_context(raw: Any, src: SourceLoc) -> dict[str, Any]:
         else:
             raise LoadError(
                 f"context.{k!r} is not a known context setting "
-                "(allowed: checkpoint_threshold, max_reincarnations)", src)
+                "(allowed: max_reincarnations)", src)
     return out
 
 
