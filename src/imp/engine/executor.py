@@ -1708,8 +1708,10 @@ async def _route_agent(
         # the success/exhaustion resets. Runs once (at the pause), unlike the
         # resume reset which is gated on the navigation point.
         state.step_attempt = 0
+        fatal_category = result.error.category if result.error else None
+        # auth_terminal is actionable: reauth_needed brings its copy, label and resume-in-place.
         pause = Pause(
-            reason=result.error.category if result.error else None,
+            reason=("reauth_needed" if fatal_category == "auth_terminal" else fatal_category),
             kind=result.error.kind if result.error else None,
         )
         _emit(log, "step_completed",

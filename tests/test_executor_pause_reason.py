@@ -82,9 +82,9 @@ def test_emit_branch_for_non_pause_action_is_interrupt() -> None:
 # already wires a fake provider that yields a classified `error` event and runs
 # it through run_quest, so an end-to-end assertion on the emitted
 # workflow_paused payload is both achievable and higher-fidelity than stubbing
-# _run_agent_invocation. The fixture yields category="auth"/kind="AuthError"
-# (a fatal Pause category) rather than the plan's illustrative "api"/"http_400";
-# the assertions follow the real fixture's values.
+# _run_agent_invocation.
+# The _FatalRunner fixture yields category="terminated"/kind="TerminatedError"
+# (a fatal Pause category); the assertions follow the real fixture's values.
 
 
 def _seed_single_agent(root: Path) -> Quest:
@@ -306,3 +306,100 @@ async def test_awaiting_user_park_records_awaiting_user_reason(
 
     # The step is marked resumable exactly as before (unchanged by the relabel).
     assert State.load(quest.state_dir).resume_pending == "w"
+
+
+# ── auth_terminal maps to reauth_needed at the fatal branch ──
+
+
+def _error_event(category: str, kind: str, message: str) -> dict:
+    return {"type": "error", "payload": {
+        "category": category, "kind": kind, "message": message}}
+
+
+def _register_scripted_provider(scripts: list[list[dict]]) -> None:
+    """Fake provider whose Nth invocation yields the Nth event script."""
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    remaining = list(scripts)
+
+    class _ScriptedRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            assert remaining, "provider invoked more times than the script allows"
+            for event in remaining.pop(0):
+                yield event
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _ScriptedProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _ScriptedRunner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _ScriptedProvider())
+
+
+@pytest.mark.anyio
+async def test_auth_terminal_pauses_at_once_as_reauth_needed(tmp_path: Path) -> None:
+    quest = _seed_single_agent(tmp_path)
+    _register_scripted_provider([[_error_event(
+        "auth_terminal", "AuthTerminalError", "claude CLI: Please run /login")]])
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    # No backoff, no retry: the pause lands on the FIRST failure.
+    assert [e for e in events if e["type"] == "agent_retry"] == []
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert len(paused) == 1
+    assert paused[0]["payload"]["reason"] == "reauth_needed"
+    assert paused[0]["payload"]["kind"] == "AuthTerminalError"
+
+    state = State.load(quest.state_dir)
+    assert state.status == "error"
+    # Resume-in-place, exactly as a reauth_needed ceiling pause arms it.
+    assert state.resume_should_continue is True
+
+
+@pytest.mark.anyio
+async def test_transient_auth_still_retries_before_it_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+    # Fail once, then succeed: the contrast is that a bare 401 gets a retry at all.
+    _register_scripted_provider([
+        [_error_event("auth", "http_401", "claude CLI: 401")],
+        [{"type": "agent_result", "payload": {"status": "Success", "outcome": "done"}}],
+    ])
+
+    async def _no_sleep(_delay: float, _coordinator: object) -> None:
+        pass
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    retries = [e for e in events if e["type"] == "agent_retry"]
+    assert [r["payload"]["category"] for r in retries] == ["auth"]
+
+
+@pytest.mark.anyio
+async def test_quota_pause_still_stamps_its_own_category(tmp_path: Path) -> None:
+    quest = _seed_single_agent(tmp_path)
+    _register_scripted_provider([[_error_event(
+        "quota", "QuotaError", "claude CLI: You have reached your usage limit")]])
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    # Only auth_terminal is remapped; every other fatal pause is verbatim.
+    assert paused[0]["payload"]["reason"] == "quota"
+    assert State.load(quest.state_dir).status == "error"
