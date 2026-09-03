@@ -3049,3 +3049,26 @@ def test_subagent_provider_digs_the_provider_out_of_an_agent_text_node() -> None
     assert any(isinstance(n, nv.AgentTextNode) for n in f.tree.root.children)
     assert rt.subagent_provider(f) == "openai"
     assert rt.subagent_model(f) == "gpt-5.6-sol"
+
+
+def test_quota_pause_renders_plain_speak_copy() -> None:
+    node = nv.PauseNode(reason="quota")
+    line = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    assert line == (
+        "paused — quota is exhausted; the quest is paused and resumable — wait "
+        "for the limit to reset or add credits, then resume")
+    # bare token fallback is gone
+    out = "\n".join(_lines([_ev("1", "workflow_paused", reason="quota")]))
+    assert "paused (quota)" not in out
+
+
+def test_auth_terminal_pause_renders_the_reauth_copy() -> None:
+    # kind must not disturb the shipped copy
+    out = "\n".join(_lines([
+        _ev("1", "workflow_paused", reason="reauth_needed",
+            kind="AuthTerminalError"),
+    ]))
+    assert "authentication kept failing" in out
+    assert "re-authenticate to Claude" in out
+    assert "auth_terminal" not in out
+    assert "AuthTerminalError" not in out
