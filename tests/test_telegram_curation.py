@@ -291,3 +291,25 @@ def test_genuine_awaiting_user_input_buzzes_when_flag_absent() -> None:
 
 def test_awaiting_user_input_is_not_a_static_buzz_member() -> None:
     assert "awaiting_user_input" not in imp_telegram._BUZZ
+
+
+def test_auth_terminal_stop_buzzes_exactly_once() -> None:
+    # The error companion buzzes, so its pause must not buzz a second time.
+    assert imp_telegram.curate(
+        "error", {"category": "auth_terminal", "kind": "AuthTerminalError",
+                  "message": "dead login"}) == "buzz"
+    assert imp_telegram.curate(
+        "workflow_paused", {"reason": "reauth_needed",
+                            "kind": "AuthTerminalError"}) == "silent"
+    assert imp_telegram.event_body(
+        "workflow_paused", {"reason": "reauth_needed",
+                            "kind": "AuthTerminalError"}) == ""
+
+
+def test_ceiling_reauth_pause_still_buzzes() -> None:
+    # The backoff-ceiling reauth_needed pause is companion-less, so it must keep buzzing.
+    for payload in ({"reason": "reauth_needed"},
+                    {"reason": "reauth_needed", "kind": "http_401"}):
+        assert imp_telegram.curate("workflow_paused", payload) == "buzz"
+        assert imp_telegram.event_body(
+            "workflow_paused", payload) == "needs you to re-authenticate"
