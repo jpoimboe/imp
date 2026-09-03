@@ -257,8 +257,3 @@ and bundled workflows.
 Issues and pull requests are welcome.  To work on imp itself, clone the repo and
 run `make sync-env` for a `.venv` matching `uv.lock`, then `make check` before
 opening a pull request.
-
-## License
-
-MIT.  See [LICENSE](LICENSE).  Third-party attribution is in
-[NOTICE](NOTICE).
