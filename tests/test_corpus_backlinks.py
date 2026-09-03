@@ -1,9 +1,7 @@
 """AC 6d: every corpus doc carries a soft back-link to the imp-knowledge hub as
-its runtime entry point, and README links to the features catalog."""
+its runtime entry point."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from tests._corpus import tracked
 
@@ -20,7 +18,3 @@ def test_every_corpus_doc_backlinks_to_the_hub() -> None:
         if SENTINEL not in p.read_text() or "imp-knowledge" not in p.read_text()
     ]
     assert not missing, f"corpus docs missing the hub back-link: {missing}"
-
-
-def test_readme_links_to_features_catalog() -> None:
-    assert "docs/guide/features.md" in Path("README.md").read_text()

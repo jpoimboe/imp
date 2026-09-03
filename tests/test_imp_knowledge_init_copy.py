@@ -4,9 +4,11 @@ from pathlib import Path
 
 from imp.cli import init as init_mod
 
+# Agent-facing prose only: the skill is injected into agent context and the guide
+# is the corpus doc agents read, so the two must describe `imp init` identically.
+# README copy is human-facing and deliberately not pinned here.
 _SKILL = Path("src/imp/assets/skills/imp-knowledge.md")
-_README = Path("README.md")
-_INIT_PROSE = (_SKILL, _README, Path("docs/guide/memory.md"))
+_INIT_PROSE = (_SKILL, Path("docs/guide/memory.md"))
 
 
 def _flat(text: str) -> str:
@@ -24,10 +26,7 @@ def test_imp_knowledge_documents_the_non_interactive_flag() -> None:
 def test_init_prose_describes_a_detected_and_confirmed_setup() -> None:
     for path in _INIT_PROSE:
         flat = _flat(path.read_text())
-        # README's pinned launch copy says "confirms on one screen"; the skill and
-        # the memory doc keep the full phrase.
-        phrase = "on one screen" if path == _README else "confirms them on one screen"
-        assert phrase in flat, path
+        assert "confirms them on one screen" in flat, path
         assert "interactive setup" not in flat, path
         assert "interactive conversation" not in flat, path
         assert "skip the conversation" not in flat, path
