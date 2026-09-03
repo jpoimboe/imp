@@ -153,32 +153,46 @@ def test_claude_opus_5_1m_keeps_its_800k_crossing() -> None:
             {"input_tokens": 300_000}, provider, "claude-opus-5[1m]") is False
 
 
-def test_sdk_context_threshold_crossed_fires_at_fraction() -> None:
+def test_sdk_crossed_applies_the_model_soft_cap() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    # 170000/200000 = 0.85 >= 0.8 -> crossed.
-    assert sdk_context_threshold_crossed(170_000, 200_000, 0.8) is True
+    # Same 260k cap, measured against the SDK's own live window.
+    assert sdk_context_threshold_crossed(
+        261_000, 1_050_000, "openai", "gpt-5.6-sol") is True
+    assert sdk_context_threshold_crossed(
+        259_000, 1_050_000, "openai", "gpt-5.6-sol") is False
 
 
-def test_sdk_context_threshold_crossed_not_before_fraction() -> None:
+def test_sdk_crossed_uncapped_model_uses_the_default_fraction() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    # 150000/200000 = 0.75 < 0.8 -> not crossed.
-    assert sdk_context_threshold_crossed(150_000, 200_000, 0.8) is False
+    # 170000/200000 = 0.85 >= 0.8; 150000/200000 = 0.75 < 0.8.
+    assert sdk_context_threshold_crossed(
+        170_000, 200_000, "claude_code", "opus") is True
+    assert sdk_context_threshold_crossed(
+        150_000, 200_000, "claude_code", "opus") is False
 
 
-def test_sdk_context_threshold_crossed_absolute_cap_divides_by_window() -> None:
+def test_sdk_crossed_unknown_model_trusts_the_live_window() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    # Absolute cap 150000 on a 200000 window -> cutoff 0.75; 160000/200000
-    # = 0.80 >= 0.75 -> crossed.
-    assert sdk_context_threshold_crossed(160_000, 200_000, 150_000) is True
+    # The SDK's window is authoritative, so an unknown model still fires at 0.8
+    # rather than never firing.
+    assert sdk_context_threshold_crossed(
+        170_000, 200_000, "claude_code", "claude-sonnet-4-5") is True
+    assert sdk_context_threshold_crossed(
+        150_000, 200_000, "mystery", "nope") is False
+    assert sdk_context_threshold_crossed(
+        170_000, 200_000, "mystery", "nope") is True
 
 
-def test_sdk_context_threshold_crossed_unavailable_inputs_never_fire() -> None:
+def test_sdk_crossed_without_live_numbers_never_fires() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    assert sdk_context_threshold_crossed(None, 200_000, 0.8) is False
-    assert sdk_context_threshold_crossed(170_000, None, 0.8) is False
-    assert sdk_context_threshold_crossed(170_000, 200_000, None) is False
-    assert sdk_context_threshold_crossed(0, 200_000, 0.8) is False
-    assert sdk_context_threshold_crossed(170_000, 0, 0.8) is False
+    assert sdk_context_threshold_crossed(
+        170_000, None, "claude_code", "opus") is False
+    assert sdk_context_threshold_crossed(
+        None, 200_000, "claude_code", "opus") is False
+    assert sdk_context_threshold_crossed(
+        0, 200_000, "claude_code", "opus") is False
+    assert sdk_context_threshold_crossed(
+        170_000, 0, "claude_code", "opus") is False
 
 
 def test_context_tokens_from_usage_anthropic_cache_split() -> None:

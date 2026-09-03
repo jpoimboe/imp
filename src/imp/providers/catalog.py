@@ -266,16 +266,16 @@ def context_threshold_crossed(
 
 def sdk_context_threshold_crossed(
     context_tokens: int | None, context_window: int | None,
-    threshold: float | int | None,
+    provider: str | None, model: str | None,
 ) -> bool:
     """True when claude_code's SDK-reported LIVE context occupancy has reached
     the checkpoint cutoff. Unlike context_threshold_crossed (which sums prompt
     tokens against the static catalog window), this divides the SDK's own live
-    context_tokens / context_window from get_context_usage(). Returns False
-    whenever any input is unavailable — the watch never fires rather than
-    guessing.
+    context_tokens / context_window from get_context_usage(), and applies the
+    model's soft cap to that window. Returns False whenever a live number is
+    unavailable — the watch never fires rather than guessing.
     """
-    frac = checkpoint_fraction(threshold, context_window)
+    frac = checkpoint_cutoff(limits_for(provider, model), context_window)
     if (frac is None or not context_window or context_window <= 0
             or not context_tokens or context_tokens <= 0):
         return False
