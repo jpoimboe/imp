@@ -10,6 +10,7 @@ from imp.providers.catalog import (
     catalog_aliases,
     checkpoint_fraction,
     context_tokens_from_usage,
+    limits_for,
     model_info,
     model_supports_vision,
     window_for_model,
@@ -322,3 +323,55 @@ def test_soft_cap_is_absent_on_every_other_entry() -> None:
                if not key.startswith("gpt-5.6"))
     assert all(info.soft_cap is None for info in ANTHROPIC.values())
     assert all(info.soft_cap is None for info in CLAUDE_CODE.values())
+
+
+def test_limits_for_resolves_exact_aliases_per_provider() -> None:
+    assert limits_for("openai", "gpt-5.6-sol") == OPENAI["gpt-5.6-sol"]
+    # codex shares the OPENAI table, so it inherits the cap with no entry of its own
+    codex_sol = limits_for("codex", "gpt-5.6-sol")
+    assert codex_sol is not None
+    assert codex_sol.soft_cap == 260_000
+    bare = limits_for("openai", "gpt-5.6")
+    assert bare is not None
+    assert (bare.window, bare.soft_cap) == (1_050_000, 260_000)
+    anthropic_1m = limits_for("anthropic", "claude-opus-5[1m]")
+    assert anthropic_1m is not None
+    assert anthropic_1m.window == 1_000_000
+    claude_code_1m = limits_for("claude_code", "claude-opus-5[1m]")
+    assert claude_code_1m is not None
+    assert claude_code_1m.window == 1_000_000
+    claude_code_opus = limits_for("claude_code", "opus")
+    assert claude_code_opus is not None
+    assert claude_code_opus.window == 200_000
+
+
+def test_limits_for_longest_prefix_covers_dated_ids() -> None:
+    # A dated id keeps its base model's limits.
+    anthropic_dated = limits_for("anthropic", "claude-opus-5-20260315")
+    assert anthropic_dated is not None
+    assert anthropic_dated.window == 200_000
+    claude_code_dated = limits_for("claude_code", "claude-opus-5-20260315")
+    assert claude_code_dated is not None
+    assert claude_code_dated.window == 200_000
+
+
+def test_limits_for_longest_prefix_beats_a_shorter_key() -> None:
+    # Both "gpt-5.6-sol" and "gpt-5" are prefixes; the longest wins, so the
+    # capped 5.6 entry answers rather than the uncapped 400k catch-all.
+    info = limits_for("openai", "gpt-5.6-sol-2026-03")
+    assert info is not None
+    assert (info.window, info.soft_cap) == (1_050_000, 260_000)
+
+
+def test_limits_for_unknown_provider_or_model_is_none() -> None:
+    assert limits_for("mystery", "gpt-5.6-sol") is None
+    assert limits_for("openai", "some-unlisted-model") is None
+    assert limits_for("openai", None) is None
+    assert limits_for(None, "gpt-5.6-sol") is None
+
+
+def test_limits_for_is_case_sensitive() -> None:
+    # Catalog keys are wire ids and model_info() is an exact dict lookup; folding
+    # case here would make the two surfaces disagree about what is a known model.
+    assert limits_for("openai", "GPT-5.6-Sol") is None
+    assert limits_for("anthropic", "Opus") is None

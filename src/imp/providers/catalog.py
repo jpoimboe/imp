@@ -158,6 +158,27 @@ def catalog_aliases(provider_name: str) -> tuple[str, ...]:
     return tuple(catalog) if catalog is not None else ()
 
 
+def limits_for(provider: str | None, model: str | None) -> ModelInfo | None:
+    """Exact alias, else the longest catalog key `model` starts with.
+
+    None when the provider or model is unknown — callers never guess. Prefix,
+    never substring: `"claude-opus-5".startswith("opus")` is false, so the bare
+    aliases cannot false-hit a dated id, and `[1m]` keys match exactly.
+    """
+    if not provider or not model:
+        return None
+    catalog = _CATALOGS.get(provider)
+    if catalog is None:
+        return None
+    exact = catalog.get(model)
+    if exact is not None:
+        return exact
+    prefixes = [key for key in catalog if model.startswith(key)]
+    if not prefixes:
+        return None
+    return catalog[max(prefixes, key=len)]
+
+
 # Provider-agnostic substring fallback for the renderer: an arbitrary model id
 # string (alias or dated id) maps to a window. Ordered so the "[1m]" marker
 # wins over the base-model tokens it always accompanies. This is the renderer's
