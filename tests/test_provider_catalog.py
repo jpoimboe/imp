@@ -300,3 +300,25 @@ def test_catalog_aliases_lists_provider_table_keys() -> None:
 
 def test_catalog_aliases_unknown_provider_is_empty() -> None:
     assert catalog_aliases("nope") == ()
+
+
+def test_openai_5_6_family_carries_the_billing_soft_cap() -> None:
+    # OpenAI bills a prompt above 272k at 2x input / 1.5x output for the WHOLE
+    # request; 260k stays under it with headroom for the handoff turns. The bare
+    # alias routes to Sol, so it needs the same cap (a `gpt-5` prefix fallback
+    # would hand off at 320k, above the breakpoint).
+    for alias in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
+        assert OPENAI[alias] == ModelInfo(
+            window=1_050_000, max_output_tokens=128_000, soft_cap=260_000)
+
+
+def test_soft_cap_is_absent_on_every_other_entry() -> None:
+    # No claude model carries a billing breakpoint on this ladder.
+    assert ModelInfo().soft_cap is None
+    assert OPENAI["gpt-5"].soft_cap is None
+    assert OPENAI["gpt-5.3-codex"].soft_cap is None
+    assert all(info.soft_cap is None
+               for key, info in OPENAI.items()
+               if not key.startswith("gpt-5.6"))
+    assert all(info.soft_cap is None for info in ANTHROPIC.values())
+    assert all(info.soft_cap is None for info in CLAUDE_CODE.values())
