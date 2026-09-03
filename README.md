@@ -50,16 +50,13 @@ recommend a Claude Max or ChatGPT Pro subscription.
 
 ## Try it
 
-imp needs Linux, Git, Python 3.11 or newer, GNU Make, `uv`, and
+imp needs Linux, Git, Python 3.11 or newer, `uv`, and
 [bubblewrap](https://github.com/containers/bubblewrap).  For model access, either
 install and sign in to the `claude` or `codex` CLI with an existing subscription,
 or export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.
 
 ```bash
-git clone https://github.com/jpoimboe/imp
-cd imp
-make sync-env
-. .venv/bin/activate
+uv tool install git+https://github.com/jpoimboe/imp
 
 mkdir /path/to/my-app
 cd /path/to/my-app
@@ -257,8 +254,9 @@ interfaces may change before the first tagged release.
 See [Architecture](docs/internals/architecture.md) for an overview of the engine
 and bundled workflows.
 
-Issues and pull requests are welcome.  Run `make check` before opening a pull
-request.
+Issues and pull requests are welcome.  To work on imp itself, clone the repo and
+run `make sync-env` for a `.venv` matching `uv.lock`, then `make check` before
+opening a pull request.
 
 ## License
 
