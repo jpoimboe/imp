@@ -2997,3 +2997,55 @@ def test_other_pause_reasons_render_exactly_as_before() -> None:
         "failure, not a gate result); the quest is paused and resumable — the "
         "warnings above name the cause")
     assert line("script_blocked") == "paused (script_blocked)"
+
+
+def test_subagent_provider_digs_the_provider_out_of_the_nested_step_context() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="claude-opus-5", provider="anthropic"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
+             name="sub_agent", input={"subagent_name": "coder"},
+             timestamp="2026-01-01T00:00:00+00:00"))
+    # The subagent's own step_context carries provider+model — the same node
+    # subagent_model walks. A subagent may run on a different backend than its
+    # parent step, so the pair must come from the nested tree, not the parent.
+    b.add(ev("c1", "step_context", agent_id="sub:t1", provider="openai",
+             model="gpt-5.6-sol", tools_schema=[], params={},
+             max_tool_calls=None))
+    f = b.running_subagents()[0]
+    assert rt.subagent_model(f) == "gpt-5.6-sol"
+    assert rt.subagent_provider(f) == "openai"
+
+
+def test_subagent_provider_is_none_without_a_resolvable_node() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="claude-opus-5", provider="anthropic"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
+             name="sub_agent", input={"subagent_name": "coder"},
+             timestamp="2026-01-01T00:00:00+00:00"))
+    f = b.running_subagents()[0]
+    assert rt.subagent_provider(f) is None
+
+
+def test_subagent_provider_digs_the_provider_out_of_an_agent_text_node() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="claude-opus-5", provider="anthropic"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk",
+             name="sub_agent", input={"subagent_name": "coder"}))
+    # agent_message with text content → AgentTextNode in the subagent's nested
+    # narrative. No step_context, so the assertion can only pass via AgentTextNode.
+    # OpenAI Responses wire format: text lives in output[].content[].
+    b.add(ev("r1", "agent_message", agent_id="sub:t1", provider="openai",
+             model="gpt-5.6-sol", stop_reason="completed", usage={},
+             raw={"output": [{"type": "message",
+                              "content": [{"type": "output_text", "text": "done"}]}]}))
+    f = b.running_subagents()[0]
+    # Confirm the fixture really produced an AgentTextNode, not a StepContextNode.
+    assert any(isinstance(n, nv.AgentTextNode) for n in f.tree.root.children)
+    assert rt.subagent_provider(f) == "openai"
+    assert rt.subagent_model(f) == "gpt-5.6-sol"

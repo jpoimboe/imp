@@ -543,6 +543,25 @@ def subagent_model(sub: nv.SubagentFold) -> str | None:
     return find(sub.tree.root.children)
 
 
+def subagent_provider(sub: nv.SubagentFold) -> str | None:
+    """The subagent's provider, dug out of its nested narrative (its step_context /
+    step carries provider+model). Returns the first provider found, or None."""
+    def find(nodes: list[Any]) -> str | None:
+        for n in nodes:
+            if isinstance(n, nv.StepNode):
+                if n.provider:
+                    return n.provider
+                inner = find(n.children)
+                if inner:
+                    return inner
+            elif isinstance(n, (nv.StepContextNode, nv.AgentTextNode)):
+                p = n.payload.get("provider")
+                if p:
+                    return str(p)
+        return None
+    return find(sub.tree.root.children)
+
+
 def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
                         gutters: tuple[int, ...] = ()) -> str:
     """The single lean/live row for a subagent: `{name}` — and NOTHING else (no
