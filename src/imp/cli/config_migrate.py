@@ -92,10 +92,10 @@ _LIVE_CHECKPOINT_KEY = re.compile(
 )
 
 
-def _pending(text: str) -> tuple[list[str], bool]:
-    """(legacy opt-out keys, a live retired checkpoint_threshold) — the byte
-    pre-check, before any ruamel import or parse."""
-    return _legacy_keys(text), _LIVE_CHECKPOINT_KEY.search(text) is not None
+def _has_pending(text: str) -> bool:
+    """Whether any transform has work to do — the byte pre-check, before any
+    ruamel import or parse."""
+    return bool(_LEGACY_OPT_OUT.search(text)) or bool(_LIVE_CHECKPOINT_KEY.search(text))
 
 
 def rewrite_config_file(path: Path) -> None:
@@ -106,14 +106,15 @@ def rewrite_config_file(path: Path) -> None:
     if not path.is_file():
         return
     text = path.read_text()
-    keys, retired = _pending(text)
-    if not keys and not retired:
+    if not _has_pending(text):
         return
     # Deferred past the byte pre-check: the post-migration steady state pays no
     # ruamel import and no parse.
     from imp.cli.config_edit import UnsetOutcome, apply_set, apply_unset
     from imp.cli.config_write import land, scratch_seam, verify_readable
 
+    keys = _legacy_keys(text)
+    retired = _LIVE_CHECKPOINT_KEY.search(text) is not None
     notices: list[str] = []
     if retired:
         result = apply_unset(text, ("context", "checkpoint_threshold"))
@@ -150,7 +151,7 @@ def _checkout_config(cwd: Path) -> Path | None:
 
     nearby = next((p / "imp" / "config.yaml" for p in (cwd, *cwd.parents)
                    if (p / "imp" / "config.yaml").is_file()), None)
-    if nearby is None or not any(_pending(nearby.read_text())):
+    if nearby is None or not _has_pending(nearby.read_text()):
         return None
     return find_control_root(cwd) / "imp" / "config.yaml"
 
