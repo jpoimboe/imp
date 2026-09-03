@@ -149,7 +149,7 @@ async def test_classified_auth_text_wins_over_no_complete_step(
     instead of `no_complete_step`. Avoids the nudge loop on auth/quota.
 
     The text "Invalid API key" is one of `_classify_agent_text`'s auth
-    patterns → `category=auth`, short-circuiting nudge/no_complete_step."""
+    patterns → `category=auth_terminal`, short-circuiting nudge/no_complete_step."""
     _seed_git_and_auth(tmp_path)
     scripted = [[
         thread_started(),
@@ -164,7 +164,7 @@ async def test_classified_auth_text_wins_over_no_complete_step(
     inv = _inv(tmp_path)
     events = [ev async for ev in runner.run(inv)]
     err = next(e for e in events if e.get("type") == "error")
-    assert err["payload"]["category"] == "auth"
+    assert err["payload"]["category"] == "auth_terminal"
     # Without this key the breadcrumb/error node carry only "claude CLI: Invalid API key".
     assert err["payload"]["detail"]["last_agent_text"] == (
         "Invalid API key — please check your credentials")

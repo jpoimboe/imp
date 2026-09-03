@@ -645,7 +645,7 @@ def test_classify_agent_text_invalid_api_key() -> None:
     from imp.providers import errors as perr
 
     out = cc._classify_agent_text("Some preamble. Invalid API key, sorry.")
-    assert isinstance(out, perr.AuthError)
+    assert isinstance(out, perr.AuthTerminalError)
 
 
 def test_classify_agent_text_login_required() -> None:
@@ -653,7 +653,7 @@ def test_classify_agent_text_login_required() -> None:
     from imp.providers import errors as perr
 
     out = cc._classify_agent_text("Please run `/login` first.")
-    assert isinstance(out, perr.AuthError)
+    assert isinstance(out, perr.AuthTerminalError)
 
 
 def test_classify_agent_text_login_required_unbackticked_anchored() -> None:
@@ -661,9 +661,9 @@ def test_classify_agent_text_login_required_unbackticked_anchored() -> None:
     from imp.providers import errors as perr
 
     # The mona44 mid-run logout message carries no backticks; anchored
-    # (default) mode must still classify it as auth.
+    # (default) mode must still classify it as auth_terminal.
     out = cc._classify_agent_text("Not logged in · Please run /login")
-    assert isinstance(out, perr.AuthError)
+    assert isinstance(out, perr.AuthTerminalError)
 
 
 def test_classify_agent_text_login_required_unbackticked_unanchored() -> None:
@@ -676,17 +676,16 @@ def test_classify_agent_text_login_required_unbackticked_unanchored() -> None:
         "Session ended abnormally.\nNot logged in · Please run /login",
         anchored=False,
     )
-    assert isinstance(out, perr.AuthError)
+    assert isinstance(out, perr.AuthTerminalError)
 
 
-def test_classify_agent_text_login_required_backticked_still_auth() -> None:
+def test_classify_agent_text_login_required_backticked_still_terminal_auth() -> None:
     from imp.providers import claude_code as cc
     from imp.providers import errors as perr
 
-    # Regression: the pre-existing backticked variant must still classify
-    # as auth after the tuple is broadened.
+    # Regression: the backticked variant must still classify as auth_terminal.
     out = cc._classify_agent_text("Please run `/login` first.")
-    assert isinstance(out, perr.AuthError)
+    assert isinstance(out, perr.AuthTerminalError)
 
 
 def test_classify_agent_text_quota_usage_limit() -> None:
@@ -731,16 +730,16 @@ def test_text_of_concatenates_textblocks_only() -> None:
 
 
 @pytest.mark.anyio
-async def test_runner_reclassifies_invalid_api_key_text_to_auth_event(
+async def test_runner_reclassifies_invalid_api_key_text_to_auth_terminal_event(
     tmp_path: Path,
 ) -> None:
     """When the claude CLI returns 'Invalid API key' as an assistant
     text response and the SDK closes the stream with a ResultMessage,
-    the runner must yield a single category=auth error event (NOT
+    the runner must yield a single category=auth_terminal error event (NOT
     missing_complete_step / no_complete_step)."""
     # Build a fake SDK client that yields: AssistantMessage("Invalid API key"),
     # then ResultMessage. The runner should reclassify the assistant text
-    # via _classify_agent_text and emit a category=auth event.
+    # via _classify_agent_text and emit a category=auth_terminal event.
     fake_messages = [
         assistant(text("Invalid API key — got 401. Cannot continue.")),
         result(),
@@ -764,8 +763,8 @@ async def test_runner_reclassifies_invalid_api_key_text_to_auth_event(
         f"{[e.get('payload', {}) for e in error_events]}"
     )
     payload = error_events[0]["payload"]
-    assert payload["category"] == "auth", (
-        f"expected category=auth, got {payload}"
+    assert payload["category"] == "auth_terminal", (
+        f"expected category=auth_terminal, got {payload}"
     )
 
 
@@ -810,7 +809,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
     """Non-interactive agent whose last text matches an auth pattern surfaces
-    AuthError; continuation_fn is never consulted."""
+    AuthTerminalError; continuation_fn is never consulted."""
     (tmp_path / "art").mkdir()
 
     scripted = [assistant(text("Invalid API key")), result()]
@@ -832,7 +831,8 @@ async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
     )
     events = [e async for e in runner.run(inv)]
     assert events[-1]["type"] == "error"
-    assert events[-1]["payload"]["category"] == "auth"
+    assert events[-1]["payload"]["category"] == "auth_terminal"
+    assert events[-1]["payload"]["kind"] == "AuthTerminalError"
     assert consulted["hit"] is False
 
 
@@ -1368,7 +1368,7 @@ def test_termination_quota_and_auth_still_pause() -> None:
     assert isinstance(quota, perr.QuotaError)
     auth = cc._termination_from_result(
         result(is_error=True), "Invalid API key", {})
-    assert isinstance(auth, perr.AuthError)
+    assert isinstance(auth, perr.AuthTerminalError)
 
 
 def test_termination_unrecognized_text_is_terminated() -> None:
@@ -4586,7 +4586,7 @@ async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
-async def test_reclassified_auth_error_carries_last_agent_text_detail(
+async def test_reclassified_auth_terminal_error_carries_last_agent_text_detail(
     tmp_path: Path,
 ) -> None:
     """Substring/API-error reclassification attaches the prose to detail.last_agent_text."""
@@ -4610,7 +4610,7 @@ async def test_reclassified_auth_error_carries_last_agent_text_detail(
         f"expected 1 error event, got {[e.get('payload', {}) for e in error_events]}"
     )
     payload = error_events[0]["payload"]
-    assert payload["category"] == "auth"
+    assert payload["category"] == "auth_terminal"
     assert payload["detail"]["last_agent_text"] == prose
 
 

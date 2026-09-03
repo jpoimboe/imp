@@ -5,8 +5,8 @@
   ],
   "errors": [
     [
-      "auth",
-      "AuthError"
+      "auth_terminal",
+      "AuthTerminalError"
     ]
   ],
   "log_types": [

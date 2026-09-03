@@ -220,9 +220,9 @@ def _termination_from_result(
         labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
     if labeled is None and status == 429:
         labeled = perr.RateLimitError(f"claude_code: api_error_status={status}")
-    if isinstance(labeled, perr.AuthError):
+    if isinstance(labeled, (perr.AuthError, perr.AuthTerminalError)):
         detail.update(_read_token_expiry(config_dir, int(time.time() * 1000)))
-    if isinstance(labeled, (perr.QuotaError, perr.AuthError,
+    if isinstance(labeled, (perr.QuotaError, perr.AuthError, perr.AuthTerminalError,
                             perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)
         return labeled

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from imp.providers import errors as perr
 
+# Prose Anthropic emits locally after clearing the saved credentials: terminal.
 _AUTH_PATTERNS = (
     "Invalid API key",
     "Please run `/login`",
@@ -147,7 +148,7 @@ def _classify_agent_text(
     of the text: every known genuine CLI error is a terse message that leads
     with the error, while an agent that merely *quotes* a pattern buries it
     mid-document behind a prose opener (the redu99 false positive — a
-    subagent report about _AUTH_PATTERNS was reclassified as AuthError, its
+    subagent report about _AUTH_PATTERNS was reclassified as AuthTerminalError, its
     successful turn rolled back, and the retry returned an empty stub).
     Callers that already hold an out-of-band error signal
     (_termination_from_result) pass anchored=False: there the substring only
@@ -156,6 +157,7 @@ def _classify_agent_text(
 
     Auth/quota patterns are checked first so they win when both substrings
     appear. The API-error regex matches "API Error: <code>":
+    An _AUTH_PATTERNS prose match → AuthTerminalError (never retried);
     401/403 → AuthError with kind="http_<code>"; 408 → NetworkError (transient
     timeout); 429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
     5xx → NetworkError (network category → RetryWithBackoff; §10).
@@ -163,7 +165,7 @@ def _classify_agent_text(
     scan = text.lstrip().split("\n", 1)[0] if anchored else text
     for pat in _AUTH_PATTERNS:
         if pat in scan:
-            return perr.AuthError(f"claude CLI: {pat}")
+            return perr.AuthTerminalError(f"claude CLI: {pat}")
     for pat in _QUOTA_PATTERNS:
         if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")

@@ -40,7 +40,7 @@ def test_500_classified_as_network() -> None:
 
 
 def test_auth_pattern_still_wins() -> None:
-    assert isinstance(_classify_agent_text("Invalid API key"), perr.AuthError)
+    assert isinstance(_classify_agent_text("Invalid API key"), perr.AuthTerminalError)
 
 
 def test_normal_text_unclassified() -> None:
@@ -85,7 +85,7 @@ def test_codeless_phrase_without_api_error_prefix_is_none() -> None:
 def test_auth_still_wins_over_codeless_phrase() -> None:
     # Auth patterns are checked first even when an API Error transient phrase co-occurs.
     err = _classify_agent_text("Invalid API key — API Error: Overloaded")
-    assert isinstance(err, perr.AuthError)
+    assert isinstance(err, perr.AuthTerminalError)
 
 
 def test_quota_still_wins_over_codeless_phrase() -> None:
@@ -111,14 +111,14 @@ def test_codeless_multiline_api_error_is_network() -> None:
     assert isinstance(_classify_agent_text(multiline2), perr.NetworkError)
 
 
-def test_invalid_authentication_credentials_phrase_is_auth() -> None:
+def test_invalid_authentication_credentials_phrase_is_terminal_auth() -> None:
     exc = _classify_agent_text("Invalid authentication credentials")
-    assert isinstance(exc, perr.AuthError)
+    assert isinstance(exc, perr.AuthTerminalError)
 
 
-def test_failed_to_authenticate_phrase_is_auth() -> None:
+def test_failed_to_authenticate_phrase_is_terminal_auth() -> None:
     exc = _classify_agent_text("Failed to authenticate")
-    assert isinstance(exc, perr.AuthError)
+    assert isinstance(exc, perr.AuthTerminalError)
 
 
 def test_lowercase_failed_to_authenticate_prose_is_not_auth() -> None:
@@ -149,10 +149,10 @@ def test_422_code_still_api_error() -> None:
     assert getattr(exc, "kind", "") == "http_422"
 
 
-def test_observed_401_credential_string_is_auth() -> None:
+def test_observed_401_credential_string_is_terminal_auth() -> None:
     exc = _classify_agent_text(
         "Failed to authenticate. API Error: 401 Invalid authentication credentials")
-    assert isinstance(exc, perr.AuthError)
+    assert isinstance(exc, perr.AuthTerminalError)
 
 
 def test_connection_refused_codeless_is_network() -> None:
@@ -260,7 +260,7 @@ def test_whole_message_error_with_situation_prefix_still_auth() -> None:
     # was `Not logged in · Please run /login`). The fragment sits mid-line, so
     # first-line anchoring must not require a match at offset 0.
     exc = _classify_agent_text("Invalid API key \u00b7 Please run `/login`")
-    assert isinstance(exc, perr.AuthError)
+    assert isinstance(exc, perr.AuthTerminalError)
 
 
 def test_first_line_error_with_trailing_lines_still_classified() -> None:
@@ -271,7 +271,7 @@ def test_first_line_error_with_trailing_lines_still_classified() -> None:
 
 def test_leading_blank_lines_before_error_still_classified() -> None:
     exc = _classify_agent_text("\n\n  Invalid API key \u00b7 Please run `/login`")
-    assert isinstance(exc, perr.AuthError)
+    assert isinstance(exc, perr.AuthTerminalError)
 
 
 def test_unanchored_mode_matches_past_first_line() -> None:
@@ -290,6 +290,31 @@ def test_termination_labels_pattern_past_first_line() -> None:
     term = _termination_from_result(
         sdk, "the CLI reported:\nYou have reached your usage limit", {})
     assert isinstance(term, perr.QuotaError)
+
+
+def test_each_auth_pattern_classifies_terminal() -> None:
+    for prose in ("Invalid API key", "Please run `/login`", "Please run /login",
+                  "Invalid authentication credentials", "Failed to authenticate"):
+        exc = _classify_agent_text(prose)
+        assert isinstance(exc, perr.AuthTerminalError), prose
+        assert exc.category == "auth_terminal"
+
+
+def test_prose_wins_over_the_status_code() -> None:
+    # The documented mixed string carries both a terminal prose pattern and a
+    # bare 401; the prose decides, because the credentials were already cleared.
+    exc = _classify_agent_text(
+        "Please run /login · API Error: 401 Invalid authentication credentials")
+    assert isinstance(exc, perr.AuthTerminalError)
+
+
+def test_bare_status_auth_stays_transient() -> None:
+    for code in (401, 403):
+        exc = _classify_agent_text(f"API Error: {code} rejected by gateway")
+        assert isinstance(exc, perr.AuthError)
+        assert not isinstance(exc, perr.AuthTerminalError)
+        assert exc.category == "auth"
+        assert getattr(exc, "kind", "") == f"http_{code}"
 
 
 def test_400_tool_use_concurrency_colon_form_wins_over_api_error_label() -> None:
