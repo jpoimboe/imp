@@ -2083,11 +2083,11 @@ async def test_error_info_message_is_the_first_line_of_the_agents_prose(
     coord = InterruptCoordinator()
     runner = _Runner([{"type": "error", "payload": {
         "category": "auth", "kind": "http_401", "message": "claude CLI: 401",
-        "detail": {"last_agent_text": "Failed to authenticate. API Error: 401\nmore prose"}}}])
+        "detail": {"last_agent_text": "API Error: 401 rejected by gateway\nmore prose"}}}])
     res = await drive_invocation(_inv(tmp_path), runner,
                                  coordinator=coord, log=None, emit_events=False)
     assert res.error is not None
-    assert res.error.message == "Failed to authenticate. API Error: 401"
+    assert res.error.message == "API Error: 401 rejected by gateway"
 
 
 @pytest.mark.anyio
