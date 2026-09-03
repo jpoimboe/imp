@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Spawn the claude_code CLI in its own session so a terminal Ctrl-C reaches imp alone.
 

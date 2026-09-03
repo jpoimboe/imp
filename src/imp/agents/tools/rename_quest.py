@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """rename_quest tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
 tool call and returns the quest id so the agent writes the spec at the

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """One-shot startup migration of a project's runtime state out of the checkout and
 into its state directory. The only reader of the pre-migration layout left."""

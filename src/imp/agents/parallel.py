@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Single read-once accessor for the IMP_MAX_PARALLEL_TASKS knob (design
 Decision 5 — the width cap).

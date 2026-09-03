@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Render an imp UI scene to a PNG you can open — the human-facing companion to
 the agent-driven impty harness.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Per-quest variable overrides at their boundary: the CLI's `NAME=VALUE` strings and
 the API's already-typed values, both checked against the workflow's own declarations

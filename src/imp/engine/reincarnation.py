@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Engine-level reincarnation helpers (foundation primitives; no executor imports)."""
 from __future__ import annotations

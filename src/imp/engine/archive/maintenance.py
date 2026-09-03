@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Archive maintenance: reap leaked quest homes already durable in the archive."""
 from __future__ import annotations

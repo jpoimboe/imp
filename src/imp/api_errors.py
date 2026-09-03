@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """The exception hierarchy `imp.api` exports, apart from it so `remote.session.attach`
 can re-parent DaemonStartupError without an import cycle."""

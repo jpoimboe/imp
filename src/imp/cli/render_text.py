@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 # src/imp/cli/render_text.py
 """Plain-text narrative view (imp log / non-TTY). Walks a NarrativeTree and

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 # check-cleared.sh — read-only merge door between integration-reviewer and
 # summarizer. The reviewer may accept a tree no slow gate ever passed (an
 # environmental failure it diagnosed and repaired), so re-ask the shared

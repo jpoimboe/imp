@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Session-daemon directory: liveness probes for per-quest session sockets."""
 from __future__ import annotations

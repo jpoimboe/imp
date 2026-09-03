@@ -7,7 +7,7 @@ name = "imp"
 version = "0.0.1"
 description = "A development process that runs itself: one intent in, a reviewed and merged change out"
 requires-python = ">=3.11"
-license = "Apache-2.0"
+license = "MIT"
 keywords = ["ai", "agents", "coding-agent", "llm", "claude", "codex", "workflow", "automation"]
 classifiers = [
   "Development Status :: 3 - Alpha",

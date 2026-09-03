@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 # cleanup.sh — the ONE end-of-quest fold + stamp, run once at cleanup-merge over
 # the whole quest range cur_base_head..HEAD. It folds every fixup!/squash!/amend!
 # chain into its target and stamps `Quest: <id>` on every non-merge commit. Both

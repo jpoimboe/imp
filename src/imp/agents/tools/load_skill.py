@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """load_skill — auto-injected built-in, like complete_step. NOT a registry
 @imp_tool: built per-step by a factory and injected unconditionally in each

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Immutable quest identity (spec AC 1): a 6-char pronounceable id — a
 consonant, vowel, consonant, vowel, then two digits (e.g. kobe47) — drawn with

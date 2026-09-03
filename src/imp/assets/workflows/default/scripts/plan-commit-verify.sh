@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 QUEST_DIR="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}"

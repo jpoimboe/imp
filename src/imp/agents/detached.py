@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Drive ONE agent invocation to completion outside run_quest/the executor."""
 from __future__ import annotations

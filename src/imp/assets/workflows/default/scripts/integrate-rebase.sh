@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 # At-head integration: the quest is head of its merge-queue lane, so the base
 # cannot move under it. Rebase the branch ONTO the base tip ONLY when the base
 # moved (non-empty base-side incoming diff); otherwise merge directly. Linear

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """The settable-key table for `imp config set` / `unset`: where each key lives in
 the document, where imp's reader reports it back, which layer owns it, and how a

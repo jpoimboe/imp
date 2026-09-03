@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """A pool of in-character status phrases, drawn one at a time by the live status
 footer while a step's `rotate_phrase` flag is set."""

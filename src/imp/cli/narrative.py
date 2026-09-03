@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 # src/imp/cli/narrative.py
 """Narrative-tree model for imp's unified renderer.

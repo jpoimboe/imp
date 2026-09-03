@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Patch the codex SDK's subprocess spawn: raise its stdout read limit and
 isolate it into its own session.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Transport-agnostic chat-command grammar: inbound text -> Command (spec Decision 3)."""
 from __future__ import annotations

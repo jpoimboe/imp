@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Router read-side relay: attach a resident session, curate+sink events; awaiting rides lease."""
 from __future__ import annotations

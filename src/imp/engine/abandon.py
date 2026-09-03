@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Abandon a quest: mark abandoned, archive a non-resumable tombstone, drop the
 live home; on a built-out quest also pop the merge queue and remove the worktree + branch."""

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 # Shared pre-merge clearance predicate, SOURCED by integrate-rebase.sh (Part 1
 # fast path) and assert-stamped.sh (Part 3 backstop). Not executed on its own —
 # it only defines _cleared_for_merge.

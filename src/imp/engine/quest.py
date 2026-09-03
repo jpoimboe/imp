@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Quest lifecycle (spec §3, §5): immutable id identity, free-form title, worktree
 creation, permanent state home at project_state_dir(control_root)/quests/<id>/."""

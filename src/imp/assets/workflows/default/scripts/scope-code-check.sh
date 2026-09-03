@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 # scope-code-check.sh — phase-boundary gate for the scoping (threshold) step.
 # Scoping must produce ONLY a spec, never committed source; the pipeline builds
 # from the spec. A well-behaved hand-off leaves HEAD == cur_base_head, so any

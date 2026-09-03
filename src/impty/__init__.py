@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """impty — drive any interactive CLI/TUI on a real pty and read its
 faithfully-rendered screen. Provisional name (see plan); the product name is

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """One-time warmup importing imp's whole reachable module graph at daemon
 startup, so a concurrent on-disk rewrite of `src/imp/*` can't later splice

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """One-shot startup migrations: the global config file's move into $IMP_HOME, the
 project config file's staged rename, and the per-project state directory's move out

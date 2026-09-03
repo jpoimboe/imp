@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Telegram north adapter for the remote-control daemon (spec Decision 4)."""
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 # src/imp/cli/palette.py
 """Shared color palette + accent map + fold glyphs for both renderers.

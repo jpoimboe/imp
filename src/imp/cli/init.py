@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Tier→model bindings come from the provider-code floor now, so init asks no
 model question — it just records the enabled providers + detected theme. A

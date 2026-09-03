@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Ephemeral CLAUDE_CONFIG_DIR for fresh claude_code starts; caller cleans up."""
 from __future__ import annotations

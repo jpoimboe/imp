@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 # assert-stamped.sh — read-only PRE-MERGE backstop. It performs NO rebase and NO
 # mutation. Run immediately before merge-to-base, it asserts the invariant that
 # cleanup already guarantees on every normal path: every non-merge commit in

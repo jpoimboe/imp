@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """imp's supported embedding surface: create, list and steer quests from another
 process without importing imp's internals."""

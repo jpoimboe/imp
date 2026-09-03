@@ -6,7 +6,7 @@
 
 **Stop babysitting your coding agent.**
 
-![license](https://img.shields.io/badge/license-Apache--2.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
+![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
 
 imp is a declarative agent workflow engine for software development.  Each
 change (feature or bug) for a given project gets built as part of an isolated,
@@ -262,5 +262,5 @@ request.
 
 ## License
 
-Apache 2.0.  See [LICENSE](LICENSE).  Third-party attribution is in
+MIT.  See [LICENSE](LICENSE).  Third-party attribution is in
 [NOTICE](NOTICE).

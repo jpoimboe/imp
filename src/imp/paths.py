@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Where imp keeps state on disk: the per-machine home, and how a path is shown
 to a user. Deliberately free of `imp.*` module-level imports — engine, CLI,

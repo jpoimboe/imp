@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 # src/imp/cli/live_driver.py
 """Live run-view driver: emit-on-finalize folded rendering.

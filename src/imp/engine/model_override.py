@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Apply a per-step model override into run state (spec: /model, --model)."""
 from __future__ import annotations

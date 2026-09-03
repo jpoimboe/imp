@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """All git mechanics for per-quest worktrees (spec §4), behind a small
 interface so quest, the executor, and the CLI stay git-agnostic. Every

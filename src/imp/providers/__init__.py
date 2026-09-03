@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """V1 provider registry. Importing this package registers NOTHING: the builtins
 land in providers.resolve._PROVIDERS on the first registry read, via

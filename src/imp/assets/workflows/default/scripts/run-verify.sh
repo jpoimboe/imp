@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
 # Run the project's tiered verification gate. Takes one positional arg naming the
 # tier to run: `fast` or `slow`.
 #

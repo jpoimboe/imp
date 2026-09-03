@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Workflow executor (unified step model): a single flat cursor over the
 workflow's steps. Each step is dispatched by kind (agent/script/branch),

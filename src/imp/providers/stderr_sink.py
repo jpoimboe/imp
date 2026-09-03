@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 # src/imp/providers/stderr_sink.py
 """Bounded capture of a provider CLI subprocess's stderr.

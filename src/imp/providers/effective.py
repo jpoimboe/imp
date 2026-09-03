@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Floor + three-layer config merge with per-leaf provenance (spec
 2026-06-08-config-file-split §2).

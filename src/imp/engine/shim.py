@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Per-run `imp` shim so every agent bash command and script gate can invoke the
 outer (running) imp as `imp`, regardless of the ambient PATH."""

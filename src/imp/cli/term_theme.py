@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Detect the terminal's color theme ONCE, at `imp init`, so the choice is
 persisted to config instead of re-queried (and risking a hang) on every run.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """A terminal session: spawn an interactive program on a real pty, feed its
 output into a long-lived pyte screen, send raw keystrokes, and read snapshots.

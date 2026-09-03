@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """Per-run subscribed-quest set + per-key replayed-event-id dedup; in-memory, no persistence."""
 from __future__ import annotations
