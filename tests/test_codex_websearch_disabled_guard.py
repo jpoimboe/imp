@@ -54,3 +54,23 @@ def test_sdk_args_never_emit_deprecated_web_search_flag() -> None:
         )
         cmd = exec_._build_command_args(args)
         assert not any("features.web_search_request" in a for a in cmd), cmd
+
+
+@pytest.mark.parametrize("tier", ["medium", "high"])
+def test_thinking_tiers_pin_high_reasoning_effort(tier: str) -> None:
+    """Matches the anthropic/claude_code per-tier posture: medium and high both
+    run at effort 'high', so the tier picks the model, not the effort."""
+    opts = CodexAgentRunner(model_name="gpt-5.6-terra")._build_thread_options(tier)
+    assert opts is not None
+    assert opts.model_reasoning_effort == "high"
+    dumped = opts.model_dump(by_alias=True, exclude_none=True)
+    assert dumped["modelReasoningEffort"] == "high"
+
+
+@pytest.mark.parametrize("tier", ["low", None])
+def test_low_and_untiered_leave_reasoning_effort_unset(tier: str | None) -> None:
+    opts = CodexAgentRunner(model_name="gpt-5.6-luna")._build_thread_options(tier)
+    assert opts is not None
+    assert opts.model_reasoning_effort is None
+    assert "modelReasoningEffort" not in opts.model_dump(
+        by_alias=True, exclude_none=True)

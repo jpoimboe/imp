@@ -118,6 +118,24 @@ def _classify_openai_exception(exc: BaseException) -> perr.ProviderError:
     raise exc
 
 
+def _openai_reasoning_posture(tier: str | None) -> dict[str, Any]:
+    """Per-tier Responses `reasoning` kwargs, mirroring
+    anthropic._anthropic_thinking_posture: medium/high run at effort 'high',
+    low/None send nothing (the model's own default). Pinned imp-side so a run's
+    posture does not re-float with an API default.
+
+    Note the ceiling: GPT-5.6 Sol exposes a 'max' effort above 'high', but the
+    Responses effort ladder imp targets here stops at 'high', so `high` and
+    `medium` share one posture exactly as they do on the claude side.
+
+    A non-reasoning model pinned to medium/high would reject `reasoning`; the
+    tiers are expected to name reasoning models (the shipped floor does).
+    """
+    if tier in ("medium", "high"):
+        return {"reasoning": {"effort": "high"}}
+    return {}
+
+
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     """Same shape as providers/anthropic.py::_build_tools — kept verbatim to
     preserve the "agent declares tools once, every runner sees the same set"
@@ -413,6 +431,7 @@ class OpenAISession(PushSession):
                     # parallel-turn schema guarantee is backstopped by imp's
                     # invoke-time arg validation (is_error on malformed input).
                     parallel_tool_calls=True,
+                    **_openai_reasoning_posture(self.invocation.tier),
                 ) as stream:
                     async for _event in request_bracketed(
                             self.invocation.coordinator, stream):

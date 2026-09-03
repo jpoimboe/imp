@@ -430,7 +430,7 @@ class CodexSession(ObserveSession):
             impty_bearer_token=(impty_bearer if runner._impty_handle is not None
                                 else None))
         proc_state["web_search_enabled"] = web_enabled
-        thread_options = runner._build_thread_options()
+        thread_options = runner._build_thread_options(invocation.tier)
         if invocation.balance_on_resume:
             # Resume edge (Fix 1): restore codex's rollout into the fresh
             # CODEX_HOME, then resume the native thread by id instead of starting a
@@ -943,11 +943,18 @@ class CodexAgentRunner:
         env = overlay_engine_env(os.environ, overrides)
         return Codex(CodexOptions(env=env))
 
-    def _build_thread_options(self) -> Any:
+    def _build_thread_options(self, tier: str | None = None) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its
         own method so the test seam can replace it without touching
         `CodexSession._enter`. Returns None when the SDK is unavailable
         (test/fake path) so `_enter` starts the thread without options.
+
+        `tier` sets `modelReasoningEffort` to match the claude providers'
+        per-tier posture (see anthropic._anthropic_thinking_posture): medium and
+        high both run at 'high', low and an untiered invocation leave it unset so
+        codex keeps its own default. `tier` defaults to None so the arg-less test
+        seam keeps working. Note the SDK's effort ladder tops out at 'high' —
+        Sol's 'max' / ultra mode is not reachable through this field.
 
         `webSearchEnabled` is deliberately NOT set: codex >=0.137 deprecated the
         SDK-emitted `features.web_search_request` flag (it no longer disables and
@@ -972,6 +979,7 @@ class CodexAgentRunner:
             sandboxMode="danger-full-access",
             approvalPolicy=CODEX_APPROVAL_POLICY,
             networkAccessEnabled=False,
+            modelReasoningEffort="high" if tier in ("medium", "high") else None,
         )
 
     def _build_prompt(self, invocation: AgentInvocation, elog: Any, aid: str) -> str:

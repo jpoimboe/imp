@@ -911,3 +911,43 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     loaded = t.load()
     assert loaded[2].role == "user"
     assert loaded[2].content[0].text == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("tier", ["medium", "high"])
+async def test_thinking_tiers_request_high_reasoning_effort(
+    tmp_path: Path, tier: str,
+) -> None:
+    """Mirrors the anthropic per-tier posture: medium and high share one
+    pinned effort, so the tier picks the model, not the effort."""
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeResponsesClient([
+        resp_response(resp_function_call("c1", "complete_step",
+                                         '{"status": "Success"}')),
+    ])
+    runner = OpenAIAgentRunner(model_name="gpt-5.6-terra",
+                               client_factory=lambda: fake)
+    async for _ in runner.run(dataclasses.replace(_inv(tmp_path), tier=tier)):
+        pass
+    assert fake.responses.calls[0]["reasoning"] == {"effort": "high"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("tier", ["low", None])
+async def test_untiered_and_low_requests_omit_reasoning(
+    tmp_path: Path, tier: str | None,
+) -> None:
+    """low and an untiered invocation send no `reasoning` at all, leaving the
+    model's own default rather than pinning one."""
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeResponsesClient([
+        resp_response(resp_function_call("c1", "complete_step",
+                                         '{"status": "Success"}')),
+    ])
+    runner = OpenAIAgentRunner(model_name="gpt-5.6-luna",
+                               client_factory=lambda: fake)
+    async for _ in runner.run(dataclasses.replace(_inv(tmp_path), tier=tier)):
+        pass
+    assert "reasoning" not in fake.responses.calls[0]
