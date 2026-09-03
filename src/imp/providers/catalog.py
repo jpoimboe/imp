@@ -191,9 +191,7 @@ _WINDOW_TOKENS: tuple[tuple[str, int], ...] = (
     ("opus", 200_000),
     ("fable", 200_000),
     # Before the "gpt-5" catch-all: these are SUBSTRING matches and first wins,
-    # so "gpt-5.6-sol" would otherwise resolve to 400k. Not cosmetic — this map
-    # is what context_threshold_crossed() divides by, so an undersized window
-    # fires the reincarnation handoff early on every 5.6 step.
+    # so "gpt-5.6-sol" would otherwise resolve to 400k.
     ("gpt-5.6", 1_050_000),
     ("gpt-5", 400_000),
 )
@@ -248,23 +246,22 @@ def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
 
 
 def context_threshold_crossed(
-    usage: dict[str, Any] | None, model: str | None,
-    threshold: float | int | None,
+    usage: dict[str, Any] | None, provider: str | None, model: str | None,
 ) -> bool:
-    """True when a turn's prompt-token occupancy has reached the checkpoint cutoff.
+    """True when a turn's prompt-token occupancy has reached the model's cutoff.
 
     Occupancy is `input + cache_read + cache_creation` (the prompt side of the
-    window, matching the context gauge's `usage_prompt_tokens`). The cutoff is
-    `checkpoint_fraction(threshold, window)` of the model window. Returns False
-    whenever the threshold, window, or usage is unavailable — the watch simply
-    never fires rather than guessing.
+    window, matching the context gauge's `usage_prompt_tokens`), divided by the
+    catalog window. Returns False when the provider/model pair is unknown or
+    usage is absent — the watch never fires rather than guessing.
     """
-    window = window_for_model(model)
-    frac = checkpoint_fraction(threshold, window)
-    if frac is None or window is None or window <= 0 or not usage:
+    info = limits_for(provider, model)
+    if info is None or not usage:
         return False
-    occupancy = context_tokens_from_usage(usage)
-    return occupancy / window >= frac
+    frac = checkpoint_cutoff(info, info.window)
+    if frac is None:
+        return False
+    return context_tokens_from_usage(usage) / info.window >= frac
 
 
 def sdk_context_threshold_crossed(

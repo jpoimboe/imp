@@ -91,18 +91,18 @@ def test_checkpoint_fraction_unresolvable_returns_none() -> None:
     assert checkpoint_fraction(-1, 200_000) is None        # negative threshold
 
 
-def test_context_threshold_crossed_fires_at_fraction() -> None:
+def test_context_threshold_crossed_fires_at_the_default_fraction() -> None:
     from imp.providers.catalog import context_threshold_crossed
     # 170000/200000 = 0.85 >= 0.8 -> crossed.
     assert context_threshold_crossed(
-        {"input_tokens": 170_000}, "sonnet", 0.8) is True
+        {"input_tokens": 170_000}, "anthropic", "sonnet") is True
 
 
-def test_context_threshold_crossed_not_before_fraction() -> None:
+def test_context_threshold_crossed_not_before_the_fraction() -> None:
     from imp.providers.catalog import context_threshold_crossed
     # 150000/200000 = 0.75 < 0.8 -> not crossed.
     assert context_threshold_crossed(
-        {"input_tokens": 150_000}, "sonnet", 0.8) is False
+        {"input_tokens": 150_000}, "anthropic", "sonnet") is False
 
 
 def test_context_threshold_crossed_sums_cache_tokens() -> None:
@@ -110,28 +110,47 @@ def test_context_threshold_crossed_sums_cache_tokens() -> None:
     # 100000 + 60000 + 5000 = 165000 / 200000 = 0.825 >= 0.8.
     assert context_threshold_crossed(
         {"input_tokens": 100_000, "cache_read_input_tokens": 60_000,
-         "cache_creation_input_tokens": 5_000}, "sonnet", 0.8) is True
+         "cache_creation_input_tokens": 5_000}, "anthropic", "sonnet") is True
 
 
-def test_context_threshold_crossed_unknown_window_never_fires() -> None:
+def test_context_threshold_crossed_unknown_model_or_provider_never_fires() -> None:
     from imp.providers.catalog import context_threshold_crossed
     assert context_threshold_crossed(
-        {"input_tokens": 999_999}, "mystery-model", 0.8) is False
-
-
-def test_context_threshold_crossed_absolute_cap_divides_by_window() -> None:
-    from imp.providers.catalog import context_threshold_crossed
-    # Absolute cap 150000 on a 200000 window -> warn fraction 0.75; 160000/200000
-    # = 0.80 >= 0.75 -> crossed.
+        {"input_tokens": 999_999}, "openai", "mystery-model") is False
     assert context_threshold_crossed(
-        {"input_tokens": 160_000}, "sonnet", 150_000) is True
+        {"input_tokens": 999_999}, "mystery", "sonnet") is False
 
 
-def test_context_threshold_crossed_no_threshold_or_usage_never_fires() -> None:
+def test_context_threshold_crossed_without_usage_never_fires() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    assert context_threshold_crossed({"input_tokens": 999_999}, "sonnet", None) is False
-    assert context_threshold_crossed(None, "sonnet", 0.8) is False
-    assert context_threshold_crossed({}, "sonnet", 0.8) is False
+    assert context_threshold_crossed(None, "anthropic", "sonnet") is False
+    assert context_threshold_crossed({}, "anthropic", "sonnet") is False
+
+
+def test_gpt_5_6_crosses_at_the_260k_soft_cap_on_both_providers() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # The whole point of the quest: 260k, not 0.8 * 1.05M = 840k.
+    for provider in ("openai", "codex"):
+        for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
+            assert context_threshold_crossed(
+                {"input_tokens": 261_000}, provider, model) is True
+            assert context_threshold_crossed(
+                {"input_tokens": 259_000}, provider, model) is False
+            # deep into the old cutoff's territory, but still under 840k
+            assert context_threshold_crossed(
+                {"input_tokens": 800_000}, provider, model) is True
+
+
+def test_claude_opus_5_1m_keeps_its_800k_crossing() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # 0.8 of the 1M window; the OpenAI cap must not leak across providers.
+    for provider in ("anthropic", "claude_code"):
+        assert context_threshold_crossed(
+            {"input_tokens": 810_000}, provider, "claude-opus-5[1m]") is True
+        assert context_threshold_crossed(
+            {"input_tokens": 790_000}, provider, "claude-opus-5[1m]") is False
+        assert context_threshold_crossed(
+            {"input_tokens": 300_000}, provider, "claude-opus-5[1m]") is False
 
 
 def test_sdk_context_threshold_crossed_fires_at_fraction() -> None:

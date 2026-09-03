@@ -328,14 +328,13 @@ class PushSession:
         return None
 
     def _note_turn(self, raw: dict[str, Any]) -> None:
-        # Tier A watch: compare this turn's occupancy to the checkpoint
-        # threshold (only before a handoff is already in flight).
+        # Tier A watch: compare this turn's occupancy to the model's checkpoint
+        # cutoff (only before a handoff is already in flight).
         self._crossed_now = (
             self._handoff_phase is None
-            and self.invocation.checkpoint_threshold is not None
             and context_threshold_crossed(
-                raw.get("usage"), self.runner.model,
-                self.invocation.checkpoint_threshold))
+                raw.get("usage"), self.invocation.provider_name,
+                self.runner.model))
 
     def handoff_before_nudge(self, last_text: str) -> str | None:
         if self._handoff_phase == "instruction_sent":

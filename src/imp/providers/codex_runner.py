@@ -699,10 +699,9 @@ class CodexSession(ObserveSession):
         # branch returned before the crossing check), so gate on not-completed.
         if (self._handoff_phase is None
                 and not self._complete_step_called
-                and invocation.checkpoint_threshold is not None
                 and context_threshold_crossed(
-                    self._proc_state.get("pending_usage"), self.runner.model,
-                    invocation.checkpoint_threshold)):
+                    self._proc_state.get("pending_usage"),
+                    invocation.provider_name, self.runner.model)):
             instr = handoff_instruction(self._handoff_path_obj)
             self.elog.append_engine_message(
                 agent_id=self.aid,
