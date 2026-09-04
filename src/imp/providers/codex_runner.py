@@ -251,8 +251,7 @@ class CodexSession(ObserveSession):
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": {},
-            "complete_step_called": False,
-            "auth_mode": auth_mode, "pending_usage": None,
+            "complete_step_called": False, "auth_mode": auth_mode,
             "context_reading": None, "context_canary_emitted": False,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
@@ -595,17 +594,19 @@ class CodexSession(ObserveSession):
         if getattr(raw, "type", None) != "turn.completed":
             return False
         from imp.engine.reincarnation import handoff_instruction, write_handoff_note
-        from imp.providers.catalog import context_threshold_crossed
+        from imp.providers.catalog import sdk_context_threshold_crossed
         invocation = self.invocation
-        # Tier A watch: this turn crossed the checkpoint threshold while still
-        # working (no complete_step). Inject the handoff instruction as the next
-        # turn prompt and capture the note on the following turn (re-query).
-        # Completion wins over a mere crossing (old ordering: the complete_step
-        # branch returned before the crossing check), so gate on not-completed.
+        # Tier A watch: codex's own reading crossed the checkpoint threshold
+        # while still working (no complete_step). Inject the handoff instruction
+        # as the next turn prompt and capture the note on the following turn
+        # (re-query). Completion wins over a mere crossing (old ordering: the
+        # complete_step branch returned before the crossing check), so gate on
+        # not-completed. No reading -> (None, None) -> never fires.
+        tokens, window = self._proc_state.get("context_reading") or (None, None)
         if (self._handoff_phase is None
                 and not self._complete_step_called
-                and context_threshold_crossed(
-                    self._proc_state.get("pending_usage"),
+                and sdk_context_threshold_crossed(
+                    tokens, window,
                     invocation.provider_name, self.runner.model)):
             instr = handoff_instruction(self._handoff_path_obj)
             self.elog.append_engine_message(
@@ -1293,9 +1294,6 @@ def process_event(
             "cache_creation_input_tokens": 0,
             "reasoning_output_tokens": reasoning_tokens,
         }
-        # Expose the turn's occupancy to the driver's Tier A watch (Mechanism 3)
-        # — the same anthropic-shaped dict context_threshold_crossed consumes.
-        state["pending_usage"] = normalized
         # `normalized` is a billing sum over every model request in this turn,
         # not prompt occupancy — read codex's own per-request record for that.
         thread_id = state.get("thread_id")
