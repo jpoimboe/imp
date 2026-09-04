@@ -395,3 +395,31 @@ def test_repeated_validation_failures_are_not_deduped(tmp_path: Path) -> None:
              if e["type"] == "runner_warning"]
     assert len(warns) == 2
     assert warns[0] == warns[1]
+
+
+# AC 6
+def test_jsonl_usage_patch_broadcasts_after_persisting(tmp_path: Path) -> None:
+    path = tmp_path / "e.jsonl"
+    seen: list[tuple[dict, int]] = []
+
+    def _record(e: dict) -> None:
+        # capture how much is on disk AT broadcast time: _emit's persist-before-
+        # broadcast order is what makes replay's disk-before-live partition hold.
+        seen.append((e, len(path.read_text(encoding="utf-8").splitlines())))
+
+    log = JsonlEventLog(path, on_event=_record)
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                             raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 82628},
+        context_tokens=22389, context_window=258400)
+
+    assert [e["type"] for e, _ in seen] == [
+        "agent_message", "agent_message_usage_patch"]
+    patch, lines_on_disk = seen[1]
+    assert patch["payload"]["context_tokens"] == 22389
+    assert patch["payload"]["context_window"] == 258400
+    # the broadcast frame is the row itself — still envelope-less (AC 6(b))
+    assert set(patch) == {"type", "agent_id", "payload"}
+    assert lines_on_disk == 2
+    assert _read(path)[-1] == patch

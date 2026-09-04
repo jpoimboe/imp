@@ -737,11 +737,15 @@ class JsonlEventLog(_BaseEventLog):
             payload["context_tokens"] = context_tokens
         if context_window is not None:
             payload["context_window"] = context_window
-        self._persist({
+        record: dict[str, Any] = {
             "type": "agent_message_usage_patch",
             "agent_id": agent_id,
             "payload": payload,
-        })
+        }
+        # broadcast as persisted: no _emit envelope, so on-disk shape is unchanged
+        self._persist(record)
+        if self._on_event is not None:
+            self._on_event(record)
 
     def events_for_current_step(self, step_name: str) -> Iterable[dict[str, Any]]:
         """Replay-helper for `imp resume`: yield events from the last
