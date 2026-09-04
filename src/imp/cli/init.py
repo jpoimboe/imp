@@ -290,6 +290,23 @@ def _read_user_config(user_path: Path) -> dict[str, Any] | None:
     return data
 
 
+def _configured_providers(existing_cfg: dict[str, Any] | None) -> list[str] | None:
+    """The machine config's reusable provider list, or None when it has none:
+    the shapes accepted here are exactly the ones `_parse_providers` accepts
+    (non-empty, all strings, no duplicates), so init repairs anything else
+    rather than reusing a value imp's own readers reject."""
+    if existing_cfg is None:
+        return None
+    raw = existing_cfg.get("providers")
+    if not isinstance(raw, list) or not raw:
+        return None
+    if not all(isinstance(name, str) for name in raw):
+        return None
+    if len(set(raw)) != len(raw):
+        return None
+    return list(raw)
+
+
 def _bootstrap_user_config(
     user_path: Path, providers: list[str], theme: str, *, allow_unsandboxed: bool,
 ) -> None:
@@ -882,15 +899,18 @@ def run_init(
               + pal.ansi(str(project_root), "wordmark", enabled=color_on))
 
     user_path = global_config_path()
-    wrote_user_config = not user_path.exists()
 
     # --- providers + theme: skip the picker when the global config already
-    #     declares providers (a re-run must not re-ask) ---
+    #     declares a reusable list (a re-run must not re-ask) ---
     existing_cfg = _read_user_config(user_path)
-    if existing_cfg and existing_cfg.get("providers"):
-        providers = [str(p) for p in existing_cfg["providers"]]
-        theme = str(existing_cfg.get("theme", "ansi"))
+    wrote_user_config = existing_cfg is None
+    configured = _configured_providers(existing_cfg)
+    if configured is not None:
+        providers = configured
+        # `or {}` only narrows for mypy: configured is non-None iff the config was read.
+        theme = str((existing_cfg or {}).get("theme", "ansi"))
         picked_this_run = False
+        repaired = False
     else:
         pick = picker_fn or _interactive_provider_picker
         providers = pick(list(_PROVIDER_DISPLAY_ORDER))
@@ -901,6 +921,9 @@ def run_init(
         if pal.theme_override() is None:
             pal.set_theme(theme)
         picked_this_run = True
+        repaired = existing_cfg is not None
+    if repaired:
+        _set_user_providers(user_path, providers)
     output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
     for line in auth_hint_lines(providers):
         output_fn(pal.ansi(line, "dim", enabled=color_on))
@@ -924,9 +947,15 @@ def run_init(
         output_fn("Project already initialized (imp/config.yaml is committed).")
         if wrote_user_config:
             output_fn("Bootstrapped your machine config (providers, theme).")
+        elif repaired:
+            output_fn(
+                f"Set providers in your machine config: {', '.join(providers)}.")
         else:
             output_fn("Your machine config is already set up — nothing to do.")
         output_fn(f"  {user_path}  (your machine: providers, theme)")
+        if not picked_this_run:
+            output_fn(
+                "Change providers later: imp config set providers <name>,<name>")
         if committed:
             output_fn("Committed imp/config.yaml.")
         return

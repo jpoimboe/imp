@@ -1452,3 +1452,82 @@ def test_set_user_providers_refuses_a_write_that_does_not_read_back(
 
     assert "would not read back as given" in str(exc.value)
     assert (home / "config.yaml").read_text() == before
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,                            # key absent
+        [],                              # the state init used to write
+        "claude_code",                   # hand-edited scalar: iterating yields chars
+        ["claude_code", 7],              # _parse_providers rejects a non-string entry
+        ["codex", "codex"],              # _parse_providers rejects a duplicate entry
+    ],
+)
+def test_no_usable_providers_to_reuse(raw: object) -> None:
+    from imp.cli.init import _configured_providers
+
+    assert _configured_providers({} if raw is None else {"providers": raw}) is None
+    assert _configured_providers(None) is None
+
+
+def test_configured_providers_returns_a_usable_list_verbatim() -> None:
+    from imp.cli.init import _configured_providers
+
+    assert _configured_providers({"providers": ["openai", "codex"]}) == [
+        "openai", "codex"]
+
+
+@pytest.mark.parametrize(
+    "seed",
+    ["providers: []\n", "", "providers: claude_code\n",
+     "providers: [codex, codex]\n"])
+def test_interactive_reinit_repairs_an_unusable_provider_list(
+    tmp_path: Path, seed: str,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, seed)
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("claude_code", "anthropic", "openai", "codex"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == [
+        "claude_code", "anthropic", "openai", "codex"]
+    assert _sans_providers(after) == _sans_providers(before)
+    assert ("Set providers in your machine config: "
+            "claude_code, anthropic, openai, codex.") in msgs
+    assert not any("already set up" in m for m in msgs)
+
+
+def test_interactive_reinit_reuses_a_valid_list_and_names_the_setter(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic, openai]\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("picker must not run when providers are configured")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_boom,
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    assert (home / "config.yaml").read_text() == before   # never silently rewritten
+    assert "Your machine config is already set up — nothing to do." in msgs
+    path_line = msgs.index(
+        f"  {home / 'config.yaml'}  (your machine: providers, theme)")
+    assert msgs[path_line + 1] == (
+        "Change providers later: imp config set providers <name>,<name>")
