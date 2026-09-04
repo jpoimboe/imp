@@ -41,7 +41,7 @@ def tear_down_quest(quest: Quest) -> None:
         # branch delete after worktree removal (git forbids deleting a checked-out branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    _force_rmtree(quest.quest_dir)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     _force_rmtree(quest.var_tmp_dir)
 
@@ -72,7 +72,7 @@ def archive_conversation(quest: Quest) -> None:
         merge_queue.pop_and_wake(control, quest_id, base_branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    _force_rmtree(quest.quest_dir)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     _force_rmtree(quest.var_tmp_dir)
 
@@ -97,6 +97,6 @@ def discard_conversation(quest: Quest) -> None:
     """Discard a zero-exchange open — no archive, no record; raises LockHeld if runner is live."""
     with ProjectLock(quest.quest_dir / "lock").acquire():
         pass
-    shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    _force_rmtree(quest.quest_dir)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     _force_rmtree(quest.var_tmp_dir)

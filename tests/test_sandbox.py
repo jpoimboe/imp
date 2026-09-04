@@ -13,9 +13,11 @@ import pytest
 
 from imp.engine.sandbox import (
     HomeLayer,
+    OverlayRoot,
     SandboxConfig,
     SandboxPolicy,
     SandboxUnavailable,
+    _force_rmtree,
     build_sandbox_argv,
     make_home_layer,
     prepare_spawn_policy,
@@ -1305,44 +1307,144 @@ def test_overlay_wrapper_passes_the_command_through_shlex_join():
     assert inner[-1] == cmd
 
 
-def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
-    # AC 5b: userxattr=True creates upper/work/merged, reports is_overlay, and
-    # records the flag; the cleanup callable removes all three.
-    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
-    layer, cleanup = make_home_layer(
-        "/home/u", upper=upper, work=work, merged=merged, userxattr=True)
-    assert isinstance(layer, HomeLayer) and layer.is_overlay
-    assert layer.userxattr is True
-    assert layer.home == "/home/u"
-    assert layer.upper == str(upper) and layer.work == str(work)
-    assert layer.merged == str(merged)
-    assert upper.is_dir() and work.is_dir() and merged.is_dir()
+def test_make_home_layer_overlay_creates_the_root_and_cleanup_sweeps_it(tmp_path):
+    # AC 10 (unit): the primitive creates only the ROOT and reports it — with the
+    # probed userxattr shape — as overlay_root; the layer itself is plain (each
+    # spawn mints its own under the root). The one cleanup rmtrees the whole root —
+    # including the mode-000 work/work dir overlayfs leaves behind (AC 6).
+    root = tmp_path / "coder.overlay"
+    layer, overlay_root, cleanup = make_home_layer(
+        "/home/u", root=root, userxattr=True)
+    assert layer == HomeLayer(home="/home/u") and not layer.is_overlay
+    assert overlay_root == OverlayRoot(path=str(root), userxattr=True)
+    assert root.is_dir()
+    residue = root / "spawn-a" / "work" / "work"
+    residue.mkdir(parents=True)
+    residue.chmod(0o000)
     cleanup()
-    assert not upper.exists() and not work.exists() and not merged.exists()
+    assert not root.exists()
 
 
 def test_make_home_layer_overlay_without_userxattr(tmp_path):
     # AC 5b: userxattr=False is still a COW overlay (a pre-v5.11 host keeps home
-    # isolation) — same dirs, same cleanup, flag off.
-    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
-    layer, cleanup = make_home_layer(
-        "/home/u", upper=upper, work=work, merged=merged, userxattr=False)
-    assert layer.is_overlay and layer.userxattr is False
-    assert upper.is_dir() and work.is_dir() and merged.is_dir()
+    # isolation) — same root, same cleanup, flag off.
+    root = tmp_path / "coder.overlay"
+    layer, overlay_root, cleanup = make_home_layer(
+        "/home/u", root=root, userxattr=False)
+    assert layer == HomeLayer(home="/home/u") and not layer.is_overlay
+    assert overlay_root == OverlayRoot(path=str(root), userxattr=False)
+    assert root.is_dir()
     cleanup()
-    assert not upper.exists() and not work.exists() and not merged.exists()
+    assert not root.exists()
 
 
-def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
-    # AC 5a: userxattr=None is the rw fallback — no overlay, no disk touched,
-    # cleanup a harmless no-op.
-    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
-    layer, cleanup = make_home_layer(
-        "/home/u", upper=upper, work=work, merged=merged, userxattr=None)
-    assert not layer.is_overlay and layer.home == "/home/u"
-    assert layer.userxattr is False
-    assert not upper.exists() and not work.exists() and not merged.exists()
+def test_make_home_layer_fallback_creates_no_root(tmp_path):
+    # AC 5a/8/10 (unit): userxattr=None is the rw fallback — no disk touched, no
+    # overlay root, and a harmless no-op cleanup.
+    root = tmp_path / "coder.overlay"
+    layer, overlay_root, cleanup = make_home_layer(
+        "/home/u", root=root, userxattr=None)
+    assert layer == HomeLayer(home="/home/u") and not layer.is_overlay
+    assert overlay_root is None
+    assert not root.exists()
     cleanup()  # no-op, must not raise
+    assert not root.exists()
+
+
+def test_force_rmtree_skips_symlinked_dirs(tmp_path: Path) -> None:
+    # Symlinks to dirs appear in os.walk dirs; os.chmod follows them.
+    # Verify the guard prevents mutating a directory outside the removed tree.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original_mode = os.stat(outside).st_mode
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "real_subdir").mkdir()
+    (tree / "link_to_outside").symlink_to(outside)
+    _force_rmtree(tree)
+    assert not tree.exists()
+    assert outside.exists()
+    assert os.stat(outside).st_mode == original_mode
+
+
+def test_prepare_spawn_policy_mints_a_distinct_layer_per_spawn(tmp_path):
+    # AC 1a/1b: two spawns off ONE step policy get three-way-distinct
+    # upper/work/merged dirs, all real and all under that step's overlay_root —
+    # so two concurrently-live mounts can never name the same upperdir. Each
+    # minted layer carries the root's probed userxattr shape (AC 6).
+    root = tmp_path / "coder.overlay"
+    step_pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                       overlay_root=OverlayRoot(path=str(root), userxattr=True))
+    a = prepare_spawn_policy(step_pol)
+    b = prepare_spawn_policy(step_pol)
+    a_dirs = (a.home_layer.upper, a.home_layer.work, a.home_layer.merged)
+    b_dirs = (b.home_layer.upper, b.home_layer.work, b.home_layer.merged)
+    for d in (*a_dirs, *b_dirs):
+        assert Path(d).is_dir()
+        assert Path(d).is_relative_to(root)
+    assert len(set(a_dirs) | set(b_dirs)) == 6      # no path reused anywhere
+    assert a.home_layer.is_overlay and b.home_layer.is_overlay
+    assert a.home_layer.home == "/home/u" == b.home_layer.home
+    assert a.home_layer.userxattr is True and b.home_layer.userxattr is True
+    assert a.overlay_root == b.overlay_root == step_pol.overlay_root
+
+
+def test_each_minted_layer_reaches_its_own_mount_command(tmp_path):
+    # AC 1c: the per-spawn dirs are what actually get mounted — each policy's own
+    # upper/work/merged appear verbatim in ITS overlay mount command, and neither
+    # spawn's argv ever names the other spawn's upperdir.
+    import shlex
+
+    root = tmp_path / "coder.overlay"
+    step_pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                       overlay_root=OverlayRoot(path=str(root), userxattr=False))
+    a, b = prepare_spawn_policy(step_pol), prepare_spawn_policy(step_pol)
+    scripts = {
+        p: _unshare_script(
+            build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={}))
+        for p in (a, b)}
+    for pol, other in ((a, b), (b, a)):
+        script, hl = scripts[pol], pol.home_layer
+        assert "lowerdir=/home/u," in script
+        assert (f"upperdir={shlex.quote(hl.upper)},"
+                f"workdir={shlex.quote(hl.work)} "
+                f"{shlex.quote(hl.merged)}") in script
+        assert other.home_layer.upper not in script
+
+
+def test_prepare_spawn_policy_self_heals_a_removed_overlay_root(tmp_path):
+    # AC 5: the root vanishing mid-step must not fail every later spawn
+    # permanently (the retry loop cannot heal a permanent setup failure), so the
+    # mint re-creates it — same shape as the git_ref_reexpose re-creation above it.
+    root = tmp_path / "gone" / "coder.overlay"
+    step_pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                       overlay_root=OverlayRoot(path=str(root), userxattr=False))
+    assert not root.exists()
+    spawn = prepare_spawn_policy(step_pol)
+    upper = Path(spawn.home_layer.upper)
+    assert upper.is_dir() and upper.is_relative_to(root)
+
+
+def test_prepare_spawn_policy_mints_nothing_without_an_overlay_root():
+    # AC 8: the non-overlay host's shape — a plain rw-bind home layer and no
+    # overlay_root — passes through untouched, so no overlay is mounted.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    out = prepare_spawn_policy(pol)
+    assert out.home_layer == HomeLayer(home="/home/u")
+    assert out.overlay_root is None
+    argv = build_sandbox_argv("x", cwd="/wt", policy=out, engine_env={})
+    assert argv[0] == "bwrap"          # no unshare/mount wrapper
+
+
+def test_active_overlay_root_without_a_minted_layer_is_fatal(tmp_path):
+    # AC 2a: the fail-OPEN shape — an ACTIVE policy carrying overlay_root but a
+    # layer that was never minted — would emit `--bind /home/u /home/u`, binding
+    # the REAL $HOME writable with no overlay at all. Refuse to build that argv.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                  overlay_root=OverlayRoot(path=str(tmp_path / "coder.overlay"),
+                                           userxattr=True))
+    with pytest.raises(AssertionError, match="overlay_root"):
+        build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
 
 
 def test_resolve_policy_binds_quest_home_rw(tmp_path):

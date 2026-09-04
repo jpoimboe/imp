@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from pathlib import Path
 
 from imp.engine.archive import ensure_current, index, index_path
+from imp.engine.sandbox import _force_rmtree
 from imp.paths import project_state_dir
 
 
@@ -33,7 +33,7 @@ def reap_archived_homes(control_root: Path) -> int:
                 continue
             if not index.has_quest(conn, cid):
                 continue
-            shutil.rmtree(home, ignore_errors=True)
+            _force_rmtree(home)
             reaped += 1
         return reaped
     finally:

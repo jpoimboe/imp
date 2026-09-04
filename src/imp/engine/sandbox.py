@@ -57,6 +57,16 @@ class HomeLayer:
 
 
 @dataclass(frozen=True, slots=True)
+class OverlayRoot:
+    """The dir each spawn mints its OWN home-overlay layer under, paired with the
+    mount shape overlay_mode negotiated for this host. Pairing them keeps a minted
+    layer's userxattr flag inseparable from the root it came from, so a layer
+    claiming a shape the probe never validated cannot be constructed."""
+    path: str
+    userxattr: bool
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxPolicy:
     active: bool                              # True → wrap with bwrap; False → bare sh -c
     worktree: str                             # rw bind at REAL path
@@ -78,6 +88,7 @@ class SandboxPolicy:
     disposable_tree: bool = False            # agent runs in a disposable git worktree
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
+    overlay_root: OverlayRoot | None = None  # per-step root spawns mint layers under
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -250,9 +261,21 @@ def build_sandbox_argv(
     the IMP_ prefix plus PYTHONPATH (`_is_engine_passthrough`): any new IMP_* var
     flows through with no edit here, and PYTHONPATH passes through as the single
     deliberate non-IMP_ exception — the imp-on-imp import shadow — matching
-    `_build_setenv`."""
+    `_build_setenv`.
+
+    An ACTIVE policy carrying overlay_root with an un-minted home layer is a
+    fail-open bug (it would bind the real $HOME rw) and raises; the INACTIVE
+    variant of that same shape is the reachable `/sandbox off` case and is fine."""
     if not policy.active:
         return ["sh", "-c", command]
+
+    if (policy.overlay_root is not None and policy.home_layer is not None
+            and not policy.home_layer.is_overlay):
+        # Fail CLOSED: this policy skipped prepare_spawn_policy, so the rw home
+        # bind would expose the REAL $HOME instead of an overlay merged view.
+        raise AssertionError(
+            f"active policy carries overlay_root {policy.overlay_root!r} with an "
+            f"un-minted home layer; spawn through prepare_spawn_policy")
 
     argv: list[str] = ["bwrap"]
     # 1. whole host readable
@@ -355,13 +378,35 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     existence-gating at spawn is always safe. Own binds (worktree, quest_home) and
     stable config (caches, extra_*) never churn and are left untouched. Scoped to
     the spawn argv only; the in-process allows_read/allows_write mirrors keep the
-    unpruned policy (a gone path is denied either way)."""
+    unpruned policy (a gone path is denied either way).
+
+    It also MINTS this spawn's home-overlay layer when policy.overlay_root is set:
+    a fresh mkdtemp dir under the root holding its own upper/work/merged. Minting
+    is per SPAWN, not per step, because two concurrently-live overlay mounts
+    sharing one upperdir/workdir is undefined behavior (the kernel's ovl_inuse
+    warning) — and overlap within a step is normal: a background command outlives
+    a foreground one, and non-isolated subagents inherit the step's policy
+    verbatim. No per-spawn cleanup exists; step teardown rmtrees the whole root."""
     if not policy.active:
         return policy
     for ref_dir in policy.git_ref_reexpose:
         Path(ref_dir).mkdir(parents=True, exist_ok=True)
+    home_layer = policy.home_layer
+    if policy.overlay_root is not None:
+        root = Path(policy.overlay_root.path)
+        root.mkdir(parents=True, exist_ok=True)   # self-heal, like git_ref_reexpose
+        layer_dir = Path(tempfile.mkdtemp(dir=root))
+        upper = layer_dir / "upper"
+        work = layer_dir / "work"
+        merged = layer_dir / "merged"
+        for d in (upper, work, merged):
+            d.mkdir()
+        home_layer = HomeLayer(home=policy.home, merged=str(merged),
+                               upper=str(upper), work=str(work),
+                               userxattr=policy.overlay_root.userxattr)
     return replace(
         policy,
+        home_layer=home_layer,
         git_ro_remask=_existing(list(policy.git_ro_remask)),
         secret_dirs=_existing(list(policy.secret_dirs)),
         secret_files=_existing(list(policy.secret_files)),
@@ -433,8 +478,11 @@ def _force_rmtree(path: Path) -> None:
     under the state dir. Owner is the real uid, so the chmod always succeeds."""
     for root, dirs, _files in os.walk(path):
         for d in dirs:
+            p = os.path.join(root, d)
+            if os.path.islink(p):  # os.chmod follows symlinks; skip to avoid mutating outside tree
+                continue
             with contextlib.suppress(OSError):
-                os.chmod(os.path.join(root, d), 0o700)
+                os.chmod(p, 0o700)
     shutil.rmtree(path, ignore_errors=True)
 
 
@@ -497,32 +545,25 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
 
 
 def make_home_layer(
-    home: str, *, upper: Path, work: Path, merged: Path, userxattr: bool | None,
-) -> tuple[HomeLayer, Callable[[], None]]:
-    """Build one invocation's writable-home layer + its teardown callable.
-    `userxattr` is overlay_mode's tri-state. None → a plain rw bind of the real
-    home (fallback): no dirs are created and cleanup is a no-op. True/False → a
-    COW overlay: create upper/work/merged and return a HomeLayer that
-    build_sandbox_argv wraps with unshare + mount -t overlay (lowerdir=home),
-    carrying the flag so the per-command mount uses the exact shape the probe
-    validated; the returned cleanup rmtrees the three dirs. One tri-state rather
-    than an on/off flag paired with userxattr, so a non-overlay layer claiming
-    userxattr cannot be constructed. The CALLER probes (overlay_mode at its own probe
-    location) and chooses where the dirs live, so this primitive is shared by the
-    executor (dirs sibling to transcript_dir) and the isolated-subagent path
-    (dirs sibling to the spike worktree)."""
+    home: str, *, root: Path, userxattr: bool | None,
+) -> tuple[HomeLayer, OverlayRoot | None, Callable[[], None]]:
+    """Build one invocation's writable-home layer, the root its spawns mint into,
+    and the teardown callable. `userxattr` is overlay_mode's tri-state. None → the
+    plain rw bind of the real home (fallback): no dirs, no overlay root, a no-op
+    cleanup. True/False → create `root` and report it as the policy's overlay_root,
+    carrying the negotiated flag so every per-spawn mount uses the exact shape the
+    probe validated; each SPAWN then mints its own upper/work/merged under the root
+    in prepare_spawn_policy, and the returned cleanup rmtrees the whole root once
+    (no per-spawn cleanup exists, so a hard-killed command cannot leak a layer).
+    The layer is the same plain HomeLayer in BOTH branches. The CALLER probes
+    (overlay_mode at its own probe location) and chooses where the root lives, so
+    this primitive is shared by the executor (root sibling to transcript_dir) and
+    the isolated-subagent path (root sibling to the spike worktree)."""
     if userxattr is None:
-        return HomeLayer(home=home), (lambda: None)
-    for d in (upper, work, merged):
-        d.mkdir(parents=True, exist_ok=True)
-    layer = HomeLayer(home=home, merged=str(merged), upper=str(upper),
-                      work=str(work), userxattr=userxattr)
-
-    def cleanup() -> None:
-        for d in (upper, work, merged):
-            _force_rmtree(d)
-
-    return layer, cleanup
+        return HomeLayer(home=home), None, (lambda: None)
+    root.mkdir(parents=True, exist_ok=True)
+    return (HomeLayer(home=home), OverlayRoot(path=str(root), userxattr=userxattr),
+            lambda: _force_rmtree(root))
 
 
 def _existing(paths: list[str]) -> tuple[str, ...]:

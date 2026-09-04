@@ -28,6 +28,7 @@ import imp.agents.tools.bash  # noqa: F401 — registers the tool
 from imp import __version__
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
+from imp.agents.tools.bg import terminate_background_processes
 from imp.agents.tools.context import ToolContext
 from imp.engine import worktree as wt
 from imp.engine.sandbox import (
@@ -187,20 +188,20 @@ def _make_overlay_root() -> Path:
 def _overlay_home(base: Path, home: Path, *,
                   secret_dirs: tuple[str, ...] = (),
                   writable_caches: tuple[str, ...] = ()):
-    """Active policy with a real COW-overlay HomeLayer over `home`. `home` and the
-    sandbox worktree are SIBLINGS under `base` (a non-/tmp real fs), so no later
-    bind_plan bind (/tmp identity, worktree rw) covers `home` and shadows the
-    overlay merged mount. Returns (policy, cleanup); cleanup removes the overlay
-    upper/work/merged dirs."""
+    """Active policy whose EVERY spawn mints its own COW-overlay layer under a
+    per-step overlay root, exactly as a real spawn does (the bash tool calls
+    prepare_spawn_policy). `home` and the sandbox worktree are SIBLINGS under
+    `base` (a non-/tmp real fs), so no later bind_plan bind (/tmp identity,
+    worktree rw) covers `home` and shadows the overlay merged mount. Returns
+    (policy, cleanup); cleanup removes the whole overlay root."""
     wt = base / "worktree"
     wt.mkdir(exist_ok=True)
     base_pol = _active_policy(wt, home=home, secret_dirs=secret_dirs)
-    layer, cleanup = make_home_layer(
-        str(home),
-        upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
-        userxattr=_OVERLAY_MODE)
+    layer, overlay_root, cleanup = make_home_layer(
+        str(home), root=base / "ovl", userxattr=_OVERLAY_MODE)
     pol = dataclasses.replace(
-        base_pol, home=str(home), writable_caches=writable_caches, home_layer=layer)
+        base_pol, home=str(home), writable_caches=writable_caches,
+        home_layer=layer, overlay_root=overlay_root)
     return pol, cleanup
 
 
@@ -211,10 +212,10 @@ def _fallback_home(root: Path, home: Path, *,
     THROUGH to the real home by design, so a /tmp-based root is fine here (the /tmp
     shadow re-binds the same host home dir the fallback already targets)."""
     base = _active_policy(root, home=home, secret_dirs=secret_dirs)
-    layer, _ = make_home_layer(
-        str(home), upper=root / "u", work=root / "w", merged=root / "m",
-        userxattr=None)
-    return dataclasses.replace(base, home=str(home), home_layer=layer)
+    layer, overlay_root, _ = make_home_layer(
+        str(home), root=root / "ovl", userxattr=None)
+    return dataclasses.replace(base, home=str(home), home_layer=layer,
+                               overlay_root=overlay_root)
 
 
 # ---------------------------------------------------------------------------
@@ -1198,12 +1199,12 @@ def test_overlay_home_faithful_isolated_and_masked() -> None:
 
 
 @requires_overlay
-def test_overlay_home_write_persists_across_bash_calls() -> None:
-    # AC 2: a file written to $HOME in one bash call is present in a later bash call
-    # within the same invocation (both calls mount the same on-disk upper). Because
-    # home is NOT shadowed by a later bind, the write lands in the overlay upper —
-    # so this proves shared-upper persistence, NOT a real-home leak: the falsifier
-    # below asserts the real home never sees the file.
+def test_overlay_home_write_does_not_persist_across_bash_calls() -> None:
+    # AC 4: each spawn mints its OWN overlay layer, so a $HOME write in one bash
+    # call is NOT visible to the next — the accepted semantics change. The first
+    # call reads its own write back, so the test cannot pass vacuously on a
+    # read-only home; the falsifier below keeps it honest about the mechanism —
+    # the write went to that call's discarded upper, never to the real home.
     root = _make_overlay_root()
     try:
         home = root / "home"
@@ -1211,15 +1212,91 @@ def test_overlay_home_write_persists_across_bash_calls() -> None:
         pol, cleanup = _overlay_home(root, home)
         try:
             ctx = _ctx(Path(pol.worktree), pol)
-            r1 = _bash(ctx, 'echo PERSISTED > "$HOME/across.txt" && echo wrote')
-            assert r1["returncode"] == 0 and "wrote" in r1["stdout"]
-            r2 = _bash(ctx, 'cat "$HOME/across.txt"')
-            assert r2["returncode"] == 0, f"read-back failed: {r2}"
-            assert "PERSISTED" in r2["stdout"], (
-                f"write did not persist across bash calls: {r2['stdout']!r}")
-            # falsifier: persistence is via the shared overlay upper, not a leak —
-            # the isolated real home never sees the file.
+            r1 = _bash(
+                ctx, 'echo PERSISTED > "$HOME/across.txt" && cat "$HOME/across.txt"')
+            assert r1["returncode"] == 0, f"first call failed: {r1}"
+            assert "PERSISTED" in r1["stdout"]      # written and read back in-spawn
+            r2 = _bash(ctx, 'cat "$HOME/across.txt" || echo MISSING')
+            assert r2["returncode"] == 0, f"second call did not run: {r2}"
+            assert "MISSING" in r2["stdout"], (
+                f"write leaked into the next bash call: {r2['stdout']!r}")
+            assert "PERSISTED" not in r2["stdout"]
+            # falsifier: the isolated real home (the lowerdir) never saw the file.
             assert not (home / "across.txt").exists()
+        finally:
+            cleanup()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@requires_overlay
+def test_concurrent_background_and_foreground_get_separate_upperdirs() -> None:
+    # Two sandboxed commands CONCURRENTLY LIVE within one step — a background
+    # command still running while a foreground command runs — are the shape that
+    # produced the kernel's ovl_inuse warning back when the upperdir was keyed
+    # per STEP. Each spawn now mints its own layer, so the two mounts share
+    # nothing. The handshake through the shared rw worktree makes the overlap
+    # deterministic rather than timing-dependent: the background command
+    # publishes `bg-ready` and then blocks until `release`, which the foreground
+    # command creates only AFTER writing and listing its own $HOME.
+    root = _make_overlay_root()
+    try:
+        home = root / "home"
+        home.mkdir()
+        pol, cleanup = _overlay_home(root, home)
+        try:
+            ctx = _ctx(Path(pol.worktree), pol)
+            ctx.background_enabled = True
+            ctx.agent_id = "step:build/coder"
+            # The loop bounds are hang-detectors, not tuned windows: they never
+            # false-fire under load, and the outer pytest timeout catches a
+            # genuine hang first.
+            bg_cmd = (
+                'echo BG > "$HOME/bg.txt"; : > bg-ready; i=0; '
+                'while [ ! -e release ] && [ $i -lt 3000 ]; '
+                'do sleep 0.05; i=$((i+1)); done; [ -e release ]')
+            fg_cmd = (
+                'i=0; while [ ! -e bg-ready ] && [ $i -lt 3000 ]; '
+                'do sleep 0.05; i=$((i+1)); done; [ -e bg-ready ] || exit 1; '
+                'echo FG > "$HOME/fg.txt"; ls "$HOME"; : > release')
+
+            async def _scenario() -> tuple[dict[str, object], dict[str, object]]:
+                reg = get_registry()
+                try:
+                    started = json.loads(await reg["bash"].async_invoke(
+                        ctx, {"command": bg_cmd, "run_in_background": True}))
+                    fg = json.loads(await reg["bash"].async_invoke(
+                        ctx, {"command": fg_cmd}))
+                    done = json.loads(await reg["bash_output"].async_invoke(
+                        ctx, {"id": started["id"], "wait": True}))
+                    return fg, done
+                finally:
+                    await terminate_background_processes(ctx)
+
+            fg, done = anyio.run(_scenario)
+
+            # both commands succeeded — and the foreground rc 0 means it SAW
+            # bg-ready, so the background mount was live for the whole fg call.
+            assert fg["returncode"] == 0, f"foreground call failed: {fg}"
+            assert done["status"] == "exited", f"background unfinished: {done}"
+            assert done["returncode"] == 0, f"background call failed: {done}"
+
+            # the smoking gun: on one shared upperdir the still-running
+            # background command's file would show up in the foreground $HOME.
+            listed = str(fg["stdout"]).split()
+            assert "fg.txt" in listed, f"foreground $HOME listing: {listed}"
+            assert "bg.txt" not in listed, f"live mounts shared an upper: {listed}"
+
+            # one layer per spawn, each upper holding only its own write.
+            layers = sorted(
+                p for p in Path(pol.overlay_root.path).iterdir() if p.is_dir())
+            assert len(layers) == 2, f"expected one layer per spawn, got {layers}"
+            contents = sorted(
+                sorted(f.name for f in (d / "upper").iterdir()) for d in layers)
+            assert contents == [["bg.txt"], ["fg.txt"]], contents
+
+            # the lowerdir — the real home — saw neither write.
+            assert sorted(p.name for p in home.iterdir()) == [], "real home mutated"
         finally:
             cleanup()
     finally:

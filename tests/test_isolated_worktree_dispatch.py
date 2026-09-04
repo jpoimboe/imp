@@ -214,10 +214,8 @@ def test_isolated_dispatch_overlay_home_torn_down_on_error(
         anyio.run(dispatch_task, ctx, "prober", "will fail")
 
     worktrees = (project_state_dir(tmp_path) / "worktrees").resolve()
-    # the per-invocation overlay dirs are gone despite the dispatch error ...
-    assert not (worktrees / "spike-prb001-1.overlay-upper").exists()
-    assert not (worktrees / "spike-prb001-1.overlay-work").exists()
-    assert not (worktrees / "spike-prb001-1.overlay-merged").exists()
+    # the per-invocation overlay root is gone despite the dispatch error ...
+    assert not (worktrees / "spike-prb001-1.overlay").exists()
     # ... and so is the throwaway worktree
     assert not (worktrees / "spike-prb001-1").exists()
 
@@ -402,23 +400,25 @@ def test_build_isolated_policy_threads_pythonpath(monkeypatch, tmp_path):
         str(worktree / "src"))
 
 
-def test_attach_isolated_home_overlay_siblings_spike(tmp_path, monkeypatch):
-    # AC 1/6 (unit): overlay dirs are SIBLINGS of the spike worktree (keyed by its
-    # name), created on disk, and the cleanup removes them.
+def test_attach_isolated_home_overlay_root_is_sibling_of_spike(tmp_path, monkeypatch):
+    # AC 7 (unit): the overlay ROOT is a SIBLING of the spike worktree (keyed by
+    # its name), spawns mint their own layers under it, and cleanup removes it.
     import imp.agents.subagents as subagents
-    from imp.engine.sandbox import HomeLayer
+    from imp.engine.sandbox import HomeLayer, prepare_spawn_policy
     monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: True)
     spike = project_state_dir(tmp_path) / "worktrees" / "spike-x-1"
     spike.mkdir(parents=True)
     pol, cleanup = subagents._attach_isolated_home(
         _active_home_policy(), spike, tmp_path / "q")
-    assert isinstance(pol.home_layer, HomeLayer) and pol.home_layer.is_overlay
-    upper = spike.parent / "spike-x-1.overlay-upper"
-    assert upper.is_dir() and upper.parent == spike.parent and upper != spike
-    assert pol.home_layer.upper == str(upper)
+    root = spike.parent / "spike-x-1.overlay"
+    assert pol.overlay_root.path == str(root) and root.is_dir()
+    assert pol.home_layer == HomeLayer(home="/home/u")
+    assert root.parent == spike.parent and root != spike
+    upper = Path(prepare_spawn_policy(pol).home_layer.upper)
+    assert upper.is_dir() and upper.is_relative_to(root)
     assert cleanup is not None
     cleanup()
-    assert not upper.exists()
+    assert not root.exists()
 
 
 def test_attach_isolated_home_falls_back_to_rw(tmp_path, monkeypatch):
@@ -431,13 +431,16 @@ def test_attach_isolated_home_falls_back_to_rw(tmp_path, monkeypatch):
         _active_home_policy(), spike, tmp_path / "q")
     assert pol.home_layer is not None and not pol.home_layer.is_overlay
     assert pol.home_layer.home == "/home/u"
-    assert not (spike.parent / "spike-x-1.overlay-upper").exists()
+    assert pol.overlay_root is None
+    assert not (spike.parent / "spike-x-1.overlay").exists()
     cleanup()  # no-op, must not raise
 
 
 def test_attach_isolated_home_records_probed_userxattr(tmp_path, monkeypatch):
-    # AC 6: the isolated-subagent path carries the probed mount shape too.
+    # AC 6: the isolated-subagent path carries the probed mount shape too — on the
+    # overlay root, and from there onto every layer a spawn mints under it.
     import imp.agents.subagents as subagents
+    from imp.engine.sandbox import prepare_spawn_policy
     spike = project_state_dir(tmp_path) / "worktrees" / "spike-x-1"
     spike.mkdir(parents=True)
     for mode in (True, False):
@@ -445,7 +448,9 @@ def test_attach_isolated_home_records_probed_userxattr(tmp_path, monkeypatch):
                             lambda _b, _h, m=mode: m)
         pol, cleanup = subagents._attach_isolated_home(
             _active_home_policy(), spike, tmp_path / "q")
-        assert pol.home_layer.is_overlay and pol.home_layer.userxattr is mode
+        assert pol.overlay_root.userxattr is mode
+        spawn_layer = prepare_spawn_policy(pol).home_layer
+        assert spawn_layer.is_overlay and spawn_layer.userxattr is mode
         assert cleanup is not None
         cleanup()
 
@@ -495,12 +500,12 @@ def test_isolated_dispatch_overlay_home_torn_down_with_worktree(
     anyio.run(dispatch_task, ctx, "prober", "measure it")
 
     pol = capture["inv"].sandbox_policy
-    assert pol.home_layer is not None and pol.home_layer.is_overlay
+    assert pol.home_layer is not None and not pol.home_layer.is_overlay
     # resolve() to match create_spike_worktree's resolved return (macOS /tmp symlink)
     worktrees = (project_state_dir(tmp_path) / "worktrees").resolve()
-    assert pol.home_layer.upper == str(worktrees / "spike-prb001-1.overlay-upper")
-    # finally teardown removed both the overlay dirs and the spike worktree
-    assert not (worktrees / "spike-prb001-1.overlay-upper").exists()
+    assert pol.overlay_root.path == str(worktrees / "spike-prb001-1.overlay")
+    # finally teardown removed both the overlay root and the spike worktree
+    assert not (worktrees / "spike-prb001-1.overlay").exists()
     assert not (worktrees / "spike-prb001-1").exists()
 
 

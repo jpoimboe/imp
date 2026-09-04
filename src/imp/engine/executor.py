@@ -907,7 +907,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
             quest_json_path=quest.quest_dir / "quest.json",
             state_json_path=quest.state_dir / "state.json",
         )
-        shutil.rmtree(quest.quest_dir, ignore_errors=True)
+        _force_rmtree(quest.quest_dir)
         shutil.rmtree(quest.tmp_dir, ignore_errors=True)
         session_socket_path(quest.id).unlink(missing_ok=True)
         _force_rmtree(quest.var_tmp_dir)
@@ -925,7 +925,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         quest_json_path=quest.quest_dir / "quest.json",
         state_json_path=quest.state_dir / "state.json",
     )
-    shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    _force_rmtree(quest.quest_dir)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     session_socket_path(quest.id).unlink(missing_ok=True)
     _force_rmtree(quest.var_tmp_dir)
@@ -948,24 +948,23 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
 def _attach_home_layer(
     policy: Any, step: Step, quest: Quest,
 ) -> tuple[Any, Callable[[], None]]:
-    """Attach the per-invocation writable-home layer to `policy` and return
-    (policy, cleanup). Overlay-capable host → a COW overlay whose upper/work/merged
-    dirs are SIBLINGS of transcript_dir (keyed only by step.phase/step.name, so
-    they survive its per-reincarnation rmtree and are shared across reincarnations);
-    cleanup removes them. Otherwise → a plain rw bind of the real home (fallback);
-    cleanup is a no-op. An inactive or home-less policy (e.g. a script gate) is
-    returned unchanged."""
+    """Attach the writable-home layer to `policy` and return (policy, cleanup).
+    Overlay-capable host → an overlay ROOT that is a SIBLING of transcript_dir
+    (keyed only by step.phase/step.name, so it survives its per-reincarnation
+    rmtree); each spawn mints its own layer under that root in
+    prepare_spawn_policy, and cleanup removes the whole root at step teardown.
+    Otherwise → a plain rw bind of the real home (fallback); cleanup is a no-op.
+    An inactive or home-less policy (e.g. a script gate) is returned unchanged."""
     if not policy.active or not policy.home:
         return policy, (lambda: None)
     base = quest.quest_dir / "steps" / step.phase
-    layer, cleanup = make_home_layer(
+    layer, overlay_root, cleanup = make_home_layer(
         policy.home,
-        upper=base / f"{step.name}.overlay-upper",
-        work=base / f"{step.name}.overlay-work",
-        merged=base / f"{step.name}.overlay-merged",
+        root=base / f"{step.name}.overlay",
         userxattr=overlay_mode(quest.quest_dir, Path(policy.home)),
     )
-    return dataclasses.replace(policy, home_layer=layer), cleanup
+    return dataclasses.replace(
+        policy, home_layer=layer, overlay_root=overlay_root), cleanup
 
 
 async def _dispatch_step(

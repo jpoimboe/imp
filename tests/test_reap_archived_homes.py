@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
+
+import pytest
 
 from imp.engine import archive
 from imp.engine.archive.maintenance import reap_archived_homes
@@ -59,3 +63,32 @@ def test_reap_is_idempotent(tmp_path: Path) -> None:
     assert reap_archived_homes(tmp_path) == 1
     assert reap_archived_homes(tmp_path) == 0        # nothing left to reap
     assert not done.exists()
+
+
+def test_reap_removes_overlay_residue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.engine.sandbox as sandbox_mod
+    done = _home(tmp_path, "done", "completed")
+    _archive(tmp_path, done, "done")
+    # Simulate overlayfs residue at steps/<phase>/<step>.overlay/<layer>/work/work
+    residue = done / "steps" / "plan" / "1.overlay" / "layer0" / "work" / "work"
+    residue.mkdir(parents=True, exist_ok=True)
+    (residue / "file.txt").write_text("x")
+    residue.chmod(0o000)
+    # Spy installed just before reap so setup chmods don't appear in recording.
+    real_chmod = os.chmod
+    chmodded: list[str] = []
+    def _spy_chmod(p, mode, *a, **k):
+        chmodded.append(str(p))
+        return real_chmod(p, mode, *a, **k)
+    monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+    try:
+        count = reap_archived_homes(tmp_path)
+        assert count == 1
+        assert not done.exists()
+        assert str(residue) in chmodded  # proves _force_rmtree's chmod walk ran
+    finally:
+        if residue.exists():
+            residue.chmod(0o700)
+        shutil.rmtree(done, ignore_errors=True)

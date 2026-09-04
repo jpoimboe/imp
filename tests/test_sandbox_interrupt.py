@@ -108,19 +108,17 @@ requires_overlay = pytest.mark.skipif(
 
 
 def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
-    """Active policy with a real COW-overlay HomeLayer. home + worktree are SIBLINGS
-    under `base` (a /var/tmp real fs), so no later bind_plan bind (/tmp identity,
-    worktree rw) covers the home path and shadows the overlay merged mount. Returns
-    (policy, cleanup); cleanup removes the overlay upper/work/merged dirs."""
+    """Active policy whose every spawn mints its own COW-overlay layer under a
+    per-step overlay root. home + worktree are SIBLINGS under `base` (a /var/tmp
+    real fs), so no later bind_plan bind (/tmp identity, worktree rw) covers the
+    home path and shadows the overlay merged mount. Returns (policy, cleanup);
+    cleanup removes the whole overlay root."""
     home = base / "home"
     home.mkdir(parents=True, exist_ok=True)
     wt = base / "worktree"
     (wt / ".git").mkdir(parents=True, exist_ok=True)
-    layer, cleanup = make_home_layer(
-        str(home),
-        upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
-        userxattr=_OVERLAY_MODE,
-    )
+    layer, overlay_root, cleanup = make_home_layer(
+        str(home), root=base / "ovl", userxattr=_OVERLAY_MODE)
     pol = SandboxPolicy(
         active=True,
         worktree=str(wt),
@@ -136,6 +134,7 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
         note="",
         home=str(home),
         home_layer=layer,
+        overlay_root=overlay_root,
     )
     return pol, cleanup
 
@@ -251,7 +250,7 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
     base = Path(tempfile.mkdtemp(prefix="imp-test-ovl-int-", dir="/var/tmp"))
     pol, cleanup = _overlay_policy(base)
     try:
-        assert pol.home_layer.is_overlay  # a real overlay, not a silent rw-fallback
+        assert pol.overlay_root  # a real overlay root, not a silent rw-fallback
         wt = Path(pol.worktree)
         ctx = ToolContext(project_root=wt, events_path=wt / "events.jsonl")
         ctx.quest_context = QuestContext(
