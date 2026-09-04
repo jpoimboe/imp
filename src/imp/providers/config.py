@@ -233,6 +233,7 @@ def _parse_providers(raw: Any, src: SourceLoc) -> tuple[str, ...]:
         raise LoadError(
             f"{src.file.name} 'providers:' must be a non-empty list of provider names",
             src,
+            hint="run 'imp config set providers claude_code' to fix",
         )
     out: list[str] = []
     seen: set[str] = set()

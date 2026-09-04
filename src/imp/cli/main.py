@@ -4345,6 +4345,7 @@ def _init_logging() -> None:
 def main(argv: list[str] | None = None) -> int:
     from imp.diagnostics import install_stack_dumper
     from imp.engine import worktree
+    from imp.engine.errors import LoadError, LoadErrors
     _init_logging()
     with contextlib.suppress(Exception):
         install_stack_dumper(
@@ -4377,6 +4378,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.flush()
         return rc
     except worktree.PreconditionError as e:
+        _emit_cli_error(f"{e}")
+        return 2
+    except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
     except BrokenPipeError:

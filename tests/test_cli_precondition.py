@@ -49,3 +49,23 @@ def test_config_outside_project_succeeds(
     rc = main(["config"])
     assert rc == 0
     assert "Traceback" not in capsys.readouterr().err
+
+
+def test_empty_providers_prints_a_clean_error_not_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    (home / "config.yaml").write_text("providers: []\n")
+
+    rc = main(["config"])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err == (
+        f"imp: {home / 'config.yaml'}:1\n"
+        "  config.yaml 'providers:' must be a non-empty list of provider names\n"
+        "  hint: run 'imp config set providers claude_code' to fix\n"
+    )
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out

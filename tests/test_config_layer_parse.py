@@ -392,3 +392,15 @@ def test_the_retired_setting_is_gone_from_the_sources() -> None:
     offenders = [str(p.relative_to(root)) for p in targets
                  if "checkpoint_threshold" in p.read_text()]
     assert offenders == []
+
+
+def test_empty_providers_error_carries_the_setter_hint(tmp_path: Path) -> None:
+    p = tmp_path / "config.yaml"
+    p.write_text("providers: []\n")
+    with pytest.raises(LoadError) as exc:
+        parse_config_layer(p)
+    assert str(exc.value) == (
+        f"{p}:1\n"
+        "  config.yaml 'providers:' must be a non-empty list of provider names\n"
+        "  hint: run 'imp config set providers claude_code' to fix"
+    )
