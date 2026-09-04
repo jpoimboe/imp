@@ -66,3 +66,37 @@ def test_feed_after_close_updates_tail_without_reopening(tmp_path: Path) -> None
 
 def test_contextvar_default_is_none() -> None:
     assert current_stderr_sink.get() is None
+
+
+_BOILER = ("WARNING: proceeding, even though we could not create PATH aliases: "
+           "permission denied\n")
+
+
+def test_tail_collapses_repeated_identical_lines(tmp_path: Path) -> None:
+    log = tmp_path / "stderr.log"
+    sink = StderrSink(log)
+    for _ in range(22):
+        sink.feed(_BOILER)
+    sink.close()
+    assert len(_BOILER) * 22 < 2048              # the whole burst fits the window
+    assert sink.tail() == _BOILER
+    assert log.read_text() == _BOILER * 22       # the raw stream on disk is intact
+
+
+def test_tail_keeps_distinct_lines_in_first_seen_order(tmp_path: Path) -> None:
+    sink = StderrSink(tmp_path / "stderr.log")
+    sink.feed("Error: alpha\nWarning: beta\nError: alpha\nWarning: gamma\n")
+    assert sink.tail() == "Error: alpha\nWarning: beta\nWarning: gamma\n"
+
+
+def test_tail_keeps_a_leading_partial_fragment(tmp_path: Path) -> None:
+    # The window is a 2 KiB BYTE window, so its first line can be a truncated
+    # fragment. That fragment is distinct text and must survive the collapse.
+    sink = StderrSink(tmp_path / "stderr.log")
+    sink.feed("x" * 2000 + "\n" + _BOILER * 3)
+    tail = sink.tail()
+    assert tail is not None
+    lines = tail.splitlines()
+    assert len(lines) == 2
+    assert set(lines[0]) == {"x"} and 0 < len(lines[0]) < 2000
+    assert lines[1] + "\n" == _BOILER

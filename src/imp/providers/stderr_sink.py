@@ -95,9 +95,18 @@ class StderrSink:
             self._open_failed = True
 
     def tail(self) -> str | None:
+        # Dedup lines so the 2 KiB window isn't ~22 copies of one provider startup warning.
         if not self._tail:
             return None
-        return self._tail.decode("utf-8", errors="replace")
+        seen: set[str] = set()
+        kept: list[str] = []
+        for line in self._tail.decode("utf-8", errors="replace").splitlines(keepends=True):
+            key = line.rstrip("\n")
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(line)
+        return "".join(kept)
 
     def close(self) -> None:
         already = self._closed
