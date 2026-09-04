@@ -20,7 +20,7 @@ from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.sandbox import (
     SandboxPolicy,
     make_home_layer,
-    overlay_available,
+    overlay_mode,
     sandbox_available,
 )
 
@@ -80,27 +80,28 @@ def _ctx(worktree: Path) -> ToolContext:
 _OVERLAY_BASE = Path("/var/tmp")
 
 
-def _probe_overlay() -> bool:
+def _probe_overlay() -> bool | None:
     if not sandbox_available() or not _OVERLAY_BASE.is_dir():
-        return False
+        return None
     try:
         root = Path(tempfile.mkdtemp(prefix="imp-int-ovl-probe-", dir=_OVERLAY_BASE))
     except OSError:
-        return False
+        return None
     try:
         probe = root / "probe"
         home = root / "home"
         probe.mkdir()
         home.mkdir()
-        return overlay_available(probe, home)
+        return overlay_mode(probe, home)
     except OSError:
-        return False
+        return None
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
+_OVERLAY_MODE: bool | None = _probe_overlay()
 requires_overlay = pytest.mark.skipif(
-    not _probe_overlay(),
+    _OVERLAY_MODE is None,
     reason="unprivileged overlayfs probe at /var/tmp failed (read-only base or "
            "stacked overlay under a nested sandbox)",
 )
@@ -118,7 +119,7 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
     layer, cleanup = make_home_layer(
         str(home),
         upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
-        use_overlay=True,
+        userxattr=_OVERLAY_MODE,
     )
     pol = SandboxPolicy(
         active=True,

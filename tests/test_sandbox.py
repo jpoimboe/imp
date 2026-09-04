@@ -487,66 +487,148 @@ def test_sandbox_available_is_cached_bool():
     assert isinstance(sandbox_available(), bool)
 
 
-def test_overlay_available_true_when_mount_succeeds(tmp_path, monkeypatch):
+def test_overlay_mode_true_when_userxattr_mount_succeeds(tmp_path, monkeypatch):
+    # AC 3a/4a: the userxattr mount succeeds → True, after exactly ONE probe.
     import imp.engine.sandbox as sb
     monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
     monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
-    calls: dict = {}
+    calls: list = []
 
     def fake_run(argv, **kw):
-        calls["argv"] = argv
+        calls.append(argv)
         return _types.SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(sb.subprocess, "run", fake_run)
-    sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path, tmp_path / "home") is True
-    # probes via unshare with a real overlay mount, then removes its scratch dir
-    assert calls["argv"][0] == "unshare"
-    assert "mount -t overlay" in calls["argv"][-1]
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is True
+    assert len(calls) == 1
+    assert calls[0][0] == "unshare"
+    assert "mount -t overlay" in calls[0][-1]
+    assert ",userxattr " in calls[0][-1]
     assert not (tmp_path / ".overlay-probe").exists()
 
 
-def test_overlay_available_false_when_mount_fails(tmp_path, monkeypatch):
+def test_overlay_mode_false_when_only_plain_mount_succeeds(tmp_path, monkeypatch):
+    # AC 3b/4a: a pre-v5.11 kernel rejects userxattr; the plain re-probe succeeds
+    # → False, NOT None, so the host keeps its COW home instead of dropping to a
+    # writable bind of the real home.
     import imp.engine.sandbox as sb
     monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
     monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
-    monkeypatch.setattr(sb.subprocess, "run",
-                        lambda *a, **k: _types.SimpleNamespace(returncode=32))
-    sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
+    calls: list = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        return _types.SimpleNamespace(returncode=0 if len(calls) > 1 else 32)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is False
+    assert len(calls) == 2
+    assert ",userxattr " in calls[0][-1]
+    assert "userxattr" not in calls[1][-1]
     assert not (tmp_path / ".overlay-probe").exists()
 
 
-def test_overlay_available_false_without_unshare(tmp_path, monkeypatch):
+def test_overlay_mode_scrubs_scratch_between_attempts(tmp_path, monkeypatch):
+    # S1: the second attempt starts from a clean upper/work — a file left behind
+    # by the failed userxattr attempt is gone before the plain re-probe runs.
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    upper = tmp_path / ".overlay-probe" / "upper"
+    seen: dict = {}
+    calls: list = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        if len(calls) == 1:
+            (upper / "stale").write_text("x")
+            return _types.SimpleNamespace(returncode=32)
+        seen["stale"] = (upper / "stale").exists()
+        seen["upper_is_dir"] = upper.is_dir()
+        return _types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is False
+    assert seen == {"stale": False, "upper_is_dir": True}
+
+
+def test_overlay_mode_none_when_both_mounts_fail(tmp_path, monkeypatch):
+    # AC 3c: neither shape mounts → no unprivileged overlay here.
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    calls: list = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        return _types.SimpleNamespace(returncode=32)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is None
+    assert len(calls) == 2
+    assert not (tmp_path / ".overlay-probe").exists()
+
+
+def test_overlay_mode_none_without_unshare(tmp_path, monkeypatch):
+    # AC 3e
     import imp.engine.sandbox as sb
     monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
     monkeypatch.setattr(sb.shutil, "which", lambda _: None)
-    sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is None
 
 
-def test_overlay_available_false_on_non_linux(tmp_path, monkeypatch):
+def test_overlay_mode_none_on_non_linux(tmp_path, monkeypatch):
+    # AC 3d
     import imp.engine.sandbox as sb
     monkeypatch.setattr(sb.platform, "system", lambda: "Darwin")
-    sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is None
 
 
-def test_overlay_available_false_when_subprocess_raises(tmp_path, monkeypatch):
+def test_overlay_mode_none_when_subprocess_raises(tmp_path, monkeypatch):
+    # AC 3f/4b: the host cannot run the probe at all — short-circuit to None
+    # WITHOUT a second attempt (the retry exists for a rejecting kernel, not a
+    # broken spawn), and leave no scratch dir behind.
     import imp.engine.sandbox as sb
     monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
     monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    calls: list = []
 
     def boom(*a, **k):
+        calls.append(a)
         raise OSError("no userns")
 
     monkeypatch.setattr(sb.subprocess, "run", boom)
-    sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is None
+    assert len(calls) == 1
     assert not (tmp_path / ".overlay-probe").exists()
 
 
-def test_overlay_available_probes_with_real_home_as_lowerdir(tmp_path, monkeypatch):
+def test_overlay_mode_none_when_probe_times_out(tmp_path, monkeypatch):
+    # AC 3f/4b: a TimeoutExpired is the same short-circuit — worst-case probe
+    # latency stays 2 x 10s only on a genuinely userxattr-rejecting host.
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    calls: list = []
+
+    def slow(*a, **k):
+        calls.append(a)
+        raise sb.subprocess.TimeoutExpired(cmd=["unshare"], timeout=10)
+
+    monkeypatch.setattr(sb.subprocess, "run", slow)
+    sb.overlay_mode.cache_clear()
+    assert sb.overlay_mode(tmp_path, tmp_path / "home") is None
+    assert len(calls) == 1
+
+
+def test_overlay_mode_probes_with_real_home_as_lowerdir(tmp_path, monkeypatch):
     import imp.engine.sandbox as sb
     monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
     monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
@@ -557,9 +639,9 @@ def test_overlay_available_probes_with_real_home_as_lowerdir(tmp_path, monkeypat
         return _types.SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(sb.subprocess, "run", fake_run)
-    sb.overlay_available.cache_clear()
+    sb.overlay_mode.cache_clear()
     home = tmp_path / "agent-home"
-    assert sb.overlay_available(tmp_path, home) is True
+    assert sb.overlay_mode(tmp_path, home) is True
     mount_cmd = calls["argv"][-1]
     # probes with the REAL home as lowerdir — the same shape the per-command mount
     # in build_sandbox_argv uses — not a synthetic empty lower under the probe dir.
@@ -1073,6 +1155,36 @@ def test_overlay_home_shell_quotes_paths_with_spaces():
     assert "'/a b/merged'" in script               # mount target + bind source quoted
 
 
+def test_overlay_home_userxattr_appends_mount_option():
+    # AC 2a: a userxattr layer moves the opaque marker to user.overlay.*; the
+    # option is appended to the mount options, immediately after workdir=.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work", userxattr=True)
+    pol = _policy(home="/home/u", home_layer=hl)
+    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    script = _unshare_script(argv)
+    assert ("mount -t overlay overlay -o "
+            "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work,userxattr "
+            "/up/merged") in script
+    # the fail-loud contract and the merged-onto-home bind are untouched
+    assert "|| exit 1" in script
+    assert "--bind /up/merged /home/u" in script
+
+
+def test_overlay_home_without_userxattr_emits_no_userxattr_option():
+    # AC 2b: the default layer keeps today's option string byte-for-byte, and
+    # `userxattr` appears NOWHERE in the argv — a pre-v5.11 kernel rejects the
+    # option outright, so it must not leak in.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    assert ("mount -t overlay overlay -o "
+            "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
+            "/up/merged") in _unshare_script(argv)
+    assert not any("userxattr" in a for a in argv)
+
+
 def test_overlay_home_write_mirror_is_dest_keyed():
     # bind_plan keys the home entry by the DEST (home), not the merged source, so
     # allows_write is correct under the overlay too.
@@ -1194,12 +1306,13 @@ def test_overlay_wrapper_passes_the_command_through_shlex_join():
 
 
 def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
-    # AC 1 (unit): the overlay layer creates upper/work/merged on disk and returns
-    # a HomeLayer that reports is_overlay; the cleanup callable removes all three.
+    # AC 5b: userxattr=True creates upper/work/merged, reports is_overlay, and
+    # records the flag; the cleanup callable removes all three.
     upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
     layer, cleanup = make_home_layer(
-        "/home/u", upper=upper, work=work, merged=merged, use_overlay=True)
+        "/home/u", upper=upper, work=work, merged=merged, userxattr=True)
     assert isinstance(layer, HomeLayer) and layer.is_overlay
+    assert layer.userxattr is True
     assert layer.home == "/home/u"
     assert layer.upper == str(upper) and layer.work == str(work)
     assert layer.merged == str(merged)
@@ -1208,13 +1321,26 @@ def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
     assert not upper.exists() and not work.exists() and not merged.exists()
 
 
-def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
-    # AC 8 (unit): the rw fallback layer touches no disk (no overlay dirs) and its
-    # cleanup is a harmless no-op.
+def test_make_home_layer_overlay_without_userxattr(tmp_path):
+    # AC 5b: userxattr=False is still a COW overlay (a pre-v5.11 host keeps home
+    # isolation) — same dirs, same cleanup, flag off.
     upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
     layer, cleanup = make_home_layer(
-        "/home/u", upper=upper, work=work, merged=merged, use_overlay=False)
+        "/home/u", upper=upper, work=work, merged=merged, userxattr=False)
+    assert layer.is_overlay and layer.userxattr is False
+    assert upper.is_dir() and work.is_dir() and merged.is_dir()
+    cleanup()
+    assert not upper.exists() and not work.exists() and not merged.exists()
+
+
+def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
+    # AC 5a: userxattr=None is the rw fallback — no overlay, no disk touched,
+    # cleanup a harmless no-op.
+    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
+    layer, cleanup = make_home_layer(
+        "/home/u", upper=upper, work=work, merged=merged, userxattr=None)
     assert not layer.is_overlay and layer.home == "/home/u"
+    assert layer.userxattr is False
     assert not upper.exists() and not work.exists() and not merged.exists()
     cleanup()  # no-op, must not raise
 

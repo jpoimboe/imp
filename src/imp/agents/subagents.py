@@ -209,14 +209,14 @@ def _attach_isolated_home(
     returned unchanged with cleanup None."""
     if not policy.active or not policy.home:
         return policy, None
-    from imp.engine.sandbox import make_home_layer, overlay_available
+    from imp.engine.sandbox import make_home_layer, overlay_mode
     base = spike_worktree.parent
     layer, cleanup = make_home_layer(
         policy.home,
         upper=base / f"{spike_worktree.name}.overlay-upper",
         work=base / f"{spike_worktree.name}.overlay-work",
         merged=base / f"{spike_worktree.name}.overlay-merged",
-        use_overlay=overlay_available(quest_dir, Path(policy.home)),
+        userxattr=overlay_mode(quest_dir, Path(policy.home)),
     )
     return dataclasses.replace(policy, home_layer=layer), cleanup
 

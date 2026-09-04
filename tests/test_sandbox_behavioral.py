@@ -35,7 +35,7 @@ from imp.engine.sandbox import (
     SandboxPolicy,
     build_sandbox_argv,
     make_home_layer,
-    overlay_available,
+    overlay_mode,
     resolve_policy,
     sandbox_available,
 )
@@ -137,31 +137,40 @@ def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
 _OVERLAY_BASE = Path("/var/tmp")
 
 
-def _probe_overlay_at_base() -> bool:
-    """Probe overlay support at the /var/tmp base, removing the probe dirs after.
-    overlay_available() only rmtrees its own inner .overlay-probe subdir; the
-    mkdtemp'd probe/home parents are cleaned up here. `home` is a separate empty
-    dir (non-overlapping with the probe's scratch layers) so a bare host mounts it
-    cleanly — the same real-home lowerdir shape the per-command mount uses."""
+def _probe_overlay_at_base() -> bool | None:
+    """Probe overlay support at the /var/tmp base, removing the probe dirs after,
+    and return overlay_mode's tri-state: None → no unprivileged overlay here (for
+    ANY reason, including no bwrap and no /var/tmp); True/False → the mount shape
+    this host accepts. overlay_mode() only rmtrees its own inner .overlay-probe
+    subdir; the mkdtemp'd probe/home parents are cleaned up here. `home` is a
+    separate empty dir (non-overlapping with the probe's scratch layers) so a bare
+    host mounts it cleanly — the same real-home lowerdir shape the per-command
+    mount uses."""
     if not sandbox_available() or not _OVERLAY_BASE.is_dir():
-        return False
+        return None
     try:
         probe = Path(tempfile.mkdtemp(prefix="imp-ovl-probe-", dir=_OVERLAY_BASE))
         home = Path(tempfile.mkdtemp(prefix="imp-ovl-home-", dir=_OVERLAY_BASE))
     except OSError:
-        return False
+        return None
     try:
-        return overlay_available(probe, home)
+        return overlay_mode(probe, home)
     finally:
         shutil.rmtree(probe, ignore_errors=True)
         shutil.rmtree(home, ignore_errors=True)
 
 
-_OVERLAY_OK = _probe_overlay_at_base()
+_OVERLAY_MODE: bool | None = _probe_overlay_at_base()
 requires_overlay = pytest.mark.skipif(
-    not _OVERLAY_OK,
+    _OVERLAY_MODE is None,
     reason="unprivileged overlayfs probe at /var/tmp failed (read-only base or "
            "stacked overlay under a nested sandbox)")
+
+
+requires_userxattr_overlay = pytest.mark.skipif(
+    _OVERLAY_MODE is not True,
+    reason="unprivileged overlayfs here does not accept -o userxattr (kernel < v5.11); "
+           "the opaque-marker fix cannot apply")
 
 
 def test_requires_overlay_skip_reason_is_verbatim() -> None:
@@ -189,7 +198,7 @@ def _overlay_home(base: Path, home: Path, *,
     layer, cleanup = make_home_layer(
         str(home),
         upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
-        use_overlay=True)
+        userxattr=_OVERLAY_MODE)
     pol = dataclasses.replace(
         base_pol, home=str(home), writable_caches=writable_caches, home_layer=layer)
     return pol, cleanup
@@ -204,7 +213,7 @@ def _fallback_home(root: Path, home: Path, *,
     base = _active_policy(root, home=home, secret_dirs=secret_dirs)
     layer, _ = make_home_layer(
         str(home), upper=root / "u", work=root / "w", merged=root / "m",
-        use_overlay=False)
+        userxattr=None)
     return dataclasses.replace(base, home=str(home), home_layer=layer)
 
 
@@ -1246,6 +1255,43 @@ def test_overlay_home_caches_write_through_to_real_home() -> None:
             # distinguisher: the non-cache write was captured by the overlay upper,
             # so it is ABSENT from the real home (proves this is not a whole-home leak).
             assert not (home / "captured.txt").exists()
+        finally:
+            cleanup()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@requires_userxattr_overlay
+def test_overlay_home_recreating_a_lower_dir_succeeds() -> None:
+    # Spec AC 1: removing and recreating a directory that exists in the overlay's
+    # LOWER home makes the kernel mark the new upper dir opaque. Unprivileged, it
+    # cannot write trusted.overlay.opaque, so without -o userxattr ovl_set_opaque()
+    # returns EIO and the mkdir fails. With userxattr the marker goes to
+    # user.overlay.opaque and the sequence succeeds.
+    root = _make_overlay_root()
+    try:
+        home = root / "home"
+        proj = home / "proj"
+        proj.mkdir(parents=True)
+        pol, cleanup = _overlay_home(root, home)
+        try:
+            ctx = _ctx(Path(pol.worktree), pol)
+            r = _bash(
+                ctx,
+                'rmdir "$HOME/proj" && echo REMOVED && '
+                'mkdir "$HOME/proj" && echo RECREATED && '
+                'echo FRESH > "$HOME/proj/new.txt" && cat "$HOME/proj/new.txt"')
+            out, err = str(r["stdout"]), str(r["stderr"])
+            assert "Input/output error" not in out + err, (
+                f"overlay opaque marker still unwritable: {out!r} {err!r}")
+            assert r["returncode"] == 0, f"recreate sequence failed: {r}"
+            assert "REMOVED" in out and "RECREATED" in out
+            # the recreated dir is usable, not a half-built inode
+            assert "FRESH" in out
+            # falsifier: this all happened in the discarded upper — the real home's
+            # dir is untouched and never saw the new file.
+            assert proj.is_dir()
+            assert not (proj / "new.txt").exists()
         finally:
             cleanup()
     finally:

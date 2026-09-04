@@ -43,11 +43,13 @@ class HomeLayer:
     """The writable-home layer bound over $HOME for an active-sandbox agent.
     Fallback (rw) shape: only `home` set → a plain `--bind home home`. COW overlay
     shape: merged/upper/work set → bwrap is wrapped with unshare + mount -t
-    overlay (lowerdir=home) and the merged view is bound onto `home`."""
+    overlay (lowerdir=home) and the merged view is bound onto `home`; userxattr
+    records the mount shape overlay_mode negotiated for this host."""
     home: str
     merged: str = ""     # overlay mountpoint bound onto $HOME ("" → plain rw bind of home)
     upper: str = ""      # overlay upperdir (captured writes; discarded at teardown)
     work: str = ""       # overlay workdir
+    userxattr: bool = False  # mount -o userxattr (opaque marker in user.overlay.*)
 
     @property
     def is_overlay(self) -> bool:
@@ -312,11 +314,12 @@ def build_sandbox_argv(
         # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner
         # command (and its sentinel) never runs — sentinel ABSENCE is the sole
         # signal, so no bespoke marker/code is needed.
+        opt = ",userxattr" if hl.userxattr else ""
         mount = (
             f"mount -t overlay overlay -o "
             f"lowerdir={shlex.quote(hl.home)},"
             f"upperdir={shlex.quote(hl.upper)},"
-            f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} "
+            f"workdir={shlex.quote(hl.work)}{opt} {shlex.quote(hl.merged)} "
             f"|| exit 1; "
             f"exec {shlex.join(argv)}"
         )
@@ -436,67 +439,90 @@ def _force_rmtree(path: Path) -> None:
 
 
 @lru_cache(maxsize=1)
-def overlay_available(probe_base: Path, home: Path) -> bool:
-    """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
-    inside a user namespace succeeds using the agent's REAL home as lowerdir.
+def overlay_mode(probe_base: Path, home: Path) -> bool | None:
+    """Whether an unprivileged overlay mounts on this host, and in WHICH shape:
+    None → none does (the caller falls back to a rw bind of the real home);
+    True → mount it with `-o userxattr`; False → mount it without.
+
+    Needs Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
+    inside a user namespace using the agent's REAL home as lowerdir. It probes
+    WITH userxattr first — that keeps the opaque marker in user.overlay.*, which
+    an unprivileged mount can actually write, so removing and recreating a
+    lower-present directory succeeds instead of returning EIO — and re-probes
+    WITHOUT it only when that mount exits nonzero (the option landed in kernel
+    v5.11; older kernels reject the mount outright, and losing the overlay would
+    cost home isolation). The scratch dirs are scrubbed and recreated between the
+    two attempts so the second starts from a clean upper/work. An OSError or
+    SubprocessError (incl. TimeoutExpired) means the host cannot run the probe at
+    all — the second attempt would fail identically — so it short-circuits to None
+    without retrying.
+
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
     real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
     tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
     build_sandbox_argv uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
-    nothing. Cached like sandbox_available(); Part 2 calls this to choose the COW
-    home vs. the rw fallback.
+    nothing. Cached like sandbox_available(); the answer is carried to the
+    per-command mount (via make_home_layer), so probe and spawn always agree.
 
     Tests that monkeypatch subprocess.run / shutil.which / platform.system must
-    call overlay_available.cache_clear() first (the result is process-global
-    cached, keyed on (probe_base, home)).
+    call overlay_mode.cache_clear() first (the result is process-global cached,
+    keyed on (probe_base, home)).
     """
     if platform.system() != "Linux" or shutil.which("unshare") is None:
-        return False
+        return None
     probe = probe_base / ".overlay-probe"
     upper, work, merged = probe / "upper", probe / "work", probe / "merged"
     try:
-        for d in (upper, work, merged):
-            d.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(
-            ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
-             f"mount -t overlay overlay -o "
-             f"lowerdir={shlex.quote(str(home))},"
-             f"upperdir={shlex.quote(str(upper))},"
-             f"workdir={shlex.quote(str(work))} {shlex.quote(str(merged))}"],
-            capture_output=True, timeout=10,
-        )
-        return r.returncode == 0
+        for opt in (",userxattr", ""):
+            _force_rmtree(probe)
+            for d in (upper, work, merged):
+                d.mkdir(parents=True, exist_ok=True)
+            r = subprocess.run(
+                ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
+                 f"mount -t overlay overlay -o "
+                 f"lowerdir={shlex.quote(str(home))},"
+                 f"upperdir={shlex.quote(str(upper))},"
+                 f"workdir={shlex.quote(str(work))}{opt} "
+                 f"{shlex.quote(str(merged))}"],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                return opt == ",userxattr"
+        return None
     except (OSError, subprocess.SubprocessError):
-        return False
+        return None
     finally:
         _force_rmtree(probe)
 
 
 def make_home_layer(
-    home: str, *, upper: Path, work: Path, merged: Path, use_overlay: bool,
+    home: str, *, upper: Path, work: Path, merged: Path, userxattr: bool | None,
 ) -> tuple[HomeLayer, Callable[[], None]]:
     """Build one invocation's writable-home layer + its teardown callable.
-    use_overlay=True → a COW overlay: create upper/work/merged and return a
-    HomeLayer that build_sandbox_argv wraps with unshare + mount -t overlay
-    (lowerdir=home); the returned cleanup rmtrees the three dirs. use_overlay=False
-    → a plain rw bind of the real home (fallback): no dirs are created and cleanup
-    is a no-op. The CALLER decides use_overlay (via overlay_available at its own
-    probe location) and chooses where the dirs live, so this primitive is shared by
-    the executor (dirs sibling to transcript_dir) and the isolated-subagent path
+    `userxattr` is overlay_mode's tri-state. None → a plain rw bind of the real
+    home (fallback): no dirs are created and cleanup is a no-op. True/False → a
+    COW overlay: create upper/work/merged and return a HomeLayer that
+    build_sandbox_argv wraps with unshare + mount -t overlay (lowerdir=home),
+    carrying the flag so the per-command mount uses the exact shape the probe
+    validated; the returned cleanup rmtrees the three dirs. One tri-state rather
+    than an on/off flag paired with userxattr, so a non-overlay layer claiming
+    userxattr cannot be constructed. The CALLER probes (overlay_mode at its own probe
+    location) and chooses where the dirs live, so this primitive is shared by the
+    executor (dirs sibling to transcript_dir) and the isolated-subagent path
     (dirs sibling to the spike worktree)."""
-    if use_overlay:
+    if userxattr is None:
+        return HomeLayer(home=home), (lambda: None)
+    for d in (upper, work, merged):
+        d.mkdir(parents=True, exist_ok=True)
+    layer = HomeLayer(home=home, merged=str(merged), upper=str(upper),
+                      work=str(work), userxattr=userxattr)
+
+    def cleanup() -> None:
         for d in (upper, work, merged):
-            d.mkdir(parents=True, exist_ok=True)
-        layer = HomeLayer(home=home, merged=str(merged),
-                          upper=str(upper), work=str(work))
+            _force_rmtree(d)
 
-        def cleanup() -> None:
-            for d in (upper, work, merged):
-                _force_rmtree(d)
-
-        return layer, cleanup
-    return HomeLayer(home=home), (lambda: None)
+    return layer, cleanup
 
 
 def _existing(paths: list[str]) -> tuple[str, ...]:
