@@ -313,6 +313,46 @@ def test_append_creates_missing_parent_and_persists(tmp_path: Path) -> None:
     assert _read(parent / "e.jsonl") == [ev]   # AC2: record persisted on write path
 
 
+def test_jsonl_usage_patch_row_carries_context_window(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 82628},
+        context_tokens=22389, context_window=258400)
+    patch = next(e for e in _read(tmp_path / "e.jsonl")
+                 if e["type"] == "agent_message_usage_patch")
+    # The on-disk row stays bare — no id/parent_id/timestamp — so existing
+    # readers and archived quests are untouched.
+    assert set(patch) == {"type", "agent_id", "payload"}
+    assert patch["payload"]["context_tokens"] == 22389
+    assert patch["payload"]["context_window"] == 258400
+    assert patch["payload"]["usage"]["input_tokens"] == 82628
+
+
+def test_jsonl_usage_patch_row_omits_context_window_when_none(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 5}, context_tokens=1000)
+    patch = next(e for e in _read(tmp_path / "e.jsonl")
+                 if e["type"] == "agent_message_usage_patch")
+    assert "context_window" not in patch["payload"]
+
+
+def test_in_memory_patch_lands_context_window_on_agent_message() -> None:
+    log = InMemoryEventLog()
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 82628},
+        context_tokens=22389, context_window=258400)
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
+    assert resp["payload"]["context_window"] == 258400
+    assert resp["payload"]["context_tokens"] == 22389
+
+
 def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:
     # .imp/quests/ exists (other quests live here) but this quest's home was rmtree'd.
     quests_root = project_state_dir(tmp_path) / "quests"
