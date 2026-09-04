@@ -33,6 +33,10 @@ from typing import Literal
 
 # ── render_config_toml ──────────────────────────────────────────────────────
 
+# Codex's per-call default is 300s; pinned high because imp bounds its own calls.
+_TOOL_TIMEOUT_SEC = 86400
+
+
 def render_config_toml(
     *, host: str, port: int, bearer_env_var: str, web_search_enabled: bool,
     impty_url: str | None = None, impty_bearer_env_var: str | None = None,
@@ -43,7 +47,9 @@ def render_config_toml(
     `web_search` control, and — when the agent holds the impty driver — a second
     in-process HTTP MCP server block for impty (url + bearer-token env var). impty
     is hosted in-process on its own ephemeral port, identical in shape to the imp
-    server, NOT as a stdio command/args block.
+    server, NOT as a stdio command/args block. Both server blocks pin
+    `tool_timeout_sec`: codex's per-call default would otherwise cap every imp and
+    impty tool call at five minutes.
 
     `web_search` lives here (not in SDK options) because codex >=0.137 deprecated
     the SDK-emitted `features.web_search_request` key. A top-level key must precede
@@ -57,6 +63,7 @@ def render_config_toml(
             "[mcp_servers.impty]\n"
             f'url = "{impty_url}"\n'
             f'bearer_token_env_var = "{impty_bearer_env_var}"\n'
+            f"tool_timeout_sec = {_TOOL_TIMEOUT_SEC}\n"
         )
     return (
         f'web_search = "{web_search}"\n'
@@ -64,6 +71,7 @@ def render_config_toml(
         "[mcp_servers.imp]\n"
         f'url = "http://{host}:{port}/mcp"\n'
         f'bearer_token_env_var = "{bearer_env_var}"\n'
+        f"tool_timeout_sec = {_TOOL_TIMEOUT_SEC}\n"
         "\n"
         "[features]\n"
         "shell_tool = false\n"

@@ -1,3 +1,4 @@
+import tomllib
 
 from imp.providers.codex_config import render_config_toml
 
@@ -45,3 +46,23 @@ def test_config_toml_no_impty_block_when_not_active() -> None:
     txt = render_config_toml(host="127.0.0.1", port=1,
                              bearer_env_var="X", web_search_enabled=False)
     assert "[mcp_servers.impty]" not in txt
+
+
+def test_config_toml_pins_the_per_call_tool_timeout_in_both_server_blocks() -> None:
+    # Codex applies tool_timeout_sec per MCP server as a plain wall clock and
+    # defaults to 300s, which would cut off any longer imp or impty tool call.
+    txt = render_config_toml(
+        host="127.0.0.1", port=49152, bearer_env_var="IMP_MCP_TOKEN",
+        web_search_enabled=False, impty_url="http://127.0.0.1:55001/mcp",
+        impty_bearer_env_var="IMP_IMPTY_TOKEN")
+    cfg = tomllib.loads(txt)
+    assert cfg["mcp_servers"]["imp"]["tool_timeout_sec"] == 86400
+    assert cfg["mcp_servers"]["impty"]["tool_timeout_sec"] == 86400
+
+
+def test_config_toml_pins_the_imp_tool_timeout_without_an_impty_block() -> None:
+    txt = render_config_toml(host="127.0.0.1", port=1,
+                             bearer_env_var="X", web_search_enabled=False)
+    cfg = tomllib.loads(txt)
+    assert cfg["mcp_servers"]["imp"]["tool_timeout_sec"] == 86400
+    assert "impty" not in cfg["mcp_servers"]
