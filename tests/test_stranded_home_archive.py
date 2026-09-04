@@ -11,6 +11,7 @@ import pytest
 import imp.cli.main as m
 from imp.cli.main import main
 from imp.cli.store import _archive_stranded_home, make_store
+from imp.engine import archive
 from imp.engine.archive import read as archive_read
 from imp.engine.archive.maintenance import reap_archived_homes
 from imp.engine.quest import LAYOUT_VERSION, Quest
@@ -165,3 +166,22 @@ def test_stale_layout_home_migrates_then_archives(tmp_path: Path) -> None:
     assert json.loads(
         archive_read.read_quest_json(tmp_path, "stale") or b"{}"
     )["layout_version"] == LAYOUT_VERSION
+
+
+def test_failed_archiving_does_not_abort_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _home(tmp_path, "brokn", "merged")
+    _home(tmp_path, "fine", "merged")
+    real = archive.archive_quest
+
+    def _boom(control: Path, quest_id: str, **kw: object) -> None:
+        if quest_id == "brokn":
+            raise RuntimeError("blob store unavailable")
+        real(control, quest_id, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(archive, "archive_quest", _boom)
+    ids = {h.quest_id for h in make_store(tmp_path).scan_homes()}
+    assert ids == {"brokn", "fine"}
+    assert archive_read.is_archived(tmp_path, "fine")
+    assert not archive_read.is_archived(tmp_path, "brokn")

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass
@@ -142,7 +143,10 @@ class LocalStore:
                 state_json = None
             lock_live = lock_is_live(cdir / "lock")
             if state_json is not None and not lock_live:
-                _archive_stranded_home(self.control_root, quest_id, cdir, state_json)
+                # one unarchivable home must not abort the whole listing
+                with contextlib.suppress(Exception):
+                    _archive_stranded_home(
+                        self.control_root, quest_id, cdir, state_json)
             events_path = cdir / "events.jsonl"
             last_iso = _last_event_iso(events_path) or ""
             has_um = _events_have_user_message(events_path)
