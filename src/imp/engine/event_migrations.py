@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""One-shot old→new event-log transform (pre-triad → triad schema)."""
+"""One-shot old→new event-log transforms."""
 
 from __future__ import annotations
 
@@ -121,4 +121,34 @@ def migrate_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 out.append(new)
         else:
             out.append(ev)
+    return out
+
+
+def migrate_id_ns_event_to_block(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One-shot: restamp the deleted "event" id_ns namespace as "block" (goza26).
+    Gating the tool_call stamp on the set of event-stamped RESULT ids leaves a
+    genuinely-legacy pre-id_ns log (unstamped on both sides) untouched, so it keeps
+    taking the renderer's `id_ns is None` ordered probe. Returns a new list; a second
+    run is a no-op, which the archive's `migrated != events` check depends on."""
+    result_ids: set[str] = set()
+    for event in events:
+        payload = event.get("payload") or {}
+        if event.get("type") == "tool_result" and payload.get("id_ns") == "event":
+            rid = payload.get("id")
+            if isinstance(rid, str):
+                result_ids.add(rid)
+    out: list[dict[str, Any]] = []
+    for event in events:
+        payload = event.get("payload") or {}
+        etype = event.get("type")
+        restamp = (
+            (etype == "tool_result" and payload.get("id_ns") == "event")
+            or (etype == "tool_call" and payload.get("name") == "sub_agent"
+                and "id_ns" not in payload and payload.get("id") in result_ids))
+        if restamp:
+            new = dict(event)
+            new["payload"] = {**payload, "id_ns": "block"}
+            out.append(new)
+        else:
+            out.append(event)
     return out

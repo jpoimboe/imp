@@ -95,9 +95,18 @@ class StderrSink:
             self._open_failed = True
 
     def tail(self) -> str | None:
+        # Dedup lines so the 2 KiB window isn't ~22 copies of one provider startup warning.
         if not self._tail:
             return None
-        return self._tail.decode("utf-8", errors="replace")
+        seen: set[str] = set()
+        kept: list[str] = []
+        for line in self._tail.decode("utf-8", errors="replace").splitlines(keepends=True):
+            key = line.rstrip("\n")
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(line)
+        return "".join(kept)
 
     def close(self) -> None:
         already = self._closed
@@ -140,8 +149,7 @@ def build_stderr_sink(
 ) -> StderrSink:
     """Wire close()-time Warning/Error span extraction into elog as runner_warning events."""
     def _on_warning(message: str) -> None:
-        elog.append(agent_id=aid, type="runner_warning",
-                    payload={"message": message})
+        elog.append_stderr_warning(agent_id=aid, message=message)
     return StderrSink(path, on_warning=_on_warning, source=source)
 
 

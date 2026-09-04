@@ -326,3 +326,32 @@ def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:
     assert log.tail(10) == []
 
     assert not home.exists()            # AC6: the rmtree'd home was NOT recreated
+
+
+def test_stderr_warning_already_in_history_is_not_re_emitted(tmp_path: Path) -> None:
+    # The `imp resume` case: a new process builds an EventLog over an existing log
+    # that already carries the warning, so the run-scoped set is seeded from disk.
+    path = tmp_path / "e.jsonl"
+    first = JsonlEventLog(path)
+    first.append_stderr_warning(agent_id="step:p/s1", message="codex stderr: boom")
+    assert [e["type"] for e in _read(path)] == ["runner_warning"]
+
+    resumed = JsonlEventLog(path)
+    resumed.append_stderr_warning(agent_id="step:p/s2", message="codex stderr: boom")
+    resumed.append_stderr_warning(agent_id="step:p/s2", message="codex stderr: other")
+
+    warns = [e["payload"]["message"] for e in _read(path)
+             if e["type"] == "runner_warning"]
+    assert warns == ["codex stderr: boom", "codex stderr: other"]
+
+
+def test_repeated_validation_failures_are_not_deduped(tmp_path: Path) -> None:
+    # Write-side validation failures keep emitting: a repeated one is signal, and it
+    # never goes through the deduping stderr path.
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append(agent_id="A", type="tool_call", payload={})
+    log.append(agent_id="A", type="tool_call", payload={})
+    warns = [e["payload"]["message"] for e in _read(tmp_path / "e.jsonl")
+             if e["type"] == "runner_warning"]
+    assert len(warns) == 2
+    assert warns[0] == warns[1]

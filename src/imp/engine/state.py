@@ -397,6 +397,8 @@ class EventLog(Protocol):
                             errors: Any = None) -> dict[str, Any]: ...
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
+    def append_stderr_warning(self, *, agent_id: str | None,
+                              message: str) -> None: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
     def tail(self, n: int) -> list[dict[str, Any]]: ...
     def update_last_agent_message_usage(
@@ -413,14 +415,20 @@ class _BaseEventLog:
         self._on_event = on_event
         self._strict = strict
         self._last: dict[str, str] = {}   # agent_id → last event id (non-None only)
-        self._rebuild_chain()
+        self._seen_stderr_warnings: set[str] = set()
+        self._rebuild_from_history()
 
-    def _rebuild_chain(self) -> None:
+    def _rebuild_from_history(self) -> None:
         for e in self.read():
             aid = e.get("agent_id")
             eid = e.get("id")
             if aid is not None and isinstance(eid, str):
                 self._last[aid] = eid
+            payload = e.get("payload")
+            if e.get("type") == "runner_warning" and isinstance(payload, dict):
+                message = payload.get("message")
+                if isinstance(message, str):
+                    self._seen_stderr_warnings.add(message)
 
     # --- core emit -----------------------------------------------------------
 
@@ -574,8 +582,8 @@ class _BaseEventLog:
         # treated as "no citations" — never write an empty array.
         if citations:
             payload["citations"] = citations
-        # §3 fold-probe namespace marker for task results ("block"/"event"); absent
-        # on legacy and non-task results so the ordered two-dict probe still fires.
+        # §3 fold-probe namespace marker for task results ("block"); absent on legacy
+        # and non-task results so the ordered two-dict probe still fires.
         if id_ns is not None:
             payload["id_ns"] = id_ns
         if kind is not None:
@@ -615,6 +623,15 @@ class _BaseEventLog:
     def append(self, *, agent_id: str | None, type: str,
                payload: Any) -> dict[str, Any]:
         return self._emit(agent_id=agent_id, type=type, payload=payload)
+
+    def append_stderr_warning(self, *, agent_id: str | None,
+                              message: str) -> None:
+        """Dedup run-wide: one sink per agent step, so an unchanging warning would repeat."""
+        if message in self._seen_stderr_warnings:
+            return
+        self._seen_stderr_warnings.add(message)
+        self._emit(agent_id=agent_id, type="runner_warning",
+                   payload={"message": message})
 
     # --- abstract ------------------------------------------------------------
 

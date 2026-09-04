@@ -49,10 +49,13 @@ def test_task_item_started_opens_fold_keyed_on_sdk_id() -> None:
     assert len(calls) == 1
     assert calls[0]["payload"]["id"] == "item_1"
     assert calls[0]["payload"]["name"] == "sub_agent"
+    # Block-tracked: the renderer reads awaits_result from the CALL, so an
+    # unstamped call leaves the fold vulnerable to an early resume-close.
+    assert calls[0]["payload"]["id_ns"] == "block"
     assert [e for e in elog.read() if e["type"] == "tool_result"] == []
 
 
-def test_task_item_completed_closes_fold_same_id_id_ns_event() -> None:
+def test_task_item_completed_closes_fold_same_id_id_ns_block() -> None:
     elog = InMemoryEventLog()
     run_state = RunState(cap=100)
     args = {"subagent_name": "impl", "task_description": "x"}
@@ -65,7 +68,8 @@ def test_task_item_completed_closes_fold_same_id_id_ns_event() -> None:
     assert len(calls) == 1                              # completed does NOT re-open
     assert len(results) == 1
     assert results[0]["payload"]["id"] == "item_1"      # pairs to the started id
-    assert results[0]["payload"]["id_ns"] == "event"
+    assert results[0]["payload"]["id_ns"] == "block"    # same namespace as the call
+    assert calls[0]["payload"]["id_ns"] == "block"      # symmetric stamp
     assert results[0]["payload"]["error"] is False
 
 
@@ -98,7 +102,7 @@ def test_task_completed_without_started_emits_lone_result() -> None:
     assert [e for e in rows if e["type"] == "tool_call"] == []
     res = [e for e in rows if e["type"] == "tool_result"]
     assert len(res) == 1 and res[0]["payload"]["id"] == "item_9"
-    assert res[0]["payload"]["id_ns"] == "event"
+    assert res[0]["payload"]["id_ns"] == "block"
 
 
 def test_non_task_item_completed_still_emits_call_and_result() -> None:
@@ -113,6 +117,7 @@ def test_non_task_item_completed_still_emits_call_and_result() -> None:
     assert len([e for e in rows if e["type"] == "tool_call"]) == 1
     assert len([e for e in rows if e["type"] == "tool_result"]) == 1
     assert "id_ns" not in next(e for e in rows if e["type"] == "tool_result")["payload"]
+    assert "id_ns" not in next(e for e in rows if e["type"] == "tool_call")["payload"]
 
 
 def test_preamble_prose_agent_message_precedes_tool_calls() -> None:
