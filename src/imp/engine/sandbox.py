@@ -261,9 +261,21 @@ def build_sandbox_argv(
     the IMP_ prefix plus PYTHONPATH (`_is_engine_passthrough`): any new IMP_* var
     flows through with no edit here, and PYTHONPATH passes through as the single
     deliberate non-IMP_ exception — the imp-on-imp import shadow — matching
-    `_build_setenv`."""
+    `_build_setenv`.
+
+    An ACTIVE policy carrying overlay_root with an un-minted home layer is a
+    fail-open bug (it would bind the real $HOME rw) and raises; the INACTIVE
+    variant of that same shape is the reachable `/sandbox off` case and is fine."""
     if not policy.active:
         return ["sh", "-c", command]
+
+    if (policy.overlay_root and policy.home_layer is not None
+            and not policy.home_layer.is_overlay):
+        # Fail CLOSED: this policy skipped prepare_spawn_policy, so the rw home
+        # bind would expose the REAL $HOME instead of an overlay merged view.
+        raise AssertionError(
+            f"active policy carries overlay_root {policy.overlay_root!r} with an "
+            f"un-minted home layer; spawn through prepare_spawn_policy")
 
     argv: list[str] = ["bwrap"]
     # 1. whole host readable

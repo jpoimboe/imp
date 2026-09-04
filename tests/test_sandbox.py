@@ -1419,6 +1419,16 @@ def test_prepare_spawn_policy_mints_nothing_without_an_overlay_root():
     assert argv[0] == "bwrap"          # no unshare/mount wrapper
 
 
+def test_active_overlay_root_without_a_minted_layer_is_fatal(tmp_path):
+    # AC 2a: the fail-OPEN shape — an ACTIVE policy carrying overlay_root but a
+    # layer that was never minted — would emit `--bind /home/u /home/u`, binding
+    # the REAL $HOME writable with no overlay at all. Refuse to build that argv.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                  overlay_root=str(tmp_path / "coder.overlay"))
+    with pytest.raises(AssertionError, match="overlay_root"):
+        build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+
+
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
     home = project_state_dir(control) / "quests" / "abc"
