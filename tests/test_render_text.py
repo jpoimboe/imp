@@ -1788,6 +1788,46 @@ def test_caret_escape_only_touches_control_bytes_in_mixed_string() -> None:
     assert rt._caret_escape("a\x07b\x1bc\nd") == "a^Gb^[c\nd"
 
 
+def test_fence_spans_finds_backtick_tilde_and_unclosed_blocks() -> None:
+    lines = ["a", "```", "x", "```", "b", "~~~~", "y", "~~~~", "c", "```", "z"]
+    # (opening-delimiter index, exclusive end of content, exclusive end of block);
+    # the last fence is unclosed and runs to end of text.
+    assert rt._fence_spans(lines) == [
+        rt._Fence(1, 3, 4), rt._Fence(5, 7, 8), rt._Fence(9, 11, 11)]
+
+
+def test_fence_spans_ignores_indented_code_and_mismatched_closers() -> None:
+    # A four-space indented code block is not a fence.
+    assert rt._fence_spans(["    ```", "x", "    ```"]) == []
+    # Three spaces still opens one.
+    assert rt._fence_spans(["   ```", "x", "   ```"]) == [rt._Fence(0, 2, 3)]
+    # A shorter run of the same char does not close a longer opener.
+    assert rt._fence_spans(["````", "```", "x", "````"]) == [rt._Fence(0, 3, 4)]
+    # A tilde run does not close a backtick fence.
+    assert rt._fence_spans(["```", "~~~", "x"]) == [rt._Fence(0, 3, 3)]
+    # A closer may be indented independently of the opener.
+    assert rt._fence_spans(["```", "x", "   ```"]) == [rt._Fence(0, 2, 3)]
+    # An info string means the line is not a closer, so this fence stays open.
+    assert rt._fence_spans(["```", "```python", "x"]) == [rt._Fence(0, 3, 3)]
+
+
+def test_fence_spans_rejects_a_backtick_opener_whose_info_string_has_a_backtick() -> None:
+    # CommonMark forbids a backtick in a backtick fence's info string, so this is a
+    # paragraph holding a code span. Treating it as an opener would shift every later
+    # span and strand a real mockup outside a fence.
+    assert rt._fence_spans(["```x``` is the flag", "", "prose"]) == []
+    # An ordinary info string still opens one, and the rule is backtick-only.
+    assert rt._fence_spans(["```python", "code", "```"]) == [rt._Fence(0, 2, 3)]
+    assert rt._fence_spans(["~~~a`b", "x", "~~~"]) == [rt._Fence(0, 2, 3)]
+
+
+def test_strip_sgr_drops_color_codes_and_keeps_every_other_escape() -> None:
+    assert rt._strip_sgr("\x1b[1;33m▌ imp\x1b[0m done") == "▌ imp done"
+    assert rt._strip_sgr("\x1b[38;2;10;20;200mtruecolor\x1b[m") == "truecolor"
+    # Not SGR: cursor move, screen clear, OSC, BEL — untouched.
+    assert rt._strip_sgr("\x1b[5A\x1b[2J\x1b]0;t\x07") == "\x1b[5A\x1b[2J\x1b]0;t\x07"
+
+
 def test_full_tool_result_and_args_control_bytes_become_caret() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",

@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 import textwrap
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, NamedTuple
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
@@ -72,6 +73,50 @@ def _caret_escape(text: str) -> str:
         else:
             out.append(ch)
     return "".join(out)
+
+
+_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+_FENCE_OPEN_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
+_FENCE_CLOSE_RE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*$")
+
+
+class _Fence(NamedTuple):
+    start: int      # line index of the opening delimiter
+    body_end: int   # exclusive end of the content lines
+    end: int        # exclusive end of the whole block
+
+
+def _strip_sgr(text: str) -> str:
+    return _SGR_RE.sub("", text)
+
+
+def _fence_spans(lines: list[str]) -> list[_Fence]:
+    """The one definition of "inside a fence" — CommonMark fenced code blocks, by
+    line index. A four-space indented code block is not a fence; an unclosed fence
+    runs to end of text. Both the escaping sibling and the rich placeholder splice
+    consume this, so they cannot disagree."""
+    out: list[_Fence] = []
+    i, n = 0, len(lines)
+    while i < n:
+        opened = _FENCE_OPEN_RE.match(lines[i])
+        # CommonMark forbids a backtick in a backtick fence's info string, so such a
+        # line is a paragraph with a code span — treating it as an opener would shift
+        # every later span and strand a real mockup outside a fence.
+        if opened is None or (opened.group(1)[0] == "`"
+                              and "`" in lines[i][opened.end():]):
+            i += 1
+            continue
+        marker = opened.group(1)
+        j = i + 1
+        while j < n:
+            closed = _FENCE_CLOSE_RE.match(lines[j])
+            if (closed is not None and closed.group(1)[0] == marker[0]
+                    and len(closed.group(1)) >= len(marker)):
+                break
+            j += 1
+        out.append(_Fence(i, j, min(j + 1, n)))
+        i = min(j + 1, n)
+    return out
 
 
 def fmt_seconds(seconds: float | int | None) -> str:
