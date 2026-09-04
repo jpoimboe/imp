@@ -591,11 +591,10 @@ def test_run_verify_log_is_named_for_the_quest_id_and_overwritten(tmp_path: Path
 
 
 def test_run_verify_comments_do_not_claim_the_event_log_holds_the_output() -> None:
-    """The header contract is the only description of where a failing run's output
-    goes. It claimed the event log, which never held it — no show_output on this
-    step means nothing emits the merged text."""
+    """Naming the event log in a comment is fine; claiming the gate run's output
+    is *retained* there is not."""
     body = (_scripts_dir() / "run-verify.sh").read_text()
-    assert "event log" not in body
+    assert not re.search(r"retained[^\n]*event log", body)
     assert "artifacts/verify/$IMP_QUEST_ID.md" in body
     assert "the only complete record" in body
     assert "imp show <id> verify" in body
