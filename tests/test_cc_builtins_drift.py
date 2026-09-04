@@ -206,6 +206,7 @@ def _probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[s
     empty registry."""
     t0 = time.monotonic()
     notes: list[str] = []
+    attempt_stderrs: list[tuple[int, str]] = []
     for attempt in range(1, _PROBE_ATTEMPTS + 1):
         start = time.monotonic()
         frame, state, stderr_text = _spawn_and_read_init(cli, deny, cwd)
@@ -213,18 +214,22 @@ def _probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[s
             break
         state_text = "process still running" if state is None else f"process exited {state}"
         notes.append(f"#{attempt} {state_text} after {time.monotonic() - start:.1f}s")
+        attempt_stderrs.append((attempt, stderr_text))
         if attempt < _PROBE_ATTEMPTS:
             time.sleep(_PROBE_RETRY_BACKOFF)
 
     if frame is None:
         total_elapsed = time.monotonic() - t0
+        stderr_sections = "\n".join(
+            f"CLI stderr (attempt {n}):\n{s}" for n, s in attempt_stderrs
+        )
         raise AssertionError(
             f"No init frame from the claude CLI after {_PROBE_ATTEMPTS} attempts"
             f" in {total_elapsed:.1f}s ({state_text}).\n"
-            "Startup shells out to git and calls the API before init, so a stall here is\n"
-            "the CLI's environment, not imp's deny posture.\n"
+            "Node startup, an rg --files scan, a ps aux, and a deferred git config precede init,\n"
+            "so a stall here is the CLI's environment, not imp's deny posture.\n"
             f"Attempts: {', '.join(notes)}\n"
-            f"CLI stderr:\n{stderr_text}"
+            f"{stderr_sections}"
         )
 
     advertised: set[str] = set()
@@ -399,4 +404,6 @@ def test_probe_retries_when_the_cli_dies_before_init(
     message = str(excinfo.value)
     assert "process exited 1" in message
     assert "died-early-stderr" in message
+    assert "CLI stderr (attempt 1):" in message
+    assert f"CLI stderr (attempt {_PROBE_ATTEMPTS}):" in message
     assert len(spawns.read_text().splitlines()) == _PROBE_ATTEMPTS
