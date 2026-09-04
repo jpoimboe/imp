@@ -560,6 +560,18 @@ def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None
     print()
 
 
+def _emit_lost_connection(quest: Quest) -> None:
+    """The client's event stream faulted: report the ending it saw, never a state it didn't."""
+    from imp.cli.store import _resolve_intent
+    color = should_use_color(sys.stdout)
+    body = [f"It may still be running — `imp resume {quest.id}` to reattach."]
+    intent = _resolve_intent(list(quest.event_log().read()))
+    for ln in _error_block("lost the connection to the run", body, quest.id,
+                           quest.title, color=color, intent=intent):
+        print(ln)
+    print()
+
+
 def _handle_terminal_outcome(
     quest: Quest, outcome: SettledOutcome, coord: Any,
 ) -> int:
@@ -567,7 +579,7 @@ def _handle_terminal_outcome(
     (never re-reads state.json or re-derives the settled outcome)."""
     from imp.cli.store import _resolve_intent
     if outcome.completed:
-        merged = any(ev.get("type") == "quest_merged" for ev in outcome.events)
+        merged = outcome.status == "merged"
         _emit_completed(quest, merged=merged, intent=_resolve_intent(outcome.events))
         return 0
     if outcome.status == "merge_blocked":

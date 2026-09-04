@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-_MAX_FRAME = 1 << 20  # exceeding this raises DelimiterNotFound and silently detaches the client
+_MAX_FRAME = 1 << 20  # hard wire cap: encode_event clips event frames to fit under it
 
 SET_LEASE = "set-lease"
 
@@ -124,8 +124,26 @@ def encode_result_error(message: str) -> str:
     return json.dumps({"kind": "result", "ok": False, "error": message})
 
 
+def _clip_strings(value: Any, limit: int) -> Any:
+    """Shrink string leaves to `limit` chars; keys, nesting and non-strings are untouched."""
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[:limit] + "… [clipped]"
+    if isinstance(value, dict):
+        return {k: _clip_strings(v, limit) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clip_strings(v, limit) for v in value]
+    return value
+
+
 def encode_event(event: dict[str, Any]) -> str:
-    return json.dumps({"kind": "event", "event": event})
+    budget = _MAX_FRAME - 1  # the caller appends the newline
+    line = json.dumps({"kind": "event", "event": event})
+    limit = budget
+    # JSON escaping makes a clip's byte saving unknowable up front, so halve until it fits.
+    while len(line.encode("utf-8")) > budget and limit > 0:
+        limit //= 2
+        line = json.dumps({"kind": "event", "event": _clip_strings(event, limit)})
+    return line
 
 
 def parse_client_message(line: str) -> ClientMessage:

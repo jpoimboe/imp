@@ -10,9 +10,10 @@ import pytest
 from anyio.abc import SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
-from imp.remote.session.protocol import encode_attach, parse_event
+from imp.remote.session.protocol import _MAX_FRAME, encode_attach, parse_event
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import ReplaySnapshot
+from tests.async_wait import HANG_BACKSTOP
 
 
 def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
@@ -245,3 +246,50 @@ def test_replay_marker_does_not_change_rendering() -> None:
     plain = list(render_tree(build_tree(events), full=False, color=False, width=80))
     with_marker = list(render_tree(build_tree(marked), full=False, color=False, width=80))
     assert with_marker == plain
+
+
+@pytest.mark.anyio
+async def test_replay_of_an_oversized_event_stays_within_the_frame_cap(
+    tmp_path: Path,
+) -> None:
+    events_path = tmp_path / "events.jsonl"
+    sock = str(tmp_path / "s.sock")
+    huge = "x" * (2 << 20)
+    recs = [
+        {"id": "e0", "type": "quest_created", "payload": {"id": "x"}},
+        {"id": "e1", "type": "tool_call",
+         "payload": {"id": "t1", "name": "write_file",
+                     "input": {"path": "big.txt", "content": huge}}},
+        {"id": "e2", "type": "step_started", "payload": {"step": "spec"}},
+    ]
+    _write_jsonl(events_path, recs)
+
+    frames = ReplaySnapshot.capture(events_path).wire_bytes().split(b"\n")[:-1]
+    assert len(frames) == 4                       # 3 records + the replay_complete boundary
+    assert all(len(f) + 1 <= _MAX_FRAME for f in frames)
+
+    done = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await done.wait()
+        return "ok"
+
+    server = SessionServer(sock, events_path=events_path)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve, run_fn)
+        client = await _attach(sock, "c1")
+        buf = BufferedByteReceiveStream(client)
+        seen: list[dict[str, Any]] = []
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+            while len(seen) < 4:
+                seen.append(parse_event(
+                    (await buf.receive_until(b"\n", _MAX_FRAME)).decode()))
+        # every replayed event reaches the client, oversized one included
+        assert [s.get("id") for s in seen] == ["e0", "e1", "e2", None]
+        assert seen[3] == {"type": "replay_complete"}
+        assert seen[1]["payload"]["input"]["content"].endswith("… [clipped]")
+        assert seen[1]["payload"]["input"]["path"] == "big.txt"
+        done.set()
+        await client.aclose()
+        tg.cancel_scope.cancel()

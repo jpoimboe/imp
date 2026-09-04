@@ -459,11 +459,11 @@ def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:
     assert capsys.readouterr().out == ""
 
 
-def test_handle_terminal_outcome_merged_event_yields_merged_true(monkeypatch) -> None:
-    events = [
-        {"type": "quest_merged", "payload": {"base": "master", "commit": "abc123"}},
-        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
-    ]
+def test_handle_terminal_outcome_derives_merged_from_the_recorded_status(
+    monkeypatch,
+) -> None:
+    # No quest_merged event anywhere: the recorded status is the whole answer.
+    events = [{"type": "step_started", "payload": {"step": "s", "kind": "agent"}}]
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
@@ -474,12 +474,12 @@ def test_handle_terminal_outcome_merged_event_yields_merged_true(monkeypatch) ->
     assert captured["merged"] is True
 
 
-def test_handle_terminal_outcome_no_merged_event_yields_merged_false(
+def test_handle_terminal_outcome_done_status_is_not_merged_despite_the_event(
     monkeypatch,
 ) -> None:
     events = [
+        {"type": "quest_merged", "payload": {"base": "master", "commit": "abc123"}},
         {"type": "workflow_completed", "payload": {}},
-        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
     ]
     captured: dict = {}
     monkeypatch.setattr(

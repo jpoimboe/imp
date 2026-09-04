@@ -21,6 +21,7 @@ from imp.engine import archive
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
+from imp.remote.session.client import StreamEnding
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 from tests.async_wait import HANG_BACKSTOP, wait_until
@@ -105,7 +106,9 @@ def test_resolve_settled_outcome_status_none_when_nothing_persisted(tmp_path: Pa
 @pytest.mark.anyio
 async def test_run_session_client_answers_gate_and_returns_completed_rc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
     quest = _make_quest(tmp_path, "2026-06-15-run")
     # The on-disk terminal state the client reads once the daemon exits.
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
@@ -153,8 +156,13 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
             await wait_until(lambda: "rc" in rc_holder)
             tg.cancel_scope.cancel()
 
+    out = capsys.readouterr().out
     assert answered == ["imp"]
     assert rc_holder["rc"] == 0
+    # The run's live event log holds no quest_merged event; the recorded status
+    # is what names the base branch.
+    assert "merged into main" in out
+    assert "done · commits on" not in out
 
 
 @pytest.mark.anyio
@@ -537,7 +545,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
     captured = capsys.readouterr()
     assert rc == 0                                    # NOT rc=3: the run had completed
     assert "startup failed" not in (captured.out + captured.err)
-    assert "merged into main" in captured.out         # rendered through the resolver's events
+    assert "merged into main" in captured.out         # rendered from the archived record's status
 
 
 @pytest.mark.anyio
@@ -958,7 +966,7 @@ def test_terminal_rendering_merged_from_archive_when_home_reaped(
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert rc == 0
-    assert lines[0] == "merged into main"     # merged=True from the archived quest_merged event
+    assert lines[0] == "merged into main"     # merged=True from the archived record's status
     assert "done · commits on" not in out     # not the unmerged headline
     # the opening intent, too, comes from the archived blob
     assert lines[1] == "2026-07-03-render · > resolve me from archive"
@@ -1238,3 +1246,139 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
 
     assert rc == 0
     assert coord._ack_hook is None                # never registered in a headless run
+
+
+async def _faulted(**_kwargs: Any) -> StreamEnding:
+    return StreamEnding.FAULT
+
+
+@pytest.mark.anyio
+async def test_stream_fault_with_merged_state_renders_the_completed_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The daemon finished in the milliseconds after the fault (the behi75 case).
+    quest = _make_quest(tmp_path, "2026-07-04-fault-merged")
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+        quest.state_dir)
+    quest.event_log().append(agent_id=None, type="quest_merged", payload={})
+    monkeypatch.setattr(session_run, "run_terminal_client", _faulted)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.split("\n")[0] == "merged into main"
+    assert "lost the connection" not in out
+
+
+@pytest.mark.anyio
+async def test_stream_fault_without_a_terminal_state_reports_lost_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-07-04-fault-live")
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+    monkeypatch.setattr(session_run, "run_terminal_client", _faulted)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new")
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert rc == 4
+    assert lines[0] == "lost the connection to the run"
+    assert lines[1] == (
+        f"It may still be running — `imp resume {quest.id}` to reattach.")
+    assert lines[2] == f"{quest.id} · T"
+    assert out.endswith("\n\n") and not out.endswith("\n\n\n")
+    assert "paused" not in out
+    assert f"resume: imp resume {quest.id}" not in out
+
+
+@pytest.mark.anyio
+async def test_clean_ending_still_renders_the_paused_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-07-04-clean-leave")
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+
+    async def _clean(**_kwargs: Any) -> StreamEnding:
+        return StreamEnding.CLEAN
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _clean)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new")
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out.split("\n")[0] == "paused"
+    assert f"resume: imp resume {quest.id}" in out
+    assert "lost the connection" not in out
+
+
+def test_resolve_settled_outcome_ignores_a_stray_live_event_line_when_home_reaped(
+    tmp_path: Path,
+) -> None:
+    # The keku73 shape: the home was reaped, then a later attach wrote one line back.
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-05-stray", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    quest.event_log().append(agent_id=None, type="cli_attached", payload={})
+    assert not quest.state_dir.exists()          # only events.jsonl came back
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.status == "merged"
+    # state.json does not load, so BOTH fields come from the archive; the stray
+    # live line never shadows the archived blob.
+    assert [e["type"] for e in outcome.events] == ["user_message", "quest_merged"]
+
+
+def test_resolve_settled_outcome_never_takes_events_from_the_archive_when_home_is_live(
+    tmp_path: Path,
+) -> None:
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-05-live", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+    outcome = resolve_settled_outcome(quest)
+    # state.json loads, so the home answers both fields — an empty live event log
+    # is an answer, not a reason to reach into the archive.
+    assert outcome.status == "paused"
+    assert outcome.events == []
+    assert outcome.completed is False
+
+
+def test_stray_live_line_still_renders_merged_from_the_archived_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-05-keku", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    quest.title = ""                          # untitled: the identity line shows the intent
+    quest.event_log().append(agent_id=None, type="cli_attached", payload={})
+    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert rc == 0
+    assert lines[0] == "merged into main"
+    assert "done · commits on" not in out
+    assert lines[1] == "2026-07-05-keku · > resolve me from archive"

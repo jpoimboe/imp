@@ -2,6 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import enum
 from collections.abc import Callable
 from typing import Any
 
@@ -18,6 +19,12 @@ from imp.remote.session.protocol import (
     encode_skill_request,
     parse_event,
 )
+
+
+class StreamEnding(enum.Enum):
+    """How the receive loop ended: the stream closed, or a frame faulted."""
+    CLEAN = enum.auto()
+    FAULT = enum.auto()
 
 
 class SessionClient:
@@ -48,18 +55,21 @@ class SessionClient:
             raise
         self._stream = stream
 
-    async def receive_events(self) -> None:
+    async def receive_events(self) -> StreamEnding:
         if self._stream is None:
             raise RuntimeError("call connect() before receive_events()")
         buf = BufferedByteReceiveStream(self._stream)
-        try:
-            while True:
+        while True:
+            try:
                 line = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
-                self._on_event(parse_event(line))
-        except (anyio.EndOfStream, anyio.IncompleteRead,
-                anyio.ClosedResourceError, anyio.BrokenResourceError,
-                anyio.DelimiterNotFound, ValueError):
-            pass
+                event = parse_event(line)
+            except (anyio.EndOfStream, anyio.IncompleteRead,
+                    anyio.ClosedResourceError, anyio.BrokenResourceError):
+                return StreamEnding.CLEAN
+            except (anyio.DelimiterNotFound, ValueError):
+                return StreamEnding.FAULT
+            # Outside the try: a renderer bug must surface as a traceback, not as EOS.
+            self._on_event(event)
 
     async def send_input(self, text: str) -> None:
         async with self._send_lock:

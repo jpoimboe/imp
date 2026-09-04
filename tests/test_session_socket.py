@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +10,9 @@ import pytest
 from anyio.abc import SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
+from imp.engine.state import JsonlEventLog
 from imp.remote.session.protocol import (
+    _MAX_FRAME,
     Attach,
     Input,
     SkillRequest,
@@ -21,7 +24,7 @@ from imp.remote.session.protocol import (
     parse_event,
 )
 from imp.remote.session.socket_server import SessionSocket, _Client
-from tests.async_wait import wait_until
+from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
 @pytest.fixture
@@ -508,3 +511,39 @@ async def test_close_is_idempotent_when_socket_already_gone(tmp_path: Path) -> N
     # Second close (listener already None, file already gone) must not raise.
     await session.close()
     assert not Path(sock).exists()
+
+
+@pytest.mark.anyio
+async def test_an_oversized_event_is_clipped_on_the_wire_but_whole_on_disk(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    events_path = tmp_path / "events.jsonl"
+    session = SessionSocket(sock)
+    # the production seam: the log persists the record, then hands it to the broadcast
+    log = JsonlEventLog(events_path, on_event=session.broadcast)
+    huge = "x" * (2 << 20)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        client = await _attach(sock, "c1")
+        await wait_until(lambda: session.attached_count == 1)
+        log.append(agent_id="a1", type="tool_call",
+                   payload={"id": "t1", "name": "write_file",
+                            "input": {"path": "big.txt", "content": huge}})
+        buf = BufferedByteReceiveStream(client)
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+            event = parse_event((await buf.receive_until(b"\n", _MAX_FRAME)).decode())
+        wire = event["payload"]["input"]["content"]
+        assert wire.endswith("… [clipped]")
+        assert len(wire) < len(huge)
+        assert event["payload"]["input"]["path"] == "big.txt"
+
+        text = events_path.read_text()
+        assert "[clipped]" not in text                       # clipping never reaches disk
+        record = json.loads(text.splitlines()[0])
+        assert record["payload"]["input"]["content"] == huge
+
+        await client.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()

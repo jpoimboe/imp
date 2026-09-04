@@ -22,6 +22,7 @@ from imp.remote.session.attach import (
     DaemonStartupError,
     build_session_attach,
 )
+from imp.remote.session.client import StreamEnding
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -43,18 +44,18 @@ class SettledOutcome:
 
 
 def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
-    """Read status and events once, live home first, then archive."""
+    """Read status and events from one source: the live home if state.json loads, else
+    the archive — a reaped home can still hold a stray events.jsonl line."""
     from imp.cli.store import _parse_jsonl
     from imp.engine.archive import read as archive_read
     try:
-        status: str | None = State.load(quest.state_dir).status
+        state = State.load(quest.state_dir)
     except FileNotFoundError:
-        status = archive_read.status_of(quest.control_root, quest.id)
-    events = list(quest.event_log().read())
-    if not events:
         raw = archive_read.read_events(quest.control_root, quest.id)
-        events = _parse_jsonl(raw) if raw is not None else []
-    return SettledOutcome(status=status, events=events)
+        return SettledOutcome(
+            status=archive_read.status_of(quest.control_root, quest.id),
+            events=_parse_jsonl(raw) if raw is not None else [])
+    return SettledOutcome(status=state.status, events=list(quest.event_log().read()))
 
 
 async def run_session_client(
@@ -83,6 +84,7 @@ async def run_session_client(
         model=model, opening_unsandboxed=opening_unsandboxed)
     startup_failed = False
     startup_error: DaemonStartupError | None = None
+    ending = StreamEnding.CLEAN
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
         if _should_run_ctrl_d_reader(non_interactive=non_interactive):
@@ -95,7 +97,7 @@ async def run_session_client(
             tg.start_soon(status.tick)
         driver.install_startup_status()
         try:
-            await run_terminal_client(
+            ending = await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
@@ -117,6 +119,13 @@ async def run_session_client(
         from imp.cli.main import _emit_startup_failed
         _emit_startup_failed(quest, startup_error)
         return 3
+    if ending is StreamEnding.FAULT:
+        from imp.cli.main import _emit_lost_connection, _handle_terminal_outcome
+        outcome = resolve_settled_outcome(quest)
+        if outcome.completed:
+            return _handle_terminal_outcome(quest, outcome, coord)
+        _emit_lost_connection(quest)
+        return 4
     from imp.cli.main import (
         _print_leave_disposition,
         _session_exit_code,

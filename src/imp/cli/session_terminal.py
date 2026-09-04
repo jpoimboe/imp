@@ -7,8 +7,9 @@ daemon. `run_terminal_client` attaches to a quest's session daemon (via an
 injected attach thunk), streams the daemon's events into a live event renderer
 (LiveDriver), forwards a local interrupt gesture as a control frame
 (SessionControls, without killing the client), and answers each bare-turn-end
-gate by soliciting one reply and sending it back as an input frame. It returns
-when the daemon's run reaches a terminal state and drops the socket. The CLI flip
+gate by soliciting one reply and sending it back as an input frame. It returns the
+StreamEnding its receive loop observed: a clean close — the run ended and dropped the
+socket, or a deliberate leave cancelled the loop — or a stream fault. The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,
 and the solicit callback, and replaces the in-process run_quest call in
 `imp new` / `imp resume` with this loop.
@@ -30,7 +31,7 @@ from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import TerminalTitle
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import Quest
-from imp.remote.session.client import SessionClient
+from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_LEAVE,
     INTERRUPT_EVENT_TYPES,
@@ -53,7 +54,7 @@ async def run_terminal_client(
     title: TerminalTitle | None = None,
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
-) -> None:
+) -> StreamEnding:
     gate_send, gate_recv = anyio.create_memory_object_stream[tuple[str, bool]](
         max_buffer_size=math.inf)
     resolved_send, resolved_recv = anyio.create_memory_object_stream[None](
@@ -107,6 +108,9 @@ async def run_terminal_client(
     # any time, including mid-grind with no prompt up. open_signal_receiver is a
     # sync context manager that installs the loop handler on enter (replacing
     # SIGQUIT's core-dump default) and restores it on exit.
+    # Only an observed fault overwrites this: on ctrl-d / ctrl-\ / force-quit
+    # _watch_force_quit cancels the group and receive_events never returns.
+    ending = StreamEnding.CLEAN
     sigquit = getattr(signal, "SIGQUIT", None)
     with contextlib.ExitStack() as stack:
         sigquit_signals = (
@@ -241,7 +245,7 @@ async def run_terminal_client(
                 tg.start_soon(_watch_force_quit)
                 tg.start_soon(_watch_sigquit)
                 tg.start_soon(_flush_pending_interrupt)
-                await client.receive_events()
+                ending = await client.receive_events()
                 tg.cancel_scope.cancel()
         finally:
             coord.detach_runner()
@@ -297,3 +301,4 @@ async def run_terminal_client(
                         await client.send_control(
                             CONTROL_INTERRUPT_LEAVE, coord.leave_reason)
             await client.aclose()
+    return ending

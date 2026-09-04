@@ -257,6 +257,7 @@ async def attach(
             try:
                 yield session
             finally:
+                # No await between these: a pump wakeup in the gap would raise into the public API.
                 tg.cancel_scope.cancel()
                 feed.recv.close()   # the context owns the feed; leave no half open
     except BaseExceptionGroup as eg:

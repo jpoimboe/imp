@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
 
-from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import CONTROL_INTERRUPT, Attach, SkillRequest, encode_set_lease
+from imp.remote.session.client import SessionClient, StreamEnding
+from imp.remote.session.protocol import (
+    _MAX_FRAME,
+    CONTROL_INTERRUPT,
+    Attach,
+    SkillRequest,
+    encode_event,
+    encode_set_lease,
+)
 from imp.remote.session.socket_server import SessionSocket
-from tests.async_wait import wait_until
+from tests._session_fakes import serve_raw_frames
+from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
 @pytest.fixture
@@ -55,15 +64,15 @@ async def test_client_receives_broadcast_event(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_client_receive_events_returns_cleanly_on_server_close(tmp_path: Path) -> None:
+async def test_receive_events_reports_clean_ending_on_server_close(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionSocket(sock)
-    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
-    finished: list[bool] = []
+    received: list[dict[str, Any]] = []
+    client = SessionClient(sock, "c1", "T", on_event=received.append)
+    endings: list[StreamEnding] = []
 
     async def _receive() -> None:
-        await client.receive_events()
-        finished.append(True)
+        endings.append(await client.receive_events())
 
     async with anyio.create_task_group() as tg:
         await server.open()
@@ -71,10 +80,73 @@ async def test_client_receive_events_returns_cleanly_on_server_close(tmp_path: P
         await client.connect()
         await wait_until(lambda: server.attached_count == 1)
         tg.start_soon(_receive)
+        server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
+        await wait_until(lambda: received)
         await server.close()
-        await wait_until(lambda: finished)
-        assert finished == [True]
+        await wait_until(lambda: endings)
+        assert endings == [StreamEnding.CLEAN]
+        # the frame delivered before the close still reached the renderer
+        assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
         await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_receive_events_reports_fault_on_oversized_frame(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    received: list[dict[str, Any]] = []
+    client = SessionClient(sock, "c1", "T", on_event=received.append)
+    good = encode_event({"type": "step_started", "payload": {"step": "plan"}})
+    async with anyio.create_task_group() as tg:
+        await serve_raw_frames(
+            sock, good.encode("utf-8") + b"\n" + b"x" * (_MAX_FRAME + 1), tg)
+        await client.connect()
+        with anyio.fail_after(HANG_BACKSTOP):
+            ending = await client.receive_events()
+        assert ending is StreamEnding.FAULT
+        # the frame that arrived before the fault still reached the renderer
+        assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_receive_events_reports_fault_on_unparseable_frame(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    received: list[dict[str, Any]] = []
+    client = SessionClient(sock, "c1", "T", on_event=received.append)
+    good = encode_event({"type": "step_started", "payload": {"step": "plan"}})
+    async with anyio.create_task_group() as tg:
+        await serve_raw_frames(
+            sock, good.encode("utf-8") + b"\nnot a frame\n", tg)
+        await client.connect()
+        with anyio.fail_after(HANG_BACKSTOP):
+            ending = await client.receive_events()
+        assert ending is StreamEnding.FAULT
+        assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_receive_events_propagates_a_renderer_exception(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionSocket(sock)
+
+    def _boom(_event: dict[str, Any]) -> None:
+        raise ValueError("renderer boom")
+
+    client = SessionClient(sock, "c1", "T", on_event=_boom)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        await wait_until(lambda: server.attached_count == 1)
+        server.broadcast({"type": "step_started", "payload": {}})
+        with anyio.fail_after(HANG_BACKSTOP), pytest.raises(ValueError, match="renderer boom"):
+            await client.receive_events()
+        await client.aclose()
+        await server.close()
         tg.cancel_scope.cancel()
 
 
