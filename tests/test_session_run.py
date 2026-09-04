@@ -21,6 +21,7 @@ from imp.engine import archive
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
+from imp.remote.session.client import StreamEnding
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 from tests.async_wait import HANG_BACKSTOP, wait_until
@@ -1238,3 +1239,88 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
 
     assert rc == 0
     assert coord._ack_hook is None                # never registered in a headless run
+
+
+async def _faulted(**_kwargs: Any) -> StreamEnding:
+    return StreamEnding.FAULT
+
+
+@pytest.mark.anyio
+async def test_stream_fault_with_merged_state_renders_the_completed_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    # The daemon finished in the milliseconds after the fault (the behi75 case).
+    quest = _make_quest(tmp_path, "2026-07-04-fault-merged")
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
+        quest.state_dir)
+    quest.event_log().append(agent_id=None, type="quest_merged", payload={})
+    monkeypatch.setattr(session_run, "run_terminal_client", _faulted)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.split("\n")[0] == "merged into main"
+    assert "lost the connection" not in out
+
+
+@pytest.mark.anyio
+async def test_stream_fault_without_a_terminal_state_reports_lost_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-07-04-fault-live")
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+    monkeypatch.setattr(session_run, "run_terminal_client", _faulted)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new")
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert rc == 4
+    assert lines[0] == "lost the connection to the run"
+    assert lines[1] == (
+        f"It may still be running — `imp resume {quest.id}` to reattach.")
+    assert lines[2] == f"{quest.id} · T"
+    assert out.endswith("\n\n") and not out.endswith("\n\n\n")
+    assert "paused" not in out
+    assert f"resume: imp resume {quest.id}" not in out
+
+
+@pytest.mark.anyio
+async def test_clean_ending_still_renders_the_paused_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _make_quest(tmp_path, "2026-07-04-clean-leave")
+    (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+
+    async def _clean(**_kwargs: Any) -> StreamEnding:
+        return StreamEnding.CLEAN
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _clean)
+
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=InterruptCoordinator(),
+        solicit=lambda _p: _never(), leave_mode="new")
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out.split("\n")[0] == "paused"
+    assert f"resume: imp resume {quest.id}" in out
+    assert "lost the connection" not in out

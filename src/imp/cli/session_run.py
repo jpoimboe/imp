@@ -22,6 +22,7 @@ from imp.remote.session.attach import (
     DaemonStartupError,
     build_session_attach,
 )
+from imp.remote.session.client import StreamEnding
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -83,6 +84,7 @@ async def run_session_client(
         model=model, opening_unsandboxed=opening_unsandboxed)
     startup_failed = False
     startup_error: DaemonStartupError | None = None
+    ending = StreamEnding.CLEAN
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
         if _should_run_ctrl_d_reader(non_interactive=non_interactive):
@@ -95,7 +97,7 @@ async def run_session_client(
             tg.start_soon(status.tick)
         driver.install_startup_status()
         try:
-            await run_terminal_client(
+            ending = await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
@@ -117,6 +119,13 @@ async def run_session_client(
         from imp.cli.main import _emit_startup_failed
         _emit_startup_failed(quest, startup_error)
         return 3
+    if ending is StreamEnding.FAULT:
+        from imp.cli.main import _emit_lost_connection, _handle_terminal_outcome
+        outcome = resolve_settled_outcome(quest)
+        if outcome.completed:
+            return _handle_terminal_outcome(quest, outcome, coord)
+        _emit_lost_connection(quest)
+        return 4
     from imp.cli.main import (
         _print_leave_disposition,
         _session_exit_code,
