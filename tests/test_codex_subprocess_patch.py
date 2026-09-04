@@ -3,6 +3,8 @@
 Covers:
 - Behavioral regression: a line > 64 KiB raises ValueError at asyncio's default limit.
 - The fix value (CODEX_STREAM_LIMIT) reads that same line cleanly.
+- Cleanup guard: the over-limit read abandons stdout, so the helper kills the child
+  rather than waiting on it.
 - _SubprocessPatchingAsyncio proxy: injects default limit AND start_new_session,
   respects explicit values for each, forwards other attrs.
 - install_codex_subprocess_patches: idempotent, replaces the SDK module ref, forwards real attrs.
@@ -11,9 +13,9 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -35,30 +37,43 @@ def anyio_backend() -> str:
 # Helper
 # ---------------------------------------------------------------------------
 
-async def _read_one_line(limit: int) -> bytes:
-    """Spawn a subprocess that writes a 200 KiB line to stdout, read it at the given limit.
+_BIG_LINE = 200 * 1024  # 200 KiB > asyncio's 64 KiB default
 
-    The big line is passed via a temp file (not as a CLI arg) to avoid the OS
-    ARG_MAX limit on long command-line arguments.
-    """
-    big = "x" * (200 * 1024)  # 200 KiB > asyncio's 64 KiB default
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(big)
-        tmp_path = f.name
-    code = (
-        f"import sys; "
-        f"data = open({tmp_path!r}).read(); "
-        f"sys.stdout.write(data + '\\n'); "
-        f"sys.stdout.flush()"
-    )
+_FAST_WRITER = (
+    "import sys; "
+    f"sys.stdout.write('x' * {_BIG_LINE} + '\\n'); "
+    "sys.stdout.flush()"
+)
+
+# The same line in small, spaced-out chunks: the feed granularity a loaded machine
+# produces, which pauses the reader early enough to block the child mid-write.
+_SLOW_WRITER = (
+    "import sys, time\n"
+    f"data = 'x' * {_BIG_LINE} + '\\n'\n"
+    "for i in range(0, len(data), 4096):\n"
+    "    sys.stdout.write(data[i:i + 4096]); sys.stdout.flush(); time.sleep(0.0005)\n"
+)
+
+
+async def _read_one_line(limit: int, writer: str = _FAST_WRITER) -> bytes:
+    """Spawn a subprocess that writes a 200 KiB line to stdout, read one line at `limit`."""
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", code,
-        stdout=asyncio.subprocess.PIPE, limit=limit)
+        sys.executable, "-c", writer,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=limit)
     try:
-        return await proc.stdout.readline()  # type: ignore[union-attr]
+        line = await proc.stdout.readline()  # type: ignore[union-attr]
     finally:
+        # Over the limit readline abandons stdout, leaving the child blocked
+        # mid-write: a graceful wait() would never return.
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        stderr = (await proc.stderr.read()).decode("utf-8", "replace")  # type: ignore[union-attr]
         await proc.wait()
-        Path(tmp_path).unlink(missing_ok=True)
+    if len(line) < _BIG_LINE:
+        raise AssertionError(
+            f"child delivered {len(line)} bytes, expected >= {_BIG_LINE} "
+            f"(exit {proc.returncode}); child stderr: {stderr!r}")
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +88,32 @@ async def test_default_limit_raises_on_oversized_line() -> None:
 
 
 @pytest.mark.anyio
-async def test_codex_limit_reads_oversized_line() -> None:
+async def test_default_limit_raises_when_the_child_writes_slowly() -> None:
+    """The over-limit read abandons stdout, so cleanup must not wait for the child to
+    finish writing into a pipe nobody drains."""
+    with pytest.raises(ValueError):
+        await _read_one_line(64 * 1024, _SLOW_WRITER)
+
+
+@pytest.mark.anyio
+async def test_a_broken_child_reports_its_exit_and_stderr() -> None:
+    """A child that dies without writing the line self-reports: byte count, exit status, stderr."""
+    broken = "import sys; sys.stderr.write('boom'); sys.stderr.flush(); sys.exit(3)"
+    with pytest.raises(AssertionError) as excinfo:
+        await _read_one_line(64 * 1024, broken)
+    message = str(excinfo.value)
+    assert "child delivered 0 bytes" in message
+    assert "expected >= 204800" in message
+    assert "exit 3" in message
+    assert "boom" in message
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("writer", [_FAST_WRITER, _SLOW_WRITER], ids=["fast", "slow"])
+async def test_codex_limit_reads_oversized_line(writer: str) -> None:
     """Fix: CODEX_STREAM_LIMIT is large enough to read a 200 KiB line cleanly."""
-    line = await _read_one_line(CODEX_STREAM_LIMIT)
-    assert len(line) >= 200 * 1024
+    line = await _read_one_line(CODEX_STREAM_LIMIT, writer)
+    assert len(line) == _BIG_LINE + 1
 
 
 # ---------------------------------------------------------------------------
