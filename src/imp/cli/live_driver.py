@@ -55,16 +55,18 @@ def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
 def context_bar(provider: str | None, model: str | None,
                 prompt_tokens: int | None, *,
                 context_pct: float | None = None,
+                context_window: int | None = None,
                 color: bool, over_bg: bool) -> str | None:
-    # Lazy import keeps `import live_driver` free of the providers package; the
-    # catalog is the renderer's only window source.
+    # Lazy import keeps `import live_driver` free of the providers package.
     from imp.providers.catalog import (
         DEFAULT_CHECKPOINT_FRACTION,
         checkpoint_cutoff,
         limits_for,
     )
     info = limits_for(provider, model)
-    window = info.window if info else None
+    # A window the provider reported for this run beats the catalog constant:
+    # codex derates its own window per-config, so only the live value is right.
+    window = context_window or (info.window if info else None)
     if context_pct is not None:
         frac = context_pct / 100
     else:
@@ -148,6 +150,7 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
 def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
+                         context_window: int | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
     project · id · title · phase · plan · counter · model context-bar."""
@@ -170,7 +173,8 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
     bar = None
     if activity.kind == "agent" and not activity.lane_wait:
         bar = context_bar(activity.provider, activity.model, prompt_tokens,
-                          context_pct=context_pct, color=color, over_bg=over)
+                          context_pct=context_pct, context_window=context_window,
+                          color=color, over_bg=over)
     body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
                              phase_seg, plan_seg, counter_seg,
                              rt.join_space(model_seg, bar)])
@@ -219,6 +223,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         model_seg = _paint(model, "gray", color=color, over_bg=over) if model else None
         bar = context_bar(provider, model, f.nested.latest_prompt_tokens,
                           context_pct=f.nested.latest_context_pct,
+                          context_window=f.nested.latest_context_window,
                           color=color, over_bg=over)
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
         if secs is not None:
@@ -410,6 +415,7 @@ class LiveDriver:
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
+            context_window=self._builder.latest_context_window,
             unsandboxed=self._unsandboxed)
         rows = [a_line, "", p_row]
         rows += compose_subagent_rows(
@@ -455,6 +461,7 @@ class LiveDriver:
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
+            context_window=self._builder.latest_context_window,
             unsandboxed=self._unsandboxed)
 
     # -- emission -------------------------------------------------------------
