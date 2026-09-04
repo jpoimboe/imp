@@ -1666,16 +1666,16 @@ async def _route_agent(
         if (state.reincarnation_count(reincarnation_key)
                 < state.max_reincarnations):
             state.bump_reincarnation(reincarnation_key)
-            stashed = stash_transcript(transcript_dir)
+            # The stash stays on disk for human forensics; nothing reads it back.
+            stash_transcript(transcript_dir)
             hp = Path(result.handoff_path)
-            note_exists = hp.exists()
-            reason = ("context threshold crossed" if note_exists
+            handoff_text = hp.read_text() if hp.exists() else None
+            reason = ("context threshold crossed" if handoff_text is not None
                       else "handoff failed — recovering from transcript")
             _emit(log, "reincarnating", {"reason": reason}, agent_id=None)
             seed = reincarnation_seed(
-                stashed_dir=stashed,
-                handoff_path=hp if note_exists else None,
-                quest_id=quest.id)
+                handoff_text=handoff_text, quest_id=quest.id,
+                step_name=step.name)
             return await _route_agent(
                 step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -1699,11 +1699,11 @@ async def _route_agent(
         # the step fresh — stash the transcript, seed the reborn session from it,
         # and re-enter — instead of pausing, up to the per-session cap.
         state.bump_reincarnation(reincarnation_key)
-        stashed = stash_transcript(transcript_dir)
+        stash_transcript(transcript_dir)
         _emit(log, "reincarnating",
               {"reason": "context window exceeded"}, agent_id=None)
-        seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None,
-                                   quest_id=quest.id)
+        seed = reincarnation_seed(handoff_text=None, quest_id=quest.id,
+                                  step_name=step.name)
         return await _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,

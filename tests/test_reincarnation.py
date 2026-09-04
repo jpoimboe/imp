@@ -43,57 +43,54 @@ def test_stash_returns_none_when_nothing_to_stash(tmp_path: Path) -> None:
     assert stash_transcript(empty) is None                  # empty transcript
 
 
-def test_seed_tier_b_points_at_stashed_transcript_and_events_query() -> None:
-    # Tier B: no handoff was captured (hard error). The seed points the reborn
-    # session at the stashed transcript and at imp events for orientation.
+_NOTE = "# Handoff\nGoal: land the parser\nRemains: wire `--json` output\n"
+
+_MARKER = ("--- HANDOFF NOTE FROM THE PREVIOUS ATTEMPT "
+           "(verbatim, to end of message) ---")
+
+
+def test_seed_with_a_note_inlines_it_verbatim_and_last() -> None:
+    # The note is the primary source and arrives IN the message; the step-scoped
+    # events query is the deeper-detail fallback.
     seed = reincarnation_seed(
-        stashed_dir=Path("/x/steps/impl/coder.attempt-1"), handoff_path=None,
-        quest_id="q7")
-    assert "/x/steps/impl/coder.attempt-1/transcript.jsonl" in seed
-    assert "imp events q7 --limit N" in seed
-    assert "handoff" not in seed.lower()
-    # No handoff was written, so the seed must not refer to a summary above it.
-    assert "summary above" not in seed
+        handoff_text=_NOTE, quest_id="q7", step_name="coder")
+    assert "- Primary: the previous attempt's handoff note" in seed
+    assert "- Deeper detail: `imp events q7 --step coder --limit N`" in seed
+    assert "- Orientation only: `imp events q7 --limit N`" in seed
+    assert seed.count(_MARKER) == 1
+    assert seed.endswith(f"{_MARKER}\n\n{_NOTE}")
 
 
-def test_seed_tier_a_names_handoff_as_primary() -> None:
-    # Tier A (built now for the later proactive-handoff lap): the handoff note is
-    # the primary recovery source; the stashed transcript is the deeper-dig source.
+def test_seed_without_a_note_makes_the_step_query_primary() -> None:
     seed = reincarnation_seed(
-        stashed_dir=Path("/x/a-1"), handoff_path=Path("/x/handoff.md"),
-        quest_id="q7")
-    assert "/x/handoff.md" in seed
-    assert "- Primary: read the handoff note" in seed
-    assert "/x/a-1/transcript.jsonl" in seed
-    assert "summary above" in seed
+        handoff_text=None, quest_id="q7", step_name="coder")
+    assert "- Primary: `imp events q7 --step coder --limit N`" in seed
+    assert "It left no handoff note, so this is the record of what it did." in seed
+    assert "- Orientation only: `imp events q7 --limit N`" in seed
+    assert "HANDOFF NOTE FROM THE PREVIOUS ATTEMPT" not in seed
+    assert "Deeper detail" not in seed
 
 
-def test_seed_drops_false_claim_points_at_bounded_query_and_names_transcript_primary() -> None:
-    # Part 3: the orientation pointer must no longer claim imp events excludes
-    # this step's own tool calls (it doesn't), must point at a BOUNDED imp events
-    # id --limit N call, and the stashed transcript must be labelled the primary
-    # detail source.
-    seed = reincarnation_seed(
-        stashed_dir=Path("/x/steps/impl/coder.attempt-1"), handoff_path=None,
-        quest_id="q7")
-    assert "this step's own tool calls" not in seed
-    assert "imp events q7 --limit N" in seed
-    assert "Primary detail source" in seed
-    assert "/x/steps/impl/coder.attempt-1/transcript.jsonl" in seed
+def test_seed_names_no_sandbox_masked_path_in_either_shape() -> None:
+    # The reported defect: everything under <quest_dir>/steps/ is masked by
+    # resolve_policy, so no seed variant may point the reborn session at one.
+    for text in (_NOTE, None):
+        seed = reincarnation_seed(
+            handoff_text=text, quest_id="q7", step_name="coder")
+        assert "/steps/" not in seed
+        assert "transcript.jsonl" not in seed
+        assert ".handoff.md" not in seed
+        assert "read_file" not in seed
 
 
-def test_seed_frames_events_query_as_provenance_not_current_state() -> None:
-    seed = reincarnation_seed(stashed_dir=None, handoff_path=None, quest_id="q7")
-    assert "provenance" in seed
-    assert "not for current state" in seed
-    assert "imp events q7 --limit N" in seed
-
-
-def test_seed_degrades_to_orientation_only_when_nothing_stashed() -> None:
-    seed = reincarnation_seed(stashed_dir=None, handoff_path=None, quest_id="q7")
-    assert seed                                  # non-empty
-    assert "imp events" in seed
-    assert "transcript.jsonl" not in seed
+def test_seed_shapes_share_the_opening_and_orientation_lines() -> None:
+    with_note = reincarnation_seed(
+        handoff_text=_NOTE, quest_id="q7", step_name="coder").splitlines()
+    without = reincarnation_seed(
+        handoff_text=None, quest_id="q7", step_name="coder").splitlines()
+    assert with_note[0].startswith("You are a reincarnated session:")
+    assert with_note[0] == without[0]
+    assert with_note[3] == without[2]        # the orientation bullet, verbatim
 
 
 def test_handoff_path_is_sibling_of_transcript_dir() -> None:
