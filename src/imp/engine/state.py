@@ -383,6 +383,7 @@ class EventLog(Protocol):
                            duration_ms: float | None = None,
                            ) -> dict[str, Any]: ...
     def append_query_result(self, *, agent_id: str | None,
+                            session_id: str,
                             total_cost_usd: float | None,
                             duration_ms: int | None,
                             duration_api_ms: int | None,
@@ -593,6 +594,7 @@ class _BaseEventLog:
         return self._emit(agent_id=agent_id, type="tool_result", payload=payload)
 
     def append_query_result(self, *, agent_id: str | None,
+                            session_id: str,
                             total_cost_usd: float | None,
                             duration_ms: int | None,
                             duration_api_ms: int | None,
@@ -605,7 +607,9 @@ class _BaseEventLog:
                             api_error_status: Any = None,
                             permission_denials: Any = None,
                             errors: Any = None) -> dict[str, Any]:
+        # session_id spans one SDK client lifetime; the row is cumulative in it.
         payload: dict[str, Any] = {
+            "session_id": session_id,
             "total_cost_usd": total_cost_usd, "duration_ms": duration_ms,
             "duration_api_ms": duration_api_ms, "num_turns": num_turns,
             "stop_reason": stop_reason, "subtype": subtype,

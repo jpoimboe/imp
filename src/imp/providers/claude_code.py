@@ -1415,6 +1415,8 @@ class ClaudeCodeSession(ObserveSession):
         self._flush_lock = asyncio.Lock()
         state.flush_llm_group = self._flush_llm_group
 
+        # One client lifetime = one id; store id is UUID5(agent_id), cannot split cumulative series.
+        self._session_id = uuid.uuid4().hex
         client_ctx = self.runner._build_client(opts)
         client = await client_ctx.__aenter__()
         runner._client = client
@@ -1736,6 +1738,7 @@ class ClaudeCodeSession(ObserveSession):
             backstop_stop_reason=getattr(raw, "stop_reason", None))
         elog.append_query_result(
             agent_id=aid,
+            session_id=self._session_id,
             total_cost_usd=getattr(raw, "total_cost_usd", None),
             duration_ms=getattr(raw, "duration_ms", None),
             duration_api_ms=getattr(raw, "duration_api_ms", None),
