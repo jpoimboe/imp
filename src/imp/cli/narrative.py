@@ -880,6 +880,19 @@ class NarrativeBuilder:
             cwin_any = payload.get("context_window")
             if ctoks is not None and cwin_any:
                 self._last_agent_context = (ctoks, cwin_any)
+        elif etype == "agent_message_usage_patch":
+            # codex attaches occupancy AFTER the turn, on this bookkeeping row —
+            # its agent_message carries usage={}, so the branch above sees nothing.
+            # Same three assignments, same own-agent routing rule; pre-routing so a
+            # registered subagent's crossing still reaches the reincarnating line.
+            ctoks = payload.get("context_tokens")
+            cwin = payload.get("context_window")
+            if ctoks is not None and cwin:
+                is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
+                if not is_subagent or agent_id == self._own_agent_id:
+                    self._latest_prompt_tokens = ctoks
+                    self._latest_context_window = cwin
+                self._last_agent_context = (ctoks, cwin)
         elif etype == "query_result":
             # Authoritative per-query totals/cost from claude_code. Accumulated
             # BEFORE sub-routing so a subagent's query_result still folds in.
@@ -1599,7 +1612,7 @@ def is_prose_field(key: str, value: Any) -> bool:
 
 def _resolves_error_prose(etype: str, payload: dict[str, Any]) -> bool:
     """True for an event that carries render ordering; a bookkeeping row does not."""
-    if etype == "query_result":
+    if etype in ("query_result", "agent_message_usage_patch"):
         return False
     if etype == "error":
         return not payload.get("audit")
@@ -1827,9 +1840,16 @@ def _h_query_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     return
 
 
+def _h_agent_message_usage_patch(
+        self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # Gauge fields already folded in add(); the row carries no render ordering.
+    return
+
+
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
 NarrativeBuilder._HANDLERS["engine_message"] = _h_engine_message
 NarrativeBuilder._HANDLERS["agent_message"] = _h_agent_message
+NarrativeBuilder._HANDLERS["agent_message_usage_patch"] = _h_agent_message_usage_patch
 NarrativeBuilder._HANDLERS["thinking"] = _h_thinking
 NarrativeBuilder._HANDLERS["step_context"] = _h_step_context
 NarrativeBuilder._HANDLERS["agent_result"] = _h_agent_result
