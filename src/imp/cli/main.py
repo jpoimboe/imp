@@ -675,25 +675,27 @@ def _claiming_settings_root() -> Path | None:
 
 
 def _preflight_imp_init(*, control_root: Path) -> str | None:
-    """Return a clean 'run imp init first' message when no provider is
-    env-available (e.g. a never-init'd machine with empty user `providers`),
-    else None. Relocates+dresses the failure that per-step resolution would
-    otherwise raise as a raw ProviderUnavailable deep in a step (spec §4)."""
+    """Relocates and dresses the ProviderUnavailable that per-step resolution
+    would otherwise raise deep in a step."""
     from imp.engine.errors import LoadError, LoadErrors
+    from imp.providers import auth_hint_lines
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import UnknownProvider, _first_available_provider
     try:
         config = load_effective_config(control_root=control_root).config
         no_provider = _first_available_provider(config) is None
     except (LoadError, LoadErrors, UnknownProvider):
-        # A malformed config (bad YAML, or a `providers:` entry that names an
-        # unregistered provider — _first_available_provider raises UnknownProvider,
-        # resolve.py:124-136) is reported downstream with full context. Don't dress
-        # it as "run imp init first" — that would mislead. Let resolution surface it.
+        # Malformed config or unknown provider — let resolution surface it with full context.
         return None
-    if no_provider:
-        return "no provider available — run `imp init` first"
-    return None
+    if not no_provider:
+        return None
+    names = list(config.providers)
+    if not names:
+        return "no providers configured — run 'imp config set providers claude_code'"
+    return "\n".join([
+        f"no authenticated provider — configured: {', '.join(names)}",
+        *auth_hint_lines(names),
+    ])
 
 
 def _apply_theme() -> None:

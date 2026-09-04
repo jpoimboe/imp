@@ -57,10 +57,12 @@ styles its own line.
   the gold three-part `_error_block` — red head + body + gold identity line — on
   **stdout**, via `_emit_merge_blocked` / `_emit_startup_failed`. The exit code
   carries the error signal for scripts.
-- **Non-quest CLI usage/lookup errors → one `imp:` line.** Bad arguments, no such
-  quest, unknown command, and similar usage errors emit a single
-  `imp: <message>` line on **stderr** via `_emit_cli_error`, which centralizes the
-  prefix so no CLI call site hand-rolls it.
+- **Non-quest CLI usage/lookup errors → one `imp:` message.** Bad arguments, no such
+  quest, unknown command, and similar usage errors emit one
+  `imp: <message>` on **stderr** via `_emit_cli_error`, which centralizes the
+  prefix so no CLI call site hand-rolls it. The prefix lands on the first line only:
+  a message may carry indented continuation lines (a `LoadError` hint, one auth hint
+  per configured provider).
 
 Carved out (unchanged): rc-conditional proxy-response relays that print a
 pre-formatted `imp: …` message routed by return code (`_emit_mutation_result`,
