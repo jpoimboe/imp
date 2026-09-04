@@ -68,6 +68,28 @@ def test_patch_row_appends_no_node() -> None:
     assert not any(isinstance(n, nv.FallbackLine) for n in _walk(b.tree.root))
 
 
+def test_step_started_resets_context_gauge() -> None:
+    b = nv.NarrativeBuilder()
+    b.add({"type": "step_started", "agent_id": None,
+           "payload": {"step": "code", "kind": "agent", "phase": "work"}})
+    for e in _codex_turn():
+        b.add(e)
+    assert b.latest_prompt_tokens == 22389
+    assert b.latest_context_window == 258400
+    # Codex leaves context_pct unpopulated; seed it via a claude_code turn so
+    # the reset assertion below is falsifiable.
+    b.add({"type": "agent_message", "agent_id": AID,
+           "payload": {"provider": "claude_code", "model": "claude-opus-4-5",
+                       "stop_reason": "end_turn", "usage": {},
+                       "context_pct": 37.5, "context_window": 200_000}})
+    assert b.latest_context_pct == 37.5              # demonstrably non-None
+    b.add({"type": "step_started", "agent_id": None,
+           "payload": {"step": "verify", "kind": "agent", "phase": "work"}})
+    assert b.latest_prompt_tokens is None
+    assert b.latest_context_pct is None
+    assert b.latest_context_window is None
+
+
 def test_an_unregistered_subagents_patch_leaves_the_top_level_gauge_alone() -> None:
     b = _fed()
     b.add({"type": "agent_message_usage_patch", "agent_id": "sub:t1",

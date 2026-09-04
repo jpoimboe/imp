@@ -1296,6 +1296,10 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._stretch_start_ts = event.get("timestamp")
     self._stretch_backoff_base = self.backoff_wait_seconds(None)
     self._segment_had_work = False
+    # New step = fresh agent conversation; prior step's window must not scale this bar.
+    self._latest_prompt_tokens = None
+    self._latest_context_pct = None
+    self._latest_context_window = None
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
