@@ -80,7 +80,8 @@ class TokenTotals:
 
 
 def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
-    """The prompt-side occupancy of ONE agent_message turn: input + both cache reads.
+    """One turn's BILLING prompt sum (input + both cache buckets); equals live occupancy
+    only on the anthropic/openai push paths (single model request), not on codex.
     None when the turn carried no usage."""
     if not usage:
         return None
@@ -568,8 +569,9 @@ class NarrativeBuilder:
 
     @property
     def latest_prompt_tokens(self) -> int | None:
-        """Prompt-token occupancy of the most recent agent_message turn (input + cache),
-        or None before any usage has arrived. NOT cumulative."""
+        """Prompt-token count of the most recent agent_message turn: the billing sum on
+        anthropic/openai paths, codex's true occupancy from agent_message_usage_patch rows.
+        NOT cumulative. None before any has arrived."""
         return self._latest_prompt_tokens
 
     @property
@@ -580,8 +582,9 @@ class NarrativeBuilder:
 
     @property
     def latest_context_window(self) -> int | None:
-        """SDK-reported raw context window of the most recent agent_message turn,
-        or None before any has arrived."""
+        """Raw context window of the most recent agent_message turn: SDK-reported on
+        anthropic/openai paths, codex's own derated window from agent_message_usage_patch rows.
+        None before any has arrived."""
         return self._latest_context_window
 
     @property
