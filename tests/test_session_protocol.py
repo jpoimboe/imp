@@ -5,6 +5,7 @@ import json
 import pytest
 
 from imp.remote.session.protocol import (
+    _MAX_FRAME,
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,
     CONTROL_SAVE,
@@ -270,3 +271,69 @@ def test_retry_now_unknown_action_still_rejected_at_both_layers() -> None:
         encode_control("explode")
     with pytest.raises(ValueError, match="unknown control action"):
         parse_client_message('{"kind": "control", "action": "explode"}')
+
+
+def test_encode_event_clips_an_oversized_frame_to_the_wire_cap() -> None:
+    huge = "x" * (2 << 20)
+    event = {
+        "type": "tool_call",
+        "agent_id": "a1",
+        "payload": {
+            "id": "t1",
+            "name": "write_file",
+            "attempt": 3,
+            "cached": False,
+            "parent": None,
+            "input": {"path": "big.txt", "content": huge},
+            "tags": ["write", huge],
+        },
+    }
+    frame = encode_event(event)
+    assert len(frame.encode("utf-8")) + 1 <= _MAX_FRAME   # +1: the caller appends "\n"
+
+    decoded = parse_event(frame)
+    # every key survives, at its original nesting and in its original order
+    assert list(decoded) == ["type", "agent_id", "payload"]
+    assert list(decoded["payload"]) == [
+        "id", "name", "attempt", "cached", "parent", "input", "tags"]
+    assert list(decoded["payload"]["input"]) == ["path", "content"]
+    # non-string leaves and short strings are carried through untouched
+    assert decoded["type"] == "tool_call"
+    assert decoded["agent_id"] == "a1"
+    assert decoded["payload"]["attempt"] == 3
+    assert decoded["payload"]["cached"] is False
+    assert decoded["payload"]["parent"] is None
+    assert decoded["payload"]["input"]["path"] == "big.txt"
+    assert decoded["payload"]["tags"][0] == "write"
+    # the long leaves are clipped in place and marked, keeping their head
+    clipped = decoded["payload"]["input"]["content"]
+    assert clipped.startswith("xxxx")
+    assert clipped.endswith("… [clipped]")
+    assert len(clipped) < len(huge)
+    assert decoded["payload"]["tags"][1].endswith("… [clipped]")   # list leaves clip too
+
+
+def test_encode_event_leaves_a_frame_that_fits_byte_identical() -> None:
+    event = {"type": "agent_result", "payload": {"text": "hi", "n": 1}}
+    frame = encode_event(event)
+    assert frame == json.dumps({"kind": "event", "event": event})
+    assert "clipped" not in frame
+
+
+def test_encode_event_does_not_clip_a_large_frame_that_still_fits() -> None:
+    text = "y" * (1 << 19)   # 512 KiB: large, still inside the 1 MiB frame budget
+    frame = encode_event({"type": "agent_result", "payload": {"text": text}})
+    assert len(frame.encode("utf-8")) + 1 <= _MAX_FRAME
+    assert parse_event(frame)["payload"]["text"] == text
+
+
+def test_encode_event_tightens_the_clip_until_many_strings_fit() -> None:
+    # 8 x 256 KiB: no single string is over the cap, and one clipping pass at half
+    # the budget still would not fit the frame — the clip has to keep tightening.
+    event = {"type": "agent_result",
+             "payload": {f"k{i}": "z" * (1 << 18) for i in range(8)}}
+    frame = encode_event(event)
+    assert len(frame.encode("utf-8")) + 1 <= _MAX_FRAME
+    decoded = parse_event(frame)
+    assert list(decoded["payload"]) == [f"k{i}" for i in range(8)]
+    assert all(v.endswith("… [clipped]") for v in decoded["payload"].values())
