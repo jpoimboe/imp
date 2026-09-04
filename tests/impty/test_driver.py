@@ -441,6 +441,10 @@ def test_wait_clamps_hard_to_the_call_cap_on_a_busy_program(
             " — call wait() again to keep watching]")
         # Generous outer bound: the clamp returns at ~0.5s, the unclamped call at 30s.
         assert elapsed < 10.0
+        # exactly at the cap uses strict >, so == cap → plain hard-cap form, no resume clause
+        at_cap = d.wait(idle=5.0, hard=0.5)
+        assert at_cap.startswith("[still busy after 0.5s hard cap]")
+        assert "call wait() again" not in at_cap
     finally:
         d.stop()
 
@@ -503,6 +507,9 @@ def test_send_numeric_wait_is_clamped_and_reports_the_clamp(
         monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.2)
         clamped = d.send("x", wait=1.0)
         assert clamped.splitlines()[0] == "[waited 0.2s call cap (1s requested)]"
+        # exactly at the cap (strict > boundary): no [waited …] prefix
+        at_cap = d.send("x", wait=0.2)
+        assert at_cap.splitlines()[0].startswith("[alive=")
         # A request already inside the ceiling emits no such line.
         unclamped = d.send("x", wait=0.1)
         assert unclamped.splitlines()[0].startswith("[alive=")
@@ -522,6 +529,9 @@ def test_resize_numeric_wait_is_clamped_and_reports_the_clamp(
         monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.2)
         clamped = d.resize(30, 100, wait=1.0)
         assert clamped.splitlines()[0] == "[waited 0.2s call cap (1s requested)]"
+        # exactly at the cap (strict > boundary): no [waited …] prefix
+        at_cap = d.resize(30, 100, wait=0.2)
+        assert at_cap.splitlines()[0].startswith("[alive=")
         unclamped = d.resize(24, 80, wait=0.1)
         assert unclamped.splitlines()[0].startswith("[alive=")
         assert d.resize(30, 100, wait=False) == "[resized]"
