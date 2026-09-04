@@ -253,7 +253,7 @@ class CodexSession(ObserveSession):
             "thread_id": None, "complete_step_args": {},
             "complete_step_called": False,
             "auth_mode": auth_mode, "pending_usage": None,
-            "context_reading": None,
+            "context_reading": None, "context_canary_emitted": False,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
         self._proc_state = proc_state
@@ -984,6 +984,13 @@ class CodexAgentRunner:
 # ── Event mapping ─────────────────────────────────────────────────────────────
 
 
+# The rollout record shape is not a public codex contract: warn once per run
+# when a turn that billed tokens yielded no reading.
+_NO_CONTEXT_READING_WARNING = (
+    "no codex context reading in the rollout; context gauge and "
+    "handoff watch disabled for this run")
+
+
 def _attach_usage_to_last_agent_message(
     elog: Any, *, agent_id: str, usage: dict[str, Any],
     context_tokens: int | None = None, context_window: int | None = None,
@@ -1299,6 +1306,10 @@ def process_event(
             except OSError:  # codex writes this file concurrently
                 reading = None
         state["context_reading"] = reading
+        if reading is None and not state.get("context_canary_emitted"):
+            state["context_canary_emitted"] = True
+            elog.append(agent_id=agent_id, type="runner_warning",
+                        payload={"message": _NO_CONTEXT_READING_WARNING})
         tokens, window = reading if reading is not None else (None, None)
         _attach_usage_to_last_agent_message(
             elog, agent_id=agent_id, usage=normalized,

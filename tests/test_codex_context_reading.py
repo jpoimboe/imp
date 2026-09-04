@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -111,3 +112,62 @@ def test_unreadable_rollout_does_not_kill_the_turn(
     assert payload["usage"]["output_tokens"] == 99
     assert "context_tokens" not in payload
     assert state["context_reading"] is None
+
+
+_CANARY = ("no codex context reading in the rollout; context gauge and "
+           "handoff watch disabled for this run")
+
+
+@dataclass
+class _UsagelessTurn:
+    """codex's usage-less `turn.completed` shape — the existing early-out."""
+    type: str = "turn.completed"
+    usage: None = None
+
+
+def _drive_turn(elog: InMemoryEventLog, state: dict[str, Any],
+                home: Path) -> None:
+    process_event(agent_message("working"), elog=elog, agent_id="step:a",
+                  state=state, provider="codex", model="gpt-5.6-luna",
+                  codex_home=home)
+    process_event(turn_completed(input_tokens=10), elog=elog,
+                  agent_id="step:a", state=state, provider="codex",
+                  model="gpt-5.6-luna", codex_home=home)
+
+
+def test_missing_reading_emits_exactly_one_canary_per_run(
+        tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[])
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home)
+    warns = [e["payload"]["message"] for e in elog.read()
+             if e["type"] == "runner_warning"]
+    assert warns == [_CANARY]
+
+
+def test_present_reading_emits_no_canary(tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    _drive_turn(elog, state, home)
+    assert [e for e in elog.read() if e["type"] == "runner_warning"] == []
+
+
+def test_usage_less_turn_emits_no_canary_and_no_patch(tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[])
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    process_event(agent_message("working"), elog=elog, agent_id="step:a",
+                  state=state, provider="codex", model="gpt-5.6-luna",
+                  codex_home=home)
+    process_event(_UsagelessTurn(), elog=elog, agent_id="step:a", state=state,
+                  provider="codex", model="gpt-5.6-luna", codex_home=home)
+    assert [e for e in elog.read() if e["type"] == "runner_warning"] == []
+    payload = next(e for e in elog.read()
+                   if e["type"] == "agent_message")["payload"]
+    assert payload["usage"] == {}
+    assert "context_tokens" not in payload
+    # The early-out ran before the read: no reading was even attempted.
+    assert "context_reading" not in state

@@ -13,7 +13,8 @@
     "token_refresh",
     "step_context",
     "engine_message",
-    "agent_message"
+    "agent_message",
+    "runner_warning"
   ],
   "raised": null,
   "step_context_count": 1,

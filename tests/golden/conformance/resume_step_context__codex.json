@@ -11,7 +11,8 @@
     "token_refresh",
     "agent_message",
     "tool_call",
-    "tool_result"
+    "tool_result",
+    "runner_warning"
   ],
   "raised": null,
   "step_context_count": 0,
