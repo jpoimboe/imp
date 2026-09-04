@@ -19,7 +19,7 @@ import importlib
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from imp.providers.base import Provider
 
@@ -29,6 +29,7 @@ class BuiltinFloor(NamedTuple):
     module: str
     tier_defaults: dict[str, str] | None
     env_var: str | None
+    auth_hint: str
 
 
 # Pinned undated major.minor ids: they track dated snapshots of that minor but never
@@ -51,6 +52,7 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
             "high": "claude-opus-5[1m]",
         },
         env_var="ANTHROPIC_API_KEY",
+        auth_hint="set ANTHROPIC_API_KEY",
     ),
     "openai": BuiltinFloor(
         module="openai",
@@ -60,6 +62,7 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
             "high": "gpt-5.6-sol",
         },
         env_var="OPENAI_API_KEY",
+        auth_hint="set OPENAI_API_KEY",
     ),
     "claude_code": BuiltinFloor(
         module="claude_code",
@@ -69,6 +72,7 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
             "high": "claude-opus-5[1m]",
         },
         env_var=None,  # CLI-authenticated (claude login); no env var
+        auth_hint="run `claude login`",
     ),
     "codex": BuiltinFloor(
         module="codex",
@@ -78,12 +82,19 @@ BUILTIN_FLOOR: dict[str, BuiltinFloor] = {
             "high": "gpt-5.6-sol",
         },
         env_var=None,  # CLI-authenticated (codex login); no env var
+        auth_hint="run `codex login`",
     ),
     # Duplicates scripted.ENV_VAR (read at runtime there); a test pins the two equal.
     "scripted": BuiltinFloor(
         module="scripted", tier_defaults=None, env_var="IMP_SCRIPTED_SCRIPT",
+        auth_hint="set IMP_SCRIPTED_SCRIPT",
     ),
 }
+
+
+def auth_hint_lines(names: Iterable[str]) -> list[str]:
+    """Indented `  <name> — <hint>` per name; a name outside the floor gets no line."""
+    return [f"  {n} — {BUILTIN_FLOOR[n].auth_hint}" for n in names if n in BUILTIN_FLOOR]
 
 
 def _thunks(module: str) -> tuple[Callable[[], bool], Callable[[str], Provider]]:
