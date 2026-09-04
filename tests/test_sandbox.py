@@ -1345,6 +1345,73 @@ def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
     cleanup()  # no-op, must not raise
 
 
+def test_prepare_spawn_policy_mints_a_distinct_layer_per_spawn(tmp_path):
+    # AC 1a/1b: two spawns off ONE step policy get three-way-distinct
+    # upper/work/merged dirs, all real and all under that step's overlay_root —
+    # so two concurrently-live mounts can never name the same upperdir.
+    root = tmp_path / "coder.overlay"
+    step_pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                       overlay_root=str(root))
+    a = prepare_spawn_policy(step_pol)
+    b = prepare_spawn_policy(step_pol)
+    a_dirs = (a.home_layer.upper, a.home_layer.work, a.home_layer.merged)
+    b_dirs = (b.home_layer.upper, b.home_layer.work, b.home_layer.merged)
+    for d in (*a_dirs, *b_dirs):
+        assert Path(d).is_dir()
+        assert Path(d).is_relative_to(root)
+    assert len(set(a_dirs) | set(b_dirs)) == 6      # no path reused anywhere
+    assert a.home_layer.is_overlay and b.home_layer.is_overlay
+    assert a.home_layer.home == "/home/u" == b.home_layer.home
+    assert a.overlay_root == b.overlay_root == str(root)
+
+
+def test_each_minted_layer_reaches_its_own_mount_command(tmp_path):
+    # AC 1c: the per-spawn dirs are what actually get mounted — each policy's own
+    # upper/work/merged appear verbatim in ITS overlay mount command, and neither
+    # spawn's argv ever names the other spawn's upperdir.
+    import shlex
+
+    root = tmp_path / "coder.overlay"
+    step_pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                       overlay_root=str(root))
+    a, b = prepare_spawn_policy(step_pol), prepare_spawn_policy(step_pol)
+    scripts = {
+        p: _unshare_script(
+            build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={}))
+        for p in (a, b)}
+    for pol, other in ((a, b), (b, a)):
+        script, hl = scripts[pol], pol.home_layer
+        assert "lowerdir=/home/u," in script
+        assert (f"upperdir={shlex.quote(hl.upper)},"
+                f"workdir={shlex.quote(hl.work)} "
+                f"{shlex.quote(hl.merged)}") in script
+        assert other.home_layer.upper not in script
+
+
+def test_prepare_spawn_policy_self_heals_a_removed_overlay_root(tmp_path):
+    # AC 5: the root vanishing mid-step must not fail every later spawn
+    # permanently (the retry loop cannot heal a permanent setup failure), so the
+    # mint re-creates it — same shape as the git_ref_reexpose re-creation above it.
+    root = tmp_path / "gone" / "coder.overlay"
+    step_pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
+                       overlay_root=str(root))
+    assert not root.exists()
+    spawn = prepare_spawn_policy(step_pol)
+    upper = Path(spawn.home_layer.upper)
+    assert upper.is_dir() and upper.is_relative_to(root)
+
+
+def test_prepare_spawn_policy_mints_nothing_without_an_overlay_root():
+    # AC 8: the non-overlay host's shape — a plain rw-bind home layer and an
+    # empty overlay_root — passes through untouched, so no overlay is mounted.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    out = prepare_spawn_policy(pol)
+    assert out.home_layer == HomeLayer(home="/home/u")
+    assert out.overlay_root == ""
+    argv = build_sandbox_argv("x", cwd="/wt", policy=out, engine_env={})
+    assert argv[0] == "bwrap"          # no unshare/mount wrapper
+
+
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
     home = project_state_dir(control) / "quests" / "abc"

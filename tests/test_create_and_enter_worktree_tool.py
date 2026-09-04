@@ -118,12 +118,14 @@ async def test_tool_refreshes_sandbox_policy_worktree(tmp_path: Path) -> None:
     ctx = _ctx(ch, State.load(ch.state_dir))
     layer = HomeLayer(home="/home/u")
     ctx.base_sandbox_policy = _active_policy(
-        str(tmp_path), home_layer=layer, readonly_overlays=("/ro/sub",))
+        str(tmp_path), home_layer=layer, overlay_root="/q/steps/build/coder.overlay",
+        readonly_overlays=("/ro/sub",))
     tool = get_registry()["create_and_enter_worktree"]
     await tool.async_invoke(ctx, {})
     wt = project_state_dir(tmp_path) / "worktrees" / "t5"
     assert ctx.base_sandbox_policy.worktree == str(wt)          # repointed at the fork
     assert ctx.base_sandbox_policy.home_layer is layer          # carried over unchanged
+    assert ctx.base_sandbox_policy.overlay_root == "/q/steps/build/coder.overlay"
     assert ctx.base_sandbox_policy.readonly_overlays == ("/ro/sub",)
 
 

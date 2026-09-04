@@ -78,6 +78,7 @@ class SandboxPolicy:
     disposable_tree: bool = False            # agent runs in a disposable git worktree
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
+    overlay_root: str = ""  # per-step dir each spawn mints its own layer under ("" → none)
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -355,13 +356,34 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     existence-gating at spawn is always safe. Own binds (worktree, quest_home) and
     stable config (caches, extra_*) never churn and are left untouched. Scoped to
     the spawn argv only; the in-process allows_read/allows_write mirrors keep the
-    unpruned policy (a gone path is denied either way)."""
+    unpruned policy (a gone path is denied either way).
+
+    It also MINTS this spawn's home-overlay layer when policy.overlay_root is set:
+    a fresh mkdtemp dir under the root holding its own upper/work/merged. Minting
+    is per SPAWN, not per step, because two concurrently-live overlay mounts
+    sharing one upperdir/workdir is undefined behavior (the kernel's ovl_inuse
+    warning) — and overlap within a step is normal: a background command outlives
+    a foreground one, and non-isolated subagents inherit the step's policy
+    verbatim. No per-spawn cleanup exists; step teardown rmtrees the whole root."""
     if not policy.active:
         return policy
     for ref_dir in policy.git_ref_reexpose:
         Path(ref_dir).mkdir(parents=True, exist_ok=True)
+    home_layer = policy.home_layer
+    if policy.overlay_root:
+        root = Path(policy.overlay_root)
+        root.mkdir(parents=True, exist_ok=True)   # self-heal, like git_ref_reexpose
+        layer_dir = Path(tempfile.mkdtemp(dir=root))
+        upper = layer_dir / "upper"
+        work = layer_dir / "work"
+        merged = layer_dir / "merged"
+        for d in (upper, work, merged):
+            d.mkdir()
+        home_layer = HomeLayer(home=policy.home, merged=str(merged),
+                               upper=str(upper), work=str(work))
     return replace(
         policy,
+        home_layer=home_layer,
         git_ro_remask=_existing(list(policy.git_ro_remask)),
         secret_dirs=_existing(list(policy.secret_dirs)),
         secret_files=_existing(list(policy.secret_files)),
