@@ -358,7 +358,7 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
 
 
 def test_init_finishes_with_no_credential_in_the_environment(tmp_path, monkeypatch):
-    # AC 8(a): init is provider-free on every path — no probe, no message.
+    # init never probes provider credentials on any path — no probe, no message.
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(
@@ -735,7 +735,7 @@ def test_init_parser_accepts_override_flags() -> None:
 
 def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
     # No --use-defaults, but a non-tty stdin/stdout must auto-route to the
-    # provider-free path (no hang, no picker).
+    # non-interactive path (no hang, no picker).
     import imp.cli.main as m
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
