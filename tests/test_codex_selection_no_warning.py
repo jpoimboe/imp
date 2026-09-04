@@ -20,7 +20,7 @@ from imp.engine.types import (
 )
 from imp.providers import resolve
 from imp.providers.config import Config
-from imp.providers.resolve import CODEX_SELECTION_WARNING, resolve_run
+from imp.providers.resolve import resolve_run
 
 _SRC = SourceLoc(file=Path("w.yaml"), line=1)
 
@@ -75,43 +75,25 @@ def _wf(steps: list[Step], agents: dict[str, AgentDef]) -> Workflow:
 def _cfg(providers: tuple[str, ...]) -> Config:
     return Config(
         providers=tuple(providers),
-        tiers={
-            "high": {"claude_code": "opus", "codex": "gpt-5.5"},
-        },
+        tiers={"high": {"claude_code": "opus", "codex": "gpt-5.5"}},
     )
 
 
-def test_codex_tier_populates_warning() -> None:
+def test_codex_tier_detail_carries_no_warning_key() -> None:
     wf = _wf([_step("s1", "high")], {"s1": _agent("s1")})
     _tiers, _steps, details = resolve_run(wf, _cfg(("codex", "claude_code")))
-    assert details["tiers"]["high"]["provider"] == "codex"
-    assert details["tiers"]["high"]["warning"] == CODEX_SELECTION_WARNING
-    assert "runs unsandboxed" in CODEX_SELECTION_WARNING
+    assert details["tiers"]["high"] == {
+        "provider": "codex", "model": "gpt-5.5",
+        "differ_from": None, "differ_tier": None}
 
 
-def test_non_codex_tier_omits_warning_key() -> None:
-    wf = _wf([_step("s1", "high")], {"s1": _agent("s1")})
-    _tiers, _steps, details = resolve_run(wf, _cfg(("claude_code", "codex")))
-    assert details["tiers"]["high"]["provider"] == "claude_code"
-    assert "warning" not in details["tiers"]["high"]
-
-
-def test_codex_step_override_populates_warning() -> None:
-    # s2 differs from s1; with only codex available it still resolves codex
-    # and the step-details warning must be present.
+def test_codex_step_override_detail_carries_no_warning_key() -> None:
+    # s2 differs from s1 with only codex configured, so the override still
+    # resolves codex (differ tier 3 = identical) — the case that used to get
+    # its own warning line.
     wf = _wf([_step("s1", "high"), _step("s2", "high", differ_from="s1")],
              {"s1": _agent("s1"), "s2": _agent("s2")})
     _tiers, _steps, details = resolve_run(wf, _cfg(("codex",)))
-    assert details["steps"]["s2"]["provider"] == "codex"
-    assert details["steps"]["s2"]["warning"] == CODEX_SELECTION_WARNING
-
-
-def test_non_codex_step_override_omits_warning_key() -> None:
-    # s1 resolves to codex (first available); s2 differs from s1 so it must pick
-    # a different provider (claude_code). That non-codex step override must not
-    # carry the warning key.
-    wf = _wf([_step("s1", "high"), _step("s2", "high", differ_from="s1")],
-             {"s1": _agent("s1"), "s2": _agent("s2")})
-    _tiers, _steps, details = resolve_run(wf, _cfg(("codex", "claude_code")))
-    assert details["steps"]["s2"]["provider"] == "claude_code"
-    assert "warning" not in details["steps"]["s2"]
+    assert details["steps"]["s2"] == {
+        "provider": "codex", "model": "gpt-5.5",
+        "differ_from": "s1", "differ_tier": 3}

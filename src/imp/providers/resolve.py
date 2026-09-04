@@ -45,22 +45,6 @@ class ProviderDefaults:
 
 _PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {}
 
-# Codex governance warning surfaced at selection time ("containment of
-# already-written bytes — scoped to in-worktree writes"). Added only when the
-# resolved provider is `codex`; absent for every other provider so the wire
-# payload stays narrow and unrelated render tests don't drift.
-CODEX_SELECTION_WARNING = (
-    "codex runs unsandboxed; a disobedient native edit outside the worktree "
-    "is detected but not auto-reverted."
-)
-
-
-def _maybe_add_codex_warning(detail: dict[str, Any], provider: str) -> None:
-    """Adds the selection-time warning key when (and only when) the resolved
-    provider is `codex`. Keeps non-codex detail dicts byte-identical."""
-    if provider == "codex":
-        detail["warning"] = CODEX_SELECTION_WARNING
-
 
 class UnknownProvider(Exception):
     pass
@@ -207,7 +191,6 @@ def resolve_run(
             "provider": winner, "model": model,
             "differ_from": None, "differ_tier": None,
         }
-        _maybe_add_codex_warning(tier_details[tier_name], winner)
 
     # — Pass 2: per-step overrides for differ_from ————————————————————————
     flat = workflow.flat_steps()
@@ -291,7 +274,6 @@ def resolve_run(
             "provider": best_provider, "model": model,
             "differ_from": target_name, "differ_tier": best_score,
         }
-        _maybe_add_codex_warning(step_details[step_name], best_provider)
 
     details = {"tiers": tier_details, "steps": step_details}
     return resolved_tiers, resolved_steps, details
