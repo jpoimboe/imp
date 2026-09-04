@@ -74,6 +74,32 @@ async def test_wrap_complete_step_captures_args(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_wrap_complete_step_capture_omits_unsent_optional(tmp_path: Path) -> None:
+    """claude_code assigns `args` verbatim and nothing downstream filters, so an
+    optional the agent did not send must simply be absent (regression guard)."""
+    state = _RunState()
+    schema = OutputSchema(
+        fields=(
+            OutputField(name="status", type="enum",
+                        values=("Success", "Error"), required=True),
+            OutputField(name="spec_path", type="string", required=False),
+        ),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    wrapped = _wrap_one(
+        "complete_step", make_complete_step_tool(schema), _ctx(tmp_path), state,
+        _passthrough_decorator,
+    )
+
+    await wrapped({"status": "Success"})
+    assert state.complete_step_args == {"status": "Success"}
+
+    await wrapped({"status": "Success", "spec_path": "docs/my-spec.md"})
+    assert state.complete_step_args == {
+        "status": "Success", "spec_path": "docs/my-spec.md"}
+
+
+@pytest.mark.anyio
 async def test_wrap_regular_tool_returns_invoke_result(tmp_path: Path) -> None:
     from imp.agents.tools import get_registry
 
