@@ -90,17 +90,24 @@ _INTERRUPTED_EVENTS = [
 
 
 @pytest.mark.parametrize(
-    "argv,cell",
+    "argv,inferred_cell,interrupted_cell",
     [
-        (["log", "alpha", "-s", "--no-pager"], "~4m 50s"),
-        (["log", "alpha", "-s", "--md=-"], "| ↳ coder | ~4m 50s | — | — |"),
-        (["log", "alpha", "-s", "--html=-"], "<td>~4m 50s</td>"),
+        (["log", "alpha", "-s", "--no-pager"],
+         "    ↳ coder      ~4m 50s  —  —",
+         "  verify     interrupted  —  —"),
+        (["log", "alpha", "-s", "--md=-"],
+         "| ↳ coder | ~4m 50s | — | — |",
+         "| verify | interrupted | — | — |"),
+        (["log", "alpha", "-s", "--html=-"],
+         "<td>~4m 50s</td>",
+         "<td>interrupted</td>"),
     ],
     ids=["terminal", "md", "html"],
 )
 def test_archived_summary_marks_inferred_and_interrupted_spans(
     argv: list[str],
-    cell: str,
+    inferred_cell: str,
+    interrupted_cell: str,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -120,5 +127,5 @@ def test_archived_summary_marks_inferred_and_interrupted_spans(
     rc = m.main(argv)
     out = capsys.readouterr().out
     assert rc == 0
-    assert cell in out
-    assert "interrupted" in out      # the trailing `verify` step, never completed
+    assert inferred_cell in out
+    assert interrupted_cell in out      # the trailing `verify` step, never completed
