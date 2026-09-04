@@ -1639,3 +1639,34 @@ def test_cmd_init_reports_an_unparseable_machine_config_non_interactively(
     assert "Traceback" not in captured.out
     assert (home / "config.yaml").read_text() == broken
     assert not (tmp_path / "imp" / "config.yaml").exists()
+
+
+def test_providers_flag_parses_a_preference_order() -> None:
+    from imp.cli.init import parse_providers_flag
+
+    assert parse_providers_flag("claude_code, openai") == ["claude_code", "openai"]
+    # order is the user's, not the display order
+    assert parse_providers_flag("codex,anthropic") == ["codex", "anthropic"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("foo",
+         "--providers: unknown provider 'foo' "
+         "(choose from: claude_code, anthropic, openai, codex)"),
+        # the `scripted` test backend is registered but not selectable here
+        ("claude_code,scripted",
+         "--providers: unknown provider 'scripted' "
+         "(choose from: claude_code, anthropic, openai, codex)"),
+        ("openai,openai", "--providers: duplicate provider 'openai'"),
+        ("", "--providers: name at least one provider"),
+        ("  ,  ", "--providers: name at least one provider"),
+    ],
+)
+def test_providers_flag_refusals(raw: str, message: str) -> None:
+    from imp.cli.init import InvalidProvidersFlag, parse_providers_flag
+
+    with pytest.raises(InvalidProvidersFlag) as exc:
+        parse_providers_flag(raw)
+    assert str(exc.value) == message

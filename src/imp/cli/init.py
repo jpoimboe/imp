@@ -100,6 +100,10 @@ class GitIdentityUnavailable(Exception):
     """git can build no author identity here, so imp init cannot commit."""
 
 
+class InvalidProvidersFlag(Exception):
+    """`imp init --providers` names something init won't accept; nothing is written."""
+
+
 _GIT_NO_IDENTITY = (
     "git has no author identity here, so imp can't commit. "
     "Set one, then re-run `imp init`:\n"
@@ -214,6 +218,24 @@ def _commit_init_files(project_root: Path, *, extra_paths: tuple[str, ...] = ())
 _PROVIDER_DISPLAY_ORDER: tuple[str, ...] = (
     "claude_code", "anthropic", "openai", "codex",
 )
+
+
+def parse_providers_flag(raw: str) -> list[str]:
+    """Parse `--providers a,b` as a preference order. Raises InvalidProvidersFlag
+    with the message for the `imp:` line; the caller has written nothing yet."""
+    names = [part.strip() for part in raw.split(",") if part.strip()]
+    if not names:
+        raise InvalidProvidersFlag("--providers: name at least one provider")
+    seen: set[str] = set()
+    for name in names:
+        if name not in _PROVIDER_DISPLAY_ORDER:
+            raise InvalidProvidersFlag(
+                f"--providers: unknown provider {name!r} "
+                f"(choose from: {', '.join(_PROVIDER_DISPLAY_ORDER)})")
+        if name in seen:
+            raise InvalidProvidersFlag(f"--providers: duplicate provider {name!r}")
+        seen.add(name)
+    return names
 
 
 def _default_detect_theme() -> str:
