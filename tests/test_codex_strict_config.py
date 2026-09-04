@@ -30,7 +30,8 @@ def _run_strict(*, codex_home: Path, cwd: Path) -> subprocess.CompletedProcess[s
     return subprocess.run(
         [_CODEX, "--strict-config", "exec", "noop"],
         cwd=str(cwd),
-        env={**os.environ, "CODEX_HOME": str(codex_home)},
+        # Blank the key: the child must not reach a real API if a future codex stops aborting here.
+        env={**os.environ, "CODEX_HOME": str(codex_home), "OPENAI_API_KEY": ""},
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
