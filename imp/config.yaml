@@ -13,7 +13,7 @@ default-base: master
 # defaults (120 fast / 300 slow) — batched integrations trip the tighter clock.
 test_cmd_fast: "make check"
 test_cmd_slow: "make check && make test-live"
-test_cmd_fast_timeout: 240
+test_cmd_fast_timeout: 300
 test_cmd_slow_timeout: 600
 
 # Worktree-relative import roots prepended to gate/agent subprocess PYTHONPATH so
