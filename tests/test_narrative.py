@@ -796,11 +796,12 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     assert act is None or "subagent(reviewer)" not in (act.verb or "")
 
 
-def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
-    # codex emits stop_reason=None once per turn at turn.completed. A parent
-    # llm_response after a task fold opened (with NO task tool_result arriving)
-    # means control returned, so the resume-close fallback must close the fold —
-    # without waiting for the step_completed backstop.
+def test_legacy_unstamped_codex_fold_salvaged_by_resume_close() -> None:
+    # Today's codex writer stamps id_ns="block" and _resume_close_folds skips
+    # block-tracked folds entirely. This fixture pins the LEGACY unstamped path:
+    # no id_ns on the tool_call, so the only signal that control returned is the
+    # parent agent_message carrying codex's turn-end stop_reason=None — resume-
+    # close must still close the fold without waiting for the step_completed backstop.
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="codex"))
