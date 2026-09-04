@@ -1503,6 +1503,7 @@ async def _route_agent(
     autonomous: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
+    reincarnation_text: str | None = None,
     memory: dict[str, str] | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
@@ -1575,7 +1576,8 @@ async def _route_agent(
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
             memory=memory,
-            opening=run_opening, feedback_lead=feedback_lead)
+            opening=run_opening, feedback_lead=feedback_lead,
+            reincarnation_text=reincarnation_text)
         if result.delay is None:
             break
         # Per-category wall-clock budget: pause cleanly when cumulative
@@ -1683,7 +1685,8 @@ async def _route_agent(
                 test_gates=test_gates, pythonpath=pythonpath, undecided=undecided,
                 headless=headless,
                 autonomous=autonomous,
-                sandbox_policy=sandbox_policy, seed_opening=seed,
+                sandbox_policy=sandbox_policy,
+                seed_opening=quest.seed_opening, reincarnation_text=seed,
                 memory=memory)
         state.step_attempt = 0
         pause = Pause(reason="context_window", kind="reincarnation_cap")
@@ -1710,7 +1713,8 @@ async def _route_agent(
             wrapper_text=wrapper_text, is_resume=False,
             test_gates=test_gates, pythonpath=pythonpath, undecided=undecided, headless=headless,
             autonomous=autonomous,
-            sandbox_policy=sandbox_policy, seed_opening=seed,
+            sandbox_policy=sandbox_policy,
+            seed_opening=quest.seed_opening, reincarnation_text=seed,
             memory=memory)
     if result.fatal:
         # Defense in depth: reset the retry count when pausing fatally, matching
@@ -1750,6 +1754,7 @@ async def _route_agent(
                                   autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
                                   seed_opening=seed_opening,
+                                  reincarnation_text=reincarnation_text,
                                   memory=memory)
 
     state.step_attempt = 0
@@ -1808,6 +1813,7 @@ async def _run_agent_invocation(
     memory: dict[str, str] | None = None,
     opening: str = "",
     feedback_lead: str | None = None,
+    reincarnation_text: str | None = None,
 ) -> AgentRunResult:
     """Run one top-level agent step to a terminal AgentRunResult.
 
@@ -1912,6 +1918,7 @@ async def _run_agent_invocation(
         subagent_depth=0,
         retry_feedback=retry_feedback,
         feedback_lead=feedback_lead,
+        reincarnation_text=reincarnation_text,
         balance_on_resume=balance_on_resume,
         resume_should_continue=(
             state.resume_pending == state.step

@@ -3292,15 +3292,19 @@ async def test_run_quest_persists_configured_max_reincarnations(tmp_path):
 async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
     """A step whose runner hits the hard window error reincarnates fresh (Tier B
     backstop) up to the per-session cap, then pauses — emitting one
-    `reincarnating` event and stashing the prior transcript at .attempt-1."""
+    `reincarnating` event, stashing the prior transcript at .attempt-1, and
+    delivering the note-less seed shape in the reborn first user message."""
     from imp.providers import resolve
 
     quest, phase, step = _seed_minimal_workflow(tmp_path)
     (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
+    sink: list[AgentInvocation] = []
+
     class _CtxWindowRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            sink.append(invocation)
             _persist_initial(invocation)   # non-empty transcript -> stashable
             yield {"type": "error", "payload": {
                 "category": "context_window", "kind": "prompt_too_long",
@@ -3331,6 +3335,16 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context window exceeded"
     assert (quest.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    # The reborn session gets the note-less shape, in its first user message.
+    assert len(sink) == 2
+    msg = sink[1].initial_messages[0].content[0].text
+    assert f"- Primary: `imp events {quest.id} --step {step} --limit N`" in msg
+    assert "It left no handoff note" in msg
+    assert "HANDOFF NOTE FROM THE PREVIOUS ATTEMPT" not in msg
+    assert "/steps/" not in msg
+    # The first (dead) attempt was never handed a seed.
+    assert "You are a reincarnated session" not in \
+        sink[0].initial_messages[0].content[0].text
 
 
 @pytest.mark.anyio
@@ -3656,12 +3670,65 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_reborn_first_user_message_ends_with_the_inlined_handoff_note(tmp_path):
+    """AC 1 and 5: the note reaches the reborn session VERBATIM, in the first
+    user message the provider actually receives, as the tail of that message —
+    for an agent whose template renders no {{ run.opening }}."""
+    from imp.engine.reincarnation import handoff_path_for, reincarnation_seed
+    from imp.providers import resolve
+
+    quest, _phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+    note = "# Handoff\nGoal: land the parser\nRemains: wire `--json` output\n"
+
+    sink: list[AgentInvocation] = []
+
+    class _HandoffRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            sink.append(invocation)
+            _persist_initial(invocation)
+            hp = handoff_path_for(invocation.transcript_dir)
+            hp.write_text(note)
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _HandoffProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _HandoffRunner:
+            return _HandoffRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _HandoffProvider(model))
+
+    await run_quest(quest)
+
+    assert len(sink) == 2
+    msg = sink[1].initial_messages[0].content[0].text
+    # The rendered body still leads the message; the seed is strictly its tail.
+    assert msg.startswith("go ")
+    assert msg.endswith(reincarnation_seed(
+        handoff_text=note, quest_id=quest.id, step_name=step))
+    assert ("--- HANDOFF NOTE FROM THE PREVIOUS ATTEMPT "
+            "(verbatim, to end of message) ---") in msg
+    assert msg.endswith(note)          # the note itself is last
+    assert "/steps/" not in msg
+
+
+@pytest.mark.anyio
 async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     """When the runner reports a Tier A handoff but the note file is absent, the
-    engine treats it as a FAILED handoff: it reincarnates from the stashed
-    transcript alone and emits the DISTINCT reason
+    engine treats it as a FAILED handoff: it emits the DISTINCT reason
     'handoff failed — recovering from transcript' — never the clean threshold
-    reason. The runner always reports handoff_path; the engine arbitrates."""
+    reason — and the reborn session gets the note-less seed shape."""
     from imp.engine.reincarnation import handoff_path_for
     from imp.providers import resolve
 
@@ -3669,8 +3736,11 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     (tmp_path / "imp" / "config.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
+    sink: list[AgentInvocation] = []
+
     class _HandoffNoNoteRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            sink.append(invocation)
             _persist_initial(invocation)   # non-empty transcript -> stashable
             hp = handoff_path_for(invocation.transcript_dir)
             # Note deliberately NOT written: the handoff turn failed to produce it.
@@ -3685,7 +3755,9 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
         def __init__(self, model: str = "m") -> None:
             self.model = model
 
-        def create_runner(self, invocation: AgentInvocation) -> _HandoffNoNoteRunner:
+        def create_runner(
+            self, invocation: AgentInvocation
+        ) -> _HandoffNoNoteRunner:
             return _HandoffNoNoteRunner()
 
     resolve.reset_providers_for_tests()
@@ -3702,6 +3774,68 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     assert reincarnating[0]["payload"]["reason"] == \
         "handoff failed — recovering from transcript"
     assert (quest.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert len(sink) == 2
+    msg = sink[1].initial_messages[0].content[0].text
+    assert f"- Primary: `imp events {quest.id} --step {step} --limit N`" in msg
+    assert "It left no handoff note" in msg
+    assert "HANDOFF NOTE FROM THE PREVIOUS ATTEMPT" not in msg
+    assert "/steps/" not in msg
+
+
+@pytest.mark.anyio
+async def test_reborn_session_renders_the_quest_opening_and_seeds_once(tmp_path):
+    """AC 9: {{ run.opening }} keeps its single meaning — the user's opening
+    intent, still rendered on a reborn session — while the reincarnation seed
+    rides its own channel and appears exactly once, in the trailing section."""
+    from imp.engine.reincarnation import handoff_path_for
+    from imp.providers import resolve
+
+    quest, _phase, _step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+    # An agent template that DOES render the opening (the threshold-agent shape).
+    (tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "go {{ quest.id }}\n\nOPENING: {{ run.opening }}\n"
+    )
+    quest.set_seed_opening("Ship the widget")
+
+    sink: list[AgentInvocation] = []
+
+    class _HandoffRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            sink.append(invocation)
+            _persist_initial(invocation)
+            hp = handoff_path_for(invocation.transcript_dir)
+            hp.write_text("# handoff\nRemains: ship it\n")
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _HandoffProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _HandoffRunner:
+            return _HandoffRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _HandoffProvider(model))
+
+    await run_quest(quest)
+
+    assert len(sink) == 2
+    msg = sink[1].initial_messages[0].content[0].text
+    assert "OPENING: Ship the widget" in msg          # the real intent, not the seed
+    assert msg.count("You are a reincarnated session") == 1
+    # The seed is in the tail, strictly after the rendered opening.
+    assert msg.index("You are a reincarnated session") > msg.index("OPENING:")
 
 
 @pytest.mark.anyio
