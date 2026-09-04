@@ -43,7 +43,10 @@ THIN_DESCRIPTIONS: dict[str, str] = {
     "send": "Send raw keystrokes to the program, then return the new screen.",
     "send_signal": "Send a real signal (default SIGINT) to the program's process group.",
     "resize": "Resize the terminal (SIGWINCH) and return the reflowed screen.",
-    "wait": "Wait for a still-working program to settle, or for new output (for_change=True).",
+    "wait": (
+        "Wait for a still-working program to settle, or for new output "
+        "(for_change=True). Each call is capped at 240s; call again to keep watching."
+    ),
     "snapshot": (
         "Render the current screen to a PNG (color, bold, box-drawing) and return its path."
     ),

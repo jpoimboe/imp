@@ -2,12 +2,13 @@
 # Copyright 2026 Josh Poimboeuf
 """Transport-neutral driver for one interactive program over an impty
 `TerminalSession`. Owns the session and exposes the eight tool bodies (start,
-view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The tool
-descriptions live on the method docstrings as the single source of truth — the
-provider host adapters (claude_code SDK tools, codex FastMCP, the standalone
-stdio server) all surface these same methods, so there is no per-provider
-description drift. Calls are blocking (wait_idle, time.sleep, pty reads); each
-in-process host offloads them to a thread.
+view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The method
+docstrings are the FULL tool descriptions, surfaced only by the standalone stdio
+server; both provider hosts (claude_code SDK tools, codex FastMCP) show the
+one-line `THIN_DESCRIPTIONS` in `impty.mcp` instead, so agent-facing wording has
+to be kept in step across the two. Calls are blocking (wait_idle, time.sleep, pty
+reads); each in-process host offloads them to a thread, and this layer clamps
+`wait` and a numeric `send`/`resize` settle to `MAX_CALL_HARD`.
 """
 
 from __future__ import annotations
@@ -19,7 +20,12 @@ import time
 from collections.abc import Callable
 
 from impty import TerminalSession
-from impty.session import DEFAULT_CHANGE_HARD, DEFAULT_SETTLE_HARD, DEFAULT_SETTLE_IDLE
+from impty.session import (
+    DEFAULT_CHANGE_HARD,
+    DEFAULT_SETTLE_HARD,
+    DEFAULT_SETTLE_IDLE,
+    MAX_CALL_HARD,
+)
 
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
@@ -39,6 +45,16 @@ def _decode_keys(data: str) -> str:
     prompt. Each matched token is pure ASCII, so unicode_escape is safe; real
     Unicode and unrecognized lone backslashes are left exactly as typed."""
     return _ESCAPE_RE.sub(lambda m: codecs.decode(m.group(0), "unicode_escape"), data)
+
+
+def _fixed_settle(wait: float) -> tuple[float, str]:
+    """Clamped fixed-settle seconds, plus the one line a clamped call prefixes to
+    the screen (empty when the request already fit inside the ceiling)."""
+    requested = float(wait)
+    settle = min(max(0.0, requested), MAX_CALL_HARD)
+    if requested <= MAX_CALL_HARD:
+        return settle, ""
+    return settle, f"[waited {settle:g}s call cap ({requested:g}s requested)]\n"
 
 
 class ImptyDriver:
@@ -127,7 +143,10 @@ class ImptyDriver:
           Use this for a continuously-animating full-screen app (a spinner / live
           TUI) that NEVER goes quiet — there `wait=True` blocks the whole settle cap
           every keystroke. e.g. `wait=0.4` lets the reaction render, then snapshots.
-          The background drainer keeps pyte current during the wait.
+          The background drainer keeps pyte current during the wait. A value over
+          240s is clamped to it — no single call blocks longer — and the reply's
+          first line then reads `[waited 240s call cap (600s requested)]`; send again
+          or call `wait()` to keep watching.
         """
         session = self._require()
         # Mark the type-then-look boundary just before the keystroke so wait_idle
@@ -139,11 +158,13 @@ class ImptyDriver:
         # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
         if wait is False:
             return "[sent]"
+        note = ""
         if wait is True:
             session.wait_idle(since=since)  # inherit the library settle policy
         else:
-            time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
-        return self._render(session)
+            settle, note = _fixed_settle(wait)
+            time.sleep(settle)  # fixed settle; drainer updates pyte
+        return f"{note}{self._render(session)}"
 
     def send_signal(self, sig: int = signal.SIGINT) -> str:
         """Deliver a real signal to the program's process group, then return the new
@@ -184,6 +205,8 @@ class ImptyDriver:
         - False: fire and return `[resized]` immediately (e.g. a never-quiet
           animating TUI; snapshot separately).
         - a number (seconds): settle for that FIXED duration, then return the screen.
+          A value over 240s is clamped to it and the reply's first line then reads
+          `[waited 240s call cap (600s requested)]`.
         """
         session = self._require()
         # Mark the boundary before the resize so wait_idle settles on the REDRAW
@@ -194,11 +217,13 @@ class ImptyDriver:
         # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
         if wait is False:
             return "[resized]"
+        note = ""
         if wait is True:
             session.wait_idle(since=since)  # inherit the library settle policy
         else:
-            time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
-        return self._render(session)
+            settle, note = _fixed_settle(wait)
+            time.sleep(settle)  # fixed settle; drainer updates pyte
+        return f"{note}{self._render(session)}"
 
     def wait(
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float | None = None,
@@ -215,27 +240,37 @@ class ImptyDriver:
         already-quiet program blocks until something new lands and then goes quiet —
         follow a long command without polling `view`. Any output counts, so an
         animating TUI returns on its next repaint. `hard` defaults to 3s, or 30s with
-        `for_change=True`; the header is `[settled]`, `[still busy after hard cap]`, or —
-        with `for_change=True` only — `[no change after hard cap]`.
+        `for_change=True`, and is clamped to 240s: no single call blocks longer than
+        that. The header is `[settled]`, `[still busy after <cap>s hard cap]`, or —
+        with `for_change=True` only — `[no change after <cap>s hard cap]`; when the
+        clamp fired the header instead names the call cap and the value you asked for
+        and tells you to call wait() again to keep watching, which is how you follow a
+        program for hours without any one call blocking for hours.
         """
         session = self._require()
         # Stamp the boundary BEFORE waiting: in change mode only output read at or
         # after this instant qualifies, so an already-quiet screen can't settle it.
         since = time.monotonic() if for_change else 0.0
-        if hard is None:
-            hard = DEFAULT_CHANGE_HARD if for_change else DEFAULT_SETTLE_HARD
-        settled = session.wait_idle(idle=idle, hard=hard, since=since)
+        requested = hard if hard is not None else (
+            DEFAULT_CHANGE_HARD if for_change else DEFAULT_SETTLE_HARD)
+        capped = min(requested, MAX_CALL_HARD)
+        settled = session.wait_idle(idle=idle, hard=capped, since=since)
         if settled:
             header = "[settled]"
-        elif for_change and (
-            session.last_output_at is None or session.last_output_at < since
-        ):
+        else:
             # The for_change guard is not redundant with the comparison: a child that
             # has produced NO output has last_output_at None, and normal mode must
-            # keep reporting that as [still busy after hard cap].
-            header = "[no change after hard cap]"
-        else:
-            header = "[still busy after hard cap]"
+            # keep reporting that as [still busy after …].
+            kind = "no change" if (
+                for_change
+                and (session.last_output_at is None or session.last_output_at < since)
+            ) else "still busy"
+            if requested > MAX_CALL_HARD:
+                header = (
+                    f"[{kind} after {capped:g}s call cap ({requested:g}s requested)"
+                    " — call wait() again to keep watching]")
+            else:
+                header = f"[{kind} after {capped:g}s hard cap]"
         return f"{header}\n{self._render(session)}"
 
     def snapshot(

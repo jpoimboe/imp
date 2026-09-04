@@ -38,17 +38,24 @@ _POLL = 0.02  # 20 ms — nominal Phase-1 poll cadence cap
 _DRAIN_YIELD = 0.002  # 2 ms — gap the background drainer leaves between reads so a
 # tool-call thread waiting on the io lock is never starved by the drainer.
 
-# The default settle policy — the SINGLE source of truth. The MCP tool layer is a
-# thin pass-through that inherits these (it sets no policy of its own). A settling
-# program returns from wait_idle as soon as it's quiet for `idle`, so `hard` is
-# only a max-patience CEILING: it bites only when the program never goes quiet (a
-# live TUI / spinner) or a reaction is slow to first appear. Kept short so driving
-# an animating app doesn't block; a caller expecting a long wait passes a larger
-# `hard` (or, for send, a numeric `wait` = fixed settle seconds).
+# The default settle policy — the SINGLE source of truth for settling, inherited
+# by the MCP tool layer. A settling program returns from wait_idle as soon as it's
+# quiet for `idle`, so `hard` is only a max-patience CEILING: it bites only when the
+# program never goes quiet (a live TUI / spinner) or a reaction is slow to first
+# appear. Kept short so driving an animating app doesn't block; a caller expecting a
+# long wait passes a larger `hard` (or, for send, a numeric `wait` = fixed settle
+# seconds) — which the tool layer then clamps to MAX_CALL_HARD, the one policy of
+# its own it adds.
 DEFAULT_SETTLE_IDLE = 0.3
 DEFAULT_SETTLE_HARD = 3.0
 # A change wait blocks for output that hasn't happened yet, so 3 s is useless here.
 DEFAULT_CHANGE_HARD = 30.0
+# The per-call ceiling the MCP tool layer clamps wait/send/resize to, so no single
+# impty tool call blocks longer than this. Deliberately below codex's 300 s per-call
+# default, so impty stays safe even where the client-side budget pin doesn't take
+# effect. It bounds ONE call's own waiting: impty calls serialize on the io lock, so
+# a call queued behind a full-budget one can still exceed this in wall clock.
+MAX_CALL_HARD = 240.0
 
 
 def _select_slice(remaining: float) -> float:
@@ -316,8 +323,10 @@ class TerminalSession:
         fork/interpreter startup and return an empty screen. So we settle only
         once qualifying output has been read (normal case), or the child has
         already exited (nothing more is coming). Returns True when settled, False
-        if `hard` elapsed while output kept arriving. The final select() may
-        block up to `idle`, so the effective wall-clock cap is ~`hard + idle`.
+        if `hard` elapsed while output kept arriving. Each select() slice is
+        bounded by the remaining budget, so `hard` is the whole wall-clock cap: an
+        `idle` window that cannot fit inside `hard` reports not settled at `hard`
+        rather than settling after it.
 
         `since` is a monotonic timestamp: only output read at or after it
         qualifies. Default 0.0 counts ANY output ever read — including what the
@@ -336,7 +345,8 @@ class TerminalSession:
         with self._io_lock:
             start = time.monotonic()
             while True:
-                result = self._read_step(idle)
+                remaining = hard - (time.monotonic() - start)
+                result = self._read_step(max(_FLOOR, min(idle, remaining)))
                 now = time.monotonic()
                 if result is _StepResult.EOF:
                     return True  # child exited / pty closed

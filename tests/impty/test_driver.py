@@ -11,6 +11,12 @@ from pathlib import Path
 import pytest
 
 from impty.driver import ImptyDriver, _decode_keys
+from impty.session import (
+    DEFAULT_CHANGE_HARD,
+    DEFAULT_SETTLE_HARD,
+    DEFAULT_SETTLE_IDLE,
+    MAX_CALL_HARD,
+)
 from tests.impty.e2e_support import can_pty
 
 _SIGINT_CHILD = (
@@ -199,7 +205,7 @@ def test_wait_returns_still_busy_after_hard_cap() -> None:
     try:
         d.wait(idle=0.2, hard=0.3)  # wait for READY
         result = d.wait(idle=5.0, hard=0.4)  # hard cap fires: never settles
-        assert result.startswith("[still busy after hard cap]")
+        assert result.startswith("[still busy after 0.4s hard cap]")
     finally:
         d.stop()
 
@@ -326,9 +332,9 @@ def test_wait_for_change_reports_no_change_after_hard_cap() -> None:
     d = ImptyDriver()
     d.start([sys.executable, "-c", prog])
     try:
-        assert d.wait(idle=0.2, hard=5.0).startswith("[settled]")
+        assert d.wait(idle=0.2, hard=5.0).splitlines()[0] == "[settled]"
         result = d.wait(idle=0.2, hard=0.5, for_change=True)
-        assert result.startswith("[no change after hard cap]")
+        assert result.startswith("[no change after 0.5s hard cap]")
     finally:
         d.stop()
 
@@ -352,7 +358,7 @@ def test_wait_for_change_reports_still_busy_when_output_never_quiets() -> None:
         # `hard` for a saturated runner — the child must land at least one tick
         # inside the window or the header would (correctly) read "no change".
         result = d.wait(idle=5.0, hard=6.0, for_change=True)
-        assert result.startswith("[still busy after hard cap]")
+        assert result.startswith("[still busy after 6s hard cap]")
     finally:
         d.stop()
 
@@ -365,7 +371,7 @@ def test_wait_normal_mode_on_silent_child_still_reports_still_busy() -> None:
     d.start([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         result = d.wait(idle=0.2, hard=0.5)
-        assert result.startswith("[still busy after hard cap]")
+        assert result.startswith("[still busy after 0.5s hard cap]")
     finally:
         d.stop()
 
@@ -387,5 +393,147 @@ def test_wait_default_hard_resolves_per_mode() -> None:
         assert [hard for hard, _ in recorded] == [3.0, 30.0]
         assert recorded[0][1] == 0.0
         assert recorded[1][1] > 0.0
+    finally:
+        d.stop()
+
+
+def test_call_budget_constants_are_the_documented_values() -> None:
+    # Pinned as constants — never by blocking for them.
+    assert MAX_CALL_HARD == 240.0
+    assert DEFAULT_SETTLE_HARD == 3.0
+    assert DEFAULT_CHANGE_HARD == 30.0
+    assert DEFAULT_SETTLE_IDLE == 0.3
+
+
+def test_wait_docstring_states_the_per_call_cap() -> None:
+    doc = ImptyDriver.wait.__doc__ or ""
+    assert f"{MAX_CALL_HARD:g}s" in doc
+    assert "call wait() again" in doc
+
+
+def test_send_and_resize_docstrings_state_the_per_call_cap() -> None:
+    cap = f"{MAX_CALL_HARD:g}s"
+    assert cap in (ImptyDriver.send.__doc__ or "")
+    assert cap in (ImptyDriver.resize.__doc__ or "")
+
+
+def test_readme_clamp_sentence_states_the_per_call_cap() -> None:
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    line = next((ln for ln in readme.splitlines() if "MAX_CALL_HARD" in ln), None)
+    assert line is not None, "README has no line mentioning MAX_CALL_HARD"
+    assert f"{MAX_CALL_HARD:g}s" in line
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_clamps_hard_to_the_call_cap_on_a_busy_program(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.5)
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        t0 = time.monotonic()
+        result = d.wait(idle=5.0, hard=30.0)
+        elapsed = time.monotonic() - t0
+        assert result.startswith(
+            "[still busy after 0.5s call cap (30s requested)"
+            " — call wait() again to keep watching]")
+        # Generous outer bound: the clamp returns at ~0.5s, the unclamped call at 30s.
+        assert elapsed < 10.0
+        # exactly at the cap uses strict >, so == cap → plain hard-cap form, no resume clause
+        at_cap = d.wait(idle=5.0, hard=0.5)
+        assert at_cap.startswith("[still busy after 0.5s hard cap]")
+        assert "call wait() again" not in at_cap
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_clamped_for_change_reports_no_change_with_the_resume_clause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        # start()'s internal settle can return un-settled if a saturated runner
+        # pushes interpreter startup past its 3s cap; READY would then land INSIDE
+        # the clamped window below and flip the header to "still busy". Settle on a
+        # generous explicit hard first, and only then arm the clamp.
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "READY" in d.view()
+        monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.5)
+        t0 = time.monotonic()
+        result = d.wait(idle=0.2, hard=30.0, for_change=True)
+        elapsed = time.monotonic() - t0
+        assert result.startswith(
+            "[no change after 0.5s call cap (30s requested)"
+            " — call wait() again to keep watching]")
+        assert elapsed < 10.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_large_idle_cannot_escape_the_call_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The whole point of the deadline fix: `idle` is NOT clamped, so the ceiling
+    # only holds because `hard` bounds every select slice.
+    monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.5)
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        t0 = time.monotonic()
+        result = d.wait(idle=30.0, hard=1800.0)
+        elapsed = time.monotonic() - t0
+        # for_change defaults False, so even an already-quiet child reports busy.
+        assert result.startswith(
+            "[still busy after 0.5s call cap (1800s requested)"
+            " — call wait() again to keep watching]")
+        # Neither ~30s (the idle window) nor cap + idle.
+        assert elapsed < 10.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_numeric_wait_is_clamped_and_reports_the_clamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.2)
+        clamped = d.send("x", wait=1.0)
+        assert clamped.splitlines()[0] == "[waited 0.2s call cap (1s requested)]"
+        # exactly at the cap (strict > boundary): no [waited …] prefix
+        at_cap = d.send("x", wait=0.2)
+        assert at_cap.splitlines()[0].startswith("[alive=")
+        # A request already inside the ceiling emits no such line.
+        unclamped = d.send("x", wait=0.1)
+        assert unclamped.splitlines()[0].startswith("[alive=")
+        assert d.send("q", wait=False) == "[sent]"
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_numeric_wait_is_clamped_and_reports_the_clamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")  # READY consumed
+        monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.2)
+        clamped = d.resize(30, 100, wait=1.0)
+        assert clamped.splitlines()[0] == "[waited 0.2s call cap (1s requested)]"
+        # exactly at the cap (strict > boundary): no [waited …] prefix
+        at_cap = d.resize(30, 100, wait=0.2)
+        assert at_cap.splitlines()[0].startswith("[alive=")
+        unclamped = d.resize(24, 80, wait=0.1)
+        assert unclamped.splitlines()[0].startswith("[alive=")
+        assert d.resize(30, 100, wait=False) == "[resized]"
     finally:
         d.stop()
