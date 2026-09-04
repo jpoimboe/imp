@@ -308,6 +308,30 @@ def _bootstrap_user_config(
         + _remote_hint())
 
 
+def _set_user_providers(user_path: Path, providers: list[str]) -> None:
+    """Write `providers:` into an existing machine config through the same
+    comment-preserving seam as `imp config set providers`. The caller has
+    already parsed the file (_read_user_config), so unreadable text cannot
+    reach apply_set here."""
+    from imp.cli.config_cmd import layer_label
+    from imp.cli.config_edit import apply_set
+    from imp.cli.config_write import (
+        ConfigWriteError,
+        land,
+        scratch_dir,
+        scratch_seam,
+        verify,
+    )
+
+    result = apply_set(user_path.read_text(), ("providers",), providers)
+    with scratch_seam(scratch_dir(user_path), user_path.name) as scratch:
+        if not verify(scratch, result.text, ("providers",), providers):
+            raise ConfigWriteError(
+                f"refusing to write {layer_label(user_path)} — "
+                "'providers' would not read back as given")
+        land(scratch, user_path)
+
+
 _TEST_CMD_FAST_COMMENT = (
     "\n# Fast test gate: lint + typecheck + fast tests, run after each\n"
     "# implement loop to catch regressions. false declares the project needs none.\n"

@@ -1380,3 +1380,75 @@ def test_cmd_init_reports_an_unparseable_machine_config_interactively(
     assert "Traceback" not in captured.out
     assert (home / "config.yaml").read_text() == broken
     assert not (tmp_path / "imp" / "config.yaml").exists()
+
+
+def _seed_machine_config(home: Path, providers_block: str) -> str:
+    """Real bootstrapped machine bytes (comments, theme, editing_mode, sandbox
+    block, remote hint) with the providers key swapped for `providers_block`."""
+    from imp.cli.init import _bootstrap_user_config
+
+    path = home / "config.yaml"
+    _bootstrap_user_config(path, ["anthropic"], "dark", allow_unsandboxed=True)
+    text = path.read_text().replace("providers:\n- anthropic\n", providers_block)
+    path.write_text(text)
+    return text
+
+
+def _sans_providers(text: str) -> list[str]:
+    return [ln for ln in text.splitlines() if not ln.startswith("providers:")]
+
+
+def test_set_user_providers_replaces_an_empty_list_and_preserves_the_file(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import _set_user_providers
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+
+    _set_user_providers(home / "config.yaml", ["claude_code", "openai"])
+
+    after = (home / "config.yaml").read_text()
+    assert "providers: [claude_code, openai]" in after
+    assert _sans_providers(after) == _sans_providers(before)
+    data = yaml.safe_load(after)
+    assert data["theme"] == "dark"
+    assert data["editing_mode"] == "emacs"
+    assert data["sandbox"] == {"allow_unsandboxed": True}
+    assert "# remote:" in after
+
+
+def test_set_user_providers_inserts_an_absent_key(tmp_path: Path) -> None:
+    from imp.cli.init import _set_user_providers
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "")
+    assert "providers" not in yaml.safe_load(before)
+
+    _set_user_providers(home / "config.yaml", ["claude_code"])
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["claude_code"]
+    assert _sans_providers(after) == _sans_providers(before)
+
+
+def test_set_user_providers_refuses_a_write_that_does_not_read_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The read-back gate is the writer's whole point: a candidate imp's own
+    reader does not report back must never land."""
+    from imp.cli.config_write import ConfigWriteError
+    from imp.cli.init import _set_user_providers
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+    monkeypatch.setattr("imp.cli.config_write.verify", lambda *_a, **_kw: False)
+
+    with pytest.raises(ConfigWriteError) as exc:
+        _set_user_providers(home / "config.yaml", ["claude_code"])
+
+    assert "would not read back as given" in str(exc.value)
+    assert (home / "config.yaml").read_text() == before
