@@ -23,10 +23,17 @@ WebSearch / WebFetch note (§5.2):
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import selectors
 import subprocess
+import sys
 import tempfile
+import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions, CLINotFoundError
@@ -35,6 +42,10 @@ from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITra
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude_code import ClaudeCodeAgentRunner
+
+# A hang detector, not a tuned window: ~3.3x the worst degraded-network case and
+# ~10x the worst init latency observed under a saturated parallel suite.
+_INIT_FRAME_BUDGET = 60.0
 
 
 def _invocation(tmp_path: Path, declared: frozenset[str] = frozenset()) -> AgentInvocation:
@@ -69,6 +80,37 @@ def _resolve_cli(opts: ClaudeAgentOptions) -> str:
         return transport._cli_path or transport._find_cli()
     except CLINotFoundError:
         pytest.skip("claude CLI not found")
+
+
+def _read_init_frame(proc: subprocess.Popen[bytes], budget: float) -> dict[str, Any] | None:
+    """Poll `proc`'s raw stdout fd for the CLI's `init` system message, giving up
+    after `budget` seconds. Bytes are buffered and split on newlines, so a frame
+    delivered across two writes still parses. Non-JSON and non-init lines are
+    skipped. Returns the parsed frame, or None on EOF or budget expiry."""
+    assert proc.stdout is not None
+    deadline = time.monotonic() + budget
+    buf = b""
+    with selectors.DefaultSelector() as selector:
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                return None
+            chunk = os.read(proc.stdout.fileno(), 65536)
+            if not chunk:               # EOF: stdout closed before an init message
+                return None
+            buf += chunk
+            while b"\n" in buf:
+                raw, buf = buf.split(b"\n", 1)
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("type") == "system" and msg.get("subtype") == "init":
+                    return msg
 
 
 def _probe_advertised_tools(cli: str, deny: list[str]) -> tuple[set[str], str]:
@@ -189,3 +231,71 @@ def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) ->
     opts = ClaudeCodeAgentRunner("m")._build_options(inv, object(), ["bash"])
     assert {"WebSearch", "WebFetch"} <= set(opts.allowed_tools)
     assert not ({"WebSearch", "WebFetch"} & set(opts.disallowed_tools))
+
+
+_STUB_INIT_FRAME = '{"type": "system", "subtype": "init", "tools": ["Bash", "ToolSearch"]}'
+
+
+@contextlib.contextmanager
+def _stub_proc(code: str) -> Iterator[subprocess.Popen[bytes]]:
+    """A short-lived python stub on binary pipes, shaped like the CLI probe's."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+    )
+    try:
+        yield proc
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        assert proc.stdout is not None
+        proc.stdout.close()
+
+
+def test_read_init_frame_returns_the_init_frame() -> None:
+    code = (
+        "import sys, time\n"
+        "sys.stdout.write('{\"type\": \"system\", \"subtype\": \"compact\"}\\n')\n"
+        "sys.stdout.write('not json at all\\n')\n"
+        f"sys.stdout.write({_STUB_INIT_FRAME!r} + '\\n')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+    with _stub_proc(code) as proc:
+        frame = _read_init_frame(proc, 10.0)
+
+    assert frame is not None
+    assert frame["tools"] == ["Bash", "ToolSearch"]
+
+
+def test_read_init_frame_honours_its_deadline_on_a_silent_process() -> None:
+    with _stub_proc("import time; time.sleep(30)") as proc:
+        start = time.monotonic()
+        frame = _read_init_frame(proc, 1.0)
+        elapsed = time.monotonic() - start
+
+    assert frame is None
+    assert elapsed < 10.0, f"reader blocked past its 1s budget ({elapsed:.1f}s)"
+
+
+def test_read_init_frame_parses_a_frame_split_across_writes() -> None:
+    head, tail = _STUB_INIT_FRAME[:20], _STUB_INIT_FRAME[20:]
+    code = (
+        "import sys, time\n"
+        f"sys.stdout.write({head!r})\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(0.2)\n"
+        f"sys.stdout.write({tail!r} + '\\n')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+    with _stub_proc(code) as proc:
+        frame = _read_init_frame(proc, 10.0)
+
+    assert frame is not None
+    assert frame["tools"] == ["Bash", "ToolSearch"]
