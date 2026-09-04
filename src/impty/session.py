@@ -316,8 +316,10 @@ class TerminalSession:
         fork/interpreter startup and return an empty screen. So we settle only
         once qualifying output has been read (normal case), or the child has
         already exited (nothing more is coming). Returns True when settled, False
-        if `hard` elapsed while output kept arriving. The final select() may
-        block up to `idle`, so the effective wall-clock cap is ~`hard + idle`.
+        if `hard` elapsed while output kept arriving. Each select() slice is
+        bounded by the remaining budget, so `hard` is the whole wall-clock cap: an
+        `idle` window that cannot fit inside `hard` reports not settled at `hard`
+        rather than settling after it.
 
         `since` is a monotonic timestamp: only output read at or after it
         qualifies. Default 0.0 counts ANY output ever read — including what the
@@ -336,7 +338,8 @@ class TerminalSession:
         with self._io_lock:
             start = time.monotonic()
             while True:
-                result = self._read_step(idle)
+                remaining = hard - (time.monotonic() - start)
+                result = self._read_step(max(_FLOOR, min(idle, remaining)))
                 now = time.monotonic()
                 if result is _StepResult.EOF:
                     return True  # child exited / pty closed

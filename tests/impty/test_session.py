@@ -47,7 +47,28 @@ def test_wait_idle_hard_timeout_returns_false_on_chatty_child() -> None:
         "while True: sys.stdout.write('x'); sys.stdout.flush(); time.sleep(0.01)"
     )
     with TerminalSession([sys.executable, "-c", prog]) as s:
+        t0 = time.monotonic()
         assert s.wait_idle(idle=0.5, hard=1.0) is False
+        # The busy path already honored `hard`; the shorter select slice must not
+        # change that. Generous bound so a saturated runner cannot false-fire.
+        assert time.monotonic() - t0 < 6.0
+
+
+def test_wait_idle_hard_bounds_the_call_on_an_already_quiet_child() -> None:
+    # The quiet path is where the old loop overshot: it parked a full `idle` in
+    # select() and only then checked `hard`. With the deadline honored, an `idle`
+    # window that cannot fit inside `hard` reports NOT settled at `hard` instead
+    # of settling late.
+    prog = "import time; print('READY', flush=True); time.sleep(30)"
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        assert s.wait_idle(idle=0.2, hard=10.0) is True  # READY read; child now quiet
+        t0 = time.monotonic()
+        settled = s.wait_idle(idle=10.0, hard=0.5)
+        elapsed = time.monotonic() - t0
+        assert settled is False
+        # Generous outer bound: the honored deadline returns at ~0.5s; the old
+        # loop returned settled=True at ~10s (a whole `idle`).
+        assert elapsed < 5.0
 
 
 # A child that parks quietly, then on one keystroke reacts AFTER a delay longer
