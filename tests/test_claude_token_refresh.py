@@ -384,3 +384,80 @@ def test_unresolvable_home_is_not_applicable(
     monkeypatch.setattr(ctr.Path, "home", staticmethod(_boom))
     out = ctr.refresh_canonical_token(NOW, env={})
     assert out.outcome == ctr.NOT_APPLICABLE
+
+
+def test_force_refreshes_a_far_from_expiry_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 10h out: reaching the endpoint proves both _needs_refresh checks were skipped.
+    path = _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
+
+    def _fake(refresh_token: str) -> dict[str, Any]:
+        assert refresh_token == "old-refresh"
+        return {"access_token": "forced-access",
+                "refresh_token": "forced-refresh", "expires_in": 3600}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path), force=True)
+
+    assert out.outcome == ctr.REFRESHED
+    assert out.expires_at == NOW + 3600 * 1000
+    oauth = json.loads(path.read_text(encoding="utf-8"))["claudeAiOauth"]
+    assert oauth["accessToken"] == "forced-access"
+    assert oauth["refreshToken"] == "forced-refresh"
+    assert oauth["expiresAt"] == NOW + 3600 * 1000
+    assert oauth["subscriptionType"] == "max"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_unforced_default_still_skips_a_fresh_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
+    before = path.read_bytes()
+
+    def _no_http(refresh_token: str) -> dict[str, Any]:
+        raise AssertionError("an unforced fresh token must not hit the endpoint")
+
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert out.outcome == ctr.SKIPPED_FRESH
+    assert path.read_bytes() == before
+
+
+def test_force_still_reports_invalid_grant_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000,
+                        refresh_token="dead")
+    before = path.read_bytes()
+    monkeypatch.setattr(ctr, "_request_refresh", _raise_invalid_grant)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path), force=True)
+    assert out.outcome == ctr.FAILED_INVALID_GRANT
+    assert path.read_bytes() == before
+
+
+def test_force_still_reports_a_lock_timeout_as_transient(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
+    before = path.read_bytes()
+
+    def _no_http(refresh_token: str) -> dict[str, Any]:
+        raise AssertionError("no HTTP when the lock is unavailable")
+
+    def _timeout(*a: Any, **k: Any) -> Any:
+        raise ctr.LockTimeout()
+
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    monkeypatch.setattr(ctr, "_token_lock", _timeout)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path), force=True)
+    assert out.outcome == ctr.FAILED_TRANSIENT
+    assert path.read_bytes() == before
+
+
+def test_force_with_an_api_key_env_is_not_applicable(tmp_path: Path) -> None:
+    _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path, ANTHROPIC_API_KEY="sk-x"), force=True)
+    assert out.outcome == ctr.NOT_APPLICABLE

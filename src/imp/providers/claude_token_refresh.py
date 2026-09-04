@@ -156,8 +156,9 @@ def _atomic_write_creds(creds_path: Path, data: dict[str, Any]) -> None:
 
 
 def refresh_canonical_token(
-    now_ms: int, *, env: Mapping[str, str] | None = None,
+    now_ms: int, *, env: Mapping[str, str] | None = None, force: bool = False,
 ) -> RefreshOutcome:
+    """`force` skips both `_needs_refresh` short-circuits; SKIPPED_FRESH is unreachable."""
     env = os.environ if env is None else env
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return RefreshOutcome(NOT_APPLICABLE)
@@ -169,7 +170,7 @@ def refresh_canonical_token(
     oauth = _oauth_of(_load_credentials(creds_path))
     if oauth is None or _refresh_token_of(oauth) is None:
         return RefreshOutcome(NOT_APPLICABLE)
-    if not _needs_refresh(oauth, now_ms):
+    if not force and not _needs_refresh(oauth, now_ms):
         return RefreshOutcome(SKIPPED_FRESH)
     try:
         with _token_lock(base / _LOCK_FILE, timeout=_LOCK_TIMEOUT):
@@ -178,7 +179,7 @@ def refresh_canonical_token(
             refresh_token = None if oauth is None else _refresh_token_of(oauth)
             if data is None or oauth is None or refresh_token is None:
                 return RefreshOutcome(NOT_APPLICABLE)
-            if not _needs_refresh(oauth, now_ms):
+            if not force and not _needs_refresh(oauth, now_ms):
                 return RefreshOutcome(SKIPPED_FRESH)
             try:
                 tokens = _request_refresh(refresh_token)
