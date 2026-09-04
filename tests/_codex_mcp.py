@@ -25,3 +25,17 @@ async def call_via_mcp(
         return await app._tool_manager.call_tool(tool.name, arguments)
     except ToolError as exc:
         return str(exc)
+
+
+async def call_protocol(
+    tool: Tool, *, ctx: ToolContext, state: RunState, arguments: dict[str, Any],
+) -> Any:
+    """Same registration path, driven over a real in-process MCP client session,
+    so the caller sees the wire-level `CallToolResult` (`isError` and all)."""
+    from mcp.server.fastmcp import FastMCP
+    from mcp.shared.memory import create_connected_server_and_client_session
+
+    app = FastMCP("imp")
+    _register_tool(app, tool, ctx=ctx, state=state)
+    async with create_connected_server_and_client_session(app._mcp_server) as session:
+        return await session.call_tool(tool.name, arguments)

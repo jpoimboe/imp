@@ -12,7 +12,7 @@ from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.state import InMemoryEventLog
 from imp.providers.codex_mcp import RunState, dispatch_tool
-from tests._codex_mcp import call_via_mcp
+from tests._codex_mcp import call_protocol, call_via_mcp
 
 
 @pytest.fixture
@@ -375,13 +375,18 @@ def test_dispatch_brackets_tool_watchdog(tmp_path: Path) -> None:
 
 
 def test_dispatch_brackets_tool_watchdog_on_raise(tmp_path: Path) -> None:
-    """Watchdog counter stays balanced when a tool raises — guards against
-    suspend_inactivity_watchdog being moved outside the try block."""
+    """The exception propagates (FastMCP turns it into an isError result) AND the
+    watchdog is both frozen during the call and balanced afterwards on that
+    path — capturing `tool_active` from inside the raising body is what guards
+    against `suspend_inactivity_watchdog` being dropped, which the trailing
+    assertion alone would not catch."""
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
+    seen = {"active": None}
 
     def _fn(ctx):
+        seen["active"] = ctx.coordinator.tool_active
         raise RuntimeError("boom")
 
     boom = Tool(name="boom", description="",
@@ -390,11 +395,35 @@ def test_dispatch_brackets_tool_watchdog_on_raise(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     ctx.coordinator = coord
     state = RunState(cap=10)
-    # RuntimeError is swallowed by dispatch_tool's `except Exception` arm
-    out = asyncio.run(dispatch_tool(tool=boom, args={}, ctx=ctx, state=state))
+    with pytest.raises(RuntimeError, match="RuntimeError: boom"):
+        asyncio.run(dispatch_tool(tool=boom, args={}, ctx=ctx, state=state))
 
-    assert "RuntimeError" in out
-    assert coord.tool_active is False
+    assert seen["active"] is True       # watchdog frozen DURING the raising call
+    assert coord.tool_active is False   # balanced after the unwind -> re-arms
+
+
+def _read_file_boom_tool() -> Tool:
+    def _fn(ctx: Any, path: str) -> str:
+        raise ValueError(f"no such file: {path}")
+
+    return Tool(name="read_file", description="",
+                input_schema={"type": "object",
+                              "properties": {"path": {"type": "string"}},
+                              "required": ["path"]}, fn=_fn)
+
+
+def test_raising_tool_yields_iserror_result_naming_the_exception_type(
+    tmp_path: Path,
+) -> None:
+    """Through a real MCP client session: a raising tool must come back as an
+    isError result whose text still names the original exception type."""
+    res = asyncio.run(call_protocol(
+        _read_file_boom_tool(), ctx=_ctx(tmp_path), state=RunState(cap=10),
+        arguments={"path": "foo.py"}))
+
+    assert res.isError is True
+    assert res.content[0].text == (
+        "Error executing tool read_file: ValueError: no such file: foo.py")
 
 
 def _image_parts() -> list:

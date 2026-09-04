@@ -95,6 +95,29 @@ def test_real_mcp_tool_call_error_marks_is_error() -> None:
     assert "boom" in results[0]["payload"]["content"]
 
 
+def test_failed_status_without_error_field_records_error_true() -> None:
+    """The live shape a raised tool error actually takes: `error` stays null and
+    the text rides in `result.content` — `status` alone must drive the flag."""
+    text = "Error executing tool read_file: ValueError: no such file: foo.py"
+    recorded = {}
+    for status in ("failed", "completed"):
+        item = McpToolCallItem(
+            id=f"c-{status}", type="mcp_tool_call", server="imp", tool="read_file",
+            arguments={"path": "foo.py"},
+            result=McpToolCallResult(
+                content=[{"type": "text", "text": text}], structured_content=None),
+            error=None, status=status,
+        )
+        elog, _ = _feed(item)
+        results = [e for e in elog.read() if e["type"] == "tool_result"]
+        assert len(results) == 1
+        recorded[status] = (results[0]["payload"]["error"],
+                            results[0]["payload"]["content"])
+
+    assert recorded["failed"] == (True, text)
+    assert recorded["completed"] == (False, text)
+
+
 def test_real_error_item_is_diagnostic_not_unhandled() -> None:
     item = ErrorItem(id="e1", type="error",
                      message="`[features].web_search_request` is deprecated")

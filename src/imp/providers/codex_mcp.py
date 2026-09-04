@@ -112,7 +112,8 @@ async def dispatch_tool(
     *, tool: Tool, args: dict[str, Any], ctx: ToolContext, state: RunState,
 ) -> str | list[Any]:
     """Invoke `tool` against `ctx` with `args`, returning a textual result
-    suitable for an MCP tool response body.
+    suitable for an MCP tool response body. A tool that raises leaves through
+    the raise, which FastMCP turns into an isError result.
 
     Cap RMW invariant: the count is incremented and compared synchronously
     here — there is NO `await` between the read (`state.dispatch_count`) and
@@ -165,9 +166,9 @@ async def dispatch_tool(
         state.fatal_tool_error = (tool.name, str(fte))
         return f"fatal tool error: {fte}"
     except Exception as exc:
-        text = f"{type(exc).__name__}: {exc}"
-        state.runtime_errors.append(text)
-        return text
+        # FastMCP rewraps this as an isError result; the prefix keeps the
+        # original exception type in the text the model reads.
+        raise RuntimeError(f"{type(exc).__name__}: {exc}") from exc
     if tool.name == "bash" and isinstance(raw, str):
         try:
             parsed = json.loads(raw)
