@@ -411,6 +411,20 @@ def test_wait_docstring_states_the_per_call_cap() -> None:
     assert "call wait() again" in doc
 
 
+def test_send_and_resize_docstrings_state_the_per_call_cap() -> None:
+    cap = f"{MAX_CALL_HARD:g}s"
+    assert cap in (ImptyDriver.send.__doc__ or "")
+    assert cap in (ImptyDriver.resize.__doc__ or "")
+
+
+def test_readme_clamp_sentence_states_the_per_call_cap() -> None:
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    line = next((ln for ln in readme.splitlines() if "MAX_CALL_HARD" in ln), None)
+    assert line is not None, "README has no line mentioning MAX_CALL_HARD"
+    assert f"{MAX_CALL_HARD:g}s" in line
+
+
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_wait_clamps_hard_to_the_call_cap_on_a_busy_program(
     monkeypatch: pytest.MonkeyPatch,
