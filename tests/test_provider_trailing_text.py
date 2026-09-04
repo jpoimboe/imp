@@ -8,10 +8,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from imp.agents.runner import Message, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.providers.claude_code import ClaudeCodeSession
 from imp.providers.codex_runner import CodexSession
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 _STALE_PROSE = "Failed to authenticate. API Error: 401 OAuth access token has been revoked"
 
@@ -56,7 +63,8 @@ def test_codex_trailing_text_reads_the_per_turn_capture() -> None:
     assert session._trailing_text() == "Invalid API key"
 
 
-def test_codex_turn_boundary_clears_the_trailing_text() -> None:
+@pytest.mark.anyio
+async def test_codex_turn_boundary_clears_the_trailing_text() -> None:
     session = CodexSession(None, None)
     session._proc_state = {"last_agent_text": "Invalid API key"}
     session._state = SimpleNamespace(
@@ -67,4 +75,4 @@ def test_codex_turn_boundary_clears_the_trailing_text() -> None:
     session.send("continue", human=False)
 
     assert session._trailing_text() == ""
-    assert session._terminal_error(session._trailing_text()) is None
+    assert await session._terminal_error(session._trailing_text()) is None

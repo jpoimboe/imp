@@ -134,7 +134,7 @@ async def test_termination_401_rolls_back_and_keeps_llm_event(tmp_path: Path) ->
 
     errs = [e for e in events if e["type"] == "error"]
     assert len(errs) == 1, events
-    assert errs[0]["payload"]["category"] == "auth_terminal"
+    assert errs[0]["payload"]["category"] == "auth"
 
     # AC1: transcript rolled back to the prior user turn -> SEND_TO_LLM on resume.
     loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
@@ -173,6 +173,27 @@ async def test_classified_text_branch_rolls_back(tmp_path: Path) -> None:
     loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
     assert [m.role for m in loaded] == ["user"]
     assert classify_resume(loaded) is ResumeState.SEND_TO_LLM
+
+
+@pytest.mark.anyio
+async def test_terminal_prose_error_event_carries_the_full_text(tmp_path: Path) -> None:
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+
+    scripted = [assistant(text("Not logged in · Please run /login")), result()]
+
+    def factory(_opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, events
+    assert errs[0]["payload"]["category"] == "auth_terminal"
+    assert errs[0]["payload"]["message"] == (
+        "claude CLI: Not logged in · Please run /login")
 
 
 @pytest.mark.anyio
@@ -216,7 +237,7 @@ async def test_auth_fails_then_recovers_on_redrive(tmp_path: Path) -> None:
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive1))
     ev1 = [ev async for ev in runner1.run(inv)]
-    assert any(e["type"] == "error" and e["payload"]["category"] == "auth_terminal"
+    assert any(e["type"] == "error" and e["payload"]["category"] == "auth"
                for e in ev1), ev1
 
     # Rolled back -> ready to genuinely re-query on the next drive.
@@ -388,8 +409,9 @@ async def test_repeated_trailing_failures_remove_only_their_own_error_turn(
 
         errs = [e for e in events if e["type"] == "error"]
         assert len(errs) == 1, (lap, events)
-        # Anchored trailing prose still labels the turn off that prose.
-        assert errs[0]["payload"]["category"] == "auth_terminal", lap
+        # Anchored trailing prose still labels the turn off that prose; the
+        # routable 401 it carries makes that label retryable auth.
+        assert errs[0]["payload"]["category"] == "auth", lap
         assert errs[0]["payload"]["detail"]["last_agent_text"] == (
             _TRAILING_AUTH_PROSE), lap
 

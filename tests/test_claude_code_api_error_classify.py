@@ -149,10 +149,23 @@ def test_422_code_still_api_error() -> None:
     assert getattr(exc, "kind", "") == "http_422"
 
 
-def test_observed_401_credential_string_is_terminal_auth() -> None:
+def test_observed_401_credential_string_routes_on_the_status_code() -> None:
     exc = _classify_agent_text(
         "Failed to authenticate. API Error: 401 Invalid authentication credentials")
-    assert isinstance(exc, perr.AuthTerminalError)
+    assert isinstance(exc, perr.AuthError)
+    assert not isinstance(exc, perr.AuthTerminalError)
+    assert exc.category == "auth"
+    assert getattr(exc, "kind", "") == "http_401"
+
+
+def test_revoked_oauth_token_prose_is_retryable_auth() -> None:
+    # The observed regression string, verbatim from the claude CLI.
+    exc = _classify_agent_text(
+        "Failed to authenticate. API Error: 401 OAuth access token has been revoked.")
+    assert isinstance(exc, perr.AuthError)
+    assert not isinstance(exc, perr.AuthTerminalError)
+    assert exc.category == "auth"
+    assert getattr(exc, "kind", "") == "http_401"
 
 
 def test_connection_refused_codeless_is_network() -> None:
@@ -300,12 +313,53 @@ def test_each_auth_pattern_classifies_terminal() -> None:
         assert exc.category == "auth_terminal"
 
 
-def test_prose_wins_over_the_status_code() -> None:
-    # The documented mixed string carries both a terminal prose pattern and a
-    # bare 401; the prose decides, because the credentials were already cleared.
+def test_status_code_wins_over_the_prose() -> None:
+    # A routable code proves the request reached the server, so the mixed
+    # string is a server rejection, not a local credential-clear.
     exc = _classify_agent_text(
         "Please run /login · API Error: 401 Invalid authentication credentials")
+    assert isinstance(exc, perr.AuthError)
+    assert not isinstance(exc, perr.AuthTerminalError)
+    assert exc.category == "auth"
+    assert getattr(exc, "kind", "") == "http_401"
+
+
+def test_each_auth_pattern_routes_on_a_routable_code() -> None:
+    for prose in ("Invalid API key", "Please run `/login`", "Please run /login",
+                  "Invalid authentication credentials", "Failed to authenticate"):
+        exc = _classify_agent_text(f"{prose} · API Error: 401 rejected")
+        assert isinstance(exc, perr.AuthError), prose
+        assert not isinstance(exc, perr.AuthTerminalError), prose
+        assert exc.category == "auth", prose
+
+
+def test_auth_prose_with_a_5xx_routes_to_network() -> None:
+    exc = _classify_agent_text("Failed to authenticate. API Error: 503 upstream down")
+    assert isinstance(exc, perr.NetworkError)
+    assert exc.category == "network"
+
+
+def test_auth_prose_with_an_unrouted_status_stays_terminal() -> None:
+    # 302 matches the regex but hits no routing branch. Yielding on a bare
+    # match would drop the text past every branch and return None.
+    exc = _classify_agent_text("Failed to authenticate. API Error: 302 redirected")
     assert isinstance(exc, perr.AuthTerminalError)
+    assert exc.category == "auth_terminal"
+
+
+def test_the_discriminator_applies_unanchored_too() -> None:
+    # The _termination_from_result seam scans the whole text, not the first line.
+    mixed = _classify_agent_text(
+        "Session ended abnormally.\n"
+        "Failed to authenticate. API Error: 401 OAuth access token has been revoked.",
+        anchored=False)
+    assert isinstance(mixed, perr.AuthError)
+    assert mixed.category == "auth"
+    prose_only = _classify_agent_text(
+        "Session ended abnormally.\nNot logged in · Please run /login",
+        anchored=False)
+    assert isinstance(prose_only, perr.AuthTerminalError)
+    assert prose_only.category == "auth_terminal"
 
 
 def test_bare_status_auth_stays_transient() -> None:
@@ -315,6 +369,20 @@ def test_bare_status_auth_stays_transient() -> None:
         assert not isinstance(exc, perr.AuthTerminalError)
         assert exc.category == "auth"
         assert getattr(exc, "kind", "") == f"http_{code}"
+
+
+def test_terminal_prose_message_carries_the_text_not_the_pattern() -> None:
+    exc = _classify_agent_text("Not logged in · Please run /login")
+    assert isinstance(exc, perr.AuthTerminalError)
+    assert str(exc) == "claude CLI: Not logged in · Please run /login"
+
+
+def test_terminal_prose_message_truncates_at_200_chars() -> None:
+    long_text = "Please run /login " + "x" * 400
+    exc = _classify_agent_text(long_text)
+    assert isinstance(exc, perr.AuthTerminalError)
+    assert str(exc) == f"claude CLI: {long_text[:200]}"
+    assert len(str(exc)) == len("claude CLI: ") + 200
 
 
 def test_400_tool_use_concurrency_colon_form_wins_over_api_error_label() -> None:

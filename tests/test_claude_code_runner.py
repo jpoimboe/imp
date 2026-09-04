@@ -4586,7 +4586,7 @@ async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
-async def test_reclassified_auth_terminal_error_carries_last_agent_text_detail(
+async def test_reclassified_auth_error_carries_last_agent_text_detail(
     tmp_path: Path,
 ) -> None:
     """Substring/API-error reclassification attaches the prose to detail.last_agent_text."""
@@ -4610,7 +4610,7 @@ async def test_reclassified_auth_terminal_error_carries_last_agent_text_detail(
         f"expected 1 error event, got {[e.get('payload', {}) for e in error_events]}"
     )
     payload = error_events[0]["payload"]
-    assert payload["category"] == "auth_terminal"
+    assert payload["category"] == "auth"
     assert payload["detail"]["last_agent_text"] == prose
 
 

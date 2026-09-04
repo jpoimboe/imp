@@ -115,6 +115,7 @@ from imp.providers.claude_code_session_store import (
 )
 from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
+    RefreshOutcome,
     refresh_canonical_token,
 )
 from imp.providers.observe_classify import (
@@ -162,17 +163,23 @@ def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object
     }
 
 
-def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
-    """Refresh the canonical claude token before spawn; raise AuthTerminalError
-    on a dead token (only a human running /login can fix it)."""
-    outcome = refresh_canonical_token(int(time.time() * 1000))
+_DEAD_GRANT_MESSAGE = (
+    "claude: OAuth refresh token is dead; re-authentication required")
+
+
+def _journal_token_refresh(elog: Any, aid: str, outcome: RefreshOutcome) -> None:
     payload: dict[str, Any] = {"outcome": outcome.outcome}
     if outcome.expires_at is not None:
         payload["expires_at"] = outcome.expires_at
     elog.append(agent_id=aid, type="token_refresh", payload=payload)
+
+
+def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
+    """Refresh the canonical claude token before spawn; a dead token needs a human /login."""
+    outcome = refresh_canonical_token(int(time.time() * 1000))
+    _journal_token_refresh(elog, aid, outcome)
     if outcome.outcome == FAILED_INVALID_GRANT:
-        raise perr.AuthTerminalError(
-            "claude: OAuth refresh token is dead; re-authentication required")
+        raise perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
 
 
 def _termination_from_result(
@@ -1824,24 +1831,36 @@ class ClaudeCodeSession(ObserveSession):
             self._handoff_path = str(self._handoff_path_obj)
         return True
 
-    def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
+    async def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
         client = self.runner._client
-        term = _termination_from_result(
+        err = _termination_from_result(
             self._last_raw, last_text,
             {**_subprocess_diag(client),
              "stderr_tail": self.runner._stderr_sink.tail()},
             config_dir=self.runner._config_dir)
-        if term is not None:
-            _roll_back_error_turn(self.messages, self.transcript)
-            return cast(dict[str, Any], perr.make_error_event(
-                term, kind=getattr(term, "kind", ""))["payload"])
-        classified = _classify_agent_text(last_text)
-        if classified is not None:
-            classified.detail["last_agent_text"] = last_text[:500]
-            _roll_back_error_turn(self.messages, self.transcript)
-            return cast(dict[str, Any], perr.make_error_event(
-                classified, kind=getattr(classified, "kind", ""))["payload"])
-        return None
+        if err is None:
+            err = _classify_agent_text(last_text)
+            if err is None:
+                return None
+            err.detail["last_agent_text"] = last_text[:500]
+        _roll_back_error_turn(self.messages, self.transcript)
+        err = await self._settle_auth_terminality(err)
+        return cast(dict[str, Any], perr.make_error_event(
+            err, kind=getattr(err, "kind", ""))["payload"])
+
+    async def _settle_auth_terminality(self, err: perr.ProviderError) -> perr.ProviderError:
+        """Probe the token on a server 401; upgrade to AuthTerminalError if the grant is dead."""
+        if err.category != "auth":
+            return err
+        outcome = await asyncio.to_thread(
+            refresh_canonical_token, int(time.time() * 1000), force=True
+        )
+        _journal_token_refresh(self.elog, self.aid, outcome)
+        if outcome.outcome != FAILED_INVALID_GRANT:
+            return err
+        upgraded = perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
+        upgraded.detail.update(err.detail)
+        return upgraded
 
     def _last_text(self) -> str:
         for prev in reversed(self.messages):

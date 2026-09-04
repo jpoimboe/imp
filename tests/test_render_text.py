@@ -2435,7 +2435,7 @@ def test_reauth_needed_pause_renders_plain_speak_copy() -> None:
     out = "\n".join(_lines([
         _ev("1", "workflow_paused", reason="reauth_needed"),
     ], width=200))
-    assert "authentication kept failing" in out
+    assert "authentication failed" in out
     assert "the quest is paused and resumable" in out
     assert "re-authenticate to Claude" in out
     assert "then resume" in out
@@ -3005,7 +3005,7 @@ def test_other_pause_reasons_render_exactly_as_before() -> None:
         return "\n".join(rt._render(node, depth=0, full=False, color=False, width=200))
 
     assert line("reauth_needed") == (
-        "paused — authentication kept failing; the quest is paused and resumable; "
+        "paused — authentication failed; the quest is paused and resumable; "
         "re-authenticate to Claude (e.g. re-login), then resume")
     assert line("sandbox_spawn_failed") == (
         "paused — the OS sandbox could not start the step (a sandbox-setup "
@@ -3083,7 +3083,8 @@ def test_auth_terminal_pause_renders_the_reauth_copy() -> None:
         _ev("1", "workflow_paused", reason="reauth_needed",
             kind="AuthTerminalError"),
     ], width=200))
-    assert "authentication kept failing" in out
+    assert "authentication failed" in out
+    assert "kept failing" not in out   # auth_terminal pauses on the first failure
     assert "re-authenticate to Claude" in out
     assert "auth_terminal" not in out
     assert "AuthTerminalError" not in out
