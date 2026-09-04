@@ -199,3 +199,18 @@ async def test_timeout_is_transient(tmp_path, provider_registry):
         tmp_path, cfg=SandboxConfig(allow_unsandboxed=True), timeout_s=0.1)
     assert isinstance(result, DetachedTransientFailure)
     assert result.category == "timeout"
+
+
+@pytest.mark.anyio
+async def test_auth_terminal_error_is_environment_failure(
+        tmp_path, provider_registry):
+    # A dead login must not be retried — it cannot heal.
+    _register(provider_registry, [
+        {"type": "error",
+         "payload": {"category": "auth_terminal", "kind": "AuthTerminalError",
+                     "message": "dead login"}},
+    ])
+    result = await _run(tmp_path, cfg=SandboxConfig(allow_unsandboxed=True))
+    assert isinstance(result, DetachedEnvironmentFailure)
+    assert result.category == "auth_terminal"
+    assert result.detail == "AuthTerminalError"

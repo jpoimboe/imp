@@ -47,6 +47,9 @@ _PAUSE_REASON_COPY: dict[str, str] = {
     "max_loops":
         "a step kept sending work back and hit its loop limit; the quest is "
         "paused and resumable — resume to continue with a fresh loop budget",
+    "quota":
+        "quota is exhausted; the quest is paused and resumable — wait for the "
+        "limit to reset or add credits, then resume",
 }
 
 
@@ -819,8 +822,8 @@ def _render(node: Any, *, depth: int, full: bool = False,
         glyph = "⏸ " if color else ""
         copy = _PAUSE_REASON_COPY.get(node.reason)
         text = f"paused — {copy}" if copy else f"paused ({node.reason})"
-        yield _line(f"{glyph}{text}", depth, color,
-                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+        yield from _hang_wrap(text, glyph, width, depth, color,
+                              *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.RenameNode):

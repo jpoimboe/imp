@@ -163,14 +163,15 @@ def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object
 
 
 def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
-    """Refresh the canonical claude token before spawn; raise AuthError on a dead token."""
+    """Refresh the canonical claude token before spawn; raise AuthTerminalError
+    on a dead token (only a human running /login can fix it)."""
     outcome = refresh_canonical_token(int(time.time() * 1000))
     payload: dict[str, Any] = {"outcome": outcome.outcome}
     if outcome.expires_at is not None:
         payload["expires_at"] = outcome.expires_at
     elog.append(agent_id=aid, type="token_refresh", payload=payload)
     if outcome.outcome == FAILED_INVALID_GRANT:
-        raise perr.AuthError(
+        raise perr.AuthTerminalError(
             "claude: OAuth refresh token is dead; re-authentication required")
 
 
@@ -220,9 +221,9 @@ def _termination_from_result(
         labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
     if labeled is None and status == 429:
         labeled = perr.RateLimitError(f"claude_code: api_error_status={status}")
-    if isinstance(labeled, perr.AuthError):
+    if isinstance(labeled, (perr.AuthError, perr.AuthTerminalError)):
         detail.update(_read_token_expiry(config_dir, int(time.time() * 1000)))
-    if isinstance(labeled, (perr.QuotaError, perr.AuthError,
+    if isinstance(labeled, (perr.QuotaError, perr.AuthError, perr.AuthTerminalError,
                             perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)
         return labeled

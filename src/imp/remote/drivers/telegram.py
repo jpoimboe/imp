@@ -38,6 +38,7 @@ _SILENT = frozenset({
 # self-inflicted / self-resolving). Static members are ALWAYS silent regardless of
 # kind. context_window is intentionally absent: it is dual-source and handled
 # kind-aware by _pause_is_silent (reincarnation_cap is companion-less → buzzes).
+# reauth_needed is likewise absent and dual-source: silent only for kind == "AuthTerminalError".
 # Everything not silenced — including any unknown or future reason — buzzes, so a
 # genuine companion-less stop is never missed.
 _PAUSE_SILENT_REASONS = frozenset({
@@ -163,14 +164,17 @@ def header_line(event: Mapping[str, Any]) -> str:
 def _pause_is_silent(payload: Mapping[str, Any]) -> bool:
     """A workflow_paused is silent when a terminal error companion already buzzed the
     same stop (or the stop was self-inflicted / self-resolving). Sole source of truth
-    for the silence decision, shared by curate() and event_body(). context_window is
-    dual-source: the Tier B hard-window fatal (a provider kind) is silenced by its
-    terminal companion, but the companion-less reincarnation cap
-    (kind == "reincarnation_cap") must buzz."""
+    for the silence decision, shared by curate() and event_body(). Two dual-source
+    reasons are decided by kind: context_window (the Tier B hard-window fatal is
+    companion-silenced, the reincarnation cap is companion-less), and reauth_needed
+    (the auth_terminal pause has an error companion, the backoff-ceiling pause has
+    none)."""
     reason = payload.get("reason")
     if reason in _PAUSE_SILENT_REASONS:
         return True
-    return reason == "context_window" and payload.get("kind") != "reincarnation_cap"
+    if reason == "context_window":
+        return payload.get("kind") != "reincarnation_cap"
+    return reason == "reauth_needed" and payload.get("kind") == "AuthTerminalError"
 
 
 def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:

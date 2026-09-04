@@ -6,7 +6,7 @@ from __future__ import annotations
 from imp.cli import narrative as nv
 from imp.cli.render_text import render_tree
 
-AUTH_PROSE = "Failed to authenticate. API Error: 401 Invalid authentication credentials"
+AUTH_PROSE = "API Error: 401 rejected by gateway"
 
 
 def _ev(eid, etype, agent_id=None, **payload):
@@ -120,8 +120,7 @@ def test_api_error_still_renders_hard_error_line() -> None:
     assert "error: [api] 500 upstream" in out
 
 
-QUIET_PROSE = ("Failed to authenticate. API Error: 401 OAuth access token "
-               "has been revoked.")
+QUIET_PROSE = "API Error: 401 OAuth access token has been revoked."
 
 
 def _healed_auth_blip() -> list[dict]:

@@ -126,6 +126,6 @@ def test_auth_error_from_substring_classifier_carries_token_expiry(
     term = _termination_from_result(
         sdk, "API request failed: Invalid authentication credentials", {},
         config_dir=tmp_path)
-    assert isinstance(term, perr.AuthError)
+    assert isinstance(term, perr.AuthTerminalError)
     assert term.detail["token_expires_at"] == 1
     assert term.detail["token_expired"] is True

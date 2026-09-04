@@ -11,7 +11,7 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import render_tree
 
-PROSE = "Failed to authenticate. API Error: 401 OAuth access token has been revoked."
+PROSE = "API Error: 401 OAuth access token has been revoked."
 AID = "step:p/s"
 
 

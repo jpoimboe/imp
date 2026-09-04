@@ -88,8 +88,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
     quest = _seed_single_agent(tmp_path)
 
     scripts = [
-        [assistant(text("Failed to authenticate. API Error: 401 "
-                        "Invalid authentication credentials")),
+        [assistant(text("API Error: 401 rejected by gateway")),
          result(is_error=True, api_error_status=401)],
         [assistant(text("done"),
                    tool_use("c1", "complete_step",
@@ -132,10 +131,11 @@ async def test_auth_retry_recovers_through_backoff_loop(
     assert "awaiting_user_input" not in log_types
     assert "agent_message" in log_types
 
-    prose = ("Failed to authenticate. API Error: 401 "
-             "Invalid authentication credentials")
+    prose = "API Error: 401 rejected by gateway"
     retries = [e for e in events if e["type"] == "agent_retry"]
     assert retries[0]["payload"]["message"] == prose
+    # Bare 401 with no terminal prose must stay transient auth (retry-with-backoff).
+    assert retries[0]["payload"]["category"] == "auth"
 
     # Verify from journaled rows: prose on the breadcrumb is engine chrome, not agent narration.
     from imp.cli import narrative as nv

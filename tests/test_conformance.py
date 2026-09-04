@@ -259,7 +259,7 @@ async def test_classify_before_nudge(pair: str, tmp_path: Path) -> None:
     driven = await run_scenario(
         pair, tmp_path, _classify_script(pair), continuation_fn=cont)
     assert driven.control[-1]["type"] == "error"
-    assert driven.control[-1]["payload"]["category"] == "auth"
+    assert driven.control[-1]["payload"]["category"] == "auth_terminal"
     # The classified Error short-circuits BEFORE the pointless nudge.
     assert consulted["hit"] is False
     check_golden(f"classify__{pair}", record(driven))

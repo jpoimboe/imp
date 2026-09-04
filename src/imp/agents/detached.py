@@ -36,7 +36,7 @@ class DetachedSuccess:
 
 @dataclass(frozen=True, slots=True)
 class DetachedEnvironmentFailure:
-    category: str  # "sandbox" | "auth" | "config"
+    category: str  # "sandbox" | "auth" | "auth_terminal" | "config"
     detail: str
 
 
@@ -136,7 +136,7 @@ def _classify(result: AgentRunResult) -> DetachedResult:
     if result.output is not None and not result.errored and not result.paused:
         return DetachedSuccess(result.output)
     err = result.error
-    if err is not None and err.category in ("auth", "config"):
+    if err is not None and err.category in ("auth", "auth_terminal", "config"):
         return DetachedEnvironmentFailure(err.category, err.kind or "")
     if err is not None:
         return DetachedTransientFailure(err.category, err.kind or "")

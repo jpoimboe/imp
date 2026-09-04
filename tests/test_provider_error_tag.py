@@ -62,7 +62,7 @@ async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
     assert [r["type"] for r in rows[-2:]] == ["agent_message", "query_result"]
     assert rows[-2]["payload"]["provider_error"] is True
     errs = [e for e in events if e.get("type") == "error"]
-    assert [e["payload"]["category"] for e in errs] == ["auth"]
+    assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
     assert errs[0]["payload"]["detail"]["last_agent_text"] == AUTH_PROSE
 
 
@@ -89,7 +89,8 @@ async def test_claude_code_splits_the_group_at_the_error_fragment(
     assert "provider_error" not in msgs[0]["payload"]
     assert [b["text"] for b in msgs[1]["payload"]["raw"]["content"]] == [AUTH_PROSE]
     assert msgs[1]["payload"]["provider_error"] is True
-    assert [e["payload"]["category"] for e in events if e.get("type") == "error"] == ["auth"]
+    assert [e["payload"]["category"] for e in events
+            if e.get("type") == "error"] == ["auth_terminal"]
 
 
 @pytest.mark.anyio
@@ -131,7 +132,7 @@ async def test_codex_tags_the_failing_turn_and_pins_the_row_order(tmp_path: Path
     assert [r["type"] for r in rows[-2:]] == ["agent_message", "agent_message_usage_patch"]
     assert rows[-2]["payload"]["provider_error"] is True
     errs = [e for e in events if e.get("type") == "error"]
-    assert [e["payload"]["category"] for e in errs] == ["auth"]
+    assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
 
 
 @pytest.mark.anyio
@@ -157,7 +158,8 @@ async def test_codex_splits_the_flush_so_ordinary_prose_keeps_its_own_node(
     assert "provider_error" not in msgs[0]["payload"]
     assert [b["text"] for b in msgs[1]["payload"]["raw"]["content"]] == [AUTH_PROSE]
     assert msgs[1]["payload"]["provider_error"] is True
-    assert [e["payload"]["category"] for e in events if e.get("type") == "error"] == ["auth"]
+    assert [e["payload"]["category"] for e in events
+            if e.get("type") == "error"] == ["auth_terminal"]
 
 
 @pytest.mark.anyio

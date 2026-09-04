@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 import stat
 import tempfile
@@ -33,6 +34,8 @@ _CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 _LOCK_FILE = ".imp-token-refresh.lock"
 _LOCK_TIMEOUT = 30.0
 _HTTP_TIMEOUT = 10.0
+_DAY_MS = 24 * 60 * 60 * 1000
+_LOGIN_WARN_WINDOW_MS = 3 * _DAY_MS   # matches Claude Code's own countdown
 
 
 class RefreshTransientError(Exception):
@@ -196,3 +199,40 @@ def refresh_canonical_token(
         return RefreshOutcome(FAILED_TRANSIENT)
     except OSError:
         return RefreshOutcome(FAILED_TRANSIENT)
+
+
+def login_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
+    """The /login window's expiry; never raises, and reads no token material."""
+    env = os.environ if env is None else env
+    if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return None
+    try:
+        base = _canonical_dir(env)
+    except RuntimeError:
+        return None
+    oauth = _oauth_of(_load_credentials(base / ".credentials.json"))
+    if oauth is None:
+        return None
+    value = oauth.get("refreshTokenExpiresAt")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return int(value)
+
+
+def login_expiry_warning(now_ms: int, expires_at_ms: int | None) -> str | None:
+    """The /login window is non-sliding: only a human running /login renews it."""
+    if expires_at_ms is None:
+        return None
+    remaining = expires_at_ms - now_ms
+    if remaining > _LOGIN_WARN_WINDOW_MS:
+        return None
+    if remaining <= 0:
+        state = "has expired"
+    elif remaining < _DAY_MS:
+        state = "expires in under a day"
+    else:
+        days = remaining // _DAY_MS
+        state = f"expires in {days} day{'s' if days > 1 else ''}"
+    return f"Claude login {state} — run `claude` then `/login` to renew"

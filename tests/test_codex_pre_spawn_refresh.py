@@ -29,7 +29,7 @@ def test_helper_journals_outcome_and_raises_on_dead_token(
 
     monkeypatch.setattr(codex_runner, "refresh_canonical_token", _dead)
     log = InMemoryEventLog()
-    with pytest.raises(perr.AuthError):
+    with pytest.raises(perr.AuthTerminalError):
         codex_runner._pre_spawn_token_refresh(log, "step:t")
 
     # Journaled BEFORE the raise; payload carries only the outcome string.
@@ -92,7 +92,8 @@ async def test_dead_token_short_circuits_before_spawn(
 
     err = events[-1]
     assert err["type"] == "error"
-    assert err["payload"]["category"] == "auth"
+    assert err["payload"]["category"] == "auth_terminal"
+    assert err["payload"]["kind"] == "AuthTerminalError"
     # Codex was never spawned — the dead token short-circuits pre-spawn.
     assert fake.start_thread_calls == []
     refreshes = [e for e in elog.read() if e["type"] == "token_refresh"]
