@@ -35,6 +35,12 @@ def connect(index_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def stamp_version(conn: sqlite3.Connection) -> None:
+    """An older writer lowers the floor, so the next current imp rebuilds its row."""
+    conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+    conn.commit()
+
+
 def ingest(
     conn: sqlite3.Connection, record: dict[str, Any], events: list[dict[str, Any]],
 ) -> None:

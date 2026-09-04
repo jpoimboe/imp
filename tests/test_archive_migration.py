@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from imp.engine import archive
-from imp.engine.archive import read
+from imp.engine.archive import index, read
 
 
 def _seed_change(control: Path, cid: str, last_ts: str) -> None:
@@ -375,3 +375,29 @@ def test_rebuild_backfills_events_content_column(tmp_path: Path) -> None:
         conn.close()
     assert "stale" not in rows                    # rebuilt from records, not the old db
     assert "BACKFILL_TRACE" in rows["evt"]        # events_content backfilled from the blob
+
+
+def _stamp_floors_ahead(control: Path) -> None:
+    """Make the archive on disk look like a newer imp wrote it: both floors one ahead."""
+    archive.data_version_path(control).write_text(str(archive._DATA_VERSION + 1))
+    conn = sqlite3.connect(archive.index_path(control))
+    try:
+        conn.execute(f"PRAGMA user_version = {index._SCHEMA_VERSION + 1}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_archive_quest_stamps_both_floors_to_this_writers_versions(
+    tmp_path: Path,
+) -> None:
+    _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
+    _stamp_floors_ahead(tmp_path)
+
+    _seed_change(tmp_path, "beta", "2026-06-02T00:00:02+00:00")
+
+    db = archive.index_path(tmp_path)
+    assert _rows_by_id(db)["beta"] == "2026-06-02T00:00:02+00:00"
+    assert (archive.data_version_path(tmp_path).read_text().strip()
+            == str(archive._DATA_VERSION))
+    assert _user_version(db) == index._SCHEMA_VERSION

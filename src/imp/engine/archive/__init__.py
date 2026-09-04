@@ -87,6 +87,7 @@ def archive_quest(
         conn = index.connect(index_path(control_root))
         try:
             index.ingest(conn, rec, _parse_events(events_bytes))
+            index.stamp_version(conn)
         finally:
             conn.close()
         _write_data_version(control_root, _DATA_VERSION)
