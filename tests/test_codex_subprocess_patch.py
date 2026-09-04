@@ -11,9 +11,9 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -35,30 +35,37 @@ def anyio_backend() -> str:
 # Helper
 # ---------------------------------------------------------------------------
 
-async def _read_one_line(limit: int) -> bytes:
-    """Spawn a subprocess that writes a 200 KiB line to stdout, read it at the given limit.
+_BIG_LINE = 200 * 1024  # 200 KiB > asyncio's 64 KiB default
 
-    The big line is passed via a temp file (not as a CLI arg) to avoid the OS
-    ARG_MAX limit on long command-line arguments.
-    """
-    big = "x" * (200 * 1024)  # 200 KiB > asyncio's 64 KiB default
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(big)
-        tmp_path = f.name
-    code = (
-        f"import sys; "
-        f"data = open({tmp_path!r}).read(); "
-        f"sys.stdout.write(data + '\\n'); "
-        f"sys.stdout.flush()"
-    )
+_FAST_WRITER = (
+    f"import sys; "
+    f"sys.stdout.write('x' * {_BIG_LINE} + '\\n'); "
+    f"sys.stdout.flush()"
+)
+
+# The same line in small, spaced-out chunks: the feed granularity a loaded machine
+# produces, which pauses the reader early enough to block the child mid-write.
+_SLOW_WRITER = (
+    "import sys, time\n"
+    f"data = 'x' * {_BIG_LINE} + '\\n'\n"
+    "for i in range(0, len(data), 4096):\n"
+    "    sys.stdout.write(data[i:i + 4096]); sys.stdout.flush(); time.sleep(0.0005)\n"
+)
+
+
+async def _read_one_line(limit: int, writer: str = _FAST_WRITER) -> bytes:
+    """Spawn a subprocess that writes a 200 KiB line to stdout, read one line at `limit`."""
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-c", code,
+        sys.executable, "-c", writer,
         stdout=asyncio.subprocess.PIPE, limit=limit)
     try:
         return await proc.stdout.readline()  # type: ignore[union-attr]
     finally:
+        # Over the limit readline abandons stdout, leaving the child blocked
+        # mid-write: a graceful wait() would never return.
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
         await proc.wait()
-        Path(tmp_path).unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +77,14 @@ async def test_default_limit_raises_on_oversized_line() -> None:
     """Reproduce: asyncio's 64 KiB default limit raises ValueError on a 200 KiB line."""
     with pytest.raises(ValueError):
         await _read_one_line(64 * 1024)
+
+
+@pytest.mark.anyio
+async def test_default_limit_raises_when_the_child_writes_slowly() -> None:
+    """The over-limit read abandons stdout, so cleanup must not wait for the child to
+    finish writing into a pipe nobody drains."""
+    with pytest.raises(ValueError):
+        await _read_one_line(64 * 1024, _SLOW_WRITER)
 
 
 @pytest.mark.anyio
