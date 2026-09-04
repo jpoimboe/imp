@@ -216,3 +216,57 @@ def test_web_search_is_not_surcharged() -> None:
                             web_search_requests=100)
     assert cost_usd("gpt-5.6-sol", searched,
                     prompt_tokens=310_000) == pytest.approx(3.08)
+
+
+# A claude_code `model_usage` rollup. Each `costUSD` is hand-worked from the
+# PUBLISHED per-million rates, never regenerated from MODEL_PRICES — that is
+# what makes this a drift guard rather than a restatement of the table.
+#   sonnet:  10*$3 + 52*$15 + 12812*$0.30                        = $0.0046536
+#   haiku:   1000*$1 + 2000*$5 + 50000*$0.10 + 4000*$1.25        = $0.021
+#   opus:    2000*$5 + 500*$25 + 100000*$0.50 + 8000*$6.25       = $0.1225
+#            + 3 web searches * $0.01                            = $0.1525
+_MODEL_USAGE = {
+    "claude-sonnet-4-6": {
+        "inputTokens": 10, "outputTokens": 52,
+        "cacheReadInputTokens": 12812, "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0, "costUSD": 0.0046536,
+    },
+    "claude-haiku-4-5-20251001": {
+        "inputTokens": 1000, "outputTokens": 2000,
+        "cacheReadInputTokens": 50000, "cacheCreationInputTokens": 4000,
+        "webSearchRequests": 0, "costUSD": 0.021,
+    },
+    "claude-opus-4-8[1m]": {
+        "inputTokens": 2000, "outputTokens": 500,
+        "cacheReadInputTokens": 100000, "cacheCreationInputTokens": 8000,
+        "webSearchRequests": 3, "costUSD": 0.1525,
+    },
+}
+
+
+def _billing(row: dict[str, float]) -> BillingUsage:
+    return BillingUsage(
+        fresh_input=int(row["inputTokens"]),
+        cached_input=int(row["cacheReadInputTokens"]),
+        cache_write=int(row["cacheCreationInputTokens"]),
+        output=int(row["outputTokens"]),
+        web_search_requests=web_search_request_count(row))
+
+
+def test_the_table_reproduces_the_vendor_cost_on_every_key_form() -> None:
+    for model, row in _MODEL_USAGE.items():
+        assert cost_usd(model, _billing(row)) == pytest.approx(
+            row["costUSD"], rel=1e-9), model
+
+
+def test_the_table_reproduces_the_vendor_cost_summed_over_the_rollup() -> None:
+    total = sum(cost_usd(model, _billing(row))
+                for model, row in _MODEL_USAGE.items())
+    assert total == pytest.approx(0.1781536, rel=1e-9)
+
+
+def test_a_date_stamped_anthropic_id_prices_rather_than_falling_to_n_a() -> None:
+    # The raw anthropic path records whatever id the API echoes, date stamp
+    # included: 1000*$3 + 1000*$15 per million = $0.018, not None.
+    usage = BillingUsage(fresh_input=1000, output=1000)
+    assert cost_usd("claude-sonnet-4-6-20250219", usage) == pytest.approx(0.018)
