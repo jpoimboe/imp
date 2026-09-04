@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from collections.abc import Awaitable, Callable
 from contextlib import ExitStack
@@ -102,6 +103,7 @@ from imp.engine.types import (
     Vars,
     Workflow,
 )
+from imp.providers.claude_token_refresh import login_expires_at, login_expiry_warning
 from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.memory import load_memory_snapshot
 from imp.providers.resolve import provider_from_model, resolve_run
@@ -448,6 +450,13 @@ async def run_quest(
             if (message := outer_imp_mismatch(quest.control_root)) is not None:
                 _emit(log, "warning",
                       {"source": "outer_imp", "message": message, "detail": {}},
+                      agent_id=None)
+            login_message = login_expiry_warning(
+                int(time.time() * 1000), login_expires_at())
+            if login_message is not None:
+                _emit(log, "warning",
+                      {"source": "claude_login_expiry", "message": login_message,
+                       "detail": {}},
                       agent_id=None)
         # First-resume bootstrap for a deferred backlog draft: an unstarted,
         # never-seeded stub (step None, has_started False) had its cursor + vars
