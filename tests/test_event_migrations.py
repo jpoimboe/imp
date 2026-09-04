@@ -1,7 +1,7 @@
 import copy
 import re
 
-from imp.engine.event_migrations import migrate_events
+from imp.engine.event_migrations import migrate_events, migrate_id_ns_event_to_block
 
 
 def test_llm_response_renamed_to_agent_message():
@@ -362,3 +362,67 @@ def test_does_not_mutate_input():
     snapshot = copy.deepcopy(old)
     migrate_events(old)
     assert old == snapshot
+
+
+def _codex_pair():
+    """A stored codex sub_agent fold as it was written before the id_ns fix: an
+    UNSTAMPED tool_call keyed on the SDK item id, and its id_ns="event" result."""
+    return [
+        {"id": "e1", "parent_id": None, "agent_id": "A", "timestamp": "T1",
+         "type": "tool_call",
+         "payload": {"id": "item_1", "name": "sub_agent",
+                     "input": {"subagent_name": "explorer", "task_description": "x"}}},
+        {"id": "e2", "parent_id": "e1", "agent_id": "A", "timestamp": "T2",
+         "type": "tool_result",
+         "payload": {"id": "item_1", "id_ns": "event", "content": "done",
+                     "error": False}},
+    ]
+
+
+def _legacy_unstamped_pair():
+    """A pre-id_ns log: neither side carries the marker. It must stay that way so the
+    renderer's `id_ns is None` ordered probe keeps closing it."""
+    return [
+        {"id": "e3", "parent_id": None, "agent_id": "A", "timestamp": "T3",
+         "type": "tool_call",
+         "payload": {"id": "b1", "name": "sub_agent",
+                     "input": {"subagent_name": "reviewer", "task_description": "go"}}},
+        {"id": "e4", "parent_id": "e3", "agent_id": "A", "timestamp": "T4",
+         "type": "tool_result",
+         "payload": {"id": "b1", "content": "ok", "error": False}},
+    ]
+
+
+def test_restamps_both_sides_of_an_event_keyed_codex_fold():
+    out = migrate_id_ns_event_to_block(_codex_pair())
+    assert [e["payload"].get("id_ns") for e in out] == ["block", "block"]
+    assert [e["payload"]["id"] for e in out] == ["item_1", "item_1"]
+    assert out[1]["payload"]["content"] == "done"      # rest of the payload survives
+    assert out[0]["type"] == "tool_call" and out[1]["type"] == "tool_result"
+
+
+def test_legacy_unstamped_pair_is_returned_unchanged():
+    legacy = _legacy_unstamped_pair()
+    assert migrate_id_ns_event_to_block(legacy) == _legacy_unstamped_pair()
+
+
+def test_second_run_yields_output_identical_to_the_first():
+    once = migrate_id_ns_event_to_block(_codex_pair())
+    assert migrate_id_ns_event_to_block(copy.deepcopy(once)) == once
+
+
+def test_unstamped_call_is_not_restamped_without_a_matching_event_result():
+    # Only the tool_call whose id appears among the id_ns="event" RESULT ids is
+    # restamped; an unrelated unstamped dispatch in the same log is left alone.
+    events = _codex_pair() + _legacy_unstamped_pair()
+    out = migrate_id_ns_event_to_block(events)
+    assert [e["payload"].get("id_ns") for e in out] == ["block", "block", None, None]
+
+
+def test_does_not_mutate_input_events():
+    # Load-bearing: the archive pass detects "blob changed" with `migrated != events`,
+    # which an in-place mutation would defeat.
+    events = _codex_pair()
+    snapshot = copy.deepcopy(events)
+    migrate_id_ns_event_to_block(events)
+    assert events == snapshot
