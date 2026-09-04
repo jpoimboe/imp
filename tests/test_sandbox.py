@@ -17,6 +17,7 @@ from imp.engine.sandbox import (
     SandboxConfig,
     SandboxPolicy,
     SandboxUnavailable,
+    _force_rmtree,
     build_sandbox_argv,
     make_home_layer,
     prepare_spawn_policy,
@@ -1348,6 +1349,22 @@ def test_make_home_layer_fallback_creates_no_root(tmp_path):
     assert not root.exists()
     cleanup()  # no-op, must not raise
     assert not root.exists()
+
+
+def test_force_rmtree_skips_symlinked_dirs(tmp_path: Path) -> None:
+    # Symlinks to dirs appear in os.walk dirs; os.chmod follows them.
+    # Verify the guard prevents mutating a directory outside the removed tree.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original_mode = os.stat(outside).st_mode
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "real_subdir").mkdir()
+    (tree / "link_to_outside").symlink_to(outside)
+    _force_rmtree(tree)
+    assert not tree.exists()
+    assert outside.exists()
+    assert os.stat(outside).st_mode == original_mode
 
 
 def test_prepare_spawn_policy_mints_a_distinct_layer_per_spawn(tmp_path):

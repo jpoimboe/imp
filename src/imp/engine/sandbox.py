@@ -478,8 +478,11 @@ def _force_rmtree(path: Path) -> None:
     under the state dir. Owner is the real uid, so the chmod always succeeds."""
     for root, dirs, _files in os.walk(path):
         for d in dirs:
+            p = os.path.join(root, d)
+            if os.path.islink(p):  # os.chmod follows symlinks; skip to avoid mutating outside tree
+                continue
             with contextlib.suppress(OSError):
-                os.chmod(os.path.join(root, d), 0o700)
+                os.chmod(p, 0o700)
     shutil.rmtree(path, ignore_errors=True)
 
 

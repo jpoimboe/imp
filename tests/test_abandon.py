@@ -419,3 +419,31 @@ def test_discard_conversation_reaps_per_quest_var_tmp_dir(tmp_path: Path) -> Non
         assert not ch.var_tmp_dir.exists()
     finally:
         shutil.rmtree(ch.var_tmp_dir, ignore_errors=True)
+
+
+def test_tear_down_quest_force_reaps_overlay_residue_in_quest_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.engine.sandbox as sandbox_mod
+    _seed_control(tmp_path)
+    qid = f"ov{uuid.uuid4().hex[:8]}"
+    ch = Quest.create(tmp_path, title="x", quest_id=qid, base_branch="main")
+    # Simulate overlayfs residue at steps/<phase>/<step>.overlay/<layer>/work/work
+    residue = ch.quest_dir / "steps" / "plan" / "1.overlay" / "layer0" / "work" / "work"
+    residue.mkdir(parents=True, exist_ok=True)
+    (residue / "file.txt").write_text("x")
+    residue.chmod(0o000)
+    real_chmod = os.chmod
+    chmodded: list[str] = []
+    def _spy_chmod(p, mode, *a, **k):
+        chmodded.append(str(p))
+        return real_chmod(p, mode, *a, **k)
+    monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+    try:
+        tear_down_quest(ch)
+        assert not ch.quest_dir.exists()
+        assert str(residue) in chmodded  # proves _force_rmtree's chmod walk ran
+    finally:
+        if residue.exists():
+            residue.chmod(0o700)
+        shutil.rmtree(ch.quest_dir, ignore_errors=True)
