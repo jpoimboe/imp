@@ -7,7 +7,8 @@ Implements what the SDK can't express (or can't express correctly): the MCP
 server URL + bearer-token env-var name, the per-server
 `default_tools_approval_mode` that keeps imp's tools auto-approved under the
 read-only sandbox, the [features] toggles, the top-level `web_search` control,
-and the auth.json seed. `web_search` lives here because the
+the `model_auto_compact_token_limit` pin that stops codex compacting its own
+history, and the auth.json seed. `web_search` lives here because the
 SDK's `features.web_search_request` flag is deprecated/ineffective on codex
 >=0.137 (see `render_config_toml`). The rest (model, sandbox_mode,
 approval_policy, network_access_enabled) still goes through SDK options.
@@ -38,6 +39,10 @@ from typing import Literal
 # Codex's per-call default is 300s; pinned high because imp bounds its own calls.
 _TOOL_TIMEOUT_SEC = 86400
 
+# Codex treats <= 0 as "compact on every request", so the disable is a value
+# above any real window, not zero.
+_AUTO_COMPACT_LIMIT = 100_000_000
+
 
 def render_config_toml(
     *, host: str, port: int, bearer_env_var: str, web_search_enabled: bool,
@@ -60,6 +65,11 @@ def render_config_toml(
     `web_search` lives here (not in SDK options) because codex >=0.137 deprecated
     the SDK-emitted `features.web_search_request` key. A top-level key must precede
     every `[table]` in TOML, so `web_search` is emitted first.
+
+    `model_auto_compact_token_limit` is pinned above any real context window
+    (codex reads <= 0 as "compact on every request"): codex's auto-compaction
+    would otherwise rewrite history invisibly beneath imp's own context
+    checkpoint. Also top-level, so it too precedes every `[table]`.
     """
     web_search = "live" if web_search_enabled else "disabled"
     impty_block = ""
@@ -74,6 +84,7 @@ def render_config_toml(
         )
     return (
         f'web_search = "{web_search}"\n'
+        f"model_auto_compact_token_limit = {_AUTO_COMPACT_LIMIT}\n"
         "\n"
         "[mcp_servers.imp]\n"
         f'url = "http://{host}:{port}/mcp"\n'

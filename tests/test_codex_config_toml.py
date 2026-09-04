@@ -1,5 +1,7 @@
 import tomllib
 
+import pytest
+
 from imp.providers.codex_config import render_config_toml
 
 
@@ -91,3 +93,36 @@ def test_config_toml_puts_approval_mode_inside_the_impty_server_table() -> None:
     assert data["mcp_servers"]["impty"]["url"] == "http://127.0.0.1:55001/mcp"
     assert data["mcp_servers"]["imp"]["default_tools_approval_mode"] == "approve"
     assert data["features"]["shell_tool"] is False
+
+
+@pytest.mark.parametrize("web_search_enabled", [False, True])
+@pytest.mark.parametrize(
+    ("impty_url", "impty_bearer_env_var"),
+    [(None, None), ("http://127.0.0.1:55001/mcp", "IMP_IMPTY_TOKEN")],
+)
+def test_config_toml_disables_codex_auto_compaction_in_every_variant(
+    web_search_enabled: bool,
+    impty_url: str | None,
+    impty_bearer_env_var: str | None,
+) -> None:
+    txt = render_config_toml(
+        host="127.0.0.1", port=49152, bearer_env_var="IMP_MCP_TOKEN",
+        web_search_enabled=web_search_enabled, impty_url=impty_url,
+        impty_bearer_env_var=impty_bearer_env_var)
+    cfg = tomllib.loads(txt)
+    # Codex reads <= 0 as "compact on every request" (measured), so the only
+    # verified disable is a limit above any real window.
+    assert cfg["model_auto_compact_token_limit"] == 100000000
+    # The scope key is irrelevant with the limit unreachable, and an invalid
+    # value there is a hard config-load failure.
+    assert "model_auto_compact_token_limit_scope" not in txt
+
+
+def test_config_toml_emits_auto_compact_limit_before_the_first_table() -> None:
+    txt = render_config_toml(host="127.0.0.1", port=49152,
+                             bearer_env_var="IMP_MCP_TOKEN",
+                             web_search_enabled=False)
+    # TOML: a top-level key after the first [table] header lands inside that
+    # table instead, so the ordering is load-bearing, not cosmetic.
+    assert txt.index("model_auto_compact_token_limit") < txt.index("[")
+    assert txt.index('web_search = "disabled"') < txt.index("[mcp_servers.imp]")
