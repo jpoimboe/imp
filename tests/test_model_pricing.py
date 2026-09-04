@@ -153,3 +153,66 @@ def test_web_search_count_is_zero_without_a_carrier() -> None:
     assert web_search_request_count({"server_tool_use": None}) == 0
     assert web_search_request_count({"server_tool_use": {}}) == 0
     assert web_search_request_count({"webSearchRequests": 0}) == 0
+
+
+# 200k fresh + 100k cached + 10k cache write = a 310,000-token prompt, over the
+# 272,000 breakpoint; 10k output.
+_LONG = BillingUsage(fresh_input=200_000, cached_input=100_000,
+                     cache_write=10_000, output=10_000)
+
+
+def test_the_long_context_surcharge_reprices_the_whole_request() -> None:
+    # unsurcharged on gpt-5.6-sol, per million:
+    #   200000*$4 + 100000*$0.40 + 10000*$5 + 10000*$20 = $1.09
+    assert cost_usd("gpt-5.6-sol", _LONG) == pytest.approx(1.09)
+    # surcharged: 2x input, 2x cached, 2x cache write, 1.5x output, everywhere
+    #   2*800000 + 2*40000 + 2*50000 + 1.5*200000 per million = $2.08
+    assert cost_usd("gpt-5.6-sol", _LONG,
+                    prompt_tokens=310_000) == pytest.approx(2.08)
+
+
+def test_the_surcharge_boundary_is_strictly_above_272k() -> None:
+    assert cost_usd("gpt-5.6-sol", _LONG,
+                    prompt_tokens=272_000) == pytest.approx(1.09)
+    assert cost_usd("gpt-5.6-sol", _LONG,
+                    prompt_tokens=272_001) == pytest.approx(2.08)
+
+
+def test_an_absent_prompt_reading_is_never_surcharged() -> None:
+    assert cost_usd("gpt-5.6-sol", _LONG,
+                    prompt_tokens=None) == pytest.approx(1.09)
+
+
+def test_gpt_5_5_and_5_4_are_surcharged_too() -> None:
+    # gpt-5.5 unsurcharged: 200000*$5 + 100000*$0.50 + 10000*$5 + 10000*$30
+    #   = $1.40; surcharged = 2*1000000 + 2*50000 + 2*50000 + 1.5*300000
+    #   per million = $2.65
+    assert cost_usd("gpt-5.5", _LONG) == pytest.approx(1.40)
+    assert cost_usd("gpt-5.5", _LONG,
+                    prompt_tokens=300_000) == pytest.approx(2.65)
+    # gpt-5.4 unsurcharged: 200000*$2.50 + 100000*$0.25 + 10000*$2.50
+    #   + 10000*$15 = $0.70; surcharged = 2*500000 + 2*25000 + 2*25000
+    #   + 1.5*150000 per million = $1.325
+    assert cost_usd("gpt-5.4", _LONG) == pytest.approx(0.70)
+    assert cost_usd("gpt-5.4", _LONG,
+                    prompt_tokens=300_000) == pytest.approx(1.325)
+
+
+def test_a_model_without_a_threshold_is_never_surcharged() -> None:
+    # gpt-5.3-codex, per million: 200000*$1.75 + 100000*$0.175
+    #   + 10000*$1.75 + 10000*$14 = $0.525, at any prompt size.
+    assert cost_usd("gpt-5.3-codex", _LONG,
+                    prompt_tokens=5_000_000) == pytest.approx(0.525)
+    for model in ("gpt-5.4-mini", "gpt-5", "claude-opus-5", "claude-sonnet-4-6"):
+        assert cost_usd(model, _LONG, prompt_tokens=5_000_000) == pytest.approx(
+            cost_usd(model, _LONG))
+
+
+def test_web_search_is_not_surcharged() -> None:
+    # The flat $0.01/request charge sits outside the token multipliers: adding
+    # 100 searches raises the surcharged figure by exactly $1.00.
+    searched = BillingUsage(fresh_input=200_000, cached_input=100_000,
+                            cache_write=10_000, output=10_000,
+                            web_search_requests=100)
+    assert cost_usd("gpt-5.6-sol", searched,
+                    prompt_tokens=310_000) == pytest.approx(3.08)

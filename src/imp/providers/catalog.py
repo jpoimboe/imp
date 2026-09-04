@@ -338,14 +338,27 @@ def web_search_request_count(usage: dict[str, Any] | None) -> int:
     return 0
 
 
-def cost_usd(model: str | None, usage: BillingUsage) -> float | None:
+def cost_usd(model: str | None, usage: BillingUsage,
+             prompt_tokens: int | None = None) -> float | None:
     """List-price dollars for one request; None when `model` is absent from the
-    price table, which is the only way a computed cost is unavailable."""
+    price table, which is the only way a computed cost is unavailable.
+
+    `prompt_tokens` is the caller's own occupancy reading for the long-context
+    surcharge — the record's prompt sum on openai, `context_tokens` on a codex
+    usage patch. None is never surcharged: the alternative codex signal
+    over-reads by several multiples, so absent evidence must not become a 2x
+    charge.
+    """
     prices = prices_for(model)
     if prices is None:
         return None
-    return ((usage.fresh_input * prices.input
-             + usage.cached_input * prices.cache_read
-             + usage.cache_write * prices.cache_write
-             + usage.output * prices.output) / 1_000_000
+    surcharged = (prices.long_context_threshold is not None
+                  and prompt_tokens is not None
+                  and prompt_tokens > prices.long_context_threshold)
+    prompt_mult = 2.0 if surcharged else 1.0
+    output_mult = 1.5 if surcharged else 1.0
+    return ((usage.fresh_input * prices.input * prompt_mult
+             + usage.cached_input * prices.cache_read * prompt_mult
+             + usage.cache_write * prices.cache_write * prompt_mult
+             + usage.output * prices.output * output_mult) / 1_000_000
             + usage.web_search_requests * WEB_SEARCH_USD_PER_REQUEST)
