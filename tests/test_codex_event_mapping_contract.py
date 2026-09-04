@@ -118,6 +118,31 @@ def test_failed_status_without_error_field_records_error_true() -> None:
     assert recorded["completed"] == (False, text)
 
 
+def test_failed_tool_call_ToolOutcome_is_error_true() -> None:
+    """is_error feeds LoopGuard — a failed tool call must not count as progress."""
+    text = "Error executing tool read_file: FileNotFoundError"
+    args = {"path": "bar.py"}
+    state: dict[str, Any] = {}
+    for status in ("failed", "completed"):
+        item = McpToolCallItem(
+            id=f"d-{status}", type="mcp_tool_call", server="imp", tool="read_file",
+            arguments=args,
+            result=McpToolCallResult(
+                content=[{"type": "text", "text": text}], structured_content=None),
+            error=None, status=status,
+        )
+        _feed(item, state=state)
+
+    outcomes = state["turn_tool_outcomes"]
+    assert len(outcomes) == 2
+    failed_out, completed_out = outcomes
+    assert failed_out.is_error is True
+    assert completed_out.is_error is False
+    for out in outcomes:
+        assert out.name == "read_file"
+        assert out.input == args
+
+
 def test_real_error_item_is_diagnostic_not_unhandled() -> None:
     item = ErrorItem(id="e1", type="error",
                      message="`[features].web_search_request` is deprecated")
