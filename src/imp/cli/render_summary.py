@@ -11,6 +11,21 @@ from imp.cli.narrative import TokenTotals, elapsed_seconds
 from imp.cli.quest_row import STATUS_COLORS, display_word
 from imp.cli.render_text import fmt_seconds
 
+_FINISHED_STATUSES = frozenset({"merged", "done", "abandoned"})
+
+
+def open_span_label(status: str) -> str:
+    """A finished quest's open span was interrupted; an unfinished one's is still in that status."""
+    return "interrupted" if status in _FINISHED_STATUSES else display_word(status)
+
+
+def _dur_text(seconds: float | None, open_label: str = "running", *,
+              inferred: bool = False) -> str:
+    """`~` marks an inferred end; open_label names a span with no end at all."""
+    if seconds is None:
+        return open_label
+    return f"~{fmt_seconds(seconds)}" if inferred else fmt_seconds(seconds)
+
 
 @dataclass
 class SubagentRow:
@@ -18,6 +33,7 @@ class SubagentRow:
     label: str | None = None
     start_ts: str | None = None
     end_ts: str | None = None
+    end_inferred: bool = False
     errored: bool = False
     tokens: TokenTotals = field(default_factory=TokenTotals)
     cost: float = 0.0
@@ -27,6 +43,9 @@ class SubagentRow:
         """dispatch → result wall clock; None while the subagent is still running."""
         return elapsed_seconds(self.start_ts, self.end_ts)
 
+    def dur_cell(self, open_label: str) -> str:
+        return _dur_text(self.wall_seconds, open_label, inferred=self.end_inferred)
+
 
 @dataclass
 class StepRow:
@@ -34,6 +53,7 @@ class StepRow:
     step: str
     start_ts: str | None
     end_ts: str | None = None
+    end_inferred: bool = False
     wait_seconds: float = 0.0
     errored: bool = False
     agent_id: str | None = None
@@ -54,6 +74,9 @@ class StepRow:
             return None
         return max(0.0, wall - self.wait_seconds)
 
+    def dur_cell(self, open_label: str) -> str:
+        return _dur_text(self.work_seconds, open_label, inferred=self.end_inferred)
+
 
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
     # Audit-only records are queryable but silent; interrupt marker is not a terminal failure.
@@ -67,7 +90,9 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     open_row: StepRow | None = None        # the currently-open occurrence
     pending_wait_start: str | None = None  # ts of an unresolved awaiting_user_input
     subs_by_agent: dict[str, SubagentRow] = {}   # "sub:<event id>" -> row (tokens/cost)
-    subs_by_block: dict[str, SubagentRow] = {}    # tool_call block id -> row (close)
+    # (call was id_ns-stamped, block id) -> row. Keying on the stamping is what stops an
+    # unstamped result from closing a stamped call: codex block ids repeat every turn.
+    open_subs: dict[tuple[bool, str], SubagentRow] = {}
 
     def _close_wait(now_ts: str | None) -> None:
         nonlocal pending_wait_start
@@ -76,6 +101,16 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             if delta is not None and delta > 0:
                 open_row.wait_seconds += delta
         pending_wait_start = None
+
+    def _contain_subs(row: StepRow | None, end_ts: str | None) -> None:
+        """Close off the step's list, not the table: a reused block id evicts its predecessor."""
+        if row is not None and end_ts is not None:
+            for sub in row.subagents:
+                if sub.end_ts is None:
+                    sub.end_ts = end_ts
+                    sub.end_inferred = True
+        open_subs.clear()
+        subs_by_agent.clear()
 
     for e in events:
         etype = e.get("type")
@@ -100,12 +135,18 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             if (open_row is not None and open_row.end_ts is None
                     and open_row.step == step and open_row.phase == phase):
                 continue
+            if open_row is not None and open_row.end_ts is None:
+                _contain_subs(open_row, ts)
+                if ts is not None:
+                    open_row.end_ts = ts
+                    open_row.end_inferred = True
             open_row = StepRow(phase=phase, step=step, start_ts=ts)
             rows.append(open_row)
         elif etype == "step_completed":
             _close_wait(ts)
             if open_row is not None and open_row.end_ts is None:
                 open_row.end_ts = ts
+            _contain_subs(open_row, ts)
             open_row = None
         elif etype == "awaiting_user_input":
             pending_wait_start = ts
@@ -136,21 +177,18 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
                 open_row.subagents.append(sub)
                 subs_by_agent[f"sub:{event_id}"] = sub
                 if block_id:
-                    subs_by_block[block_id] = sub
+                    open_subs[(p.get("id_ns") == "block", block_id)] = sub
         elif etype == "tool_result":
-            sub = subs_by_block.get(str(p.get("id", "")))
-            if sub is not None:
-                sub.end_ts = ts
-                sub.errored = bool(p.get("error", False))
+            id_ns = p.get("id_ns")
+            if id_ns is None or id_ns == "block":
+                sub = open_subs.pop((id_ns == "block", str(p.get("id", ""))), None)
+                if sub is not None:
+                    sub.end_ts = ts
+                    sub.errored = bool(p.get("error", False))
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
     return rows
-
-
-def _dur_text(seconds: float | None, open_label: str = "running") -> str:
-    """Duration text via the shared fmt_seconds; open_label for an open span."""
-    return open_label if seconds is None else fmt_seconds(seconds)
 
 
 def _tok_total(t: TokenTotals) -> int:
@@ -239,11 +277,11 @@ def _column_widths(summary: list[StepRow], open_label: str) -> tuple[int, int, i
     toks: list[int] = []
     costs: list[int] = []
     for r in summary:
-        durs.append(len(_dur_text(r.work_seconds, open_label)))
+        durs.append(len(r.dur_cell(open_label)))
         toks.append(len(_fmt_tokens(_tok_total(r.tokens))))
         costs.append(len(_fmt_cost(r.cost)))
         for s in r.subagents:
-            durs.append(len(_dur_text(s.wall_seconds)))
+            durs.append(len(s.dur_cell(open_label)))
             toks.append(len(_fmt_tokens(_tok_total(s.tokens))))
             costs.append(len(_fmt_cost(s.cost)))
     return (max(names, default=0), max(durs, default=0),
@@ -254,19 +292,19 @@ def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
                tok_w: int, cost_w: int, color: bool, open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
     name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
-    dur = pal.ansi(f"{_dur_text(row.work_seconds, open_label):>{dur_w}}", *codes, enabled=color)
+    dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     tok = f"{_fmt_tokens(_tok_total(row.tokens)):>{tok_w}}"
     cost = f"{_fmt_cost(row.cost):>{cost_w}}"
     return f"  {name}  {dur}  {tok}  {cost}"
 
 
 def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int,
-              tok_w: int, cost_w: int, color: bool) -> str:
+              tok_w: int, cost_w: int, color: bool, open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if sub.errored else pal.NODE_COLORS["subagent"]
     # The extra two-space indent is absorbed by narrowing the label field, so the
     # numeric columns stay aligned with the step rows (see _column_widths).
     body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
-    dur = pal.ansi(f"{_dur_text(sub.wall_seconds):>{dur_w}}", *codes, enabled=color)
+    dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     tok = f"{_fmt_tokens(_tok_total(sub.tokens)):>{tok_w}}"
     cost = f"{_fmt_cost(sub.cost):>{cost_w}}"
     return f"    {body}  {dur}  {tok}  {cost}"
@@ -274,7 +312,7 @@ def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int,
 
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int) -> list[str]:
-    open_label = header.status
+    open_label = open_span_label(header.status)
     name_w, dur_w, tok_w, cost_w = _column_widths(summary, open_label)
     work, tokens, cost = header_totals(summary, header.total_seconds)
     lines = [_header_line(header, work, tokens, cost, color=color)]
@@ -294,5 +332,6 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                                 open_label=open_label))
         for sub in row.subagents:
             lines.append(_sub_line(sub, name_w=name_w, dur_w=dur_w,
-                                   tok_w=tok_w, cost_w=cost_w, color=color))
+                                   tok_w=tok_w, cost_w=cost_w, color=color,
+                                   open_label=open_label))
     return lines

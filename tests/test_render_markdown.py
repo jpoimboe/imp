@@ -538,3 +538,40 @@ def test_second_retry_still_shows_in_the_lean_markdown() -> None:
     events = [_ev("r1", "agent_retry", category="auth", attempt=2,
                   backoff_seconds=2.0, message="401 revoked")]
     assert "> **warning:** [auth] retry 2 (2.0s) — 401 revoked" in _md(events)
+
+
+def test_summary_markdown_marks_inferred_ends_with_a_tilde() -> None:
+    rows = [StepRow(phase="implement", step="task-lead",
+                    start_ts="2026-01-01T00:00:00+00:00",
+                    end_ts="2026-01-01T00:05:00+00:00", end_inferred=True,
+                    subagents=[SubagentRow(name="coder",
+                                           start_ts="2026-01-01T00:00:10+00:00",
+                                           end_ts="2026-01-01T00:02:24+00:00",
+                                           end_inferred=True)])]
+    hdr = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+                        total_seconds=300.0)
+    out = render_summary_markdown(rows, header=hdr)
+    assert "| task-lead | ~5m 0s | — | — |" in out
+    assert "| ↳ coder | ~2m 14s | — | — |" in out
+
+
+def test_summary_markdown_open_spans_in_a_finished_quest_read_interrupted() -> None:
+    rows = [StepRow(phase="implement", step="task-lead",
+                    start_ts="2026-01-01T00:00:00+00:00", end_ts=None,
+                    subagents=[SubagentRow(name="coder",
+                                           start_ts="2026-01-01T00:00:10+00:00")])]
+    hdr = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+                        total_seconds=300.0)
+    out = render_summary_markdown(rows, header=hdr)
+    assert "| task-lead | interrupted | — | — |" in out
+    assert "| ↳ coder | interrupted | — | — |" in out
+    assert "| task-lead | merged |" not in out
+
+
+def test_summary_markdown_merge_blocked_open_step_reads_two_words() -> None:
+    rows = [StepRow(phase="implement", step="task-lead",
+                    start_ts="2026-01-01T00:00:00+00:00", end_ts=None)]
+    hdr = SummaryHeader(workflow="imp", quest_id="c", status="merge_blocked",
+                        total_seconds=100.0)
+    out = render_summary_markdown(rows, header=hdr)
+    assert "| task-lead | merge blocked | — | — |" in out

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from imp.cli.narrative import TokenTotals
+from imp.cli.narrative import TokenTotals, elapsed_seconds
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
@@ -14,6 +14,7 @@ from imp.cli.render_summary import (
     _tok_total,
     build_summary,
     header_totals,
+    open_span_label,
     render_summary,
     summary_total,
 )
@@ -293,15 +294,23 @@ def _qr(agent_id: str, ts: str, cost: float) -> dict:
 
 
 def _subcall(event_id: str, block_id: str, agent_id: str, ts: str,
-             name: str, label: str | None = None) -> dict:
-    return {"type": "tool_call", "id": event_id, "agent_id": agent_id, "timestamp": ts,
-            "payload": {"name": "sub_agent", "id": block_id, "id_ns": "block",
-                        "label": label, "input": {"subagent_name": name}}}
+             name: str, label: str | None = None, *,
+             stamped: bool = True) -> dict:
+    payload: dict = {"name": "sub_agent", "id": block_id, "label": label,
+                     "input": {"subagent_name": name}}
+    if stamped:
+        payload["id_ns"] = "block"
+    return {"type": "tool_call", "id": event_id, "agent_id": agent_id,
+            "timestamp": ts, "payload": payload}
 
 
-def _subresult(block_id: str, agent_id: str, ts: str, error: bool = False) -> dict:
+def _subresult(block_id: str, agent_id: str, ts: str, error: bool = False, *,
+               stamped: bool = True) -> dict:
+    payload: dict = {"id": block_id, "error": error}
+    if stamped:
+        payload["id_ns"] = "block"
     return {"type": "tool_result", "agent_id": agent_id, "timestamp": ts,
-            "payload": {"id": block_id, "error": error}}
+            "payload": payload}
 
 
 def test_step_own_tokens_summed_from_matching_agent_id():
@@ -667,3 +676,271 @@ def test_header_waiting_renders_bold():
                         status="waiting", total_seconds=100.0)
     out = render_summary([], header=hdr, color=True, width=80)
     assert "\x1b[1mwaiting\x1b[0m" in out[0]   # bold, like running
+
+
+def test_plain_tool_result_cannot_close_a_stamped_subagent():
+    prefix = [
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_5", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        # An ordinary, unrelated tool result that happens to reuse block id item_5
+        # (codex block ids are short per-turn sequence numbers).
+        _subresult("item_5", "lead1", "2026-01-01T00:00:30+00:00", stamped=False),
+    ]
+    ignored = build_summary(prefix)[0].subagents[0]
+    assert ignored.end_ts is None
+    assert ignored.wall_seconds is None
+
+    # ...and its own stamped result still closes it afterwards.
+    closed = build_summary([
+        *prefix,
+        _subresult("item_5", "lead1", "2026-01-01T00:00:50+00:00"),
+    ])[0].subagents[0]
+    assert closed.end_ts == "2026-01-01T00:00:50+00:00"
+    assert closed.wall_seconds == 40.0
+
+
+def test_duplicate_stamped_result_does_not_move_end_ts():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_5", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subresult("item_5", "lead1", "2026-01-01T00:00:55+00:00"),
+        _subresult("item_5", "lead1", "2026-01-01T00:02:00+00:00"),
+        _completed("task-lead", "2026-01-01T00:03:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.end_ts == "2026-01-01T00:00:55+00:00"
+    assert sub.wall_seconds == 45.0
+
+
+def test_legacy_unstamped_pair_still_closes():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00", "explorer",
+                 stamped=False),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00", stamped=False),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].subagents[0].wall_seconds == 45.0
+
+
+def test_open_subagent_is_contained_at_its_step_end():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.end_ts == "2026-01-01T00:01:00+00:00"
+    assert sub.wall_seconds == 50.0
+    assert sub.end_inferred is True
+
+
+def test_observed_close_is_not_marked_inferred():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subresult("item_3", "lead1", "2026-01-01T00:00:55+00:00"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.wall_seconds == 45.0
+    assert sub.end_inferred is False
+
+
+def test_second_subagent_reusing_an_open_block_id_is_still_contained():
+    # Codex opens the fold at item.started with the raw SDK item id
+    # (codex_runner.py:1085,1107-1110). An interrupt between started and completed
+    # leaves the first dispatch resultless; on resume the step folds into the same
+    # occurrence while item numbering restarts, so the next dispatch reuses item_3.
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev1", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subcall("ev2", "item_3", "lead1", "2026-01-01T00:00:40+00:00", "explorer"),
+        _subresult("item_3", "lead1", "2026-01-01T00:01:00+00:00"),
+        _completed("task-lead", "2026-01-01T00:02:00+00:00"),
+    ])
+    first, second = rows[0].subagents
+    assert second.name == "explorer"
+    assert second.end_ts == "2026-01-01T00:01:00+00:00"    # its own stamped result
+    assert second.end_inferred is False
+    # The evicted first row is unreachable through the pairing table, so it must be
+    # closed off the step's own list or it stays open forever.
+    assert first.end_ts == "2026-01-01T00:02:00+00:00"     # contained at step end
+    assert first.end_inferred is True
+    assert first.wall_seconds == 110.0
+
+
+def test_repeated_block_id_in_a_later_step_cannot_reach_back():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev1", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:01:05+00:00"),
+        _subresult("item_3", "v1", "2026-01-01T00:02:00+00:00"),
+        _completed("verify", "2026-01-01T00:02:30+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.end_ts == "2026-01-01T00:01:00+00:00"   # step A's end, not step B's result
+    assert sub.wall_seconds == 50.0
+    assert rows[1].subagents == []
+
+
+def test_step_without_completion_closes_at_the_next_step_start():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:05:00+00:00"),
+        _completed("verify", "2026-01-01T00:06:00+00:00"),
+    ])
+    assert rows[0].end_ts == "2026-01-01T00:05:00+00:00"
+    assert rows[0].wall_seconds == 300.0
+    assert rows[0].end_inferred is True
+    assert rows[1].end_inferred is False
+
+
+def test_trailing_open_step_stays_open_and_uninferred():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+    ])
+    assert rows[0].end_ts is None
+    assert rows[0].end_inferred is False
+
+
+def test_resume_reentry_is_not_an_inferred_close():
+    rows = build_summary([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:01:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:06:00+00:00"),  # resume
+        _completed("verify", "2026-01-01T00:06:30+00:00"),
+    ])
+    assert len(rows) == 1
+    assert rows[0].end_inferred is False
+
+
+def test_every_subagent_is_contained_on_a_codex_shaped_log():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev1", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subresult("item_3", "lead1", "2026-01-01T00:02:00+00:00"),
+        _subcall("ev2", "item_5", "lead1", "2026-01-01T00:02:10+00:00", "explorer"),
+        # unrelated tool result reusing item_5 while the explorer is still open
+        _subresult("item_5", "lead1", "2026-01-01T00:02:20+00:00", stamped=False),
+        _completed("task-lead", "2026-01-01T00:05:00+00:00"),
+        _started("code-review", "review", "2026-01-01T00:05:05+00:00"),
+        _subcall("ev3", "item_3", "rev1", "2026-01-01T00:05:10+00:00", "reviewer"),
+        # a stale id from the first step, stamped, arriving in this one
+        _subresult("item_5", "rev1", "2026-01-01T00:06:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:08:00+00:00"),  # review never completes
+        _completed("verify", "2026-01-01T00:09:00+00:00"),
+    ])
+    assert [r.step for r in rows] == ["task-lead", "code-review", "verify"]
+    for row in rows:
+        assert row.end_ts is not None
+        for sub in row.subagents:
+            ran = elapsed_seconds(sub.start_ts, sub.end_ts)
+            slack = elapsed_seconds(sub.end_ts, row.end_ts)
+            assert ran is not None and ran >= 0
+            assert slack is not None and slack >= 0
+    assert rows[0].subagents[0].wall_seconds == 110.0            # its own stamped result
+    assert rows[0].subagents[1].end_ts == "2026-01-01T00:05:00+00:00"  # contained at step end
+    assert rows[1].subagents[0].end_ts == "2026-01-01T00:08:00+00:00"  # step closed at next start
+
+
+def test_dur_text_marks_an_inferred_end_with_a_tilde():
+    assert _dur_text(90.0, inferred=True) == "~1m 30s"
+    assert _dur_text(90.0) == "1m 30s"
+
+
+@pytest.mark.parametrize("status,expected", [
+    ("merged", "interrupted"),
+    ("done", "interrupted"),
+    ("abandoned", "interrupted"),
+    ("running", "running"),
+    ("waiting", "waiting"),
+    ("paused", "paused"),
+    ("new", "new"),
+    ("error", "error"),
+    ("shelved", "shelved"),          # parked, not finished: keeps its status word
+    ("merge_blocked", "merge blocked"),
+])
+def test_open_span_label_word_per_status(status, expected):
+    assert open_span_label(status) == expected
+
+
+def test_inferred_ends_render_with_a_tilde_on_step_and_subagent():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:05:00+00:00", end_inferred=True,
+                   subagents=[SubagentRow(name="coder",
+                                          start_ts="2026-01-01T00:00:10+00:00",
+                                          end_ts="2026-01-01T00:02:24+00:00",
+                                          end_inferred=True)])
+    out = render_summary([step], header=_HDR, color=False, width=80)
+    assert out[-2:] == [
+        "  task-lead   ~5m 0s  —  —",
+        "    ↳ coder  ~2m 14s  —  —",
+    ]
+
+
+def test_open_spans_in_a_finished_quest_read_interrupted():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00", end_ts=None,
+                   subagents=[SubagentRow(name="coder",
+                                          start_ts="2026-01-01T00:00:10+00:00")])
+    out = render_summary([step], header=_HDR, color=False, width=80)   # _HDR is merged
+    assert out[-2:] == [
+        "  task-lead  interrupted  —  —",
+        "    ↳ coder  interrupted  —  —",
+    ]
+    assert "merged" not in "\n".join(out[1:])   # the status word stays in the header
+
+
+@pytest.mark.parametrize("status", ["done", "abandoned"])
+def test_other_finished_statuses_also_read_interrupted(status):
+    hdr = SummaryHeader(workflow="feature", quest_id="abc", status=status,
+                        total_seconds=100.0)
+    out = render_summary([_row("implement", "task-lead", 0, open_=True)],
+                         header=hdr, color=False, width=80)
+    assert "  task-lead  interrupted" in out[-1]
+    assert status not in out[-1]
+
+
+def test_merge_blocked_open_step_reads_two_words():
+    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+                        status="merge_blocked", total_seconds=100.0)
+    out = render_summary([_row("implement", "task-lead", 0, open_=True)],
+                         header=hdr, color=False, width=80)
+    assert "  task-lead  merge blocked" in out[-1]
+    assert "merge_blocked" not in out[-1]
+
+
+def test_alignment_across_tilde_plain_and_interrupted_cells():
+    rows = [
+        StepRow(phase="implement", step="a",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                subagents=[SubagentRow(name="coder",
+                                       start_ts="2026-01-01T00:00:05+00:00",
+                                       end_ts="2026-01-01T00:00:50+00:00")]),
+        StepRow(phase="implement", step="b",
+                start_ts="2026-01-01T00:01:00+00:00",
+                end_ts="2026-01-01T00:01:45+00:00", end_inferred=True),
+        StepRow(phase="implement", step="c",
+                start_ts="2026-01-01T00:02:00+00:00", end_ts=None),
+    ]
+    out = render_summary(rows, header=_HDR, color=False, width=80)
+    assert out[2:] == [
+        "  a                1m 0s  —  —",
+        "    ↳ coder          45s  —  —",
+        "  b                 ~45s  —  —",
+        "  c          interrupted  —  —",
+    ]
+    assert len({len(ln) for ln in out[2:]}) == 1   # one column grid for every row
