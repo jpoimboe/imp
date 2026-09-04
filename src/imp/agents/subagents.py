@@ -200,25 +200,24 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
 def _attach_isolated_home(
     policy: Any, spike_worktree: Path, quest_dir: Path,
 ) -> tuple[Any, Callable[[], None] | None]:
-    """Attach the per-invocation writable-home layer to an isolated subagent's
-    policy, keyed by the spike worktree, and return (policy, cleanup). The overlay
-    upper/work/merged dirs are SIBLINGS of the spike worktree under
-    <state dir>/worktrees/ (a real local fs, not the symlinked quest home inside the
-    worktree); cleanup rmtrees them at teardown. Without overlay support the home
-    is a plain rw bind (cleanup is a no-op). An inactive or home-less policy is
-    returned unchanged with cleanup None."""
+    """Attach the writable-home layer to an isolated subagent's policy, keyed by
+    the spike worktree, and return (policy, cleanup). The overlay ROOT is a SIBLING
+    of the spike worktree under <state dir>/worktrees/ (a real local fs, not the
+    symlinked quest home inside the worktree); each spawn mints its own layer under
+    it in prepare_spawn_policy, and cleanup rmtrees the whole root at teardown.
+    Without overlay support the home is a plain rw bind (cleanup is a no-op). An
+    inactive or home-less policy is returned unchanged with cleanup None."""
     if not policy.active or not policy.home:
         return policy, None
     from imp.engine.sandbox import make_home_layer, overlay_mode
     base = spike_worktree.parent
-    layer, cleanup = make_home_layer(
+    layer, overlay_root, cleanup = make_home_layer(
         policy.home,
-        upper=base / f"{spike_worktree.name}.overlay-upper",
-        work=base / f"{spike_worktree.name}.overlay-work",
-        merged=base / f"{spike_worktree.name}.overlay-merged",
+        root=base / f"{spike_worktree.name}.overlay",
         userxattr=overlay_mode(quest_dir, Path(policy.home)),
     )
-    return dataclasses.replace(policy, home_layer=layer), cleanup
+    return dataclasses.replace(
+        policy, home_layer=layer, overlay_root=overlay_root), cleanup
 
 
 def _suspend_handback_body(

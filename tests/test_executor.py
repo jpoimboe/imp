@@ -4433,46 +4433,49 @@ class _CapLog:
         return {}
 
 
-def test_attach_home_layer_overlay_creates_sibling_upper(tmp_path, monkeypatch):
+def test_attach_home_layer_overlay_creates_sibling_root(tmp_path, monkeypatch):
     from imp.engine import executor as ex
     from imp.engine.sandbox import HomeLayer
     monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
-    assert isinstance(pol.home_layer, HomeLayer) and pol.home_layer.is_overlay
-    upper = tmp_path / "steps" / "build" / "coder.overlay-upper"
+    root = tmp_path / "steps" / "build" / "coder.overlay"
     transcript_dir = tmp_path / "steps" / "build" / "coder"
-    assert upper.is_dir()
+    assert pol.overlay_root.path == str(root) and root.is_dir()
+    # the STEP policy carries a plain layer; each spawn mints its own under the root
+    assert pol.home_layer == HomeLayer(home="/home/u")
     # SIBLING of transcript_dir (not a child) — survives its rmtree on reincarnation.
-    assert upper.parent == transcript_dir.parent and upper != transcript_dir
-    work = tmp_path / "steps" / "build" / "coder.overlay-work"
-    merged = tmp_path / "steps" / "build" / "coder.overlay-merged"
-    assert work.is_dir() and merged.is_dir()
-    assert pol.home_layer.upper == str(upper)
+    assert root.parent == transcript_dir.parent and root != transcript_dir
     cleanup()
-    assert not upper.exists() and not work.exists() and not merged.exists()
+    assert not root.exists()
 
 
 def test_reincarnation_preserves_and_teardown_removes_overlay_home(
         tmp_path, monkeypatch):
-    # AC 6: reincarnating a top-level step neither wipes nor leaks its per-invocation
-    # home. The overlay upper is a SIBLING of transcript_dir, so _route_agent's
-    # per-reincarnation rmtree of transcript_dir leaves it (and a captured write)
-    # intact; cleanup removes upper/work/merged at invocation teardown.
+    # AC 6: reincarnating a top-level step neither wipes nor leaks its home. The
+    # overlay ROOT is a SIBLING of transcript_dir, so _route_agent's
+    # per-reincarnation rmtree of transcript_dir leaves it (and a spawn's captured
+    # write) intact; step teardown removes the whole root, including the mode-000
+    # work/work dir overlayfs leaves in a workdir.
     import shutil
 
     from imp.engine import executor as ex
+    from imp.engine.sandbox import prepare_spawn_policy
     monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
 
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
-    upper = Path(pol.home_layer.upper)
-    work = Path(pol.home_layer.work)
-    merged = Path(pol.home_layer.merged)
-    # a write captured in the overlay upper during the first incarnation
+    root = Path(pol.overlay_root.path)
+    spawn = prepare_spawn_policy(pol)
+    upper = Path(spawn.home_layer.upper)
+    # a write captured in this spawn's overlay upper during the first incarnation
     (upper / "captured").write_text("data")
+    # the mode-000 residue overlayfs leaves inside a workdir
+    residue = Path(spawn.home_layer.work) / "work"
+    residue.mkdir()
+    residue.chmod(0o000)
 
     # the executor recreates transcript_dir on each reincarnation restart
     transcript_dir = tmp_path / "steps" / "build" / "coder"
@@ -4482,13 +4485,13 @@ def test_reincarnation_preserves_and_teardown_removes_overlay_home(
     shutil.rmtree(transcript_dir, ignore_errors=True)
     transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    # the sibling overlay upper and its captured write survive the reincarnation
-    assert upper.is_dir()
+    # the sibling overlay root and the captured write survive the reincarnation
     assert (upper / "captured").read_text() == "data"
 
-    # invocation teardown removes all three overlay dirs — nothing left behind
+    # step teardown removes the whole root — no residue under steps/<phase>/
     cleanup()
-    assert not upper.exists() and not work.exists() and not merged.exists()
+    assert not root.exists()
+    assert list((tmp_path / "steps" / "build").iterdir()) == [transcript_dir]
 
 
 def test_attach_home_layer_noop_for_home_less(tmp_path, monkeypatch):
@@ -4499,7 +4502,8 @@ def test_attach_home_layer_noop_for_home_less(tmp_path, monkeypatch):
     active_no_home = _active_home_policy(home="")
     pol, cleanup = ex._attach_home_layer(active_no_home, step, quest)
     assert pol is active_no_home and pol.home_layer is None
-    assert not (tmp_path / "steps" / "build" / "coder.overlay-upper").exists()
+    assert pol.overlay_root is None
+    assert not (tmp_path / "steps").exists()
     cleanup()  # no-op, must not raise
 
 
@@ -4511,7 +4515,9 @@ def test_attach_home_layer_falls_back_to_rw_home(tmp_path, monkeypatch):
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
     assert pol.home_layer is not None and not pol.home_layer.is_overlay
     assert pol.home_layer.home == "/home/u"
-    assert not (tmp_path / "steps" / "build" / "coder.overlay-upper").exists()
+    # AC 8: no overlay root and nothing created on disk on a non-overlay host.
+    assert pol.overlay_root is None
+    assert not (tmp_path / "steps").exists()
     cleanup()  # no-op, must not raise
 
 
@@ -4549,16 +4555,19 @@ def test_warn_if_no_overlay_silent_when_available(monkeypatch):
 
 
 def test_attach_home_layer_records_probed_userxattr(tmp_path, monkeypatch):
-    # AC 6: the probe's answer reaches the spawn unchanged — True mounts WITH
+    # AC 6: the probe's answer reaches the spawn unchanged — it rides on the
+    # overlay root and lands on the layer each spawn mints: True mounts WITH
     # userxattr, False mounts without, and both are real COW overlays.
     from imp.engine import executor as ex
+    from imp.engine.sandbox import prepare_spawn_policy
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     for mode in (True, False):
         step = types.SimpleNamespace(phase="build", name=f"coder-{mode}")
         monkeypatch.setattr(ex, "overlay_mode", lambda _b, _h, m=mode: m)
         pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
-        assert pol.home_layer.is_overlay
-        assert pol.home_layer.userxattr is mode
+        assert pol.overlay_root.userxattr is mode
+        spawn_layer = prepare_spawn_policy(pol).home_layer
+        assert spawn_layer.is_overlay and spawn_layer.userxattr is mode
         cleanup()
 
 
