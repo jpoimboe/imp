@@ -1534,6 +1534,48 @@ def test_interactive_reinit_reuses_a_valid_list_and_names_the_setter(
         "Change providers later: imp config set providers <name>,<name>")
 
 
+def test_fresh_interactive_init_announces_provider_repair(tmp_path: Path) -> None:
+    """Fresh init (no imp/config.yaml) against a machine config with providers: []
+    reports the repair and preserves the existing comment."""
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("claude_code", "openai"),
+        input_fn=_inputs(),
+        output_fn=msgs.append,
+    )
+
+    assert "Set providers in your machine config: claude_code, openai." in msgs
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["claude_code", "openai"]
+    assert _sans_providers(after) == _sans_providers(before)
+
+
+def test_fresh_interactive_init_no_repair_no_announcement(tmp_path: Path) -> None:
+    """Fresh init (no imp/config.yaml) against a machine config with a valid
+    provider list must NOT print the set-providers line (no repair happened)."""
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    _seed_machine_config(home, "providers: [anthropic]\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("picker must not run when providers are configured")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_boom,
+        input_fn=_inputs(),
+        output_fn=msgs.append,
+    )
+
+    assert not any("Set providers in your machine config:" in m for m in msgs)
+
+
 _DEFAULT_PROVIDERS = ["claude_code", "anthropic", "openai", "codex"]
 
 

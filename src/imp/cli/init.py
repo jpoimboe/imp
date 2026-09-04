@@ -1003,6 +1003,11 @@ def run_init(
             output_fn("Committed imp/config.yaml.")
         return
 
+    if repaired:
+        output_fn(pal.ansi(
+            f"Set providers in your machine config: {', '.join(providers)}.",
+            "dim", enabled=color_on))
+
     # --- fresh init: the sandbox gate (init itself needs no model provider) ---
     allow_unsandboxed = False
     if not sandbox_available():
