@@ -140,6 +140,9 @@ class LocalStore:
                 state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
             except FileNotFoundError:
                 state_json = None
+            lock_live = lock_is_live(cdir / "lock")
+            if state_json is not None and not lock_live:
+                _archive_stranded_home(self.control_root, quest_id, cdir, state_json)
             events_path = cdir / "events.jsonl"
             last_iso = _last_event_iso(events_path) or ""
             has_um = _events_have_user_message(events_path)
@@ -150,7 +153,7 @@ class LocalStore:
             out.append(HomeDigest(
                 quest_id, quest_json, state_json, meta, last_iso, has_um,
                 conversation_prose(parsed), _resolve_intent(parsed),
-                lock_is_live(cdir / "lock")))
+                lock_live))
         return out
 
     def quest_card(self, quest_id: str) -> QuestCard | None:
