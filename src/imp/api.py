@@ -116,6 +116,7 @@ def list_quests(control_root: Path) -> list[QuestSummary]:
     """Every quest under `control_root` — live homes first, then archived ones."""
     from imp.cli.store import _row_for_id
     from imp.engine.archive import read as archive_read
+    from imp.engine.errors import LoadError
     from imp.engine.quest import live_quest_ids
 
     # Deliberately not `_iter_quest_ids`: its `make_store` retargets to whatever
@@ -128,7 +129,11 @@ def list_quests(control_root: Path) -> list[QuestSummary]:
             continue
         out.append(_summary(row[0], row[1], row[2], row[4]))
     seen = set(live)
-    for r in archive_read.completed_rows(control_root):
+    try:
+        rows = archive_read.completed_rows(control_root)
+    except LoadError as e:
+        raise ImpError(str(e)) from e
+    for r in rows:
         if r[0] not in seen:
             out.append(_summary(r[0], r[1], r[2], r[4]))
     return out
