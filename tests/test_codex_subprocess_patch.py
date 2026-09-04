@@ -40,9 +40,9 @@ def anyio_backend() -> str:
 _BIG_LINE = 200 * 1024  # 200 KiB > asyncio's 64 KiB default
 
 _FAST_WRITER = (
-    f"import sys; "
+    "import sys; "
     f"sys.stdout.write('x' * {_BIG_LINE} + '\\n'); "
-    f"sys.stdout.flush()"
+    "sys.stdout.flush()"
 )
 
 # The same line in small, spaced-out chunks: the feed granularity a loaded machine
