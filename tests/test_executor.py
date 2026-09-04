@@ -3839,6 +3839,72 @@ async def test_reborn_session_renders_the_quest_opening_and_seeds_once(tmp_path)
 
 
 @pytest.mark.anyio
+async def test_events_step_window_reaches_the_dead_attempt(tmp_path):
+    """AC 7: `imp events <id> --step <name>` is what the seed recommends, so the
+    window it scopes to must contain the pre-reincarnation attempt's events —
+    not just the reborn one's."""
+    from imp.engine import events_index as ei
+    from imp.engine.reincarnation import handoff_path_for
+    from imp.engine.state import parse_events_jsonl
+    from imp.providers import resolve
+
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    class _HandoffRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            hp = handoff_path_for(invocation.transcript_dir)
+            hp.write_text("# handoff\n")
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _HandoffProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _HandoffRunner:
+            return _HandoffRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _HandoffProvider(model))
+
+    result = await run_quest(quest)
+    assert result is RunResult.PAUSED
+
+    # Exactly what `imp events --step` does: enumerate the log, scope by name.
+    events = parse_events_jsonl(quest.events_path.read_bytes())
+    indexed = list(enumerate(events, start=1))
+    starts = [o for o, e in indexed
+              if e["type"] == "step_started" and e["payload"].get("step") == step]
+    reincarnations = [o for o, e in indexed if e["type"] == "reincarnating"]
+    assert len(starts) == 2          # dead attempt + reborn attempt
+    assert len(reincarnations) == 1
+
+    scoped = ei.build_step_index(indexed, step, ei.subagent_handle_map(indexed))
+    assert scoped is not None
+    assert len(scoped.windows) == 1
+    assert scoped.windows[0][0] == starts[0]       # opens at the DEAD attempt
+    assert scoped.windows[0][1] >= starts[1]       # and still covers the reborn one
+    assert ei.in_intervals(reincarnations[0], scoped.windows) is True
+    # The dead attempt's own agent events are counted, not just spanned.
+    own = next((a for a in scoped.agents if a.handle == step), None)
+    assert own is not None
+    assert own.count > 0
+    first_agent_ord = min(o for o, e in indexed
+                          if e.get("agent_id") == f"step:{phase}/{step}")
+    assert first_agent_ord < reincarnations[0]        # it is the dead attempt's
+    assert ei.in_intervals(first_agent_ord, scoped.windows) is True
+
+
+@pytest.mark.anyio
 async def test_resume_keep_path_feedback_ends_with_backstop(tmp_path: Path) -> None:
     """Kept-transcript resume (retry_wrapper path): the feedback delivered to the
     resumed schema'd agent preserves the source feedback and ends with the
