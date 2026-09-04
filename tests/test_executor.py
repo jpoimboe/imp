@@ -4547,7 +4547,7 @@ def test_sandbox_off_shape_with_overlay_root_builds_bare_argv(tmp_path, monkeypa
 
     from imp.engine import executor as ex
     from imp.engine.sandbox import build_sandbox_argv
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: True)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)

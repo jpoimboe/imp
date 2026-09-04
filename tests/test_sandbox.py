@@ -1441,7 +1441,8 @@ def test_active_overlay_root_without_a_minted_layer_is_fatal(tmp_path):
     # layer that was never minted — would emit `--bind /home/u /home/u`, binding
     # the REAL $HOME writable with no overlay at all. Refuse to build that argv.
     pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"),
-                  overlay_root=str(tmp_path / "coder.overlay"))
+                  overlay_root=OverlayRoot(path=str(tmp_path / "coder.overlay"),
+                                           userxattr=True))
     with pytest.raises(AssertionError, match="overlay_root"):
         build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
 

@@ -269,7 +269,7 @@ def build_sandbox_argv(
     if not policy.active:
         return ["sh", "-c", command]
 
-    if (policy.overlay_root and policy.home_layer is not None
+    if (policy.overlay_root is not None and policy.home_layer is not None
             and not policy.home_layer.is_overlay):
         # Fail CLOSED: this policy skipped prepare_spawn_policy, so the rw home
         # bind would expose the REAL $HOME instead of an overlay merged view.

@@ -1288,7 +1288,8 @@ def test_concurrent_background_and_foreground_get_separate_upperdirs() -> None:
             assert "bg.txt" not in listed, f"live mounts shared an upper: {listed}"
 
             # one layer per spawn, each upper holding only its own write.
-            layers = sorted(p for p in Path(pol.overlay_root).iterdir() if p.is_dir())
+            layers = sorted(
+                p for p in Path(pol.overlay_root.path).iterdir() if p.is_dir())
             assert len(layers) == 2, f"expected one layer per spawn, got {layers}"
             contents = sorted(
                 sorted(f.name for f in (d / "upper").iterdir()) for d in layers)
