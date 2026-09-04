@@ -579,7 +579,7 @@ def _handle_terminal_outcome(
     (never re-reads state.json or re-derives the settled outcome)."""
     from imp.cli.store import _resolve_intent
     if outcome.completed:
-        merged = any(ev.get("type") == "quest_merged" for ev in outcome.events)
+        merged = outcome.status == "merged"
         _emit_completed(quest, merged=merged, intent=_resolve_intent(outcome.events))
         return 0
     if outcome.status == "merge_blocked":

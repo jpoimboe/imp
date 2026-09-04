@@ -106,7 +106,9 @@ def test_resolve_settled_outcome_status_none_when_nothing_persisted(tmp_path: Pa
 @pytest.mark.anyio
 async def test_run_session_client_answers_gate_and_returns_completed_rc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
     quest = _make_quest(tmp_path, "2026-06-15-run")
     # The on-disk terminal state the client reads once the daemon exits.
     (project_state_dir(tmp_path) / "worktrees" / quest.id).mkdir(parents=True)
@@ -154,8 +156,13 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
             await wait_until(lambda: "rc" in rc_holder)
             tg.cancel_scope.cancel()
 
+    out = capsys.readouterr().out
     assert answered == ["imp"]
     assert rc_holder["rc"] == 0
+    # The run's live event log holds no quest_merged event; the recorded status
+    # is what names the base branch.
+    assert "merged into main" in out
+    assert "done · commits on" not in out
 
 
 @pytest.mark.anyio
@@ -538,7 +545,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
     captured = capsys.readouterr()
     assert rc == 0                                    # NOT rc=3: the run had completed
     assert "startup failed" not in (captured.out + captured.err)
-    assert "merged into main" in captured.out         # rendered through the resolver's events
+    assert "merged into main" in captured.out         # rendered from the archived record's status
 
 
 @pytest.mark.anyio
@@ -959,7 +966,7 @@ def test_terminal_rendering_merged_from_archive_when_home_reaped(
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert rc == 0
-    assert lines[0] == "merged into main"     # merged=True from the archived quest_merged event
+    assert lines[0] == "merged into main"     # merged=True from the archived record's status
     assert "done · commits on" not in out     # not the unmerged headline
     # the opening intent, too, comes from the archived blob
     assert lines[1] == "2026-07-03-render · > resolve me from archive"
