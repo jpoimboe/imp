@@ -215,11 +215,6 @@ _PROVIDER_DISPLAY_ORDER: tuple[str, ...] = (
     "claude_code", "anthropic", "openai", "codex",
 )
 
-# Providers driven by a local CLI rather than an HTTP API — no env-var prompt
-# at init time, and omitted from the informational env hints. codex
-# authenticates via its own ~/.codex/auth.json (codex login), like claude_code.
-_PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code", "codex"})
-
 
 def _default_detect_theme() -> str:
     """Real terminal-theme detection (dark | light | ansi). Wrapped so a failure
@@ -838,6 +833,7 @@ def run_init(
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
 ) -> None:
+    from imp.providers import auth_hint_lines
     from imp.providers.paths import global_config_path
 
     color_on = pal.should_use_color(sys.stdout)
@@ -869,12 +865,8 @@ def run_init(
             pal.set_theme(theme)
         picked_this_run = True
     output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
-    for prov in providers:
-        if prov in _PROVIDERS_WITHOUT_ENV:
-            continue
-        output_fn(pal.ansi(
-            f"  {prov} → {prov.upper()}_API_KEY (set this env var)",
-            "dim", enabled=color_on))
+    for line in auth_hint_lines(providers):
+        output_fn(pal.ansi(line, "dim", enabled=color_on))
     if picked_this_run and theme != "ansi":
         output_fn(pal.ansi(
             f"Detected a {theme} terminal — colors tuned to match.",

@@ -981,7 +981,7 @@ def test_host_success_lines_carry_engine_chrome(
     # This one prints before the theme is applied, so its gold is the ansi gold.
     assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
     assert f"{DIM}Enabled: anthropic{RESET}" in msgs
-    assert f"{DIM}  anthropic → ANTHROPIC_API_KEY (set this env var){RESET}" in msgs
+    assert f"{DIM}  anthropic — set ANTHROPIC_API_KEY{RESET}" in msgs
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
     assert f"{DIM}  imp/config.yaml{RESET}" in msgs
@@ -1280,3 +1280,30 @@ def test_cmd_init_runs_in_a_fresh_directory(tmp_path_factory, monkeypatch, capsy
     assert capsys.readouterr().err == ""
     assert (fresh / ".git").exists()
     assert (fresh / "imp" / "config.yaml").is_file()
+
+
+def test_picker_confirmation_hints_every_enabled_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """claude_code gets a hint now — it used to be silently skipped for having no env var."""
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("claude_code", "anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+
+    enabled = msgs.index("Enabled: claude_code, anthropic")
+    assert msgs[enabled + 1] == "  claude_code — run `claude login`"
+    assert msgs[enabled + 2] == "  anthropic — set ANTHROPIC_API_KEY"
+    assert not any("set this env var" in m for m in msgs)
+
+
+def test_string_built_env_hints_are_gone_from_the_source_tree() -> None:
+    src = Path(__file__).resolve().parents[1] / "src"
+    blob = "\n".join(p.read_text() for p in src.rglob("*.py"))
+    assert "_PROVIDERS_WITHOUT_ENV" not in blob
+    assert "(set this env var)" not in blob
