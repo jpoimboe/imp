@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 
 from imp.providers import errors as perr
 
-# Prose Anthropic emits locally after clearing the saved credentials: terminal.
+# Prose Anthropic emits locally after clearing the saved credentials: terminal,
+# unless the same scan carries a routable status code (see _classify_agent_text).
 _AUTH_PATTERNS = (
     "Invalid API key",
     "Please run `/login`",
@@ -155,25 +156,37 @@ def _classify_agent_text(
     picks the error category, and a miss degrades to TerminatedError, not a
     false pause.
 
-    Auth/quota patterns are checked first so they win when both substrings
-    appear. The API-error regex matches "API Error: <code>":
-    An _AUTH_PATTERNS prose match → AuthTerminalError (never retried);
+    Auth prose is terminal only without server evidence: Anthropic emits those
+    patterns locally after clearing the saved credentials, without sending a
+    request, so no retry can heal them. A routable "API Error: <code>" in the
+    same scan is proof a request reached the server and came back, so the prose
+    is a server rejection and routes on the code instead. A codeless
+    "API Error:" is a transport failure — the request never arrived — so it
+    cannot overturn the terminal reading, and neither can a matched-but-unrouted
+    code (a 3xx), which no branch below would route.
+
+    Quota patterns keep their precedence and win over any code. Routing:
     401/403 → AuthError with kind="http_<code>"; 408 → NetworkError (transient
     timeout); 429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
-    5xx → NetworkError (network category → RetryWithBackoff; §10).
+    5xx → NetworkError (network category → RetryWithBackoff; §10); statusless
+    "API Error:" → NetworkError.
     """
     scan = text.lstrip().split("\n", 1)[0] if anchored else text
-    for pat in _AUTH_PATTERNS:
-        if pat in scan:
-            return perr.AuthTerminalError(f"claude CLI: {pat}")
+    m = _API_ERROR_RE.search(scan)
+    code = int(m.group(1)) if m else None
+    # 400-599 is exactly the set the branches below route; an unrouted code
+    # would otherwise drop the text past every branch and return None.
+    routable = code is not None and 400 <= code < 600
+    if not routable:
+        for pat in _AUTH_PATTERNS:
+            if pat in scan:
+                return perr.AuthTerminalError(f"claude CLI: {pat}")
     for pat in _QUOTA_PATTERNS:
         if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")
     if _USAGE_LIMIT_RE.search(scan):
         return _rate_limit_with_reset_hint(text)
-    m = _API_ERROR_RE.search(scan)
-    if m:
-        code = int(m.group(1))
+    if code is not None:
         if code == 429:
             return _rate_limit_with_reset_hint(text)
         if code in (401, 403):
