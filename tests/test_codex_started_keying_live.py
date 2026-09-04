@@ -32,7 +32,7 @@ async def test_codex_task_lifecycle_keyed_on_sdk_item_id() -> None:
              and (e.get("payload") or {}).get("name") == "sub_agent"]
     results = [e for e in events
                if e.get("type") == "tool_result"
-               and (e.get("payload") or {}).get("id_ns") == "event"]
+               and (e.get("payload") or {}).get("id_ns") == "block"]
     call_ids = [(c.get("payload") or {}).get("id") for c in calls]
     result_ids = [(r.get("payload") or {}).get("id") for r in results]
     assert len(calls) >= 2, "expected >=2 task tool_call events"

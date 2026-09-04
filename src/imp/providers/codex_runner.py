@@ -1095,7 +1095,7 @@ def process_event(
             elog.append_tool_call(
                 agent_id=agent_id,
                 block=ToolUseBlock(id=sdk_id, name="sub_agent", input=args),
-                label=label)
+                label=label, id_ns="block")
         return
 
     # `item.completed` — dispatch on the item's own type.
@@ -1161,11 +1161,10 @@ def process_event(
             task_id_ns: str | None
             if name == "sub_agent":
                 # quest 2: the task tool_call was opened at item.started keyed on
-                # this same SDK id; close the fold here with the matching result
-                # (id_ns="event" marks the codex namespace for the §3 fold probe).
-                # A task item with no prior item.started (the no-pair path) still
-                # emits a lone keyed result.
-                task_id_ns = "event"
+                # this same SDK id and stamped id_ns="block"; close the fold here
+                # with the matching result. A task item with no prior item.started
+                # (the no-pair path) still emits a lone keyed result.
+                task_id_ns = "block"
             else:
                 # Non-task tool: emit the tool_call/result pair keyed on the SDK id.
                 task_id_ns = None
