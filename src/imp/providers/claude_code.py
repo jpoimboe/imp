@@ -1992,6 +1992,8 @@ class ClaudeCodeAgentRunner:
         # controlled per-quest worktree/snapshot git model). Static, unconditional.
         env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
         env["CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"] = "1"
+        # Per-call MCP wall clock: pinned to 24h so no host value caps an imp tool call.
+        env["MCP_TOOL_TIMEOUT"] = "86400000"
         thinking_cfg, effort_cfg = _cc_thinking_posture(invocation.tier)
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,

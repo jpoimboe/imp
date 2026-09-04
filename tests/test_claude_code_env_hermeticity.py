@@ -79,3 +79,17 @@ def test_hostile_host_env_does_not_change_spawn_posture(
     # Posture stays imp-owned regardless of the host env.
     assert opts.thinking == {"type": "adaptive", "display": "summarized"}
     assert opts.effort == "high"
+
+
+def test_spawn_env_pins_the_per_call_mcp_tool_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # MCP_TOOL_TIMEOUT is a per-call wall clock with no exemption for sdk servers,
+    # so an inherited host value would silently cap every imp tool call. imp owns
+    # the budget: 24h in ms, regardless of what the host set.
+    monkeypatch.setenv("MCP_TOOL_TIMEOUT", "5000")
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    opts = runner._build_options(
+        _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
+    )
+    assert opts.env.get("MCP_TOOL_TIMEOUT") == "86400000"
