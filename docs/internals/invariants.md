@@ -39,6 +39,11 @@ Read this when editing imp's engine/renderer or workflow prompts.
   (If the invariant ever genuinely can't be met, that is the trigger to revisit
   the deferred re-descent / `State` frame-stack machinery, not a reason to ship a
   non-idempotent subagent.)
+- **Never hand an agent a path its sandbox masks.** `<quest_dir>/steps/` (the
+  overlay-home mountpoints and transcripts) and `<quest_dir>/events.jsonl` are
+  masked for every agent by `resolve_policy`. Engine-authored text that points a
+  sandboxed agent at recovery data must inline the content or route through
+  `imp events`, which the daemon resolves outside the sandbox.
 
 ## Future / unbuilt
 

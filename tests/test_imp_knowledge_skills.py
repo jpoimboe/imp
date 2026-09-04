@@ -382,3 +382,20 @@ def test_knowledge_names_worktree_setup_among_the_settings_init_confirms() -> No
     flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
     assert ("detects the default workflow, integration branch, fast test command, "
             "`worktree_setup`, and import root and confirms them on one screen") in flat
+
+
+def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -> None:
+    flat = " ".join(load_internal_skill(_skills_dir(), "imp-knowledge").split())
+    assert ('- `imp log <id>` — the human "read the story" narrative, tool bursts '
+            "folded; `--step <name>` scopes it to one step.") in flat
+    assert ("- `imp events <id>` — the agent-facing digest, where event content "
+            "actually lives: bare prints an index (steps, subagents, types); add a "
+            "leaf selector (`--limit N`, `--type`, `--agent <handle>`, a range, "
+            "`--all`) for one compact line per event, `--step <name>` to scope, "
+            "`--json` for exact payloads.") in flat
+    # the wording that steered agents at the folded human view is gone
+    assert "the readable narrative of what happened" not in flat
+    assert "the event index (steps, subagents, types)" not in flat
+    # the digest bullet still leads the events-search bullet that refines it
+    assert (flat.index("the agent-facing digest")
+            < flat.index("imp events search <query>"))

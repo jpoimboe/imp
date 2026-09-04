@@ -96,8 +96,8 @@ answers the question, and never dump the raw log as your default.
   but composes with the content flags `--full` / `--show` / `--hide`. For
   example, `imp log <id> --step threshold` reads just the seed conversation.
 - **Digest** — `imp events <id>`. A bare `imp events <id>` call prints a self-describing index
-  (steps + types); add a leaf selector (`--type`, `--subtype`, `--wire`, `--agent`, a `<range>`, or
-  `--all`) to get one compact line per event. On a TTY each compact line is
+  (steps + types); add a leaf selector (`--type`, `--subtype`, `--wire`, `--agent`, a `<range>`,
+  `--limit N`, or `--all`) to get one compact line per event. On a TTY each compact line is
   clipped to one terminal row so the stream stays scannable; add `--full` to
   lift the clip and render the full untruncated line (still one logical line per
   event). Piped output is effectively unclipped already. This is the default for

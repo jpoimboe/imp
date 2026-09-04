@@ -23,43 +23,48 @@ def stash_transcript(transcript_dir: Path) -> Path | None:
 
 
 def reincarnation_seed(
-    *, stashed_dir: Path | None, handoff_path: Path | None, quest_id: str
+    *, handoff_text: str | None, quest_id: str, step_name: str
 ) -> str:
-    """Opening user message for a reincarnated (reborn) session.
+    """Recovery text for a reincarnated (reborn) session, appended last to its
+    first user message.
 
-    The prior session approached its context limit and is restarting fresh.
-    Point it at its recovery sources in priority order: the agent-authored
-    handoff note (primary; present only for the proactive Tier A path), the
-    stashed prior transcript for deeper detail, and `imp events <id> --limit N`
-    for quest-level orientation. Built to serve both the no-handoff (reactive,
-    Tier B) and handoff (proactive, Tier A) shapes.
+    Names only sources the reborn session can actually reach: the handoff note
+    inlined verbatim, and `imp events` queries the daemon resolves outside the
+    sandbox — never a path under <quest_dir>/steps/, which every agent's policy
+    masks. `handoff_text is None` means no note (the reactive Tier B path, or a
+    proactive handoff that wrote none); an empty note cannot occur, since
+    write_handoff_note refuses empty or whitespace-only text.
     """
+    step_query = (
+        f"`imp events {quest_id} --step {step_name} --limit N` returns the last "
+        "N events of this step — everything the previous attempt did, one "
+        "compact line each, in order (`--json` gives an event's exact payload)")
     lines = [
         "You are a reincarnated session: the previous attempt approached its "
         "context limit and was restarted fresh to keep working without a silent "
         "compaction. Pick up where it left off using the recovery sources below.",
     ]
-    if handoff_path is not None:
+    if handoff_text is not None:
         lines.append(
-            f"- Primary: read the handoff note at `{handoff_path}` — a compact "
-            "summary of the goal, decisions, key findings, and exactly what "
-            "remains.")
-    if stashed_dir is not None:
-        # The "summary above" only exists on the Tier A (handoff) path; on the
-        # reactive Tier B path the transcript IS the only prior detail, so word
-        # the pointer accordingly rather than referring to a missing summary.
-        tail = (" (read_file it if you need more than the summary above carries)."
-                if handoff_path is not None
-                else " — read_file it for the prior session's full detail.")
+            "- Primary: the previous attempt's handoff note — its goal, "
+            "decisions, key findings, and exactly what remains — reproduced "
+            "verbatim at the end of this message.")
         lines.append(
-            f"- Primary detail source: the prior transcript is stashed at "
-            f"`{stashed_dir}/transcript.jsonl`{tail}")
+            f"- Deeper detail: {step_query}. Reach for it when the handoff note "
+            "does not carry enough.")
+    else:
+        lines.append(
+            f"- Primary: {step_query}. It left no handoff note, so this is the "
+            "record of what it did.")
     lines.append(
-        f"- Orientation only: `imp events {quest_id} --limit N` returns the last N "
-        "entries of the quest's event log — the provenance record of what was said "
-        "and what prior steps did (a bare call prints the quest's index). Use it "
-        "for quest-level bearings, not for current state and not as the primary "
-        "source of detail.")
+        f"- Orientation only: `imp events {quest_id} --limit N` widens the same "
+        "log to the whole quest — what earlier steps did and what was said (a "
+        "bare call prints the quest's index). Use it for quest-level bearings, "
+        "not for current state.")
+    if handoff_text is not None:
+        lines.append(
+            "\n--- HANDOFF NOTE FROM THE PREVIOUS ATTEMPT (verbatim, to end of "
+            f"message) ---\n\n{handoff_text}")
     return "\n".join(lines)
 
 

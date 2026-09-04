@@ -70,10 +70,12 @@ bookkeeping. Ask the CLI instead:
   (`show <id> spec` for the raw spec, `--json` for a structured card).
 - `imp search <query>` — case-insensitive substring search across in-flight,
   backlog, and archived quests' conversation content.
-- `imp log <id>` — the readable narrative of what happened; `--step <name>` scopes
-  it to one step.
-- `imp events <id>` — the event index (steps, subagents, types); add `--step
-  <name>` for a per-agent breakdown, or `--agent <handle>` to follow one subagent.
+- `imp log <id>` — the human "read the story" narrative, tool bursts folded;
+  `--step <name>` scopes it to one step.
+- `imp events <id>` — the agent-facing digest, where event content actually
+  lives: bare prints an index (steps, subagents, types); add a leaf selector
+  (`--limit N`, `--type`, `--agent <handle>`, a range, `--all`) for one compact
+  line per event, `--step <name>` to scope, `--json` for exact payloads.
 - `imp events search <query>` — the same substring search over structured event
   content (tool calls, results, reasoning) across all quests, reaching what `imp
   search` (prose only) can't; `--type` / `--agent` narrow it.

@@ -493,6 +493,7 @@ def build_agent_invocation(
     subagent_depth: int = 0,
     retry_feedback: str | None = None,
     feedback_lead: str | None = None,
+    reincarnation_text: str | None = None,
     balance_on_resume: bool = False,
     resume_should_continue: bool = False,
     resume_cause: ResumeCause = "human",
@@ -576,6 +577,9 @@ def build_agent_invocation(
             task = f"{reflow_markdown(body_source)}\n\n{instruction}"
             if feedback_lead:
                 task = f"{feedback_lead}\n\n{task}"
+            if reincarnation_text:
+                # Appended after reflow so the note reaches the model byte-for-byte, and lands last.
+                task = f"{task}\n\n{reincarnation_text}"
             messages = (Message(role="user", content=(TextBlock(text=task),)),)
     def _mark_waiting() -> None:
         quest_state.halt_condition = "waiting"
