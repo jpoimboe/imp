@@ -57,15 +57,21 @@ async def _read_one_line(limit: int, writer: str = _FAST_WRITER) -> bytes:
     """Spawn a subprocess that writes a 200 KiB line to stdout, read one line at `limit`."""
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-c", writer,
-        stdout=asyncio.subprocess.PIPE, limit=limit)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=limit)
     try:
-        return await proc.stdout.readline()  # type: ignore[union-attr]
+        line = await proc.stdout.readline()  # type: ignore[union-attr]
     finally:
         # Over the limit readline abandons stdout, leaving the child blocked
         # mid-write: a graceful wait() would never return.
         with contextlib.suppress(ProcessLookupError):
             proc.kill()
+        stderr = (await proc.stderr.read()).decode("utf-8", "replace")  # type: ignore[union-attr]
         await proc.wait()
+    if len(line) < _BIG_LINE:
+        raise AssertionError(
+            f"child delivered {len(line)} bytes, expected >= {_BIG_LINE} "
+            f"(exit {proc.returncode}); child stderr: {stderr!r}")
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +91,19 @@ async def test_default_limit_raises_when_the_child_writes_slowly() -> None:
     finish writing into a pipe nobody drains."""
     with pytest.raises(ValueError):
         await _read_one_line(64 * 1024, _SLOW_WRITER)
+
+
+@pytest.mark.anyio
+async def test_a_broken_child_reports_its_exit_and_stderr() -> None:
+    """A child that dies without writing the line self-reports: byte count, exit status, stderr."""
+    broken = "import sys; sys.stderr.write('boom'); sys.stderr.flush(); sys.exit(3)"
+    with pytest.raises(AssertionError) as excinfo:
+        await _read_one_line(64 * 1024, broken)
+    message = str(excinfo.value)
+    assert "child delivered 0 bytes" in message
+    assert "expected >= 204800" in message
+    assert "exit 3" in message
+    assert "boom" in message
 
 
 @pytest.mark.anyio
