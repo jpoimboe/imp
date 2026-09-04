@@ -49,7 +49,7 @@ def _invocation(tmp_path: Path) -> AgentInvocation:
 async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) -> None:
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 crosses the model cutoff, 0.8 * 400000 = 320000 (330000) on a tool-using turn.
+        # Turn 1 crosses the model cutoff, the 260000 soft cap (330000) on a tool-using turn.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
@@ -77,7 +77,7 @@ async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) ->
 @pytest.mark.anyio
 async def test_below_threshold_does_not_elicit_handoff(tmp_path: Path) -> None:
     fake = FakeResponsesClient([
-        # 100000 / 400000 = 0.25 < 0.8 -> no crossing.
+        # 100000 / 1050000 = 0.095, under the 260000 soft cap -> no crossing.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
@@ -102,7 +102,7 @@ async def test_empty_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
     # fires so the engine can reincarnate.
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 crosses the model cutoff, 0.8 * 400000 = 320000 (330000); also carries prose so a
+        # Turn 1 crosses the model cutoff, the 260000 soft cap (330000); also carries prose so a
         # walk-back helper would have stale text to pick up.
         resp_response(
             resp_message("I will write the files"),
@@ -128,7 +128,7 @@ async def test_handoff_fires_on_tool_less_writing_turn(tmp_path: Path) -> None:
     # the runner still emits exactly one terminal `handoff` and stops.
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 crosses the model cutoff, 0.8 * 400000 = 320000 (330000) on a tool-using turn.
+        # Turn 1 crosses the model cutoff, the 260000 soft cap (330000) on a tool-using turn.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),

@@ -105,8 +105,9 @@ OPENAI: dict[str, ModelInfo] = {
     # resolution can cap it, and is hidden from the /model roster
     # (model_command._HIDDEN_ALIASES) because an operator writing it into a
     # `tiers:` block would get the flagship at every tier.
-    # `soft_cap` encodes the 272k billing breakpoint: a prompt above it bills
-    # the WHOLE request at 2x input / 1.5x output.
+    # `soft_cap` is deliberate headroom UNDER the 272k billing breakpoint, not
+    # the breakpoint itself: handing off at 260k keeps the whole request below
+    # the point where it would bill at 2x input / 1.5x output.
     "gpt-5.6-sol": ModelInfo(
         window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
     "gpt-5.6-terra": ModelInfo(
@@ -116,8 +117,10 @@ OPENAI: dict[str, ModelInfo] = {
     "gpt-5.6": ModelInfo(
         window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
     "gpt-5": ModelInfo(window=400_000),
-    "gpt-5.5": ModelInfo(window=400_000),
-    "gpt-5.4": ModelInfo(window=400_000),
+    # 5.5 and 5.4 share the 1.05M window and the same 272k breakpoint as the
+    # 5.6 family, so they take the same handoff headroom.
+    "gpt-5.5": ModelInfo(window=1_050_000, soft_cap=260_000),
+    "gpt-5.4": ModelInfo(window=1_050_000, soft_cap=260_000),
     "gpt-5.4-mini": ModelInfo(window=400_000),
     "gpt-5.3-codex": ModelInfo(window=400_000),
 }

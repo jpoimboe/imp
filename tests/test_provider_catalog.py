@@ -53,7 +53,7 @@ def test_unknown_alias_yields_conservative_default() -> None:
 
 def test_other_providers_seed_their_windows() -> None:
     assert model_info(ANTHROPIC, "opus").window == 200_000
-    assert model_info(OPENAI, "gpt-5.5").window == 400_000
+    assert model_info(OPENAI, "gpt-5.5").window == 1_050_000
 
 
 def test_context_threshold_crossed_fires_at_the_default_fraction() -> None:
@@ -323,12 +323,16 @@ def test_openai_5_6_family_carries_the_billing_soft_cap() -> None:
 
 def test_soft_cap_is_absent_on_every_other_entry() -> None:
     # No claude model carries a billing breakpoint on this ladder.
+    capped = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6",
+              "gpt-5.5", "gpt-5.4"}
     assert ModelInfo().soft_cap is None
     assert OPENAI["gpt-5"].soft_cap is None
     assert OPENAI["gpt-5.3-codex"].soft_cap is None
+    # gpt-5.4-mini shares a prefix with the capped gpt-5.4 but has no
+    # breakpoint of its own — exact keys, never prefixes.
+    assert OPENAI["gpt-5.4-mini"].soft_cap is None
     assert all(info.soft_cap is None
-               for key, info in OPENAI.items()
-               if not key.startswith("gpt-5.6"))
+               for key, info in OPENAI.items() if key not in capped)
     assert all(info.soft_cap is None for info in ANTHROPIC.values())
     assert all(info.soft_cap is None for info in CLAUDE_CODE.values())
 
@@ -420,3 +424,34 @@ def test_context_tokens_from_usage_docstring_disclaims_live_occupancy() -> None:
     assert "model's view of prompt size" not in doc
     assert "billing" in doc.lower()
     assert "single model request" in doc
+
+
+def test_gpt_5_5_and_5_4_carry_the_1m_window_and_the_260k_soft_cap() -> None:
+    for alias in ("gpt-5.5", "gpt-5.4"):
+        info = OPENAI[alias]
+        assert info.window == 1_050_000
+        assert info.soft_cap == 260_000
+        # 260k of a 1.05M window ~= 0.248 — the handoff lands far under the 0.8
+        # default share, and so under the 272k billing breakpoint.
+        assert checkpoint_cutoff(info, info.window) == 260_000 / 1_050_000
+        assert checkpoint_cutoff(info, info.window) < DEFAULT_CHECKPOINT_FRACTION
+
+
+def test_gpt_5_5_and_5_4_cross_the_threshold_at_the_soft_cap() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    for provider in ("openai", "codex"):
+        for model in ("gpt-5.5", "gpt-5.4"):
+            assert context_threshold_crossed(
+                {"input_tokens": 261_000}, provider, model) is True
+            assert context_threshold_crossed(
+                {"input_tokens": 259_000}, provider, model) is False
+            # deep past the old 320k cutoff, still far under 0.8 * 1.05M
+            assert context_threshold_crossed(
+                {"input_tokens": 700_000}, provider, model) is True
+
+
+def test_the_uncapped_openai_models_keep_the_400k_window() -> None:
+    for alias in ("gpt-5", "gpt-5.4-mini", "gpt-5.3-codex"):
+        info = OPENAI[alias]
+        assert info.window == 400_000
+        assert info.soft_cap is None
