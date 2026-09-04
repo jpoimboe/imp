@@ -77,8 +77,9 @@ recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. A r
 quest shows a `vars:` line of its effective workflow variables; one still in the backlog
 shows the overrides it was filed with, or no line at all if it was filed with none. `--json`
 carries the same under a `vars` key. Add a
-subcommand to narrow to one facet: `imp show <id> spec` for the raw spec, or add
-`--json` to get the overview card as a structured object. For the event timeline,
+subcommand to narrow to one facet: `imp show <id> spec` for the raw spec and
+`imp show <id> verify` for the last failing test-gate run, or add `--json` to get
+the overview card as a structured object. For the event timeline,
 use `imp events <id>` (below). Read the facet the user asked about and answer from
 it.
 
@@ -117,8 +118,8 @@ answers them — not the sandbox floor:
 
 - **`imp show <id>`** — the primary "what is this quest / what did it accomplish"
   read: the quest's detail card (id, title, status, timing, dependencies, the
-  opening intent, and the summary inlined). Add `spec` for the raw spec, or
-  `--json` for the card as a structured object.
+  opening intent, and the summary inlined). Add `spec` for the raw spec, `verify`
+  for the last failing gate run, or `--json` for the card as a structured object.
 - **`imp events <id>`** — the event history, when you need the trace rather than
   the distilled record. A bare `imp events <id>` call prints the index; steer into the high-signal
   types with `--type agent_result` (and away from the `tool_call` / `tool_result`
