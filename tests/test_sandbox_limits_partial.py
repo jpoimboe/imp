@@ -94,10 +94,10 @@ def test_partial_steers_to_the_skill_and_names_no_cli_surface() -> None:
     assert ("The sandbox masks this project's imp state — sibling quest homes and the "
             "archive are not on disk at all, so a filesystem search silently answers "
             "the wrong question.") in flat
-    assert ("Never read or search imp state off the filesystem, and never infer another "
-            "quest's liveness from it.") in flat
-    assert ("Load `imp-knowledge` for the CLI reads that answer correctly, resolved by "
-            "the unsandboxed daemon.") in flat
+    assert ("Never read or search other quests' or archived state off the filesystem, "
+            "and never infer another quest's liveness from it.") in flat
+    assert ("Load `imp-knowledge` for the CLI-based reads that answer the question "
+            "correctly, resolved by the unsandboxed daemon.") in flat
     # One place documents the CLI — the skill — so this prompt cannot drift out of date.
     for banned in ("imp show", "imp list", "imp log", "imp search", "imp events",
                    "IMP_SESSION_SOCKET", "IMP_STATE_DIR", "events.jsonl", "`cat`"):

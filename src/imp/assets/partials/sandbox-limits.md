@@ -39,6 +39,6 @@ sections.
 
 > The sandbox masks this project's imp state — sibling quest homes and the archive are
 > not on disk at all, so a filesystem search silently answers the wrong question. Never
-> read or search imp state off the filesystem, and never infer another quest's liveness
-> from it. Load `imp-knowledge` for the CLI reads that answer correctly, resolved by the
-> unsandboxed daemon.
+> read or search other quests' or archived state off the filesystem, and never infer
+> another quest's liveness from it. Load `imp-knowledge` for the CLI-based reads that
+> answer the question correctly, resolved by the unsandboxed daemon.
