@@ -822,8 +822,8 @@ def _render(node: Any, *, depth: int, full: bool = False,
         glyph = "⏸ " if color else ""
         copy = _PAUSE_REASON_COPY.get(node.reason)
         text = f"paused — {copy}" if copy else f"paused ({node.reason})"
-        yield _line(f"{glyph}{text}", depth, color,
-                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+        yield from _hang_wrap(text, glyph, width, depth, color,
+                              *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.RenameNode):

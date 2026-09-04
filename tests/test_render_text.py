@@ -1492,7 +1492,7 @@ def test_non_interrupt_pause_reason_still_renders_line() -> None:
             model="m", provider="anthropic"),
         _ev("2", "workflow_paused", reason="max_loops"),
     ])
-    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    out = "\n".join(render_tree(tree, full=False, color=False, width=200))
     assert f"paused — {_MAX_LOOPS_COPY}" in out
 
 
@@ -2101,13 +2101,28 @@ def test_route_label_header_suffix_renders_lifecycle_yellow() -> None:
 
 def test_pause_node_renders_lifecycle_yellow_with_glyph() -> None:
     node = nv.PauseNode(reason="max_loops")
-    plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=200))
     assert plain == f"paused — {_MAX_LOOPS_COPY}"   # no glyph when color is off
     assert "max_loops" not in plain                 # raw token never reaches the user
-    colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=200))
     assert f"⏸ paused — {_MAX_LOOPS_COPY}" in colored
     assert pal._ANSI["yellow"] in colored
     assert pal._ANSI["dim"] not in colored     # was dim metadata; no longer
+
+
+def test_long_pause_copy_wraps_to_the_terminal_width() -> None:
+    node = nv.PauseNode(reason="reauth_needed")
+    lines = list(rt._render(node, depth=0, full=False, color=False, width=60))
+    assert len(lines) > 1                        # the ~127-char copy no longer overruns
+    assert all(len(ln) <= 60 for ln in lines)
+    # With color, the glyph appears only on the first line; continuations carry a hang.
+    colored = list(rt._render(node, depth=0, full=False, color=True, width=60))
+    assert len(colored) > 1
+    assert "⏸" in colored[0]
+    assert "⏸" not in colored[1]
+    # Continuation lines begin with a two-space hang (strip ANSI to measure).
+    plain1 = _visible(colored[1])
+    assert plain1.startswith("  ")
 
 
 def test_pause_node_renders_lifecycle_wordmark_in_all_themes() -> None:
@@ -2419,7 +2434,7 @@ def test_header_line_prepends_phase_in_resumed_and_model_forms() -> None:
 def test_reauth_needed_pause_renders_plain_speak_copy() -> None:
     out = "\n".join(_lines([
         _ev("1", "workflow_paused", reason="reauth_needed"),
-    ]))
+    ], width=200))
     assert "authentication kept failing" in out
     assert "the quest is paused and resumable" in out
     assert "re-authenticate to Claude" in out
@@ -2431,7 +2446,7 @@ def test_reauth_needed_pause_renders_plain_speak_copy() -> None:
 def test_sandbox_spawn_failed_pause_renders_plain_speak_copy() -> None:
     out = "\n".join(_lines([
         _ev("1", "workflow_paused", reason="sandbox_spawn_failed"),
-    ]))
+    ], width=200))
     assert "the OS sandbox could not start the step" in out
     assert "a sandbox-setup failure, not a gate result" in out
     assert "the quest is paused and resumable" in out
@@ -2987,7 +3002,7 @@ def test_header_line_drops_route_suffix_when_equal_to_label() -> None:
 def test_other_pause_reasons_render_exactly_as_before() -> None:
     def line(reason: str) -> str:
         node = nv.PauseNode(reason=reason)
-        return "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+        return "\n".join(rt._render(node, depth=0, full=False, color=False, width=200))
 
     assert line("reauth_needed") == (
         "paused — authentication kept failing; the quest is paused and resumable; "
@@ -3053,12 +3068,12 @@ def test_subagent_provider_digs_the_provider_out_of_an_agent_text_node() -> None
 
 def test_quota_pause_renders_plain_speak_copy() -> None:
     node = nv.PauseNode(reason="quota")
-    line = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    line = "\n".join(rt._render(node, depth=0, full=False, color=False, width=200))
     assert line == (
         "paused — quota is exhausted; the quest is paused and resumable — wait "
         "for the limit to reset or add credits, then resume")
     # bare token fallback is gone
-    out = "\n".join(_lines([_ev("1", "workflow_paused", reason="quota")]))
+    out = "\n".join(_lines([_ev("1", "workflow_paused", reason="quota")], width=200))
     assert "paused (quota)" not in out
 
 
@@ -3067,7 +3082,7 @@ def test_auth_terminal_pause_renders_the_reauth_copy() -> None:
     out = "\n".join(_lines([
         _ev("1", "workflow_paused", reason="reauth_needed",
             kind="AuthTerminalError"),
-    ]))
+    ], width=200))
     assert "authentication kept failing" in out
     assert "re-authenticate to Claude" in out
     assert "auth_terminal" not in out
