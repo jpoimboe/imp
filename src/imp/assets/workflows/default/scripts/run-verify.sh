@@ -78,6 +78,10 @@ if [[ -z "$cmd" ]]; then
 fi
 
 cache="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}/last_green_tree_${tier}"
+# Bound here, before the gate runs: a missing id must fail on its own, never turn
+# a gate exit code into a script error. The <kind>/<id>.md shape is what makes the
+# file resolvable through the existing store, sandbox proxy and archive reader.
+log_path="$IMP_QUEST_DIR/artifacts/verify/${IMP_QUEST_ID:?IMP_QUEST_ID not set by engine}.md"
 tree="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
 if [[ -n "$tree" && -f "$cache" && "$(cat "$cache")" == "$tree" ]]; then
   echo "$tier gate skipped — tree unchanged since last green run"
@@ -92,6 +96,21 @@ out="$(timeout -k 30 "$gate_timeout" bash -c "$cmd" 2>&1)" || rc=$?
 
 if [[ -n "$out" ]]; then
   printf '%s\n' "$out"   # firehose first: the full merged output, retained in the event log
+fi
+
+if (( rc != 0 )); then
+  # Same never-fail-the-gate idiom as the tree-SHA cache below: a write that cannot
+  # land must not change the result the gate reports.
+  mkdir -p "$(dirname "$log_path")" && {
+    printf '%s\n' \
+      "# Gate failure — $tier" \
+      "" \
+      "- command: $cmd" \
+      "- exit: $rc" \
+      "- when: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+      "" \
+      "$out"
+  } > "$log_path" || true
 fi
 
 if (( rc == 124 )); then

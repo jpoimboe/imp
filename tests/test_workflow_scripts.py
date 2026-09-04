@@ -8,6 +8,7 @@ unit tests miss.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -25,6 +26,9 @@ def _run(script: str, *args: str, env_extra: dict[str, str] | None = None,
          env_remove: tuple[str, ...] = (), cwd: Path | None = None,
          ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
+    # Not inherited: under imp's own gate the ambient IMP_QUEST_ID is the real
+    # quest, which would make the failure-log path differ from a bare `make test`.
+    env["IMP_QUEST_ID"] = "test-quest"
     for key in env_remove:
         env.pop(key, None)
     if env_extra:
@@ -453,3 +457,121 @@ def test_run_verify_fast_no_command_stamps_only_its_tier(tmp_path: Path) -> None
     assert (quest_dir / "last_green_tree_fast").read_text().strip() == _head_tree(project)
     assert not (quest_dir / "last_green_tree_slow").exists()
     assert not (quest_dir / "last_verified_tree_slow").exists()
+
+
+# ── run-verify.sh: the durable failure log ──────────────────────────────────
+
+_MIDDLE = "MIDDLE-OF-THE-RUN-MARKER"
+# ~4KB of padding either side: the marker lands outside both the head and the tail
+# 2000 chars that truncate_detail keeps, i.e. exactly what the excerpt drops today.
+_BIG_FAILING_CMD = (
+    "for i in $(seq 1 200); do echo head-padding-line-$i; done; "
+    f"echo {_MIDDLE}; "
+    "for i in $(seq 1 200); do echo tail-padding-line-$i; done; "
+    "exit 3"
+)
+# Same padding, killed mid-run instead of exiting: the echoes all land well inside
+# the 1s ceiling, so a 124 log must carry the middle of the run too.
+_BIG_TIMEOUT_CMD = _BIG_FAILING_CMD.replace("exit 3", "sleep 5")
+
+
+def _verify_log(quest_dir: Path, quest_id: str = "abcd12") -> Path:
+    return quest_dir / "artifacts" / "verify" / f"{quest_id}.md"
+
+
+def _assert_the_middle_of_the_run_survived(lines: list[str]) -> None:
+    """The six header lines echo $cmd, which contains _MIDDLE, so the gap has to be
+    measured against the run output alone — the header copy is not what proves the
+    middle of the run was kept."""
+    run_output = "\n".join(lines[6:])
+    assert run_output.count(_MIDDLE) == 1
+    middle = run_output.index(_MIDDLE)
+    assert middle > 2000, "fixture too small: the marker is inside the retained head"
+    assert len(run_output) - middle > 2000, (
+        "fixture too small: the marker is inside the retained tail")
+
+
+@pytest.mark.parametrize("tier,cmd_var", [
+    ("fast", "IMP_TEST_CMD_FAST"),
+    ("slow", "IMP_TEST_CMD_SLOW"),
+])
+def test_run_verify_failure_writes_the_complete_output(
+    tmp_path: Path, tier: str, cmd_var: str,
+) -> None:
+    """The excerpt the agent receives drops the middle of the run, which is where
+    a pytest FAILURES section lives; the artifact must carry the whole thing."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    quest_dir = tmp_path / "quest"
+    proc = _run("run-verify.sh", tier, env_extra={
+        "IMP_PROJECT_ROOT": str(project), cmd_var: _BIG_FAILING_CMD,
+        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir)})
+    assert proc.returncode == 3, proc.stderr
+
+    body = _verify_log(quest_dir).read_text()
+    lines = body.splitlines()
+    assert lines[0] == f"# Gate failure — {tier}"
+    assert lines[1] == ""
+    assert lines[2] == f"- command: {_BIG_FAILING_CMD}"
+    assert lines[3] == "- exit: 3"
+    assert re.fullmatch(r"- when: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", lines[4]), lines[4]
+    assert lines[5] == ""
+    assert "head-padding-line-1" in body
+    assert "tail-padding-line-200" in body
+    _assert_the_middle_of_the_run_survived(lines)
+
+
+def test_run_verify_timeout_writes_the_complete_output(tmp_path: Path) -> None:
+    """A killed run is exactly when a truncated record hurts most, so 124 writes
+    the log on the same path as a plain failure."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    quest_dir = tmp_path / "quest"
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project),
+        "IMP_TEST_CMD_FAST": _BIG_TIMEOUT_CMD,
+        "IMP_TEST_CMD_FAST_TIMEOUT": "3",
+        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir)})
+    assert proc.returncode == 124, proc.stderr
+
+    lines = _verify_log(quest_dir).read_text().splitlines()
+    assert lines[0] == "# Gate failure — fast"
+    assert lines[2].startswith("- command: ")
+    assert lines[3] == "- exit: 124"
+    assert re.fullmatch(r"- when: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", lines[4]), lines[4]
+    assert "head-padding-line-1" in lines
+    assert "tail-padding-line-200" in lines
+    _assert_the_middle_of_the_run_survived(lines)
+
+
+def test_run_verify_green_run_writes_no_log(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    quest_dir = tmp_path / "quest"
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "echo ran-ok; true",
+        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir)})
+    assert proc.returncode == 0, proc.stderr
+    assert not (quest_dir / "artifacts" / "verify").exists()
+
+
+def test_run_verify_log_is_named_for_the_quest_id_and_overwritten(tmp_path: Path) -> None:
+    """One file per quest at the <kind>/<id>.md shape LocalStore.get_artifact
+    resolves; the second failing run replaces the first, tier header included."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    quest_dir = tmp_path / "quest"
+    env = {"IMP_PROJECT_ROOT": str(project),
+           "IMP_QUEST_ID": "zzz999", "IMP_QUEST_DIR": str(quest_dir)}
+    first = _run("run-verify.sh", "fast", env_extra={
+        **env, "IMP_TEST_CMD_FAST": "echo first-run; exit 1"})
+    assert first.returncode == 1, first.stderr
+    second = _run("run-verify.sh", "slow", env_extra={
+        **env, "IMP_TEST_CMD_SLOW": "echo second-run; exit 4"})
+    assert second.returncode == 4, second.stderr
+
+    body = _verify_log(quest_dir, "zzz999").read_text()
+    assert body.splitlines()[0] == "# Gate failure — slow"
+    assert "second-run" in body
+    assert "first-run" not in body
+    assert sorted(p.name for p in (quest_dir / "artifacts" / "verify").iterdir()) == ["zzz999.md"]
