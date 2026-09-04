@@ -723,3 +723,69 @@ def test_legacy_unstamped_pair_still_closes():
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
     ])
     assert rows[0].subagents[0].wall_seconds == 45.0
+
+
+def test_open_subagent_is_contained_at_its_step_end():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.end_ts == "2026-01-01T00:01:00+00:00"
+    assert sub.wall_seconds == 50.0
+    assert sub.end_inferred is True
+
+
+def test_observed_close_is_not_marked_inferred():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subresult("item_3", "lead1", "2026-01-01T00:00:55+00:00"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.wall_seconds == 45.0
+    assert sub.end_inferred is False
+
+
+def test_second_subagent_reusing_an_open_block_id_is_still_contained():
+    # Codex opens the fold at item.started with the raw SDK item id
+    # (codex_runner.py:1085,1107-1110). An interrupt between started and completed
+    # leaves the first dispatch resultless; on resume the step folds into the same
+    # occurrence while item numbering restarts, so the next dispatch reuses item_3.
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev1", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subcall("ev2", "item_3", "lead1", "2026-01-01T00:00:40+00:00", "explorer"),
+        _subresult("item_3", "lead1", "2026-01-01T00:01:00+00:00"),
+        _completed("task-lead", "2026-01-01T00:02:00+00:00"),
+    ])
+    first, second = rows[0].subagents
+    assert second.name == "explorer"
+    assert second.end_ts == "2026-01-01T00:01:00+00:00"    # its own stamped result
+    assert second.end_inferred is False
+    # The evicted first row is unreachable through the pairing table, so it must be
+    # closed off the step's own list or it stays open forever.
+    assert first.end_ts == "2026-01-01T00:02:00+00:00"     # contained at step end
+    assert first.end_inferred is True
+    assert first.wall_seconds == 110.0
+
+
+def test_repeated_block_id_in_a_later_step_cannot_reach_back():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev1", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:01:05+00:00"),
+        _subresult("item_3", "v1", "2026-01-01T00:02:00+00:00"),
+        _completed("verify", "2026-01-01T00:02:30+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.end_ts == "2026-01-01T00:01:00+00:00"   # step A's end, not step B's result
+    assert sub.wall_seconds == 50.0
+    assert rows[1].subagents == []

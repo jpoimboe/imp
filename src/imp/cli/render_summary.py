@@ -18,6 +18,7 @@ class SubagentRow:
     label: str | None = None
     start_ts: str | None = None
     end_ts: str | None = None
+    end_inferred: bool = False
     errored: bool = False
     tokens: TokenTotals = field(default_factory=TokenTotals)
     cost: float = 0.0
@@ -79,6 +80,16 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
                 open_row.wait_seconds += delta
         pending_wait_start = None
 
+    def _contain_subs(row: StepRow | None, end_ts: str | None) -> None:
+        """Close off the step's list, not the table: a reused block id evicts its predecessor."""
+        if row is not None and end_ts is not None:
+            for sub in row.subagents:
+                if sub.end_ts is None:
+                    sub.end_ts = end_ts
+                    sub.end_inferred = True
+        open_subs.clear()
+        subs_by_agent.clear()
+
     for e in events:
         etype = e.get("type")
         ts = e.get("timestamp")
@@ -108,6 +119,7 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             _close_wait(ts)
             if open_row is not None and open_row.end_ts is None:
                 open_row.end_ts = ts
+            _contain_subs(open_row, ts)
             open_row = None
         elif etype == "awaiting_user_input":
             pending_wait_start = ts
