@@ -908,6 +908,7 @@ def run_init(
     output_fn: Callable[[str], None],
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
+    providers_override: list[str] | None = None,
 ) -> None:
     from imp.providers import auth_hint_lines
     from imp.providers.paths import global_config_path
@@ -922,34 +923,37 @@ def run_init(
 
     user_path = global_config_path()
 
-    # --- providers + theme: skip the picker when the global config already
-    #     declares a reusable list (a re-run must not re-ask) ---
+    # --- providers + theme: an explicit --providers wins; otherwise reuse a
+    #     list the config already declares (a re-run must not re-ask) ---
     existing_cfg = _read_user_config(user_path)
     wrote_user_config = existing_cfg is None
     configured = _configured_providers(existing_cfg)
-    if configured is not None:
+    if providers_override is not None:
+        providers = providers_override
+        reused = False
+    elif configured is not None:
         providers = configured
-        # `or {}` only narrows for mypy: configured is non-None iff the config was read.
-        theme = str((existing_cfg or {}).get("theme", "ansi"))
-        picked_this_run = False
-        repaired = False
+        reused = True
     else:
         pick = picker_fn or _interactive_provider_picker
         providers = pick(list(_PROVIDER_DISPLAY_ORDER))
         if not providers:
             raise ValueError("at least one provider must be selected")
+        reused = False
+    repaired = existing_cfg is not None and not reused
+    if existing_cfg is None:
         theme = (detect_theme_fn or _default_detect_theme)()
         # Everything below renders in the detected theme; IMP_THEME still wins.
         if pal.theme_override() is None:
             pal.set_theme(theme)
-        picked_this_run = True
-        repaired = existing_cfg is not None
+    else:
+        theme = str(existing_cfg.get("theme", "ansi"))
     if repaired:
         _set_user_providers(user_path, providers)
     output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
     for line in auth_hint_lines(providers):
         output_fn(pal.ansi(line, "dim", enabled=color_on))
-    if picked_this_run and theme != "ansi":
+    if wrote_user_config and theme != "ansi":
         output_fn(pal.ansi(
             f"Detected a {theme} terminal — colors tuned to match.",
             "dim", enabled=color_on))
@@ -975,7 +979,7 @@ def run_init(
         else:
             output_fn("Your machine config is already set up — nothing to do.")
         output_fn(f"  {user_path}  (your machine: providers, theme)")
-        if not picked_this_run:
+        if reused:
             output_fn(
                 "Change providers later: imp config set providers <name>,<name>")
         if committed:
@@ -1065,6 +1069,7 @@ def run_init_noninteractive(
     base: str | None = None,
     pythonpath: list[str] | Literal[False] | None = None,
     detect_verify_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
+    providers_override: list[str] | None = None,
 ) -> None:
     """Non-interactive `imp init`: write imp/config.yaml from defaults (+
     overrides) and record the default provider preference order, with no model
@@ -1083,13 +1088,17 @@ def run_init_noninteractive(
     existing_cfg = _read_user_config(user_path)
     wrote_user_config = existing_cfg is None
     configured = _configured_providers(existing_cfg)
-    if configured is not None:
+    if providers_override is not None:
+        providers = providers_override
+        reused = False
+    elif configured is not None:
         providers = configured
-        repaired = False
+        reused = True
     else:
         # Preference order, not inventory: the resolver takes the first env-available one.
         providers = list(_PROVIDER_DISPLAY_ORDER)
-        repaired = existing_cfg is not None
+        reused = False
+    repaired = existing_cfg is not None and not reused
 
     if already_initialized:
         _ensure_git_repo_silent(project_root)  # a copied config.yaml may sit in a non-git dir

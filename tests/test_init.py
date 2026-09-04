@@ -1670,3 +1670,128 @@ def test_providers_flag_refusals(raw: str, message: str) -> None:
     with pytest.raises(InvalidProvidersFlag) as exc:
         parse_providers_flag(raw)
     assert str(exc.value) == message
+
+
+def test_providers_override_skips_the_picker_on_a_fresh_init(tmp_path: Path) -> None:
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=lambda _m: None,
+        providers_override=["claude_code", "openai"],
+    )
+
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["providers"] == ["claude_code", "openai"]
+
+
+def test_providers_override_still_detects_the_theme(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skipping the picker must not skip theme detection: a fresh interactive
+    init still renders the splash and screen in the terminal's own theme."""
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    seen: dict[str, str] = {}
+    _stub_screen_recording_theme(monkeypatch, seen)
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=lambda _m: None, detect_theme_fn=lambda: "dark",
+        providers_override=["openai"],
+    )
+
+    assert seen["theme"] == "dark"
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["theme"] == "dark"
+
+
+def test_providers_override_rewrites_an_existing_valid_list(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic]\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=msgs.append, providers_override=["codex", "openai"],
+    )
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["codex", "openai"]
+    assert _sans_providers(after) == _sans_providers(before)
+    assert "Set providers in your machine config: codex, openai." in msgs
+    assert not any("already set up" in m for m in msgs)
+    # the list was just set explicitly — that line is for a reusing re-run
+    assert not any(m.startswith("Change providers later:") for m in msgs)
+
+
+def test_providers_override_bootstraps_absent_machine_config_for_initialized_project(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=msgs.append, providers_override=["codex", "openai"],
+    )
+
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["providers"] == ["codex", "openai"]
+    assert "Bootstrapped your machine config (providers, theme)." in msgs
+
+
+def test_use_defaults_providers_override_writes_the_given_list(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None,
+        providers_override=["openai", "codex"])
+
+    data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
+    assert data["providers"] == ["openai", "codex"]
+    branch_line = next(
+        i for i, m in enumerate(msgs) if m.startswith("Integration branch: "))
+    assert msgs[branch_line + 1] == (
+        "Providers: openai, codex (the first authenticated one is used)")
+
+
+def test_use_defaults_providers_override_rewrites_an_existing_valid_list(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic]\n")
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None,
+        providers_override=["codex"])
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["codex"]
+    assert _sans_providers(after) == _sans_providers(before)
+    assert msgs == [
+        "Project already initialized (imp/config.yaml is committed).",
+        "Set providers in your machine config: codex.",
+    ]
