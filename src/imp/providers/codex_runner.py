@@ -49,7 +49,6 @@ from imp.engine.env import quest_scratch_root
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef
 from imp.providers import errors as perr
-from imp.providers.catalog import context_tokens_from_usage
 from imp.providers.codex_config import (
     AuthMode,
     detect_auth_mode,
@@ -64,6 +63,7 @@ from imp.providers.codex_mcp import (
     start_impty_server,
     start_server,
 )
+from imp.providers.codex_rollout import latest_context_reading
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
@@ -253,6 +253,7 @@ class CodexSession(ObserveSession):
             "thread_id": None, "complete_step_args": {},
             "complete_step_called": False,
             "auth_mode": auth_mode, "pending_usage": None,
+            "context_reading": None,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
         self._proc_state = proc_state
@@ -541,7 +542,8 @@ class CodexSession(ObserveSession):
                       state=self._proc_state,
                       provider=self.invocation.provider_name,
                       model=self.runner.model, run_state=state,
-                      subagent_defs=self.invocation.subagent_defs)
+                      subagent_defs=self.invocation.subagent_defs,
+                      codex_home=self.runner._codex_home)
 
         # Mirror complete_step_args from the shared state into proc_state so the
         # terminal check sees them at the boundary.
@@ -984,13 +986,14 @@ class CodexAgentRunner:
 
 def _attach_usage_to_last_agent_message(
     elog: Any, *, agent_id: str, usage: dict[str, Any],
-    context_tokens: int | None = None,
+    context_tokens: int | None = None, context_window: int | None = None,
 ) -> None:
     """Patch the most recent `agent_message` payload for `agent_id` with
-    `usage` (and the canonical `context_tokens` when supplied). Required on
+    `usage` (and codex's live occupancy pair when supplied). Required on
     every `EventLog` implementation — see `src/imp/engine/state.py`."""
     elog.update_last_agent_message_usage(
-        agent_id=agent_id, usage=usage, context_tokens=context_tokens)
+        agent_id=agent_id, usage=usage, context_tokens=context_tokens,
+        context_window=context_window)
 
 
 def _serialize_mcp_result(result: Any) -> str:
@@ -1045,11 +1048,12 @@ def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str, run_state: Any = None,
     subagent_defs: dict[str, AgentDef] | None = None,
+    codex_home: Path | None = None,
 ) -> None:
     """Translate one codex ThreadEvent into imp EventLog records.
 
-    `state` is a shared dict carrying in-flight thread_id, pending usage,
-    captured complete_step args, etc. Filled in across subsequent tasks.
+    `state` is a shared dict carrying in-flight thread_id, the latest context
+    reading, captured complete_step args, etc.
 
     The default arm (unknown item type) logs a runner_warning and returns
     (L3 invariant); only security-relevant types get special handling.
@@ -1285,11 +1289,20 @@ def process_event(
         # Expose the turn's occupancy to the driver's Tier A watch (Mechanism 3)
         # — the same anthropic-shaped dict context_threshold_crossed consumes.
         state["pending_usage"] = normalized
-        # Attach to the most recent agent_message payload for this agent_id,
-        # carrying the canonical context_tokens computed from the same dict.
+        # `normalized` is a billing sum over every model request in this turn,
+        # not prompt occupancy — read codex's own per-request record for that.
+        thread_id = state.get("thread_id")
+        reading = None
+        if codex_home is not None and thread_id:
+            try:
+                reading = latest_context_reading(codex_home, thread_id)
+            except OSError:  # codex writes this file concurrently
+                reading = None
+        state["context_reading"] = reading
+        tokens, window = reading if reading is not None else (None, None)
         _attach_usage_to_last_agent_message(
             elog, agent_id=agent_id, usage=normalized,
-            context_tokens=context_tokens_from_usage(normalized))
+            context_tokens=tokens, context_window=window)
         return
 
     # Default arm: turn.failed / error / unknown —

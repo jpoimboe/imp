@@ -36,23 +36,6 @@ def test_turn_completed_attaches_normalized_usage_to_last_agent_message() -> Non
     assert usage.get("reasoning_output_tokens") == 100
 
 
-def test_turn_completed_lands_context_tokens_on_last_agent_message() -> None:
-    elog = InMemoryEventLog()
-    state: dict[str, Any] = {"pending_usage": None, "auth_mode": "chatgpt"}
-    process_event(agent_message("done"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.5")
-    process_event(
-        turn_completed(input_tokens=1000, output_tokens=500,
-                       cached_input_tokens=200, reasoning_output_tokens=100),
-        elog=elog, agent_id="step:a", state=state,
-        provider="codex", model="gpt-5.5",
-    )
-    llm = [e for e in elog.read() if e["type"] == "agent_message"]
-    assert len(llm) == 1
-    # full prompt = fresh(1000 - 200) + cache_read(200) + cache_creation(0)
-    assert llm[0]["payload"]["context_tokens"] == 1000
-
-
 def test_turn_completed_stashes_normalized_usage_in_proc_state() -> None:
     """The Tier A watch reads proc_state['pending_usage']; process_event must
     populate it with the SAME anthropic-shaped normalized dict it attaches to
