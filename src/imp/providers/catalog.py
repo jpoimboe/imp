@@ -244,3 +244,64 @@ def sdk_context_threshold_crossed(
             or not context_tokens or context_tokens <= 0):
         return False
     return context_tokens / context_window >= frac
+
+
+LONG_CONTEXT_BREAKPOINT = 272_000
+
+
+@dataclass(frozen=True)
+class ModelPrices:
+    """USD per million tokens, one rate per billing bucket.
+    `long_context_threshold` is the prompt-token breakpoint above which the
+    WHOLE request is surcharged; None means never surcharged."""
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
+    long_context_threshold: int | None = None
+
+
+# input, output, cache read, cache write — USD per million tokens.
+MODEL_PRICES: dict[str, ModelPrices] = {
+    # Anthropic: no long-context premium at any size — 4.6-and-later bill a 900k
+    # request at the same per-token rate as a 9k one.
+    "claude-opus-5": ModelPrices(5.00, 25.00, 0.50, 6.25),
+    "claude-fable-5": ModelPrices(10.00, 50.00, 1.00, 12.50),
+    "claude-opus-4-8": ModelPrices(5.00, 25.00, 0.50, 6.25),
+    "claude-sonnet-4-6": ModelPrices(3.00, 15.00, 0.30, 3.75),
+    "claude-haiku-4-5": ModelPrices(1.00, 5.00, 0.10, 1.25),
+    "opus": ModelPrices(5.00, 25.00, 0.50, 6.25),
+    "sonnet": ModelPrices(3.00, 15.00, 0.30, 3.75),
+    "haiku": ModelPrices(1.00, 5.00, 0.10, 1.25),
+    # OpenAI: cache write is 1.25x input on the 5.6 family and the plain input
+    # rate everywhere else. Sol's rate is promotional through 2026-11-21.
+    "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.6": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.5": ModelPrices(5.00, 30.00, 0.50, 5.00, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.4": ModelPrices(2.50, 15.00, 0.25, 2.50, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.4-mini": ModelPrices(0.75, 4.50, 0.075, 0.75),
+    "gpt-5.3-codex": ModelPrices(1.75, 14.00, 0.175, 1.75),
+    "gpt-5": ModelPrices(1.25, 10.00, 0.125, 1.25),
+}
+
+
+def prices_for(model: str | None) -> ModelPrices | None:
+    """Strip any `[...]` suffix, then exact match, else the longest table key
+    the id starts with. None when nothing matches — callers never guess a rate.
+
+    Ids arrive bare (`claude-sonnet-4-6`), date-stamped
+    (`claude-haiku-4-5-20251001`) and suffixed (`claude-opus-4-8[1m]`); an
+    exact-match lookup would drop the latter two entirely.
+    """
+    if not model:
+        return None
+    base = model.split("[", 1)[0]
+    exact = MODEL_PRICES.get(base)
+    if exact is not None:
+        return exact
+    prefixes = [key for key in MODEL_PRICES if base.startswith(key)]
+    if not prefixes:
+        return None
+    return MODEL_PRICES[max(prefixes, key=len)]
