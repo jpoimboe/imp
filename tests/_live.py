@@ -1,9 +1,15 @@
-"""Gating helpers for live-API tests.
+"""Gating helpers for live provider tests.
 
 Live tests carry `@pytest.mark.live(<provider>)` and run only under
 `--run-live` (see tests/conftest.py's collection hook and parse_run_live /
 live_skip_reason / provider_available below). A selected provider whose
 toolchain or credentials are absent skips (not fails) at collection.
+
+A test that only launches a provider's CLI, with no model turn, belongs here
+too: the launch itself is the live dependency. Measured on the claude CLI
+(quest bepi35), its pre-init path -- node boot, an `rg --files` scan, a
+`ps aux`, a git call, an awaited telemetry dial -- costs 15.9-16.2s with the
+network degraded against 0.68-0.79s idle.
 """
 
 from __future__ import annotations
@@ -104,7 +110,7 @@ def live_skip_reason(requested: frozenset[str] | None, provider: str) -> str | N
     set -> skip as not-selected; requested but toolchain/creds missing -> skip
     with the capability reason."""
     if requested is None:
-        return "live-API test — pass --run-live to run"
+        return "live test — pass --run-live to run"
     if provider not in requested:
         return f"{provider} not selected by --run-live"
     return provider_available(provider)

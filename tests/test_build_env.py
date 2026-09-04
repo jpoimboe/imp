@@ -190,3 +190,11 @@ def test_dev_extra_pins_build_and_the_lock_carries_it() -> None:
     data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
     assert "build>=1.2" in data["project"]["optional-dependencies"]["dev"]
     assert '\nname = "build"\n' in (_REPO_ROOT / "uv.lock").read_text()
+
+
+def test_test_live_runs_the_deny_posture_probes() -> None:
+    # The CLI-spawning drift probes run in no other lane; if this file falls out
+    # of the expanded recipe, they silently run nowhere.
+    out = _make_n("test-live")
+    assert out.returncode == 0, out.stderr
+    assert "tests/test_cc_builtins_drift_live.py" in out.stdout

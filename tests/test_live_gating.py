@@ -101,7 +101,7 @@ def test_provider_available_anthropic_present(monkeypatch):
 
 def test_live_skip_reason_no_flag_skips_all():
     from tests._live import live_skip_reason
-    assert live_skip_reason(None, "anthropic") == "live-API test — pass --run-live to run"
+    assert live_skip_reason(None, "anthropic") == "live test — pass --run-live to run"
 
 
 def test_live_skip_reason_provider_not_selected():
@@ -165,7 +165,7 @@ def test_hook_no_flag_skips_live_marked_test():
     from tests.conftest import pytest_collection_modifyitems
     item = _StubItem("tests/test_x_live.py", live_provider="anthropic")
     pytest_collection_modifyitems(_StubConfig(None), [item])
-    assert "live-API test — pass --run-live to run" in _skip_reasons(item)
+    assert "live test — pass --run-live to run" in _skip_reasons(item)
 
 
 def test_hook_adds_raised_timeout_to_live_file():
@@ -217,7 +217,7 @@ def test_bare_pytest_skips_converted_live_file_despite_env():
     )
     combined = proc.stdout + proc.stderr
     assert proc.returncode == 0, combined
-    assert "live-API test — pass --run-live to run" in combined
+    assert "live test — pass --run-live to run" in combined
     assert "IMP_LIVE_PROVIDERS" not in combined  # old skip reason is gone
 
 
@@ -882,3 +882,34 @@ def test_group_c_state_reads_poll_and_report_evidence():
         assert 'json.loads(state_path.read_text())["status"]' not in src
         assert 'wait_for_status(state_path, "paused", timeout=E2E_POLL_TIMEOUT)' in src
         assert "evidence(" in src
+
+
+def test_live_category_prose_never_says_api():
+    """The `live` marker gates on a provider toolchain, which may be only a CLI
+    binary — so `live-API` is retired as the category name."""
+    for rel in ("pyproject.toml", "tests/_live.py", "tests/conftest.py", "Makefile"):
+        body = (_REPO_ROOT / rel).read_text()
+        assert "live-api" not in body.lower(), f"{rel} still names the category live-API"
+
+
+@pytest.mark.timeout(120)  # raise the 60s global cap: this spawns a nested pytest
+def test_cc_deny_posture_probes_skip_without_the_flag():
+    """Both CLI-spawning deny-posture probes are collected from the live file and
+    skipped by the run-live gate, so a bare fast run spawns no claude binary."""
+    env = {**os.environ}
+    env["PYTHONPATH"] = (
+        str(_REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    )
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "pytest", "-p", "no:randomly", "-rs", "-v",
+            "tests/test_cc_builtins_drift_live.py",
+        ],
+        cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=110,
+    )
+    combined = proc.stdout + proc.stderr
+    assert proc.returncode == 0, combined
+    assert "test_no_builtin_escapes_imp_deny_posture SKIPPED" in combined
+    assert "test_deny_posture_probe_is_live SKIPPED" in combined
+    assert "2 skipped" in combined
+    assert "live test — pass --run-live to run" in combined

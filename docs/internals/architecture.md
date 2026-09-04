@@ -84,7 +84,7 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Worktrees are cut under the state directory (`worktrees/<id>/`), and spec/plan artifacts live in the quest home (`quests/<id>/artifacts/`, which the worktree reaches as `.imp/quests/<id>/artifacts/`); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under the state directory's `archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `minimal` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
+All git mechanics sit behind `worktree.py`. Worktrees are cut under the state directory (`worktrees/<id>/`), and a quest's artifacts live in the quest home (`quests/<id>/artifacts/`, which the worktree reaches as `.imp/quests/<id>/artifacts/`); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under the state directory's `archive/` — so each quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events). A no-merge completion (e.g. the `minimal` workflow) reaches the terminal status `done` and is archived the same way — searchable, with its home cleaned up — rather than merged into a base.
 
 ```mermaid
 flowchart LR
@@ -356,7 +356,7 @@ These are dispatched via `subagents:` frontmatter and are **never** a workflow s
 
 ### Data files
 
-These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. Spec/plan artifacts are journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
+These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. Everything under `artifacts/` is journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*), which is what keeps it readable after the worktree is pruned.
 
 The columns list the **principal** writers and readers, not an exhaustive census —
 `deferred.md` in particular is appended to by many agents (any agent may file a
@@ -367,6 +367,7 @@ The columns list the **principal** writers and readers, not an exhaustive census
 | `artifacts/spec/{id}.md` | threshold (draft) → spec-finalizer (final) | all phases |
 | `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, gap-check, batch-code-reviewer, deferred-sweep, summarizer |
 | `artifacts/summary/{id}.md` | summarizer | finalize, `imp show` |
+| `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / `integration-verify` gates | `imp show` |
 | `progress.md` | task-lead, deferred-sweep | all implement/converge steps (tasks, commit subjects) |
 | `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |
 

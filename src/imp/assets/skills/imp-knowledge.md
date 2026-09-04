@@ -68,7 +68,8 @@ bookkeeping. Ask the CLI instead:
   completed quests (merged or done); `--all` adds abandoned and shelved
   conversations.
 - `imp show <id>` — a quest's card: status, current step, intent, and summary
-  (`show <id> spec` for the raw spec, `--json` for a structured card).
+  (`show <id> spec` for the raw spec, `show <id> verify` for the last failing
+  gate run, `--json` for a structured card).
 - `imp search <query>` — case-insensitive substring search across in-flight,
   backlog, and archived quests' conversation content.
 - `imp log <id>` — the human "read the story" narrative, tool bursts folded;

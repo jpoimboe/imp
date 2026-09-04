@@ -67,8 +67,8 @@ def test_imp_operator_notes_has_unblocking_section() -> None:
 
 
 def test_memory_code_comments_present_at_sites() -> None:
-    drift = pathlib.Path("tests/test_cc_builtins_drift.py").read_text()
-    assert "Do NOT skip on CLAUDECODE=1" in drift
+    probe = pathlib.Path("tests/cc_probe.py").read_text()
+    assert "Do NOT skip on CLAUDECODE=1" in probe
 
     openai = pathlib.Path("src/imp/providers/openai.py").read_text()
     assert "no encrypted" in openai

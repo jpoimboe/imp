@@ -399,3 +399,13 @@ def test_knowledge_cheatsheet_distinguishes_log_narrative_from_events_digest() -
     # the digest bullet still leads the events-search bullet that refines it
     assert (flat.index("the agent-facing digest")
             < flat.index("imp events search <query>"))
+
+
+def test_knowledge_and_introspection_name_the_verify_artifact_view() -> None:
+    knowledge = load_internal_skill(_skills_dir(), "imp-knowledge")
+    assert "show <id> verify" in knowledge
+    intro = " ".join(_introspection_doc().split())
+    assert "`imp show <id> spec` for the raw spec" in intro
+    assert "`imp show <id> verify` for the last failing test-gate run" in intro
+    # the cross-quest reader list enumerates the facets a second time
+    assert "Add `spec` for the raw spec, `verify` for the last failing gate run" in intro

@@ -70,7 +70,7 @@ require-venv:
 
 # Scope a run: make test PYTEST_ARGS="tests/foo.py -k name"
 .PHONY: test
-test: require-venv ## Fast test suite (skips live-API tests). What CI runs.
+test: require-venv ## Fast test suite (skips live provider tests). What CI runs.
 	$(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
 
 .PHONY: test-verbose
@@ -89,10 +89,11 @@ _LIVE_TEST_FILES := \
   tests/test_codex_provider_live.py \
   tests/test_codex_started_keying_live.py \
   tests/test_codex_context_reading_live.py \
-  tests/test_parallel_elicitation_live.py
+  tests/test_parallel_elicitation_live.py \
+  tests/test_cc_builtins_drift_live.py
 
 .PHONY: test-live
-test-live: require-venv ## Run live-API tests (--run-live); providers whose toolchain/creds are present run, the rest skip.
+test-live: require-venv ## Run tests needing a real provider (--run-live); providers whose toolchain/creds are present run, the rest skip.
 	@$(_LOAD_LIVE_KEYS) && \
 	  timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) --run-live -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 

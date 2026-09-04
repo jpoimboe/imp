@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -44,6 +45,22 @@ def _seed_with_artifacts(control: Path, quest_id: str, title: str) -> Quest:
     return ch
 
 
+_FAILURE_LINE = "E   assert probe_advertised_tools() == {}"
+_VERIFY_LOG = (
+    "# Gate failure — fast\n\n"
+    "- command: make check\n"
+    "- exit: 2\n"
+    "- when: 2026-09-04T18:22:31Z\n\n"
+    f"{_FAILURE_LINE}\n"
+)
+
+
+def _seed_verify_log(ch: Quest, quest_id: str) -> None:
+    verify = ch.quest_dir / "artifacts" / "verify"
+    verify.mkdir(parents=True)
+    (verify / f"{quest_id}.md").write_text(_VERIFY_LOG)
+
+
 def _run(monkeypatch: pytest.MonkeyPatch, control: Path, *argv: str) -> str:
     import imp.cli.main as m
 
@@ -79,18 +96,15 @@ def test_show_rejects_trimmed_facets(
     assert f"invalid choice: '{facet}'" in capsys.readouterr().err
 
 
-def test_show_spec_falls_back_after_archive(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+def _archive_and_prune(control: Path, ch: Quest, quest_id: str) -> None:
+    """Prunes the home's artifacts too: `_show_artifact` prefers the live file, so
+    leaving it would resolve without ever reading the archive."""
     files = {
         str(p.relative_to(ch.quest_dir / "artifacts")): p
         for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
-    worktree.artifact_commit(tmp_path, _ID, files, message="artifact: spec")
+    worktree.artifact_commit(control, quest_id, files, message="artifact: seed")
     st = State.load(ch.state_dir)
     st.status = "completed"
     st.save(ch.state_dir)
@@ -105,21 +119,40 @@ def test_show_spec_falls_back_after_archive(
             )
             + "\n"
         )
-    from imp.engine import archive
-
     archive.archive_quest(
-        tmp_path,
-        _ID,
+        control,
+        quest_id,
         events_path=ch.events_path,
         quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
     # The per-Quest artifact ref is RETAINED at archive (spec AC 3).
-    assert _git_wip_present(tmp_path, _ID)
-    worktree.remove_worktree(tmp_path, _ID)
-    assert not (project_state_dir(tmp_path) / "worktrees" / _ID).exists()
-    # Worktree gone -> spec resolves from the archive.
+    assert _git_wip_present(control, quest_id)
+    worktree.remove_worktree(control, quest_id)
+    assert not (project_state_dir(control) / "worktrees" / quest_id).exists()
+    shutil.rmtree(ch.quest_dir / "artifacts")
+
+
+def test_show_spec_falls_back_after_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _archive_and_prune(tmp_path, ch, _ID)
+    # Live files gone -> spec resolves from refs/imp/artifacts/<id>.
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
+
+
+def test_show_verify_falls_back_after_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_verify_log(ch, _ID)
+    _archive_and_prune(tmp_path, ch, _ID)
+    assert _FAILURE_LINE in _run(monkeypatch, tmp_path, "show", _ID, "verify")
 
 
 def test_show_missing_change_returns_error(
@@ -154,9 +187,10 @@ def test_show_backlog_default_renders_card(
     assert "wire up OAuth login" in out
 
 
-def test_show_backlog_spec_errors(
+def test_show_backlog_resource_message_wording(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.cli.main as m
 
@@ -170,8 +204,19 @@ def test_show_backlog_spec_errors(
         origin="idea",
         seed_opening="Add OAuth",
     )
-    rc = main(["show", "2026-06-16-bkg111", "spec"])
-    assert rc == 2
+    rc_spec = main(["show", "2026-06-16-bkg111", "spec"])
+    err_spec = capsys.readouterr().err
+    assert rc_spec == 2
+    assert err_spec.rstrip("\n") == (
+        "imp: 2026-06-16-bkg111 is in the backlog (not started); no spec yet"
+    )
+
+    rc_verify = main(["show", "2026-06-16-bkg111", "verify"])
+    err_verify = capsys.readouterr().err
+    assert rc_verify == 2
+    assert err_verify.rstrip("\n") == (
+        "imp: 2026-06-16-bkg111 is in the backlog (not started); no failing gate output yet"
+    )
 
 
 def test_backlog_card_omits_depends_on_when_empty(
@@ -852,3 +897,47 @@ def test_show_omits_the_vars_line_when_the_workflow_declares_none(
     assert "vars:" not in out
     assert json.loads(
         _run(monkeypatch, tmp_path, "show", "novars", "--json"))["vars"] == {}
+
+
+def test_show_verify_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole point of the artifact is the assertion text the feedback excerpt
+    drops, so the read has to surface the log body, not the spec."""
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_verify_log(ch, _ID)
+    out = _run(monkeypatch, tmp_path, "show", _ID, "verify")
+    assert _FAILURE_LINE in out
+    assert "# Gate failure — fast" in out
+    assert "SPEC BODY" not in out
+
+
+def test_show_verify_absent_reports_no_gate_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    _seed_with_artifacts(tmp_path, _ID, "Feat")  # spec present, no gate has failed
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    rc = main(["show", _ID, "verify"])
+    err = capsys.readouterr().err
+    assert rc == 2, err
+    assert err.rstrip("\n") == f"imp: no failing gate output recorded for '{_ID}'"
+
+
+def test_show_absent_spec_message_is_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Feat", quest_id=_ID, base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    rc = main(["show", _ID, "spec"])
+    err = capsys.readouterr().err
+    assert rc == 2, err
+    assert err.rstrip("\n") == f"imp: no spec for '{_ID}'"

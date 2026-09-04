@@ -496,6 +496,8 @@ def test_architecture_data_files_table_names_the_shipped_writers_and_readers() -
         "| `artifacts/plans/{id}-plan-N.md` | plan-writer | task-lead, plan-reviewer, "
         "gap-check, batch-code-reviewer, deferred-sweep, summarizer |",
         "| `artifacts/summary/{id}.md` | summarizer | finalize, `imp show` |",
+        "| `artifacts/verify/{id}.md` | the `verify` / `converge-verify` / "
+        "`integration-verify` gates | `imp show` |",
         "| `deferred.md` | task-lead, deferred-sweep | gap-check, deferred-sweep, finalize |",
     ):
         assert row in text, row

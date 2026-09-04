@@ -72,3 +72,14 @@ def test_log_follow_help_documents_content_flag_composition() -> None:
     assert ("Live-tail the narrative (tail -f): replay it, then stream new events "
             "until the quest reaches a terminal status. Composes with "
             "--full/--show/--hide; implies --no-pager.") in help_text
+
+
+def test_show_documents_the_verify_artifact() -> None:
+    sp = _subparser("show")
+    assert " ".join((sp.description or "").split()) == (
+        "Print a quest's detail card, or name an artifact to print just that: "
+        "spec for the spec, verify for the last failing test-gate run. Reads "
+        "the live quest files while a quest is in flight and falls back to the "
+        "archive once it is merged."
+    )
+    assert "{spec,verify}" in sp.format_help()

@@ -8,7 +8,7 @@ in-process MCP server). If claude adds a new built-in and this constant
 doesn't include it, the agent could silently call the new tool and bypass
 imp's strict-MCP-only policy.
 
-The drift guard (`tests/test_cc_builtins_drift.py`) spawns the bundled CLI
+The drift guard (`tests/test_cc_builtins_drift_live.py`) spawns the bundled CLI
 under the exact deny list this constant produces and reads the tool registry
 it advertises, rather than syncing against a bare CLI listing. A failure means
 a built-in is reachable from every claude_code step; add it here.
