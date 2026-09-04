@@ -21,9 +21,6 @@ EVENTS: list[dict[str, Any]] = [
     {"id": "m", "agent_id": None, "type": "quest_merged",
      "payload": {"base": "master"}},
 ]
-# quest_merged is deliberately suppressed in the live path (main.py owns that
-# line), so it is excluded from the parity comparison.
-PARITY_EVENTS = [e for e in EVENTS if e["type"] != "quest_merged"]
 
 
 class _Pipe(io.StringIO):
@@ -58,6 +55,10 @@ def test_advisory_is_tallied_into_the_end_of_run_summary() -> None:
 
 
 def test_live_and_log_render_the_advisory_identically() -> None:
-    live = _live(PARITY_EVENTS)
+    live = _live(EVENTS)
+    log = _log(EVENTS)
     assert f"warning: {MESSAGE}" in "\n".join(live)
-    assert live == _log(PARITY_EVENTS)
+    # main.py owns the merged line in the live path; every line above it — the
+    # inline advisory AND the warnings-summary block — must match byte for byte.
+    assert log[-1].startswith("Merged ")
+    assert live == log[:-1]
