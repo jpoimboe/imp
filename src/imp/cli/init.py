@@ -1044,29 +1044,46 @@ def run_init_noninteractive(
     pythonpath: list[str] | Literal[False] | None = None,
     detect_verify_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
 ) -> None:
-    """Provider-free, non-interactive `imp init`: write imp/config.yaml from
-    defaults (+ overrides) with no model call. Both `--use-defaults` and the
-    no-TTY auto-headless fallback land here. Never prompts — resolves the
-    integration branch from git, or raises IntegrationBranchUnresolved when git
-    offers none, and raises GitIdentityUnavailable when git can build no author
-    identity to commit with."""
+    """Non-interactive `imp init`: write imp/config.yaml from defaults (+
+    overrides) and record the default provider preference order, with no model
+    call. Both `--use-defaults` and the no-TTY auto-headless fallback land here.
+    Never prompts — resolves the integration branch from git, or raises
+    IntegrationBranchUnresolved when git offers none, and raises
+    GitIdentityUnavailable when git can build no author identity to commit
+    with."""
     from imp.providers.paths import global_config_path
 
     workflow = workflow or _DEFAULT_WORKFLOW
     imp_dir = project_root / "imp"
     already_initialized = (imp_dir / "config.yaml").is_file()
     user_path = global_config_path()
-    wrote_user_config = not user_path.exists()
+    # Read before any write: an unparseable machine config aborts init untouched.
+    existing_cfg = _read_user_config(user_path)
+    wrote_user_config = existing_cfg is None
+    configured = _configured_providers(existing_cfg)
+    if configured is not None:
+        providers = configured
+        repaired = False
+    else:
+        # Preference order, not inventory: the resolver takes the first env-available one.
+        providers = list(_PROVIDER_DISPLAY_ORDER)
+        repaired = existing_cfg is not None
 
     if already_initialized:
         _ensure_git_repo_silent(project_root)  # a copied config.yaml may sit in a non-git dir
         if not _git_can_commit(project_root):
             raise GitIdentityUnavailable(_GIT_NO_IDENTITY)
         if wrote_user_config:
-            _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
+            _bootstrap_user_config(
+                user_path, providers, "ansi", allow_unsandboxed=False)
+        elif repaired:
+            _set_user_providers(user_path, providers)
         _ensure_imp_gitignore(project_root)
         _commit_init_files(project_root)
         output_fn("Project already initialized (imp/config.yaml is committed).")
+        if repaired:
+            output_fn(
+                f"Set providers in your machine config: {', '.join(providers)}.")
         return
 
     git_created = _ensure_git_repo_silent(project_root)
@@ -1083,6 +1100,8 @@ def run_init_noninteractive(
                 "`default-base: <branch>` to imp/config.yaml.")
         default_base = detected_base.branch
     output_fn(f"Integration branch: {default_base}")
+    output_fn(f"Providers: {', '.join(providers)} "
+              "(the first authenticated one is used)")
 
     detect_cmd = detect_verify_fn or detect_test_command
     detected = detect_cmd(project_root)
@@ -1111,7 +1130,10 @@ def run_init_noninteractive(
     committed = write_init_files(project_root, settings)
 
     if wrote_user_config:
-        _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
+        _bootstrap_user_config(
+            user_path, providers, "ansi", allow_unsandboxed=False)
+    elif repaired:
+        _set_user_providers(user_path, providers)
 
     output_fn("Created:")
     output_fn("  imp/config.yaml")

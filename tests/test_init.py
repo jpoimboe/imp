@@ -1531,3 +1531,111 @@ def test_interactive_reinit_reuses_a_valid_list_and_names_the_setter(
         f"  {home / 'config.yaml'}  (your machine: providers, theme)")
     assert msgs[path_line + 1] == (
         "Change providers later: imp config set providers <name>,<name>")
+
+
+_DEFAULT_PROVIDERS = ["claude_code", "anthropic", "openai", "codex"]
+
+
+def test_use_defaults_writes_the_default_preference_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider_registry: object,
+) -> None:
+    # provider_registry (tests/conftest.py) resets the process-global registry on
+    # BOTH sides; resolve._ensure_builtins then lazily re-registers the builtins
+    # this test reads through. Registering here by hand would leak to every later
+    # test in the worker.
+    from imp.cli.init import run_init_noninteractive
+    from imp.cli.main import main
+    from imp.providers.effective import load_effective_config
+
+    msgs: list[str] = []
+
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
+    assert data["providers"] == _DEFAULT_PROVIDERS
+    branch_line = next(
+        i for i, m in enumerate(msgs) if m.startswith("Integration branch: "))
+    assert msgs[branch_line + 1] == (
+        "Providers: claude_code, anthropic, openai, codex "
+        "(the first authenticated one is used)")
+    # imp's own readers must accept what init wrote — `providers: []` did not.
+    assert list(load_effective_config(control_root=tmp_path).config.providers) == (
+        _DEFAULT_PROVIDERS)
+    monkeypatch.chdir(tmp_path)
+    assert main(["config"]) == 0
+
+
+@pytest.mark.parametrize(
+    "seed",
+    ["providers: []\n", "", "providers: claude_code\n",
+     "providers: [codex, codex]\n"])
+def test_use_defaults_repairs_an_existing_machine_config(
+    tmp_path: Path, seed: str,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, seed)
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == _DEFAULT_PROVIDERS
+    assert _sans_providers(after) == _sans_providers(before)
+    assert msgs == [
+        "Project already initialized (imp/config.yaml is committed).",
+        "Set providers in your machine config: "
+        "claude_code, anthropic, openai, codex.",
+    ]
+
+
+def test_use_defaults_says_nothing_about_providers_when_it_repairs_nothing(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic]\n")
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    assert (home / "config.yaml").read_text() == before
+    assert msgs == ["Project already initialized (imp/config.yaml is committed)."]
+
+
+def test_cmd_init_reports_an_unparseable_machine_config_non_interactively(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The scripted path reads the machine config too — before it writes
+    anything, so a file it cannot parse aborts init with the tree untouched."""
+    import imp.cli.main as m
+
+    _init_repo(tmp_path)
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    broken = "providers: [anthropic\n"
+    (home / "config.yaml").write_text(broken)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+
+    rc = m._cmd_init(_init_args())   # --use-defaults => the headless branch
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err.splitlines()[0].startswith(
+        "imp: invalid YAML in config.yaml: ")
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert (home / "config.yaml").read_text() == broken
+    assert not (tmp_path / "imp" / "config.yaml").exists()
