@@ -144,7 +144,7 @@ def test_repo_config_uses_tiered_test_cmds() -> None:
     layer, _src = parse_config_layer(_REPO_CONFIG)
     assert layer["test_cmd_fast"] == "make check"
     assert layer["test_cmd_slow"] == "make check && make test-live"
-    assert layer["test_cmd_fast_timeout"] == 240
+    assert layer["test_cmd_fast_timeout"] == 300
     assert layer["test_cmd_slow_timeout"] == 600
     # Guard against a regression to the removed verify_command/verify_timeout surface.
     raw = _REPO_CONFIG.read_text()
