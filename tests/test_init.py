@@ -1236,7 +1236,8 @@ def test_read_user_config_refuses_a_non_mapping(tmp_path: Path) -> None:
     p.write_text("- claude_code\n- openai\n")
     with pytest.raises(ConfigWriteError) as exc:
         _read_user_config(p)
-    assert str(exc.value) == "config.yaml must be a mapping of settings, got list"
+    # Same wording as imp's own config loader (src/imp/providers/config.py:123).
+    assert str(exc.value) == "config.yaml root must be a mapping"
 
 
 def test_cmd_init_refuses_on_detached_head(tmp_path, monkeypatch, capsys):

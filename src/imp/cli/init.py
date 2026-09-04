@@ -306,9 +306,7 @@ def _read_user_config(user_path: Path) -> dict[str, Any] | None:
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise ConfigWriteError(
-            f"{user_path.name} must be a mapping of settings, "
-            f"got {type(data).__name__}")
+        raise ConfigWriteError(f"{user_path.name} root must be a mapping")
     return data
 
 
