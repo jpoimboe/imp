@@ -43,11 +43,13 @@ class HomeLayer:
     """The writable-home layer bound over $HOME for an active-sandbox agent.
     Fallback (rw) shape: only `home` set → a plain `--bind home home`. COW overlay
     shape: merged/upper/work set → bwrap is wrapped with unshare + mount -t
-    overlay (lowerdir=home) and the merged view is bound onto `home`."""
+    overlay (lowerdir=home) and the merged view is bound onto `home`; userxattr
+    records the mount shape overlay_mode negotiated for this host."""
     home: str
     merged: str = ""     # overlay mountpoint bound onto $HOME ("" → plain rw bind of home)
     upper: str = ""      # overlay upperdir (captured writes; discarded at teardown)
     work: str = ""       # overlay workdir
+    userxattr: bool = False  # mount -o userxattr (opaque marker in user.overlay.*)
 
     @property
     def is_overlay(self) -> bool:
@@ -312,11 +314,12 @@ def build_sandbox_argv(
         # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner
         # command (and its sentinel) never runs — sentinel ABSENCE is the sole
         # signal, so no bespoke marker/code is needed.
+        opt = ",userxattr" if hl.userxattr else ""
         mount = (
             f"mount -t overlay overlay -o "
             f"lowerdir={shlex.quote(hl.home)},"
             f"upperdir={shlex.quote(hl.upper)},"
-            f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} "
+            f"workdir={shlex.quote(hl.work)}{opt} {shlex.quote(hl.merged)} "
             f"|| exit 1; "
             f"exec {shlex.join(argv)}"
         )

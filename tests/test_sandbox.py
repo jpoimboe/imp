@@ -1073,6 +1073,36 @@ def test_overlay_home_shell_quotes_paths_with_spaces():
     assert "'/a b/merged'" in script               # mount target + bind source quoted
 
 
+def test_overlay_home_userxattr_appends_mount_option():
+    # AC 2a: a userxattr layer moves the opaque marker to user.overlay.*; the
+    # option is appended to the mount options, immediately after workdir=.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work", userxattr=True)
+    pol = _policy(home="/home/u", home_layer=hl)
+    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    script = _unshare_script(argv)
+    assert ("mount -t overlay overlay -o "
+            "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work,userxattr "
+            "/up/merged") in script
+    # the fail-loud contract and the merged-onto-home bind are untouched
+    assert "|| exit 1" in script
+    assert "--bind /up/merged /home/u" in script
+
+
+def test_overlay_home_without_userxattr_emits_no_userxattr_option():
+    # AC 2b: the default layer keeps today's option string byte-for-byte, and
+    # `userxattr` appears NOWHERE in the argv — a pre-v5.11 kernel rejects the
+    # option outright, so it must not leak in.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    assert ("mount -t overlay overlay -o "
+            "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
+            "/up/merged") in _unshare_script(argv)
+    assert not any("userxattr" in a for a in argv)
+
+
 def test_overlay_home_write_mirror_is_dest_keyed():
     # bind_plan keys the home entry by the DEST (home), not the merged source, so
     # allows_write is correct under the overlay too.
