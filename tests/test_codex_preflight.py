@@ -31,7 +31,7 @@ def test_codex_model_under_apikey_also_fails_config(tmp_path: Path) -> None:
 
 
 def test_happy_path_returns_auth_mode(tmp_path: Path) -> None:
-    """`tmp_path` is not a git repo — a non-git cwd is an ordinary codex run now."""
+    """`tmp_path` is not a git repo — imp's preflight no longer rejects a non-git cwd."""
     canonical = tmp_path / "auth.json"
     canonical.write_text('{"auth_mode": "chatgpt", "tokens": {"refresh_token": "rt"}}')
     mode = preflight(model="gpt-5.5", canonical_auth=canonical, env={})
