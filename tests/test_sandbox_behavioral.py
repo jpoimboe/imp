@@ -28,6 +28,7 @@ import imp.agents.tools.bash  # noqa: F401 — registers the tool
 from imp import __version__
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
+from imp.agents.tools.bg import terminate_background_processes
 from imp.agents.tools.context import ToolContext
 from imp.engine import worktree as wt
 from imp.engine.sandbox import (
@@ -1222,6 +1223,79 @@ def test_overlay_home_write_does_not_persist_across_bash_calls() -> None:
             assert "PERSISTED" not in r2["stdout"]
             # falsifier: the isolated real home (the lowerdir) never saw the file.
             assert not (home / "across.txt").exists()
+        finally:
+            cleanup()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@requires_overlay
+def test_concurrent_background_and_foreground_get_separate_upperdirs() -> None:
+    # Two sandboxed commands CONCURRENTLY LIVE within one step — a background
+    # command still running while a foreground command runs — are the shape that
+    # produced the kernel's ovl_inuse warning back when the upperdir was keyed
+    # per STEP. Each spawn now mints its own layer, so the two mounts share
+    # nothing. The handshake through the shared rw worktree makes the overlap
+    # deterministic rather than timing-dependent: the background command
+    # publishes `bg-ready` and then blocks until `release`, which the foreground
+    # command creates only AFTER writing and listing its own $HOME.
+    root = _make_overlay_root()
+    try:
+        home = root / "home"
+        home.mkdir()
+        pol, cleanup = _overlay_home(root, home)
+        try:
+            ctx = _ctx(Path(pol.worktree), pol)
+            ctx.background_enabled = True
+            ctx.agent_id = "step:build/coder"
+            # The loop bounds are hang-detectors, not tuned windows: they never
+            # false-fire under load, and the outer pytest timeout catches a
+            # genuine hang first.
+            bg_cmd = (
+                'echo BG > "$HOME/bg.txt"; : > bg-ready; i=0; '
+                'while [ ! -e release ] && [ $i -lt 3000 ]; '
+                'do sleep 0.05; i=$((i+1)); done; [ -e release ]')
+            fg_cmd = (
+                'i=0; while [ ! -e bg-ready ] && [ $i -lt 3000 ]; '
+                'do sleep 0.05; i=$((i+1)); done; [ -e bg-ready ] || exit 1; '
+                'echo FG > "$HOME/fg.txt"; ls "$HOME"; : > release')
+
+            async def _scenario() -> tuple[dict[str, object], dict[str, object]]:
+                reg = get_registry()
+                try:
+                    started = json.loads(await reg["bash"].async_invoke(
+                        ctx, {"command": bg_cmd, "run_in_background": True}))
+                    fg = json.loads(await reg["bash"].async_invoke(
+                        ctx, {"command": fg_cmd}))
+                    done = json.loads(await reg["bash_output"].async_invoke(
+                        ctx, {"id": started["id"], "wait": True}))
+                    return fg, done
+                finally:
+                    await terminate_background_processes(ctx)
+
+            fg, done = anyio.run(_scenario)
+
+            # both commands succeeded — and the foreground rc 0 means it SAW
+            # bg-ready, so the background mount was live for the whole fg call.
+            assert fg["returncode"] == 0, f"foreground call failed: {fg}"
+            assert done["status"] == "exited", f"background unfinished: {done}"
+            assert done["returncode"] == 0, f"background call failed: {done}"
+
+            # the smoking gun: on one shared upperdir the still-running
+            # background command's file would show up in the foreground $HOME.
+            listed = str(fg["stdout"]).split()
+            assert "fg.txt" in listed, f"foreground $HOME listing: {listed}"
+            assert "bg.txt" not in listed, f"live mounts shared an upper: {listed}"
+
+            # one layer per spawn, each upper holding only its own write.
+            layers = sorted(p for p in Path(pol.overlay_root).iterdir() if p.is_dir())
+            assert len(layers) == 2, f"expected one layer per spawn, got {layers}"
+            contents = sorted(
+                sorted(f.name for f in (d / "upper").iterdir()) for d in layers)
+            assert contents == [["bg.txt"], ["fg.txt"]], contents
+
+            # the lowerdir — the real home — saw neither write.
+            assert sorted(p.name for p in home.iterdir()) == [], "real home mutated"
         finally:
             cleanup()
     finally:
