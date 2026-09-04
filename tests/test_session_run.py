@@ -1324,3 +1324,54 @@ async def test_clean_ending_still_renders_the_paused_block(
     assert out.split("\n")[0] == "paused"
     assert f"resume: imp resume {quest.id}" in out
     assert "lost the connection" not in out
+
+
+def test_resolve_settled_outcome_ignores_a_stray_live_event_line_when_home_reaped(
+    tmp_path: Path,
+) -> None:
+    # The keku73 shape: the home was reaped, then a later attach wrote one line back.
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-05-stray", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    quest.event_log().append(agent_id=None, type="cli_attached", payload={})
+    assert not quest.state_dir.exists()          # only events.jsonl came back
+    outcome = resolve_settled_outcome(quest)
+    assert outcome.status == "merged"
+    # state.json does not load, so BOTH fields come from the archive; the stray
+    # live line never shadows the archived blob.
+    assert [e["type"] for e in outcome.events] == ["user_message", "quest_merged"]
+
+
+def test_resolve_settled_outcome_never_takes_events_from_the_archive_when_home_is_live(
+    tmp_path: Path,
+) -> None:
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-05-live", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+    outcome = resolve_settled_outcome(quest)
+    # state.json loads, so the home answers both fields — an empty live event log
+    # is an answer, not a reason to reach into the archive.
+    assert outcome.status == "paused"
+    assert outcome.events == []
+    assert outcome.completed is False
+
+
+def test_stray_live_line_still_renders_merged_from_the_archived_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    quest = _archive_reaped_quest(
+        tmp_path, "2026-07-05-keku", status="merged",
+        events=_INTENT_EVENT_LINE + _MERGED_EVENT_LINE)
+    quest.title = ""                          # untitled: the identity line shows the intent
+    quest.event_log().append(agent_id=None, type="cli_attached", payload={})
+    rc = main._session_exit_code(quest, SimpleNamespace(interrupted=False))
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert rc == 0
+    assert lines[0] == "merged into main"
+    assert "done · commits on" not in out
+    assert lines[1] == "2026-07-05-keku · > resolve me from archive"

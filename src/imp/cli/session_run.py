@@ -44,18 +44,18 @@ class SettledOutcome:
 
 
 def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
-    """Read status and events once, live home first, then archive."""
+    """Read status and events from one source: the live home if state.json loads, else
+    the archive — a reaped home can still hold a stray events.jsonl line."""
     from imp.cli.store import _parse_jsonl
     from imp.engine.archive import read as archive_read
     try:
-        status: str | None = State.load(quest.state_dir).status
+        state = State.load(quest.state_dir)
     except FileNotFoundError:
-        status = archive_read.status_of(quest.control_root, quest.id)
-    events = list(quest.event_log().read())
-    if not events:
         raw = archive_read.read_events(quest.control_root, quest.id)
-        events = _parse_jsonl(raw) if raw is not None else []
-    return SettledOutcome(status=status, events=events)
+        return SettledOutcome(
+            status=archive_read.status_of(quest.control_root, quest.id),
+            events=_parse_jsonl(raw) if raw is not None else [])
+    return SettledOutcome(status=state.status, events=list(quest.event_log().read()))
 
 
 async def run_session_client(
