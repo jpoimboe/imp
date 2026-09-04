@@ -3,6 +3,8 @@
 Covers:
 - Behavioral regression: a line > 64 KiB raises ValueError at asyncio's default limit.
 - The fix value (CODEX_STREAM_LIMIT) reads that same line cleanly.
+- Cleanup guard: the over-limit read abandons stdout, so the helper kills the child
+  rather than waiting on it.
 - _SubprocessPatchingAsyncio proxy: injects default limit AND start_new_session,
   respects explicit values for each, forwards other attrs.
 - install_codex_subprocess_patches: idempotent, replaces the SDK module ref, forwards real attrs.
@@ -107,10 +109,11 @@ async def test_a_broken_child_reports_its_exit_and_stderr() -> None:
 
 
 @pytest.mark.anyio
-async def test_codex_limit_reads_oversized_line() -> None:
+@pytest.mark.parametrize("writer", [_FAST_WRITER, _SLOW_WRITER], ids=["fast", "slow"])
+async def test_codex_limit_reads_oversized_line(writer: str) -> None:
     """Fix: CODEX_STREAM_LIMIT is large enough to read a 200 KiB line cleanly."""
-    line = await _read_one_line(CODEX_STREAM_LIMIT)
-    assert len(line) >= 200 * 1024
+    line = await _read_one_line(CODEX_STREAM_LIMIT, writer)
+    assert len(line) == _BIG_LINE + 1
 
 
 # ---------------------------------------------------------------------------
