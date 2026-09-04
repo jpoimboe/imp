@@ -452,7 +452,7 @@ def test_cmd_init_appends_trailing_blank_on_tty(
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
 
-    def fake_run_init(project, *, input_fn, output_fn):
+    def fake_run_init(project, *, input_fn, output_fn, **kwargs):
         output_fn("Created:")
         output_fn("  imp/config.yaml")
 

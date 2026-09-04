@@ -722,6 +722,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
     from imp.cli.init import (
         GitIdentityUnavailable,
         IntegrationBranchUnresolved,
+        InvalidProvidersFlag,
+        parse_providers_flag,
         run_init,
         run_init_noninteractive,
     )
@@ -739,6 +741,14 @@ def _cmd_init(args: argparse.Namespace) -> int:
             _emit_cli_error(
                 f"unknown workflow {wf_arg!r}; available: {', '.join(names)}")
             return 2
+    providers_arg = getattr(args, "providers", None)
+    providers_override: list[str] | None = None
+    if providers_arg is not None:
+        try:
+            providers_override = parse_providers_flag(providers_arg)
+        except InvalidProvidersFlag as e:
+            _emit_cli_error(f"{e}")
+            return 2
     headless, auto_headless = _select_headless(args)
     try:
         if headless:
@@ -746,7 +756,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
                 print(
                     "No interactive terminal detected — writing defaults to "
                     "imp/config.yaml. Override with --workflow / --base / "
-                    "--pythonpath.",
+                    "--pythonpath / --providers.",
                     file=sys.stderr,
                 )
             raw_pythonpath = getattr(args, "pythonpath", None)
@@ -762,9 +772,11 @@ def _cmd_init(args: argparse.Namespace) -> int:
                 workflow=getattr(args, "workflow", None),
                 base=getattr(args, "base", None),
                 pythonpath=pythonpath,
+                providers_override=providers_override,
             )
         else:
-            run_init(project, input_fn=input, output_fn=print)
+            run_init(project, input_fn=input, output_fn=print,
+                     providers_override=providers_override)
     except (IntegrationBranchUnresolved, GitIdentityUnavailable,
             ConfigWriteError) as e:
         _emit_cli_error(f"{e}")
@@ -3804,9 +3816,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=_cmd_init, warm=True)
     p_init.add_argument(
         "--use-defaults", action="store_true", dest="non_interactive",
-        help="Non-interactive, provider-free setup: write imp/config.yaml with "
-             "the default workflow, resolved integration branch, and teaching "
-             "hints — no model call, works in CI with no credentials.")
+        help="Non-interactive setup: write imp/config.yaml with the default "
+             "workflow, resolved integration branch, and teaching hints — no "
+             "model call, works in CI with no credentials.")
+    p_init.add_argument(
+        "--providers", metavar="CSV", default=None,
+        help="Comma-separated providers to enable, in preference order; skips "
+             "the picker. Defaults to all four — the first authenticated one "
+             "is used.")
     p_init.add_argument(
         "--workflow", metavar="NAME", default=None,
         help="Default workflow recorded by the non-interactive path (defaults "

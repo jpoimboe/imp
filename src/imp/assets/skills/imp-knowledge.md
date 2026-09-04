@@ -51,8 +51,9 @@ lands stays maintainable.
   Claude Code so far). Setup (`imp init`) detects the default workflow, integration
   branch, fast test command, `worktree_setup`, and import root and confirms them on
   one screen, needing no provider; `--use-defaults` (with optional
-  `--workflow`/`--base`/`--pythonpath`) runs it non-interactively, and no-TTY
-  invocations take that path automatically.
+  `--workflow`/`--base`/`--pythonpath`) runs it non-interactively, no-TTY
+  invocations take that path automatically, and `--providers a,b` skips the
+  picker in either mode.
 - **Batteries-included, customizable.** A default workflow encoding current
   best-practice agentic engineering; author your own if you like.
 - **Beyond software.** Not limited to code — imp can drive other structured

@@ -784,7 +784,8 @@ def test_init_empty_pythonpath_flag_passes_false(tmp_path, monkeypatch):
 def _init_args(**over: object) -> argparse.Namespace:
     """A parser-shaped Namespace for _cmd_init: --use-defaults => non_interactive."""
     fields: dict[str, object] = {
-        "non_interactive": True, "workflow": None, "base": None, "pythonpath": None}
+        "non_interactive": True, "workflow": None, "base": None,
+        "pythonpath": None, "providers": None}
     fields.update(over)
     return argparse.Namespace(**fields)
 
@@ -1795,3 +1796,100 @@ def test_use_defaults_providers_override_rewrites_an_existing_valid_list(
         "Project already initialized (imp/config.yaml is committed).",
         "Set providers in your machine config: codex.",
     ]
+
+
+def test_init_parser_accepts_the_providers_flag() -> None:
+    from imp.cli.main import _build_parser
+
+    args = _build_parser().parse_args(["init", "--providers", "claude_code,openai"])
+    assert args.providers == "claude_code,openai"
+    assert _build_parser().parse_args(["init"]).providers is None
+
+
+def test_cmd_init_passes_the_parsed_providers_to_both_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    called: dict[str, object] = {}
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive",
+                        lambda _project, **kw: called.update(kw))
+    m._cmd_init(_init_args(providers="claude_code, openai"))
+    assert called["providers_override"] == ["claude_code", "openai"]
+
+    # Under pytest stdin is not a tty, so _select_headless would route the
+    # second call headless too unless both streams are pinned open.
+    called.clear()
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("imp.cli.init.run_init",
+                        lambda _project, **kw: called.update(kw))
+    m._cmd_init(_init_args(non_interactive=False, providers="codex"))
+    assert called["providers_override"] == ["codex"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "line"),
+    [
+        ("claude_code,foo",
+         "imp: --providers: unknown provider 'foo' "
+         "(choose from: claude_code, anthropic, openai, codex)"),
+        ("openai,openai", "imp: --providers: duplicate provider 'openai'"),
+        (",", "imp: --providers: name at least one provider"),
+    ],
+)
+def test_cmd_init_rejects_a_bad_providers_value_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], raw: str, line: str,
+) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    for name in ("run_init", "run_init_noninteractive"):
+        monkeypatch.setattr(
+            f"imp.cli.init.{name}",
+            lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("a bad --providers must not reach the writer")))
+
+    rc = m._cmd_init(_init_args(providers=raw))
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err.splitlines() == [line]
+    assert captured.out == ""
+    assert not (tmp_path / "imp").exists()
+    assert not (tmp_path / "imphome" / "config.yaml").exists()
+
+
+def test_cmd_init_providers_flag_writes_exactly_that_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+
+    rc = m._cmd_init(_init_args(providers="claude_code,openai"))
+
+    assert rc == 0
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["providers"] == ["claude_code", "openai"]
+
+
+def test_init_help_documents_providers_and_drops_provider_free(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli.main import _build_parser
+
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["init", "-h"])
+    help_text = " ".join(capsys.readouterr().out.split())
+
+    assert ("Comma-separated providers to enable, in preference order; skips "
+            "the picker. Defaults to all four — the first authenticated one is "
+            "used.") in help_text
+    assert ("Non-interactive setup: write imp/config.yaml with the default "
+            "workflow, resolved integration branch, and teaching hints — no "
+            "model call, works in CI with no credentials.") in help_text
+    # init no longer skips providers on the non-interactive path
+    assert "provider-free" not in help_text
