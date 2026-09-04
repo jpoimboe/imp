@@ -169,9 +169,9 @@ def scratch_dir(target: Path) -> Path:
     return target.parent / f".config-verify-{os.getpid()}"
 
 
-def _refusal(target: Path, key: SettableKey) -> str:
+def refusal(target: Path, dotted: str) -> str:
     return (f"refusing to write {layer_label(target)} — "
-            f"{key.dotted!r} would not read back as given")
+            f"{dotted!r} would not read back as given")
 
 
 def _emit_shadow(key: SettableKey, layer: Layer, control_root: Path) -> None:
@@ -217,11 +217,11 @@ def run_set(*, key: str, value: str, scope: Layer | None,
                           target.name) as scratch:
             if not verify(scratch, result.text, settable.read_path, parsed):
                 if not isinstance(parsed, str):
-                    raise ConfigWriteError(_refusal(target, settable))
+                    raise ConfigWriteError(refusal(target, settable.dotted))
                 result = apply_set(current, settable.path,
                                    DoubleQuotedScalarString(parsed))
                 if not verify(scratch, result.text, settable.read_path, parsed):
-                    raise ConfigWriteError(_refusal(target, settable))
+                    raise ConfigWriteError(refusal(target, settable.dotted))
             land(scratch, target)
     except ConfigWriteError as err:
         _emit_error(str(err))

@@ -352,11 +352,11 @@ def _set_user_providers(user_path: Path, providers: list[str]) -> None:
     comment-preserving seam as `imp config set providers`. The caller has
     already parsed the file (_read_user_config), so unreadable text cannot
     reach apply_set here."""
-    from imp.cli.config_cmd import layer_label
     from imp.cli.config_edit import apply_set
     from imp.cli.config_write import (
         ConfigWriteError,
         land,
+        refusal,
         scratch_dir,
         scratch_seam,
         verify,
@@ -365,9 +365,7 @@ def _set_user_providers(user_path: Path, providers: list[str]) -> None:
     result = apply_set(user_path.read_text(), ("providers",), providers)
     with scratch_seam(scratch_dir(user_path), user_path.name) as scratch:
         if not verify(scratch, result.text, ("providers",), providers):
-            raise ConfigWriteError(
-                f"refusing to write {layer_label(user_path)} — "
-                "'providers' would not read back as given")
+            raise ConfigWriteError(refusal(user_path, "providers"))
         land(scratch, user_path)
 
 
