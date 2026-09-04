@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from unittest.mock import patch as _patch
 
@@ -32,22 +31,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _git_init(p: Path) -> None:
-    subprocess.run(["git", "init", "-q", str(p)], check=True)
-    subprocess.run(
-        ["git", "-C", str(p), "config", "user.email", "t@t.t"], check=True)
-    subprocess.run(
-        ["git", "-C", str(p), "config", "user.name", "T"], check=True)
-    # An initial commit so `git stash create` (the snapshot substrate) has a
-    # HEAD to work against.
-    (p / ".gitkeep").write_text("")
-    subprocess.run(["git", "-C", str(p), "add", ".gitkeep"], check=True)
-    subprocess.run(
-        ["git", "-C", str(p), "commit", "-q", "-m", "init"], check=True)
-
-
-def _seed_git_and_auth(tmp_path: Path) -> None:
-    _git_init(tmp_path)
+def _seed_auth(tmp_path: Path) -> None:
     (tmp_path / "auth.json").write_text('{"auth_mode": "chatgpt", "tokens": {}}')
     (tmp_path / "tx").mkdir(exist_ok=True)
 
@@ -92,7 +76,7 @@ def _build_invocation(
 async def test_run_yields_agent_result_when_complete_step_captured(
     tmp_path: Path,
 ) -> None:
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     canonical = tmp_path / "auth.json"
     elog = InMemoryEventLog()
 
@@ -141,7 +125,7 @@ async def test_drive_turns_sweeps_bg_per_event(
         await real(ctx)
 
     monkeypatch.setattr(bg_mod, "_sweep_bg", counting)
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     canonical = tmp_path / "auth.json"
     elog = InMemoryEventLog()
 
@@ -176,7 +160,7 @@ async def test_run_fails_fast_with_network_error_when_self_ping_fails(
     """Spec run() flow step 2: imp pings its own MCP endpoint and fails fast
     with a `network` ProviderError when unreachable, BEFORE provisioning
     CODEX_HOME or starting any SDK turn."""
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
 
     fake = FakeCodex(scripted_turns=[[]])  # won't get touched
     runner = CodexAgentRunner(
@@ -209,7 +193,7 @@ async def test_response_wait_is_request_bracketed(tmp_path: Path) -> None:
 
     from imp.cli.signals import InterruptCoordinator
 
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     canonical = tmp_path / "auth.json"
     elog = InMemoryEventLog()
 
@@ -274,7 +258,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
     same task. Cancellation is equivalent for the finally assertion.
 
     Construction mirrored from test_run_yields_agent_result_when_complete_step_captured
-    (same file): _seed_git_and_auth, _canonical_auth_override, FakeCodex
+    (same file): _seed_auth, _canonical_auth_override, FakeCodex
     client_factory, _build_invocation — adapted to add bash to agent_def.tools.
     """
     import anyio as _anyio
@@ -296,7 +280,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
         def start_thread(self, options: object = None) -> _StallingThread:
             return _StallingThread()
 
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     canonical = tmp_path / "auth.json"
 
     # Build invocation with bash in tools so bg injection fires and
@@ -386,7 +370,7 @@ async def test_codex_bridges_stderr_warning_into_runner_warning(
     bridge with source="codex" and that close() emits the runner_warning."""
     import imp.providers.stderr_sink as ss
 
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     canonical = tmp_path / "auth.json"
     elog = InMemoryEventLog()
 

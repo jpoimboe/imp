@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -25,22 +24,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _git_init(p: Path) -> None:
-    subprocess.run(["git", "init", "-q", str(p)], check=True)
-    subprocess.run(
-        ["git", "-C", str(p), "config", "user.email", "t@t.t"], check=True)
-    subprocess.run(
-        ["git", "-C", str(p), "config", "user.name", "T"], check=True)
-    # An initial commit so `git stash create` (the snapshot substrate) has a
-    # HEAD to work against.
-    (p / ".gitkeep").write_text("")
-    subprocess.run(["git", "-C", str(p), "add", ".gitkeep"], check=True)
-    subprocess.run(
-        ["git", "-C", str(p), "commit", "-q", "-m", "init"], check=True)
-
-
-def _seed_git_and_auth(tmp_path: Path) -> None:
-    _git_init(tmp_path)
+def _seed_auth(tmp_path: Path) -> None:
     (tmp_path / "auth.json").write_text('{"auth_mode": "chatgpt", "tokens": {}}')
     (tmp_path / "tx").mkdir(exist_ok=True)
 
@@ -87,7 +71,7 @@ async def test_teardown_runs_on_no_complete_step_error_exit(
     turn without calling complete_step: the shared driver surfaces the
     no_complete_step error (the unified observe/push behavior) and the finally
     must still tear the codex_home down."""
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     # A turn that completes WITHOUT calling complete_step. With no continuation_fn
     # wired, the shared driver yields the no_complete_step terminal error.
     scripted = [[thread_started(), turn_completed()]]
@@ -125,7 +109,7 @@ async def test_server_shutdown_runs_when_provisioning_fails(
     targets `server_handle.shutdown()`, which only runs for a provision failure
     once the try is widened to cover provision.
     """
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     runner = CodexAgentRunner(
         model_name="gpt-5.5",
         client_factory=lambda options=None: FakeCodex(scripted_turns=[[]]),
@@ -179,7 +163,7 @@ async def test_codex_teardown_closes_impty_session(
 ) -> None:
     """Codex runner's finally block must call impty_handle.shutdown() and
     impty_driver.close() when impty is in the agent's drivers."""
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
 
     shutdown_calls: list[int] = []
     close_calls: list[int] = []

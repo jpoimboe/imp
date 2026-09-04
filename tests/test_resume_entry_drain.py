@@ -497,7 +497,6 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
     messages-list providers, codex re-prompts with a string, so the drain
     must append the texts to `next_prompt` before the `while True` loop."""
     import json
-    import subprocess
 
     from imp.agents.runner import AgentInvocation, QuestContext
     from imp.engine.state import InMemoryEventLog
@@ -513,16 +512,6 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
 
     _SRC = SourceLoc(file=Path("a.md"), line=1)
 
-    # Bootstrap a git repo so preflight() passes.
-    def _git_init(p: Path) -> None:
-        subprocess.run(["git", "init", "-q", str(p)], check=True)
-        subprocess.run(["git", "-C", str(p), "config", "user.email", "t@t.t"], check=True)
-        subprocess.run(["git", "-C", str(p), "config", "user.name", "T"], check=True)
-        (p / ".gitkeep").write_text("")
-        subprocess.run(["git", "-C", str(p), "add", ".gitkeep"], check=True)
-        subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "init"], check=True)
-
-    _git_init(tmp_path)
     (tmp_path / "auth.json").write_text('{"auth_mode": "chatgpt", "tokens": {}}')
     tx = tmp_path / "tx"
     tx.mkdir(exist_ok=True)
