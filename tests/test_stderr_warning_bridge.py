@@ -83,3 +83,37 @@ def test_build_stderr_sink_emits_runner_warning_to_event_log(tmp_path: Path) -> 
     assert len(warns) == 1
     assert warns[0]["agent_id"] == "step:p/s"
     assert warns[0]["payload"]["message"] == "codex stderr: Error: nested config drift"
+
+
+def _sink_for(tmp_path: Path, step: str, elog: InMemoryEventLog) -> StderrSink:
+    return build_stderr_sink(tmp_path / step / "stderr.log", elog=elog,
+                             aid=f"step:p/{step}", source="codex")
+
+
+def _warnings_of(elog: InMemoryEventLog) -> list[str]:
+    return [e["payload"]["message"] for e in elog.read()
+            if e["type"] == "runner_warning"]
+
+
+def test_same_warning_from_two_steps_emits_one_event(tmp_path: Path) -> None:
+    # One sink is built per agent STEP; the dedup is run-scoped, so the second
+    # step's identical provider startup warning adds no event.
+    elog = InMemoryEventLog()
+    for step in ("s1", "s2"):
+        sink = _sink_for(tmp_path, step, elog)
+        sink.feed("WARNING: proceeding, even though we could not create PATH "
+                  "aliases: nope\n")
+        sink.close()
+    assert _warnings_of(elog) == [
+        "codex stderr: WARNING: proceeding, even though we could not create PATH "
+        "aliases: nope"]
+
+
+def test_two_different_warnings_from_two_steps_emit_two_events(tmp_path: Path) -> None:
+    elog = InMemoryEventLog()
+    for step, text in (("s1", "Warning: alpha\n"), ("s2", "Warning: beta\n")):
+        sink = _sink_for(tmp_path, step, elog)
+        sink.feed(text)
+        sink.close()
+    assert _warnings_of(elog) == ["codex stderr: Warning: alpha",
+                                  "codex stderr: Warning: beta"]

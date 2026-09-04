@@ -140,8 +140,7 @@ def build_stderr_sink(
 ) -> StderrSink:
     """Wire close()-time Warning/Error span extraction into elog as runner_warning events."""
     def _on_warning(message: str) -> None:
-        elog.append(agent_id=aid, type="runner_warning",
-                    payload={"message": message})
+        elog.append_stderr_warning(agent_id=aid, message=message)
     return StderrSink(path, on_warning=_on_warning, source=source)
 
 
