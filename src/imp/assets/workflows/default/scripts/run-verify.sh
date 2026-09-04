@@ -15,16 +15,24 @@
 # Contract:
 #   - resolved command non-empty → run it via `bash -c` under a timeout with its
 #     stdout+stderr merged into one ordered stream; propagate its exit code. The
-#     full merged output is replayed first (retained whole in the event log), then
-#     an actionable summary is printed LAST so the lean display tail lands on it:
-#     on timeout (exit 124) the summary names THIS tier's *_timeout config key to
-#     raise (truncated output otherwise reads as a hang at whatever check happened
-#     to be printing); on a plain non-zero failure it reprints the tail of the run;
-#     on success it is silent. The workflow routes exit 124 to a human pause
+#     full merged output is replayed first, then an actionable summary is printed
+#     LAST: on timeout (exit 124) the summary names THIS tier's *_timeout config
+#     key to raise (truncated output otherwise reads as a hang at whatever check
+#     happened to be printing) and lands in the last-lines rendering the human
+#     pause shows; on a plain non-zero failure it points at the saved log; on
+#     success it is silent. The workflow routes exit 124 to a human pause
 #     (re-running can't beat the clock), distinct from a real non-zero failure
 #     which bounces back to the upstream agent.
 #   - resolved command unset or empty → print an informational message and exit 0
 #     (no gate; project hasn't wired / has opted out of this tier).
+#
+# Durable failure log: on ANY non-zero exit, including 124, the complete merged
+# output is written to $IMP_QUEST_DIR/artifacts/verify/$IMP_QUEST_ID.md. That file
+# is the only complete record of the run — what this script prints reaches the
+# resumed agent as a 4000-char head+tail excerpt, and this step sets no
+# show_output, so nothing else keeps the whole text. _harvest_artifacts journals
+# artifacts/** after every step, so the log is readable while the quest is in
+# flight and after it merges, with `imp show <id> verify`.
 #
 # Per-tier tree-SHA skip cache: record the git tree SHA of the last green (exit-0)
 # run in a per-tier per-quest file (last_green_tree_<tier>) under $IMP_QUEST_DIR.
@@ -95,7 +103,7 @@ rc=0
 out="$(timeout -k 30 "$gate_timeout" bash -c "$cmd" 2>&1)" || rc=$?
 
 if [[ -n "$out" ]]; then
-  printf '%s\n' "$out"   # firehose first: the full merged output, retained in the event log
+  printf '%s\n' "$out"   # firehose first; only a head+tail excerpt of this reaches the agent, so the log below keeps the whole of it
 fi
 
 if (( rc != 0 )); then
@@ -120,10 +128,12 @@ if (( rc == 124 )); then
   echo "imp: suite slower than the ceiling — though a genuinely hung test is possible, and"
   echo "imp: the retained output above is there to tell those apart. If it is merely slow,"
   echo "imp: raise the ceiling with the '$timeout_key' config key (seconds)."
+  echo "imp: the retained output is also saved at $log_path (\`imp show $IMP_QUEST_ID verify\`)."
 elif (( rc != 0 )); then
   printf '\n'
-  echo "imp: the $tier gate failed (exit $rc); tail of the run:"
-  printf '%s\n' "$out" | tail -n 15
+  echo "imp: the $tier gate failed (exit $rc); the output above is truncated in this message."
+  echo "imp: the complete run is saved at $log_path"
+  echo "imp: and stays readable after the quest merges with \`imp show $IMP_QUEST_ID verify\`."
 fi
 
 # Record the tree of every slow run (pass or fail) so a later pre-merge gate will be able to

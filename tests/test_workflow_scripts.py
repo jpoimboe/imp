@@ -304,34 +304,47 @@ def test_run_verify_merges_gate_stderr_into_stdout(tmp_path: Path) -> None:
 
 
 def test_run_verify_failure_tail_is_last_on_stdout(tmp_path: Path) -> None:
+    """The plain-failure summary is a pointer at the saved log, not a reprint: it
+    reaches no human display, and its only reader paid ~1200 of 2000 feedback
+    characters to read the run's tail twice."""
     project = tmp_path / "proj"
     project.mkdir()
+    quest_dir = tmp_path / "quest"
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": "echo the-failure-line; exit 1",
-        "IMP_QUEST_DIR": str(project_state_dir(project) / "quests" / "test-quest")})
+        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir)})
     assert proc.returncode == 1
-    assert "the-failure-line" in proc.stdout
-    assert "gate failed (exit 1)" in proc.stdout
-    # the tail content is reprinted AFTER the summary header, so the lean reveal lands on it
-    assert proc.stdout.index("gate failed (exit 1)") < proc.stdout.rindex("the-failure-line")
+    assert proc.stdout.splitlines()[-3:] == [
+        "imp: the fast gate failed (exit 1); the output above is truncated in this message.",
+        f"imp: the complete run is saved at {_verify_log(quest_dir)}",
+        "imp: and stays readable after the quest merges with `imp show abcd12 verify`.",
+    ]
+    assert proc.stdout.count("the-failure-line") == 1
 
 
 def test_run_verify_timeout_guidance_is_last_line_block_on_stdout(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
+    quest_dir = tmp_path / "quest"
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": "echo early-output; sleep 5",
         "IMP_TEST_CMD_FAST_TIMEOUT": "1",
-        "IMP_QUEST_DIR": str(project_state_dir(project) / "quests" / "test-quest")})
+        "IMP_QUEST_ID": "abcd12", "IMP_QUEST_DIR": str(quest_dir)})
     assert proc.returncode == 124
     assert "early-output" in proc.stdout
     assert "test_cmd_fast_timeout" in proc.stdout
     assert "gate ceiling" in proc.stdout
-    assert any("test_cmd_fast_timeout" in ln for ln in proc.stdout.splitlines()[-6:])
+    # This branch DOES reach a human, through the script_blocked ErrorNode's
+    # last-15-lines rendering, so the whole block has to stay at the end.
+    assert any("test_cmd_fast_timeout" in ln for ln in proc.stdout.splitlines()[-7:])
     assert proc.stdout.index("early-output") < proc.stdout.index("test_cmd_fast_timeout")
     assert "test_cmd_fast_timeout" not in proc.stderr
+    assert proc.stdout.splitlines()[-1] == (
+        f"imp: the retained output is also saved at {_verify_log(quest_dir)} "
+        "(`imp show abcd12 verify`)."
+    )
 
 
 def test_run_verify_success_summary_is_silent(tmp_path: Path) -> None:
@@ -575,3 +588,14 @@ def test_run_verify_log_is_named_for_the_quest_id_and_overwritten(tmp_path: Path
     assert "second-run" in body
     assert "first-run" not in body
     assert sorted(p.name for p in (quest_dir / "artifacts" / "verify").iterdir()) == ["zzz999.md"]
+
+
+def test_run_verify_comments_do_not_claim_the_event_log_holds_the_output() -> None:
+    """The header contract is the only description of where a failing run's output
+    goes. It claimed the event log, which never held it — no show_output on this
+    step means nothing emits the merged text."""
+    body = (_scripts_dir() / "run-verify.sh").read_text()
+    assert "event log" not in body
+    assert "artifacts/verify/$IMP_QUEST_ID.md" in body
+    assert "the only complete record" in body
+    assert "imp show <id> verify" in body
