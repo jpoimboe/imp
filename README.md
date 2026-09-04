@@ -53,7 +53,10 @@ recommend a Claude Max or ChatGPT Pro subscription.
 imp needs Linux, Git, Python 3.11 or newer, `uv`, and
 [bubblewrap](https://github.com/containers/bubblewrap).  For model access, either
 install and sign in to the `claude` or `codex` CLI with an existing subscription,
-or export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.
+or export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.  For web
+work, add a browser: imp renders and drives real pages for mockups and browser
+tests, and an agent that finds none will spend a few minutes downloading ~115 MB
+of Chromium into `~/.cache`.
 
 ```bash
 uv tool install git+https://github.com/jpoimboe/imp
@@ -77,6 +80,43 @@ a different direction.
 Brownfield development works too.  Run `imp init` and `imp new` from an
 existing checkout; imp reads the code before asking questions and fits the
 feature to the existing code.
+
+## What a quest costs
+
+imp front-loads deliberation, so expect hours of machine time and real
+subscription spend for anything non-trivial.  Most of it goes to thinking rather
+than typing: writing the spec, reviewing it, planning each chunk of work,
+reviewing those plans.  A spec is rewritten until a fresh reviewer clears it --
+often several rounds -- and so is every plan.
+
+That is the design, not overhead.  A reviewer who never saw the author's
+reasoning catches mistakes while they are still an unbuilt paragraph, and
+planning a chunk of work often takes longer than building it.  Rewriting a plan
+is cheap; rewriting a merged feature is not.
+
+One measured run, from a one-sentence intent to a merge commit: a greenfield
+FastAPI + HTMX + SQLite task tracker, on Claude Max with imp's default ladder --
+Opus 5 leading each step, Sonnet 4.6 coding -- September 2026.
+
+| | |
+|---|---|
+| imp working time | 6 h 16 m |
+| spec review rounds | 6 |
+| plans / tasks | 3 / 25 |
+| plan review rounds | 6 |
+| questions asked of the human | 1 |
+| merged result | 41 files, +3,278 lines, 136 tests |
+| tokens | 85.7 M -- 93% of them cache reads |
+| list-rate cost | $91, and zero marginal cost on a subscription |
+
+Ninety-three percent cache reads is the economic signature of a fresh-context
+workflow: every step re-reads a prompt prefix it did not write, and cache pricing
+is what makes that affordable.  Genuine new output was 0.13% of the total.
+
+The same intent on the codex backend took 7 h 24 m and 115 M tokens, with 2 spec
+rounds and 17 plan rounds across 6 plans.  The number of rounds swings; the shape
+does not.  Both are single runs -- read them as an order of magnitude, not a
+benchmark.
 
 ## Features
 
