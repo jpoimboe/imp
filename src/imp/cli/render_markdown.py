@@ -19,6 +19,7 @@ from imp.cli.render_summary import (
     _sub_body,
     _tok_total,
     header_totals,
+    open_span_label,
 )
 
 _MAX_HEADING = 6
@@ -278,7 +279,7 @@ def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
     work, tokens, cost = header_totals(summary, header.total_seconds)
-    open_label = header.status
+    open_label = open_span_label(header.status)
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),
         (f"**Status:** {_md_escape(header.status)}"
@@ -292,12 +293,12 @@ def render_summary_markdown(summary: list[StepRow], *,
             grouped.append((row.phase, []))
         step = _md_escape(row.step).replace("|", "\\|")
         grouped[-1][1].append(
-            f"| {step} | {_dur_text(row.work_seconds, open_label)}"
+            f"| {step} | {row.dur_cell(open_label)}"
             f" | {_fmt_tokens(_tok_total(row.tokens))} | {_fmt_cost(row.cost)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")
             grouped[-1][1].append(
-                f"| {body} | {_dur_text(sub.wall_seconds)}"
+                f"| {body} | {sub.dur_cell(open_label)}"
                 f" | {_fmt_tokens(_tok_total(sub.tokens))} | {_fmt_cost(sub.cost)} |")
     for phase, rows in grouped:
         table = "\n".join([
