@@ -989,7 +989,7 @@ class CodexAgentRunner:
 # when a turn that billed tokens yielded no reading.
 _NO_CONTEXT_READING_WARNING = (
     "no codex context reading in the rollout; context gauge and "
-    "handoff watch disabled for this run")
+    "handoff watch inactive for this turn (warned once per run)")
 
 
 def _attach_usage_to_last_agent_message(

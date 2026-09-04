@@ -115,7 +115,7 @@ def test_unreadable_rollout_does_not_kill_the_turn(
 
 
 _CANARY = ("no codex context reading in the rollout; context gauge and "
-           "handoff watch disabled for this run")
+           "handoff watch inactive for this turn (warned once per run)")
 
 
 @dataclass
