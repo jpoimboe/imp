@@ -3,12 +3,13 @@ and the old partial name survives nowhere under src/ or tests/."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from imp.agents.prompts import build_context, render_prompt
-from imp.assets import bundled_workflow_dir
+from imp.assets import bundled_partials_dir, bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import InMemoryEventLog
 
@@ -74,21 +75,64 @@ def test_interactive_git_writing_agents_render_the_write_bounds(
     # Fragments only the reframed hatch section carries — the include pulls it in too.
     assert "or a read of a masked path" in out
     assert "re-enables itself when the step ends" in out
+    # The rewritten masking steer, and the grounding partial it defers to, both land.
+    assert "so a filesystem search silently answers the wrong question" in out
+    assert 'load_skill(name="imp-knowledge")' in out
 
 
-def test_partial_names_the_cross_project_read_path_and_both_env_pins() -> None:
-    section = PARTIAL.read_text().split("## Another quest's state is invisible on disk\n")[1]
+_NEW_HEADING = "## imp state on disk is masked — load `imp-knowledge`"
+
+
+def test_partial_steers_to_the_skill_and_names_no_cli_surface() -> None:
+    text = PARTIAL.read_text()
+    section = text.split(_NEW_HEADING + "\n")[1]
     lines = [ln for ln in section.splitlines() if ln.strip()]
     # The section is a markdown blockquote in the file and stays one.
     assert lines and all(ln.startswith("> ") for ln in lines)
     # Strip `> ` first: `_flat` alone leaves each `>` as a token, breaking wrap-spanning matches.
     flat = _flat(" ".join(ln.removeprefix("> ") for ln in lines))
-    # The tmpfs covers this project's state dir only, so the unqualified claim is wrong now.
-    assert "masks **this project's** state directory except this quest's own home" in flat
-    assert "so a sibling quest home beside `{{ quest.home }}` does not exist at all" in flat
-    assert "resolved by the unsandboxed daemon" in flat
-    assert "Other projects' state directories are readable read-only" in flat
-    assert "grep their `quests/<id>/events.jsonl` or artifacts directly" in flat
-    assert "never `cat` one; it is unbounded" in flat
-    # Both pins, together: the socket alone re-routes the read to this quest's daemon.
-    assert "`cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>`" in flat
+    assert ("The sandbox masks this project's imp state — sibling quest homes and the "
+            "archive are not on disk at all, so a filesystem search silently answers "
+            "the wrong question.") in flat
+    assert ("Never read or search other quests' or archived state off the filesystem, "
+            "and never infer another quest's liveness from it.") in flat
+    assert ("Load `imp-knowledge` for the CLI-based reads that answer the question "
+            "correctly, resolved by the unsandboxed daemon.") in flat
+    # One place documents the CLI — the skill — so this prompt cannot drift out of date.
+    for banned in ("imp show", "imp list", "imp log", "imp search", "imp events",
+                   "IMP_SESSION_SOCKET", "IMP_STATE_DIR", "events.jsonl", "`cat`"):
+        assert banned not in text, banned
+
+
+_WORKFLOWS = Path("src/imp/assets/workflows")
+_INCLUDE = re.compile(r'\{%\s*include\s+"partials/([^"]+)\.md"\s*%\}')
+
+
+def _include_closure(workflow_dir: Path, source: str) -> set[str]:
+    seen: set[str] = set()
+    pending = _INCLUDE.findall(source)
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        local = workflow_dir / "partials" / f"{name}.md"
+        path = local if local.is_file() else bundled_partials_dir() / f"{name}.md"
+        pending.extend(_INCLUDE.findall(path.read_text()))
+    return seen
+
+
+def test_every_agent_carrying_sandbox_limits_also_carries_grounding() -> None:
+    carriers: set[str] = set()
+    for agents_dir in sorted(_WORKFLOWS.glob("*/agents")):
+        wf_dir = agents_dir.parent
+        for src in sorted(agents_dir.glob("*.md")):
+            closure = _include_closure(wf_dir, src.read_text())
+            if "sandbox-limits" not in closure:
+                continue
+            site = f"{wf_dir.name}/{src.stem}"
+            carriers.add(site)
+            # The steer defers to the skill, so grounding must reach the same prompt.
+            assert "imp-grounding" in closure, site
+    assert {"default/threshold", "default/finalize",
+            "minimal/front-door", "minimal/finalize"} <= carriers

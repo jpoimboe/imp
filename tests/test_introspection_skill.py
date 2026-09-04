@@ -5,6 +5,10 @@ from pathlib import Path
 _SKILL = Path("docs/guide/introspection.md")
 
 
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
 def test_skill_documents_append_intent() -> None:
     text = _SKILL.read_text()
     assert "imp edit" in text
@@ -32,3 +36,9 @@ def test_reading_another_quest_credits_the_daemon_not_the_sandbox_floor() -> Non
     # The one on-disk read that does work across the mask, and its two env pins.
     assert "Other projects' state directories *are* readable read-only" in text
     assert "`cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>`" in text
+    # The demotion: the on-disk cross-project read is a fallback, not the history path.
+    flat = _flat(text)
+    assert "a fallback for cross-project diagnosis only" in flat
+    assert ("**This** project's history is unreachable that way (its sibling quest homes "
+            "and archive are masked); search it with `imp search` / `imp events search`, "
+            "which the daemon resolves.") in flat

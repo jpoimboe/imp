@@ -126,7 +126,10 @@ answers them — not the sandbox floor:
   archived quests alike.
 
 Other projects' state directories *are* readable read-only inside the sandbox,
-so their `quests/<id>/events.jsonl` and artifacts can be read directly. The
+so their `quests/<id>/events.jsonl` and artifacts can be read directly — a
+fallback for cross-project diagnosis only. **This** project's history is
+unreachable that way (its sibling quest homes and archive are masked); search it
+with `imp search` / `imp events search`, which the daemon resolves. The
 `imp` CLI reaches another project only with both env pins cleared —
 `cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>` — since
 the socket pins reads to this quest's daemon and `IMP_STATE_DIR` to this
