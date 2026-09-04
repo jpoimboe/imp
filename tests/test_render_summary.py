@@ -293,15 +293,23 @@ def _qr(agent_id: str, ts: str, cost: float) -> dict:
 
 
 def _subcall(event_id: str, block_id: str, agent_id: str, ts: str,
-             name: str, label: str | None = None) -> dict:
-    return {"type": "tool_call", "id": event_id, "agent_id": agent_id, "timestamp": ts,
-            "payload": {"name": "sub_agent", "id": block_id, "id_ns": "block",
-                        "label": label, "input": {"subagent_name": name}}}
+             name: str, label: str | None = None, *,
+             stamped: bool = True) -> dict:
+    payload: dict = {"name": "sub_agent", "id": block_id, "label": label,
+                     "input": {"subagent_name": name}}
+    if stamped:
+        payload["id_ns"] = "block"
+    return {"type": "tool_call", "id": event_id, "agent_id": agent_id,
+            "timestamp": ts, "payload": payload}
 
 
-def _subresult(block_id: str, agent_id: str, ts: str, error: bool = False) -> dict:
+def _subresult(block_id: str, agent_id: str, ts: str, error: bool = False, *,
+               stamped: bool = True) -> dict:
+    payload: dict = {"id": block_id, "error": error}
+    if stamped:
+        payload["id_ns"] = "block"
     return {"type": "tool_result", "agent_id": agent_id, "timestamp": ts,
-            "payload": {"id": block_id, "error": error}}
+            "payload": payload}
 
 
 def test_step_own_tokens_summed_from_matching_agent_id():
@@ -667,3 +675,51 @@ def test_header_waiting_renders_bold():
                         status="waiting", total_seconds=100.0)
     out = render_summary([], header=hdr, color=True, width=80)
     assert "\x1b[1mwaiting\x1b[0m" in out[0]   # bold, like running
+
+
+def test_plain_tool_result_cannot_close_a_stamped_subagent():
+    prefix = [
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_5", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        # An ordinary, unrelated tool result that happens to reuse block id item_5
+        # (codex block ids are short per-turn sequence numbers).
+        _subresult("item_5", "lead1", "2026-01-01T00:00:30+00:00", stamped=False),
+    ]
+    ignored = build_summary(prefix)[0].subagents[0]
+    assert ignored.end_ts is None
+    assert ignored.wall_seconds is None
+
+    # ...and its own stamped result still closes it afterwards.
+    closed = build_summary([
+        *prefix,
+        _subresult("item_5", "lead1", "2026-01-01T00:00:50+00:00"),
+    ])[0].subagents[0]
+    assert closed.end_ts == "2026-01-01T00:00:50+00:00"
+    assert closed.wall_seconds == 40.0
+
+
+def test_duplicate_stamped_result_does_not_move_end_ts():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "item_5", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subresult("item_5", "lead1", "2026-01-01T00:00:55+00:00"),
+        _subresult("item_5", "lead1", "2026-01-01T00:02:00+00:00"),
+        _completed("task-lead", "2026-01-01T00:03:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.end_ts == "2026-01-01T00:00:55+00:00"
+    assert sub.wall_seconds == 45.0
+
+
+def test_legacy_unstamped_pair_still_closes():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00", "explorer",
+                 stamped=False),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00", stamped=False),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].subagents[0].wall_seconds == 45.0

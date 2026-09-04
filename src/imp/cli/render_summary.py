@@ -67,7 +67,9 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     open_row: StepRow | None = None        # the currently-open occurrence
     pending_wait_start: str | None = None  # ts of an unresolved awaiting_user_input
     subs_by_agent: dict[str, SubagentRow] = {}   # "sub:<event id>" -> row (tokens/cost)
-    subs_by_block: dict[str, SubagentRow] = {}    # tool_call block id -> row (close)
+    # (call was id_ns-stamped, block id) -> row. Keying on the stamping is what stops an
+    # unstamped result from closing a stamped call: codex block ids repeat every turn.
+    open_subs: dict[tuple[bool, str], SubagentRow] = {}
 
     def _close_wait(now_ts: str | None) -> None:
         nonlocal pending_wait_start
@@ -136,12 +138,14 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
                 open_row.subagents.append(sub)
                 subs_by_agent[f"sub:{event_id}"] = sub
                 if block_id:
-                    subs_by_block[block_id] = sub
+                    open_subs[(p.get("id_ns") == "block", block_id)] = sub
         elif etype == "tool_result":
-            sub = subs_by_block.get(str(p.get("id", "")))
-            if sub is not None:
-                sub.end_ts = ts
-                sub.errored = bool(p.get("error", False))
+            id_ns = p.get("id_ns")
+            if id_ns is None or id_ns == "block":
+                sub = open_subs.pop((id_ns == "block", str(p.get("id", ""))), None)
+                if sub is not None:
+                    sub.end_ts = ts
+                    sub.errored = bool(p.get("error", False))
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
