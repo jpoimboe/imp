@@ -85,7 +85,6 @@ class RunState:
     complete_step_called: bool = False
     complete_step_args: dict[str, Any] = field(default_factory=dict)
     abort_requested: bool = False
-    runtime_errors: list[str] = field(default_factory=list)
     fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)

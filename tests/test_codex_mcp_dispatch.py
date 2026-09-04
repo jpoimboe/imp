@@ -426,6 +426,17 @@ def test_raising_tool_yields_iserror_result_naming_the_exception_type(
         "Error executing tool read_file: ValueError: no such file: foo.py")
 
 
+def test_codex_run_state_has_no_runtime_errors_field() -> None:
+    """Its only writer was the swallow arm that now re-raises. claude_code has an
+    independent field of the same name that must survive."""
+    from dataclasses import fields
+
+    from imp.providers.claude_code import _RunState as ClaudeCodeRunState
+
+    assert "runtime_errors" not in {f.name for f in fields(RunState)}
+    assert "runtime_errors" in {f.name for f in fields(ClaudeCodeRunState)}
+
+
 def _image_parts() -> list:
     return [
         TextPart(text="shot.png — 8×8 PNG"),
