@@ -66,3 +66,28 @@ def test_config_toml_pins_the_imp_tool_timeout_without_an_impty_block() -> None:
     cfg = tomllib.loads(txt)
     assert cfg["mcp_servers"]["imp"]["tool_timeout_sec"] == 86400
     assert "impty" not in cfg["mcp_servers"]
+
+
+def test_config_toml_puts_approval_mode_inside_the_imp_server_table() -> None:
+    txt = render_config_toml(host="127.0.0.1", port=49152,
+                             bearer_env_var="IMP_MCP_TOKEN",
+                             web_search_enabled=False)
+    data = tomllib.loads(txt)
+    # Parsed, not substring-matched: a key landing in the wrong table must fail.
+    assert data["mcp_servers"]["imp"]["default_tools_approval_mode"] == "approve"
+    assert "default_tools_approval_mode" not in data["features"]
+    assert data["features"] == {
+        "shell_tool": False, "plugins": False, "image_generation": False,
+    }
+
+
+def test_config_toml_puts_approval_mode_inside_the_impty_server_table() -> None:
+    txt = render_config_toml(
+        host="127.0.0.1", port=49152, bearer_env_var="IMP_MCP_TOKEN",
+        web_search_enabled=False, impty_url="http://127.0.0.1:55001/mcp",
+        impty_bearer_env_var="IMP_IMPTY_TOKEN")
+    data = tomllib.loads(txt)
+    assert data["mcp_servers"]["impty"]["default_tools_approval_mode"] == "approve"
+    assert data["mcp_servers"]["impty"]["url"] == "http://127.0.0.1:55001/mcp"
+    assert data["mcp_servers"]["imp"]["default_tools_approval_mode"] == "approve"
+    assert data["features"]["shell_tool"] is False

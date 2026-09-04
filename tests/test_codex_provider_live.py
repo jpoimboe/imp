@@ -1,6 +1,7 @@
 """Live e2e for the codex provider, gated behind `--run-live` (codex).
 Runs codex under the EXACT production flags:
-`sandbox_mode="danger-full-access" + network_access_enabled=False` — the
+`sandbox_mode="read-only" + network_access_enabled=False`, with imp's own MCP
+servers auto-approved via config.toml's `default_tools_approval_mode` — the
 combination the unit tests can't validate.
 
 Assertions:

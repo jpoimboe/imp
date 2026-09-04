@@ -975,7 +975,7 @@ class CodexAgentRunner:
         # against. Verified: both forms model_dump() to the same payload.
         return ThreadOptions(
             model=self.model,
-            sandboxMode="danger-full-access",
+            sandboxMode="read-only",
             approvalPolicy=CODEX_APPROVAL_POLICY,
             networkAccessEnabled=False,
             modelReasoningEffort="high" if tier in ("medium", "high") else None,
