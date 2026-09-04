@@ -2025,6 +2025,14 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+# The keys are `show`'s resource choices; the values are the message when nothing
+# is recorded, so a choice cannot exist without one.
+_SHOW_ARTIFACT_ABSENT = {
+    "spec": "no spec for",
+    "verify": "no failing gate output recorded for",
+}
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     from imp.cli.store import make_store
     token = args.token
@@ -2066,10 +2074,9 @@ def _cmd_show(args: argparse.Namespace) -> int:
                          color=should_use_color(sys.stdout)),
             no_pager=args.no_pager, trailing_blank=True)
         return 0
-    if resource == "spec":
-        data = make_store(control).get_artifact(quest_id, "spec")
+    data = make_store(control).get_artifact(quest_id, resource)
     if data is None:
-        _emit_cli_error(f"no {resource} for {quest_id!r}")
+        _emit_cli_error(f"{_SHOW_ARTIFACT_ABSENT[resource]} {quest_id!r}")
         return 2
     _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
                    no_pager=args.no_pager, trailing_blank=True)
@@ -4128,9 +4135,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "show",
         help="Show one quest's detail or a named artifact (imp show <id>).",
         description=(
-            "Print a quest's detail card, or name the spec artifact to print "
-            "just that. "
-            "Reads the live worktree files while a quest is in flight and "
+            "Print a quest's detail card, or name an artifact to print just "
+            "that: spec for the spec, verify for the last failing test-gate "
+            "run. Reads the live quest files while a quest is in flight and "
             "falls back to the archive once it is merged."),
     )
     p_show.add_argument(
@@ -4138,7 +4145,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Quest id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=["spec"],
+        choices=list(_SHOW_ARTIFACT_ABSENT),
         help="Which artifact to print (default: a detail card).")
     p_show.add_argument(
         "--no-pager", action="store_true",
