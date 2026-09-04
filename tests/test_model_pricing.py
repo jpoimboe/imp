@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from imp.providers.catalog import ModelPrices, prices_for
+from imp.providers.catalog import (
+    BillingUsage,
+    ModelPrices,
+    cost_usd,
+    prices_for,
+)
 
 
 def test_anthropic_rates_match_the_published_table() -> None:
@@ -72,3 +77,50 @@ def test_only_the_surcharged_models_carry_a_long_context_threshold() -> None:
                   "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6",
                   "claude-haiku-4-5"):
         assert prices_for(model).long_context_threshold is None
+
+
+# 1000 fresh / 2000 cached / 3000 cache write / 4000 output, priced by hand
+# against the published per-million rates for every model in the table.
+_MIXED = BillingUsage(fresh_input=1000, cached_input=2000,
+                      cache_write=3000, output=4000)
+
+
+@pytest.mark.parametrize(("model", "expected"), [
+    ("gpt-5.6-sol", 0.0998),     # 4000 +   800 + 15000 +  80000 per million
+    ("gpt-5.6-terra", 0.0579),   # 2000 +   400 +  7500 +  48000
+    ("gpt-5.6-luna", 0.00579),   #  200 +    40 +   750 +   4800
+    ("gpt-5.6", 0.0998),         # alias -> sol
+    ("gpt-5.5", 0.141),          # 5000 +  1000 + 15000 + 120000
+    ("gpt-5.4", 0.0705),         # 2500 +   500 +  7500 +  60000
+    ("gpt-5.4-mini", 0.02115),   #  750 +   150 +  2250 +  18000
+    ("gpt-5.3-codex", 0.06335),  # 1750 +   350 +  5250 +  56000
+    ("gpt-5", 0.04525),          # 1250 +   250 +  3750 +  40000
+])
+def test_every_openai_model_prices_the_hand_worked_fixture(
+        model: str, expected: float) -> None:
+    assert cost_usd(model, _MIXED) == pytest.approx(expected, rel=1e-12)
+
+
+def test_cached_input_is_not_billed_at_the_fresh_rate() -> None:
+    # 3000 tokens all fresh on gpt-5.6-sol: 3000 * $4/M = $0.012.
+    # The same 3000 as 1000 fresh + 2000 cached: 1000 * $4/M + 2000 * $0.40/M.
+    assert cost_usd("gpt-5.6-sol",
+                    BillingUsage(fresh_input=3000)) == pytest.approx(0.012)
+    assert cost_usd("gpt-5.6-sol",
+                    BillingUsage(fresh_input=1000, cached_input=2000)
+                    ) == pytest.approx(0.0048)
+
+
+def test_anthropic_buckets_price_side_by_side_with_no_subtraction() -> None:
+    # The live probe row: 10 fresh input billed in full ALONGSIDE 12812 cache
+    # reads and 52 output on sonnet — 10*$3 + 52*$15 + 12812*$0.30 per million.
+    usage = BillingUsage(fresh_input=10, cached_input=12812, output=52)
+    assert cost_usd("claude-sonnet-4-6", usage) == pytest.approx(0.0046536)
+
+
+def test_a_model_absent_from_the_table_has_no_computed_cost() -> None:
+    assert cost_usd("gpt-9-imaginary", BillingUsage(fresh_input=1000)) is None
+
+
+def test_zero_usage_on_a_known_model_costs_nothing() -> None:
+    assert cost_usd("gpt-5.6-sol", BillingUsage()) == 0.0

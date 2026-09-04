@@ -305,3 +305,30 @@ def prices_for(model: str | None) -> ModelPrices | None:
     if not prefixes:
         return None
     return MODEL_PRICES[max(prefixes, key=len)]
+
+
+@dataclass(frozen=True)
+class BillingUsage:
+    """One request's canonical billing quadruple plus its web-search count.
+
+    `fresh_input` is already net of whatever buckets its source path nests
+    inside `input_tokens` — the per-provider normalizer owns that subtraction,
+    and nothing here subtracts again.
+    """
+    fresh_input: int = 0
+    cached_input: int = 0
+    cache_write: int = 0
+    output: int = 0
+    web_search_requests: int = 0
+
+
+def cost_usd(model: str | None, usage: BillingUsage) -> float | None:
+    """List-price dollars for one request; None when `model` is absent from the
+    price table, which is the only way a computed cost is unavailable."""
+    prices = prices_for(model)
+    if prices is None:
+        return None
+    return (usage.fresh_input * prices.input
+            + usage.cached_input * prices.cache_read
+            + usage.cache_write * prices.cache_write
+            + usage.output * prices.output) / 1_000_000
