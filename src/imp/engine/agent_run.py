@@ -578,8 +578,7 @@ def build_agent_invocation(
             if feedback_lead:
                 task = f"{feedback_lead}\n\n{task}"
             if reincarnation_text:
-                # Appended after reflow so the inlined handoff note reaches the
-                # model byte-for-byte, and last so "to end of message" holds.
+                # Appended after reflow so the note reaches the model byte-for-byte, and lands last.
                 task = f"{task}\n\n{reincarnation_text}"
             messages = (Message(role="user", content=(TextBlock(text=task),)),)
     def _mark_waiting() -> None:
