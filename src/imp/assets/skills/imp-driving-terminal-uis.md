@@ -38,7 +38,8 @@ send/react loop for interactive programs.
   worktree. `light=True` previews a light theme.
 - **`wait(idle=…, hard=…, for_change=False)`** — let a still-working program settle
   before you look; `for_change=True` waits for NEW output instead (30s cap), to follow
-  a long command without polling.
+  a long command without polling. No call blocks past 240s: a bigger `hard` is clamped
+  and the header says to call again — loop it to follow a program for hours.
 - **`resize(rows, cols, wait=True)`** — resize the terminal (SIGWINCH) to test reflow.
 - **`send_signal(sig=2)`** — deliver a real signal to the program's group (SIGINT=2,
   SIGTERM=15), independent of tty mode.
