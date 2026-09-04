@@ -2,12 +2,13 @@
 # Copyright 2026 Josh Poimboeuf
 """Transport-neutral driver for one interactive program over an impty
 `TerminalSession`. Owns the session and exposes the eight tool bodies (start,
-view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The tool
-descriptions live on the method docstrings as the single source of truth — the
-provider host adapters (claude_code SDK tools, codex FastMCP, the standalone
-stdio server) all surface these same methods, so there is no per-provider
-description drift. Calls are blocking (wait_idle, time.sleep, pty reads); each
-in-process host offloads them to a thread.
+view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The method
+docstrings are the FULL tool descriptions, surfaced only by the standalone stdio
+server; both provider hosts (claude_code SDK tools, codex FastMCP) show the
+one-line `THIN_DESCRIPTIONS` in `impty.mcp` instead, so agent-facing wording has
+to be kept in step across the two. Calls are blocking (wait_idle, time.sleep, pty
+reads); each in-process host offloads them to a thread, and this layer clamps
+`wait` and a numeric `send`/`resize` settle to `MAX_CALL_HARD`.
 """
 
 from __future__ import annotations
