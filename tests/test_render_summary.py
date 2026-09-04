@@ -14,6 +14,7 @@ from imp.cli.render_summary import (
     _tok_total,
     build_summary,
     header_totals,
+    open_span_label,
     render_summary,
     summary_total,
 )
@@ -851,3 +852,95 @@ def test_every_subagent_is_contained_on_a_codex_shaped_log():
     assert rows[0].subagents[0].wall_seconds == 110.0            # its own stamped result
     assert rows[0].subagents[1].end_ts == "2026-01-01T00:05:00+00:00"  # contained at step end
     assert rows[1].subagents[0].end_ts == "2026-01-01T00:08:00+00:00"  # step closed at next start
+
+
+def test_dur_text_marks_an_inferred_end_with_a_tilde():
+    assert _dur_text(90.0, inferred=True) == "~1m 30s"
+    assert _dur_text(90.0) == "1m 30s"
+
+
+@pytest.mark.parametrize("status,expected", [
+    ("merged", "interrupted"),
+    ("done", "interrupted"),
+    ("abandoned", "interrupted"),
+    ("running", "running"),
+    ("waiting", "waiting"),
+    ("paused", "paused"),
+    ("new", "new"),
+    ("error", "error"),
+    ("shelved", "shelved"),          # parked, not finished: keeps its status word
+    ("merge_blocked", "merge blocked"),
+])
+def test_open_span_label_word_per_status(status, expected):
+    assert open_span_label(status) == expected
+
+
+def test_inferred_ends_render_with_a_tilde_on_step_and_subagent():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:05:00+00:00", end_inferred=True,
+                   subagents=[SubagentRow(name="coder",
+                                          start_ts="2026-01-01T00:00:10+00:00",
+                                          end_ts="2026-01-01T00:02:24+00:00",
+                                          end_inferred=True)])
+    out = render_summary([step], header=_HDR, color=False, width=80)
+    assert out[-2:] == [
+        "  task-lead   ~5m 0s  —  —",
+        "    ↳ coder  ~2m 14s  —  —",
+    ]
+
+
+def test_open_spans_in_a_finished_quest_read_interrupted():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00", end_ts=None,
+                   subagents=[SubagentRow(name="coder",
+                                          start_ts="2026-01-01T00:00:10+00:00")])
+    out = render_summary([step], header=_HDR, color=False, width=80)   # _HDR is merged
+    assert out[-2:] == [
+        "  task-lead  interrupted  —  —",
+        "    ↳ coder  interrupted  —  —",
+    ]
+    assert "merged" not in "\n".join(out[1:])   # the status word stays in the header
+
+
+@pytest.mark.parametrize("status", ["done", "abandoned"])
+def test_other_finished_statuses_also_read_interrupted(status):
+    hdr = SummaryHeader(workflow="feature", quest_id="abc", status=status,
+                        total_seconds=100.0)
+    out = render_summary([_row("implement", "task-lead", 0, open_=True)],
+                         header=hdr, color=False, width=80)
+    assert "  task-lead  interrupted" in out[-1]
+    assert status not in out[-1]
+
+
+def test_merge_blocked_open_step_reads_two_words():
+    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+                        status="merge_blocked", total_seconds=100.0)
+    out = render_summary([_row("implement", "task-lead", 0, open_=True)],
+                         header=hdr, color=False, width=80)
+    assert "  task-lead  merge blocked" in out[-1]
+    assert "merge_blocked" not in out[-1]
+
+
+def test_alignment_across_tilde_plain_and_interrupted_cells():
+    rows = [
+        StepRow(phase="implement", step="a",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                subagents=[SubagentRow(name="coder",
+                                       start_ts="2026-01-01T00:00:05+00:00",
+                                       end_ts="2026-01-01T00:00:50+00:00")]),
+        StepRow(phase="implement", step="b",
+                start_ts="2026-01-01T00:01:00+00:00",
+                end_ts="2026-01-01T00:01:45+00:00", end_inferred=True),
+        StepRow(phase="implement", step="c",
+                start_ts="2026-01-01T00:02:00+00:00", end_ts=None),
+    ]
+    out = render_summary(rows, header=_HDR, color=False, width=80)
+    assert out[2:] == [
+        "  a                1m 0s  —  —",
+        "    ↳ coder          45s  —  —",
+        "  b                 ~45s  —  —",
+        "  c          interrupted  —  —",
+    ]
+    assert len({len(ln) for ln in out[2:]}) == 1   # one column grid for every row
