@@ -2,9 +2,9 @@
 # Copyright 2026 Josh Poimboeuf
 """CodexAgentRunner — the heavy lifting for the `codex` provider.
 
-Implements: interrupt() with four effects, fail-fast preflight(),
-snapshot/restore mechanism (git stash create + untracked set), and
-process_event() for basic event types.
+Implements: interrupt() with four effects, fail-fast preflight(), and
+process_event() for basic event types. Native writes need no runner-side guard:
+codex's own `read-only` sandbox refuses them.
 """
 
 from __future__ import annotations
@@ -15,11 +15,9 @@ import json
 import logging
 import os
 import secrets
-import shutil
-import subprocess
 import time
 from collections.abc import AsyncGenerator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -90,20 +88,8 @@ class PreflightError(Exception):
         self.category = category
 
 
-def _is_git_repo(cwd: Path) -> bool:
-    """True iff `cwd` is inside a git working tree."""
-    try:
-        r = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=str(cwd), check=False, capture_output=True, text=True, timeout=5.0,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0 and r.stdout.strip() == "true"
-
-
 def preflight(
-    *, model: str, cwd: Path, canonical_auth: Path, env: Mapping[str, str],
+    *, model: str, canonical_auth: Path, env: Mapping[str, str],
 ) -> AuthMode:
     """Run fail-fast checks before building SDK options. Returns auth mode."""
     # 1. Refuse `*-codex` in BOTH auth modes (M1).
@@ -114,14 +100,7 @@ def preflight(
             "*-codex in both auth modes until it gets fail-closed obedience "
             "validation. Choose a non-codex model (e.g. gpt-5.5).",
         )
-    # 2. Non-git cwd → no snapshot substrate (M2).
-    if not _is_git_repo(cwd):
-        raise PreflightError(
-            "config",
-            f"cwd {cwd!s} is not a git repository; codex provider requires "
-            "git for the fail-closed snapshot/revert mechanism.",
-        )
-    # 3. Auth must exist.
+    # 2. Auth must exist.
     mode = detect_auth_mode(canonical_path=canonical_auth, env=env)
     if mode is None:
         raise PreflightError(
@@ -130,64 +109,6 @@ def preflight(
             "OPENAI_API_KEY); run `codex login` or export an API key.",
         )
     return mode
-
-
-# ── EntrySnapshot / restore ───────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class EntrySnapshot:
-    """Captured state at `run()` entry — used to revert on fail-closed."""
-    stash_sha: str
-    untracked: frozenset[str] = field(default_factory=frozenset)
-
-
-def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args], cwd=str(cwd), check=True,
-        capture_output=True, text=True,
-    )
-
-
-def take_snapshot(cwd: Path) -> EntrySnapshot:
-    """Snapshot tracked state + record untracked set at run() entry."""
-    stash_sha = _git(cwd, "stash", "create").stdout.strip()
-    untracked_raw = _git(cwd, "ls-files", "--others", "--exclude-standard").stdout
-    untracked = frozenset(line for line in untracked_raw.splitlines() if line)
-    return EntrySnapshot(stash_sha=stash_sha, untracked=untracked)
-
-
-def restore_to_snapshot(cwd: Path, snap: EntrySnapshot) -> None:
-    """Restore the worktree to the entry snapshot."""
-    # 1. Tracked state.
-    # Unstage any pre-existing untracked files that got staged during the run,
-    # so that `git reset --hard HEAD` does not delete them.
-    if snap.untracked:
-        staged_raw = subprocess.run(
-            ["git", "ls-files", "--cached", "--"],
-            cwd=str(cwd), capture_output=True, text=True, check=False,
-        ).stdout
-        staged = set(staged_raw.splitlines())
-        to_unstage = [f for f in snap.untracked if f in staged]
-        if to_unstage:
-            _git(cwd, "rm", "--cached", "--force", "--", *to_unstage)
-    _git(cwd, "reset", "--hard", "HEAD")
-    if snap.stash_sha:
-        try:
-            _git(cwd, "stash", "apply", "--index", snap.stash_sha)
-        except subprocess.CalledProcessError:
-            _git(cwd, "stash", "apply", snap.stash_sha)
-    # 2. Remove this-run-only untracked files.
-    current_raw = _git(cwd, "ls-files", "--others", "--exclude-standard").stdout
-    current = [line for line in current_raw.splitlines() if line]
-    for rel in current:
-        if rel in snap.untracked:
-            continue
-        target = cwd / rel
-        with contextlib.suppress(OSError):
-            if target.is_dir() and not target.is_symlink():
-                shutil.rmtree(target, ignore_errors=True)
-            else:
-                target.unlink(missing_ok=True)
 
 
 # ── CodexAgentRunner ──────────────────────────────────────────────────────────
@@ -281,12 +202,11 @@ class CodexSession(ObserveSession):
         self.aid = aid
         self.subagent_depth = invocation.subagent_depth
 
-        # 1. Preflight (auth / *-codex / non-git cwd) — raises PreflightError.
+        # 1. Preflight (auth / *-codex) — raises PreflightError.
         canonical_auth = runner._canonical_auth_path()
         cwd = invocation.quest_context.project_root
         auth_mode = preflight(
-            model=runner.model, cwd=cwd, canonical_auth=canonical_auth,
-            env=os.environ,
+            model=runner.model, canonical_auth=canonical_auth, env=os.environ,
         )
         runner._auth_mode = auth_mode
         runner._canonical_auth = canonical_auth
@@ -331,7 +251,7 @@ class CodexSession(ObserveSession):
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": {},
-            "complete_step_called": False, "native_violation": None,
+            "complete_step_called": False,
             "auth_mode": auth_mode, "pending_usage": None,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
@@ -342,12 +262,7 @@ class CodexSession(ObserveSession):
         tmp_root = quest_scratch_root()
         sweep_stale_codex_homes(tmp_root=tmp_root, max_age_seconds=24 * 3600)
 
-        # 4. Take entry snapshot for the fail-closed revert mechanism.
-        entry_snapshot = take_snapshot(cwd)
-        self._entry_snapshot = entry_snapshot
-        runner._entry_snapshot = entry_snapshot
-
-        # 5. Start the in-process MCP server on an ephemeral port.
+        # 4. Start the in-process MCP server on an ephemeral port.
         bearer_token = secrets.token_urlsafe(24)
         server_handle = await start_server(
             tools=tools, ctx=ctx, state=state,
@@ -361,7 +276,7 @@ class CodexSession(ObserveSession):
             elog=elog, aid=aid, source="codex")
         runner._stderr_token = current_stderr_sink.set(runner._stderr_sink)
 
-        # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe against
+        # 4a. Imp-side server-start ping: a single bearer-auth'd HTTP probe against
         # `server_handle.url` to fail fast before provisioning if imp can't reach
         # its own server. On failure stash the terminal error (events() yields it
         # on first pull); run()'s finally shuts the server down (codex_home is
@@ -382,7 +297,7 @@ class CodexSession(ObserveSession):
                 ))["payload"]))
             return
 
-        # 6. Provision CODEX_HOME + config.toml + seed auth. web_search is
+        # 5. Provision CODEX_HOME + config.toml + seed auth. web_search is
         #    controlled via config.toml's top-level key (the deprecated SDK flag no
         #    longer disables it on codex >=0.137), so it must be decided here, at
         #    provision time, from the agent's declared tools.
@@ -424,7 +339,7 @@ class CodexSession(ObserveSession):
                 params={"env.CODEX_HOME": str(codex_home)},
                 max_tool_calls=invocation.max_tool_calls)
 
-        # 7. Build the SDK client + start/resume the persistent thread.
+        # 6. Build the SDK client + start/resume the persistent thread.
         client = runner._build_client(
             codex_home=codex_home, bearer_token=bearer_token,
             impty_bearer_token=(impty_bearer if runner._impty_handle is not None
@@ -648,18 +563,6 @@ class CodexSession(ObserveSession):
                     f"codex tool dispatch cap ({state.cap}) exceeded"})
             return
 
-        # Native-tool violation → fail-closed. AC #18: unconditional revert + bail.
-        if self._proc_state.get("native_violation") is not None:
-            detail = self._proc_state["native_violation"]
-            restore_to_snapshot(self.ctx.project_root, self._entry_snapshot)
-            yield Error(payload={
-                "category": "config", "kind": "native_tool_violation",
-                "message": (
-                    f"codex used a native {detail['kind']} tool; "
-                    "worktree reverted to entry state."),
-                "detail": {**detail, "kept_bytes": False}})
-            return
-
         # turn.failed → categorize + bail.
         if getattr(raw, "type", None) == "turn.failed":
             yield Error(payload=cast(dict[str, Any], perr.make_error_event(
@@ -804,7 +707,6 @@ class CodexAgentRunner:
         self._stderr_token: Any = None
         self._auth_mode: AuthMode | None = None
         self._canonical_auth: Path | None = None
-        self._entry_snapshot: Any = None
         self._proc_state: dict[str, Any] = {}
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
@@ -975,15 +877,15 @@ class CodexAgentRunner:
         # against. Verified: both forms model_dump() to the same payload.
         return ThreadOptions(
             model=self.model,
-            sandboxMode="danger-full-access",
+            sandboxMode="read-only",
             approvalPolicy=CODEX_APPROVAL_POLICY,
             networkAccessEnabled=False,
             modelReasoningEffort="high" if tier in ("medium", "high") else None,
         )
 
     def _build_prompt(self, invocation: AgentInvocation, elog: Any, aid: str) -> str:
-        """Prepend the anti-native-tool instruction (design: soft enforcement
-        backstopped by the tripwire). For a subagent the completion line is
+        """Prepend the anti-native-tool instruction (a turn-saver: the read-only
+        sandbox already refuses the call). For a subagent the completion line is
         replaced by the deliverable note; the tool_search and
         no-native-apply_patch lines stay (a subagent still uses the other
         mcp__imp__* tools).
@@ -1326,28 +1228,6 @@ def process_event(
                         payload={"message":
                                  f"unexpected codex web_search item "
                                  f"(query={query!r})"})
-            return
-        if itype in ("file_change", "command_execution"):
-            # Native-tool violation: recording it here triggers the runner's
-            # unconditional revert at the next turn boundary (hard run failure).
-            if itype == "file_change":
-                # SDK `FileChangeItem` carries `changes: [{path, kind}, …]`, not a
-                # top-level `path`; reading `path` yielded "?" for real edits.
-                changes = getattr(item, "changes", None) or []
-                paths = []
-                for c in changes:
-                    p = c.get("path") if isinstance(c, dict) else getattr(c, "path", None)
-                    if p:
-                        paths.append(p)
-                detail = ", ".join(paths) or getattr(item, "path", None) or "?"
-            else:
-                detail = getattr(item, "command", None) or "?"
-            state["native_violation"] = {
-                "kind": itype, "detail": detail,
-            }
-            elog.append(agent_id=agent_id, type="runner_warning",
-                        payload={
-                            "message": f"native {itype} detected: {detail!r}"})
             return
         if itype == "error":
             # codex surfaces some non-fatal conditions as `error` items (e.g. the

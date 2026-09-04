@@ -12,7 +12,7 @@ from imp.providers.codex_runner import CodexAgentRunner
 from tests.codex_fakes import FakeCodex
 from tests.test_codex_runner_happy_path import (
     _build_invocation,
-    _seed_git_and_auth,
+    _seed_auth,
 )
 
 
@@ -72,7 +72,7 @@ def test_helper_does_not_raise_on_non_dead_outcomes(
 async def test_dead_token_short_circuits_before_spawn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _seed_git_and_auth(tmp_path)  # writes a chatgpt-mode auth.json
+    _seed_auth(tmp_path)  # writes a chatgpt-mode auth.json
     canonical = tmp_path / "auth.json"
 
     def _dead(now_ms: int, *, env: object = None) -> ctr.RefreshOutcome:
@@ -111,7 +111,7 @@ async def test_fresh_token_proceeds_to_spawn(
         turn_completed,
     )
 
-    _seed_git_and_auth(tmp_path)
+    _seed_auth(tmp_path)
     canonical = tmp_path / "auth.json"
 
     def _fresh(now_ms: int, *, env: object = None) -> ctr.RefreshOutcome:

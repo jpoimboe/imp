@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner
+from imp.cli import narrative as nv
+from imp.cli import render_text as rt
 from imp.engine.types import (
     AgentDef,
     OutputField,
@@ -20,7 +22,7 @@ from imp.engine.types import (
 )
 from imp.providers import resolve
 from imp.providers.config import Config
-from imp.providers.resolve import CODEX_SELECTION_WARNING, resolve_run
+from imp.providers.resolve import resolve_run
 
 _SRC = SourceLoc(file=Path("w.yaml"), line=1)
 
@@ -75,43 +77,54 @@ def _wf(steps: list[Step], agents: dict[str, AgentDef]) -> Workflow:
 def _cfg(providers: tuple[str, ...]) -> Config:
     return Config(
         providers=tuple(providers),
-        tiers={
-            "high": {"claude_code": "opus", "codex": "gpt-5.5"},
-        },
+        tiers={"high": {"claude_code": "opus", "codex": "gpt-5.5"}},
     )
 
 
-def test_codex_tier_populates_warning() -> None:
+def test_codex_tier_detail_carries_no_warning_key() -> None:
     wf = _wf([_step("s1", "high")], {"s1": _agent("s1")})
     _tiers, _steps, details = resolve_run(wf, _cfg(("codex", "claude_code")))
-    assert details["tiers"]["high"]["provider"] == "codex"
-    assert details["tiers"]["high"]["warning"] == CODEX_SELECTION_WARNING
-    assert "runs unsandboxed" in CODEX_SELECTION_WARNING
+    assert details["tiers"]["high"] == {
+        "provider": "codex", "model": "gpt-5.5",
+        "differ_from": None, "differ_tier": None}
 
 
-def test_non_codex_tier_omits_warning_key() -> None:
-    wf = _wf([_step("s1", "high")], {"s1": _agent("s1")})
-    _tiers, _steps, details = resolve_run(wf, _cfg(("claude_code", "codex")))
-    assert details["tiers"]["high"]["provider"] == "claude_code"
-    assert "warning" not in details["tiers"]["high"]
-
-
-def test_codex_step_override_populates_warning() -> None:
-    # s2 differs from s1; with only codex available it still resolves codex
-    # and the step-details warning must be present.
+def test_codex_step_override_detail_carries_no_warning_key() -> None:
+    # s2 differs from s1 with only codex configured, so the override still
+    # resolves codex (differ tier 3 = identical) — the case that used to get
+    # its own warning line.
     wf = _wf([_step("s1", "high"), _step("s2", "high", differ_from="s1")],
              {"s1": _agent("s1"), "s2": _agent("s2")})
     _tiers, _steps, details = resolve_run(wf, _cfg(("codex",)))
-    assert details["steps"]["s2"]["provider"] == "codex"
-    assert details["steps"]["s2"]["warning"] == CODEX_SELECTION_WARNING
+    assert details["steps"]["s2"] == {
+        "provider": "codex", "model": "gpt-5.5",
+        "differ_from": "s1", "differ_tier": 3}
 
 
-def test_non_codex_step_override_omits_warning_key() -> None:
-    # s1 resolves to codex (first available); s2 differs from s1 so it must pick
-    # a different provider (claude_code). That non-codex step override must not
-    # carry the warning key.
-    wf = _wf([_step("s1", "high"), _step("s2", "high", differ_from="s1")],
-             {"s1": _agent("s1"), "s2": _agent("s2")})
-    _tiers, _steps, details = resolve_run(wf, _cfg(("codex", "claude_code")))
-    assert details["steps"]["s2"]["provider"] == "claude_code"
-    assert "warning" not in details["steps"]["s2"]
+def test_codex_rows_render_without_a_warning_subline() -> None:
+    """A legacy `tiers_resolved` event — the shape sitting in event logs and
+    archives written before the warning was retired — still carries the key;
+    the reader must drop it rather than render a stale ⚠ line."""
+    b = nv.NarrativeBuilder()
+    b.add({"id": "e1", "agent_id": None, "type": "tiers_resolved",
+           "payload": {
+               "tiers": {"high": {
+                   "provider": "codex", "model": "gpt-5.5",
+                   "differ_tier": None, "differ_from": None,
+                   "warning": "stale copy from an old run"}},
+               "steps": {"s2": {
+                   "provider": "codex", "model": "gpt-5.5",
+                   "differ_tier": 3, "differ_from": "s1",
+                   "warning": "stale copy from an old run"}}}})
+    node = next(c for c in b.tree.root.children
+                if isinstance(c, nv.TiersResolvedNode))
+    assert node.rows == [
+        {"tier": "high", "provider": "codex", "model": "gpt-5.5",
+         "differ_tier": None, "differ_from": None},
+        {"tier": "s2", "provider": "codex", "model": "gpt-5.5",
+         "differ_tier": 3, "differ_from": "s1"},
+    ]
+    out = list(rt._render(node, depth=0, full=True, color=False, width=120))
+    assert any("→ codex/gpt-5.5" in ln for ln in out)
+    assert not any("⚠" in ln for ln in out)
+    assert not any("stale copy" in ln for ln in out)

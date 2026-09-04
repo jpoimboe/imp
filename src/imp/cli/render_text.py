@@ -896,8 +896,6 @@ def _render(node: Any, *, depth: int, full: bool = False,
                 yield _line(f"    differ from {r['differ_from']}: "
                             f"tier {r['differ_tier']}, {label}",
                             depth, color, *dim, gutters=gutters)
-            if r.get("warning"):
-                yield _line(f"    ⚠ {r['warning']}", depth, color, *dim, gutters=gutters)
         return
 
     if isinstance(node, nv.WarningsSummaryNode):
