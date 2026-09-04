@@ -371,6 +371,20 @@ def test_bare_status_auth_stays_transient() -> None:
         assert getattr(exc, "kind", "") == f"http_{code}"
 
 
+def test_terminal_prose_message_carries_the_text_not_the_pattern() -> None:
+    exc = _classify_agent_text("Not logged in · Please run /login")
+    assert isinstance(exc, perr.AuthTerminalError)
+    assert str(exc) == "claude CLI: Not logged in · Please run /login"
+
+
+def test_terminal_prose_message_truncates_at_200_chars() -> None:
+    long_text = "Please run /login " + "x" * 400
+    exc = _classify_agent_text(long_text)
+    assert isinstance(exc, perr.AuthTerminalError)
+    assert str(exc) == f"claude CLI: {long_text[:200]}"
+    assert len(str(exc)) == len("claude CLI: ") + 200
+
+
 def test_400_tool_use_concurrency_colon_form_wins_over_api_error_label() -> None:
     # Colon form: _classify_agent_text labels this a terminal ApiError(http_400).
     # The 400/concurrency rule must override that classification → NetworkError.

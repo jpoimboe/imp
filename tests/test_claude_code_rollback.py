@@ -176,6 +176,27 @@ async def test_classified_text_branch_rolls_back(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_terminal_prose_error_event_carries_the_full_text(tmp_path: Path) -> None:
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+
+    scripted = [assistant(text("Not logged in · Please run /login")), result()]
+
+    def factory(_opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, events
+    assert errs[0]["payload"]["category"] == "auth_terminal"
+    assert errs[0]["payload"]["message"] == (
+        "claude CLI: Not logged in · Please run /login")
+
+
+@pytest.mark.anyio
 async def test_quota_pause_still_errors_and_rollback_is_harmless(
     tmp_path: Path,
 ) -> None:

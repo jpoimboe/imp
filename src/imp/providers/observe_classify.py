@@ -180,7 +180,7 @@ def _classify_agent_text(
     if not routable:
         for pat in _AUTH_PATTERNS:
             if pat in scan:
-                return perr.AuthTerminalError(f"claude CLI: {pat}")
+                return perr.AuthTerminalError(f"claude CLI: {text[:200]}")
     for pat in _QUOTA_PATTERNS:
         if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")
