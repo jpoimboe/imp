@@ -189,7 +189,7 @@ def _overlay_home(base: Path, home: Path, *,
     layer, cleanup = make_home_layer(
         str(home),
         upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
-        use_overlay=True)
+        userxattr=False)
     pol = dataclasses.replace(
         base_pol, home=str(home), writable_caches=writable_caches, home_layer=layer)
     return pol, cleanup
@@ -204,7 +204,7 @@ def _fallback_home(root: Path, home: Path, *,
     base = _active_policy(root, home=home, secret_dirs=secret_dirs)
     layer, _ = make_home_layer(
         str(home), upper=root / "u", work=root / "w", merged=root / "m",
-        use_overlay=False)
+        userxattr=None)
     return dataclasses.replace(base, home=str(home), home_layer=layer)
 
 

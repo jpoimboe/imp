@@ -1224,12 +1224,13 @@ def test_overlay_wrapper_passes_the_command_through_shlex_join():
 
 
 def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
-    # AC 1 (unit): the overlay layer creates upper/work/merged on disk and returns
-    # a HomeLayer that reports is_overlay; the cleanup callable removes all three.
+    # AC 5b: userxattr=True creates upper/work/merged, reports is_overlay, and
+    # records the flag; the cleanup callable removes all three.
     upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
     layer, cleanup = make_home_layer(
-        "/home/u", upper=upper, work=work, merged=merged, use_overlay=True)
+        "/home/u", upper=upper, work=work, merged=merged, userxattr=True)
     assert isinstance(layer, HomeLayer) and layer.is_overlay
+    assert layer.userxattr is True
     assert layer.home == "/home/u"
     assert layer.upper == str(upper) and layer.work == str(work)
     assert layer.merged == str(merged)
@@ -1238,13 +1239,26 @@ def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
     assert not upper.exists() and not work.exists() and not merged.exists()
 
 
-def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
-    # AC 8 (unit): the rw fallback layer touches no disk (no overlay dirs) and its
-    # cleanup is a harmless no-op.
+def test_make_home_layer_overlay_without_userxattr(tmp_path):
+    # AC 5b: userxattr=False is still a COW overlay (a pre-v5.11 host keeps home
+    # isolation) — same dirs, same cleanup, flag off.
     upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
     layer, cleanup = make_home_layer(
-        "/home/u", upper=upper, work=work, merged=merged, use_overlay=False)
+        "/home/u", upper=upper, work=work, merged=merged, userxattr=False)
+    assert layer.is_overlay and layer.userxattr is False
+    assert upper.is_dir() and work.is_dir() and merged.is_dir()
+    cleanup()
+    assert not upper.exists() and not work.exists() and not merged.exists()
+
+
+def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
+    # AC 5a: userxattr=None is the rw fallback — no overlay, no disk touched,
+    # cleanup a harmless no-op.
+    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
+    layer, cleanup = make_home_layer(
+        "/home/u", upper=upper, work=work, merged=merged, userxattr=None)
     assert not layer.is_overlay and layer.home == "/home/u"
+    assert layer.userxattr is False
     assert not upper.exists() and not work.exists() and not merged.exists()
     cleanup()  # no-op, must not raise
 

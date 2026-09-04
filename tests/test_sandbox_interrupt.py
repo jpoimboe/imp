@@ -118,7 +118,7 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
     layer, cleanup = make_home_layer(
         str(home),
         upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
-        use_overlay=True,
+        userxattr=False,
     )
     pol = SandboxPolicy(
         active=True,

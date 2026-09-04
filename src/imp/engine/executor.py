@@ -963,7 +963,8 @@ def _attach_home_layer(
         upper=base / f"{step.name}.overlay-upper",
         work=base / f"{step.name}.overlay-work",
         merged=base / f"{step.name}.overlay-merged",
-        use_overlay=overlay_available(quest.quest_dir, Path(policy.home)),
+        userxattr=False if overlay_available(
+            quest.quest_dir, Path(policy.home)) else None,
     )
     return dataclasses.replace(policy, home_layer=layer), cleanup
 

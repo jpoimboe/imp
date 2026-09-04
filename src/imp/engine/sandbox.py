@@ -477,29 +477,32 @@ def overlay_available(probe_base: Path, home: Path) -> bool:
 
 
 def make_home_layer(
-    home: str, *, upper: Path, work: Path, merged: Path, use_overlay: bool,
+    home: str, *, upper: Path, work: Path, merged: Path, userxattr: bool | None,
 ) -> tuple[HomeLayer, Callable[[], None]]:
     """Build one invocation's writable-home layer + its teardown callable.
-    use_overlay=True → a COW overlay: create upper/work/merged and return a
-    HomeLayer that build_sandbox_argv wraps with unshare + mount -t overlay
-    (lowerdir=home); the returned cleanup rmtrees the three dirs. use_overlay=False
-    → a plain rw bind of the real home (fallback): no dirs are created and cleanup
-    is a no-op. The CALLER decides use_overlay (via overlay_available at its own
-    probe location) and chooses where the dirs live, so this primitive is shared by
-    the executor (dirs sibling to transcript_dir) and the isolated-subagent path
+    `userxattr` is overlay_mode's tri-state. None → a plain rw bind of the real
+    home (fallback): no dirs are created and cleanup is a no-op. True/False → a
+    COW overlay: create upper/work/merged and return a HomeLayer that
+    build_sandbox_argv wraps with unshare + mount -t overlay (lowerdir=home),
+    carrying the flag so the per-command mount uses the exact shape the probe
+    validated; the returned cleanup rmtrees the three dirs. One tri-state rather
+    than a use_overlay/userxattr pair, so a non-overlay layer claiming userxattr
+    cannot be constructed. The CALLER probes (overlay_mode at its own probe
+    location) and chooses where the dirs live, so this primitive is shared by the
+    executor (dirs sibling to transcript_dir) and the isolated-subagent path
     (dirs sibling to the spike worktree)."""
-    if use_overlay:
+    if userxattr is None:
+        return HomeLayer(home=home), (lambda: None)
+    for d in (upper, work, merged):
+        d.mkdir(parents=True, exist_ok=True)
+    layer = HomeLayer(home=home, merged=str(merged), upper=str(upper),
+                      work=str(work), userxattr=userxattr)
+
+    def cleanup() -> None:
         for d in (upper, work, merged):
-            d.mkdir(parents=True, exist_ok=True)
-        layer = HomeLayer(home=home, merged=str(merged),
-                          upper=str(upper), work=str(work))
+            _force_rmtree(d)
 
-        def cleanup() -> None:
-            for d in (upper, work, merged):
-                _force_rmtree(d)
-
-        return layer, cleanup
-    return HomeLayer(home=home), (lambda: None)
+    return layer, cleanup
 
 
 def _existing(paths: list[str]) -> tuple[str, ...]:
