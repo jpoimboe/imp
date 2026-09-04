@@ -329,6 +329,29 @@ def _configured_providers(existing_cfg: dict[str, Any] | None) -> list[str] | No
     return list(raw)
 
 
+class _ProviderChoice(NamedTuple):
+    providers: list[str]
+    reused: bool
+    repaired: bool
+
+
+def _decide_providers(
+    existing_cfg: dict[str, Any] | None,
+    providers_override: list[str] | None,
+    fallback_fn: Callable[[], list[str]],
+) -> _ProviderChoice:
+    """Explicit --providers wins, else a reusable existing list, else the fallback;
+    repaired means an existing file's list is being rewritten."""
+    configured = _configured_providers(existing_cfg)
+    if providers_override is not None:
+        providers, reused = providers_override, False
+    elif configured is not None:
+        providers, reused = configured, True
+    else:
+        providers, reused = fallback_fn(), False
+    return _ProviderChoice(providers, reused, existing_cfg is not None and not reused)
+
+
 def _bootstrap_user_config(
     user_path: Path, providers: list[str], theme: str, *, allow_unsandboxed: bool,
 ) -> None:
@@ -925,20 +948,16 @@ def run_init(
     #     list the config already declares (a re-run must not re-ask) ---
     existing_cfg = _read_user_config(user_path)
     wrote_user_config = existing_cfg is None
-    configured = _configured_providers(existing_cfg)
-    if providers_override is not None:
-        providers = providers_override
-        reused = False
-    elif configured is not None:
-        providers = configured
-        reused = True
-    else:
+
+    def _pick_providers() -> list[str]:
         pick = picker_fn or _interactive_provider_picker
-        providers = pick(list(_PROVIDER_DISPLAY_ORDER))
-        if not providers:
+        result = pick(list(_PROVIDER_DISPLAY_ORDER))
+        if not result:
             raise ValueError("at least one provider must be selected")
-        reused = False
-    repaired = existing_cfg is not None and not reused
+        return result
+
+    choice = _decide_providers(existing_cfg, providers_override, _pick_providers)
+    providers, reused, repaired = choice.providers, choice.reused, choice.repaired
     if existing_cfg is None:
         theme = (detect_theme_fn or _default_detect_theme)()
         # Everything below renders in the detected theme; IMP_THEME still wins.
@@ -1085,18 +1104,11 @@ def run_init_noninteractive(
     # Read before any write: an unparseable machine config aborts init untouched.
     existing_cfg = _read_user_config(user_path)
     wrote_user_config = existing_cfg is None
-    configured = _configured_providers(existing_cfg)
-    if providers_override is not None:
-        providers = providers_override
-        reused = False
-    elif configured is not None:
-        providers = configured
-        reused = True
-    else:
-        # Preference order, not inventory: the resolver takes the first env-available one.
-        providers = list(_PROVIDER_DISPLAY_ORDER)
-        reused = False
-    repaired = existing_cfg is not None and not reused
+    choice = _decide_providers(
+        existing_cfg, providers_override,
+        lambda: list(_PROVIDER_DISPLAY_ORDER),  # preference order, not inventory
+    )
+    providers, repaired = choice.providers, choice.repaired
 
     if already_initialized:
         _ensure_git_repo_silent(project_root)  # a copied config.yaml may sit in a non-git dir
