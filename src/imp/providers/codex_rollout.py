@@ -9,6 +9,9 @@ actual conversation context — is deleted at the pause. To resume, imp must own
 that file across the pause: copy it (and the thread_id) into the durable
 `transcript_dir` on pause, restore it into the fresh CODEX_HOME on resume, then
 call `Codex.resume_thread(thread_id)`.
+
+The same file is also the only place codex reports live context occupancy, so
+`latest_context_reading` reads it in place — no stdout JSON mode emits it.
 """
 from __future__ import annotations
 
@@ -35,6 +38,36 @@ def _newest_matching_rollout(codex_home: Path, thread_id: str) -> Path | None:
     if len(rollouts) == 1:
         return rollouts[0]
     return None
+
+
+def latest_context_reading(codex_home: Path, thread_id: str) -> tuple[int, int] | None:
+    """codex's own live context reading from its rollout: the newest usable
+    `(last_token_usage.total_tokens, model_context_window)` pair, or None when
+    the rollout is absent or carries no usable `token_count` record. Never a
+    partial reading — both halves come from the same record."""
+    rollout = _newest_matching_rollout(codex_home, thread_id)
+    if rollout is None:
+        return None
+    reading: tuple[int, int] | None = None
+    with rollout.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            # Pre-filter: rollouts run to megabytes, few lines are token_count.
+            if "token_count" not in line:
+                continue
+            try:
+                rec = json.loads(line)
+                payload = rec["payload"]
+                if rec["type"] != "event_msg" or payload["type"] != "token_count":
+                    continue
+                info = payload["info"]
+                tokens = info["last_token_usage"]["total_tokens"]
+                window = info["model_context_window"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if (isinstance(tokens, int) and tokens > 0
+                    and isinstance(window, int) and window > 0):
+                reading = (tokens, window)
+    return reading
 
 
 def persist_rollout(*, codex_home: Path, thread_id: str, transcript_dir: Path) -> bool:
