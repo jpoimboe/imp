@@ -18,6 +18,8 @@ directly, and complete the run once they are satisfied.
 
 {% include "partials/action-care.md" %}
 
+{% include "partials/imp-grounding.md" %}
+
 {% include "partials/sandbox-limits.md" %}
 
 {% if run.autonomous %}
