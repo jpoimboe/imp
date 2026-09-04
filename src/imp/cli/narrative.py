@@ -525,22 +525,21 @@ class NarrativeBuilder:
         self._stretch_backoff_base: float = 0.0
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
-        # Two-dict open-fold registry. By block id (NON-EMPTY block ids only)
-        # and by tool_call event id (always present, unique per mint). The close
-        # path probes the namespace named by the result's `id_ns`; codex keys by
-        # event id (empty block), in-process by block id.
+        # Two-dict open-fold registry. By block id (NON-EMPTY block ids only) and by
+        # tool_call event id (always present, unique per mint). Every writer stamps
+        # id_ns="block" on a non-empty block id; the event dict backs the ordered
+        # probe that closes a legacy unstamped log.
         self._open_sub_by_block: dict[str, SubagentFold] = {}
         self._open_sub_by_event: dict[str, SubagentFold] = {}
         # Folds closed PROVISIONALLY by a salvage path (resume-close fallback or
         # pause/resume finalize) before their canonical task tool_result arrived.
-        # Keyed the same two ways as the open registry so a late stamped result can
+        # Keyed by block id like the open registry so a late stamped result can
         # recognise its already-closed fold (benign race) instead of warning
         # "matched no open fold". The late result is then the AUTHORITATIVE close:
         # it upgrades the outcome-free salvage close. Only salvage paths populate
-        # these — a normal close never does, so a true duplicate canonical result
+        # this — a normal close never does, so a true duplicate canonical result
         # (which the providers suppress) still surfaces as a malformed-log warning.
         self._closed_sub_by_block: dict[str, SubagentFold] = {}
-        self._closed_sub_by_event: dict[str, SubagentFold] = {}
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
@@ -811,12 +810,10 @@ class NarrativeBuilder:
 
     def _remember_salvage_closed(self, fold: SubagentFold) -> None:
         """Record a provisionally-closed fold so its late canonical tool_result is
-        recognised (benign race) rather than warned on. Mirror the open registry's
-        keying: by block id only when non-empty (codex mints empty block ids and
-        keys by event id; "" must not collide)."""
+        recognised (benign race) rather than warned on. Mirrors the open registry's
+        keying: block id only, and only when non-empty."""
         if fold.block_id:
             self._closed_sub_by_block[fold.block_id] = fold
-        self._closed_sub_by_event[fold.event_id] = fold
 
     def _close_open_folds_at_step_end(self, ts: str | None) -> None:
         for fold in list(self._open_sub_by_event.values()):
@@ -1889,9 +1886,7 @@ def _take_subagent_fold(
     self: NarrativeBuilder, rid: str, id_ns: Any,
 ) -> tuple[SubagentFold | None, str]:
     """Probe the id_ns namespace for rid; remove from both dicts. Returns (fold, status)."""
-    if id_ns == "event":
-        fold = self._open_sub_by_event.get(rid)
-    elif id_ns == "block":
+    if id_ns == "block":
         fold = self._open_sub_by_block.get(rid)
     elif id_ns is None:
         fold = self._open_sub_by_block.get(rid) or self._open_sub_by_event.get(rid)
@@ -1907,19 +1902,12 @@ def _take_subagent_fold(
 def _take_closed_fold(
     self: NarrativeBuilder, rid: str, id_ns: Any,
 ) -> SubagentFold | None:
-    """Probe the SALVAGE-closed registry for rid in the id_ns namespace; remove it
-    so a late canonical result is applied at most once. Stamped namespaces only —
-    an unstamped legacy result never reaches this path (it has its own probe)."""
-    if id_ns == "event":
-        fold = self._closed_sub_by_event.get(rid)
-    elif id_ns == "block":
-        fold = self._closed_sub_by_block.get(rid)
-    else:
+    """Probe the SALVAGE-closed registry for rid; remove it so a late canonical
+    result is applied at most once. Stamped ("block") results only — an unstamped
+    legacy result never reaches this path (it has its own probe)."""
+    if id_ns != "block":
         return None
-    if fold is not None:
-        self._closed_sub_by_block.pop(fold.block_id, None)
-        self._closed_sub_by_event.pop(fold.event_id, None)
-    return fold
+    return self._closed_sub_by_block.pop(rid, None)
 
 
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

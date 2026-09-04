@@ -1602,10 +1602,30 @@ def test_task_result_with_no_open_fold_still_warns() -> None:
     assert all(call.name != "tool" for burst in bursts for call in burst.calls)
 
 
+def test_event_stamped_result_no_longer_closes_by_the_call_event_id() -> None:
+    # The "event" id_ns namespace is deleted, so a result stamped with it names an
+    # unknown namespace: it closes nothing and warns, even when its id is exactly
+    # the open fold's tool_call EVENT id — the key the old probe looked up.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="codex"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    step = b._step_stack[-1]
+    fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert fold.event_id == "tk1"
+    b.add(_ev("r1", "tool_result", agent_id="step:p/s", id="tk1", id_ns="event",
+              content='{"status":"Success"}', error=False))
+    assert fold.running is True                      # not closed
+    warnings = [c for c in step.children
+                if isinstance(c, nv.ErrorNode) and c.is_warning]
+    assert [w.message for w in warnings] == [
+        "task result 'tk1' (id_ns='event') matched no open fold"]
+
+
 def test_stamped_result_missing_its_namespace_renders_warning_not_close() -> None:
-    # AC36/AC38: an id_ns-stamped result whose id matches no open fold in its
-    # named namespace renders a malformed-log WARNING and closes nothing — even
-    # with exactly one fold open.
+    # AC36/AC38: a result naming a namespace that does not exist renders a
+    # malformed-log WARNING and closes nothing — even with exactly one fold open.
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
@@ -1613,7 +1633,9 @@ def test_stamped_result_missing_its_namespace_renders_warning_not_close() -> Non
               input={"subagent_name": "reviewer", "task_description": "go"}))
     step = b._step_stack[-1]
     fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
-    # id_ns="event" but id "b1" only lives in the block-id dict → namespace miss.
+    # "b1" IS a live block id, which suppresses the resume-close fallback (add()
+    # matches on the raw id, ignoring id_ns) — so the unknown namespace is the only
+    # thing between this result and a close, and the fold must survive it.
     b.add(_ev("r1", "tool_result", agent_id="step:p/s", id="b1", id_ns="event",
               content='{"status":"Success"}', error=False))
     assert fold.running is True                      # not closed

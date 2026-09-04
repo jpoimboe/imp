@@ -574,8 +574,8 @@ class _BaseEventLog:
         # treated as "no citations" — never write an empty array.
         if citations:
             payload["citations"] = citations
-        # §3 fold-probe namespace marker for task results ("block"/"event"); absent
-        # on legacy and non-task results so the ordered two-dict probe still fires.
+        # §3 fold-probe namespace marker for task results ("block"); absent on legacy
+        # and non-task results so the ordered two-dict probe still fires.
         if id_ns is not None:
             payload["id_ns"] = id_ns
         if kind is not None:
