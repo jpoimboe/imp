@@ -1516,26 +1516,90 @@ def test_concurrent_inprocess_folds_close_independently_by_block_ns() -> None:
     assert folds["reviewer"].running is True
 
 
-def test_concurrent_codex_folds_close_by_event_ns_no_empty_block_collision() -> None:
-    # AC36: codex mints task tool_calls with an EMPTY block id and keys the
-    # tool_result by the minted EVENT id, stamped id_ns="event". Two such folds
-    # must not collide on "" and must each close by event id.
+def test_codex_task_fold_closes_on_its_own_stamped_result() -> None:
+    # Replay of what codex_runner actually writes: a sub_agent tool_call stamped
+    # id_ns="block" on a non-empty SDK item id, an intervening turn-end event from
+    # the opener, then the matching stamped result. The stamps make awaits_result
+    # True, which is what shields the fold from the resume-close fallback.
     b = nv.NarrativeBuilder()
-    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
-              model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="", name="sub_agent",
-              input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="", name="sub_agent",
-              input={"subagent_name": "tester", "task_description": "go"}))
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="codex"))
+    b.add(ev("tk1", "tool_call", "step:p/s", id="item_1", id_ns="block",
+             name="sub_agent",
+             input={"subagent_name": "explorer", "task_description": "map it"},
+             timestamp="2026-09-04T00:00:01"))
+    step = b._step_stack[-1]
+    fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    # A codex agent_message is unconditionally turn-end, so an UNSTAMPED fold
+    # would be resume-closed here, outcome-free, with end_ts frozen at :02.
+    b.add(ev("am1", "agent_message", "step:p/s", provider="codex", model="m",
+             stop_reason=None, usage={},
+             raw={"content": [{"type": "text", "text": "dispatched"}]},
+             timestamp="2026-09-04T00:00:02"))
+    assert fold.running is True
+    b.add(ev("r1", "tool_result", "step:p/s", id="item_1", id_ns="block",
+             content="explored 4 files", error=False,
+             timestamp="2026-09-04T00:00:09"))
+    assert fold.running is False
+    assert fold.outcome == "explored 4 files"       # closed BY the result
+    assert fold.end_ts == "2026-09-04T00:00:09"     # from the result, not :02
+    warnings = [c for c in step.children
+                if isinstance(c, nv.ErrorNode) and c.is_warning]
+    assert warnings == []
+
+
+def test_concurrent_codex_folds_close_by_sdk_item_id() -> None:
+    # Two codex sub_agent dispatches carry DISTINCT non-empty SDK item ids, both
+    # stamped id_ns="block". A result closes only the fold sharing its id.
+    b = nv.NarrativeBuilder()
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="codex"))
+    b.add(ev("tk1", "tool_call", "step:p/s", id="item_1", id_ns="block",
+             name="sub_agent",
+             input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(ev("tk2", "tool_call", "step:p/s", id="item_2", id_ns="block",
+             name="sub_agent",
+             input={"subagent_name": "tester", "task_description": "go"}))
     step = b._step_stack[-1]
     folds = {f.subagent_name: f for f in step.children
              if isinstance(f, nv.SubagentFold)}
-    assert folds["reviewer"].running is True and folds["tester"].running is True
-    # Close task1 by its EVENT id (codex result payload id == minted event id).
-    b.add(_ev("r1", "tool_result", agent_id="step:p/s", id="tk1", id_ns="event",
-              content='{"status":"Success"}', error=False))
-    assert folds["reviewer"].running is False
+    assert folds["reviewer"].running is True
     assert folds["tester"].running is True
+    b.add(ev("r2", "tool_result", "step:p/s", id="item_2", id_ns="block",
+             content='{"status":"Success"}', error=False))
+    assert folds["tester"].running is False
+    assert folds["tester"].outcome == '{"status":"Success"}'
+    assert folds["reviewer"].running is True
+    # The sibling then closes against its OWN result. _take_subagent_fold pops by
+    # both block_id and event_id, so closing one fold must not strand the other.
+    b.add(ev("r1", "tool_result", "step:p/s", id="item_1", id_ns="block",
+             content='{"status":"Error"}', error=True))
+    assert folds["reviewer"].running is False
+    assert folds["reviewer"].outcome == '{"status":"Error"}'
+    assert folds["reviewer"].is_error is True
+    warnings = [c for c in step.children
+                if isinstance(c, nv.ErrorNode) and c.is_warning]
+    assert warnings == []
+
+
+def test_task_result_with_no_open_fold_still_warns() -> None:
+    # A genuinely malformed stream (a keyed task result with no fold to close)
+    # keeps producing the diagnostic, verbatim — the fix stops it firing
+    # spuriously, it does not silence it.
+    b = nv.NarrativeBuilder()
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="codex"))
+    b.add(ev("r1", "tool_result", "step:p/s", id="item_7", id_ns="block",
+             content='{"status":"Success"}', error=False))
+    step = b._step_stack[-1]
+    warnings = [c for c in step.children
+                if isinstance(c, nv.ErrorNode) and c.is_warning]
+    assert len(warnings) == 1
+    assert warnings[0].message == (
+        "task result 'item_7' (id_ns='block') matched no open fold")
+    # No orphan "tool" burst entry was created for the unmatched result.
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert all(call.name != "tool" for burst in bursts for call in burst.calls)
 
 
 def test_stamped_result_missing_its_namespace_renders_warning_not_close() -> None:
