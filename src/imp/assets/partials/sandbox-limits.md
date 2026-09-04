@@ -35,15 +35,10 @@ the loop is stuck — to that process's dump file `{{ quest.home }}/stack-dump.t
 read it to see where it hangs. Repeated signals append repeated timestamped
 sections.
 
-## Another quest's state is invisible on disk
+## imp state on disk is masked — load `imp-knowledge`
 
-> **Another quest's state is invisible on disk — ask the CLI.** The sandbox masks
-> **this project's** state directory except this quest's own home, so a sibling quest
-> home beside `{{ quest.home }}` does not exist at all and its `lock`/`state.json`
-> reads as absent. Never infer another quest's liveness from the filesystem —
-> `imp show <id>` / `imp list` report it correctly (resolved by the unsandboxed
-> daemon). Other projects' state directories are readable read-only — grep their
-> `quests/<id>/events.jsonl` or artifacts directly when diagnosing across projects
-> (never `cat` one; it is unbounded). The `imp` CLI reaches another project only with
-> both pins cleared: `cd <other repo> && IMP_SESSION_SOCKET= IMP_STATE_DIR= imp log <id>`
-> — the socket pins reads to this quest's daemon, the state dir to this project.
+> The sandbox masks this project's imp state — sibling quest homes and the archive are
+> not on disk at all, so a filesystem search silently answers the wrong question. Never
+> read or search imp state off the filesystem, and never infer another quest's liveness
+> from it. Load `imp-knowledge` for the CLI reads that answer correctly, resolved by the
+> unsandboxed daemon.
