@@ -186,7 +186,12 @@ def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | Non
 
 
 def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
-    """The model's view of prompt size for one turn: input + both cache buckets.
+    """One turn's BILLING prompt sum: input + both cache buckets.
+
+    It equals live context occupancy only when the turn was a single model
+    request — true on the anthropic/openai push paths, false on codex, where
+    usage is summed over every request in the turn and runs several times
+    higher than the prompt actually sent.
 
     Correct for both usage shapes: Anthropic's `input_tokens` EXCLUDES cached
     tokens (so the three-way sum is the true prompt), while OpenAI Responses
@@ -223,11 +228,12 @@ def sdk_context_threshold_crossed(
     context_tokens: int | None, context_window: int | None,
     provider: str | None, model: str | None,
 ) -> bool:
-    """True when claude_code's SDK-reported LIVE context occupancy has reached
-    the checkpoint cutoff. Unlike context_threshold_crossed (which sums prompt
-    tokens against the static catalog window), this divides the SDK's own live
-    context_tokens / context_window from get_context_usage(), and applies the
-    model's soft cap to that window. Returns False whenever a live number is
+    """True when a provider's own reported LIVE context occupancy has reached
+    the checkpoint cutoff — claude_code's `get_context_usage()`, or codex's
+    rollout `token_count` record. Unlike context_threshold_crossed (which sums
+    prompt tokens against the static catalog window), this divides the
+    provider's live context_tokens / context_window, and applies the model's
+    soft cap to that window. Returns False whenever a live number is
     unavailable — the watch never fires rather than guessing.
     """
     frac = checkpoint_cutoff(limits_for(provider, model), context_window)

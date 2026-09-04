@@ -313,6 +313,46 @@ def test_append_creates_missing_parent_and_persists(tmp_path: Path) -> None:
     assert _read(parent / "e.jsonl") == [ev]   # AC2: record persisted on write path
 
 
+def test_jsonl_usage_patch_row_carries_context_window(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 82628},
+        context_tokens=22389, context_window=258400)
+    patch = next(e for e in _read(tmp_path / "e.jsonl")
+                 if e["type"] == "agent_message_usage_patch")
+    # The on-disk row stays bare — no id/parent_id/timestamp — so existing
+    # readers and archived quests are untouched.
+    assert set(patch) == {"type", "agent_id", "payload"}
+    assert patch["payload"]["context_tokens"] == 22389
+    assert patch["payload"]["context_window"] == 258400
+    assert patch["payload"]["usage"]["input_tokens"] == 82628
+
+
+def test_jsonl_usage_patch_row_omits_context_window_when_none(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 5}, context_tokens=1000)
+    patch = next(e for e in _read(tmp_path / "e.jsonl")
+                 if e["type"] == "agent_message_usage_patch")
+    assert "context_window" not in patch["payload"]
+
+
+def test_in_memory_patch_lands_context_window_on_agent_message() -> None:
+    log = InMemoryEventLog()
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 82628},
+        context_tokens=22389, context_window=258400)
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
+    assert resp["payload"]["context_window"] == 258400
+    assert resp["payload"]["context_tokens"] == 22389
+
+
 def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:
     # .imp/quests/ exists (other quests live here) but this quest's home was rmtree'd.
     quests_root = project_state_dir(tmp_path) / "quests"
@@ -355,3 +395,31 @@ def test_repeated_validation_failures_are_not_deduped(tmp_path: Path) -> None:
              if e["type"] == "runner_warning"]
     assert len(warns) == 2
     assert warns[0] == warns[1]
+
+
+# AC 6
+def test_jsonl_usage_patch_broadcasts_after_persisting(tmp_path: Path) -> None:
+    path = tmp_path / "e.jsonl"
+    seen: list[tuple[dict, int]] = []
+
+    def _record(e: dict) -> None:
+        # capture how much is on disk AT broadcast time: _emit's persist-before-
+        # broadcast order is what makes replay's disk-before-live partition hold.
+        seen.append((e, len(path.read_text(encoding="utf-8").splitlines())))
+
+    log = JsonlEventLog(path, on_event=_record)
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
+                             raw={}, usage={}, stop_reason=None)
+    log.update_last_agent_message_usage(
+        agent_id="step:a", usage={"input_tokens": 82628},
+        context_tokens=22389, context_window=258400)
+
+    assert [e["type"] for e, _ in seen] == [
+        "agent_message", "agent_message_usage_patch"]
+    patch, lines_on_disk = seen[1]
+    assert patch["payload"]["context_tokens"] == 22389
+    assert patch["payload"]["context_window"] == 258400
+    # the broadcast frame is the row itself — still envelope-less (AC 6(b))
+    assert set(patch) == {"type", "agent_id", "payload"}
+    assert lines_on_disk == 2
+    assert _read(path)[-1] == patch

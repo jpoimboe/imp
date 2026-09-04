@@ -3544,3 +3544,62 @@ def test_driver_without_project_renders_todays_bands_unchanged() -> None:
     assert drv.compose_toolbar_static() == "lufu50 · t"
     rows = drv.compose_startup(0)
     assert rows is not None and rows[2] == "lufu50 · t"
+
+
+# AC 5(a)
+def test_context_bar_prefers_a_provider_reported_window() -> None:
+    from imp.cli.live_driver import context_bar
+    # codex reports 258400 for gpt-5.6-*; the catalog's 1.05M would draw 20%.
+    # 206720/258400 = 0.80 = the handoff cutoff (soft_cap 260k > window, so the
+    # cutoff is the 0.8 default) -> eight red cells.
+    bar = context_bar("codex", "gpt-5.6-sol", 206_720, context_window=258_400,
+                      color=True, over_bg=False)
+    assert bar is not None
+    assert bar.count("█") == 8
+    assert bar.endswith(" 80%")
+    assert "\x1b[31m" in bar
+
+
+# AC 5(b)
+def test_context_bar_without_a_reported_window_falls_back_to_the_catalog() -> None:
+    from imp.cli.live_driver import context_bar
+    # Same call, no reading: unchanged behavior — 206720/1_050_000 = 20%.
+    assert context_bar("codex", "gpt-5.6-sol", 206_720,
+                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
+
+
+# AC 8
+def test_compose_status_bar_uses_the_window_from_the_usage_patch() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                    model="gpt-5.6-sol", provider="codex"))
+    drv.on_event(ev("3", "agent_message", agent_id="step:p/s", provider="codex",
+                    model="gpt-5.6-sol", stop_reason="end_turn",
+                    raw={"content": [{"type": "text", "text": "done"}]}, usage={}))
+    drv.on_event({"type": "agent_message_usage_patch", "agent_id": "step:p/s",
+                  "payload": {"usage": {"input_tokens": 82628},
+                              "context_tokens": 22389, "context_window": 258400}})
+    block = drv.compose_status(0)
+    assert block is not None
+    # 22389/258400 -> 9%. Against the catalog's 1.05M window it would read 2%.
+    assert "9%" in block[2]
+    assert "2%" not in block[2]
+
+
+def test_compose_subagent_rows_take_the_window_from_a_usage_patch() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    ctx = ev("c1", "step_context", agent_id="sub:t1", provider="codex",
+             model="gpt-5.6-sol", tools_schema=[], params={}, max_tool_calls=None)
+    msg = ev("r1", "agent_message", agent_id="sub:t1", provider="codex",
+             model="gpt-5.6-sol", stop_reason="end_turn",
+             raw={"content": [{"type": "text", "text": "hi"}]}, usage={})
+    patch = {"type": "agent_message_usage_patch", "agent_id": "sub:t1",
+             "payload": {"usage": {"input_tokens": 82628},
+                         "context_tokens": 22389, "context_window": 258400}}
+    b = _sub_builder(("t1", "coder"), readings=[ctx, msg, patch],
+                     start_ts="2026-01-01T00:00:00+00:00")
+    rows = compose_subagent_rows(b, color=False, width=120,
+                                 now_iso="2026-01-01T00:00:05+00:00")
+    assert len(rows) == 1
+    assert "9%" in rows[0]      # the sub's own reading, against 258400 not 1.05M

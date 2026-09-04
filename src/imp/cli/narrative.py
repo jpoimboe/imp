@@ -80,7 +80,8 @@ class TokenTotals:
 
 
 def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
-    """The prompt-side occupancy of ONE agent_message turn: input + both cache reads.
+    """One turn's BILLING prompt sum (input + both cache buckets); equals live occupancy
+    only on the anthropic/openai push paths (single model request), not on codex.
     None when the turn carried no usage."""
     if not usage:
         return None
@@ -568,8 +569,9 @@ class NarrativeBuilder:
 
     @property
     def latest_prompt_tokens(self) -> int | None:
-        """Prompt-token occupancy of the most recent agent_message turn (input + cache),
-        or None before any usage has arrived. NOT cumulative."""
+        """Prompt-token count of the most recent agent_message turn: the billing sum on
+        anthropic/openai paths, codex's true occupancy from agent_message_usage_patch rows.
+        NOT cumulative. None before any has arrived."""
         return self._latest_prompt_tokens
 
     @property
@@ -580,8 +582,9 @@ class NarrativeBuilder:
 
     @property
     def latest_context_window(self) -> int | None:
-        """SDK-reported raw context window of the most recent agent_message turn,
-        or None before any has arrived."""
+        """Raw context window of the most recent agent_message turn: SDK-reported on
+        anthropic/openai paths, codex's own derated window from agent_message_usage_patch rows.
+        None before any has arrived."""
         return self._latest_context_window
 
     @property
@@ -880,6 +883,19 @@ class NarrativeBuilder:
             cwin_any = payload.get("context_window")
             if ctoks is not None and cwin_any:
                 self._last_agent_context = (ctoks, cwin_any)
+        elif etype == "agent_message_usage_patch":
+            # codex attaches occupancy AFTER the turn, on this bookkeeping row —
+            # its agent_message carries usage={}, so the branch above sees nothing.
+            # Same three assignments, same own-agent routing rule; pre-routing so a
+            # registered subagent's crossing still reaches the reincarnating line.
+            ctoks = payload.get("context_tokens")
+            cwin = payload.get("context_window")
+            if ctoks is not None and cwin:
+                is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
+                if not is_subagent or agent_id == self._own_agent_id:
+                    self._latest_prompt_tokens = ctoks
+                    self._latest_context_window = cwin
+                self._last_agent_context = (ctoks, cwin)
         elif etype == "query_result":
             # Authoritative per-query totals/cost from claude_code. Accumulated
             # BEFORE sub-routing so a subagent's query_result still folds in.
@@ -1280,6 +1296,10 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._stretch_start_ts = event.get("timestamp")
     self._stretch_backoff_base = self.backoff_wait_seconds(None)
     self._segment_had_work = False
+    # New step = fresh agent conversation; prior step's window must not scale this bar.
+    self._latest_prompt_tokens = None
+    self._latest_context_pct = None
+    self._latest_context_window = None
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
@@ -1599,7 +1619,7 @@ def is_prose_field(key: str, value: Any) -> bool:
 
 def _resolves_error_prose(etype: str, payload: dict[str, Any]) -> bool:
     """True for an event that carries render ordering; a bookkeeping row does not."""
-    if etype == "query_result":
+    if etype in ("query_result", "agent_message_usage_patch"):
         return False
     if etype == "error":
         return not payload.get("audit")
@@ -1827,9 +1847,16 @@ def _h_query_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     return
 
 
+def _h_agent_message_usage_patch(
+        self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # Gauge fields already folded in add(); the row carries no render ordering.
+    return
+
+
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
 NarrativeBuilder._HANDLERS["engine_message"] = _h_engine_message
 NarrativeBuilder._HANDLERS["agent_message"] = _h_agent_message
+NarrativeBuilder._HANDLERS["agent_message_usage_patch"] = _h_agent_message_usage_patch
 NarrativeBuilder._HANDLERS["thinking"] = _h_thinking
 NarrativeBuilder._HANDLERS["step_context"] = _h_step_context
 NarrativeBuilder._HANDLERS["agent_result"] = _h_agent_result

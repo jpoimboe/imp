@@ -15,7 +15,8 @@
     "tool_result",
     "tool_call",
     "tool_result",
-    "agent_message"
+    "agent_message",
+    "runner_warning"
   ],
   "raised": null,
   "step_context_count": 1,

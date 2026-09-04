@@ -16,6 +16,7 @@
     "tool_call",
     "tool_result",
     "agent_message",
+    "runner_warning",
     "output_validation_nudge",
     "engine_message",
     "tool_call",

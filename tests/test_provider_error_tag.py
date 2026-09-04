@@ -127,7 +127,9 @@ async def test_codex_tags_the_failing_turn_and_pins_the_row_order(tmp_path: Path
 
     events = [e async for e in runner.run(_invocation(tmp_path, event_log=elog))]
 
-    rows = _rows(tmp_path)
+    # The fake writes no rollout, so every turn also emits the once-per-run
+    # no-context-reading canary; it is not part of the ordering invariant.
+    rows = [r for r in _rows(tmp_path) if r["type"] != "runner_warning"]
     # codex's bookkeeping row is the usage patch, written straight to disk.
     assert [r["type"] for r in rows[-2:]] == ["agent_message", "agent_message_usage_patch"]
     assert rows[-2]["payload"]["provider_error"] is True

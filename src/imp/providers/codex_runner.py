@@ -49,7 +49,6 @@ from imp.engine.env import quest_scratch_root
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef
 from imp.providers import errors as perr
-from imp.providers.catalog import context_tokens_from_usage
 from imp.providers.codex_config import (
     AuthMode,
     detect_auth_mode,
@@ -64,6 +63,7 @@ from imp.providers.codex_mcp import (
     start_impty_server,
     start_server,
 )
+from imp.providers.codex_rollout import latest_context_reading
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
@@ -251,8 +251,8 @@ class CodexSession(ObserveSession):
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": {},
-            "complete_step_called": False,
-            "auth_mode": auth_mode, "pending_usage": None,
+            "complete_step_called": False, "auth_mode": auth_mode,
+            "context_reading": None, "context_canary_emitted": False,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
         self._proc_state = proc_state
@@ -541,7 +541,8 @@ class CodexSession(ObserveSession):
                       state=self._proc_state,
                       provider=self.invocation.provider_name,
                       model=self.runner.model, run_state=state,
-                      subagent_defs=self.invocation.subagent_defs)
+                      subagent_defs=self.invocation.subagent_defs,
+                      codex_home=self.runner._codex_home)
 
         # Mirror complete_step_args from the shared state into proc_state so the
         # terminal check sees them at the boundary.
@@ -593,17 +594,19 @@ class CodexSession(ObserveSession):
         if getattr(raw, "type", None) != "turn.completed":
             return False
         from imp.engine.reincarnation import handoff_instruction, write_handoff_note
-        from imp.providers.catalog import context_threshold_crossed
+        from imp.providers.catalog import sdk_context_threshold_crossed
         invocation = self.invocation
-        # Tier A watch: this turn crossed the checkpoint threshold while still
-        # working (no complete_step). Inject the handoff instruction as the next
-        # turn prompt and capture the note on the following turn (re-query).
-        # Completion wins over a mere crossing (old ordering: the complete_step
-        # branch returned before the crossing check), so gate on not-completed.
+        # Tier A watch: codex's own reading crossed the checkpoint threshold
+        # while still working (no complete_step). Inject the handoff instruction
+        # as the next turn prompt and capture the note on the following turn
+        # (re-query). Completion wins over a mere crossing (old ordering: the
+        # complete_step branch returned before the crossing check), so gate on
+        # not-completed. No reading -> (None, None) -> never fires.
+        tokens, window = self._proc_state.get("context_reading") or (None, None)
         if (self._handoff_phase is None
                 and not self._complete_step_called
-                and context_threshold_crossed(
-                    self._proc_state.get("pending_usage"),
+                and sdk_context_threshold_crossed(
+                    tokens, window,
                     invocation.provider_name, self.runner.model)):
             instr = handoff_instruction(self._handoff_path_obj)
             self.elog.append_engine_message(
@@ -982,15 +985,23 @@ class CodexAgentRunner:
 # ── Event mapping ─────────────────────────────────────────────────────────────
 
 
+# The rollout record shape is not a public codex contract: warn once per run
+# when a turn that billed tokens yielded no reading.
+_NO_CONTEXT_READING_WARNING = (
+    "no codex context reading in the rollout; context gauge and "
+    "handoff watch inactive for this turn (warned once per run)")
+
+
 def _attach_usage_to_last_agent_message(
     elog: Any, *, agent_id: str, usage: dict[str, Any],
-    context_tokens: int | None = None,
+    context_tokens: int | None = None, context_window: int | None = None,
 ) -> None:
     """Patch the most recent `agent_message` payload for `agent_id` with
-    `usage` (and the canonical `context_tokens` when supplied). Required on
+    `usage` (and codex's live occupancy pair when supplied). Required on
     every `EventLog` implementation — see `src/imp/engine/state.py`."""
     elog.update_last_agent_message_usage(
-        agent_id=agent_id, usage=usage, context_tokens=context_tokens)
+        agent_id=agent_id, usage=usage, context_tokens=context_tokens,
+        context_window=context_window)
 
 
 def _serialize_mcp_result(result: Any) -> str:
@@ -1045,11 +1056,12 @@ def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str, run_state: Any = None,
     subagent_defs: dict[str, AgentDef] | None = None,
+    codex_home: Path | None = None,
 ) -> None:
     """Translate one codex ThreadEvent into imp EventLog records.
 
-    `state` is a shared dict carrying in-flight thread_id, pending usage,
-    captured complete_step args, etc. Filled in across subsequent tasks.
+    `state` is a shared dict carrying in-flight thread_id, the latest context
+    reading, captured complete_step args, etc.
 
     The default arm (unknown item type) logs a runner_warning and returns
     (L3 invariant); only security-relevant types get special handling.
@@ -1282,14 +1294,24 @@ def process_event(
             "cache_creation_input_tokens": 0,
             "reasoning_output_tokens": reasoning_tokens,
         }
-        # Expose the turn's occupancy to the driver's Tier A watch (Mechanism 3)
-        # — the same anthropic-shaped dict context_threshold_crossed consumes.
-        state["pending_usage"] = normalized
-        # Attach to the most recent agent_message payload for this agent_id,
-        # carrying the canonical context_tokens computed from the same dict.
+        # `normalized` is a billing sum over every model request in this turn,
+        # not prompt occupancy — read codex's own per-request record for that.
+        thread_id = state.get("thread_id")
+        reading = None
+        if codex_home is not None and thread_id:
+            try:
+                reading = latest_context_reading(codex_home, thread_id)
+            except OSError:  # codex writes this file concurrently
+                reading = None
+        state["context_reading"] = reading
+        if reading is None and not state.get("context_canary_emitted"):
+            state["context_canary_emitted"] = True
+            elog.append(agent_id=agent_id, type="runner_warning",
+                        payload={"message": _NO_CONTEXT_READING_WARNING})
+        tokens, window = reading if reading is not None else (None, None)
         _attach_usage_to_last_agent_message(
             elog, agent_id=agent_id, usage=normalized,
-            context_tokens=context_tokens_from_usage(normalized))
+            context_tokens=tokens, context_window=window)
         return
 
     # Default arm: turn.failed / error / unknown —

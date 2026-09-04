@@ -403,7 +403,7 @@ class EventLog(Protocol):
     def tail(self, n: int) -> list[dict[str, Any]]: ...
     def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
-        context_tokens: int | None = None,
+        context_tokens: int | None = None, context_window: int | None = None,
     ) -> None: ...
 
 
@@ -726,7 +726,7 @@ class JsonlEventLog(_BaseEventLog):
 
     def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
-        context_tokens: int | None = None,
+        context_tokens: int | None = None, context_window: int | None = None,
     ) -> None:
         # JsonlEventLog is append-only on disk. Write a usage-patch row so
         # read_telemetry can fold it into the preceding agent_message totals.
@@ -735,11 +735,17 @@ class JsonlEventLog(_BaseEventLog):
         payload: dict[str, Any] = {"usage": usage}
         if context_tokens is not None:
             payload["context_tokens"] = context_tokens
-        self._persist({
+        if context_window is not None:
+            payload["context_window"] = context_window
+        record: dict[str, Any] = {
             "type": "agent_message_usage_patch",
             "agent_id": agent_id,
             "payload": payload,
-        })
+        }
+        # broadcast as persisted: no _emit envelope, so on-disk shape is unchanged
+        self._persist(record)
+        if self._on_event is not None:
+            self._on_event(record)
 
     def events_for_current_step(self, step_name: str) -> Iterable[dict[str, Any]]:
         """Replay-helper for `imp resume`: yield events from the last
@@ -783,7 +789,7 @@ class InMemoryEventLog(_BaseEventLog):
 
     def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
-        context_tokens: int | None = None,
+        context_tokens: int | None = None, context_window: int | None = None,
     ) -> None:
         for ev in reversed(self._events):
             if ev.get("type") == "agent_message" and ev.get("agent_id") == agent_id:
@@ -794,6 +800,8 @@ class InMemoryEventLog(_BaseEventLog):
                 payload["usage"] = {**existing, **usage}
                 if context_tokens is not None:
                     payload["context_tokens"] = context_tokens
+                if context_window is not None:
+                    payload["context_window"] = context_window
                 return
         raise RuntimeError(
             f"no prior agent_message for agent_id={agent_id!r} to attach usage to"
