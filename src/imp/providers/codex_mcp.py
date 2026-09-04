@@ -330,7 +330,9 @@ def _register_tool(
     a plain `**kwargs` wrapper produces an incorrect schema.  Instead we:
       1. Build a Pydantic model from the tool's `input_schema` properties,
          subclassing FastMCP's `ArgModelBase` so `call_fn_with_arg_validation`
-         can validate incoming arguments and unpack them by name.
+         can validate incoming arguments and unpack them by name. The subclass
+         omits non-required fields the caller left unset, so an unsent optional
+         never reaches the tool as None.
       2. Directly construct an MCP `Tool` object — bypassing `from_function` —
          so the `parameters` field carries the original `input_schema` verbatim.
       3. Register the `Tool` directly in the tool-manager's registry.
@@ -356,8 +358,14 @@ def _register_tool(
         else:
             field_defs[fname] = (Any, PydanticField(None))
 
+    class _Args(ArgModelBase):
+        # FastMCP dumps every field, so an unset optional would shadow the tool's default.
+        def model_dump_one_level(self) -> dict[str, Any]:
+            return {k: v for k, v in super().model_dump_one_level().items()
+                    if k in required_fields or v is not None}
+
     ArgModel = create_model(
-        f"{tool.name}Arguments", __base__=ArgModelBase, **field_defs
+        f"{tool.name}Arguments", __base__=_Args, **field_defs
     )
     fn_meta = FuncMetadata(arg_model=ArgModel)
 
