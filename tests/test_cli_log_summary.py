@@ -127,3 +127,65 @@ def test_summary_merged_change_via_journal_status(tmp_path, monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "merged" in out
     assert "  merge-to-base  10s" in out
+
+
+_INTERRUPTED_EVENTS = [
+    {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
+     "payload": {"step": "task-lead", "phase": "implement"}},
+    {"type": "step_context", "agent_id": "lead1",
+     "timestamp": "2026-01-01T00:00:01+00:00", "payload": {}},
+    {"type": "tool_call", "id": "ev1", "agent_id": "lead1",
+     "timestamp": "2026-01-01T00:00:10+00:00",
+     "payload": {"name": "sub_agent", "id": "item_3", "id_ns": "block",
+                 "input": {"subagent_name": "coder"}}},
+    {"type": "step_completed", "timestamp": "2026-01-01T00:05:00+00:00",
+     "payload": {"step": "task-lead", "action": {"verb": "continue"}}},
+    {"type": "step_started", "timestamp": "2026-01-01T00:05:05+00:00",
+     "payload": {"step": "verify", "phase": "implement"}},
+    {"type": "step_started", "timestamp": "2026-01-01T00:10:05+00:00",
+     "payload": {"step": "code-review", "phase": "implement"}},
+]
+
+
+def _merged_open_quest(tmp_path, monkeypatch, cid="openq"):
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(m, "_resolve_id", lambda control, token: cid)
+    monkeypatch.setattr(s, "_load_events_for_id", lambda control, c: _INTERRUPTED_EVENTS)
+    monkeypatch.setattr(
+        s, "_row_for_id",
+        lambda control, c: (cid, "merged", "implement", "2026-01-01T00:10:05+00:00",
+                            cid, "2026-01-01T00:00:00+00:00", None, None))
+    return cid
+
+
+def test_summary_terminal_marks_inferred_spans_and_interrupted_tail(
+        tmp_path, monkeypatch, capsys):
+    cid = _merged_open_quest(tmp_path, monkeypatch)
+    assert main(["log", "-s", cid]) == 0
+    out = capsys.readouterr().out
+    assert "\n".join([
+        "  task-lead          5m 0s  —  —",
+        "    ↳ coder        ~4m 50s  —  —",
+        "  verify            ~5m 0s  —  —",
+        "  code-review  interrupted  —  —",
+    ]) in out
+    # The finished status word appears once, on the header line — never in a duration cell.
+    assert sum("merged" in ln for ln in out.splitlines()) == 1
+
+
+@pytest.mark.parametrize("flag,cells", [
+    ("--md=-", ("| task-lead | 5m 0s | — | — |",
+                "| ↳ coder | ~4m 50s | — | — |",
+                "| verify | ~5m 0s | — | — |",
+                "| code-review | interrupted | — | — |")),
+    ("--html=-", ("<td>5m 0s</td>", "<td>~4m 50s</td>",
+                  "<td>~5m 0s</td>", "<td>interrupted</td>")),
+], ids=["md", "html"])
+def test_summary_export_surfaces_match_the_terminal_cells(
+        flag, cells, tmp_path, monkeypatch, capsys):
+    cid = _merged_open_quest(tmp_path, monkeypatch)
+    assert main(["log", "-s", cid, flag]) == 0
+    out = capsys.readouterr().out
+    for cell in cells:
+        assert cell in out

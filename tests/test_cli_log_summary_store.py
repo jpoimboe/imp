@@ -73,3 +73,52 @@ def test_summary_status_from_store_survives_masked_events(
     out = capsys.readouterr().out
     assert rc == 0
     assert expected in out
+
+
+_INTERRUPTED_EVENTS = [
+    {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
+     "payload": {"step": "task-lead", "phase": "implement"}},
+    {"type": "tool_call", "id": "ev1", "agent_id": "lead1",
+     "timestamp": "2026-01-01T00:00:10+00:00",
+     "payload": {"name": "sub_agent", "id": "item_3", "id_ns": "block",
+                 "input": {"subagent_name": "coder"}}},
+    {"type": "step_completed", "timestamp": "2026-01-01T00:05:00+00:00",
+     "payload": {"step": "task-lead", "action": {"verb": "continue"}}},
+    {"type": "step_started", "timestamp": "2026-01-01T00:05:05+00:00",
+     "payload": {"step": "verify", "phase": "implement"}},
+]
+
+
+@pytest.mark.parametrize(
+    "argv,cell",
+    [
+        (["log", "alpha", "-s", "--no-pager"], "~4m 50s"),
+        (["log", "alpha", "-s", "--md=-"], "| ↳ coder | ~4m 50s | — | — |"),
+        (["log", "alpha", "-s", "--html=-"], "<td>~4m 50s</td>"),
+    ],
+    ids=["terminal", "md", "html"],
+)
+def test_archived_summary_marks_inferred_and_interrupted_spans(
+    argv: list[str],
+    cell: str,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Archived merged quest: contained subagent is `~`-marked; open step reads `interrupted`."""
+    import imp.cli.main as m
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr("imp.cli.store.make_store",
+                        lambda _c: _FakeStore(_INTERRUPTED_EVENTS, "merged"))
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    rc = m.main(argv)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert cell in out
+    assert "interrupted" in out      # the trailing `verify` step, never completed
