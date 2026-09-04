@@ -186,7 +186,12 @@ def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | Non
 
 
 def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
-    """The model's view of prompt size for one turn: input + both cache buckets.
+    """One turn's BILLING prompt sum: input + both cache buckets.
+
+    It equals live context occupancy only when the turn was a single model
+    request — true on the anthropic/openai push paths, false on codex, where
+    usage is summed over every request in the turn and runs several times
+    higher than the prompt actually sent.
 
     Correct for both usage shapes: Anthropic's `input_tokens` EXCLUDES cached
     tokens (so the three-way sum is the true prompt), while OpenAI Responses

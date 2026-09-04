@@ -408,3 +408,15 @@ def test_checkpoint_cutoff_without_a_window_is_none() -> None:
     assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], 0) is None
     assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], -1) is None
     assert checkpoint_cutoff(None, None) is None
+
+
+def test_context_tokens_from_usage_docstring_disclaims_live_occupancy() -> None:
+    """The old wording — "the model's view of prompt size" — is what made a
+    codex defect invisible: there a turn's usage is an element-wise sum over
+    every model request in the turn, several times the real prompt."""
+    # Collapse the docstring's wrapping so the assertions pin wording, not
+    # where the lines happen to break.
+    doc = " ".join((context_tokens_from_usage.__doc__ or "").split())
+    assert "model's view of prompt size" not in doc
+    assert "billing" in doc.lower()
+    assert "single model request" in doc
