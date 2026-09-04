@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from imp.cli.narrative import TokenTotals
+from imp.cli.narrative import TokenTotals, elapsed_seconds
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
@@ -789,3 +789,65 @@ def test_repeated_block_id_in_a_later_step_cannot_reach_back():
     assert sub.end_ts == "2026-01-01T00:01:00+00:00"   # step A's end, not step B's result
     assert sub.wall_seconds == 50.0
     assert rows[1].subagents == []
+
+
+def test_step_without_completion_closes_at_the_next_step_start():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:05:00+00:00"),
+        _completed("verify", "2026-01-01T00:06:00+00:00"),
+    ])
+    assert rows[0].end_ts == "2026-01-01T00:05:00+00:00"
+    assert rows[0].wall_seconds == 300.0
+    assert rows[0].end_inferred is True
+    assert rows[1].end_inferred is False
+
+
+def test_trailing_open_step_stays_open_and_uninferred():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+    ])
+    assert rows[0].end_ts is None
+    assert rows[0].end_inferred is False
+
+
+def test_resume_reentry_is_not_an_inferred_close():
+    rows = build_summary([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _await("2026-01-01T00:01:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:06:00+00:00"),  # resume
+        _completed("verify", "2026-01-01T00:06:30+00:00"),
+    ])
+    assert len(rows) == 1
+    assert rows[0].end_inferred is False
+
+
+def test_every_subagent_is_contained_on_a_codex_shaped_log():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev1", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _subresult("item_3", "lead1", "2026-01-01T00:02:00+00:00"),
+        _subcall("ev2", "item_5", "lead1", "2026-01-01T00:02:10+00:00", "explorer"),
+        # unrelated tool result reusing item_5 while the explorer is still open
+        _subresult("item_5", "lead1", "2026-01-01T00:02:20+00:00", stamped=False),
+        _completed("task-lead", "2026-01-01T00:05:00+00:00"),
+        _started("code-review", "review", "2026-01-01T00:05:05+00:00"),
+        _subcall("ev3", "item_3", "rev1", "2026-01-01T00:05:10+00:00", "reviewer"),
+        # a stale id from the first step, stamped, arriving in this one
+        _subresult("item_5", "rev1", "2026-01-01T00:06:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:08:00+00:00"),  # review never completes
+        _completed("verify", "2026-01-01T00:09:00+00:00"),
+    ])
+    assert [r.step for r in rows] == ["task-lead", "code-review", "verify"]
+    for row in rows:
+        assert row.end_ts is not None
+        for sub in row.subagents:
+            ran = elapsed_seconds(sub.start_ts, sub.end_ts)
+            slack = elapsed_seconds(sub.end_ts, row.end_ts)
+            assert ran is not None and ran >= 0
+            assert slack is not None and slack >= 0
+    assert rows[0].subagents[0].wall_seconds == 110.0            # its own stamped result
+    assert rows[0].subagents[1].end_ts == "2026-01-01T00:05:00+00:00"  # contained at step end
+    assert rows[1].subagents[0].end_ts == "2026-01-01T00:08:00+00:00"  # step closed at next start

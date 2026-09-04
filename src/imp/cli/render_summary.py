@@ -35,6 +35,7 @@ class StepRow:
     step: str
     start_ts: str | None
     end_ts: str | None = None
+    end_inferred: bool = False
     wait_seconds: float = 0.0
     errored: bool = False
     agent_id: str | None = None
@@ -113,6 +114,10 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             if (open_row is not None and open_row.end_ts is None
                     and open_row.step == step and open_row.phase == phase):
                 continue
+            if open_row is not None and open_row.end_ts is None:
+                _contain_subs(open_row, ts)
+                open_row.end_ts = ts
+                open_row.end_inferred = True
             open_row = StepRow(phase=phase, step=step, start_ts=ts)
             rows.append(open_row)
         elif etype == "step_completed":
