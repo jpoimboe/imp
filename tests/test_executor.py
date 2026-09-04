@@ -4236,7 +4236,7 @@ class _CapLog:
 def test_attach_home_layer_overlay_creates_sibling_upper(tmp_path, monkeypatch):
     from imp.engine import executor as ex
     from imp.engine.sandbox import HomeLayer
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: True)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
@@ -4263,7 +4263,7 @@ def test_reincarnation_preserves_and_teardown_removes_overlay_home(
     import shutil
 
     from imp.engine import executor as ex
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: True)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
 
@@ -4293,7 +4293,7 @@ def test_reincarnation_preserves_and_teardown_removes_overlay_home(
 
 def test_attach_home_layer_noop_for_home_less(tmp_path, monkeypatch):
     from imp.engine import executor as ex
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: True)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     active_no_home = _active_home_policy(home="")
@@ -4305,7 +4305,7 @@ def test_attach_home_layer_noop_for_home_less(tmp_path, monkeypatch):
 
 def test_attach_home_layer_falls_back_to_rw_home(tmp_path, monkeypatch):
     from imp.engine import executor as ex
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: False)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: None)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
@@ -4318,7 +4318,7 @@ def test_attach_home_layer_falls_back_to_rw_home(tmp_path, monkeypatch):
 def test_attach_home_layer_noop_for_inactive(tmp_path, monkeypatch):
     from imp.engine import executor as ex
     from imp.engine.sandbox import SandboxPolicy
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: True)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     inactive = SandboxPolicy(
         active=False, worktree="", git_common_dir="", git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
@@ -4332,7 +4332,7 @@ def test_attach_home_layer_noop_for_inactive(tmp_path, monkeypatch):
 
 def test_warn_if_no_overlay_emits_when_unavailable(monkeypatch):
     from imp.engine import executor as ex
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: False)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: None)
     log = _CapLog()
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, log)
@@ -4341,7 +4341,32 @@ def test_warn_if_no_overlay_emits_when_unavailable(monkeypatch):
 
 def test_warn_if_no_overlay_silent_when_available(monkeypatch):
     from imp.engine import executor as ex
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: True)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
+    log = _CapLog()
+    quest = types.SimpleNamespace(quest_dir=Path("/x"))
+    ex._warn_if_no_overlay(_active_home_policy(), quest, log)
+    assert log.events == []
+
+
+def test_attach_home_layer_records_probed_userxattr(tmp_path, monkeypatch):
+    # AC 6: the probe's answer reaches the spawn unchanged — True mounts WITH
+    # userxattr, False mounts without, and both are real COW overlays.
+    from imp.engine import executor as ex
+    quest = types.SimpleNamespace(quest_dir=tmp_path)
+    for mode in (True, False):
+        step = types.SimpleNamespace(phase="build", name=f"coder-{mode}")
+        monkeypatch.setattr(ex, "overlay_mode", lambda _b, _h, m=mode: m)
+        pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
+        assert pol.home_layer.is_overlay
+        assert pol.home_layer.userxattr is mode
+        cleanup()
+
+
+def test_warn_if_no_overlay_silent_for_non_userxattr_overlay(monkeypatch):
+    # AC 8: a False probe still yields an overlay — home isolation is intact, so
+    # the warning must NOT fire; only None means "unavailable".
+    from imp.engine import executor as ex
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: False)
     log = _CapLog()
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, log)
@@ -4350,7 +4375,7 @@ def test_warn_if_no_overlay_silent_when_available(monkeypatch):
 
 def test_warn_if_no_overlay_emits_verbatim_reason(monkeypatch):
     from imp.engine import executor as ex
-    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: False)
+    monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: None)
     log = _CapLog()
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, log)
@@ -4367,9 +4392,9 @@ def test_attach_home_layer_threads_resolved_home(tmp_path, monkeypatch):
 
     def capture(base, home):
         seen["base"], seen["home"] = base, home
-        return False
+        return None
 
-    monkeypatch.setattr(ex, "overlay_available", capture)
+    monkeypatch.setattr(ex, "overlay_mode", capture)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     ex._attach_home_layer(_active_home_policy(), step, quest)
@@ -4385,7 +4410,7 @@ def test_warn_if_no_overlay_threads_resolved_home(monkeypatch):
         seen["home"] = home
         return True
 
-    monkeypatch.setattr(ex, "overlay_available", capture)
+    monkeypatch.setattr(ex, "overlay_mode", capture)
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, _CapLog())
     assert seen["home"] == Path("/home/u")
@@ -4394,8 +4419,7 @@ def test_warn_if_no_overlay_threads_resolved_home(monkeypatch):
 def test_warn_if_no_overlay_skips_probe_when_home_absent(monkeypatch):
     from imp.engine import executor as ex
     called: list = []
-    monkeypatch.setattr(ex, "overlay_available",
-                        lambda *a: called.append(a) or False)
+    monkeypatch.setattr(ex, "overlay_mode", lambda *a: called.append(a))
     log = _CapLog()
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(home=""), quest, log)

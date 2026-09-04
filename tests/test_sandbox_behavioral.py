@@ -35,7 +35,7 @@ from imp.engine.sandbox import (
     SandboxPolicy,
     build_sandbox_argv,
     make_home_layer,
-    overlay_available,
+    overlay_mode,
     resolve_policy,
     sandbox_available,
 )
@@ -137,29 +137,32 @@ def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
 _OVERLAY_BASE = Path("/var/tmp")
 
 
-def _probe_overlay_at_base() -> bool:
-    """Probe overlay support at the /var/tmp base, removing the probe dirs after.
-    overlay_available() only rmtrees its own inner .overlay-probe subdir; the
-    mkdtemp'd probe/home parents are cleaned up here. `home` is a separate empty
-    dir (non-overlapping with the probe's scratch layers) so a bare host mounts it
-    cleanly — the same real-home lowerdir shape the per-command mount uses."""
+def _probe_overlay_at_base() -> bool | None:
+    """Probe overlay support at the /var/tmp base, removing the probe dirs after,
+    and return overlay_mode's tri-state: None → no unprivileged overlay here (for
+    ANY reason, including no bwrap and no /var/tmp); True/False → the mount shape
+    this host accepts. overlay_mode() only rmtrees its own inner .overlay-probe
+    subdir; the mkdtemp'd probe/home parents are cleaned up here. `home` is a
+    separate empty dir (non-overlapping with the probe's scratch layers) so a bare
+    host mounts it cleanly — the same real-home lowerdir shape the per-command
+    mount uses."""
     if not sandbox_available() or not _OVERLAY_BASE.is_dir():
-        return False
+        return None
     try:
         probe = Path(tempfile.mkdtemp(prefix="imp-ovl-probe-", dir=_OVERLAY_BASE))
         home = Path(tempfile.mkdtemp(prefix="imp-ovl-home-", dir=_OVERLAY_BASE))
     except OSError:
-        return False
+        return None
     try:
-        return overlay_available(probe, home)
+        return overlay_mode(probe, home)
     finally:
         shutil.rmtree(probe, ignore_errors=True)
         shutil.rmtree(home, ignore_errors=True)
 
 
-_OVERLAY_OK = _probe_overlay_at_base()
+_OVERLAY_MODE: bool | None = _probe_overlay_at_base()
 requires_overlay = pytest.mark.skipif(
-    not _OVERLAY_OK,
+    _OVERLAY_MODE is None,
     reason="unprivileged overlayfs probe at /var/tmp failed (read-only base or "
            "stacked overlay under a nested sandbox)")
 
@@ -189,7 +192,7 @@ def _overlay_home(base: Path, home: Path, *,
     layer, cleanup = make_home_layer(
         str(home),
         upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
-        userxattr=False)
+        userxattr=_OVERLAY_MODE)
     pol = dataclasses.replace(
         base_pol, home=str(home), writable_caches=writable_caches, home_layer=layer)
     return pol, cleanup

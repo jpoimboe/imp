@@ -101,7 +101,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     # fake runner never actually spawns a sandboxed shell, so the policy is
     # inspected as pure data.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
     quest = _make_quest(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
@@ -129,7 +129,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
 def test_isolated_dispatch_parks_artifact_surviving_teardown(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
     quest = _make_quest(tmp_path)
 
     seen: dict = {}
@@ -162,7 +162,7 @@ def test_isolated_dispatch_tears_down_on_error(
     import imp.engine.worktree as wtmod
 
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
     quest = _make_quest(tmp_path)
 
     # Spy on teardown so the test proves it ran with the spike's id+discriminator
@@ -201,7 +201,7 @@ def test_isolated_dispatch_overlay_home_torn_down_on_error(
     # here (unlike test_isolated_dispatch_tears_down_on_error), so this fails if
     # home_cleanup() is ever moved out of finally into the try body.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: True)
     quest = _make_quest(tmp_path)
 
     async def _spawn_boom(_inv):
@@ -407,7 +407,7 @@ def test_attach_isolated_home_overlay_siblings_spike(tmp_path, monkeypatch):
     # name), created on disk, and the cleanup removes them.
     import imp.agents.subagents as subagents
     from imp.engine.sandbox import HomeLayer
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: True)
     spike = project_state_dir(tmp_path) / "worktrees" / "spike-x-1"
     spike.mkdir(parents=True)
     pol, cleanup = subagents._attach_isolated_home(
@@ -424,7 +424,7 @@ def test_attach_isolated_home_overlay_siblings_spike(tmp_path, monkeypatch):
 def test_attach_isolated_home_falls_back_to_rw(tmp_path, monkeypatch):
     # AC 8 (unit): no overlay support → rw-bind fallback, no overlay dirs created.
     import imp.agents.subagents as subagents
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
     spike = project_state_dir(tmp_path) / "worktrees" / "spike-x-1"
     spike.mkdir(parents=True)
     pol, cleanup = subagents._attach_isolated_home(
@@ -435,10 +435,25 @@ def test_attach_isolated_home_falls_back_to_rw(tmp_path, monkeypatch):
     cleanup()  # no-op, must not raise
 
 
+def test_attach_isolated_home_records_probed_userxattr(tmp_path, monkeypatch):
+    # AC 6: the isolated-subagent path carries the probed mount shape too.
+    import imp.agents.subagents as subagents
+    spike = project_state_dir(tmp_path) / "worktrees" / "spike-x-1"
+    spike.mkdir(parents=True)
+    for mode in (True, False):
+        monkeypatch.setattr("imp.engine.sandbox.overlay_mode",
+                            lambda _b, _h, m=mode: m)
+        pol, cleanup = subagents._attach_isolated_home(
+            _active_home_policy(), spike, tmp_path / "q")
+        assert pol.home_layer.is_overlay and pol.home_layer.userxattr is mode
+        assert cleanup is not None
+        cleanup()
+
+
 def test_attach_isolated_home_noop_for_inactive(tmp_path, monkeypatch):
     import imp.agents.subagents as subagents
     from imp.engine.sandbox import SandboxPolicy
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: True)
     inactive = SandboxPolicy(
         active=False, worktree="", git_common_dir="", git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
@@ -455,9 +470,9 @@ def test_attach_isolated_home_threads_resolved_home(tmp_path, monkeypatch):
 
     def capture(base, home):
         seen["base"], seen["home"] = base, home
-        return False
+        return None
 
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", capture)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", capture)
     spike = project_state_dir(tmp_path) / "worktrees" / "spike-x-1"
     spike.mkdir(parents=True)
     subagents._attach_isolated_home(_active_home_policy(), spike, tmp_path / "q")
@@ -470,7 +485,7 @@ def test_isolated_dispatch_overlay_home_torn_down_with_worktree(
     # AC 1/6 (wiring): dispatch attaches an overlay home keyed to the spike
     # worktree; the outer finally removes the overlay dirs with the worktree.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: True)
     quest = _make_quest(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
@@ -498,7 +513,7 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
     from imp.engine.sandbox import build_sandbox_argv
 
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
     # _make_quest uses load_effective_config internally; patch it AFTER so
     # Quest.create gets the real config object (which has tier_names() etc.).
     quest = _make_quest(tmp_path)
@@ -525,7 +540,7 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
 def test_isolated_dispatch_forks_spike_from_base_changed_on_disk(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
     _seed_control(tmp_path)
     # A pre-go-live draft: this is the window in which a spiker runs.
     quest = Quest.create_draft(tmp_path, title="T", quest_id="prb900",

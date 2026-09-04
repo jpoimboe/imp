@@ -439,39 +439,59 @@ def _force_rmtree(path: Path) -> None:
 
 
 @lru_cache(maxsize=1)
-def overlay_available(probe_base: Path, home: Path) -> bool:
-    """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
-    inside a user namespace succeeds using the agent's REAL home as lowerdir.
+def overlay_mode(probe_base: Path, home: Path) -> bool | None:
+    """Whether an unprivileged overlay mounts on this host, and in WHICH shape:
+    None → none does (the caller falls back to a rw bind of the real home);
+    True → mount it with `-o userxattr`; False → mount it without.
+
+    Needs Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
+    inside a user namespace using the agent's REAL home as lowerdir. It probes
+    WITH userxattr first — that keeps the opaque marker in user.overlay.*, which
+    an unprivileged mount can actually write, so removing and recreating a
+    lower-present directory succeeds instead of returning EIO — and re-probes
+    WITHOUT it only when that mount exits nonzero (the option landed in kernel
+    v5.11; older kernels reject the mount outright, and losing the overlay would
+    cost home isolation). The scratch dirs are scrubbed and recreated between the
+    two attempts so the second starts from a clean upper/work. An OSError or
+    SubprocessError (incl. TimeoutExpired) means the host cannot run the probe at
+    all — the second attempt would fail identically — so it short-circuits to None
+    without retrying.
+
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
     real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
     tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
     build_sandbox_argv uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
-    nothing. Cached like sandbox_available(); Part 2 calls this to choose the COW
-    home vs. the rw fallback.
+    nothing. Cached like sandbox_available(); the answer is carried to the
+    per-command mount (via make_home_layer), so probe and spawn always agree.
 
     Tests that monkeypatch subprocess.run / shutil.which / platform.system must
-    call overlay_available.cache_clear() first (the result is process-global
-    cached, keyed on (probe_base, home)).
+    call overlay_mode.cache_clear() first (the result is process-global cached,
+    keyed on (probe_base, home)).
     """
     if platform.system() != "Linux" or shutil.which("unshare") is None:
-        return False
+        return None
     probe = probe_base / ".overlay-probe"
     upper, work, merged = probe / "upper", probe / "work", probe / "merged"
     try:
-        for d in (upper, work, merged):
-            d.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(
-            ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
-             f"mount -t overlay overlay -o "
-             f"lowerdir={shlex.quote(str(home))},"
-             f"upperdir={shlex.quote(str(upper))},"
-             f"workdir={shlex.quote(str(work))} {shlex.quote(str(merged))}"],
-            capture_output=True, timeout=10,
-        )
-        return r.returncode == 0
+        for opt in (",userxattr", ""):
+            _force_rmtree(probe)
+            for d in (upper, work, merged):
+                d.mkdir(parents=True, exist_ok=True)
+            r = subprocess.run(
+                ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
+                 f"mount -t overlay overlay -o "
+                 f"lowerdir={shlex.quote(str(home))},"
+                 f"upperdir={shlex.quote(str(upper))},"
+                 f"workdir={shlex.quote(str(work))}{opt} "
+                 f"{shlex.quote(str(merged))}"],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                return opt == ",userxattr"
+        return None
     except (OSError, subprocess.SubprocessError):
-        return False
+        return None
     finally:
         _force_rmtree(probe)
 
@@ -486,8 +506,8 @@ def make_home_layer(
     build_sandbox_argv wraps with unshare + mount -t overlay (lowerdir=home),
     carrying the flag so the per-command mount uses the exact shape the probe
     validated; the returned cleanup rmtrees the three dirs. One tri-state rather
-    than a use_overlay/userxattr pair, so a non-overlay layer claiming userxattr
-    cannot be constructed. The CALLER probes (overlay_mode at its own probe
+    than an on/off flag paired with userxattr, so a non-overlay layer claiming
+    userxattr cannot be constructed. The CALLER probes (overlay_mode at its own probe
     location) and chooses where the dirs live, so this primitive is shared by the
     executor (dirs sibling to transcript_dir) and the isolated-subagent path
     (dirs sibling to the spike worktree)."""
