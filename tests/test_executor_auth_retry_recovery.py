@@ -15,6 +15,8 @@ from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
+from imp.providers import claude_code
+from imp.providers import claude_token_refresh as ctr
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
@@ -212,3 +214,54 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
     assert "agent_retry" in log_types
     assert "workflow_paused" not in log_types
     assert "agent_message" in log_types
+
+
+@pytest.mark.anyio
+async def test_dead_grant_probe_pauses_on_the_first_401(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+
+    script = [
+        assistant(text(
+            "Failed to authenticate. API Error: 401 "
+            "OAuth access token has been revoked.")),
+        result(),
+    ]
+
+    def client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=script)
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return ClaudeCodeAgentRunner(
+                model_name="m", client_factory=client_factory)
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    def _dead_on_force(now_ms: int, *, env: Any = None,
+                       force: bool = False) -> ctr.RefreshOutcome:
+        if not force:
+            return ctr.RefreshOutcome(ctr.NOT_APPLICABLE)
+        return ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT)
+
+    monkeypatch.setattr(claude_code, "refresh_canonical_token", _dead_on_force)
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    out = await run_quest(quest)
+
+    assert out is RunResult.PAUSED
+    events = list(quest.event_log().read())
+    # The probe settles it on the first 401: no backoff, no retry, no ceiling.
+    assert [e for e in events if e["type"] == "agent_retry"] == []
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert len(paused) == 1
+    assert paused[0]["payload"]["reason"] == "reauth_needed"
+    assert paused[0]["payload"]["kind"] == "AuthTerminalError"

@@ -58,9 +58,10 @@ async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
     events = [e async for e in runner.run(_inv(tmp_path, event_log=elog))]
 
     rows = _rows(tmp_path)
-    # Only a bookkeeping row sits between the tagged prose and the terminal error.
-    assert [r["type"] for r in rows[-2:]] == ["agent_message", "query_result"]
-    assert rows[-2]["payload"]["provider_error"] is True
+    # The forced auth probe journals its outcome after the turn's query_result.
+    assert [r["type"] for r in rows[-3:]] == [
+        "agent_message", "query_result", "token_refresh"]
+    assert rows[-3]["payload"]["provider_error"] is True
     errs = [e for e in events if e.get("type") == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth"]
     assert errs[0]["payload"]["detail"]["last_agent_text"] == AUTH_PROSE
