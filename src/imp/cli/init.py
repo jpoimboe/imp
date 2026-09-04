@@ -46,7 +46,7 @@ from imp.cli.verify_detect import (
     format_test_cmd_fast_yaml,
 )
 from imp.engine import worktree
-from imp.engine._yaml import load_config_yaml
+from imp.engine._yaml import config_yaml_error, load_config_yaml
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
@@ -269,12 +269,25 @@ def _build_user_config(providers: list[str]) -> dict[str, Any]:
 
 
 def _read_user_config(user_path: Path) -> dict[str, Any] | None:
+    """The machine config's settings, or None when the file is absent. Raises
+    when it exists but is not a readable mapping: init repairs `providers:` in
+    place now, and repairing text it cannot read would be guesswork."""
+    from imp.cli.config_write import ConfigWriteError
+
     if not user_path.exists():
         return None
     try:
-        return load_config_yaml(user_path.read_text()) or {}
-    except YAMLError:
+        data = load_config_yaml(user_path.read_text())
+    except YAMLError as err:
+        raise ConfigWriteError(
+            f"invalid YAML in {user_path.name}: {config_yaml_error(err)}") from err
+    if data is None:
         return {}
+    if not isinstance(data, dict):
+        raise ConfigWriteError(
+            f"{user_path.name} must be a mapping of settings, "
+            f"got {type(data).__name__}")
+    return data
 
 
 def _bootstrap_user_config(

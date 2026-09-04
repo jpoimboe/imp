@@ -718,6 +718,7 @@ def _apply_theme() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     from imp.assets import selectable_workflow_names
+    from imp.cli.config_write import ConfigWriteError
     from imp.cli.init import (
         GitIdentityUnavailable,
         IntegrationBranchUnresolved,
@@ -764,7 +765,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
             )
         else:
             run_init(project, input_fn=input, output_fn=print)
-    except (IntegrationBranchUnresolved, GitIdentityUnavailable) as e:
+    except (IntegrationBranchUnresolved, GitIdentityUnavailable,
+            ConfigWriteError) as e:
         _emit_cli_error(f"{e}")
         return 2
     except FileExistsError as e:

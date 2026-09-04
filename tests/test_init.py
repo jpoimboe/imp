@@ -1212,14 +1212,30 @@ def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
     assert "ansiyellow" in doc
 
 
-def test_read_user_config_treats_malformed_yaml_as_empty(tmp_path: Path) -> None:
-    # The clause must catch ruamel's YAMLError, not PyYAML's: init falls back to
-    # asking rather than dying on a hand-broken machine config.
+def test_read_user_config_refuses_unparseable_yaml(tmp_path: Path) -> None:
+    # Reading a hand-broken machine config as "providers absent" would make init
+    # repair it — i.e. hand corrupt text to the writer. Report it instead.
+    from imp.cli.config_write import ConfigWriteError
     from imp.cli.init import _read_user_config
 
     p = tmp_path / "config.yaml"
     p.write_text("providers: [anthropic\n")
-    assert _read_user_config(p) == {}
+    with pytest.raises(ConfigWriteError) as exc:
+        _read_user_config(p)
+    assert str(exc.value).startswith("invalid YAML in config.yaml: ")
+
+
+def test_read_user_config_refuses_a_non_mapping(tmp_path: Path) -> None:
+    """Valid YAML that is not a mapping used to flow through and blow up on
+    `.get("providers")` — an uncaught traceback out of `imp init`."""
+    from imp.cli.config_write import ConfigWriteError
+    from imp.cli.init import _read_user_config
+
+    p = tmp_path / "config.yaml"
+    p.write_text("- claude_code\n- openai\n")
+    with pytest.raises(ConfigWriteError) as exc:
+        _read_user_config(p)
+    assert str(exc.value) == "config.yaml must be a mapping of settings, got list"
 
 
 def test_cmd_init_refuses_on_detached_head(tmp_path, monkeypatch, capsys):
@@ -1307,3 +1323,60 @@ def test_string_built_env_hints_are_gone_from_the_source_tree() -> None:
     blob = "\n".join(p.read_text() for p in src.rglob("*.py"))
     assert "_PROVIDERS_WITHOUT_ENV" not in blob
     assert "(set this env var)" not in blob
+
+
+def test_interactive_init_refuses_an_unparseable_machine_config(tmp_path: Path) -> None:
+    from imp.cli.config_write import ConfigWriteError
+    from imp.cli.init import run_init
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    broken = "providers: [anthropic\n"
+    (home / "config.yaml").write_text(broken)
+
+    with pytest.raises(ConfigWriteError):
+        run_init(
+            project_root=tmp_path, picker_fn=_picks("claude_code"),
+            input_fn=_inputs(), output_fn=lambda _m: None,
+        )
+
+    assert (home / "config.yaml").read_text() == broken
+    assert not (tmp_path / "imp").exists()
+
+
+def test_cmd_init_reports_an_unparseable_machine_config_interactively(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Both streams a tty + no --use-defaults => _select_headless picks the
+    # interactive branch (src/imp/cli/main.py); under pytest
+    # stdin.isatty() is False, so the patches are what reach run_init at all.
+    import imp.cli.main as m
+
+    _init_repo(tmp_path)
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    broken = "providers: [anthropic\n"
+    (home / "config.yaml").write_text(broken)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True, raising=False)
+    # _cmd_init injects no picker_fn, so pin the real terminal picker shut: the
+    # refusal must land before it, and an unpinned red run would try to draw it.
+    monkeypatch.setattr(
+        "imp.cli.init._interactive_provider_picker",
+        lambda _available: (_ for _ in ()).throw(
+            AssertionError("a config that will not parse must not reach the picker")))
+
+    rc = m._cmd_init(_init_args(non_interactive=False))
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    # `imp: ` prefixes the first line only; ruamel's parser detail is itself a
+    # multi-line snippet, so pin the head, not the message's line count.
+    assert captured.err.splitlines()[0].startswith(
+        "imp: invalid YAML in config.yaml: ")
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert (home / "config.yaml").read_text() == broken
+    assert not (tmp_path / "imp" / "config.yaml").exists()
