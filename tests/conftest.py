@@ -35,9 +35,10 @@ def _command_summaries() -> dict[str, str]:
 FIXTURES = Path(__file__).parent / "fixtures"
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
 
-# Live-API tests (the `*_live.py` convention, excluding the unrelated
-# `test_live_*` UI tests) drive real provider round-trips that take tens of
-# seconds each — 30-45s already at `-n 4` — and stretch further under heavier
+# Live provider tests (the `*_live.py` convention, excluding the unrelated
+# `test_live_*` UI tests) drive a real provider toolchain — an API round-trip,
+# or a spawned CLI — for tens of seconds each, 30-45s already at `-n 4`,
+# stretching further under heavier
 # `-n` concurrency. That leaves little headroom under the global `timeout = 60`
 # (signal method, pyproject.toml), which then fires SIGALRM mid-call: a spurious
 # Timeout on a sync subprocess test, or an event loop torn down mid-await on an
@@ -79,9 +80,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         const=RUN_LIVE_ALL,
         default=None,
         help=(
-            "Run live-API tests. Bare --run-live runs every provider whose "
-            "toolchain/credentials are present; --run-live=claude_code,openai "
-            "scopes to a subset (valid: anthropic, openai, claude_code, codex)."
+            "Run tests needing a real provider. Bare --run-live runs every "
+            "provider whose toolchain/credentials are present; "
+            "--run-live=claude_code,openai scopes to a subset "
+            "(valid: anthropic, openai, claude_code, codex)."
         ),
     )
 
@@ -148,7 +150,7 @@ def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item],
 ) -> None:
     """Two jobs at collection: (1) raise the per-test timeout for the slow
-    liveness families — live-API `*_live.py` files (see _LIVE_TEST_TIMEOUT),
+    liveness families — live provider `*_live.py` files (see _LIVE_TEST_TIMEOUT),
     impty PTY e2e `tests/impty/test_e2e_*.py` files (see _IMPTY_E2E_TIMEOUT), and
     the session-daemon/socket family (see _SESSION_SOCKET_TEST_FILES /
     _SESSION_SOCKET_TEST_TIMEOUT) — each keeping its own explicit `timeout`
@@ -221,18 +223,18 @@ os.environ.pop("IMP_STATE_DIR", None)
 def _stub_provider_api_keys(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Stub provider env vars only if not already set. Live-API tests get
-    the real env through (the collection gate handles the "no auth" case);
-    ordinary tests get the stub so module-level provider construction works.
+    """Stub provider env vars only if not already set. Live provider tests get
+    the real credentials through (the collection gate handles the "no auth"
+    case); ordinary tests get the stub so module-level provider construction
+    works.
 
-    Live-API tests spawn subprocesses (or the claude_code provider's nested
-    `claude`) that read ANTHROPIC_API_KEY from the real env. Stubbing it to
-    "sk-test" would give the subprocess a fake key and cause "Invalid API key"
-    / 401 errors. These tests follow a `_live` suffix convention
-    (`*_live.py`, `*_live_<provider>.py`) and gate themselves with the
-    `live` marker, so exempt them from stubbing. The unrelated `test_live_*` UI
-    tests (live_status/live_driver) are NOT live-API tests and still get the
-    stub.
+    Live provider tests spawn subprocesses (or the claude_code provider's
+    nested `claude`) that read ANTHROPIC_API_KEY from the real env. Stubbing it
+    to "sk-test" would give the subprocess a fake key and cause "Invalid API
+    key" / 401 errors. The exemption is keyed to the `_live` filename
+    convention (`*_live.py`, `*_live_<provider>.py`), which these tests pair
+    with the `live` marker. The unrelated `test_live_*` UI tests
+    (live_status/live_driver) need no real credentials and still get the stub.
     """
     name = Path(request.node.fspath).name
     if "_live" in name and not name.startswith("test_live_"):
