@@ -17,11 +17,18 @@ from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
 from imp.engine.quest import Quest
-from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import SkillRequest, encode_attach, encode_input
+from imp.remote.session.client import SessionClient, StreamEnding
+from imp.remote.session.protocol import (
+    _MAX_FRAME,
+    SkillRequest,
+    encode_attach,
+    encode_event,
+    encode_input,
+)
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import SessionSocket
-from tests.async_wait import wait_until
+from tests._session_fakes import serve_raw_frames
+from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _seed_control
 
 
@@ -2997,3 +3004,89 @@ async def test_only_a_live_interrupt_delivered_arms_the_force_quit_offer(
                 "stopping…", "stopping… (interrupt again to force-quit)"]
 
             done.set()
+
+
+@pytest.mark.anyio
+async def test_terminal_client_reports_fault_ending_on_oversized_frame(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    rendered: list[str] = []
+    good = encode_event({"type": "step_started", "payload": {}})
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            rendered.append(event["type"])
+
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await serve_raw_frames(
+                sock, good.encode("utf-8") + b"\n" + b"x" * (_MAX_FRAME + 1), tg)
+            ending = await run_terminal_client(
+                attach=_attach, driver=_Driver(),
+                coord=coord, solicit=_solicit, leave_mode="new")
+            tg.cancel_scope.cancel()
+
+    assert ending is StreamEnding.FAULT
+    assert rendered == ["step_started"]   # the pre-fault frame still rendered
+
+
+@pytest.mark.anyio
+async def test_terminal_client_reports_clean_ending_when_a_leave_cancels_the_loop(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionSocket(sock)
+    coord = InterruptCoordinator()
+    endings: list[StreamEnding] = []
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve)
+
+            async def _client() -> None:
+                endings.append(await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, leave_mode="new"))
+
+            tg.start_soon(_client)
+            await wait_until(
+                lambda: coord.escalation_event is not None
+                and server.attached_count == 1
+            )
+            coord.escalation_event.set()       # deliberate leave: cancels the receive loop
+            await wait_until(lambda: endings)
+            await server.close()
+            tg.cancel_scope.cancel()
+
+    # The loop was cancelled and never returned an ending: it must read as clean,
+    # never as a fault (a fault would print the lost-connection block on every detach).
+    assert endings == [StreamEnding.CLEAN]
