@@ -52,6 +52,13 @@ no intent yet, ask first; once they reply, the selected hat reads as needed.
 **Explore context once intent is in hand.** After the user answers, read relevant
 files, docs, and recent commits — this prevents follow-ups the code already answers.
 
+**Settle what the intent means before you research it.** Reading the repo settles what
+the project *is*, never what the user *meant*. When a load-bearing word in the opening
+carries two or more readings that would produce materially different software, name them
+and ask which is meant — before researching, recommending, or designing against any of
+them. Ask it open: the recommendation-anchored convention below does **not** apply, so
+attach no recommended reading.
+
 **Research before you converge.** Once the intent is in hand, map the relevant code
 before settling questions or proposing a design. There is **no cost gating** in the
 spec phase — research as much as the quest warrants.
