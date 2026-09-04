@@ -890,3 +890,26 @@ def test_live_category_prose_never_says_api():
     for rel in ("pyproject.toml", "tests/_live.py", "tests/conftest.py", "Makefile"):
         body = (_REPO_ROOT / rel).read_text()
         assert "live-api" not in body.lower(), f"{rel} still names the category live-API"
+
+
+@pytest.mark.timeout(120)  # raise the 60s global cap: this spawns a nested pytest
+def test_cc_deny_posture_probes_skip_without_the_flag():
+    """Both CLI-spawning deny-posture probes are collected from the live file and
+    skipped by the run-live gate, so a bare fast run spawns no claude binary."""
+    env = {**os.environ}
+    env["PYTHONPATH"] = (
+        str(_REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    )
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "pytest", "-p", "no:randomly", "-rs", "-v",
+            "tests/test_cc_builtins_drift_live.py",
+        ],
+        cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=110,
+    )
+    combined = proc.stdout + proc.stderr
+    assert proc.returncode == 0, combined
+    assert "test_no_builtin_escapes_imp_deny_posture SKIPPED" in combined
+    assert "test_deny_posture_probe_is_live SKIPPED" in combined
+    assert "2 skipped" in combined
+    assert "live test — pass --run-live to run" in combined
