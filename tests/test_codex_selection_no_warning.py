@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner
+from imp.cli import narrative as nv
+from imp.cli import render_text as rt
 from imp.engine.types import (
     AgentDef,
     OutputField,
@@ -97,3 +99,32 @@ def test_codex_step_override_detail_carries_no_warning_key() -> None:
     assert details["steps"]["s2"] == {
         "provider": "codex", "model": "gpt-5.5",
         "differ_from": "s1", "differ_tier": 3}
+
+
+def test_codex_rows_render_without_a_warning_subline() -> None:
+    """A legacy `tiers_resolved` event — the shape sitting in event logs and
+    archives written before the warning was retired — still carries the key;
+    the reader must drop it rather than render a stale ⚠ line."""
+    b = nv.NarrativeBuilder()
+    b.add({"id": "e1", "agent_id": None, "type": "tiers_resolved",
+           "payload": {
+               "tiers": {"high": {
+                   "provider": "codex", "model": "gpt-5.5",
+                   "differ_tier": None, "differ_from": None,
+                   "warning": "stale copy from an old run"}},
+               "steps": {"s2": {
+                   "provider": "codex", "model": "gpt-5.5",
+                   "differ_tier": 3, "differ_from": "s1",
+                   "warning": "stale copy from an old run"}}}})
+    node = next(c for c in b.tree.root.children
+                if isinstance(c, nv.TiersResolvedNode))
+    assert node.rows == [
+        {"tier": "high", "provider": "codex", "model": "gpt-5.5",
+         "differ_tier": None, "differ_from": None},
+        {"tier": "s2", "provider": "codex", "model": "gpt-5.5",
+         "differ_tier": 3, "differ_from": "s1"},
+    ]
+    out = list(rt._render(node, depth=0, full=True, color=False, width=120))
+    assert any("→ codex/gpt-5.5" in ln for ln in out)
+    assert not any("⚠" in ln for ln in out)
+    assert not any("stale copy" in ln for ln in out)

@@ -2284,8 +2284,7 @@ def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     tiers = p.get("tiers") or {}
     rows = [
         {"tier": tier, "provider": d.get("provider"), "model": d.get("model"),
-         "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from"),
-         "warning": d.get("warning")}
+         "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from")}
         for tier, d in tiers.items()
     ]
     # Also add step overrides (steps with differ_from resolution)
@@ -2294,7 +2293,6 @@ def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         rows.append({
             "tier": step_name, "provider": d.get("provider"), "model": d.get("model"),
             "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from"),
-            "warning": d.get("warning"),
         })
     self._append(TiersResolvedNode(rows=rows))
 
