@@ -18,7 +18,7 @@ import filelock
 
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
-from imp.engine.event_migrations import migrate_events
+from imp.engine.event_migrations import migrate_events, migrate_id_ns_event_to_block
 from imp.engine.state import derive_started_at
 from imp.paths import project_state_dir
 
@@ -156,11 +156,12 @@ def _read_user_version(control_root: Path) -> int:
         conn.close()
 
 
-# blob schema versions: 6 == final_state.project_facts stripped;
+# blob schema versions: 7 == "event" id_ns restamped "block";
+# 6 == final_state.project_facts stripped;
 # 5 == quest_meta.workflow rename imp->default;
 # 4 == final_state.resume_target `prompt` split; 3 == final_state.status
 # realigned; 2 == started_at backfilled; 1 == triad; absent == pre-triad
-_DATA_VERSION = 6
+_DATA_VERSION = 7
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -208,9 +209,10 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     final_state.resume_target `prompt` -> `prompt-paused` (the pre-split tell).
     Also strips the removed `project_facts` key from each record's final_state.
     Also rewrite each record's quest_meta.workflow "imp"->"default".
+    Also restamp each blob's "event" id_ns task folds as "block".
     Rebuilds the index once so its derived columns match, then stamps the data-version
-    marker. A triad blob is left untouched (migrate_events is a no-op on it); old blobs
-    orphan harmlessly (nothing GCs blobs)."""
+    marker. A triad blob with no "event" id_ns folds is left untouched (both transforms
+    are no-ops on it); old blobs orphan harmlessly (nothing GCs blobs)."""
     store = LocalBlobStore(blobs_root(control_root))
     records_dir = records_root(control_root)
     cids = list(record.list_record_ids(records_dir))
@@ -223,7 +225,7 @@ def _migrate_archive_blobs(control_root: Path) -> None:
                 continue
             blob = store.get(rec["events_hash"])
             events = _parse_events(blob) if blob is not None else []
-            migrated = migrate_events(events)
+            migrated = migrate_id_ns_event_to_block(migrate_events(events))
             dirty = False
             if blob is not None and migrated != events:
                 rec["events_hash"] = store.put(_serialize_events(migrated))

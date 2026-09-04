@@ -258,8 +258,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_six() -> None:
-    assert archive._DATA_VERSION == 6
+def test_data_version_bumped_to_seven() -> None:
+    assert archive._DATA_VERSION == 7
 
 
 def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:
@@ -280,7 +280,8 @@ def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None
     migrated = record.read_record(archive.records_root(tmp_path), "wf01")
     assert migrated is not None
     assert migrated["quest_meta"]["workflow"] == "default"
-    assert archive.data_version_path(tmp_path).read_text().strip() == "6"
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
 
 
 def test_migrate_remaps_resume_target_prompt_to_prompt_paused(tmp_path: Path) -> None:
@@ -377,7 +378,8 @@ def test_migrate_strips_project_facts_from_final_state(tmp_path: Path) -> None:
     assert "project_facts" not in fs
     assert fs["status"] == "merged"                     # nothing else disturbed
     assert archive._read_user_version(tmp_path) >= index._SCHEMA_VERSION
-    assert archive.data_version_path(tmp_path).read_text().strip() == "6"
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
 
 
 def test_stripping_project_facts_is_idempotent(tmp_path: Path) -> None:
@@ -398,3 +400,53 @@ def test_stripping_project_facts_is_idempotent(tmp_path: Path) -> None:
     fs = _final_state_of(tmp_path, "pf02")
     assert "project_facts" not in fs
     assert fs["status"] == "merged"
+
+
+_EVENT_KEYED = [
+    {"id": "t0", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-02T00:00:00+00:00",
+     "type": "quest_created", "payload": {"id": "x", "title": ""}},
+    {"id": "t1", "parent_id": None, "agent_id": "A",
+     "timestamp": "2026-06-02T03:00:00+00:00",
+     "type": "user_message",
+     "payload": {"role": "user", "subtype": "intent",
+                 "content": [{"type": "text", "text": "hi"}]}},
+    {"id": "t2", "parent_id": None, "agent_id": "A",
+     "timestamp": "2026-06-02T03:00:01+00:00",
+     "type": "tool_call",
+     "payload": {"id": "item_1", "name": "sub_agent",
+                 "input": {"subagent_name": "explorer", "task_description": "x"}}},
+    {"id": "t3", "parent_id": "t2", "agent_id": "A",
+     "timestamp": "2026-06-02T03:00:09+00:00",
+     "type": "tool_result",
+     "payload": {"id": "item_1", "id_ns": "event", "content": "done", "error": False}},
+]
+
+
+def test_migrate_restamps_event_keyed_task_folds_and_repoints_the_hash(
+    tmp_path: Path,
+) -> None:
+    old_hash = _seed_old_archived_quest(tmp_path, "ns001", _EVENT_KEYED)
+
+    archive.ensure_current(tmp_path)
+
+    rec = record.read_record(archive.records_root(tmp_path), "ns001")
+    assert rec is not None
+    assert rec["events_hash"] != old_hash          # blob rewritten, record repointed
+    migrated = _events_of(tmp_path, "ns001")
+    assert [e["payload"].get("id_ns") for e in migrated] == [
+        None, None, "block", "block"]
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_blob_with_nothing_to_migrate_keeps_its_events_hash(tmp_path: Path) -> None:
+    # A triad blob with no id_ns anywhere: both transforms are no-ops, so the record
+    # must still point at the original blob.
+    old_hash = _seed_old_archived_quest(tmp_path, "ns002", _TRIAD)
+
+    archive.ensure_current(tmp_path)
+
+    rec = record.read_record(archive.records_root(tmp_path), "ns002")
+    assert rec is not None
+    assert rec["events_hash"] == old_hash
