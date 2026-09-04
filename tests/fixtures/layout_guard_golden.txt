@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 15
+# LAYOUT_VERSION: 16
 [paths]
 events.jsonl
 quest.json
