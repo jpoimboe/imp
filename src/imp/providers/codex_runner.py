@@ -633,7 +633,7 @@ class CodexSession(ObserveSession):
             tools=list(ps.get("turn_tool_outcomes", [])),
             has_complete_step=bool(ps.get("complete_step_called")))
 
-    def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
+    async def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
         classified = _classify_agent_text(last_text)
         if classified is not None:
             classified.detail["last_agent_text"] = last_text[:500]

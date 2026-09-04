@@ -1831,7 +1831,7 @@ class ClaudeCodeSession(ObserveSession):
             self._handoff_path = str(self._handoff_path_obj)
         return True
 
-    def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
+    async def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
         client = self.runner._client
         err = _termination_from_result(
             self._last_raw, last_text,
@@ -1844,15 +1844,17 @@ class ClaudeCodeSession(ObserveSession):
                 return None
             err.detail["last_agent_text"] = last_text[:500]
         _roll_back_error_turn(self.messages, self.transcript)
-        err = self._settle_auth_terminality(err)
+        err = await self._settle_auth_terminality(err)
         return cast(dict[str, Any], perr.make_error_event(
             err, kind=getattr(err, "kind", ""))["payload"])
 
-    def _settle_auth_terminality(self, err: perr.ProviderError) -> perr.ProviderError:
+    async def _settle_auth_terminality(self, err: perr.ProviderError) -> perr.ProviderError:
         """Probe the token on a server 401; upgrade to AuthTerminalError if the grant is dead."""
         if err.category != "auth":
             return err
-        outcome = refresh_canonical_token(int(time.time() * 1000), force=True)
+        outcome = await asyncio.to_thread(
+            refresh_canonical_token, int(time.time() * 1000), force=True
+        )
         _journal_token_refresh(self.elog, self.aid, outcome)
         if outcome.outcome != FAILED_INVALID_GRANT:
             return err
