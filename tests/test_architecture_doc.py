@@ -454,6 +454,20 @@ def test_invariants_exempt_the_reconciler_not_the_deleted_integrator() -> None:
     assert "integrator" not in text
 
 
+def test_invariants_forbid_handing_an_agent_a_masked_path() -> None:
+    text = Path("docs/internals/invariants.md").read_text()
+    flat = " ".join(text.split())
+    assert ("- **Never hand an agent a path its sandbox masks.** "
+            "`<quest_dir>/steps/` (the overlay-home mountpoints and transcripts) "
+            "and `<quest_dir>/events.jsonl` are masked for every agent by "
+            "`resolve_policy`. Engine-authored text that points a sandboxed agent "
+            "at recovery data must inline the content or route through "
+            "`imp events`, which the daemon resolves outside the sandbox.") in flat
+    # it is a live layering invariant, not a future/unbuilt aspiration
+    layering, _, _future = flat.partition("## Future / unbuilt")
+    assert "Never hand an agent a path its sandbox masks." in layering
+
+
 def test_architecture_engine_half_names_the_current_default_subagents() -> None:
     text = ARCH.read_text()
     assert (
