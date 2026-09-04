@@ -248,3 +248,38 @@ def test_scripted_keeps_its_runtime_env_var_but_no_floor_table() -> None:
     assert not hasattr(scripted, "TIER_DEFAULTS")
     assert scripted.ENV_VAR == "IMP_SCRIPTED_SCRIPT"
     assert BUILTIN_FLOOR["scripted"].env_var == scripted.ENV_VAR
+
+
+# Exact literals: the hint is user-facing copy, so a plausible-but-wrong string
+# must not pass. Table order mirrors the spec's §6 table.
+_EXPECTED_AUTH_HINTS = {
+    "claude_code": "run `claude login`",
+    "codex": "run `codex login`",
+    "anthropic": "set ANTHROPIC_API_KEY",
+    "openai": "set OPENAI_API_KEY",
+    "scripted": "set IMP_SCRIPTED_SCRIPT",
+}
+
+
+def test_every_builtin_carries_its_auth_hint() -> None:
+    assert {n: e.auth_hint for n, e in BUILTIN_FLOOR.items()} == _EXPECTED_AUTH_HINTS
+
+
+def test_auth_hint_lines_renders_one_indented_line_per_known_provider() -> None:
+    from imp.providers import auth_hint_lines
+
+    assert auth_hint_lines(["claude_code", "anthropic"]) == [
+        "  claude_code — run `claude login`",
+        "  anthropic — set ANTHROPIC_API_KEY",
+    ]
+
+
+def test_auth_hint_lines_skips_a_name_outside_the_floor() -> None:
+    """A provider registered by a test (or a third party) is not in BUILTIN_FLOOR;
+    it must be silently hintless, never a KeyError."""
+    from imp.providers import auth_hint_lines
+
+    assert auth_hint_lines(["housecat", "openai"]) == [
+        "  openai — set OPENAI_API_KEY",
+    ]
+    assert auth_hint_lines([]) == []

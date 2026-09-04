@@ -58,20 +58,20 @@ def reads_back_as(got: Any, expected: Any) -> bool:
 
 
 @contextmanager
-def scratch_seam(scratch_dir: Path, name: str) -> Iterator[Path]:
+def scratch_seam(directory: Path, name: str) -> Iterator[Path]:
     """A real file under the target's own basename, so validator messages already
     name `config.yaml` and `os.replace` lands from the same filesystem. Any
     directory this had to create goes away again unless a write landed in it."""
     created: list[Path] = []
-    for path in (scratch_dir, *scratch_dir.parents):
+    for path in (directory, *directory.parents):
         if path.exists():
             break
         created.append(path)
     try:
-        scratch_dir.mkdir(parents=True, exist_ok=True)
-        yield scratch_dir / name
+        directory.mkdir(parents=True, exist_ok=True)
+        yield directory / name
     finally:
-        shutil.rmtree(scratch_dir, ignore_errors=True)
+        shutil.rmtree(directory, ignore_errors=True)
         for path in created:
             with suppress(OSError):
                 path.rmdir()
@@ -165,13 +165,13 @@ def _require_project_file(target: Path, control_root: Path) -> None:
         f"no imp/config.yaml in {control_root} — run 'imp init' first")
 
 
-def _scratch_dir(target: Path) -> Path:
+def scratch_dir(target: Path) -> Path:
     return target.parent / f".config-verify-{os.getpid()}"
 
 
-def _refusal(target: Path, key: SettableKey) -> str:
+def refusal(target: Path, dotted: str) -> str:
     return (f"refusing to write {layer_label(target)} — "
-            f"{key.dotted!r} would not read back as given")
+            f"{dotted!r} would not read back as given")
 
 
 def _emit_shadow(key: SettableKey, layer: Layer, control_root: Path) -> None:
@@ -213,15 +213,15 @@ def run_set(*, key: str, value: str, scope: Layer | None,
                 f"invalid YAML in {target.name}: {config_yaml_error(err)}") from err
         # Verify even when the text is unchanged: the write is accepted only if
         # imp's own reader reports the value back at the claimed path.
-        with scratch_seam(_scratch_dir(target),
+        with scratch_seam(scratch_dir(target),
                           target.name) as scratch:
             if not verify(scratch, result.text, settable.read_path, parsed):
                 if not isinstance(parsed, str):
-                    raise ConfigWriteError(_refusal(target, settable))
+                    raise ConfigWriteError(refusal(target, settable.dotted))
                 result = apply_set(current, settable.path,
                                    DoubleQuotedScalarString(parsed))
                 if not verify(scratch, result.text, settable.read_path, parsed):
-                    raise ConfigWriteError(_refusal(target, settable))
+                    raise ConfigWriteError(refusal(target, settable.dotted))
             land(scratch, target)
     except ConfigWriteError as err:
         _emit_error(str(err))
@@ -263,7 +263,7 @@ def run_unset(*, key: str, scope: Layer | None,
             _emit_line(f"{layer_label(target)}: {settable.dotted} "
                        "is not set (nothing to do)")
             return 0
-        with scratch_seam(_scratch_dir(target),
+        with scratch_seam(scratch_dir(target),
                           target.name) as scratch:
             verify_readable(scratch, result.text)
             land(scratch, target)

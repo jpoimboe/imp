@@ -19,8 +19,9 @@ def test_imp_knowledge_documents_the_non_interactive_flag() -> None:
     text = _SKILL.read_text()
     # The retired one-shot import-root detection wording is gone.
     assert "one-shot agent" not in text
-    # The provider-free non-interactive flag is documented.
+    # Both init flags an agent may pass are documented.
     assert "--use-defaults" in text
+    assert "--providers" in text
 
 
 def test_init_prose_describes_a_detected_and_confirmed_setup() -> None:

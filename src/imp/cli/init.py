@@ -46,7 +46,7 @@ from imp.cli.verify_detect import (
     format_test_cmd_fast_yaml,
 )
 from imp.engine import worktree
-from imp.engine._yaml import load_config_yaml
+from imp.engine._yaml import config_yaml_error, load_config_yaml
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
@@ -98,6 +98,10 @@ class IntegrationBranchUnresolved(Exception):
 
 class GitIdentityUnavailable(Exception):
     """git can build no author identity here, so imp init cannot commit."""
+
+
+class InvalidProvidersFlag(Exception):
+    """`imp init --providers` names something init won't accept; nothing is written."""
 
 
 _GIT_NO_IDENTITY = (
@@ -215,10 +219,23 @@ _PROVIDER_DISPLAY_ORDER: tuple[str, ...] = (
     "claude_code", "anthropic", "openai", "codex",
 )
 
-# Providers driven by a local CLI rather than an HTTP API — no env-var prompt
-# at init time, and omitted from the informational env hints. codex
-# authenticates via its own ~/.codex/auth.json (codex login), like claude_code.
-_PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code", "codex"})
+
+def parse_providers_flag(raw: str) -> list[str]:
+    """Parse `--providers a,b` as a preference order. Raises InvalidProvidersFlag
+    with the message for the `imp:` line; the caller has written nothing yet."""
+    names = [part.strip() for part in raw.split(",") if part.strip()]
+    if not names:
+        raise InvalidProvidersFlag("--providers: name at least one provider")
+    seen: set[str] = set()
+    for name in names:
+        if name not in _PROVIDER_DISPLAY_ORDER:
+            raise InvalidProvidersFlag(
+                f"--providers: unknown provider {name!r} "
+                f"(choose from: {', '.join(_PROVIDER_DISPLAY_ORDER)})")
+        if name in seen:
+            raise InvalidProvidersFlag(f"--providers: duplicate provider {name!r}")
+        seen.add(name)
+    return names
 
 
 def _default_detect_theme() -> str:
@@ -274,12 +291,63 @@ def _build_user_config(providers: list[str]) -> dict[str, Any]:
 
 
 def _read_user_config(user_path: Path) -> dict[str, Any] | None:
+    """The machine config's settings, or None when the file is absent. Raises
+    when it exists but is not a readable mapping: init repairs `providers:` in
+    place now, and repairing text it cannot read would be guesswork."""
+    from imp.cli.config_write import ConfigWriteError
+
     if not user_path.exists():
         return None
     try:
-        return load_config_yaml(user_path.read_text()) or {}
-    except YAMLError:
+        data = load_config_yaml(user_path.read_text())
+    except YAMLError as err:
+        raise ConfigWriteError(
+            f"invalid YAML in {user_path.name}: {config_yaml_error(err)}") from err
+    if data is None:
         return {}
+    if not isinstance(data, dict):
+        raise ConfigWriteError(f"{user_path.name} root must be a mapping")
+    return data
+
+
+def _configured_providers(existing_cfg: dict[str, Any] | None) -> list[str] | None:
+    """The machine config's reusable provider list, or None when it has none:
+    the shapes accepted here are exactly the ones `_parse_providers` accepts
+    (non-empty, all strings, no duplicates), so init repairs anything else
+    rather than reusing a value imp's own readers reject."""
+    if existing_cfg is None:
+        return None
+    raw = existing_cfg.get("providers")
+    if not isinstance(raw, list) or not raw:
+        return None
+    if not all(isinstance(name, str) for name in raw):
+        return None
+    if len(set(raw)) != len(raw):
+        return None
+    return list(raw)
+
+
+class _ProviderChoice(NamedTuple):
+    providers: list[str]
+    reused: bool
+    repaired: bool
+
+
+def _decide_providers(
+    existing_cfg: dict[str, Any] | None,
+    providers_override: list[str] | None,
+    fallback_fn: Callable[[], list[str]],
+) -> _ProviderChoice:
+    """Explicit --providers wins, else a reusable existing list, else the fallback;
+    repaired means an existing file's list is being rewritten."""
+    configured = _configured_providers(existing_cfg)
+    if providers_override is not None:
+        providers, reused = providers_override, False
+    elif configured is not None:
+        providers, reused = configured, True
+    else:
+        providers, reused = fallback_fn(), False
+    return _ProviderChoice(providers, reused, existing_cfg is not None and not reused)
 
 
 def _bootstrap_user_config(
@@ -298,6 +366,28 @@ def _bootstrap_user_config(
         + "editing_mode: emacs  # emacs | vi\n"
         + sandbox_block
         + _remote_hint())
+
+
+def _set_user_providers(user_path: Path, providers: list[str]) -> None:
+    """Write `providers:` into an existing machine config through the same
+    comment-preserving seam as `imp config set providers`. The caller has
+    already parsed the file (_read_user_config), so unreadable text cannot
+    reach apply_set here."""
+    from imp.cli.config_edit import apply_set
+    from imp.cli.config_write import (
+        ConfigWriteError,
+        land,
+        refusal,
+        scratch_dir,
+        scratch_seam,
+        verify,
+    )
+
+    result = apply_set(user_path.read_text(), ("providers",), providers)
+    with scratch_seam(scratch_dir(user_path), user_path.name) as scratch:
+        if not verify(scratch, result.text, ("providers",), providers):
+            raise ConfigWriteError(refusal(user_path, "providers"))
+        land(scratch, user_path)
 
 
 _TEST_CMD_FAST_COMMENT = (
@@ -837,7 +927,9 @@ def run_init(
     output_fn: Callable[[str], None],
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
+    providers_override: list[str] | None = None,
 ) -> None:
+    from imp.providers import auth_hint_lines
     from imp.providers.paths import global_config_path
 
     color_on = pal.should_use_color(sys.stdout)
@@ -849,33 +941,34 @@ def run_init(
               + pal.ansi(str(project_root), "wordmark", enabled=color_on))
 
     user_path = global_config_path()
-    wrote_user_config = not user_path.exists()
 
-    # --- providers + theme: skip the picker when the global config already
-    #     declares providers (a re-run must not re-ask) ---
+    # --- providers + theme: an explicit --providers wins; otherwise reuse a
+    #     list the config already declares (a re-run must not re-ask) ---
     existing_cfg = _read_user_config(user_path)
-    if existing_cfg and existing_cfg.get("providers"):
-        providers = [str(p) for p in existing_cfg["providers"]]
-        theme = str(existing_cfg.get("theme", "ansi"))
-        picked_this_run = False
-    else:
+    wrote_user_config = existing_cfg is None
+
+    def _pick_providers() -> list[str]:
         pick = picker_fn or _interactive_provider_picker
-        providers = pick(list(_PROVIDER_DISPLAY_ORDER))
-        if not providers:
+        result = pick(list(_PROVIDER_DISPLAY_ORDER))
+        if not result:
             raise ValueError("at least one provider must be selected")
+        return result
+
+    choice = _decide_providers(existing_cfg, providers_override, _pick_providers)
+    providers, reused, repaired = choice.providers, choice.reused, choice.repaired
+    if existing_cfg is None:
         theme = (detect_theme_fn or _default_detect_theme)()
         # Everything below renders in the detected theme; IMP_THEME still wins.
         if pal.theme_override() is None:
             pal.set_theme(theme)
-        picked_this_run = True
+    else:
+        theme = str(existing_cfg.get("theme", "ansi"))
+    if repaired:
+        _set_user_providers(user_path, providers)
     output_fn(pal.ansi(f"Enabled: {', '.join(providers)}", "dim", enabled=color_on))
-    for prov in providers:
-        if prov in _PROVIDERS_WITHOUT_ENV:
-            continue
-        output_fn(pal.ansi(
-            f"  {prov} → {prov.upper()}_API_KEY (set this env var)",
-            "dim", enabled=color_on))
-    if picked_this_run and theme != "ansi":
+    for line in auth_hint_lines(providers):
+        output_fn(pal.ansi(line, "dim", enabled=color_on))
+    if wrote_user_config and theme != "ansi":
         output_fn(pal.ansi(
             f"Detected a {theme} terminal — colors tuned to match.",
             "dim", enabled=color_on))
@@ -895,12 +988,23 @@ def run_init(
         output_fn("Project already initialized (imp/config.yaml is committed).")
         if wrote_user_config:
             output_fn("Bootstrapped your machine config (providers, theme).")
+        elif repaired:
+            output_fn(
+                f"Set providers in your machine config: {', '.join(providers)}.")
         else:
             output_fn("Your machine config is already set up — nothing to do.")
         output_fn(f"  {user_path}  (your machine: providers, theme)")
+        if reused:
+            output_fn(
+                "Change providers later: imp config set providers <name>,<name>")
         if committed:
             output_fn("Committed imp/config.yaml.")
         return
+
+    if repaired:
+        output_fn(pal.ansi(
+            f"Set providers in your machine config: {', '.join(providers)}.",
+            "dim", enabled=color_on))
 
     # --- fresh init: the sandbox gate (init itself needs no model provider) ---
     allow_unsandboxed = False
@@ -985,30 +1089,45 @@ def run_init_noninteractive(
     base: str | None = None,
     pythonpath: list[str] | Literal[False] | None = None,
     detect_verify_fn: Callable[[Path], DetectedTestCommand | None] | None = None,
+    providers_override: list[str] | None = None,
 ) -> None:
-    """Provider-free, non-interactive `imp init`: write imp/config.yaml from
-    defaults (+ overrides) with no model call. Both `--use-defaults` and the
-    no-TTY auto-headless fallback land here. Never prompts — resolves the
-    integration branch from git, or raises IntegrationBranchUnresolved when git
-    offers none, and raises GitIdentityUnavailable when git can build no author
-    identity to commit with."""
+    """Non-interactive `imp init`: write imp/config.yaml from defaults (+
+    overrides) and record the default provider preference order, with no model
+    call. Both `--use-defaults` and the no-TTY auto-headless fallback land here.
+    Never prompts — resolves the integration branch from git, or raises
+    IntegrationBranchUnresolved when git offers none, and raises
+    GitIdentityUnavailable when git can build no author identity to commit
+    with."""
     from imp.providers.paths import global_config_path
 
     workflow = workflow or _DEFAULT_WORKFLOW
     imp_dir = project_root / "imp"
     already_initialized = (imp_dir / "config.yaml").is_file()
     user_path = global_config_path()
-    wrote_user_config = not user_path.exists()
+    # Read before any write: an unparseable machine config aborts init untouched.
+    existing_cfg = _read_user_config(user_path)
+    wrote_user_config = existing_cfg is None
+    choice = _decide_providers(
+        existing_cfg, providers_override,
+        lambda: list(_PROVIDER_DISPLAY_ORDER),  # preference order, not inventory
+    )
+    providers, repaired = choice.providers, choice.repaired
 
     if already_initialized:
         _ensure_git_repo_silent(project_root)  # a copied config.yaml may sit in a non-git dir
         if not _git_can_commit(project_root):
             raise GitIdentityUnavailable(_GIT_NO_IDENTITY)
         if wrote_user_config:
-            _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
+            _bootstrap_user_config(
+                user_path, providers, "ansi", allow_unsandboxed=False)
+        elif repaired:
+            _set_user_providers(user_path, providers)
         _ensure_imp_gitignore(project_root)
         _commit_init_files(project_root)
         output_fn("Project already initialized (imp/config.yaml is committed).")
+        if repaired:
+            output_fn(
+                f"Set providers in your machine config: {', '.join(providers)}.")
         return
 
     git_created = _ensure_git_repo_silent(project_root)
@@ -1025,6 +1144,8 @@ def run_init_noninteractive(
                 "`default-base: <branch>` to imp/config.yaml.")
         default_base = detected_base.branch
     output_fn(f"Integration branch: {default_base}")
+    output_fn(f"Providers: {', '.join(providers)} "
+              "(the first authenticated one is used)")
 
     detect_cmd = detect_verify_fn or detect_test_command
     detected = detect_cmd(project_root)
@@ -1053,7 +1174,10 @@ def run_init_noninteractive(
     committed = write_init_files(project_root, settings)
 
     if wrote_user_config:
-        _bootstrap_user_config(user_path, [], "ansi", allow_unsandboxed=False)
+        _bootstrap_user_config(
+            user_path, providers, "ansi", allow_unsandboxed=False)
+    elif repaired:
+        _set_user_providers(user_path, providers)
 
     output_fn("Created:")
     output_fn("  imp/config.yaml")

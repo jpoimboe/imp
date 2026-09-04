@@ -675,25 +675,27 @@ def _claiming_settings_root() -> Path | None:
 
 
 def _preflight_imp_init(*, control_root: Path) -> str | None:
-    """Return a clean 'run imp init first' message when no provider is
-    env-available (e.g. a never-init'd machine with empty user `providers`),
-    else None. Relocates+dresses the failure that per-step resolution would
-    otherwise raise as a raw ProviderUnavailable deep in a step (spec §4)."""
+    """Relocates and dresses the ProviderUnavailable that per-step resolution
+    would otherwise raise deep in a step."""
     from imp.engine.errors import LoadError, LoadErrors
+    from imp.providers import auth_hint_lines
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import UnknownProvider, _first_available_provider
     try:
         config = load_effective_config(control_root=control_root).config
         no_provider = _first_available_provider(config) is None
     except (LoadError, LoadErrors, UnknownProvider):
-        # A malformed config (bad YAML, or a `providers:` entry that names an
-        # unregistered provider — _first_available_provider raises UnknownProvider,
-        # resolve.py:124-136) is reported downstream with full context. Don't dress
-        # it as "run imp init first" — that would mislead. Let resolution surface it.
+        # Malformed config or unknown provider — let resolution surface it with full context.
         return None
-    if no_provider:
-        return "no provider available — run `imp init` first"
-    return None
+    if not no_provider:
+        return None
+    names = list(config.providers)
+    if not names:
+        return "no providers configured — run 'imp config set providers claude_code'"
+    return "\n".join([
+        f"no authenticated provider — configured: {', '.join(names)}",
+        *auth_hint_lines(names),
+    ])
 
 
 def _apply_theme() -> None:
@@ -716,9 +718,12 @@ def _apply_theme() -> None:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     from imp.assets import selectable_workflow_names
+    from imp.cli.config_write import ConfigWriteError
     from imp.cli.init import (
         GitIdentityUnavailable,
         IntegrationBranchUnresolved,
+        InvalidProvidersFlag,
+        parse_providers_flag,
         run_init,
         run_init_noninteractive,
     )
@@ -736,6 +741,14 @@ def _cmd_init(args: argparse.Namespace) -> int:
             _emit_cli_error(
                 f"unknown workflow {wf_arg!r}; available: {', '.join(names)}")
             return 2
+    providers_arg = getattr(args, "providers", None)
+    providers_override: list[str] | None = None
+    if providers_arg is not None:
+        try:
+            providers_override = parse_providers_flag(providers_arg)
+        except InvalidProvidersFlag as e:
+            _emit_cli_error(f"{e}")
+            return 2
     headless, auto_headless = _select_headless(args)
     try:
         if headless:
@@ -743,7 +756,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
                 print(
                     "No interactive terminal detected — writing defaults to "
                     "imp/config.yaml. Override with --workflow / --base / "
-                    "--pythonpath.",
+                    "--pythonpath / --providers.",
                     file=sys.stderr,
                 )
             raw_pythonpath = getattr(args, "pythonpath", None)
@@ -759,10 +772,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
                 workflow=getattr(args, "workflow", None),
                 base=getattr(args, "base", None),
                 pythonpath=pythonpath,
+                providers_override=providers_override,
             )
         else:
-            run_init(project, input_fn=input, output_fn=print)
-    except (IntegrationBranchUnresolved, GitIdentityUnavailable) as e:
+            run_init(project, input_fn=input, output_fn=print,
+                     providers_override=providers_override)
+    except (IntegrationBranchUnresolved, GitIdentityUnavailable,
+            ConfigWriteError) as e:
         _emit_cli_error(f"{e}")
         return 2
     except FileExistsError as e:
@@ -3800,9 +3816,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=_cmd_init, warm=True)
     p_init.add_argument(
         "--use-defaults", action="store_true", dest="non_interactive",
-        help="Non-interactive, provider-free setup: write imp/config.yaml with "
-             "the default workflow, resolved integration branch, and teaching "
-             "hints — no model call, works in CI with no credentials.")
+        help="Non-interactive setup: write imp/config.yaml with the default "
+             "workflow, resolved integration branch, and teaching hints — no "
+             "model call, works in CI with no credentials.")
+    p_init.add_argument(
+        "--providers", metavar="CSV", default=None,
+        help="Comma-separated providers to enable, in preference order; skips "
+             "the picker. Defaults to all four — the first authenticated one "
+             "is used.")
     p_init.add_argument(
         "--workflow", metavar="NAME", default=None,
         help="Default workflow recorded by the non-interactive path (defaults "
@@ -4343,6 +4364,7 @@ def _init_logging() -> None:
 def main(argv: list[str] | None = None) -> int:
     from imp.diagnostics import install_stack_dumper
     from imp.engine import worktree
+    from imp.engine.errors import LoadError, LoadErrors
     _init_logging()
     with contextlib.suppress(Exception):
         install_stack_dumper(
@@ -4375,6 +4397,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.flush()
         return rc
     except worktree.PreconditionError as e:
+        _emit_cli_error(f"{e}")
+        return 2
+    except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
     except BrokenPipeError:

@@ -358,7 +358,7 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
 
 
 def test_init_finishes_with_no_credential_in_the_environment(tmp_path, monkeypatch):
-    # AC 8(a): init is provider-free on every path — no probe, no message.
+    # init never probes provider credentials on any path — no probe, no message.
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(
@@ -735,7 +735,7 @@ def test_init_parser_accepts_override_flags() -> None:
 
 def test_init_no_tty_routes_non_interactive(tmp_path, monkeypatch):
     # No --use-defaults, but a non-tty stdin/stdout must auto-route to the
-    # provider-free path (no hang, no picker).
+    # non-interactive path (no hang, no picker).
     import imp.cli.main as m
 
     monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
@@ -784,7 +784,8 @@ def test_init_empty_pythonpath_flag_passes_false(tmp_path, monkeypatch):
 def _init_args(**over: object) -> argparse.Namespace:
     """A parser-shaped Namespace for _cmd_init: --use-defaults => non_interactive."""
     fields: dict[str, object] = {
-        "non_interactive": True, "workflow": None, "base": None, "pythonpath": None}
+        "non_interactive": True, "workflow": None, "base": None,
+        "pythonpath": None, "providers": None}
     fields.update(over)
     return argparse.Namespace(**fields)
 
@@ -981,7 +982,7 @@ def test_host_success_lines_carry_engine_chrome(
     # This one prints before the theme is applied, so its gold is the ansi gold.
     assert f"Setting up imp in {GOLD_ANSI}{tmp_path}{RESET}" in msgs
     assert f"{DIM}Enabled: anthropic{RESET}" in msgs
-    assert f"{DIM}  anthropic → ANTHROPIC_API_KEY (set this env var){RESET}" in msgs
+    assert f"{DIM}  anthropic — set ANTHROPIC_API_KEY{RESET}" in msgs
     assert f"{DIM}Detected a dark terminal — colors tuned to match.{RESET}" in msgs
     assert f"{GOLD_DARK}Created:{RESET}" in msgs
     assert f"{DIM}  imp/config.yaml{RESET}" in msgs
@@ -1212,14 +1213,31 @@ def test_picker_docstring_no_longer_calls_the_cursor_row_cyan() -> None:
     assert "ansiyellow" in doc
 
 
-def test_read_user_config_treats_malformed_yaml_as_empty(tmp_path: Path) -> None:
-    # The clause must catch ruamel's YAMLError, not PyYAML's: init falls back to
-    # asking rather than dying on a hand-broken machine config.
+def test_read_user_config_refuses_unparseable_yaml(tmp_path: Path) -> None:
+    # Reading a hand-broken machine config as "providers absent" would make init
+    # repair it — i.e. hand corrupt text to the writer. Report it instead.
+    from imp.cli.config_write import ConfigWriteError
     from imp.cli.init import _read_user_config
 
     p = tmp_path / "config.yaml"
     p.write_text("providers: [anthropic\n")
-    assert _read_user_config(p) == {}
+    with pytest.raises(ConfigWriteError) as exc:
+        _read_user_config(p)
+    assert str(exc.value).startswith("invalid YAML in config.yaml: ")
+
+
+def test_read_user_config_refuses_a_non_mapping(tmp_path: Path) -> None:
+    """Valid YAML that is not a mapping used to flow through and blow up on
+    `.get("providers")` — an uncaught traceback out of `imp init`."""
+    from imp.cli.config_write import ConfigWriteError
+    from imp.cli.init import _read_user_config
+
+    p = tmp_path / "config.yaml"
+    p.write_text("- claude_code\n- openai\n")
+    with pytest.raises(ConfigWriteError) as exc:
+        _read_user_config(p)
+    # Same wording as imp's own config loader (src/imp/providers/config.py:123).
+    assert str(exc.value) == "config.yaml root must be a mapping"
 
 
 def test_cmd_init_refuses_on_detached_head(tmp_path, monkeypatch, capsys):
@@ -1280,3 +1298,641 @@ def test_cmd_init_runs_in_a_fresh_directory(tmp_path_factory, monkeypatch, capsy
     assert capsys.readouterr().err == ""
     assert (fresh / ".git").exists()
     assert (fresh / "imp" / "config.yaml").is_file()
+
+
+def test_picker_confirmation_hints_every_enabled_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """claude_code gets a hint now — it used to be silently skipped for having no env var."""
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setenv("NO_COLOR", "1")
+    msgs: list[str] = []
+
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("claude_code", "anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+
+    enabled = msgs.index("Enabled: claude_code, anthropic")
+    assert msgs[enabled + 1] == "  claude_code — run `claude login`"
+    assert msgs[enabled + 2] == "  anthropic — set ANTHROPIC_API_KEY"
+    assert not any("set this env var" in m for m in msgs)
+
+
+def test_string_built_env_hints_are_gone_from_the_source_tree() -> None:
+    src = Path(__file__).resolve().parents[1] / "src"
+    blob = "\n".join(p.read_text() for p in src.rglob("*.py"))
+    assert "_PROVIDERS_WITHOUT_ENV" not in blob
+    assert "(set this env var)" not in blob
+
+
+def test_interactive_init_refuses_an_unparseable_machine_config(tmp_path: Path) -> None:
+    from imp.cli.config_write import ConfigWriteError
+    from imp.cli.init import run_init
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    broken = "providers: [anthropic\n"
+    (home / "config.yaml").write_text(broken)
+
+    with pytest.raises(ConfigWriteError):
+        run_init(
+            project_root=tmp_path, picker_fn=_picks("claude_code"),
+            input_fn=_inputs(), output_fn=lambda _m: None,
+        )
+
+    assert (home / "config.yaml").read_text() == broken
+    assert not (tmp_path / "imp").exists()
+
+
+def test_cmd_init_reports_an_unparseable_machine_config_interactively(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Both streams a tty + no --use-defaults => _select_headless picks the
+    # interactive branch (src/imp/cli/main.py); under pytest
+    # stdin.isatty() is False, so the patches are what reach run_init at all.
+    import imp.cli.main as m
+
+    _init_repo(tmp_path)
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    broken = "providers: [anthropic\n"
+    (home / "config.yaml").write_text(broken)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True, raising=False)
+    # _cmd_init injects no picker_fn, so pin the real terminal picker shut: the
+    # refusal must land before it, and an unpinned red run would try to draw it.
+    monkeypatch.setattr(
+        "imp.cli.init._interactive_provider_picker",
+        lambda _available: (_ for _ in ()).throw(
+            AssertionError("a config that will not parse must not reach the picker")))
+
+    rc = m._cmd_init(_init_args(non_interactive=False))
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    # `imp: ` prefixes the first line only; ruamel's parser detail is itself a
+    # multi-line snippet, so pin the head, not the message's line count.
+    assert captured.err.splitlines()[0].startswith(
+        "imp: invalid YAML in config.yaml: ")
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert (home / "config.yaml").read_text() == broken
+    assert not (tmp_path / "imp" / "config.yaml").exists()
+
+
+def _seed_machine_config(home: Path, providers_block: str) -> str:
+    """Real bootstrapped machine bytes (comments, theme, editing_mode, sandbox
+    block, remote hint) with the providers key swapped for `providers_block`."""
+    from imp.cli.init import _bootstrap_user_config
+
+    path = home / "config.yaml"
+    _bootstrap_user_config(path, ["anthropic"], "dark", allow_unsandboxed=True)
+    text = path.read_text().replace("providers:\n- anthropic\n", providers_block)
+    path.write_text(text)
+    return text
+
+
+def _sans_providers(text: str) -> list[str]:
+    return [ln for ln in text.splitlines() if not ln.startswith("providers:")]
+
+
+def test_set_user_providers_replaces_an_empty_list_and_preserves_the_file(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import _set_user_providers
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+
+    _set_user_providers(home / "config.yaml", ["claude_code", "openai"])
+
+    after = (home / "config.yaml").read_text()
+    assert "providers: [claude_code, openai]" in after
+    assert _sans_providers(after) == _sans_providers(before)
+    data = yaml.safe_load(after)
+    assert data["theme"] == "dark"
+    assert data["editing_mode"] == "emacs"
+    assert data["sandbox"] == {"allow_unsandboxed": True}
+    assert "# remote:" in after
+
+
+def test_set_user_providers_inserts_an_absent_key(tmp_path: Path) -> None:
+    from imp.cli.init import _set_user_providers
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "")
+    assert "providers" not in yaml.safe_load(before)
+
+    _set_user_providers(home / "config.yaml", ["claude_code"])
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["claude_code"]
+    assert _sans_providers(after) == _sans_providers(before)
+
+
+def test_set_user_providers_refuses_a_write_that_does_not_read_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The read-back gate is the writer's whole point: a candidate imp's own
+    reader does not report back must never land."""
+    from imp.cli.config_write import ConfigWriteError
+    from imp.cli.init import _set_user_providers
+
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+    monkeypatch.setattr("imp.cli.config_write.verify", lambda *_a, **_kw: False)
+
+    with pytest.raises(ConfigWriteError) as exc:
+        _set_user_providers(home / "config.yaml", ["claude_code"])
+
+    assert "would not read back as given" in str(exc.value)
+    assert (home / "config.yaml").read_text() == before
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,                            # key absent
+        [],                              # the state init used to write
+        "claude_code",                   # hand-edited scalar: iterating yields chars
+        ["claude_code", 7],              # _parse_providers rejects a non-string entry
+        ["codex", "codex"],              # _parse_providers rejects a duplicate entry
+    ],
+)
+def test_no_usable_providers_to_reuse(raw: object) -> None:
+    from imp.cli.init import _configured_providers
+
+    assert _configured_providers({} if raw is None else {"providers": raw}) is None
+    assert _configured_providers(None) is None
+
+
+def test_configured_providers_returns_a_usable_list_verbatim() -> None:
+    from imp.cli.init import _configured_providers
+
+    assert _configured_providers({"providers": ["openai", "codex"]}) == [
+        "openai", "codex"]
+
+
+@pytest.mark.parametrize(
+    "seed",
+    ["providers: []\n", "", "providers: claude_code\n",
+     "providers: [codex, codex]\n"])
+def test_interactive_reinit_repairs_an_unusable_provider_list(
+    tmp_path: Path, seed: str,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, seed)
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("claude_code", "anthropic", "openai", "codex"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == [
+        "claude_code", "anthropic", "openai", "codex"]
+    assert _sans_providers(after) == _sans_providers(before)
+    assert ("Set providers in your machine config: "
+            "claude_code, anthropic, openai, codex.") in msgs
+    assert not any("already set up" in m for m in msgs)
+
+
+def test_interactive_reinit_reuses_a_valid_list_and_names_the_setter(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic, openai]\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("picker must not run when providers are configured")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_boom,
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+
+    assert (home / "config.yaml").read_text() == before   # never silently rewritten
+    assert "Your machine config is already set up — nothing to do." in msgs
+    path_line = msgs.index(
+        f"  {home / 'config.yaml'}  (your machine: providers, theme)")
+    assert msgs[path_line + 1] == (
+        "Change providers later: imp config set providers <name>,<name>")
+
+
+def test_fresh_interactive_init_announces_provider_repair(tmp_path: Path) -> None:
+    """Fresh init (no imp/config.yaml) against a machine config with providers: []
+    reports the repair and preserves the existing comment."""
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: []\n")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("claude_code", "openai"),
+        input_fn=_inputs(),
+        output_fn=msgs.append,
+    )
+
+    assert "Set providers in your machine config: claude_code, openai." in msgs
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["claude_code", "openai"]
+    assert _sans_providers(after) == _sans_providers(before)
+
+
+def test_fresh_interactive_init_no_repair_no_announcement(tmp_path: Path) -> None:
+    """Fresh init (no imp/config.yaml) against a machine config with a valid
+    provider list must NOT print the set-providers line (no repair happened)."""
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    _seed_machine_config(home, "providers: [anthropic]\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("picker must not run when providers are configured")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_boom,
+        input_fn=_inputs(),
+        output_fn=msgs.append,
+    )
+
+    assert not any("Set providers in your machine config:" in m for m in msgs)
+
+
+_DEFAULT_PROVIDERS = ["claude_code", "anthropic", "openai", "codex"]
+
+
+def test_use_defaults_writes_the_default_preference_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider_registry: object,
+) -> None:
+    # provider_registry (tests/conftest.py) resets the process-global registry on
+    # BOTH sides; resolve._ensure_builtins then lazily re-registers the builtins
+    # this test reads through. Registering here by hand would leak to every later
+    # test in the worker.
+    from imp.cli.init import run_init_noninteractive
+    from imp.cli.main import main
+    from imp.providers.effective import load_effective_config
+
+    msgs: list[str] = []
+
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
+    assert data["providers"] == _DEFAULT_PROVIDERS
+    branch_line = next(
+        i for i, m in enumerate(msgs) if m.startswith("Integration branch: "))
+    assert msgs[branch_line + 1] == (
+        "Providers: claude_code, anthropic, openai, codex "
+        "(the first authenticated one is used)")
+    # imp's own readers must accept what init wrote — `providers: []` did not.
+    assert list(load_effective_config(control_root=tmp_path).config.providers) == (
+        _DEFAULT_PROVIDERS)
+    monkeypatch.chdir(tmp_path)
+    assert main(["config"]) == 0
+
+
+@pytest.mark.parametrize(
+    "seed",
+    ["providers: []\n", "", "providers: claude_code\n",
+     "providers: [codex, codex]\n"])
+def test_use_defaults_repairs_an_existing_machine_config(
+    tmp_path: Path, seed: str,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, seed)
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == _DEFAULT_PROVIDERS
+    assert _sans_providers(after) == _sans_providers(before)
+    assert msgs == [
+        "Project already initialized (imp/config.yaml is committed).",
+        "Set providers in your machine config: "
+        "claude_code, anthropic, openai, codex.",
+    ]
+
+
+def test_use_defaults_says_nothing_about_providers_when_it_repairs_nothing(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic]\n")
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+
+    assert (home / "config.yaml").read_text() == before
+    assert msgs == ["Project already initialized (imp/config.yaml is committed)."]
+
+
+def test_cmd_init_reports_an_unparseable_machine_config_non_interactively(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The scripted path reads the machine config too — before it writes
+    anything, so a file it cannot parse aborts init with the tree untouched."""
+    import imp.cli.main as m
+
+    _init_repo(tmp_path)
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    broken = "providers: [anthropic\n"
+    (home / "config.yaml").write_text(broken)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+
+    rc = m._cmd_init(_init_args())   # --use-defaults => the headless branch
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err.splitlines()[0].startswith(
+        "imp: invalid YAML in config.yaml: ")
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert (home / "config.yaml").read_text() == broken
+    assert not (tmp_path / "imp" / "config.yaml").exists()
+
+
+def test_providers_flag_parses_a_preference_order() -> None:
+    from imp.cli.init import parse_providers_flag
+
+    assert parse_providers_flag("claude_code, openai") == ["claude_code", "openai"]
+    # order is the user's, not the display order
+    assert parse_providers_flag("codex,anthropic") == ["codex", "anthropic"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("foo",
+         "--providers: unknown provider 'foo' "
+         "(choose from: claude_code, anthropic, openai, codex)"),
+        # the `scripted` test backend is registered but not selectable here
+        ("claude_code,scripted",
+         "--providers: unknown provider 'scripted' "
+         "(choose from: claude_code, anthropic, openai, codex)"),
+        ("openai,openai", "--providers: duplicate provider 'openai'"),
+        ("", "--providers: name at least one provider"),
+        ("  ,  ", "--providers: name at least one provider"),
+    ],
+)
+def test_providers_flag_refusals(raw: str, message: str) -> None:
+    from imp.cli.init import InvalidProvidersFlag, parse_providers_flag
+
+    with pytest.raises(InvalidProvidersFlag) as exc:
+        parse_providers_flag(raw)
+    assert str(exc.value) == message
+
+
+def test_providers_override_skips_the_picker_on_a_fresh_init(tmp_path: Path) -> None:
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=lambda _m: None,
+        providers_override=["claude_code", "openai"],
+    )
+
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["providers"] == ["claude_code", "openai"]
+
+
+def test_providers_override_still_detects_the_theme(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skipping the picker must not skip theme detection: a fresh interactive
+    init still renders the splash and screen in the terminal's own theme."""
+    monkeypatch.delenv("IMP_THEME", raising=False)
+    seen: dict[str, str] = {}
+    _stub_screen_recording_theme(monkeypatch, seen)
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=lambda _m: None, detect_theme_fn=lambda: "dark",
+        providers_override=["openai"],
+    )
+
+    assert seen["theme"] == "dark"
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["theme"] == "dark"
+
+
+def test_providers_override_rewrites_an_existing_valid_list(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic]\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=msgs.append, providers_override=["codex", "openai"],
+    )
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["codex", "openai"]
+    assert _sans_providers(after) == _sans_providers(before)
+    assert "Set providers in your machine config: codex, openai." in msgs
+    assert not any("already set up" in m for m in msgs)
+    # the list was just set explicitly — that line is for a reusing re-run
+    assert not any(m.startswith("Change providers later:") for m in msgs)
+
+
+def test_providers_override_bootstraps_absent_machine_config_for_initialized_project(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+
+    def _boom(_available: list[str]) -> list[str]:
+        raise AssertionError("--providers must skip the picker")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_boom, input_fn=_inputs(),
+        output_fn=msgs.append, providers_override=["codex", "openai"],
+    )
+
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["providers"] == ["codex", "openai"]
+    assert "Bootstrapped your machine config (providers, theme)." in msgs
+
+
+def test_use_defaults_providers_override_writes_the_given_list(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None,
+        providers_override=["openai", "codex"])
+
+    data = yaml.safe_load((tmp_path / "imphome" / "config.yaml").read_text())
+    assert data["providers"] == ["openai", "codex"]
+    branch_line = next(
+        i for i, m in enumerate(msgs) if m.startswith("Integration branch: "))
+    assert msgs[branch_line + 1] == (
+        "Providers: openai, codex (the first authenticated one is used)")
+
+
+def test_use_defaults_providers_override_rewrites_an_existing_valid_list(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.init import run_init_noninteractive
+
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("default-workflow: imp\n")
+    home = tmp_path / "imphome"
+    home.mkdir(parents=True)
+    before = _seed_machine_config(home, "providers: [anthropic]\n")
+
+    msgs: list[str] = []
+    run_init_noninteractive(
+        tmp_path, output_fn=msgs.append, detect_verify_fn=lambda _r: None,
+        providers_override=["codex"])
+
+    after = (home / "config.yaml").read_text()
+    assert yaml.safe_load(after)["providers"] == ["codex"]
+    assert _sans_providers(after) == _sans_providers(before)
+    assert msgs == [
+        "Project already initialized (imp/config.yaml is committed).",
+        "Set providers in your machine config: codex.",
+    ]
+
+
+def test_init_parser_accepts_the_providers_flag() -> None:
+    from imp.cli.main import _build_parser
+
+    args = _build_parser().parse_args(["init", "--providers", "claude_code,openai"])
+    assert args.providers == "claude_code,openai"
+    assert _build_parser().parse_args(["init"]).providers is None
+
+
+def test_cmd_init_passes_the_parsed_providers_to_both_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    called: dict[str, object] = {}
+    monkeypatch.setattr("imp.cli.init.run_init_noninteractive",
+                        lambda _project, **kw: called.update(kw))
+    m._cmd_init(_init_args(providers="claude_code, openai"))
+    assert called["providers_override"] == ["claude_code", "openai"]
+
+    # Under pytest stdin is not a tty, so _select_headless would route the
+    # second call headless too unless both streams are pinned open.
+    called.clear()
+    monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(m.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("imp.cli.init.run_init",
+                        lambda _project, **kw: called.update(kw))
+    m._cmd_init(_init_args(non_interactive=False, providers="codex"))
+    assert called["providers_override"] == ["codex"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "line"),
+    [
+        ("claude_code,foo",
+         "imp: --providers: unknown provider 'foo' "
+         "(choose from: claude_code, anthropic, openai, codex)"),
+        ("openai,openai", "imp: --providers: duplicate provider 'openai'"),
+        (",", "imp: --providers: name at least one provider"),
+    ],
+)
+def test_cmd_init_rejects_a_bad_providers_value_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], raw: str, line: str,
+) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    for name in ("run_init", "run_init_noninteractive"):
+        monkeypatch.setattr(
+            f"imp.cli.init.{name}",
+            lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("a bad --providers must not reach the writer")))
+
+    rc = m._cmd_init(_init_args(providers=raw))
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.err.splitlines() == [line]
+    assert captured.out == ""
+    assert not (tmp_path / "imp").exists()
+    assert not (tmp_path / "imphome" / "config.yaml").exists()
+
+
+def test_cmd_init_providers_flag_writes_exactly_that_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+
+    rc = m._cmd_init(_init_args(providers="claude_code,openai"))
+
+    assert rc == 0
+    user = tmp_path / "imphome" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["providers"] == ["claude_code", "openai"]
+
+
+def test_init_help_documents_providers_and_drops_provider_free(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from imp.cli.main import _build_parser
+
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["init", "-h"])
+    help_text = " ".join(capsys.readouterr().out.split())
+
+    assert ("Comma-separated providers to enable, in preference order; skips "
+            "the picker. Defaults to all four — the first authenticated one is "
+            "used.") in help_text
+    assert ("Non-interactive setup: write imp/config.yaml with the default "
+            "workflow, resolved integration branch, and teaching hints — no "
+            "model call, works in CI with no credentials.") in help_text
+    # init no longer skips providers on the non-interactive path
+    assert "provider-free" not in help_text

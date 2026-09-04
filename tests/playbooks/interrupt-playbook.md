@@ -234,7 +234,7 @@ the skip signal and note it.
 > **`imp init` / global config.** This machine already has a global config
 > (`~/.imp/config.yaml`) with detected `providers`/`theme`; the clone inherits it and
 > §4's local override forces the one under test. You should **not** need `imp init`. If
-> `imp new` prints `✗ no provider available — run `imp init` first`, run `imp init` once
+> `imp new` prints `imp: no authenticated provider — configured: …`, run `imp init` once
 > (idempotent; only bootstraps the global config). Note that same preflight also fires when a
 > *forced* provider's env-check fails — there it's a missing-credential **skip** (§2's gating
 > table), not an init problem.
