@@ -1,4 +1,6 @@
 
+import pytest
+
 from imp.providers import errors as perr
 from imp.providers.codex_runner import categorize_turn_failed
 
@@ -44,3 +46,41 @@ def test_refresh_token_reuse_maps_to_auth() -> None:
 def test_refresh_reuse_partial_signature_maps_to_auth() -> None:
     err = categorize_turn_failed({"message": "refresh token was already used."})
     assert isinstance(err, perr.AuthError)
+
+
+@pytest.mark.parametrize("message", [
+    "context_length_exceeded",
+    "This model's maximum context length is 258400 tokens",
+    "the request exceeds the context window for this model",
+    "too many tokens in the request",
+])
+def test_context_overflow_messages_map_to_context_window(message: str) -> None:
+    err = categorize_turn_failed({"status": 400, "message": message})
+    assert isinstance(err, perr.ContextWindowError)
+    assert err.category == "context_window"
+
+
+def test_context_overflow_beats_the_network_branch() -> None:
+    # "timeout" alone routes to network; an overflow message carrying it must
+    # not, or Tier B reincarnation never fires and imp just retries forever.
+    err = categorize_turn_failed({
+        "message": "context_length_exceeded (connection timeout during retry)",
+    })
+    assert err.category == "context_window"
+
+
+def test_auth_still_beats_the_context_window_branch() -> None:
+    err = categorize_turn_failed({
+        "status": 401,
+        "message": "Unauthorized: maximum context length",
+    })
+    assert err.category == "auth"
+
+
+def test_chatgpt_account_400_still_beats_the_context_window_branch() -> None:
+    err = categorize_turn_failed({
+        "status": 400,
+        "message": "model gpt-5.6-sol is not supported with a ChatGPT account; "
+                   "context window mismatch",
+    })
+    assert err.category == "config"

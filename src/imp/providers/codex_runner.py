@@ -63,7 +63,7 @@ from imp.providers.codex_mcp import (
     start_impty_server,
     start_server,
 )
-from imp.providers.codex_rollout import latest_context_reading
+from imp.providers.codex_rollout import compaction_seen, latest_context_reading
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
@@ -253,6 +253,7 @@ class CodexSession(ObserveSession):
             "thread_id": None, "complete_step_args": {},
             "complete_step_called": False, "auth_mode": auth_mode,
             "context_reading": None, "context_canary_emitted": False,
+            "compaction_canary_emitted": False,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
         self._proc_state = proc_state
@@ -991,6 +992,12 @@ _NO_CONTEXT_READING_WARNING = (
     "no codex context reading in the rollout; context gauge and "
     "handoff watch inactive for this turn (warned once per run)")
 
+# codex ignores unknown top-level config keys silently, so an upstream rename of
+# `model_auto_compact_token_limit` would revert imp to invisible history loss.
+_COMPACTION_WARNING = (
+    "codex auto-compacted its context — the model_auto_compact_token_limit "
+    "pin is not in effect (warned once per run)")
+
 
 def _attach_usage_to_last_agent_message(
     elog: Any, *, agent_id: str, usage: dict[str, Any],
@@ -1308,6 +1315,16 @@ def process_event(
             state["context_canary_emitted"] = True
             elog.append(agent_id=agent_id, type="runner_warning",
                         payload={"message": _NO_CONTEXT_READING_WARNING})
+        if (codex_home is not None and thread_id
+                and not state.get("compaction_canary_emitted")):
+            try:
+                compacted = compaction_seen(codex_home, thread_id)
+            except OSError:  # codex writes this file concurrently
+                compacted = False
+            if compacted:
+                state["compaction_canary_emitted"] = True
+                elog.append(agent_id=agent_id, type="runner_warning",
+                            payload={"message": _COMPACTION_WARNING})
         tokens, window = reading if reading is not None else (None, None)
         _attach_usage_to_last_agent_message(
             elog, agent_id=agent_id, usage=normalized,
@@ -1328,6 +1345,7 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
       - HTTP 401 / "Unauthorized" → ``AuthError``
       - OAuth refresh-token reuse ("already used" / "log out and sign in") → ``AuthError``
       - HTTP 400 "model … not supported … ChatGPT account" → ``ConfigError``
+      - model context overflow → ``ContextWindowError`` (Tier B reincarnation)
       - subprocess network/timeout → ``NetworkError``
       - any other → ``ApiError`` (terminal; maps to Pause).
     """
@@ -1343,6 +1361,10 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
         return perr.AuthError(f"codex: {message[:200]}")
     if status == 400 and "chatgpt account" in message.lower():
         return perr.ConfigError(f"codex: {message[:300]}")
+    if any(s in message.lower() for s in (
+            "context_length_exceeded", "maximum context length",
+            "context window", "too many tokens")):
+        return perr.ContextWindowError(f"codex: {message[:200]}")
     if kind == "network" or "timeout" in message.lower() or "network" in message.lower():
         return perr.NetworkError(f"codex: {message[:200]}")
     return perr.ApiError(f"codex: {message[:200]}")

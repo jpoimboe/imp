@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -171,3 +172,80 @@ def test_usage_less_turn_emits_no_canary_and_no_patch(tmp_path: Path) -> None:
     assert "context_tokens" not in payload
     # The early-out ran before the read: no reading was even attempted.
     assert "context_reading" not in state
+
+
+_COMPACTION_CANARY = (
+    "codex auto-compacted its context — the model_auto_compact_token_limit "
+    "pin is not in effect (warned once per run)")
+
+
+def _compact(home: Path) -> None:
+    """Append codex's top-level compaction record to the planted rollout."""
+    rollout = next((home / "sessions").rglob("*.jsonl"))
+    with rollout.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "timestamp": "2026-09-04T06:58:53.348Z",
+            "ordinal": 18,
+            "type": "compacted",
+            "payload": {"message": "", "replacement_history": []},
+        }) + "\n")
+
+
+def test_compacted_rollout_emits_exactly_one_canary_per_run(
+        tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
+    _compact(home)
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home)
+    warns = [e["payload"]["message"] for e in elog.read()
+             if e["type"] == "runner_warning"]
+    assert warns == [_COMPACTION_CANARY]
+    assert state["compaction_canary_emitted"] is True
+    # The occupancy reading still lands: the canary is advisory, not a bail-out.
+    payload = next(e for e in elog.read()
+                   if e["type"] == "agent_message")["payload"]
+    assert payload["context_tokens"] == 22_389
+
+
+def test_non_compacted_rollout_warns_only_about_the_missing_reading(
+        tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[])
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    _drive_turn(elog, state, home)
+    warns = [e["payload"]["message"] for e in elog.read()
+             if e["type"] == "runner_warning"]
+    assert warns == [_CANARY]
+    payload = next(e for e in elog.read()
+                   if e["type"] == "agent_message")["payload"]
+    # `_drive_turn` bills 10 fresh input tokens; the usage patch is untouched.
+    assert payload["usage"]["input_tokens"] == 10
+
+
+def test_unreadable_rollout_does_not_kill_the_compaction_check(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """codex writes the rollout from another process; the locator's rglob->stat
+    window can lose the file mid-scan."""
+    def _boom(codex_home: Path, thread_id: str) -> bool:
+        raise OSError("rollout vanished mid-turn")
+
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
+    _compact(home)
+    monkeypatch.setattr(cr, "compaction_seen", _boom)
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    _drive_turn(elog, state, home)
+    assert [e for e in elog.read() if e["type"] == "runner_warning"] == []
+    payload = next(e for e in elog.read()
+                   if e["type"] == "agent_message")["payload"]
+    assert payload["context_tokens"] == 22_389
+
+
+def test_proc_state_seeds_both_canary_latches() -> None:
+    # `_enter` provisions an MCP server and a codex subprocess, so the seed is
+    # pinned at the source (the repo's established idiom for unreachable structure).
+    src = inspect.getsource(cr.CodexSession._enter)
+    assert '"context_canary_emitted": False' in src
+    assert '"compaction_canary_emitted": False' in src

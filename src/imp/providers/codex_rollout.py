@@ -11,7 +11,8 @@ that file across the pause: copy it (and the thread_id) into the durable
 call `Codex.resume_thread(thread_id)`.
 
 The same file is also the only place codex reports live context occupancy, so
-`latest_context_reading` reads it in place — no stdout JSON mode emits it.
+`latest_context_reading` reads it in place — no stdout JSON mode emits it — and
+the only place codex records that it compacted history (`compaction_seen`).
 """
 from __future__ import annotations
 
@@ -68,6 +69,26 @@ def latest_context_reading(codex_home: Path, thread_id: str) -> tuple[int, int] 
                     and isinstance(window, int) and window > 0):
                 reading = (tokens, window)
     return reading
+
+
+def compaction_seen(codex_home: Path, thread_id: str) -> bool:
+    """True when codex compacted its own history in this rollout — a top-level
+    `{"type": "compacted"}` record. Nothing about a compaction reaches the
+    `codex exec --json` stdout stream, so the rollout is the only signal."""
+    rollout = _newest_matching_rollout(codex_home, thread_id)
+    if rollout is None:
+        return False
+    with rollout.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            # Pre-filter: rollouts run to megabytes, few lines mention it.
+            if "compacted" not in line:
+                continue
+            try:
+                if json.loads(line)["type"] == "compacted":
+                    return True
+            except (ValueError, KeyError, TypeError):
+                continue
+    return False
 
 
 def persist_rollout(*, codex_home: Path, thread_id: str, transcript_dir: Path) -> bool:

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.providers.codex_rollout import (
+    compaction_seen,
     latest_context_reading,
     persist_rollout,
     restore_rollout,
@@ -186,3 +187,53 @@ def test_latest_context_reading_returns_none_when_usage_missing(tmp_path: Path) 
     }) + "\n"
     home = _home_with(tmp_path, body)
     assert latest_context_reading(home, "thr-1") is None
+
+
+def _compacted_line() -> str:
+    """codex's real top-level compaction record, shape-verbatim from the spike
+    rollouts (`.imp/quests/sila75/artifacts/spike/rollouts/zero.rollout.jsonl`)."""
+    return json.dumps({
+        "timestamp": "2026-09-04T06:58:53.348Z",
+        "ordinal": 18,
+        "type": "compacted",
+        "payload": {
+            "message": "",
+            "replacement_history": [
+                {"type": "compaction", "id": "cmp_0d8ba4f379",
+                 "encrypted_content": "gAAAAABqmmxw"},
+            ],
+        },
+    }) + "\n"
+
+
+def _decoy_lines() -> str:
+    """Lines that must not trip the predicate: a truncated record the pre-filter
+    hands to json.loads anyway, and an agent message whose prose says
+    "compacted" without being codex's compaction record."""
+    return (
+        '{"type": "compacted", "payload": {"message": "trunca\n'
+        + json.dumps({
+            "type": "event_msg",
+            "payload": {"type": "agent_message",
+                        "message": "the history was compacted upstream"},
+        }) + "\n"
+    )
+
+
+def test_compaction_seen_true_for_a_compacted_rollout(tmp_path: Path) -> None:
+    body = _decoy_lines() + _token_count_line() + _compacted_line()
+    home = _home_with(tmp_path, body)
+    assert compaction_seen(home, "thr-1") is True
+
+
+def test_compaction_seen_false_without_a_compacted_record(tmp_path: Path) -> None:
+    # Decoys carry the substring; a bare match with no type check would return True.
+    body = _decoy_lines() + _token_count_line()
+    home = _home_with(tmp_path, body)
+    assert compaction_seen(home, "thr-1") is False
+
+
+def test_compaction_seen_false_when_rollout_absent(tmp_path: Path) -> None:
+    home = tmp_path / "codex_home"
+    (home / "sessions").mkdir(parents=True)  # exists but empty
+    assert compaction_seen(home, "thr-1") is False
