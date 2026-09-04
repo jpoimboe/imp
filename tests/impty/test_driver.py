@@ -477,3 +477,39 @@ def test_a_large_idle_cannot_escape_the_call_cap(
         assert elapsed < 10.0
     finally:
         d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_numeric_wait_is_clamped_and_reports_the_clamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.2)
+        clamped = d.send("x", wait=1.0)
+        assert clamped.splitlines()[0] == "[waited 0.2s call cap (1s requested)]"
+        # A request already inside the ceiling emits no such line.
+        unclamped = d.send("x", wait=0.1)
+        assert unclamped.splitlines()[0].startswith("[alive=")
+        assert d.send("q", wait=False) == "[sent]"
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_numeric_wait_is_clamped_and_reports_the_clamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")  # READY consumed
+        monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.2)
+        clamped = d.resize(30, 100, wait=1.0)
+        assert clamped.splitlines()[0] == "[waited 0.2s call cap (1s requested)]"
+        unclamped = d.resize(24, 80, wait=0.1)
+        assert unclamped.splitlines()[0].startswith("[alive=")
+        assert d.resize(30, 100, wait=False) == "[resized]"
+    finally:
+        d.stop()

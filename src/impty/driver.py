@@ -46,6 +46,16 @@ def _decode_keys(data: str) -> str:
     return _ESCAPE_RE.sub(lambda m: codecs.decode(m.group(0), "unicode_escape"), data)
 
 
+def _fixed_settle(wait: float) -> tuple[float, str]:
+    """Clamped fixed-settle seconds, plus the one line a clamped call prefixes to
+    the screen (empty when the request already fit inside the ceiling)."""
+    requested = float(wait)
+    settle = min(max(0.0, requested), MAX_CALL_HARD)
+    if requested <= MAX_CALL_HARD:
+        return settle, ""
+    return settle, f"[waited {settle:g}s call cap ({requested:g}s requested)]\n"
+
+
 class ImptyDriver:
     """One lazy `TerminalSession` at a time. `start` replaces any existing one."""
 
@@ -132,7 +142,10 @@ class ImptyDriver:
           Use this for a continuously-animating full-screen app (a spinner / live
           TUI) that NEVER goes quiet — there `wait=True` blocks the whole settle cap
           every keystroke. e.g. `wait=0.4` lets the reaction render, then snapshots.
-          The background drainer keeps pyte current during the wait.
+          The background drainer keeps pyte current during the wait. A value over
+          240s is clamped to it — no single call blocks longer — and the reply's
+          first line then reads `[waited 240s call cap (600s requested)]`; send again
+          or call `wait()` to keep watching.
         """
         session = self._require()
         # Mark the type-then-look boundary just before the keystroke so wait_idle
@@ -144,11 +157,13 @@ class ImptyDriver:
         # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
         if wait is False:
             return "[sent]"
+        note = ""
         if wait is True:
             session.wait_idle(since=since)  # inherit the library settle policy
         else:
-            time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
-        return self._render(session)
+            settle, note = _fixed_settle(wait)
+            time.sleep(settle)  # fixed settle; drainer updates pyte
+        return f"{note}{self._render(session)}"
 
     def send_signal(self, sig: int = signal.SIGINT) -> str:
         """Deliver a real signal to the program's process group, then return the new
@@ -189,6 +204,8 @@ class ImptyDriver:
         - False: fire and return `[resized]` immediately (e.g. a never-quiet
           animating TUI; snapshot separately).
         - a number (seconds): settle for that FIXED duration, then return the screen.
+          A value over 240s is clamped to it and the reply's first line then reads
+          `[waited 240s call cap (600s requested)]`.
         """
         session = self._require()
         # Mark the boundary before the resize so wait_idle settles on the REDRAW
@@ -199,11 +216,13 @@ class ImptyDriver:
         # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
         if wait is False:
             return "[resized]"
+        note = ""
         if wait is True:
             session.wait_idle(since=since)  # inherit the library settle policy
         else:
-            time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
-        return self._render(session)
+            settle, note = _fixed_settle(wait)
+            time.sleep(settle)  # fixed settle; drainer updates pyte
+        return f"{note}{self._render(session)}"
 
     def wait(
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float | None = None,
