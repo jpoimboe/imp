@@ -10,6 +10,7 @@ from pathlib import Path
 
 from imp.engine.archive import (
     blobs_root,
+    check_floors,
     ensure_current,
     index,
     index_path,
@@ -49,6 +50,7 @@ def is_archived(control_root: Path, quest_id: str) -> bool:
 def completed_rows(
     control_root: Path,
 ) -> list[tuple[str, str, str, str, str, str, str | None]]:
+    check_floors(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
@@ -77,6 +79,7 @@ def search_archive(
 def search_archive_content(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str, str | None]]:
+    check_floors(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
@@ -91,6 +94,7 @@ def search_archive_content(
 def search_archive_events_content(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str | None]]:
+    check_floors(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():

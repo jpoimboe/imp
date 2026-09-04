@@ -18,6 +18,7 @@ import filelock
 
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
+from imp.engine.errors import ArchiveMismatch
 from imp.engine.event_migrations import migrate_events, migrate_id_ns_event_to_block
 from imp.engine.state import derive_started_at
 from imp.paths import project_state_dir
@@ -260,6 +261,17 @@ def _migrate_archive_blobs(control_root: Path) -> None:
                 record.write_record(records_dir, rec)
     rebuild_index(control_root)
     _write_data_version(control_root, _DATA_VERSION)
+
+
+def check_floors(control_root: Path) -> None:
+    """Refuse a read whose archive floors are newer than this install knows."""
+    stored_data = _read_data_version(control_root)
+    if stored_data > _DATA_VERSION:
+        raise ArchiveMismatch(floor="data", stored=stored_data, known=_DATA_VERSION)
+    stored_index = _read_user_version(control_root)
+    if stored_index > index._SCHEMA_VERSION:
+        raise ArchiveMismatch(
+            floor="index", stored=stored_index, known=index._SCHEMA_VERSION)
 
 
 def ensure_current(control_root: Path) -> None:
