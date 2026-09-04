@@ -338,6 +338,21 @@ def web_search_request_count(usage: dict[str, Any] | None) -> int:
     return 0
 
 
+def billing_usage_from_openai(usage: dict[str, Any] | None) -> BillingUsage:
+    """A raw `ResponseUsage` dump → the canonical quadruple."""
+    if not usage:
+        return BillingUsage()
+    details = usage.get("input_tokens_details")
+    cached = (int(details.get("cached_tokens", 0) or 0)
+              if isinstance(details, dict) else 0)
+    input_tokens = int(usage.get("input_tokens", 0) or 0)
+    return BillingUsage(
+        fresh_input=max(0, input_tokens - cached),  # input_tokens includes cached; fresh is net
+        cached_input=cached,
+        # reasoning_tokens is inside output_tokens; never added on top
+        output=int(usage.get("output_tokens", 0) or 0))
+
+
 def cost_usd(model: str | None, usage: BillingUsage,
              prompt_tokens: int | None = None) -> float | None:
     """List-price dollars for one request; None when `model` is absent from the
