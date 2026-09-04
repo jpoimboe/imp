@@ -7,6 +7,7 @@ from imp.providers.catalog import (
     ModelPrices,
     cost_usd,
     prices_for,
+    web_search_request_count,
 )
 
 
@@ -124,3 +125,31 @@ def test_a_model_absent_from_the_table_has_no_computed_cost() -> None:
 
 def test_zero_usage_on_a_known_model_costs_nothing() -> None:
     assert cost_usd("gpt-5.6-sol", BillingUsage()) == 0.0
+
+
+def test_web_search_bills_ten_dollars_per_thousand_requests() -> None:
+    # 1000 fresh sonnet input = 1000 * $3/M = $0.003; 250 searches add $2.50.
+    tokens_only = BillingUsage(fresh_input=1000)
+    with_search = BillingUsage(fresh_input=1000, web_search_requests=250)
+    assert cost_usd("claude-sonnet-4-6", tokens_only) == pytest.approx(0.003)
+    assert cost_usd("claude-sonnet-4-6", with_search) == pytest.approx(2.503)
+
+
+def test_web_search_count_reads_the_claude_code_carrier() -> None:
+    assert web_search_request_count(
+        {"inputTokens": 10, "webSearchRequests": 7}) == 7
+
+
+def test_web_search_count_reads_the_raw_anthropic_carrier() -> None:
+    assert web_search_request_count(
+        {"input_tokens": 10,
+         "server_tool_use": {"web_search_requests": 4}}) == 4
+
+
+def test_web_search_count_is_zero_without_a_carrier() -> None:
+    assert web_search_request_count(None) == 0
+    assert web_search_request_count({}) == 0
+    assert web_search_request_count({"input_tokens": 10}) == 0
+    assert web_search_request_count({"server_tool_use": None}) == 0
+    assert web_search_request_count({"server_tool_use": {}}) == 0
+    assert web_search_request_count({"webSearchRequests": 0}) == 0

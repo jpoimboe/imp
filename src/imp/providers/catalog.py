@@ -247,6 +247,7 @@ def sdk_context_threshold_crossed(
 
 
 LONG_CONTEXT_BREAKPOINT = 272_000
+WEB_SEARCH_USD_PER_REQUEST = 0.01  # $10 per 1,000 requests
 
 
 @dataclass(frozen=True)
@@ -322,13 +323,29 @@ class BillingUsage:
     web_search_requests: int = 0
 
 
+def web_search_request_count(usage: dict[str, Any] | None) -> int:
+    """Server-side web-search requests from either Anthropic-family carrier:
+    claude_code's flat `webSearchRequests`, and the raw API's nested
+    `server_tool_use.web_search_requests`."""
+    if not usage:
+        return 0
+    flat = usage.get("webSearchRequests")
+    if flat is not None:
+        return int(flat)
+    server_tool_use = usage.get("server_tool_use")
+    if isinstance(server_tool_use, dict):
+        return int(server_tool_use.get("web_search_requests", 0) or 0)
+    return 0
+
+
 def cost_usd(model: str | None, usage: BillingUsage) -> float | None:
     """List-price dollars for one request; None when `model` is absent from the
     price table, which is the only way a computed cost is unavailable."""
     prices = prices_for(model)
     if prices is None:
         return None
-    return (usage.fresh_input * prices.input
-            + usage.cached_input * prices.cache_read
-            + usage.cache_write * prices.cache_write
-            + usage.output * prices.output) / 1_000_000
+    return ((usage.fresh_input * prices.input
+             + usage.cached_input * prices.cache_read
+             + usage.cache_write * prices.cache_write
+             + usage.output * prices.output) / 1_000_000
+            + usage.web_search_requests * WEB_SEARCH_USD_PER_REQUEST)
