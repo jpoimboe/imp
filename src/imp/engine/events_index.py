@@ -100,7 +100,11 @@ def step_windows(indexed: Sequence[tuple[int, dict[str, Any]]]) -> list[StepInfo
     carrying the (start, end) ordinal span of every occurrence. Windows are
     built from step_started/step_completed lifecycle events, so script steps
     (which have no agent) are included. A step still open at the end of the log
-    closes at the last ordinal."""
+    closes at the last ordinal. A re-entry into an already-open step (a
+    reincarnation, a transient-error retry, or a restart from an empty
+    transcript) emits a second step_started and shares the open window rather
+    than resetting its start; once a step has completed, a later start opens a
+    separate window."""
     order: list[str] = []
     by_name: dict[str, StepInfo] = {}
     open_start: dict[str, int] = {}
@@ -120,7 +124,7 @@ def step_windows(indexed: Sequence[tuple[int, dict[str, Any]]]) -> list[StepInfo
             continue
         if etype == "step_started":
             _ensure(name)
-            open_start[name] = ordinal
+            open_start.setdefault(name, ordinal)
         else:
             start = open_start.pop(name, ordinal)
             _ensure(name).windows.append((start, ordinal))

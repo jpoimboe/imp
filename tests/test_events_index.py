@@ -121,6 +121,58 @@ def test_step_windows_closes_open_step_at_last_ordinal() -> None:
     assert steps[0].occurrences() == 1
 
 
+def test_step_windows_spans_a_reincarnation() -> None:
+    # A reincarnation re-enters a still-open step: both attempts are one window.
+    events = [
+        _ev(None, "step_started", step="coder", phase="build"),   # 1
+        _ev("a", "tool_call", agent_id="step:build/coder"),       # 2  dead attempt
+        _ev(None, "reincarnating", reason="context threshold crossed"),  # 3
+        _ev(None, "step_started", step="coder", phase="build"),   # 4
+        _ev("b", "tool_call", agent_id="step:build/coder"),       # 5  reborn attempt
+        _ev(None, "step_completed", step="coder"),                # 6
+    ]
+    steps = ei.step_windows(_indexed(events))
+    assert [s.name for s in steps] == ["coder"]
+    assert steps[0].windows == [(1, 6)]
+    assert steps[0].occurrences() == 1
+
+
+def test_step_windows_separates_a_later_rerun_from_a_reincarnation() -> None:
+    # A start AFTER the step completed still opens its own window.
+    events = [
+        _ev(None, "step_started", step="coder"),     # 1
+        _ev(None, "step_started", step="coder"),     # 2  re-entry, step still open
+        _ev(None, "step_completed", step="coder"),   # 3
+        _ev(None, "step_started", step="review"),    # 4
+        _ev(None, "step_completed", step="review"),  # 5
+        _ev(None, "step_started", step="coder"),     # 6  genuine repeat
+        _ev(None, "step_completed", step="coder"),   # 7
+    ]
+    steps = {s.name: s for s in ei.step_windows(_indexed(events))}
+    assert steps["coder"].windows == [(1, 3), (6, 7)]
+    assert steps["coder"].occurrences() == 2
+    assert steps["review"].windows == [(4, 5)]
+
+
+def test_build_step_index_scopes_a_reincarnated_step_to_both_attempts() -> None:
+    # The consumer behind `imp events --step`: the dead attempt must be in scope.
+    events = [
+        _ev(None, "step_started", step="coder", phase="build"),   # 1
+        _ev("a", "tool_call", agent_id="step:build/coder"),       # 2  dead attempt
+        _ev(None, "reincarnating", reason="context threshold crossed"),  # 3
+        _ev(None, "step_started", step="coder", phase="build"),   # 4
+        _ev("b", "tool_call", agent_id="step:build/coder"),       # 5  reborn attempt
+        _ev(None, "step_completed", step="coder"),                # 6
+    ]
+    si = ei.build_step_index(_indexed(events), "coder", {})
+    assert si is not None
+    assert si.windows == [(1, 6)]
+    assert ei.in_intervals(2, si.windows) is True
+    roster = {a.handle: a for a in si.agents}
+    assert roster["coder"].ranges == [(1, 6)]
+    assert roster["coder"].count == 6
+
+
 def test_subagent_handle_map_numbers_globally_by_dispatch_order() -> None:
     # Each dispatch tool_call has a known event id (first `_ev` positional); the
     # subagent's agent_id is sub:<that id>. Numbering is a global per-step
