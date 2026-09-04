@@ -19,7 +19,12 @@ import time
 from collections.abc import Callable
 
 from impty import TerminalSession
-from impty.session import DEFAULT_CHANGE_HARD, DEFAULT_SETTLE_HARD, DEFAULT_SETTLE_IDLE
+from impty.session import (
+    DEFAULT_CHANGE_HARD,
+    DEFAULT_SETTLE_HARD,
+    DEFAULT_SETTLE_IDLE,
+    MAX_CALL_HARD,
+)
 
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
@@ -215,27 +220,37 @@ class ImptyDriver:
         already-quiet program blocks until something new lands and then goes quiet —
         follow a long command without polling `view`. Any output counts, so an
         animating TUI returns on its next repaint. `hard` defaults to 3s, or 30s with
-        `for_change=True`; the header is `[settled]`, `[still busy after hard cap]`, or —
-        with `for_change=True` only — `[no change after hard cap]`.
+        `for_change=True`, and is clamped to 240s: no single call blocks longer than
+        that. The header is `[settled]`, `[still busy after <cap>s hard cap]`, or —
+        with `for_change=True` only — `[no change after <cap>s hard cap]`; when the
+        clamp fired the header instead names the call cap and the value you asked for
+        and tells you to call wait() again to keep watching, which is how you follow a
+        program for hours without any one call blocking for hours.
         """
         session = self._require()
         # Stamp the boundary BEFORE waiting: in change mode only output read at or
         # after this instant qualifies, so an already-quiet screen can't settle it.
         since = time.monotonic() if for_change else 0.0
-        if hard is None:
-            hard = DEFAULT_CHANGE_HARD if for_change else DEFAULT_SETTLE_HARD
-        settled = session.wait_idle(idle=idle, hard=hard, since=since)
+        requested = hard if hard is not None else (
+            DEFAULT_CHANGE_HARD if for_change else DEFAULT_SETTLE_HARD)
+        capped = min(requested, MAX_CALL_HARD)
+        settled = session.wait_idle(idle=idle, hard=capped, since=since)
         if settled:
             header = "[settled]"
-        elif for_change and (
-            session.last_output_at is None or session.last_output_at < since
-        ):
+        else:
             # The for_change guard is not redundant with the comparison: a child that
             # has produced NO output has last_output_at None, and normal mode must
-            # keep reporting that as [still busy after hard cap].
-            header = "[no change after hard cap]"
-        else:
-            header = "[still busy after hard cap]"
+            # keep reporting that as [still busy after …].
+            kind = "no change" if (
+                for_change
+                and (session.last_output_at is None or session.last_output_at < since)
+            ) else "still busy"
+            if requested > MAX_CALL_HARD:
+                header = (
+                    f"[{kind} after {capped:g}s call cap ({requested:g}s requested)"
+                    " — call wait() again to keep watching]")
+            else:
+                header = f"[{kind} after {capped:g}s hard cap]"
         return f"{header}\n{self._render(session)}"
 
     def snapshot(
