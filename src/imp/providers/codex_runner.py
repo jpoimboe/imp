@@ -1287,16 +1287,19 @@ def process_event(
         # without this mapping cache would silently record as zero.
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
         cached = int(getattr(usage, "cached_input_tokens", 0) or 0)
+        # Undeclared on the SDK Usage, so it arrives via model_extra; like
+        # `cached` it nests inside input_tokens, so both subtract from fresh.
+        cache_write = int(getattr(usage, "cache_write_input_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
         reasoning_tokens = int(getattr(usage, "reasoning_output_tokens", 0) or 0)
         normalized = {
             # `input_tokens` here means FRESH input (anthropic-style) so the
             # downstream `_normalize_usage` anthropic branch picks it up
             # correctly: fresh = anthropic input, cache_read = cache.
-            "input_tokens": max(0, input_tokens - cached),
+            "input_tokens": max(0, input_tokens - cached - cache_write),
             "output_tokens": output_tokens,
             "cache_read_input_tokens": cached,
-            "cache_creation_input_tokens": 0,
+            "cache_creation_input_tokens": cache_write,
             "reasoning_output_tokens": reasoning_tokens,
         }
         # `normalized` is a billing sum over every model request in this turn,
