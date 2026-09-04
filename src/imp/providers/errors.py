@@ -49,10 +49,8 @@ class AuthError(ProviderError):
 
 
 class AuthTerminalError(ProviderError):
-    """A login the provider CLI has already given up on: it cleared the saved
-    credentials and stops each request locally, so no request is sent and no
-    retry can heal it. Deliberately NOT an AuthError subclass — a bare 401 is
-    still retried. Maps to Pause."""
+    """A login the provider CLI already gave up on — it cleared the credentials, so
+    no retry can heal it. Deliberately NOT an AuthError subclass; maps to Pause."""
     category: Category = "auth_terminal"
 
 
