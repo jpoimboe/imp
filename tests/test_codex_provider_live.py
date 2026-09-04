@@ -250,5 +250,4 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     assert err["payload"]["kind"] in (
         "tool_call_ceiling_exceeded",      # expected: cap tripped on dispatch #2
         "no_complete_step",                # model ended turn without completing
-        "native_tool_violation",           # model reached for a native tool
     ), err

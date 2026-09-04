@@ -28,8 +28,6 @@ pytestmark = pytest.mark.skipif(
 from openai_codex_sdk.types import (  # noqa: E402
     AgentMessageItem,
     ErrorItem,
-    FileChangeItem,
-    FileUpdateChange,
     ItemCompletedEvent,
     McpToolCallItem,
     McpToolCallResult,
@@ -95,21 +93,6 @@ def test_real_mcp_tool_call_error_marks_is_error() -> None:
     assert len(results) == 1
     assert results[0]["payload"]["error"] is True
     assert "boom" in results[0]["payload"]["content"]
-
-
-def test_real_file_change_native_violation_detail_has_path() -> None:
-    item = FileChangeItem(
-        id="f1", type="file_change",
-        changes=[FileUpdateChange(path="/proj/native.txt", kind="update")],
-        status="completed",
-    )
-    elog, st = _feed(item)
-    assert st["native_violation"] is not None
-    # Detail must carry the real path (read from `changes`, not a missing `.path`).
-    assert "/proj/native.txt" in st["native_violation"]["detail"]
-    assert "/proj/native.txt" in str(
-        [e for e in elog.read() if e["type"] == "runner_warning"]
-    )
 
 
 def test_real_error_item_is_diagnostic_not_unhandled() -> None:

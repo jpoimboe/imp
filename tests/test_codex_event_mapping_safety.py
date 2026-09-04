@@ -53,20 +53,19 @@ def test_unknown_item_type_logs_fallback_does_not_raise() -> None:
     assert any("todo_list" in str(w["payload"]) for w in warns)
 
 
-def test_file_change_marks_native_violation_on_state() -> None:
-    elog = InMemoryEventLog()
-    state: dict[str, Any] = {"native_violation": None}
-    process_event(file_change("/etc/passwd"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.5")
-    assert state["native_violation"] is not None
-    # Path is captured for the runner_warning message.
-    assert "/etc/passwd" in str(state["native_violation"])
-
-
-def test_command_execution_marks_native_violation_on_state() -> None:
-    elog = InMemoryEventLog()
-    state: dict[str, Any] = {"native_violation": None}
-    process_event(command_execution("rm -rf /"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.5")
-    assert state["native_violation"] is not None
-    assert "rm -rf /" in str(state["native_violation"])
+def test_native_item_types_fall_through_to_the_unknown_item_warning() -> None:
+    """No tripwire left: a native file_change / command_execution is an item
+    shape imp does not model, not a run-killer."""
+    for item, itype in ((file_change("/etc/passwd"), "file_change"),
+                        (command_execution("rm -rf /"), "command_execution")):
+        elog = InMemoryEventLog()
+        state: dict[str, Any] = {}
+        process_event(item, elog=elog, agent_id="step:a", state=state,
+                      provider="codex", model="gpt-5.5")
+        # The fall-through arm writes NO state at all — strictly stronger than
+        # naming the one removed key, and it keeps this file out of AC 6's grep.
+        assert state == {}
+        warns = [e for e in elog.read() if e["type"] == "runner_warning"]
+        assert len(warns) == 1, warns
+        assert warns[0]["payload"]["message"] == (
+            f"unhandled codex item type: {itype!r}")

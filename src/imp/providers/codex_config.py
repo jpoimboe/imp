@@ -4,8 +4,10 @@
 step 3, "Lifecycle / teardown", and "Auth copy-in").
 
 Implements what the SDK can't express (or can't express correctly): the MCP
-server URL + bearer-token env-var name, the [features] toggles, the top-level
-`web_search` control, and the auth.json seed. `web_search` lives here because the
+server URL + bearer-token env-var name, the per-server
+`default_tools_approval_mode` that keeps imp's tools auto-approved under the
+read-only sandbox, the [features] toggles, the top-level `web_search` control,
+and the auth.json seed. `web_search` lives here because the
 SDK's `features.web_search_request` flag is deprecated/ineffective on codex
 >=0.137 (see `render_config_toml`). The rest (model, sandbox_mode,
 approval_policy, network_access_enabled) still goes through SDK options.

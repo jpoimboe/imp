@@ -9,9 +9,12 @@ runner shape; the differences are in this module's siblings:
   - `codex_mcp.py`     — the MCP server + tool wrappers + cap counter.
   - `codex_config.py`  — per-run CODEX_HOME, config.toml, auth seed + reconcile.
 
-Soft enforcement against native `apply_patch` (#8161 still unfixed in 0.129.0):
-the system prompt forbids native tools; a `file_change` / `command_execution`
-item is a fail-closed tripwire that reverts the worktree to run-entry state.
+Native `apply_patch` is refused by the read-only sandbox — no approval path
+under `approval_policy = "never"`. The shell vector is additionally removed
+outright by `[features] shell_tool = false`, which leaves the `exec_command`
+binding absent before the sandbox is consulted. imp's own MCP tools run in
+imp's process, outside that sandbox, and are auto-approved per server via
+config.toml.
 
 `_env_check` requires BOTH `codex` on PATH AND `openai_codex_sdk` importable —
 stricter than `claude_code._env_check` (binary-only). Deliberate asymmetry.
