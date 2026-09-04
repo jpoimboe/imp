@@ -2025,11 +2025,16 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-# The keys are `show`'s resource choices; the values are the message when nothing
-# is recorded, so a choice cannot exist without one.
-_SHOW_ARTIFACT_ABSENT = {
-    "spec": "no spec for",
-    "verify": "no failing gate output recorded for",
+class _ShowArtifact(NamedTuple):
+    absent: str
+    noun: str
+
+
+# The keys are `show`'s resource choices; a choice cannot exist without both the
+# absent-artifact message and the noun the backlog path names it by.
+_SHOW_ARTIFACTS = {
+    "spec": _ShowArtifact("no spec for", "spec"),
+    "verify": _ShowArtifact("no failing gate output recorded for", "failing gate output"),
 }
 
 
@@ -2058,7 +2063,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
                               color=should_use_color(sys.stdout)),
                 no_pager=args.no_pager, trailing_blank=True)
             return 0
-        _emit_cli_error(f"{quest_id} is in the backlog (not started); no {resource} yet")
+        _emit_cli_error(
+            f"{quest_id} is in the backlog (not started); no {_SHOW_ARTIFACTS[resource].noun} yet")
         return 2
     if resource is None:
         if args.json:
@@ -2076,7 +2082,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
         return 0
     data = make_store(control).get_artifact(quest_id, resource)
     if data is None:
-        _emit_cli_error(f"{_SHOW_ARTIFACT_ABSENT[resource]} {quest_id!r}")
+        _emit_cli_error(f"{_SHOW_ARTIFACTS[resource].absent} {quest_id!r}")
         return 2
     _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
                    no_pager=args.no_pager, trailing_blank=True)
@@ -4145,7 +4151,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Quest id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=list(_SHOW_ARTIFACT_ABSENT),
+        choices=list(_SHOW_ARTIFACTS),
         help="Which artifact to print (default: a detail card).")
     p_show.add_argument(
         "--no-pager", action="store_true",

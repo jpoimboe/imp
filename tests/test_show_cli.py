@@ -187,9 +187,10 @@ def test_show_backlog_default_renders_card(
     assert "wire up OAuth login" in out
 
 
-def test_show_backlog_spec_errors(
+def test_show_backlog_resource_message_wording(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.cli.main as m
 
@@ -203,8 +204,19 @@ def test_show_backlog_spec_errors(
         origin="idea",
         seed_opening="Add OAuth",
     )
-    rc = main(["show", "2026-06-16-bkg111", "spec"])
-    assert rc == 2
+    rc_spec = main(["show", "2026-06-16-bkg111", "spec"])
+    err_spec = capsys.readouterr().err
+    assert rc_spec == 2
+    assert err_spec.rstrip("\n") == (
+        "imp: 2026-06-16-bkg111 is in the backlog (not started); no spec yet"
+    )
+
+    rc_verify = main(["show", "2026-06-16-bkg111", "verify"])
+    err_verify = capsys.readouterr().err
+    assert rc_verify == 2
+    assert err_verify.rstrip("\n") == (
+        "imp: 2026-06-16-bkg111 is in the backlog (not started); no failing gate output yet"
+    )
 
 
 def test_backlog_card_omits_depends_on_when_empty(
