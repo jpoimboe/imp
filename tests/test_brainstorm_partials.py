@@ -266,3 +266,20 @@ def test_delegate_exploration_carries_explorer_tier_discipline() -> None:
     idx_tier = text.index("Leave the tier unset:")
     assert idx_intro < idx_tier
 
+
+def test_brainstorm_mockup_copy_pastes_the_terminal_and_renders_the_web() -> None:
+    flat = " ".join((PARTIALS / "brainstorm-dialogue.md").read_text().split())
+    sentences = (
+        "Use concrete mockups where the change is visual: paste a terminal mockup into "
+        "your message as a fenced block with its real ANSI SGR colors; never depict a "
+        "color the codes cannot produce. Write a web mockup as real HTML, never ASCII: "
+        "render it, look at it, and give the human its path."
+    )
+    assert sentences in flat
+    # The old framing was unfollowable: it told agents to put ANSI where prose is escaped.
+    assert "terminal mockups use real ANSI SGR colors" not in flat
+    assert "it is real HTML you render and hand the human a path to" not in flat
+    # Still inside the surface-inventory beat it qualifies, before the next beat.
+    assert flat.index("**Walk the whole surface.**") < flat.index(sentences)
+    assert flat.index(sentences) < flat.index("**Revise, don't restate.**")
+

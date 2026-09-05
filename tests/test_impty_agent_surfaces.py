@@ -25,3 +25,18 @@ def test_terminal_ui_skill_wait_bullet_states_the_clamp() -> None:
     assert bullet is not None, "the skill has no `wait(` bullet"
     assert f"{MAX_CALL_HARD:g}s" in bullet
     assert "call again" in bullet
+
+
+def test_terminal_ui_skill_closes_by_telling_the_agent_to_paste_the_screen() -> None:
+    body = load_internal_skill(bundled_skills_dir(), "imp-driving-terminal-uis")
+    parts = body.split("## Showing the human", 1)
+    assert len(parts) == 2, "the skill has no `Showing the human` section"
+    # Slicing the section proves the rule sits under its own heading, and the
+    # end-anchor proves it is the closing section the spec asks for.
+    section = " ".join(parts[1].split())
+    assert section.startswith(
+        "Paste the screen into your message as a fenced block: "
+        "SGR color survives there verbatim."
+    )
+    assert "any control byte that isn't SGR — arrives as literal `^[[33m`" in section
+    assert " ".join(body.split()).endswith("give the snapshot PNG path too.")

@@ -53,3 +53,10 @@ send/react loop for interactive programs.
 4. Repeat; `stop` when done.
 
 Snapshots work even where the worktree is read-only.
+
+## Showing the human
+
+Paste the screen into your message as a fenced block: SGR color survives there
+verbatim. Anywhere else — and any control byte that isn't SGR — arrives as
+literal `^[[33m`. When the look matters beyond color, give the snapshot PNG path
+too.

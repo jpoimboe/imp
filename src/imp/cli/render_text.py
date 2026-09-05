@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 import textwrap
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, NamedTuple
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
@@ -72,6 +73,76 @@ def _caret_escape(text: str) -> str:
         else:
             out.append(ch)
     return "".join(out)
+
+
+_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+_FENCE_OPEN_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
+_FENCE_CLOSE_RE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*$")
+
+
+class _Fence(NamedTuple):
+    start: int      # line index of the opening delimiter
+    body_end: int   # exclusive end of the content lines
+    end: int        # exclusive end of the whole block
+
+
+def _strip_sgr(text: str) -> str:
+    return _SGR_RE.sub("", text)
+
+
+def _fence_spans(lines: list[str]) -> list[_Fence]:
+    """The one definition of "inside a fence" — CommonMark fenced code blocks, by
+    line index. A four-space indented code block is not a fence; an unclosed fence
+    runs to end of text. Both the escaping sibling and the rich placeholder splice
+    consume this, so they cannot disagree."""
+    out: list[_Fence] = []
+    i, n = 0, len(lines)
+    while i < n:
+        opened = _FENCE_OPEN_RE.match(lines[i])
+        # CommonMark forbids a backtick in a backtick fence's info string, so such a
+        # line is a paragraph with a code span — treating it as an opener would shift
+        # every later span and strand a real mockup outside a fence.
+        if opened is None or (opened.group(1)[0] == "`"
+                              and "`" in lines[i][opened.end():]):
+            i += 1
+            continue
+        marker = opened.group(1)
+        j = i + 1
+        while j < n:
+            closed = _FENCE_CLOSE_RE.match(lines[j])
+            if (closed is not None and closed.group(1)[0] == marker[0]
+                    and len(closed.group(1)) >= len(marker)):
+                break
+            j += 1
+        out.append(_Fence(i, j, min(j + 1, n)))
+        i = min(j + 1, n)
+    return out
+
+
+def _sgr_survives(line: str) -> str:
+    parts: list[str] = []
+    pos = 0
+    for m in _SGR_RE.finditer(line):
+        parts.append(_caret_escape(line[pos:m.start()]))
+        parts.append(m.group(0))
+        pos = m.end()
+    parts.append(_caret_escape(line[pos:]))
+    return "".join(parts)
+
+
+def _caret_escape_prose(text: str) -> str:
+    """`_caret_escape` for agent-authored prose, with one narrowed exception: an SGR
+    sequence inside a fenced code block passes through verbatim, so a mockup keeps
+    its colors. Every other control byte, and any escape outside a fence, still
+    caret-escapes — `_caret_escape` itself stays absolute."""
+    lines = text.split("\n")
+    fenced: set[int] = set()
+    for span in _fence_spans(lines):
+        # Content lines only: the splice lifts exactly these, and an SGR left raw on a
+        # delimiter line (a colored info string) would reach rich unlifted.
+        fenced.update(range(span.start + 1, span.body_end))
+    return "\n".join(_sgr_survives(ln) if i in fenced else _caret_escape(ln)
+                     for i, ln in enumerate(lines))
 
 
 def fmt_seconds(seconds: float | int | None) -> str:
@@ -225,6 +296,67 @@ _MD_THEME = {
 }
 
 
+# A permanent Unicode noncharacter: no font maps it and it is invalid in
+# interchange — unlike the Private Use Area, where terminal icon fonts
+# (Nerd Fonts) live and a mockup's glyphs would be at risk.
+_SLOT_UNIT = "￿"
+
+
+def _slot_prefix(text: str) -> str:
+    """The shortest run of `_SLOT_UNIT` absent from `text`, so a slot key cannot be
+    forged by content. This is what lets the lift leave the text byte-for-byte
+    alone: editing it here would desynchronize the two fence scans."""
+    prefix = _SLOT_UNIT
+    while prefix in text:
+        prefix += _SLOT_UNIT
+    return prefix
+
+
+def _lift_colored_fences(text: str, color: bool) -> tuple[str, dict[str, list[str]]]:
+    """Swap every fence carrying SGR for a one-line placeholder, because rich counts
+    escape bytes as visible width and wraps in the wrong place. Returns the rewritten
+    text plus the placeholder→lines map to splice back after rendering. Each lifted
+    line ends with a reset so an unterminated color cannot bleed into imp's chrome;
+    with color off the SGR is stripped, keeping piped output byte-clean. These lines
+    bypass rich entirely, so they carry SGR and nothing else — all other control bytes
+    are caret-escaped. The text is never otherwise edited: both fence scans must see
+    the same bytes."""
+    prefix = _slot_prefix(text)
+    lines = text.split("\n")
+    lifted: dict[str, list[str]] = {}
+    out: list[str] = []
+    prev = 0
+    for i, span in enumerate(_fence_spans(lines)):
+        body = lines[span.start + 1:span.body_end]
+        if not any(_SGR_RE.search(ln) for ln in body):
+            continue
+        slot = f"{prefix}{i}{prefix}"
+        lifted[slot] = ([_sgr_survives(ln) + "\x1b[0m" for ln in body] if color
+                        else [_caret_escape(_strip_sgr(ln)) for ln in body])
+        out.extend(lines[prev:span.start])
+        out.append(slot)
+        prev = span.end
+    out.extend(lines[prev:])
+    return "\n".join(out), lifted
+
+
+def _splice_lifted_fences(rendered: str, lifted: dict[str, list[str]]) -> str:
+    out: list[str] = []
+    unmatched = dict(lifted)
+    for line in rendered.split("\n"):
+        slot = next((k for k in lifted if k in line), None)
+        if slot is None:
+            out.append(line)
+        else:
+            unmatched.pop(slot, None)
+            out.extend(lifted[slot])
+    # A slot key wrapped by rich matches no single line; appending the lifted
+    # lines at the end loses position but never silently drops the content.
+    for lines in unmatched.values():
+        out.extend(lines)
+    return "\n".join(out)
+
+
 def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80) -> str:
     import io
 
@@ -232,6 +364,7 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
     from rich.markdown import Markdown
     from rich.theme import Theme
     buf = io.StringIO()
+    text, lifted = _lift_colored_fences(text, color)
     md = Markdown(text)
     for token in md.parsed:
         if token.type == "inline" and token.children:
@@ -246,7 +379,7 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
             color_system="standard" if color else None,
             force_terminal=color, soft_wrap=False, highlight=False,
             theme=Theme(_MD_THEME)).print(md)
-    return buf.getvalue()
+    return _splice_lifted_fences(buf.getvalue(), lifted)
 
 
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,
@@ -698,7 +831,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
         return
 
     if isinstance(node, nv.AgentTextNode):
-        yield from _render_markdown_block(_caret_escape(node.text), width, depth,
+        yield from _render_markdown_block(_caret_escape_prose(node.text), width, depth,
                                           color, display_width, gutters)
         return
 

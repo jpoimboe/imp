@@ -575,3 +575,30 @@ def test_summary_markdown_merge_blocked_open_step_reads_two_words() -> None:
                         total_seconds=100.0)
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | merge blocked | — | — |" in out
+
+
+def test_agent_prose_colored_fence_exports_stripped_not_caret_escaped() -> None:
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text",
+                              "text": "Look:\n\n```\n"
+                                      "\x1b[1;33m▌ imp\x1b[0m planning\n```\n"}]}),
+    ])
+    assert "\x1b" not in out          # no escape bytes
+    assert "^[[" not in out           # and no caret form either — SGR is dropped
+    assert "▌ imp planning" in out    # the mockup's text survives
+
+
+def test_tool_call_fence_exports_without_sgr_noise() -> None:
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "\x1b[31mred\x1b[0m"}),
+    ], full=True)
+    assert "\x1b" not in out
+    assert "^[[" not in out
+    assert "command=red" in out

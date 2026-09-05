@@ -22,8 +22,8 @@ _REFERRERS = (
 _ADJACENT: dict[str, tuple[str, ...]] = {
     "src/imp/assets/partials/brainstorm-dialogue.md": (
         "never depict a color the codes cannot produce. "
-        "A web mockup is never ASCII — it is real HTML you render and "
-        "hand the human a path to.",
+        "Write a web mockup as real HTML, never ASCII: render it, look at it, "
+        "and give the human its path.",
         "grounded in the real rendering, not a guess. "
         "When it turns on a browser surface, load `imp-driving-web-uis` "
         '(`load_skill(name="imp-driving-web-uis")`) and render it the same way.',

@@ -33,11 +33,12 @@ _ENGINE_MD_LABELS = {
 
 
 def _md_escape(text: str) -> str:
-    """Neutralize untrusted content: caret-escape C0/DEL control bytes (reusing
+    """Neutralize untrusted content: drop SGR color (a mockup exports as its text,
+    not `^[[1;33m` noise), caret-escape the remaining C0/DEL control bytes (reusing
     render_text's control-byte guard), then HTML-escape the three significant
     characters so a `<script>` in a tool result or agent turn renders as visible
     text, never a live tag."""
-    return html.escape(rt._caret_escape(text), quote=False)
+    return html.escape(rt._caret_escape(rt._strip_sgr(text)), quote=False)
 
 
 def _heading(level: int, text: str) -> str:
@@ -46,9 +47,10 @@ def _heading(level: int, text: str) -> str:
 
 def _fence(text: str) -> str:
     """Wrap literal content in a code fence long enough to survive any backtick
-    run inside it. Control bytes are caret-escaped; the fence itself guarantees
-    the content is inert when later rendered to HTML."""
-    body = rt._caret_escape(text)
+    run inside it. SGR color is dropped and the remaining control bytes are
+    caret-escaped; the fence itself guarantees the content is inert when later
+    rendered to HTML."""
+    body = rt._caret_escape(rt._strip_sgr(text))
     longest = 0
     run = 0
     for ch in body:

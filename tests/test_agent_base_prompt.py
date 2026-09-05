@@ -15,6 +15,12 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 _CODING_STANCE = Path("src/imp/assets/partials/coding-stance.md")
+_RENDER_BULLET = (
+    "- Rendered something for the user to look at? Paste it into your prose, in a "
+    "fenced block, in the same message — tool output never reaches them. If it's a "
+    "file they must open (an image, an exported artifact), state its path yourself. "
+    "Before ending a turn, check that every \"here's…\" has its thing on screen."
+)
 
 
 def _agent(name: str = "rev", tools=frozenset({"complete_step"})) -> AgentDef:
@@ -160,6 +166,17 @@ def test_base_has_recommendation_anchored_and_no_jargon_conventions() -> None:
     assert low.index("numbered list") < low.index("plain affirmative")
     assert low.index("narrate your internal deliberation") < low.index(
         "complexity classes")
+
+
+def test_user_facing_note_demands_the_render_land_in_the_message() -> None:
+    # The old bullet covered only files the user must open; a mockup's rendered
+    # bytes are the deliverable, so they have to land in the message itself.
+    flat = " ".join(_USER_FACING_NOTE.split())
+    assert _RENDER_BULLET in flat
+    assert "can't see inline" not in flat
+    # Still the third bullet of Tone and style, ahead of the colon/lead-in rule.
+    assert flat.index("- Reference code as file_path:line_number") < flat.index(_RENDER_BULLET)
+    assert flat.index(_RENDER_BULLET) < flat.index("- Never put a colon before a tool call")
 
 
 def test_core_tail_does_not_contain_users_see_only() -> None:
