@@ -186,10 +186,9 @@ def engine_env(
                             anchor on this instead of a cwd-relative .imp/quests/
                             so the state directory survives worktree relocation.
         IMP_STATE_DIR     — absolute host path of this project's state directory;
-                            injected only when control_root is provided. Under the
-                            sandbox mask the `repo` marker is unreadable, so an
-                            in-sandbox `imp` resolves through this override instead
-                            of the slug walk.
+                            injected only when control_root is provided. The sandbox
+                            binds imp_home()/projects read-only, so the slug-walk
+                            claim/mint path cannot run in-sandbox.
         IMP_OUTPUT        — path to the JSON file where a script writes its declared
                             typed output: fields; injected only when output_path is
                             provided (i.e. when an output: schema is in play).
