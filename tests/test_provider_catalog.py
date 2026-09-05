@@ -430,6 +430,7 @@ def test_gpt_5_5_and_5_4_carry_the_1m_window_and_the_260k_soft_cap() -> None:
     for alias in ("gpt-5.5", "gpt-5.4"):
         info = OPENAI[alias]
         assert info.window == 1_050_000
+        assert info.max_output_tokens == 128_000
         assert info.soft_cap == 260_000
         # 260k of a 1.05M window ~= 0.248 — the handoff lands far under the 0.8
         # default share, and so under the 272k billing breakpoint.
