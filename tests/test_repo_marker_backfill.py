@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.config_migrate import _derive_owner, _state_candidates
-from imp.paths import imp_home
+from imp.cli.config_migrate import _derive_owner, _state_candidates, backfill_repo_markers
+from imp.paths import imp_home, project_state_dir
+from tests._dac import dac_enforced
 from tests.conftest import _init_repo
 
 # Every fixture builds real git checkouts; git spawns are slow under a saturated -n auto.
@@ -250,6 +251,118 @@ def test_a_repeated_candidate_costs_one_git_spawn(
 
     assert _derive_owner(state) == control
     assert seen == [control]
+
+
+def test_the_sweep_writes_the_resolved_owner_with_a_trailing_newline(
+    tmp_path: Path,
+) -> None:
+    """Spec AC 1: byte-identical to the slug walk's own mint form (paths.py:61)."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", control)
+
+    backfill_repo_markers()
+
+    assert (state / "repo").read_text() == f"{control.resolve()}\n"
+
+
+def test_the_sweep_resolves_a_symlinked_project_root_before_writing(
+    tmp_path: Path,
+) -> None:
+    """Resolution is load-bearing: paths.py:53 and :71 compare against str(root.resolve())."""
+    control = _checkout(tmp_path / "real", "widget")
+    link = tmp_path / "link"
+    link.symlink_to(control)
+    state = _state_dir("widget")
+    _quest(state, "aaa111", link)
+
+    backfill_repo_markers()
+
+    assert (state / "repo").read_text() == f"{control}\n"
+
+
+def test_a_backfilled_directory_is_returned_by_the_slug_walk(tmp_path: Path) -> None:
+    """Spec AC 12: without the marker the walk skips it and mints `widget-2`."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", control)
+
+    backfill_repo_markers()
+
+    assert project_state_dir(control) == state
+    assert not (imp_home() / "projects" / "widget-2").exists()
+
+
+def test_a_directory_with_no_derivable_owner_is_left_unmarked() -> None:
+    """Spec AC 7a."""
+    state = _state_dir("widget")
+
+    backfill_repo_markers()
+
+    assert not (state / "repo").exists()
+
+
+def test_a_leaked_scratch_quest_cannot_poison_the_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 4 — the vave28 shape pointed at the migration itself. (a) nothing is
+    written, so (b) the genuine owner is still accepted by the override guard rather
+    than locked out behind a marker naming the scratch checkout."""
+    genuine = _checkout(tmp_path / "home", "widget")
+    scratch = _checkout(tmp_path / "spike", "r1")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", scratch)
+
+    backfill_repo_markers()
+
+    assert not (state / "repo").exists()
+    monkeypatch.setenv("IMP_STATE_DIR", str(state))
+    assert project_state_dir(genuine) == state
+
+
+def test_an_existing_marker_is_left_byte_identical(tmp_path: Path) -> None:
+    """Spec AC 9: presence of the marker is the guard, even when it names another
+    checkout — repointing one is the operator's call, not the migration's."""
+    control = _checkout(tmp_path, "widget")
+    other = tmp_path / "elsewhere" / "widget"
+    state = _state_dir("widget")
+    _quest(state, "aaa111", control)
+    (state / "repo").write_text(f"{other}\n")
+
+    backfill_repo_markers()
+
+    assert (state / "repo").read_text() == f"{other}\n"
+
+
+def test_a_malformed_and_an_unwritable_directory_do_not_abort_the_sweep(
+    tmp_path: Path,
+) -> None:
+    """Spec AC 8: both failures sort BEFORE the good directory, so a sweep that
+    aborted on either would leave `gamma` unmarked. The unwritable case is routine:
+    in-sandbox `imp_home()/projects` is a read-only bind."""
+    alpha = _checkout(tmp_path, "alpha")
+    beta = _checkout(tmp_path, "beta")
+    gamma = _checkout(tmp_path, "gamma")
+    alpha_state = _state_dir("alpha")
+    _quest(alpha_state, "aaa111", alpha)
+    (alpha_state / "quests" / "aaa111" / "quest.json").write_text("{not json")
+    beta_state = _state_dir("beta")
+    _quest(beta_state, "bbb222", beta)
+    gamma_state = _state_dir("gamma")
+    _quest(gamma_state, "ccc333", gamma)
+    beta_state.chmod(0o500)
+    try:
+        # The suite runs as uid 0 in a userns holding CAP_DAC_OVERRIDE, where a write
+        # into an r-x directory silently succeeds; dropping it is what makes the
+        # unwritable half real. r-x still lets _derive_owner read beta's records.
+        with dac_enforced():
+            backfill_repo_markers()
+    finally:
+        beta_state.chmod(0o700)
+
+    assert (gamma_state / "repo").read_text() == f"{gamma}\n"
+    assert not (alpha_state / "repo").exists()
+    assert not (beta_state / "repo").exists()
 
 
 def test_worktree_candidate_with_symlinked_imp_home_is_not_dropped(

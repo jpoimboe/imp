@@ -222,6 +222,26 @@ def _derive_owner(state_dir: Path) -> Path | None:
     return owners.pop() if len(owners) == 1 else None
 
 
+def backfill_repo_markers() -> None:
+    """Write the missing `repo` ownership marker into every imp-owned state directory
+    whose own records determine its owner, so `_checked_override` has something to
+    refuse a foreign checkout with. Bounded to `imp_home()/projects/`: a hand-pinned
+    $IMP_STATE_DIR is never marked. Each directory is isolated — a malformed record or
+    a read-only directory skips that one and the sweep continues."""
+    projects = imp_home() / "projects"
+    if not projects.is_dir():
+        return
+    for directory in sorted(projects.iterdir()):
+        with suppress(Exception):
+            marker = directory / "repo"
+            if not directory.is_dir() or marker.exists():
+                continue
+            owner = _derive_owner(directory)
+            if owner is None:
+                continue
+            marker.write_text(f"{owner}\n")
+
+
 def run_startup_migrations() -> None:
     """Best-effort per config step: one that cannot run is retried on the next
     invocation and must never be the reason a command dies. The state move is
