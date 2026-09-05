@@ -202,8 +202,8 @@ def refresh_canonical_token(
         return RefreshOutcome(FAILED_TRANSIENT)
 
 
-def login_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
-    """The /login window's expiry; never raises, and reads no token material."""
+def _oauth_timestamp(key: str, env: Mapping[str, str] | None) -> int | None:
+    """Never raises, and reads no token material."""
     env = os.environ if env is None else env
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return None
@@ -214,12 +214,22 @@ def login_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
     oauth = _oauth_of(_load_credentials(base / ".credentials.json"))
     if oauth is None:
         return None
-    value = oauth.get("refreshTokenExpiresAt")
+    value = oauth.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     if isinstance(value, float) and not math.isfinite(value):
         return None
     return int(value)
+
+
+def login_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
+    """The /login window's expiry."""
+    return _oauth_timestamp("refreshTokenExpiresAt", env)
+
+
+def canonical_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
+    """The canonical access token's expiry — the value a rotation race moves."""
+    return _oauth_timestamp("expiresAt", env)
 
 
 def login_expiry_warning(now_ms: int, expires_at_ms: int | None) -> str | None:
