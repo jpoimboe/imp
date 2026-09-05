@@ -105,8 +105,9 @@ OPENAI: dict[str, ModelInfo] = {
     # resolution can cap it, and is hidden from the /model roster
     # (model_command._HIDDEN_ALIASES) because an operator writing it into a
     # `tiers:` block would get the flagship at every tier.
-    # `soft_cap` encodes the 272k billing breakpoint: a prompt above it bills
-    # the WHOLE request at 2x input / 1.5x output.
+    # `soft_cap` is deliberate headroom UNDER the 272k billing breakpoint, not
+    # the breakpoint itself: handing off at 260k keeps the whole request below
+    # the point where it would bill at 2x input / 1.5x output.
     "gpt-5.6-sol": ModelInfo(
         window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
     "gpt-5.6-terra": ModelInfo(
@@ -116,8 +117,12 @@ OPENAI: dict[str, ModelInfo] = {
     "gpt-5.6": ModelInfo(
         window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
     "gpt-5": ModelInfo(window=400_000),
-    "gpt-5.5": ModelInfo(window=400_000),
-    "gpt-5.4": ModelInfo(window=400_000),
+    # 5.5 and 5.4 share the 1.05M window, the 128k output cap and the same 272k
+    # breakpoint as the 5.6 family, so they take the same handoff headroom.
+    "gpt-5.5": ModelInfo(
+        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
+    "gpt-5.4": ModelInfo(
+        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
     "gpt-5.4-mini": ModelInfo(window=400_000),
     "gpt-5.3-codex": ModelInfo(window=400_000),
 }
@@ -241,3 +246,121 @@ def sdk_context_threshold_crossed(
             or not context_tokens or context_tokens <= 0):
         return False
     return context_tokens / context_window >= frac
+
+
+LONG_CONTEXT_BREAKPOINT = 272_000
+WEB_SEARCH_USD_PER_REQUEST = 0.01  # $10 per 1,000 requests
+
+
+@dataclass(frozen=True)
+class ModelPrices:
+    """USD per million tokens, one rate per billing bucket.
+    `long_context_threshold` is the prompt-token breakpoint above which the
+    WHOLE request is surcharged; None means never surcharged."""
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
+    long_context_threshold: int | None = None
+
+
+# input, output, cache read, cache write — USD per million tokens.
+MODEL_PRICES: dict[str, ModelPrices] = {
+    # Anthropic: no long-context premium at any size — 4.6-and-later bill a 900k
+    # request at the same per-token rate as a 9k one.
+    "claude-opus-5": ModelPrices(5.00, 25.00, 0.50, 6.25),
+    "claude-fable-5": ModelPrices(10.00, 50.00, 1.00, 12.50),
+    "claude-opus-4-8": ModelPrices(5.00, 25.00, 0.50, 6.25),
+    "claude-sonnet-4-6": ModelPrices(3.00, 15.00, 0.30, 3.75),
+    "claude-haiku-4-5": ModelPrices(1.00, 5.00, 0.10, 1.25),
+    "opus": ModelPrices(5.00, 25.00, 0.50, 6.25),
+    "sonnet": ModelPrices(3.00, 15.00, 0.30, 3.75),
+    "haiku": ModelPrices(1.00, 5.00, 0.10, 1.25),
+    # OpenAI: cache write is 1.25x input on the 5.6 family and the plain input
+    # rate everywhere else. Sol's rate is promotional through 2026-11-21.
+    "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.6": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.5": ModelPrices(5.00, 30.00, 0.50, 5.00, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.4": ModelPrices(2.50, 15.00, 0.25, 2.50, LONG_CONTEXT_BREAKPOINT),
+    "gpt-5.4-mini": ModelPrices(0.75, 4.50, 0.075, 0.75),
+    "gpt-5.3-codex": ModelPrices(1.75, 14.00, 0.175, 1.75),
+    "gpt-5": ModelPrices(1.25, 10.00, 0.125, 1.25),
+}
+
+
+def prices_for(model: str | None) -> ModelPrices | None:
+    """Strip any `[...]` suffix, then exact match, else the longest table key
+    the id starts with. None when nothing matches — callers never guess a rate.
+
+    Ids arrive bare (`claude-sonnet-4-6`), date-stamped
+    (`claude-haiku-4-5-20251001`) and suffixed (`claude-opus-4-8[1m]`); an
+    exact-match lookup would drop the latter two entirely.
+    """
+    if not model:
+        return None
+    base = model.split("[", 1)[0]
+    exact = MODEL_PRICES.get(base)
+    if exact is not None:
+        return exact
+    prefixes = [key for key in MODEL_PRICES if base.startswith(key)]
+    if not prefixes:
+        return None
+    return MODEL_PRICES[max(prefixes, key=len)]
+
+
+@dataclass(frozen=True)
+class BillingUsage:
+    """One request's canonical billing quadruple plus its web-search count.
+
+    `fresh_input` is already net of whatever buckets its source path nests
+    inside `input_tokens` — the per-provider normalizer owns that subtraction,
+    and nothing here subtracts again.
+    """
+    fresh_input: int = 0
+    cached_input: int = 0
+    cache_write: int = 0
+    output: int = 0
+    web_search_requests: int = 0
+
+
+def web_search_request_count(usage: dict[str, Any] | None) -> int:
+    """Server-side web-search requests from either Anthropic-family carrier:
+    claude_code's flat `webSearchRequests`, and the raw API's nested
+    `server_tool_use.web_search_requests`."""
+    if not usage:
+        return 0
+    flat = usage.get("webSearchRequests")
+    if flat is not None:
+        return int(flat)
+    server_tool_use = usage.get("server_tool_use")
+    if isinstance(server_tool_use, dict):
+        return int(server_tool_use.get("web_search_requests", 0) or 0)
+    return 0
+
+
+def cost_usd(model: str | None, usage: BillingUsage,
+             prompt_tokens: int | None = None) -> float | None:
+    """List-price dollars for one request; None when `model` is absent from the
+    price table, which is the only way a computed cost is unavailable.
+
+    `prompt_tokens` is the caller's own occupancy reading for the long-context
+    surcharge — the record's prompt sum on openai, `context_tokens` on a codex
+    usage patch. None is never surcharged: the alternative codex signal
+    over-reads by several multiples, so absent evidence must not become a 2x
+    charge.
+    """
+    prices = prices_for(model)
+    if prices is None:
+        return None
+    surcharged = (prices.long_context_threshold is not None
+                  and prompt_tokens is not None
+                  and prompt_tokens > prices.long_context_threshold)
+    prompt_mult = 2.0 if surcharged else 1.0
+    output_mult = 1.5 if surcharged else 1.0
+    return ((usage.fresh_input * prices.input * prompt_mult
+             + usage.cached_input * prices.cache_read * prompt_mult
+             + usage.cache_write * prices.cache_write * prompt_mult
+             + usage.output * prices.output * output_mult) / 1_000_000
+            + usage.web_search_requests * WEB_SEARCH_USD_PER_REQUEST)

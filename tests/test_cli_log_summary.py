@@ -49,11 +49,14 @@ def test_summary_renders_header_and_timeline(tmp_path, monkeypatch, capsys):
     rc = main(["log", "-s", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    assert f"·  {slug}  ·  paused  ·  4m 45s" in out
+    assert f"default  ·  {slug}  ·  paused\n" in out   # identity only
+    assert "·  4m 45s" not in out                       # the total moved out
+    assert "                 time  in  out  cost\n" in out
     assert "spec\n" in out
     assert "  spec-writer  1m 30s" in out
     assert "plan\n" in out
     assert "  plan-writer  3m 10s" in out
+    assert "\n  total        4m 45s" in out
 
 
 def test_summary_long_flag_alias(tmp_path, monkeypatch, capsys):
@@ -126,7 +129,7 @@ def test_summary_merged_change_via_journal_status(tmp_path, monkeypatch, capsys)
     assert rc == 0
     out = capsys.readouterr().out
     assert "merged" in out
-    assert "  merge-to-base  10s" in out
+    assert "  merge-to-base   10s" in out
 
 
 _INTERRUPTED_EVENTS = [
@@ -165,20 +168,20 @@ def test_summary_terminal_marks_inferred_spans_and_interrupted_tail(
     assert main(["log", "-s", cid]) == 0
     out = capsys.readouterr().out
     assert "\n".join([
-        "  task-lead          5m 0s  —  —",
-        "    ↳ coder        ~4m 50s  —  —",
-        "  verify            ~5m 0s  —  —",
-        "  code-review  interrupted  —  —",
+        "  task-lead          5m 0s   —    —     —",
+        "    ↳ coder        ~4m 50s   —    —     —",
+        "  verify            ~5m 0s   —    —     —",
+        "  code-review  interrupted   —    —     —",
     ]) in out
     # The finished status word appears once, on the header line — never in a duration cell.
     assert sum("merged" in ln for ln in out.splitlines()) == 1
 
 
 @pytest.mark.parametrize("flag,cells", [
-    ("--md=-", ("| task-lead | 5m 0s | — | — |",
-                "| ↳ coder | ~4m 50s | — | — |",
-                "| verify | ~5m 0s | — | — |",
-                "| code-review | interrupted | — | — |")),
+    ("--md=-", ("| task-lead | 5m 0s | — | — | — | — | — |",
+                "| ↳ coder | ~4m 50s | — | — | — | — | — |",
+                "| verify | ~5m 0s | — | — | — | — | — |",
+                "| code-review | interrupted | — | — | — | — | — |")),
     ("--html=-", ("<td>5m 0s</td>", "<td>~4m 50s</td>",
                   "<td>~5m 0s</td>", "<td>interrupted</td>")),
 ], ids=["md", "html"])

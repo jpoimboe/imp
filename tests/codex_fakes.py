@@ -18,6 +18,7 @@ class FakeUsage:
     output_tokens: int = 0
     cached_input_tokens: int = 0
     reasoning_output_tokens: int = 0
+    cache_write_input_tokens: int = 0
 
 
 @dataclass
@@ -219,11 +220,13 @@ def thread_started(thread_id: str = "thr-1") -> FakeThreadStartedEvent:
 def turn_completed(
     *, input_tokens: int = 0, output_tokens: int = 0,
     cached_input_tokens: int = 0, reasoning_output_tokens: int = 0,
+    cache_write_input_tokens: int = 0,
 ) -> FakeTurnCompletedEvent:
     return FakeTurnCompletedEvent(usage=FakeUsage(
         input_tokens=input_tokens, output_tokens=output_tokens,
         cached_input_tokens=cached_input_tokens,
-        reasoning_output_tokens=reasoning_output_tokens))
+        reasoning_output_tokens=reasoning_output_tokens,
+        cache_write_input_tokens=cache_write_input_tokens))
 
 
 def turn_failed(error: dict[str, Any]) -> FakeTurnFailedEvent:

@@ -90,6 +90,15 @@ FakeUserMessage.__name__ = "UserMessage"
 
 
 @dataclass
+class FakeSystemMessage:
+    subtype: str
+    data: dict[str, Any]
+
+
+FakeSystemMessage.__name__ = "SystemMessage"
+
+
+@dataclass
 class FakeResultMessage:
     """End-of-turn marker. The runner reacts to this by checking
     state.complete_step_called and breaking the loop. is_error / api_error_status
@@ -178,6 +187,13 @@ def assistant(*blocks: Any, message_id: str | None = None,
 
 def user(*blocks: Any) -> FakeUserMessage:
     return FakeUserMessage(content=list(blocks))
+
+
+def system_init(api_key_source: str | None) -> FakeSystemMessage:
+    data: dict[str, Any] = {"model": "claude-sonnet-4-5"}
+    if api_key_source is not None:
+        data["apiKeySource"] = api_key_source
+    return FakeSystemMessage(subtype="init", data=data)
 
 
 def result(

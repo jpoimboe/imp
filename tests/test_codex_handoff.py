@@ -50,9 +50,9 @@ def _agent_def() -> AgentDef:
 async def test_threshold_crossing_elicits_codex_handoff(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A codex turn whose reported occupancy crosses the model cutoff,
-    0.8 * 400000 = 320000, without completing the step elicits the handoff
-    instruction as the next prompt; the following turn yields the terminal
-    `handoff` event."""
+    260000 / 400000 = 0.65 against the live SDK window, without completing the
+    step elicits the handoff instruction as the next prompt; the following turn
+    yields the terminal `handoff` event."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
@@ -184,7 +184,7 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
         thread_started("thr-1"), agent_message("done"),
         mcp_call(name="complete_step", args={"answer": "42"},
                  result="ok", item_id="cs-1"),
-        # 350000/400000 = 0.875 >= 0.8 -> crosses, but the turn completes.
+        # 350000/400000 = 0.875 >= 0.65 -> crosses, but the turn completes.
         turn_completed(input_tokens=350_000),
     ]]
     runner = CodexAgentRunner(

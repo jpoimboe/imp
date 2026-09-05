@@ -1,7 +1,11 @@
 import copy
 import re
 
-from imp.engine.event_migrations import migrate_events, migrate_id_ns_event_to_block
+from imp.engine.event_migrations import (
+    backfill_query_result_session_ids,
+    migrate_events,
+    migrate_id_ns_event_to_block,
+)
 
 
 def test_llm_response_renamed_to_agent_message():
@@ -426,3 +430,120 @@ def test_does_not_mutate_input_events():
     snapshot = copy.deepcopy(events)
     migrate_id_ns_event_to_block(events)
     assert events == snapshot
+
+
+_A = "step:build/coder"
+
+
+def _qr(cost, agent_id=_A, **payload):
+    return {"id": f"q{cost}", "parent_id": None, "agent_id": agent_id,
+            "timestamp": "T", "type": "query_result",
+            "payload": {"total_cost_usd": cost, **payload}}
+
+
+def _step_started(phase="build", step="coder"):
+    return {"id": "s1", "parent_id": None, "agent_id": None, "timestamp": "T",
+            "type": "step_started",
+            "payload": {"phase": phase, "step": step, "model": "m",
+                        "provider": "claude_code"}}
+
+
+def _last_per_session(events):
+    """What the accounting path does with the result: rows are cumulative inside a
+    session, so each session contributes only its last row."""
+    last = {}
+    for e in events:
+        if e["type"] == "query_result":
+            last[e["payload"]["session_id"]] = e["payload"]["total_cost_usd"]
+    return round(sum(last.values()), 2)
+
+
+def test_a_step_started_for_that_agent_closes_the_cumulative_series():
+    # The hava67 shape in miniature: one agent, two SDK sessions, every row
+    # cumulative within its own. Adding all five is the live over-report
+    # (measured $45.01 against a true $28.11); the last row of each session is
+    # the truth. A partition that lumped all five under one id would total 6.40.
+    events = [_qr(3.00), _qr(8.00), _qr(12.50), _step_started(),
+              _qr(4.00), _qr(6.40)]
+    out = backfill_query_result_session_ids(events)
+    ids = [e["payload"]["session_id"] for e in out if e["type"] == "query_result"]
+    assert ids[0] == ids[1] == ids[2]
+    assert ids[3] == ids[4]
+    assert ids[0] != ids[3]
+    assert _last_per_session(out) == 18.90        # naive sum would be 33.90
+
+
+def test_a_cost_drop_alone_opens_a_new_session():
+    # A subagent gets no step_started of its own, and the fresh_stream path skips
+    # step_context, so a cumulative total that goes DOWN is the only boundary
+    # signal left.
+    events = [_qr(5.00, agent_id="sub:a1"), _qr(9.00, agent_id="sub:a1"),
+              _qr(2.00, agent_id="sub:a1"), _qr(7.50, agent_id="sub:a1")]
+    out = backfill_query_result_session_ids(events)
+    ids = [e["payload"]["session_id"] for e in out]
+    assert ids[0] == ids[1]
+    assert ids[2] == ids[3]
+    assert ids[0] != ids[2]
+    assert _last_per_session(out) == 16.50        # naive sum would be 23.50
+
+
+def test_a_step_started_for_another_agent_does_not_close_this_series():
+    # Resetting on ANY step_started would split this agent's one cumulative series
+    # in two and double-count its first 1.00.
+    events = [_qr(1.00), _step_started(phase="scoping", step="threshold"),
+              _qr(4.00)]
+    out = backfill_query_result_session_ids(events)
+    ids = [e["payload"]["session_id"] for e in out if e["type"] == "query_result"]
+    assert ids[0] == ids[1]
+    assert _last_per_session(out) == 4.00
+
+
+def test_two_agents_interleaved_keep_separate_series():
+    events = [_qr(1.00), _qr(0.50, agent_id="sub:x"),
+              _qr(2.00), _qr(0.90, agent_id="sub:x")]
+    out = backfill_query_result_session_ids(events)
+    ids = [e["payload"]["session_id"] for e in out]
+    assert ids[0] == ids[2]
+    assert ids[1] == ids[3]
+    assert ids[0] != ids[1]
+    assert _last_per_session(out) == 2.90
+
+
+def test_a_row_with_no_cost_reading_stays_in_the_current_session():
+    # Reading an absent cost as 0.0 would look like a drop and split the series,
+    # re-adding the 3.00 already contained in the 8.00.
+    events = [_qr(3.00), _qr(None), _qr(8.00)]
+    out = backfill_query_result_session_ids(events)
+    ids = [e["payload"]["session_id"] for e in out]
+    assert ids[0] == ids[1] == ids[2]
+    assert _last_per_session(out) == 8.00
+
+
+def test_a_row_that_already_carries_an_id_is_left_alone():
+    events = [_qr(2.00, session_id="live-abc"), _qr(5.00, session_id="live-abc")]
+    assert backfill_query_result_session_ids(events) == events
+
+
+def test_a_second_backfill_run_yields_identical_output():
+    # Named for this transform: the file already carries an id_ns-flavoured
+    # `test_second_run_yields_output_identical_to_the_first` at :409.
+    once = backfill_query_result_session_ids(
+        [_qr(3.00), _qr(8.00), _step_started(), _qr(4.00)])
+    assert backfill_query_result_session_ids(copy.deepcopy(once)) == once
+
+
+def test_passes_other_events_through_and_does_not_mutate_the_input():
+    # Load-bearing: both migration paths detect "changed" with `migrated != events`,
+    # which an in-place mutation would defeat.
+    events = [_step_started(),
+              {"id": "t1", "parent_id": None, "agent_id": _A, "timestamp": "T",
+               "type": "tool_call", "payload": {"name": "bash", "id": "c1"}},
+              _qr(1.00)]
+    snapshot = copy.deepcopy(events)
+    out = backfill_query_result_session_ids(events)
+    assert events == snapshot
+    assert out[0] == snapshot[0]
+    assert out[1] == snapshot[1]
+    assert set(out[2]["payload"]) == {"session_id", "total_cost_usd"}
+    assert out[2]["payload"]["total_cost_usd"] == 1.00
+    assert out[2]["payload"]["session_id"]

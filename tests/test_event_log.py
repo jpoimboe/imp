@@ -188,13 +188,14 @@ def test_append_tool_result_stamps_id_ns_when_provided() -> None:
 def test_append_query_result_carries_telemetry_and_omits_absent(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     r = log.append_query_result(
-        agent_id="A", total_cost_usd=0.0123, duration_ms=4200,
-        duration_api_ms=3900, num_turns=3, stop_reason="end_turn",
-        subtype="success", is_error=False,
+        agent_id="A", session_id="sess-1", total_cost_usd=0.0123,
+        duration_ms=4200, duration_api_ms=3900, num_turns=3,
+        stop_reason="end_turn", subtype="success", is_error=False,
         usage={"input_tokens": 1000, "output_tokens": 200},
         model_usage={"claude-x": {"input_tokens": 1000}})
     assert r["type"] == "query_result"
     p = r["payload"]
+    assert p["session_id"] == "sess-1"
     assert p["total_cost_usd"] == 0.0123
     assert p["num_turns"] == 3
     assert p["usage"] == {"input_tokens": 1000, "output_tokens": 200}
@@ -213,12 +214,13 @@ def test_append_query_result_carries_telemetry_and_omits_absent(tmp_path: Path) 
 def test_append_query_result_includes_present_optional_fields(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     r = log.append_query_result(
-        agent_id="A", total_cost_usd=0.0, duration_ms=1, duration_api_ms=1,
-        num_turns=1, stop_reason=None, subtype="error_during_execution",
-        is_error=True, usage={}, model_usage={},
-        api_error_status=529, permission_denials=[{"tool": "bash"}],
-        errors=["boom"])
+        agent_id="A", session_id="sess-2", total_cost_usd=0.0, duration_ms=1,
+        duration_api_ms=1, num_turns=1, stop_reason=None,
+        subtype="error_during_execution", is_error=True, usage={},
+        model_usage={}, api_error_status=529,
+        permission_denials=[{"tool": "bash"}], errors=["boom"])
     p = r["payload"]
+    assert p["session_id"] == "sess-2"
     assert p["api_error_status"] == 529
     assert p["permission_denials"] == [{"tool": "bash"}]
     assert p["errors"] == ["boom"]

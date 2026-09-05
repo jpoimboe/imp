@@ -53,15 +53,6 @@ def test_patch_row_names_the_context_on_the_reincarnation_line() -> None:
     assert "reincarnating — context threshold crossed (22k/258k)" in out
 
 
-# AC 7(c)
-def test_patch_row_does_not_move_the_quest_token_totals() -> None:
-    b = _fed()
-    # the agent_message carried usage={}; the patch's 82628 is billing already
-    # counted elsewhere and must not accumulate here (codex `imp log -s` totals
-    # are separate work).
-    assert b.tree.tokens.input == 0
-
-
 # AC 7(d)
 def test_patch_row_appends_no_node() -> None:
     b = _fed()

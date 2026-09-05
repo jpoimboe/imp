@@ -131,9 +131,11 @@ def test_md_summary_uses_summary_document(tmp_path, monkeypatch):
     assert main(["log", slug, "--md", "--summary"]) == 0
     text = (tmp_path / f"imp-log-{slug}.md").read_text()
     assert "**Status:**" in text                 # SummaryHeader line
-    assert "| Step | Duration | Tokens | Cost |" in text  # reworked summary table
+    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out | Cost |"
+            in text)  # reworked summary table
     assert "Wait" not in text                              # Wait column dropped
     assert "<details>" not in text
+    assert "| total |" in text                  # the totals row is present
 
 
 def test_html_summary_renders_header(tmp_path, monkeypatch):

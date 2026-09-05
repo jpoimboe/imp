@@ -19,7 +19,11 @@ from typing import Any
 from imp.engine import worktree
 from imp.engine.env import quest_var_tmp_root
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
-from imp.engine.event_migrations import migrate_events, migrate_id_ns_event_to_block
+from imp.engine.event_migrations import (
+    backfill_query_result_session_ids,
+    migrate_events,
+    migrate_id_ns_event_to_block,
+)
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import (
     JsonlEventLog,
@@ -32,7 +36,7 @@ from imp.engine.state import (
 from imp.engine.types import SourceLoc
 from imp.paths import project_state_dir
 
-LAYOUT_VERSION = 16  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 17  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -414,6 +418,25 @@ def _migrate_v15_to_v16(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v16_to_v17(quest_dir: Path) -> None:
+    """v16->v17: query_result gained a required `session_id` (vusi13), so backfill a
+    synthetic one on every pre-existing row — a new id when a step_started for that
+    agent intervenes or the cumulative cost drops — and the reader stays
+    single-version. The event rewrite precedes the version stamp so a failed rewrite
+    leaves the home at v16 and the migration re-runs on the next load; a home with no
+    query_result rows is left byte-identical."""
+    events_path = quest_dir / "events.jsonl"
+    if events_path.exists():
+        events = parse_events_jsonl(events_path.read_bytes())
+        migrated = backfill_query_result_session_ids(events)
+        if migrated != events:
+            _rewrite_events_jsonl(events_path, migrated)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 17
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -430,6 +453,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (13, 14): _migrate_v13_to_v14,
     (14, 15): _migrate_v14_to_v15,
     (15, 16): _migrate_v15_to_v16,
+    (16, 17): _migrate_v16_to_v17,
 }
 
 

@@ -6,7 +6,7 @@ from imp.cli import render_text as rt
 def _root_with(children: list) -> nv.NarrativeTree:
     root = nv.WorkflowNode(id="abc123", title="x")
     root.children = children
-    return nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    return nv.NarrativeTree(root=root)
 
 
 def _render(children: list, *, color: bool = False) -> str:

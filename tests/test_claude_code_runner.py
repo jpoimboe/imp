@@ -31,6 +31,7 @@ from tests.cc_fakes import (
     message_start,
     message_stop,
     result,
+    system_init,
     text,
     thinking,
     tool_result,
@@ -3904,6 +3905,65 @@ async def test_query_result_carries_optional_error_fields(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
+async def test_every_query_result_in_one_client_lifetime_shares_a_session_id(
+    tmp_path: Path,
+) -> None:
+    """A requery emits a second query_result against the SAME SDK client. Both
+    rows are cumulative over one session, so they must carry one id — the
+    accounting path takes the last row per id and would drop turn 1 otherwise."""
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("Should I proceed?")), result(),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})), result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = replace(_inv(tmp_path, event_log=log),
+                  continuation_fn=lambda _last: ("looks good, proceed", False))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    ids = [e["payload"]["session_id"]
+           for e in log.read() if e["type"] == "query_result"]
+    assert len(ids) == 2
+    assert ids[0]
+    assert ids[0] == ids[1]
+
+
+@pytest.mark.anyio
+async def test_a_second_client_lifetime_mints_a_different_session_id(
+    tmp_path: Path,
+) -> None:
+    """A re-entry builds a new SDK client, which starts a new cumulative series;
+    summing across the two ids is then the correct total."""
+    (tmp_path / "art").mkdir()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=[
+            assistant(text("done"),
+                      tool_use("c1", "complete_step", {"status": "Success"})),
+            result(),
+        ])
+
+    log = InMemoryEventLog()
+    for _ in range(2):
+        runner = ClaudeCodeAgentRunner(
+            model_name="claude-sonnet-4-5", client_factory=factory)
+        async for _ev in runner.run(_inv(tmp_path, event_log=log)):
+            pass
+
+    ids = [e["payload"]["session_id"]
+           for e in log.read() if e["type"] == "query_result"]
+    assert len(ids) == 2
+    assert ids[0] != ids[1]
+
+
+@pytest.mark.anyio
 async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> None:
     from tests.cc_fakes import tool_result, user
     (tmp_path / "art").mkdir()
@@ -5170,3 +5230,67 @@ async def test_lido99_reply_retry_keeps_the_preceding_assistant_turn(
     assert [r["type"] for r in body] == ["user", "assistant"]
     assert body[1]["message"]["content"][0]["text"] == design
     assert "Continue from where you left off." not in json.dumps(body)
+
+
+def test_auth_mode_maps_api_key_source_to_the_metered_marker() -> None:
+    from imp.providers.claude_code import _auth_mode_from_init
+    assert _auth_mode_from_init({"apiKeySource": "none"}) == "subscription"
+    assert _auth_mode_from_init({"apiKeySource": "user"}) == "apikey"
+    assert _auth_mode_from_init(
+        {"apiKeySource": "ANTHROPIC_API_KEY"}) == "apikey"
+    # Missing apiKeySource yields None rather than an "unknown" sentinel.
+    assert _auth_mode_from_init({"model": "claude-sonnet-4-5"}) is None
+    assert _auth_mode_from_init(None) is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("api_key_source", "expected"),
+                         [("none", "subscription"), ("user", "apikey")])
+async def test_init_auth_mode_reaches_the_agent_message(
+    tmp_path: Path, api_key_source: str, expected: str,
+) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        system_init(api_key_source),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+
+    ams = [e for e in log.read() if e["type"] == "agent_message"]
+    assert len(ams) == 1
+    assert ams[0]["payload"]["auth_mode"] == expected
+
+
+@pytest.mark.anyio
+async def test_no_init_message_leaves_auth_mode_off_the_agent_message(
+    tmp_path: Path,
+) -> None:
+    """Absent is the honest state — never a default of "apikey"."""
+    (tmp_path / "art").mkdir()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=[
+            assistant(text("done"),
+                      tool_use("c1", "complete_step", {"status": "Success"})),
+            result(),
+        ])
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+
+    ams = [e for e in log.read() if e["type"] == "agent_message"]
+    assert len(ams) == 1
+    assert "auth_mode" not in ams[0]["payload"]

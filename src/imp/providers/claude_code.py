@@ -1111,6 +1111,14 @@ def _sdk_message_to_imp(
     return None, [], []
 
 
+def _auth_mode_from_init(data: dict[str, Any] | None) -> str | None:
+    """`apiKeySource` is the only auth signal the SDK init message carries."""
+    source = (data or {}).get("apiKeySource")
+    if source is None:
+        return None
+    return "subscription" if source == "none" else "apikey"
+
+
 async def _context_usage_fields(client: Any) -> dict[str, Any]:
     try:
         cu = await client.get_context_usage()
@@ -1408,6 +1416,7 @@ class ClaudeCodeSession(ObserveSession):
         self._llm_model: str | None = None
         self._llm_stop_reason: Any = None
         self._llm_usage: dict[str, Any] = {}
+        self._auth_mode: str | None = None
         self._stream_usage_by_msg: dict[str, tuple[dict[str, Any], Any]] = {}
         self._stream_cur_msg_id: str | None = None
         self._stream_cur_usage: dict[str, Any] = {}
@@ -1415,6 +1424,8 @@ class ClaudeCodeSession(ObserveSession):
         self._flush_lock = asyncio.Lock()
         state.flush_llm_group = self._flush_llm_group
 
+        # One client lifetime = one id; store id is UUID5(agent_id), cannot split cumulative series.
+        self._session_id = uuid.uuid4().hex
         client_ctx = self.runner._build_client(opts)
         client = await client_ctx.__aenter__()
         runner._client = client
@@ -1463,6 +1474,7 @@ class ClaudeCodeSession(ObserveSession):
                 raw={"content": self._llm_blocks, "stop_reason": stop,
                      "usage": usage},
                 usage=usage, stop_reason=stop,
+                auth_mode=self._auth_mode,
                 provider_error=classifies_as_provider_error(self._llm_tail_text),
                 message_id=self._llm_group_key,
                 context_window=cu_fields.get("context_window"),
@@ -1558,6 +1570,8 @@ class ClaudeCodeSession(ObserveSession):
                 self._stream_cur_msg_id = None
                 self._stream_cur_usage = {}
                 self._stream_cur_stop_reason = None
+        if cls_name == "SystemMessage" and getattr(raw, "subtype", None) == "init":
+            self._auth_mode = _auth_mode_from_init(getattr(raw, "data", None))
         imp_msg, warns, thinkings = _sdk_message_to_imp(raw)
         for content in thinkings:
             yield Thinking(text=content)
@@ -1736,6 +1750,7 @@ class ClaudeCodeSession(ObserveSession):
             backstop_stop_reason=getattr(raw, "stop_reason", None))
         elog.append_query_result(
             agent_id=aid,
+            session_id=self._session_id,
             total_cost_usd=getattr(raw, "total_cost_usd", None),
             duration_ms=getattr(raw, "duration_ms", None),
             duration_api_ms=getattr(raw, "duration_api_ms", None),
