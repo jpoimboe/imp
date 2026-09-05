@@ -152,3 +152,46 @@ def migrate_id_ns_event_to_block(events: list[dict[str, Any]]) -> list[dict[str,
         else:
             out.append(event)
     return out
+
+
+def backfill_query_result_session_ids(
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """One-shot: stamp a synthetic session_id on every query_result row written
+    before the field existed (vusi13). The rows are cumulative within one SDK client
+    lifetime, so the accounting path takes the last row per id; a series ends when a
+    step_started for that agent intervenes or the cumulative cost drops. A row whose
+    cost is not a number neither opens nor closes a series — reading it as 0.0 would
+    look like a drop and re-add an already-counted total. Returns a new list; a row
+    that already carries the key is passed through, so a second run is a no-op, which
+    both callers' `migrated != events` checks depend on."""
+    out: list[dict[str, Any]] = []
+    current: dict[str | None, str] = {}
+    watermark: dict[str | None, float] = {}
+    minted = 0
+    for event in events:
+        payload = event.get("payload") or {}
+        etype = event.get("type")
+        if etype == "step_started":
+            # step_started is an executor row (agent_id None); the agent it starts
+            # is the one the executor keys as step:<phase>/<name>.
+            started = f"step:{payload.get('phase')}/{payload.get('step')}"
+            current.pop(started, None)
+            watermark.pop(started, None)
+            out.append(event)
+            continue
+        if etype != "query_result" or "session_id" in payload:
+            out.append(event)
+            continue
+        aid = event.get("agent_id")
+        raw = payload.get("total_cost_usd")
+        cost = float(raw) if isinstance(raw, int | float) else None
+        if aid not in current or (cost is not None and cost < watermark.get(aid, 0.0)):
+            minted += 1
+            current[aid] = f"migrated-{minted}"
+        if cost is not None:
+            watermark[aid] = cost
+        new = dict(event)
+        new["payload"] = {"session_id": current[aid], **payload}
+        out.append(new)
+    return out
