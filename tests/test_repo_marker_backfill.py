@@ -185,6 +185,20 @@ def test_a_name_the_mint_rule_could_not_produce_is_rejected(
     assert _derive_owner(state) is None
 
 
+def test_a_zero_padded_suffix_is_rejected_but_the_canonical_form_is_admitted(
+    tmp_path: Path,
+) -> None:
+    """`widget-02` is not mintable (zero-padded); canonical `widget-2` is."""
+    control = _checkout(tmp_path, "widget")
+    zero_padded = _state_dir("widget-02")
+    _quest(zero_padded, "aaa111", control)
+    canonical = _state_dir("widget-2")
+    _quest(canonical, "bbb222", control)
+
+    assert _derive_owner(zero_padded) is None
+    assert _derive_owner(canonical) == control
+
+
 def test_a_candidate_that_is_not_a_checkout_is_dropped(tmp_path: Path) -> None:
     """Spec AC 7c."""
     plain = tmp_path / "widget"

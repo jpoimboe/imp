@@ -209,7 +209,8 @@ def _could_be_minted(dir_name: str, root: Path) -> bool:
     if dir_name == base:
         return True
     suffix = dir_name.removeprefix(f"{base}-")
-    return suffix != dir_name and suffix.isdecimal() and int(suffix) >= 2
+    return (suffix.isdecimal() and int(suffix) >= 2
+            and dir_name == f"{base}-{int(suffix)}")
 
 
 def _derive_owner(state_dir: Path) -> Path | None:
