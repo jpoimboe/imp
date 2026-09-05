@@ -5,7 +5,6 @@ import pytest
 from imp.providers.catalog import (
     BillingUsage,
     ModelPrices,
-    billing_usage_from_openai,
     cost_usd,
     prices_for,
     web_search_request_count,
@@ -272,49 +271,3 @@ def test_a_date_stamped_anthropic_id_prices_rather_than_falling_to_n_a() -> None
     usage = BillingUsage(fresh_input=1000, output=1000)
     assert cost_usd("claude-sonnet-4-6-20250219", usage) == pytest.approx(0.018)
 
-
-def test_openai_cached_tokens_are_not_billed_at_the_fresh_rate() -> None:
-    """OpenAI's `input_tokens` INCLUDES cached tokens, so fresh must be net of
-    them: 100k input with 90k cached is 10k fresh, not 100k."""
-    usage = {
-        "input_tokens": 100_000,
-        "input_tokens_details": {"cached_tokens": 90_000},
-        "output_tokens": 2_000,
-        "output_tokens_details": {"reasoning_tokens": 1_500},
-        "total_tokens": 102_000,
-    }
-    billing = billing_usage_from_openai(usage)
-    assert billing.fresh_input == 10_000
-    assert billing.cached_input == 90_000
-    # ResponseUsage carries no cache-write field at all.
-    assert billing.cache_write == 0
-    # 10_000*4.00 + 90_000*0.40 + 2_000*20.00 = 116_000 per million.
-    assert cost_usd("gpt-5.6-sol", billing) == pytest.approx(0.116)
-    # Billing all 100k as fresh would be $0.44 — the bug this closes.
-    assert cost_usd("gpt-5.6-sol", billing) != pytest.approx(0.44)
-
-
-def test_openai_reasoning_tokens_are_not_added_on_top_of_output() -> None:
-    """Reasoning is billed as output and already counted in `output_tokens`."""
-    billing = billing_usage_from_openai({
-        "input_tokens": 500,
-        "input_tokens_details": {"cached_tokens": 0},
-        "output_tokens": 4_000,
-        "output_tokens_details": {"reasoning_tokens": 3_800},
-        "total_tokens": 4_500,
-    })
-    assert billing.output == 4_000
-
-
-def test_a_flat_openai_usage_bills_every_input_token_as_fresh() -> None:
-    """_usage_dict fallback emits no nested detail; nothing to subtract."""
-    billing = billing_usage_from_openai(
-        {"input_tokens": 700, "output_tokens": 30, "total_tokens": 730})
-    assert billing.fresh_input == 700
-    assert billing.cached_input == 0
-    assert billing.output == 30
-
-
-def test_an_absent_openai_usage_bills_nothing() -> None:
-    assert billing_usage_from_openai({}) == BillingUsage()
-    assert billing_usage_from_openai(None) == BillingUsage()

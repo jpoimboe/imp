@@ -10,7 +10,6 @@ from typing import Any
 
 from imp.providers.catalog import (
     BillingUsage,
-    billing_usage_from_openai,
     cost_usd,
     web_search_request_count,
 )
@@ -151,6 +150,21 @@ def vendor_contribution(model_usage: dict[str, Any],
     if total_cost_usd is None and _billed_or_none(billing) is None:
         return None
     return contribution(billing, float(total_cost_usd or 0.0), metered=metered)
+
+
+def billing_usage_from_openai(usage: dict[str, Any] | None) -> BillingUsage:
+    """A raw `ResponseUsage` dump → the canonical quadruple."""
+    if not usage:
+        return BillingUsage()
+    details = usage.get("input_tokens_details")
+    cached = (int(details.get("cached_tokens", 0) or 0)
+              if isinstance(details, dict) else 0)
+    input_tokens = int(usage.get("input_tokens", 0) or 0)
+    return BillingUsage(
+        fresh_input=max(0, input_tokens - cached),  # input_tokens includes cached; fresh is net
+        cached_input=cached,
+        # reasoning_tokens is inside output_tokens; never added on top
+        output=int(usage.get("output_tokens", 0) or 0))
 
 
 def _billing_from_flat(usage: dict[str, Any]) -> BillingUsage:
