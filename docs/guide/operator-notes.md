@@ -61,7 +61,16 @@ files, but a quest's recorded `project_root` (in `quests/<id>/quest.json`) and i
 the checkout moved will resume against the old, now-missing location.
 
 `$IMP_STATE_DIR` sidesteps the slug entirely: set it and imp uses that path verbatim, so a
-checkout that moves often can pin its state directory once.
+checkout that moves often can pin its state directory once. A pinned directory carries no
+`repo` marker, so imp cannot tell whose state it holds and will not refuse a run from a
+foreign checkout — a scratch run that inherited the variable writes straight into your live
+quests. Opt in to the ownership guard by writing the marker yourself:
+
+```bash
+cd /path/to/the/owning/checkout
+DIR=~/.imp/projects/whatever   # substitute: the directory $IMP_STATE_DIR names
+pwd -P > "$DIR/repo"           # imp now refuses any other checkout pointed here
+```
 
 ## Archive version skew
 
