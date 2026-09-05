@@ -3302,3 +3302,14 @@ def test_literal_text_node_colored_fence_stays_caret_escaped() -> None:
     out = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
     assert "^[[1;33m" in out                              # literal text keeps absolute escaping
     assert "\x1b[1;33m" not in out
+
+
+def test_conventions_doc_records_the_narrowed_caret_rule() -> None:
+    text = Path("docs/internals/conventions.md").read_text()
+    flat = " ".join(text.split())
+    assert "## Color in agent prose" in text
+    assert "SGR color inside a fenced code block in agent prose survives verbatim" in flat
+    assert "any escape outside a fence, still renders as `^[`" in flat
+    assert "the `--md`/`--html` exports strip SGR entirely" in flat
+    # The section names the primitive; a rename must not strand the reader.
+    assert hasattr(rt, "_caret_escape")

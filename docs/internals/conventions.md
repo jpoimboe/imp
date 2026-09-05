@@ -77,6 +77,14 @@ traceback, `daemon.py`, the archive progress indicator, `loader.py` warnings,
 raw to keep its diagnostic value, reaching the user via the crash-banner
 mechanism.
 
+## Color in agent prose
+
+Content-origin text is caret-escaped (`render_text._caret_escape`) so it cannot
+alter terminal state. The one exception: SGR color inside a fenced code block in
+agent prose survives verbatim, so a design mockup keeps its colors; every other
+control byte, and any escape outside a fence, still renders as `^[`. Color-off
+output and the `--md`/`--html` exports strip SGR entirely.
+
 ## See also
 
 - `internals/architecture.md` — the engine and renderer these surfaces are built on.
