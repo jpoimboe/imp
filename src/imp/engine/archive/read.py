@@ -92,30 +92,6 @@ def search_archive_events_content(
         conn.close()
 
 
-def most_recent_archived_id(control_root: Path) -> str | None:
-    ensure_current(control_root)
-    db = index_path(control_root)
-    if not db.exists():
-        return None
-    conn = index.connect(db)
-    try:
-        return index.most_recent_id(conn)
-    finally:
-        conn.close()
-
-
-def last_event_ts(control_root: Path, quest_id: str) -> str | None:
-    ensure_current(control_root)
-    db = index_path(control_root)
-    if not db.exists():
-        return None
-    conn = index.connect(db)
-    try:
-        return index.last_event_ts(conn, quest_id)
-    finally:
-        conn.close()
-
-
 def read_events(control_root: Path, quest_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
