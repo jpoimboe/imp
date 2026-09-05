@@ -10,16 +10,14 @@ from typing import Any
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
+from imp.cli.accounting import RowUsage
 from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
-    _dur_text,
     _fmt_tokens,
     _sub_body,
-    _tok_total,
     cost_cell,
     open_span_label,
-    summary_totals,
 )
 
 _MAX_HEADING = 6
@@ -277,17 +275,23 @@ def render_markdown(tree: nv.NarrativeTree, *, full: bool) -> str:
     return "\n\n".join(blocks).strip() + "\n"
 
 
+_MD_HEADER = "| Step | Duration | Fresh | Cache read | Cache write | Out | Cost |"
+_MD_RULE = "|---|---|---|---|---|---|---|"
+
+
+def _md_cells(u: RowUsage) -> str:
+    return (f"{_fmt_tokens(u.fresh_input)} | {_fmt_tokens(u.cached_input)}"
+            f" | {_fmt_tokens(u.cache_write)} | {_fmt_tokens(u.output)}"
+            f" | {cost_cell(u)}")
+
+
 def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
-    work, total = summary_totals(summary, header.total_seconds)
     open_label = open_span_label(header.status)
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),
-        (f"**Status:** {_md_escape(header.status)}"
-         f" · **Total:** {_dur_text(work)}"
-         f" · **Tokens:** {_fmt_tokens(_tok_total(total))}"
-         f" · **Cost:** {cost_cell(total)}"),
+        f"**Status:** {_md_escape(header.status)}",
     ]
     grouped: list[tuple[str, list[str]]] = []
     for row in summary:
@@ -296,18 +300,13 @@ def render_summary_markdown(summary: list[StepRow], *,
         step = _md_escape(row.step).replace("|", "\\|")
         grouped[-1][1].append(
             f"| {step} | {row.dur_cell(open_label)}"
-            f" | {_fmt_tokens(_tok_total(row.totals))} | {cost_cell(row.totals)} |")
+            f" | {_md_cells(row.totals)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")
             grouped[-1][1].append(
                 f"| {body} | {sub.dur_cell(open_label)}"
-                f" | {_fmt_tokens(_tok_total(sub.usage))} | {cost_cell(sub.usage)} |")
+                f" | {_md_cells(sub.usage)} |")
     for phase, rows in grouped:
-        table = "\n".join([
-            _heading(2, _md_escape(phase)),
-            "| Step | Duration | Tokens | Cost |",
-            "|---|---|---|---|",
-            *rows,
-        ])
-        blocks.append(table)
+        blocks.append("\n".join([_heading(2, _md_escape(phase)),
+                                 _MD_HEADER, _MD_RULE, *rows]))
     return "\n\n".join(blocks).strip() + "\n"

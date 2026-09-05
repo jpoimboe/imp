@@ -237,11 +237,6 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     return rows
 
 
-def _tok_total(u: RowUsage) -> int:
-    """A row's single token figure: the whole input side plus output."""
-    return u.input_total + u.output
-
-
 def _fmt_tokens(total: int) -> str:
     """Human-formatted token count: '—' for 0, bare int below 1k, then k / M."""
     if total <= 0:

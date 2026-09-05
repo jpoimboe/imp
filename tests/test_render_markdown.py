@@ -396,10 +396,14 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
     assert "# imp — gumu81" in out               # SummaryHeader workflow/id
     assert "merged" in out                        # status carried
     assert "## design" in out                     # phase grouping heading
-    assert "| Step | Duration | Tokens | Cost |" in out
+    assert ("| Step | Duration | Fresh | Cache read | Cache write | Out | Cost |"
+            in out)
     assert "Wait" not in out                      # Wait column dropped
-    assert "| spec | 1m 0s | — | — |" in out      # work-time dur, no tokens/cost
-    assert "**Total:** 1m 0s" in out              # work-time header total
+    assert "| spec | 1m 0s | — | — | — | — | — |" in out
+    assert "**Status:** merged" in out            # AC 22(d): identity only
+    assert "**Total:**" not in out
+    assert "**Tokens:**" not in out
+    assert "**Cost:**" not in out
 
 
 def test_summary_markdown_durations_exclude_wait_and_drop_wait_column() -> None:
@@ -414,9 +418,9 @@ def test_summary_markdown_durations_exclude_wait_and_drop_wait_column() -> None:
                            status="running", total_seconds=None)
     out = render_summary_markdown(rows, header=header)
     assert "Wait" not in out                          # Wait column dropped
-    assert "| waited | 20s | — | — |" in out          # 30s wall - 10s wait = 20s work
-    assert "| open | running | — | — |" in out         # open step → running duration
-    assert "**Total:** running" in out                 # total_seconds None → running
+    assert "| waited | 20s | — | — | — | — | — |" in out   # 30s wall - 10s wait
+    assert "| open | running | — | — | — | — | — |" in out  # open step
+    assert "**Total:** running" not in out                 # the total moved out
 
 
 def test_summary_multiple_phases_grouped_in_order() -> None:
@@ -440,21 +444,24 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
         StepRow(phase="implement", step="task-lead",
                 start_ts="2024-01-01T00:00:00Z",
                 end_ts="2024-01-01T00:01:00Z",
-                usage=RowUsage(fresh_input=12000, output=345, dollars=0.34,
+                usage=RowUsage(fresh_input=12000, cached_input=200,
+                               cache_write=100, output=345, dollars=0.34,
                                priced=1),
                 subagents=[SubagentRow(
                     name="explorer", label="map repo",
                     start_ts="2024-01-01T00:00:05Z",
                     end_ts="2024-01-01T00:00:50Z",
-                    usage=RowUsage(fresh_input=200, dollars=0.05, priced=1))]),
+                    usage=RowUsage(fresh_input=200, output=20, dollars=0.05,
+                                   priced=1))]),
     ]
     header = SummaryHeader(workflow="imp", quest_id="c",
                            status="merged", total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
-    assert "| task-lead | 1m 0s | 12.5k | ~$0.39 |" in out
-    assert "| ↳ explorer (map repo) | 45s | 200 | ~$0.05 |" in out
-    assert "**Tokens:** 12.5k" in out    # 12345 step + 200 subagent = 12545
-    assert "**Cost:** ~$0.39" in out     # 0.34 step + 0.05 subagent, metered
+    # AC 22(a): the four buckets are broken out, not collapsed into one figure.
+    assert ("| task-lead | 1m 0s | 12.2k | 200 | 100 | 365 | ~$0.39 |"
+            in out)
+    assert ("| ↳ explorer (map repo) | 45s | 200 | — | — | 20 | ~$0.05 |"
+            in out)
 
 
 def test_summary_markdown_open_step_reflects_paused_status() -> None:
@@ -553,8 +560,8 @@ def test_summary_markdown_marks_inferred_ends_with_a_tilde() -> None:
     hdr = SummaryHeader(workflow="imp", quest_id="c", status="merged",
                         total_seconds=300.0)
     out = render_summary_markdown(rows, header=hdr)
-    assert "| task-lead | ~5m 0s | — | — |" in out
-    assert "| ↳ coder | ~2m 14s | — | — |" in out
+    assert "| task-lead | ~5m 0s | — | — | — | — | — |" in out
+    assert "| ↳ coder | ~2m 14s | — | — | — | — | — |" in out
 
 
 def test_summary_markdown_open_spans_in_a_finished_quest_read_interrupted() -> None:
@@ -565,8 +572,8 @@ def test_summary_markdown_open_spans_in_a_finished_quest_read_interrupted() -> N
     hdr = SummaryHeader(workflow="imp", quest_id="c", status="merged",
                         total_seconds=300.0)
     out = render_summary_markdown(rows, header=hdr)
-    assert "| task-lead | interrupted | — | — |" in out
-    assert "| ↳ coder | interrupted | — | — |" in out
+    assert "| task-lead | interrupted | — | — | — | — | — |" in out
+    assert "| ↳ coder | interrupted | — | — | — | — | — |" in out
     assert "| task-lead | merged |" not in out
 
 
@@ -576,7 +583,7 @@ def test_summary_markdown_merge_blocked_open_step_reads_two_words() -> None:
     hdr = SummaryHeader(workflow="imp", quest_id="c", status="merge_blocked",
                         total_seconds=100.0)
     out = render_summary_markdown(rows, header=hdr)
-    assert "| task-lead | merge blocked | — | — |" in out
+    assert "| task-lead | merge blocked | — | — | — | — | — |" in out
 
 
 def test_agent_prose_colored_fence_exports_stripped_not_caret_escaped() -> None:

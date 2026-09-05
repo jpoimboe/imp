@@ -178,10 +178,10 @@ def test_summary_terminal_marks_inferred_spans_and_interrupted_tail(
 
 
 @pytest.mark.parametrize("flag,cells", [
-    ("--md=-", ("| task-lead | 5m 0s | — | — |",
-                "| ↳ coder | ~4m 50s | — | — |",
-                "| verify | ~5m 0s | — | — |",
-                "| code-review | interrupted | — | — |")),
+    ("--md=-", ("| task-lead | 5m 0s | — | — | — | — | — |",
+                "| ↳ coder | ~4m 50s | — | — | — | — | — |",
+                "| verify | ~5m 0s | — | — | — | — | — |",
+                "| code-review | interrupted | — | — | — | — | — |")),
     ("--html=-", ("<td>5m 0s</td>", "<td>~4m 50s</td>",
                   "<td>~5m 0s</td>", "<td>interrupted</td>")),
 ], ids=["md", "html"])

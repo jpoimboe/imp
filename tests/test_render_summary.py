@@ -11,7 +11,6 @@ from imp.cli.render_summary import (
     _dur_text,
     _fmt_tokens,
     _sub_body,
-    _tok_total,
     build_summary,
     cost_cell,
     legend_lines,
@@ -722,10 +721,6 @@ def test_legend_lines_follow_the_cells_actually_rendered():
         "[ ] list-price equivalent; subscription usage is not billed per token",
         "≥ excludes steps run on a model absent from the price table"]
 
-
-def test_tok_total_sums_the_input_side_and_output():
-    usage = RowUsage(fresh_input=1, cached_input=3, cache_write=4, output=2)
-    assert _tok_total(usage) == 10
 
 
 def test_dur_text_running_when_none_else_compact():
