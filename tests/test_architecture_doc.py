@@ -167,6 +167,22 @@ def test_operator_notes_document_the_moved_checkout_limitation() -> None:
     assert "Finish or abandon in-flight quests before moving a checkout" in text
 
 
+def test_operator_notes_document_archive_version_skew() -> None:
+    from imp.engine.errors import ArchiveMismatch
+
+    text = Path("docs/guide/operator-notes.md").read_text()
+    flat = " ".join(text.split())
+    assert "## Archive version skew" in text
+    section = " ".join(text.split("## Archive version skew", 1)[1].split())
+    # the refusal line is quoted verbatim, not paraphrased
+    assert str(ArchiveMismatch(floor="data", stored=8, known=7)) in flat
+    assert "archive index is at v" in section
+    # the remedy for a running quest, and the rule future schema work must follow
+    assert "imp resume <id>" in section
+    assert "a new index column must be nullable" in section
+    assert "index.ingest" in section
+
+
 OVERVIEW_DIAGRAM = """flowchart LR
   start([intent]) --> TH["threshold"]
   TH --> SPEC["spec"]
