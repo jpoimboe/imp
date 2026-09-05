@@ -1,6 +1,7 @@
 # tests/test_edit_file_closest_match.py
-"""Closest-region scan behind edit_file's not-found diagnostic: anchoring,
-the 0.6 floor, tie-breaking, and the caps that bound its cost."""
+"""edit_file's not-found diagnostic: the closest-region scan (anchoring, the
+0.6 floor, tie-breaking, the caps that bound its cost), the rendered
+want:/file: message, and the cause named in _short_repr's docstring."""
 from __future__ import annotations
 
 import time
@@ -11,7 +12,7 @@ import pytest
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.fs import _apply_edit, _closest_region
+from imp.agents.tools.fs import _apply_edit, _closest_region, _short_repr
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -362,3 +363,12 @@ def test_all_anchors_over_the_hit_cap_degrades_to_todays_message() -> None:
     assert time.perf_counter() - started < 5.0
     assert msg == (
         "'        self.name = nameX.strip()' not found in 'big.py'")
+
+
+def test_short_repr_docstring_names_content_drift_not_whitespace() -> None:
+    # The archive refutes the old claim (1 of 12 sampled misses were
+    # whitespace); the docstring must not keep asserting it.
+    doc = _short_repr.__doc__
+    assert doc is not None
+    assert "content drift" in doc
+    assert "whitespace" not in doc

@@ -267,8 +267,9 @@ def _short_repr(s: str, cap: int = 200) -> str:
     """repr capped for error texts. A multi-KB `old` would otherwise be
     echoed in full into the transcript — pure redundancy, since the failing
     value is already in the agent's context as the call it just made. The
-    escaped HEAD is what identifies the edit (whitespace mistakes are the
-    top not-found cause); the disclosed length tells the rest."""
+    escaped HEAD is what identifies the edit (the top not-found cause is
+    content drift — an earlier edit already changed the file); the disclosed
+    length tells the rest."""
     if len(s) <= cap:
         return repr(s)
     return f"{s[:cap]!r}… [{len(s)} chars total]"

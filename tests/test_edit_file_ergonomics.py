@@ -242,8 +242,9 @@ def test_long_old_capped_in_not_unique_message(tmp_path: Path) -> None:
 
 
 def test_short_old_repr_stays_full_and_escaped(tmp_path: Path) -> None:
-    # The repr's escaping is the valuable part (whitespace mistakes are the
-    # top not-found cause) — short olds keep today's exact full-repr message.
+    # The repr's escaping is the valuable part (the top not-found cause is
+    # content drift — an earlier edit already changed the file) — short olds
+    # keep today's exact full-repr message.
     (tmp_path / "x.py").write_text("content\n")
     with pytest.raises(ValueError, match=r"'nope\\nx' not found in 'x\.py'"):
         _edit(_ctx(tmp_path), path="x.py", old="nope\nx", new="y")
