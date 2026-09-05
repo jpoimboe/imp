@@ -14,10 +14,13 @@ from imp.cli.accounting import RowUsage
 from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
+    _dur_text,
     _fmt_tokens,
     _sub_body,
     cost_cell,
+    legend_lines,
     open_span_label,
+    summary_totals,
 )
 
 _MAX_HEADING = 6
@@ -288,25 +291,33 @@ def _md_cells(u: RowUsage) -> str:
 def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
+    work, total = summary_totals(summary, header.total_seconds)
     open_label = open_span_label(header.status)
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),
         f"**Status:** {_md_escape(header.status)}",
     ]
+    cells = [cost_cell(total)]
     grouped: list[tuple[str, list[str]]] = []
     for row in summary:
         if not grouped or grouped[-1][0] != row.phase:
             grouped.append((row.phase, []))
         step = _md_escape(row.step).replace("|", "\\|")
+        cells.append(cost_cell(row.totals))
         grouped[-1][1].append(
             f"| {step} | {row.dur_cell(open_label)}"
             f" | {_md_cells(row.totals)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")
+            cells.append(cost_cell(sub.usage))
             grouped[-1][1].append(
                 f"| {body} | {sub.dur_cell(open_label)}"
                 f" | {_md_cells(sub.usage)} |")
     for phase, rows in grouped:
         blocks.append("\n".join([_heading(2, _md_escape(phase)),
                                  _MD_HEADER, _MD_RULE, *rows]))
+    blocks.append("\n".join([
+        _MD_HEADER, _MD_RULE,
+        f"| total | {_dur_text(work)} | {_md_cells(total)} |"]))
+    blocks += legend_lines(cells)
     return "\n\n".join(blocks).strip() + "\n"

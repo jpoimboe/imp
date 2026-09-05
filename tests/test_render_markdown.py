@@ -611,3 +611,63 @@ def test_tool_call_fence_exports_without_sgr_noise() -> None:
     assert "\x1b" not in out
     assert "^[[" not in out
     assert "command=red" in out
+
+
+def test_summary_markdown_carries_a_totals_row() -> None:
+    # AC 22(b) / AC 19: the totals row holds what the rollup line dropped.
+    rows = [
+        StepRow(phase="implement", step="a",
+                start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:30Z",
+                usage=RowUsage(fresh_input=1000, cached_input=200,
+                               cache_write=100, output=40, dollars=0.20,
+                               priced=1)),
+        StepRow(phase="review", step="b",
+                start_ts="2024-01-01T00:00:30Z", end_ts="2024-01-01T00:01:00Z",
+                usage=RowUsage(fresh_input=1000, output=10, dollars=0.10,
+                               priced=1),
+                subagents=[SubagentRow(
+                    name="coder",
+                    start_ts="2024-01-01T00:00:35Z",
+                    end_ts="2024-01-01T00:00:55Z",
+                    usage=RowUsage(fresh_input=500, output=10, dollars=0.20,
+                                   priced=1))]),
+    ]
+    header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+                           total_seconds=60.0)
+    out = render_summary_markdown(rows, header=header)
+    assert "| total | 1m 0s | 2.5k | 200 | 100 | 60 | ~$0.50 |" in out
+    assert out.index("## review") < out.index("| total |")
+
+
+def test_summary_markdown_shows_the_legend_lines_for_the_cells_it_rendered():
+    # AC 22(c) / AC 18: a mixed-auth run, tilde line first.
+    rows = [
+        StepRow(phase="p", step="metered",
+                start_ts="2024-01-01T00:00:00Z", end_ts="2024-01-01T00:00:30Z",
+                usage=RowUsage(fresh_input=100, output=10, dollars=2.00,
+                               priced=1)),
+        StepRow(phase="p", step="subscription",
+                start_ts="2024-01-01T00:00:30Z", end_ts="2024-01-01T00:01:00Z",
+                usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
+                               priced=1, notional=1)),
+    ]
+    header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+                           total_seconds=60.0)
+    out = render_summary_markdown(rows, header=header)
+    tilde = "~ estimated at API list price"
+    bracket = ("[ ] list-price equivalent;"
+               " subscription usage is not billed per token")
+    floor = "≥ excludes steps run on a model absent from the price table"
+    assert tilde in out and bracket in out
+    assert out.index(tilde) < out.index(bracket)
+    assert floor not in out                      # no unpriced model here
+
+
+def test_summary_markdown_with_no_steps_keeps_the_time_and_drops_the_legend():
+    # Same reachable window as the terminal view: no step rows, but a real span.
+    header = SummaryHeader(workflow="imp", quest_id="c", status="running",
+                           total_seconds=2342.0)
+    out = render_summary_markdown([], header=header)
+    assert "| total | 39m 2s | — | — | — | — | — |" in out
+    assert "estimated at API list price" not in out   # nothing was priced
+    assert "##" not in out                            # no phase headings
