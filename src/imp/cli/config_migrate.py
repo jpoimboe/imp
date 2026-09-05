@@ -18,7 +18,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-from imp.paths import display_path, imp_home
+from imp.paths import _slug, display_path, imp_home
 
 
 def migrate_global_config(legacy: Path, new: Path) -> None:
@@ -182,6 +182,44 @@ def _state_candidates(state_dir: Path) -> list[Path]:
     roots += [str(json.loads(rec.read_text()).get("quest_meta", {}).get("project_root") or "")
               for rec in sorted((state_dir / "archive" / "records").glob("*.json"))]
     return [Path(root) for root in roots if root]
+
+
+def _owner_of(candidate: Path, state_dir: Path) -> Path | None:
+    """The checkout a recorded project_root belongs to. None when the candidate cannot
+    be trusted — it vanished, its git dir is unresolvable, or it is not itself a
+    checkout — which drops that candidate only, never the whole directory."""
+    from imp.engine.worktree import PreconditionError, find_control_root
+
+    if not candidate.is_dir():
+        return None
+    try:
+        control = find_control_root(candidate)
+    except PreconditionError:
+        return None
+    if candidate.resolve().is_relative_to((state_dir / "worktrees").resolve()):
+        return control
+    return control if control == candidate.resolve() else None
+
+
+def _could_be_minted(dir_name: str, root: Path) -> bool:
+    """The exact inverse of the slug walk's mint rule (paths.py:50): `<slug>`, or
+    `<slug>-N` for N >= 2. This is what stops a leaked scratch quest — whose recorded
+    root lives in the live state dir — from marking that dir for the scratch checkout."""
+    base = _slug(root.name)
+    if dir_name == base:
+        return True
+    suffix = dir_name.removeprefix(f"{base}-")
+    return suffix != dir_name and suffix.isdecimal() and int(suffix) >= 2
+
+
+def _derive_owner(state_dir: Path) -> Path | None:
+    """The one checkout a marker-less state directory belongs to, or None when its
+    surviving candidates do not agree on exactly one."""
+    # Deduplicated: one git spawn per DISTINCT candidate, however many records name it.
+    owners = {owner for candidate in dict.fromkeys(_state_candidates(state_dir))
+              if (owner := _owner_of(candidate, state_dir)) is not None
+              and _could_be_minted(state_dir.name, owner)}
+    return owners.pop() if len(owners) == 1 else None
 
 
 def run_startup_migrations() -> None:

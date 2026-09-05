@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.config_migrate import _state_candidates
+from imp.cli.config_migrate import _derive_owner, _state_candidates
 from imp.paths import imp_home
 from tests.conftest import _init_repo
 
@@ -90,3 +90,183 @@ def test_a_malformed_record_raises_for_the_sweep_to_isolate(tmp_path: Path) -> N
 
     with pytest.raises(json.JSONDecodeError):
         _state_candidates(state)
+
+
+def test_a_quest_recording_the_checkout_derives_it(tmp_path: Path) -> None:
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", control)
+
+    assert _derive_owner(state) == control
+
+
+def test_an_archive_record_alone_derives_the_owner(tmp_path: Path) -> None:
+    """Spec AC 6: an empty quests/ beside one archived record still resolves."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    (state / "quests").mkdir()
+    _record(state, "arc111", control)
+
+    assert _derive_owner(state) == control
+
+
+def test_a_worktree_candidate_normalizes_to_its_control_root(tmp_path: Path) -> None:
+    """Spec AC 2: the only candidate on the reporting host is a quest worktree."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    worktree = _worktree(state, control, "aaa111")
+    _quest(state, "aaa111", worktree)
+
+    assert worktree != control
+    assert _derive_owner(state) == control
+
+
+def test_a_vanished_worktree_candidate_drops_alone(tmp_path: Path) -> None:
+    """Spec AC 3: a dead candidate neither vetoes the survivors nor breaks unanimity."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", state / "worktrees" / "aaa111")   # never created
+    _quest(state, "bbb222", control)
+
+    assert _derive_owner(state) == control
+
+
+def test_a_worktree_with_no_resolvable_git_dir_drops_alone(tmp_path: Path) -> None:
+    """Spec AC 3, the PreconditionError half: the scratch repo was deleted out from
+    under a leaked quest's worktree, leaving a plain directory behind."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    orphan = state / "worktrees" / "ccc333"
+    orphan.mkdir(parents=True)
+    _quest(state, "ccc333", orphan)
+    _quest(state, "bbb222", control)
+
+    assert _derive_owner(state) == control
+
+
+def test_a_scratch_checkout_the_walk_could_not_have_minted_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Spec AC 4: the vave28 shape pointed at the migration itself — a leaked quest
+    records /tmp/spike/r1, which slugs to `r1` and can never own projects/widget."""
+    scratch = _checkout(tmp_path / "spike", "r1")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", scratch)
+
+    assert _derive_owner(state) is None
+
+
+@pytest.mark.parametrize("dir_name", ["widget", "widget-2", "widget-10"])
+def test_the_mintable_names_are_admitted(tmp_path: Path, dir_name: str) -> None:
+    """Spec AC 5: the anti-poison clause must not break normal collision handling."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir(dir_name)
+    _quest(state, "aaa111", control)
+
+    assert _derive_owner(state) == control
+
+
+@pytest.mark.parametrize("dir_name", ["widget-1", "widget-x", "widgets", "gadget"])
+def test_a_name_the_mint_rule_could_not_produce_is_rejected(
+    tmp_path: Path, dir_name: str,
+) -> None:
+    """`-1` is never minted: n == 1 is the bare slug."""
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir(dir_name)
+    _quest(state, "aaa111", control)
+
+    assert _derive_owner(state) is None
+
+
+def test_a_candidate_that_is_not_a_checkout_is_dropped(tmp_path: Path) -> None:
+    """Spec AC 7c."""
+    plain = tmp_path / "widget"
+    plain.mkdir()
+    state = _state_dir("widget")
+    _quest(state, "aaa111", plain)
+
+    assert _derive_owner(state) is None
+
+
+def test_a_candidate_below_the_checkout_root_is_dropped(tmp_path: Path) -> None:
+    """Spec AC 7c: inside a checkout but not the checkout, and not under worktrees/."""
+    control = _checkout(tmp_path, "widget")
+    subdir = control / "src"
+    subdir.mkdir()
+    state = _state_dir("widget")
+    _quest(state, "aaa111", subdir)
+
+    assert _derive_owner(state) is None
+
+
+def test_a_symlinked_project_root_still_derives_the_owner(tmp_path: Path) -> None:
+    """The comparison is resolved, so a symlinked recorded root is not silently lost."""
+    control = _checkout(tmp_path / "real", "widget")
+    link = tmp_path / "link"
+    link.symlink_to(control)
+    state = _state_dir("widget")
+    _quest(state, "aaa111", link)
+
+    assert _derive_owner(state) == control
+
+
+def test_two_surviving_owners_leave_it_underivable(tmp_path: Path) -> None:
+    """Spec AC 7b: the migration never guesses."""
+    first = _checkout(tmp_path / "a", "widget")
+    second = _checkout(tmp_path / "b", "widget")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", first)
+    _record(state, "bbb222", second)
+
+    assert _derive_owner(state) is None
+
+
+def test_no_candidates_leave_it_underivable() -> None:
+    """Spec AC 7a."""
+    assert _derive_owner(_state_dir("widget")) is None
+
+
+def test_a_repeated_candidate_costs_one_git_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Derivation re-runs on every invocation for a directory that stays unmarked
+    (the AC-14 deferral, and every sandboxed call until the marker is re-exposed), so
+    a project whose N records all name one root must not pay N `git rev-parse` spawns."""
+    from imp.engine import worktree
+
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    for quest_id in ("aaa111", "bbb222", "ccc333"):
+        _quest(state, quest_id, control)
+    _record(state, "ddd444", control)
+    seen: list[Path] = []
+    real = worktree.find_control_root
+
+    def counting(start: Path) -> Path:
+        seen.append(start)
+        return real(start)
+
+    monkeypatch.setattr(worktree, "find_control_root", counting)
+
+    assert _derive_owner(state) == control
+    assert seen == [control]
+
+
+def test_worktree_candidate_with_symlinked_imp_home_is_not_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Worktree clause fires even when IMP_HOME traverses a symlink (/home -> /var/home)."""
+    real = tmp_path / "real" / "imphome"
+    real.mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "real")
+    monkeypatch.setenv("IMP_HOME", str(link / "imphome"))
+
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    worktree = _worktree(state, control, "aaa111")
+    _quest(state, "aaa111", worktree.resolve())
+
+    backfill_repo_markers()
+
+    assert (state / "repo").read_text() == f"{control}\n"
