@@ -1685,6 +1685,60 @@ def test_other_projects_state_is_readable_but_never_writable() -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# The $IMP_STATE_DIR ownership marker survives the state tmpfs, read-only
+# ---------------------------------------------------------------------------
+
+def test_repo_marker_readable_but_never_writable_in_sandbox() -> None:
+    """AC 23: the guard reads <state dir>/repo, and the state tmpfs would otherwise hide
+    it — so an in-sandbox `imp` pointed at a foreign checkout's state dir would read
+    clean and write into it. Bind ordering cannot prove visibility; this drives bwrap."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-repo-marker-"))
+    try:
+        _init_repo(control)
+        wt_path = wt.create_worktree(control, "q1", "main")
+
+        state = project_state_dir(control)
+        quest_dir = state / "quests" / "q1"
+        quest_dir.mkdir(parents=True)
+        marker = state / "repo"
+        expected = f"{control.resolve()}\n"
+        assert marker.read_text() == expected      # minted by the slug walk
+
+        sib = state / "quests" / "sib"
+        sib.mkdir(parents=True)
+        (sib / "events.jsonl").write_text("MARKERSIBSECRET\n")
+
+        pol = resolve_policy(
+            worktree=wt_path, control_root=control, quest_id="q1",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(wt_path)},
+            environ=os.environ, available=True, quest_dir=quest_dir,
+        )
+        ctx = _ctx(wt_path, pol)
+
+        r_read = _bash(ctx, f"cat {marker}")
+        assert r_read["returncode"] == 0, (
+            f"repo marker not readable inside sandbox: {r_read!r}")
+        assert r_read["stdout"].strip() == expected.strip(), (
+            f"in-sandbox repo marker differs from the host file: {r_read!r}")
+
+        # No exit code asserted: a redirect failure is 1 under bash, 2 under dash.
+        r_write = _bash(ctx, f"echo /tmp/elsewhere > {marker}")
+        assert "Read-only file system" in r_write["stderr"], (
+            f"repo marker was writable inside sandbox: {r_write!r}")
+        assert marker.read_text() == expected
+
+        # The re-expose is ONE file: the tmpfs still hides every sibling quest.
+        scan = _bash(
+            ctx, f"grep -rn MARKERSIBSECRET {state} 2>/dev/null; echo SCAN_DONE")
+        assert "SCAN_DONE" in scan["stdout"]
+        assert "MARKERSIBSECRET" not in scan["stdout"], (
+            f"sibling leaked through the state mask: {scan['stdout']!r}")
+    finally:
+        shutil.rmtree(control, ignore_errors=True)
+
+
 def test_slash_tmp_is_the_real_host_tmp() -> None:
     """AC3: /tmp inside the sandbox is the real host /tmp (identity bind); a write
     to /tmp/<name> inside the sandbox appears at the same path on the host."""
