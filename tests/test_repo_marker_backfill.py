@@ -365,6 +365,82 @@ def test_a_malformed_and_an_unwritable_directory_do_not_abort_the_sweep(
     assert not (beta_state / "repo").exists()
 
 
+@pytest.mark.parametrize("stub_shape", ["bare", "empty-quests"])
+def test_a_marker_only_stub_sibling_does_not_block_the_repair(
+    tmp_path: Path, stub_shape: str,
+) -> None:
+    """Spec AC 13 — the reporting host's shape. Blocking on a contentless stub would
+    leave the live directory unmarked and the whole fix ceremonial there."""
+    control = _checkout(tmp_path, "widget")
+    live = _state_dir("widget")
+    _quest(live, "aaa111", control)
+    stub = _state_dir("widget-2")
+    (stub / "repo").write_text(f"{control}\n")
+    if stub_shape == "empty-quests":
+        (stub / "quests").mkdir()
+
+    backfill_repo_markers()
+
+    assert (live / "repo").read_text() == f"{control}\n"
+    assert project_state_dir(control) == live          # the stub is retired, not deleted
+    assert (stub / "repo").read_text() == f"{control}\n"
+
+
+@pytest.mark.parametrize("sibling_shape", ["quests", "archive"])
+def test_a_sibling_holding_real_state_keeps_the_claim(
+    tmp_path: Path, sibling_shape: str,
+) -> None:
+    """Spec AC 14: `<slug>` outranks `<slug>-2` in the walk, so marking a stale
+    `<slug>` would steal resolution from the live sibling and orphan its quests."""
+    control = _checkout(tmp_path, "widget")
+    stale = _state_dir("widget")
+    _quest(stale, "aaa111", control)
+    live = _state_dir("widget-2")
+    (live / "repo").write_text(f"{control}\n")
+    if sibling_shape == "quests":
+        _quest(live, "bbb222", control)
+    else:
+        (live / "archive").mkdir()
+
+    backfill_repo_markers()
+
+    assert not (stale / "repo").exists()
+    assert project_state_dir(control) == live
+
+
+def test_a_sibling_claiming_another_owner_does_not_block(tmp_path: Path) -> None:
+    """Only a claim on the DERIVED owner defers the backfill."""
+    control = _checkout(tmp_path / "a", "widget")
+    other = _checkout(tmp_path / "b", "widget")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", control)
+    sibling = _state_dir("widget-2")
+    (sibling / "repo").write_text(f"{other}\n")
+    _quest(sibling, "bbb222", other)
+
+    backfill_repo_markers()
+
+    assert (state / "repo").read_text() == f"{control}\n"
+
+
+def test_a_marker_written_this_pass_does_not_block_a_later_directory(
+    tmp_path: Path,
+) -> None:
+    """Spec AC 15: siblings are read once up front, so the outcome cannot depend on
+    visit order. An implementation that re-read the tree per directory would mark
+    only whichever of these two it happened to reach first."""
+    control = _checkout(tmp_path, "widget")
+    first = _state_dir("widget")
+    _quest(first, "aaa111", control)
+    second = _state_dir("widget-2")
+    _quest(second, "bbb222", control)
+
+    backfill_repo_markers()
+
+    assert (first / "repo").read_text() == f"{control}\n"
+    assert (second / "repo").read_text() == f"{control}\n"
+
+
 def test_worktree_candidate_with_symlinked_imp_home_is_not_dropped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -222,22 +222,44 @@ def _derive_owner(state_dir: Path) -> Path | None:
     return owners.pop() if len(owners) == 1 else None
 
 
+def _holds_state(directory: Path) -> bool:
+    quests = directory / "quests"
+    return ((quests.is_dir() and any(quests.iterdir()))
+            or (directory / "archive").is_dir())
+
+
+def _live_claims(projects: Path) -> set[str]:
+    """The owner paths a sibling directory already claims AND holds real state for.
+    A marker-only stub is not a claim — it has no quests to orphan — so it never blocks
+    the repair; marking the live directory beside it retires the stub in the walk."""
+    claims: set[str] = set()
+    for directory in sorted(projects.iterdir()):
+        with suppress(Exception):   # isolated per sibling, like the sweep itself
+            marker = directory / "repo"
+            if marker.is_file() and _holds_state(directory):
+                claims.add(marker.read_text().strip())
+    return claims
+
+
 def backfill_repo_markers() -> None:
     """Write the missing `repo` ownership marker into every imp-owned state directory
     whose own records determine its owner, so `_checked_override` has something to
     refuse a foreign checkout with. Bounded to `imp_home()/projects/`: a hand-pinned
     $IMP_STATE_DIR is never marked. Each directory is isolated — a malformed record or
-    a read-only directory skips that one and the sweep continues."""
+    a read-only directory skips that one and the sweep continues. Siblings are read
+    once up front, so a marker this pass writes cannot change a later directory's
+    outcome."""
     projects = imp_home() / "projects"
     if not projects.is_dir():
         return
+    claimed = _live_claims(projects)
     for directory in sorted(projects.iterdir()):
         with suppress(Exception):
             marker = directory / "repo"
             if not directory.is_dir() or marker.exists():
                 continue
             owner = _derive_owner(directory)
-            if owner is None:
+            if owner is None or str(owner) in claimed:
                 continue
             marker.write_text(f"{owner}\n")
 
