@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,24 @@ def test_render_inert_question_renders_markdown_not_raw() -> None:
 def test_render_inert_question_emits_ansi_when_color() -> None:
     out = render_inert_question(_FENCED, width=80, color=True)
     assert "\x1b[" in out  # markdown→ANSI styling applied
+
+
+_COLORED_FENCE = ("Here it is:\n\n```\n"
+                  "\x1b[1;33m▌ imp\x1b[0m \x1b[36mplanning\x1b[0m · "
+                  "\x1b[2mstep 3 of 7 · writing the plan summary\x1b[0m\n```\n")
+
+
+def test_render_inert_question_keeps_fence_color_and_visible_width() -> None:
+    out = render_inert_question(_COLORED_FENCE, width=70, color=True)
+    hits = [ln for ln in out.split("\n")
+            if "planning" in re.sub(r"\x1b\[[0-9;]*m", "", ln)]
+    assert len(hits) == 1, out
+    # The whole line, not just its head: today rich miscounts the escape bytes and
+    # this ends at "…writing the plan", dropping "summary" onto a second line.
+    assert (re.sub(r"\x1b\[[0-9;]*m", "", hits[0])
+            == "  ▌ imp planning · step 3 of 7 · writing the plan summary")
+    assert "\x1b[1;33m▌ imp\x1b[0m" in hits[0]
+    assert hits[0].endswith("\x1b[0m")
 
 
 def _seed_quest_with_events(

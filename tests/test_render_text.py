@@ -3169,3 +3169,73 @@ def test_caret_escape_prose_handles_two_fences_with_prose_between() -> None:
         "```\n\x1b[31mA\x1b[0m\n```\n\nmid \x1b[35mm\x1b[0m\n\n```\n\x1b[32mB\x1b[0m\n```\n")
     assert "\x1b[31mA\x1b[0m" in out and "\x1b[32mB\x1b[0m" in out
     assert "mid ^[[35mm^[[0m" in out
+
+
+# 83 raw chars, 55 visible columns (57 with the 2-col hang indent): at width 70
+# rich counts the escape bytes as visible and wraps it before "summary".
+_STATUS_LINE = ("\x1b[1;33m▌ imp\x1b[0m \x1b[36mplanning\x1b[0m · "
+                "\x1b[2mstep 3 of 7 · writing the plan summary\x1b[0m")
+
+
+def test_colored_fence_renders_on_one_line_at_visible_width() -> None:
+    lines = rt._render_markdown_block(f"Look:\n\n```\n{_STATUS_LINE}\n```\n",
+                                      70, 0, color=True)
+    hits = [ln for ln in lines if "planning" in _visible(ln)]
+    assert len(hits) == 1, lines          # 83 raw chars, 57 visible cols: no wrap
+    assert _visible(hits[0]) == "  ▌ imp planning · step 3 of 7 · writing the plan summary"
+    assert "\x1b[1;33m" in hits[0] and "\x1b[36m" in hits[0]
+
+
+def test_every_line_of_a_colored_fence_ends_with_a_reset() -> None:
+    lines = rt._render_markdown_block("Look:\n\n```\n\x1b[31mone\n\x1b[32mtwo\n```\n",
+                                      70, 0, color=True)
+    body = [ln for ln in lines if _visible(ln).strip() in ("one", "two")]
+    assert len(body) == 2, lines
+    assert all(ln.endswith("\x1b[0m") for ln in body)   # no color bleeds past the block
+
+
+def test_color_off_strips_sgr_from_a_colored_fence() -> None:
+    out = "\n".join(rt._render_markdown_block(f"Look:\n\n```\n{_STATUS_LINE}\n```\n",
+                                              70, 0, color=False))
+    assert "\x1b" not in out
+    assert "▌ imp planning · step 3 of 7 · writing the plan summary" in out
+
+
+def test_two_colored_fences_both_splice_in_source_order() -> None:
+    text = ("one:\n\n```\n\x1b[31mAAA\x1b[0m\n```\n\nmid\n\n"
+            "```\n\x1b[32mBBB\x1b[0m\n```\n\ntail\n")
+    visible = [_visible(ln).strip()
+               for ln in rt._render_markdown_block(text, 70, 0, color=True)]
+    assert [v for v in visible if v] == ["• one:", "AAA", "mid", "BBB", "tail"]
+
+
+def test_content_carrying_the_slot_unit_renders_faithfully() -> None:
+    # The splice replaces any rendered line holding a slot key, so a slot key must be
+    # unforgeable by content — and the lift must not "sanitize" the text to get there,
+    # which would both destroy a codepoint and desync the two fence scans.
+    text = (f"before {rt._SLOT_UNIT}0{rt._SLOT_UNIT} after\n\n"
+            "```\n\x1b[31mCOLOR\x1b[0m\n```\n\ntail\n")
+    visible = [_visible(ln).strip()
+               for ln in rt._render_markdown_block(text, 70, 0, color=True)]
+    assert [v for v in visible if v] == [
+        f"• before {rt._SLOT_UNIT}0{rt._SLOT_UNIT} after", "COLOR", "tail"]
+
+
+def test_a_private_use_glyph_in_a_mockup_survives() -> None:
+    # U+E000 is the first Private Use codepoint — where terminal icon fonts (Nerd
+    # Fonts) live, so a prompt mockup plausibly carries one. It is content, not chrome.
+    lines = rt._render_markdown_block(
+        "Look:\n\n```\n\x1b[36m zsh\x1b[0m ~/src\n```\n", 70, 0, color=True)
+    assert any(" zsh" in ln for ln in lines), lines
+
+
+def test_both_fence_scans_see_the_same_text() -> None:
+    # Adversarial: deleting the slot unit from "``<unit>`" would complete a ``` run and
+    # close the fence early, so a lift that "sanitized" the text would scan different
+    # spans than the escape pass did — stranding the colored "B" outside a fence and
+    # handing rich a raw escape. That surfaces as an ESC byte in color-off output,
+    # which AC 6 forbids.
+    text = (f"```\n\x1b[31mA\x1b[0m\n``{rt._SLOT_UNIT}`\n"
+            "\x1b[32mB\x1b[0m\n```\n")
+    assert "\x1b" not in "\n".join(
+        rt._render_markdown_block(rt._caret_escape_prose(text), 70, 0, color=False))

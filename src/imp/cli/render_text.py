@@ -296,6 +296,56 @@ _MD_THEME = {
 }
 
 
+# A permanent Unicode noncharacter: no font maps it and it is invalid in
+# interchange — unlike the Private Use Area, where terminal icon fonts
+# (Nerd Fonts) live and a mockup's glyphs would be at risk.
+_SLOT_UNIT = "￿"
+
+
+def _slot_prefix(text: str) -> str:
+    """The shortest run of `_SLOT_UNIT` absent from `text`, so a slot key cannot be
+    forged by content. This is what lets the lift leave the text byte-for-byte
+    alone: editing it here would desynchronize the two fence scans."""
+    prefix = _SLOT_UNIT
+    while prefix in text:
+        prefix += _SLOT_UNIT
+    return prefix
+
+
+def _lift_colored_fences(text: str, color: bool) -> tuple[str, dict[str, list[str]]]:
+    """Swap every fence carrying SGR for a one-line placeholder, because rich counts
+    escape bytes as visible width and wraps in the wrong place. Returns the rewritten
+    text plus the placeholder→lines map to splice back after rendering. Each lifted
+    line ends with a reset so an unterminated color cannot bleed into imp's chrome;
+    with color off the SGR is stripped, keeping piped output byte-clean. The text is
+    never otherwise edited: both fence scans must see the same bytes."""
+    prefix = _slot_prefix(text)
+    lines = text.split("\n")
+    lifted: dict[str, list[str]] = {}
+    out: list[str] = []
+    prev = 0
+    for i, span in enumerate(_fence_spans(lines)):
+        body = lines[span.start + 1:span.body_end]
+        if not any(_SGR_RE.search(ln) for ln in body):
+            continue
+        slot = f"{prefix}{i}{prefix}"
+        lifted[slot] = ([ln + "\x1b[0m" for ln in body] if color
+                        else [_strip_sgr(ln) for ln in body])
+        out.extend(lines[prev:span.start])
+        out.append(slot)
+        prev = span.end
+    out.extend(lines[prev:])
+    return "\n".join(out), lifted
+
+
+def _splice_lifted_fences(rendered: str, lifted: dict[str, list[str]]) -> str:
+    out: list[str] = []
+    for line in rendered.split("\n"):
+        slot = next((k for k in lifted if k in line), None)
+        out.extend(lifted[slot] if slot is not None else [line])
+    return "\n".join(out)
+
+
 def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80) -> str:
     import io
 
@@ -303,6 +353,7 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
     from rich.markdown import Markdown
     from rich.theme import Theme
     buf = io.StringIO()
+    text, lifted = _lift_colored_fences(text, color)
     md = Markdown(text)
     for token in md.parsed:
         if token.type == "inline" and token.children:
@@ -317,7 +368,7 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
             color_system="standard" if color else None,
             force_terminal=color, soft_wrap=False, highlight=False,
             theme=Theme(_MD_THEME)).print(md)
-    return buf.getvalue()
+    return _splice_lifted_fences(buf.getvalue(), lifted)
 
 
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,
