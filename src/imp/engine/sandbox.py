@@ -379,10 +379,15 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     policy creation; bwrap must still bind each ro path over the read-only floor,
     so a spawn carrying a vanished path dies in sandbox SETUP ("Read-only file
     system") before the command runs. A mask over a gone path protects nothing, so
-    existence-gating at spawn is always safe. Own binds (worktree, quest_home) and
-    stable config (caches, extra_*) never churn and are left untouched. Scoped to
-    the spawn argv only; the in-process allows_read/allows_write mirrors keep the
-    unpruned policy (a gone path is denied either way).
+    existence-gating at spawn is always safe. Own binds (worktree, quest_home) and stable config
+    (caches, extra_*) never churn and are left untouched. Scoped to the spawn argv only; the
+    in-process allows_read/allows_write mirrors keep the unpruned policy (a gone path is denied
+    either way).
+
+    The repo marker re-expose (state_repo_ro) is gated on the same terms _checked_override
+    reads it on — is_file() — so the bind exists exactly when the guard has something to
+    read; a hand-pinned $IMP_STATE_DIR carries no marker, and an un-gated --ro-bind of a
+    missing source would abort bwrap setup for those users.
 
     It also MINTS this spawn's home-overlay layer when policy.overlay_root is set:
     a fresh mkdtemp dir under the root holding its own upper/work/merged. Minting
@@ -414,6 +419,8 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
         git_ro_remask=_existing(list(policy.git_ro_remask)),
         secret_dirs=_existing(list(policy.secret_dirs)),
         secret_files=_existing(list(policy.secret_files)),
+        state_repo_ro=(policy.state_repo_ro
+                       if Path(policy.state_repo_ro).is_file() else ""),
     )
 
 

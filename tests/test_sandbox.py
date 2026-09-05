@@ -421,6 +421,35 @@ def test_prepare_spawn_policy_keeps_worktrees_mask_even_if_absent(tmp_path):
     assert pruned.git_worktree_self == str(gone / "self")
 
 
+def test_prepare_spawn_policy_drops_a_vanished_repo_marker(tmp_path):
+    # AC 22(a). A hand-pinned $IMP_STATE_DIR carries no marker by design, and bwrap
+    # aborts SETUP on a missing --ro-bind source — every sandboxed step for those users
+    # would die before its command ran.
+    state = tmp_path / "state"
+    state.mkdir()
+    marker = state / "repo"
+    p = _policy(state_mask=str(state), state_repo_ro=str(marker))
+    prepared = prepare_spawn_policy(p)
+    assert prepared.state_repo_ro == ""
+    assert str(marker) not in build_sandbox_argv(
+        "x", cwd="/wt", policy=prepared, engine_env={})
+
+
+def test_prepare_spawn_policy_keeps_a_present_repo_marker(tmp_path):
+    # AC 22(b): gating must not cost the marker where it exists — that is the whole
+    # point of the re-expose.
+    state = tmp_path / "state"
+    state.mkdir()
+    marker = state / "repo"
+    marker.write_text(f"{tmp_path}\n")
+    p = _policy(state_mask=str(state), state_repo_ro=str(marker))
+    prepared = prepare_spawn_policy(p)
+    assert prepared.state_repo_ro == str(marker)
+    assert (str(marker), "ro") in prepared.bind_plan()
+    assert f"--ro-bind {marker} {marker}" in " ".join(
+        build_sandbox_argv("x", cwd="/wt", policy=prepared, engine_env={}))
+
+
 def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"
