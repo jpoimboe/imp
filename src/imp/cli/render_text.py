@@ -119,6 +119,32 @@ def _fence_spans(lines: list[str]) -> list[_Fence]:
     return out
 
 
+def _sgr_survives(line: str) -> str:
+    parts: list[str] = []
+    pos = 0
+    for m in _SGR_RE.finditer(line):
+        parts.append(_caret_escape(line[pos:m.start()]))
+        parts.append(m.group(0))
+        pos = m.end()
+    parts.append(_caret_escape(line[pos:]))
+    return "".join(parts)
+
+
+def _caret_escape_prose(text: str) -> str:
+    """`_caret_escape` for agent-authored prose, with one narrowed exception: an SGR
+    sequence inside a fenced code block passes through verbatim, so a mockup keeps
+    its colors. Every other control byte, and any escape outside a fence, still
+    caret-escapes — `_caret_escape` itself stays absolute."""
+    lines = text.split("\n")
+    fenced: set[int] = set()
+    for span in _fence_spans(lines):
+        # Content lines only: the splice lifts exactly these, and an SGR left raw on a
+        # delimiter line (a colored info string) would reach rich unlifted.
+        fenced.update(range(span.start + 1, span.body_end))
+    return "\n".join(_sgr_survives(ln) if i in fenced else _caret_escape(ln)
+                     for i, ln in enumerate(lines))
+
+
 def fmt_seconds(seconds: float | int | None) -> str:
     """Format an elapsed-second count. This is the single duration formatter for
     every surface (tree recaps, live timer, summary tables, markdown). Under a

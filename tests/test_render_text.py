@@ -3128,3 +3128,44 @@ def test_auth_terminal_pause_renders_the_reauth_copy() -> None:
     assert "re-authenticate to Claude" in out
     assert "auth_terminal" not in out
     assert "AuthTerminalError" not in out
+
+
+def test_caret_escape_prose_keeps_sgr_inside_a_fence_and_carets_outside() -> None:
+    text = "hi \x1b[31mred\x1b[0m\n\n```\n\x1b[1;33m▌ imp\x1b[0m\n```\n"
+    out = rt._caret_escape_prose(text)
+    assert "hi ^[[31mred^[[0m" in out          # flowing prose: still absolute
+    assert "\x1b[1;33m▌ imp\x1b[0m" in out      # inside the fence: verbatim
+
+
+def test_caret_escape_prose_carets_non_sgr_controls_inside_a_fence() -> None:
+    text = "```\n\x1b[31mR\x1b[0m \x07 \x1b[2J \x1b[5A \x1b]0;title\x07\n```\n"
+    out = rt._caret_escape_prose(text)
+    assert "\x1b[31mR\x1b[0m" in out            # SGR survives
+    assert "^G" in out and "^[[2J" in out and "^[[5A" in out
+    assert "^[]0;title^G" in out                # OSC title write, caret-escaped
+    assert "\x07" not in out
+
+
+def test_caret_escape_prose_treats_an_indented_code_block_as_prose() -> None:
+    assert rt._caret_escape_prose("    \x1b[31mR\x1b[0m") == "    ^[[31mR^[[0m"
+
+
+def test_caret_escape_prose_exempts_content_lines_only_not_the_delimiters() -> None:
+    # The splice lifts content lines only, so SGR left raw on a delimiter (a colored
+    # info string) would reach rich unlifted — the one thing the splice exists to
+    # prevent. The exception covers exactly the lines the splice takes.
+    assert (rt._caret_escape_prose("```\x1b[31m\n\x1b[32mbody\x1b[0m\n```\n")
+            == "```^[[31m\n\x1b[32mbody\x1b[0m\n```\n")
+
+
+def test_caret_escape_prose_exempts_an_unclosed_fence_to_end_of_text() -> None:
+    out = rt._caret_escape_prose("p \x1b[31mq\x1b[0m\n\n```\n\x1b[32mA\x1b[0m\n\x1b[33mB\x1b[0m\n")
+    assert "p ^[[31mq^[[0m" in out
+    assert "\x1b[32mA\x1b[0m\n\x1b[33mB\x1b[0m" in out
+
+
+def test_caret_escape_prose_handles_two_fences_with_prose_between() -> None:
+    out = rt._caret_escape_prose(
+        "```\n\x1b[31mA\x1b[0m\n```\n\nmid \x1b[35mm\x1b[0m\n\n```\n\x1b[32mB\x1b[0m\n```\n")
+    assert "\x1b[31mA\x1b[0m" in out and "\x1b[32mB\x1b[0m" in out
+    assert "mid ^[[35mm^[[0m" in out
