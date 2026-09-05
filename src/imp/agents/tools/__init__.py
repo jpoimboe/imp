@@ -33,8 +33,13 @@ class Tool:
     fn: Callable[..., Any]
     read_only: bool = False
 
+    def _bind(self, args: dict[str, Any]) -> dict[str, Any]:
+        # Drop None optionals so the parameter's declared default takes effect.
+        required = set(self.input_schema.get("required", ()))
+        return {k: v for k, v in args.items() if v is not None or k in required}
+
     def invoke(self, ctx: Any, args: dict[str, Any]) -> Any:
-        result = self.fn(ctx, **args)
+        result = self.fn(ctx, **self._bind(args))
         if inspect.iscoroutine(result):
             raise TypeError(
                 f"tool {self.name!r} is async; use async_invoke from runner"
@@ -44,7 +49,7 @@ class Tool:
     async def async_invoke(self, ctx: Any, args: dict[str, Any]) -> Any:
         """Await-friendly invocation. Sync tools return their value; async
         tools (`async def`) get awaited transparently."""
-        result = self.fn(ctx, **args)
+        result = self.fn(ctx, **self._bind(args))
         if inspect.iscoroutine(result):
             return await result
         return result

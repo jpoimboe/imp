@@ -12,6 +12,7 @@ from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.state import InMemoryEventLog
 from imp.providers.codex_mcp import RunState, dispatch_tool
+from tests._codex_mcp import call_protocol, call_via_mcp
 
 
 @pytest.fixture
@@ -109,36 +110,31 @@ def test_dispatch_awaits_async_tool(tmp_path: Path) -> None:
     assert state.dispatch_count == 1
 
 
-def test_complete_step_drops_none_valued_optional_args(tmp_path: Path) -> None:
-    """codex's arg-model defaults absent optional fields to None via
-    PydanticField(None); the capture must drop them so output validation
-    doesn't reject a present-but-None optional field with 'expected string,
-    got NoneType' (regression: spec-writer spec_path omitted by codex)."""
-    ctx = _ctx(tmp_path)
-    state = RunState(cap=50)
-
+def _complete_step_tool() -> Tool:
     def _cs(ctx: Any, **kwargs: Any) -> str:
         raise AssertionError("complete_step body must not run inside the wrapper")
 
-    cs = Tool(name="complete_step", description="",
-              input_schema={"type": "object",
-                            "properties": {
-                                "status": {"type": "string"},
-                                "phase": {"type": "string"},
-                                "complexity": {"type": "string"},
-                                "spec_path": {"type": "string"},
-                            },
-                            "required": ["status"]},
-              fn=_cs)
+    return Tool(name="complete_step", description="",
+                input_schema={"type": "object",
+                              "properties": {
+                                  "status": {"type": "string"},
+                                  "phase": {"type": "string"},
+                                  "complexity": {"type": "string"},
+                                  "spec_path": {"type": "string"},
+                              },
+                              "required": ["status"]},
+                fn=_cs)
 
-    # Simulate codex omitting the optional spec_path — the arg-model
-    # materialises spec_path=None; the fix must strip it.
-    out = asyncio.run(dispatch_tool(
-        tool=cs,
-        args={"status": "Success", "phase": "drafting",
-              "complexity": "trivial", "spec_path": None},
-        ctx=ctx, state=state,
-    ))
+
+def test_complete_step_args_never_carry_a_fabricated_none(tmp_path: Path) -> None:
+    """An optional the agent did not send is ABSENT from the capture — the
+    arg model never materialises it, so there is nothing to strip. Otherwise
+    output validation rejects it with 'expected string, got NoneType'."""
+    state = RunState(cap=50)
+    out = asyncio.run(call_via_mcp(
+        _complete_step_tool(), ctx=_ctx(tmp_path), state=state,
+        arguments={"status": "Success", "phase": "drafting",
+                   "complexity": "trivial"}))
     assert state.complete_step_called is True
     assert state.complete_step_args == {
         "status": "Success", "phase": "drafting", "complexity": "trivial"}
@@ -147,28 +143,12 @@ def test_complete_step_drops_none_valued_optional_args(tmp_path: Path) -> None:
 
 
 def test_complete_step_preserves_non_none_optional_arg(tmp_path: Path) -> None:
-    """A non-None optional field (e.g. spec_path provided) must NOT be dropped —
-    the filter is None-only, not 'optional field' blanket removal."""
-    ctx = _ctx(tmp_path)
+    """A field the agent DID send survives with its value — the arg model omits
+    only what was unset, never an optional that carries data."""
     state = RunState(cap=50)
-
-    def _cs(ctx: Any, **kwargs: Any) -> str:
-        raise AssertionError("complete_step body must not run inside the wrapper")
-
-    cs = Tool(name="complete_step", description="",
-              input_schema={"type": "object",
-                            "properties": {
-                                "status": {"type": "string"},
-                                "spec_path": {"type": "string"},
-                            },
-                            "required": ["status"]},
-              fn=_cs)
-
-    out = asyncio.run(dispatch_tool(
-        tool=cs,
-        args={"status": "Success", "spec_path": "docs/my-spec.md"},
-        ctx=ctx, state=state,
-    ))
+    out = asyncio.run(call_via_mcp(
+        _complete_step_tool(), ctx=_ctx(tmp_path), state=state,
+        arguments={"status": "Success", "spec_path": "docs/my-spec.md"}))
     assert state.complete_step_called is True
     assert state.complete_step_args == {
         "status": "Success", "spec_path": "docs/my-spec.md"}
@@ -395,13 +375,18 @@ def test_dispatch_brackets_tool_watchdog(tmp_path: Path) -> None:
 
 
 def test_dispatch_brackets_tool_watchdog_on_raise(tmp_path: Path) -> None:
-    """Watchdog counter stays balanced when a tool raises — guards against
-    suspend_inactivity_watchdog being moved outside the try block."""
+    """The exception propagates (FastMCP turns it into an isError result) AND the
+    watchdog is both frozen during the call and balanced afterwards on that
+    path — capturing `tool_active` from inside the raising body is what guards
+    against `suspend_inactivity_watchdog` being dropped, which the trailing
+    assertion alone would not catch."""
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
+    seen = {"active": None}
 
     def _fn(ctx):
+        seen["active"] = ctx.coordinator.tool_active
         raise RuntimeError("boom")
 
     boom = Tool(name="boom", description="",
@@ -410,11 +395,46 @@ def test_dispatch_brackets_tool_watchdog_on_raise(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     ctx.coordinator = coord
     state = RunState(cap=10)
-    # RuntimeError is swallowed by dispatch_tool's `except Exception` arm
-    out = asyncio.run(dispatch_tool(tool=boom, args={}, ctx=ctx, state=state))
+    with pytest.raises(RuntimeError, match="RuntimeError: boom"):
+        asyncio.run(dispatch_tool(tool=boom, args={}, ctx=ctx, state=state))
 
-    assert "RuntimeError" in out
-    assert coord.tool_active is False
+    assert seen["active"] is True       # watchdog frozen DURING the raising call
+    assert coord.tool_active is False   # balanced after the unwind -> re-arms
+
+
+def _read_file_boom_tool() -> Tool:
+    def _fn(ctx: Any, path: str) -> str:
+        raise ValueError(f"no such file: {path}")
+
+    return Tool(name="read_file", description="",
+                input_schema={"type": "object",
+                              "properties": {"path": {"type": "string"}},
+                              "required": ["path"]}, fn=_fn)
+
+
+def test_raising_tool_yields_iserror_result_naming_the_exception_type(
+    tmp_path: Path,
+) -> None:
+    """Through a real MCP client session: a raising tool must come back as an
+    isError result whose text still names the original exception type."""
+    res = asyncio.run(call_protocol(
+        _read_file_boom_tool(), ctx=_ctx(tmp_path), state=RunState(cap=10),
+        arguments={"path": "foo.py"}))
+
+    assert res.isError is True
+    assert res.content[0].text == (
+        "Error executing tool read_file: ValueError: no such file: foo.py")
+
+
+def test_codex_run_state_has_no_runtime_errors_field() -> None:
+    """Its only writer was the swallow arm that now re-raises. claude_code has an
+    independent field of the same name that must survive."""
+    from dataclasses import fields
+
+    from imp.providers.claude_code import _RunState as ClaudeCodeRunState
+
+    assert "runtime_errors" not in {f.name for f in fields(RunState)}
+    assert "runtime_errors" in {f.name for f in fields(ClaudeCodeRunState)}
 
 
 def _image_parts() -> list:

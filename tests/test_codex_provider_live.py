@@ -400,3 +400,111 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
     raise AssertionError(
         f"codex never completed the probe in {_PROBE_ATTEMPTS} attempts "
         f"(external codex/LLM nondeterminism). Last events: {last_events}")
+
+
+_OMITTED_MARKER = "BANANA-42"
+# read_file returns this stub instead of the content when the same (offset,
+# limit) window of an unchanged file is re-read within one ToolContext.
+_DEDUP_STUB_PREFIX = "[unchanged since you read it"
+
+
+def _reader_inv(root: Path) -> AgentInvocation:
+    inv = _inv(root)
+    agent_def = dataclasses.replace(
+        inv.agent_def,
+        name="reader",
+        description="read one file",
+        tools=frozenset({"complete_step", "read_file"}),
+    )
+    return dataclasses.replace(
+        inv,
+        agent_def=agent_def,
+        system_prompt=(
+            "Call the `read_file` tool with ONLY the `path` argument, set to "
+            "`marker.txt`. Do not pass `offset` and do not pass `limit` — omit "
+            "both arguments entirely. Then call complete_step with `word` set "
+            "to the exact text of that file's single line. Do not call any "
+            "other tools and do not write any files."
+        ),
+        continuation_fn=build_continuation_fn(headless=True),
+    )
+
+
+def _call_args(payload: dict[str, Any]) -> dict[str, Any]:
+    """`tool_call` payloads store the SDK's `arguments` under `"input"` verbatim —
+    a dict on 0.153.2 but a JSON string on other shapes."""
+    raw = payload.get("input") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+@pytest.mark.anyio
+async def test_codex_live_omitted_optional_arg_reaches_python_default(
+    tmp_path: Path,
+) -> None:
+    """AC 10: a real codex turn calls `read_file` without `offset`; the recorded
+    tool_result must carry the file's contents and `error: false`, not the
+    `offset must be an integer >= 1, got None` failure the fabricated null used
+    to produce. A call where the model volunteered `offset`, or whose result is
+    the re-read dedup stub, leaves the precondition unmet — keep scanning
+    rather than assert."""
+    last_events: list[Any] = []
+    for attempt in range(_ROUND_TRIP_ATTEMPTS):
+        root = tmp_path / f"attempt{attempt}"
+        root.mkdir()
+        _git_init(root)
+        (root / "marker.txt").write_text(f"{_OMITTED_MARKER}\n")
+        (root / "tx").mkdir()
+
+        events: list[Any] = []
+        try:
+            async with contextlib.aclosing(
+                    CodexAgentRunner(model_name="gpt-5.6-luna").run(
+                        _reader_inv(root))) as run:
+                async for ev in run:
+                    events.append(ev)
+                    if ev.get("type") == "agent_result":
+                        break
+        except AwaitingUserInput:
+            last_events = events
+            reason = stale_codex_oauth_skip_reason(events)
+            if reason is not None:
+                pytest.skip(reason)
+            continue
+        last_events = events
+        reason = stale_codex_oauth_skip_reason(events)
+        if reason is not None:
+            pytest.skip(reason)
+
+        ev_path = root / "events.jsonl"
+        recs = [
+            json.loads(ln)
+            for ln in (ev_path.read_text().splitlines() if ev_path.exists() else [])
+            if ln.strip()
+        ]
+        results = {r["payload"]["id"]: r["payload"]
+                   for r in recs if r.get("type") == "tool_result"}
+        for rec in recs:
+            if (rec.get("type") != "tool_call"
+                    or rec["payload"].get("name") != "read_file"):
+                continue
+            if _call_args(rec["payload"]).get("offset") is not None:
+                continue
+            result = results.get(rec["payload"]["id"])
+            if result is None:
+                continue
+            content = str(result["content"])
+            if content.startswith(_DEDUP_STUB_PREFIX):
+                continue
+            assert result["error"] is False, result
+            assert _OMITTED_MARKER in content, result
+            return
+
+    raise AssertionError(
+        f"codex never called read_file with `offset` omitted in "
+        f"{_ROUND_TRIP_ATTEMPTS} attempts (external codex/LLM "
+        f"nondeterminism). Last events: {last_events}")

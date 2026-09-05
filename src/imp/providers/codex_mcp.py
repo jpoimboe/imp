@@ -85,7 +85,6 @@ class RunState:
     complete_step_called: bool = False
     complete_step_args: dict[str, Any] = field(default_factory=dict)
     abort_requested: bool = False
-    runtime_errors: list[str] = field(default_factory=list)
     fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
@@ -112,7 +111,8 @@ async def dispatch_tool(
     *, tool: Tool, args: dict[str, Any], ctx: ToolContext, state: RunState,
 ) -> str | list[Any]:
     """Invoke `tool` against `ctx` with `args`, returning a textual result
-    suitable for an MCP tool response body.
+    suitable for an MCP tool response body. A tool that raises leaves through
+    the raise, which FastMCP turns into an isError result.
 
     Cap RMW invariant: the count is incremented and compared synchronously
     here — there is NO `await` between the read (`state.dispatch_count`) and
@@ -138,14 +138,7 @@ async def dispatch_tool(
         # runner reads `state.complete_step_args` at that boundary, not via
         # a call-stack return (design "complete_step capture").
         state.complete_step_called = True
-        # The dynamic arg-model (_register_imp_tool) defaults every non-required
-        # property to None (PydanticField(None)), so model_dump materializes
-        # e.g. spec_path=None even when codex omitted it. Drop None-valued keys
-        # so complete_step_args reflects what the agent ACTUALLY sent —
-        # otherwise output-schema validation rejects a present-but-None optional
-        # field ("expected string, got NoneType"). imp output types are never
-        # nullable, so a None here always means "field not provided".
-        state.complete_step_args = {k: v for k, v in args.items() if v is not None}
+        state.complete_step_args = args
         return "step complete"
     if tool.name == "sub_agent":
         # task special-case: never goes through async_invoke (its _invoke raises
@@ -172,9 +165,9 @@ async def dispatch_tool(
         state.fatal_tool_error = (tool.name, str(fte))
         return f"fatal tool error: {fte}"
     except Exception as exc:
-        text = f"{type(exc).__name__}: {exc}"
-        state.runtime_errors.append(text)
-        return text
+        # FastMCP rewraps this as an isError result; the prefix keeps the
+        # original exception type in the text the model reads.
+        raise RuntimeError(f"{type(exc).__name__}: {exc}") from exc
     if tool.name == "bash" and isinstance(raw, str):
         try:
             parsed = json.loads(raw)
@@ -330,7 +323,9 @@ def _register_tool(
     a plain `**kwargs` wrapper produces an incorrect schema.  Instead we:
       1. Build a Pydantic model from the tool's `input_schema` properties,
          subclassing FastMCP's `ArgModelBase` so `call_fn_with_arg_validation`
-         can validate incoming arguments and unpack them by name.
+         can validate incoming arguments and unpack them by name. The subclass
+         omits non-required fields the caller left unset, so an unsent optional
+         never reaches the tool as None.
       2. Directly construct an MCP `Tool` object — bypassing `from_function` —
          so the `parameters` field carries the original `input_schema` verbatim.
       3. Register the `Tool` directly in the tool-manager's registry.
@@ -356,8 +351,14 @@ def _register_tool(
         else:
             field_defs[fname] = (Any, PydanticField(None))
 
+    class _Args(ArgModelBase):
+        # FastMCP dumps every field, so an unset optional would shadow the tool's default.
+        def model_dump_one_level(self) -> dict[str, Any]:
+            return {k: v for k, v in super().model_dump_one_level().items()
+                    if k in required_fields or v is not None}
+
     ArgModel = create_model(
-        f"{tool.name}Arguments", __base__=ArgModelBase, **field_defs
+        f"{tool.name}Arguments", __base__=_Args, **field_defs
     )
     fn_meta = FuncMetadata(arg_model=ArgModel)
 

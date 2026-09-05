@@ -1199,12 +1199,10 @@ def process_event(
                 id_ns=task_id_ns,
             )
             if name == "complete_step":
-                # Fallback capture from the RAW SDK item args, which carry no
-                # Pydantic None-injection (unlike the in-process MCP wrapper, so
-                # no None-filtering is needed here). When the wrapper's
-                # RunState capture ran, the consume loop's mirror overwrites
-                # proc_state with its already-filtered args; this write is the
-                # fallback for when that path didn't run.
+                # Fallback capture from the RAW SDK item args. When the
+                # in-process wrapper's RunState capture ran, the consume loop's
+                # mirror overwrites proc_state with those args; this write is
+                # the fallback for when that path didn't run.
                 state["complete_step_args"] = match_args if match_args is not None else {}
                 state["complete_step_called"] = True
             # Accumulate tool outcome for the per-turn LoopGuard record.
