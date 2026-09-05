@@ -194,15 +194,16 @@ def test_completed_rows_migrates_before_query(tmp_path: Path) -> None:
     assert _user_version(db) == 5
 
 
-def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
+def test_search_archive_content_migrates_before_query(tmp_path: Path) -> None:
     _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
     db = archive.index_path(tmp_path)
     _write_legacy_v0_db(db)  # only the bogus 'stale' row remains in the db
 
-    hits = read.search_archive(tmp_path, "alpha")
+    hits = read.search_archive_content(tmp_path, "alpha")
 
-    # Without the gate the legacy db has no 'alpha' row -> []. With it, the
-    # rebuild restores 'alpha' (title "Alpha") and the search finds it.
+    # Without the gate the legacy db has neither an 'alpha' row nor a `content`
+    # column. With it, the rebuild restores 'alpha' (title "Alpha") and the
+    # search finds it.
     assert [h[0] for h in hits] == ["alpha"]
     assert _user_version(db) == 5
 

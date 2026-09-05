@@ -336,17 +336,3 @@ def test_search_events_content_matches_structured_events_only(tmp_path: Path) ->
     finally:
         conn.close()
 
-
-def test_search_matches_content_and_still_matches_id_title(tmp_path: Path) -> None:
-    conn = index.connect(tmp_path / "index.db")
-    try:
-        index.ingest(conn, _sample_record(), _prose_events())
-        # body term present only in the conversation prose, not id/title
-        assert [r[0] for r in index.search(conn, "300s")] == ["alpha"]
-        # id and title still match (regression guard)
-        assert [r[0] for r in index.search(conn, "alph")] == ["alpha"]
-        assert [r[0] for r in index.search(conn, "Alpha")] == ["alpha"]
-        # a term in none of id/title/content does not match
-        assert index.search(conn, "SECRETNOISE") == []
-    finally:
-        conn.close()

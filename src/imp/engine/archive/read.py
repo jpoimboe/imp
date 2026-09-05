@@ -62,20 +62,6 @@ def completed_rows(
         conn.close()
 
 
-def search_archive(
-    control_root: Path, query: str,
-) -> list[tuple[str, str, str, str]]:
-    ensure_current(control_root)
-    db = index_path(control_root)
-    if not db.exists():
-        return []
-    conn = index.connect(db)
-    try:
-        return index.search(conn, query)
-    finally:
-        conn.close()
-
-
 def search_archive_content(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str, str | None]]:
