@@ -3324,3 +3324,13 @@ def test_lifted_fence_is_not_dropped_when_slot_key_wraps() -> None:
     text = f"intro {long_run} done\n\n```\n\x1b[1;33mmock\x1b[0m\n```\n"
     out = rt._markdown_to_ansi(text, 40, True)
     assert "\x1b[1;33mmock\x1b[0m" in out
+
+
+def test_crlf_fence_keeps_sgr_and_has_no_bare_cr() -> None:
+    # Lines that bypass rich must have non-SGR control bytes neutralized.
+    # A CRLF agent message keeps \r on lifted lines; that bare CR rewrites
+    # the TTY line when it reaches the terminal.
+    out = rt._markdown_to_ansi(
+        "intro\r\n```\r\n\x1b[1;33mmock\x1b[0m\r\n```\r\nafter\r\n", 40, True)
+    assert "\x1b[1;33mmock\x1b[0m" in out
+    assert "\r" not in out

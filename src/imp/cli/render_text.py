@@ -317,8 +317,10 @@ def _lift_colored_fences(text: str, color: bool) -> tuple[str, dict[str, list[st
     escape bytes as visible width and wraps in the wrong place. Returns the rewritten
     text plus the placeholder→lines map to splice back after rendering. Each lifted
     line ends with a reset so an unterminated color cannot bleed into imp's chrome;
-    with color off the SGR is stripped, keeping piped output byte-clean. The text is
-    never otherwise edited: both fence scans must see the same bytes."""
+    with color off the SGR is stripped, keeping piped output byte-clean. These lines
+    bypass rich entirely, so they carry SGR and nothing else — all other control bytes
+    are caret-escaped. The text is never otherwise edited: both fence scans must see
+    the same bytes."""
     prefix = _slot_prefix(text)
     lines = text.split("\n")
     lifted: dict[str, list[str]] = {}
@@ -329,8 +331,8 @@ def _lift_colored_fences(text: str, color: bool) -> tuple[str, dict[str, list[st
         if not any(_SGR_RE.search(ln) for ln in body):
             continue
         slot = f"{prefix}{i}{prefix}"
-        lifted[slot] = ([ln + "\x1b[0m" for ln in body] if color
-                        else [_strip_sgr(ln) for ln in body])
+        lifted[slot] = ([_sgr_survives(ln) + "\x1b[0m" for ln in body] if color
+                        else [_caret_escape(_strip_sgr(ln)) for ln in body])
         out.extend(lines[prev:span.start])
         out.append(slot)
         prev = span.end
