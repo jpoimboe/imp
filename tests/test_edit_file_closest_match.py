@@ -4,8 +4,39 @@ the 0.6 floor, tie-breaking, and the caps that bound its cost."""
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
-from imp.agents.tools.fs import _closest_region
+import anyio
+import pytest
+
+from imp.agents.tools import get_registry
+from imp.agents.tools.context import ToolContext
+from imp.agents.tools.fs import _apply_edit, _closest_region
+
+
+def _ctx(tmp_path: Path) -> ToolContext:
+    ctx = ToolContext(
+        project_root=tmp_path,
+        events_path=tmp_path / "events.jsonl",
+    )
+    ctx.coordinator = None
+    return ctx
+
+
+def _edit(ctx: ToolContext, **args: object) -> str:
+    return anyio.run(get_registry()["edit_file"].async_invoke, ctx, args)
+
+
+def _not_found_message(body: str, old: str, path: str = "x.py",
+                       label: str = "") -> str:
+    # Guard the fixture itself: _apply_edit raises on plain substring absence,
+    # so an `old` that IS contained never reaches the not-found branch and
+    # would make the assertions below vacuous.
+    assert body.count(old) == 0, "fixture is not a miss: old is contained"
+    with pytest.raises(ValueError) as exc:
+        _apply_edit(body, old, "NEW", path, False, label=label)
+    return str(exc.value)
+
 
 # The spec's motivating real-world case: `old` differs from the file line only
 # in interior whitespace, so it is genuinely absent (not a substring).
@@ -121,3 +152,213 @@ def test_old_over_the_char_cap_is_skipped_even_when_it_would_anchor() -> None:
     assert len(under) < 2000 < len(over)
     assert _closest_region(body, under) == (0, body.split("\n")[0:20])
     assert _closest_region(body, over) is None
+
+
+def test_message_appends_the_diff_after_todays_prefix() -> None:
+    # Reproduces the spec's worked example byte-for-byte.
+    assert _not_found_message(RV_BODY, RV_OLD, path="rv.sh") == (
+        "'if (( rc == 124 )); then' not found in 'rv.sh'"
+        " — closest match at line 2:\n"
+        "    want: 'if (( rc == 124 )); then'\n"
+        "    file: '\\tif ((rc == 124)); then'"
+    )
+
+
+def test_multiline_old_reports_the_window_start_line() -> None:
+    body = "alpha\nbeta\ngamma\ndelta\nepsilon\n"
+    assert _not_found_message(body, "beta\nGAMMA\ndelta") == (
+        "'beta\\nGAMMA\\ndelta' not found in 'x.py' — closest match at line 2:\n"
+        "    want: 'GAMMA'\n"
+        "    file: 'gamma'"
+    )
+
+
+def test_identical_lines_inside_the_window_are_omitted() -> None:
+    body = "def f():\n    a = 1\n    b = 2\n    c = 3\n    return a\n"
+    old = "def F():\n    a = 1\n    b = 2\n    c = 3\n    return A\n"
+    msg = _not_found_message(body, old)
+    assert msg.endswith(
+        " — closest match at line 1:\n"
+        "    want: 'def F():'\n"
+        "    file: 'def f():'\n"
+        "    want: '    return A'\n"
+        "    file: '    return a'"
+    )
+    # Scoped to the diff: the message's `old` repr prefix names them too.
+    tail = msg.split("closest match")[1]
+    assert "a = 1" not in tail
+    assert "b = 2" not in tail
+    assert "c = 3" not in tail
+
+
+def test_more_than_six_differing_lines_are_capped_with_a_tail() -> None:
+    body = "\n".join(f"line {i} of the file" for i in range(12)) + "\n"
+    old = "\n".join(
+        (f"line {i} of the file" if i in (2, 3) else f"line {i} of the FILE")
+        for i in range(2, 12))
+    msg = _not_found_message(body, old)
+    assert msg.endswith(
+        " — closest match at line 3:\n"
+        "    want: 'line 4 of the FILE'\n"
+        "    file: 'line 4 of the file'\n"
+        "    want: 'line 5 of the FILE'\n"
+        "    file: 'line 5 of the file'\n"
+        "    want: 'line 6 of the FILE'\n"
+        "    file: 'line 6 of the file'\n"
+        "    want: 'line 7 of the FILE'\n"
+        "    file: 'line 7 of the file'\n"
+        "    want: 'line 8 of the FILE'\n"
+        "    file: 'line 8 of the file'\n"
+        "    want: 'line 9 of the FILE'\n"
+        "    file: 'line 9 of the file'\n"
+        "    … 2 more lines differ"
+    )
+    assert "line 10" not in msg.split("closest match")[1]
+
+
+def test_trailing_whitespace_difference_is_visible() -> None:
+    # Raw text would print two identical-looking lines; _short_repr's escaping
+    # is what makes the difference legible.
+    msg = _not_found_message("alpha\nbeta \ngamma\n", "alpha\nbeta\ngamma")
+    assert msg.endswith(
+        " — closest match at line 1:\n"
+        "    want: 'beta'\n"
+        "    file: 'beta '"
+    )
+
+
+def test_tab_versus_spaces_difference_is_visible() -> None:
+    msg = _not_found_message("if x:\n\treturn 1\n", "if x:\n    return 1")
+    assert msg.endswith(
+        " — closest match at line 1:\n"
+        "    want: '    return 1'\n"
+        "    file: '\\treturn 1'"
+    )
+
+
+def test_displayed_lines_obey_the_short_repr_cap() -> None:
+    body = "head\n" + "x" * 260 + "\ntail\n"
+    old = "head\ny" + "x" * 259 + "\ntail"
+    msg = _not_found_message(body, old)
+    assert " — closest match at line 1:" in msg
+    assert msg.count("[260 chars total]") == 2
+    assert "x" * 201 not in msg.split("closest match")[1]
+
+
+def test_missing_line_on_one_side_renders_as_empty_string() -> None:
+    msg = _not_found_message("alpha\nbeta\n", "alpha\nbeta\ngamma\ndelta")
+    assert msg.endswith(
+        " — closest match at line 1:\n"
+        "    want: 'gamma'\n"
+        "    file: ''\n"
+        "    want: 'delta'\n"
+        "    file: ''"
+    )
+
+
+def test_no_near_miss_keeps_todays_message_byte_for_byte() -> None:
+    assert _not_found_message("content\n", "nope\nx") == (
+        "'nope\\nx' not found in 'x.py'")
+
+
+def test_batch_label_still_prefixes_the_diagnostic() -> None:
+    assert _not_found_message(RV_BODY, RV_OLD, path="rv.sh",
+                              label="edit #2: ") == (
+        "edit #2: 'if (( rc == 124 )); then' not found in 'rv.sh'"
+        " — closest match at line 2:\n"
+        "    want: 'if (( rc == 124 )); then'\n"
+        "    file: '\\tif ((rc == 124)); then'"
+    )
+
+
+def test_batch_failure_with_diagnostic_writes_nothing(tmp_path: Path) -> None:
+    # edit #1 applies to the in-memory body, edit #2 genuinely misses; the
+    # batch stays all-or-nothing, so the file on disk is untouched.
+    p = tmp_path / "rv.sh"
+    p.write_text(RV_BODY)
+    before = p.read_bytes()
+    with pytest.raises(ValueError) as exc:
+        _edit(_ctx(tmp_path), path="rv.sh", edits=[
+            {"old": "do_run", "new": "DO_RUN"},
+            {"old": RV_OLD, "new": "Z"},
+        ])
+    msg = str(exc.value)
+    assert msg.startswith("edit #2: ")
+    assert " — closest match at line 2:" in msg
+    assert p.read_bytes() == before
+
+
+def test_edit_file_gains_no_new_parameter() -> None:
+    schema = get_registry()["edit_file"].input_schema
+    assert set(schema["properties"]) == {
+        "path", "old", "new", "replace_all", "edits"}
+
+
+def test_large_file_with_large_old_raises_promptly() -> None:
+    # Both dimensions pinned: 20k lines AND a 40-line old. The rejected
+    # exhaustive slide takes tens of seconds here; the anchored scan measured
+    # 0.31 s. The 5 s budget cannot false-fire under a saturated CI.
+    body = "".join(f"    value_{i} = compute({i})\n" for i in range(20000))
+    old = "\n".join(f"    value_{i} = compute({i})  # drift"
+                    for i in range(9000, 9040))
+    started = time.perf_counter()
+    msg = _not_found_message(body, old, path="big.py")
+    assert time.perf_counter() - started < 5.0
+    assert " — closest match at line 9001:" in msg
+    assert "    file: '    value_9000 = compute(9000)'" in msg
+
+
+def test_worst_case_in_cap_old_stays_bounded() -> None:
+    # THE ceiling: an `old` at the character cap, drifting on every line, so
+    # every line must be compared and quick_ratio() prunes nothing. This is
+    # the most expensive input the caps admit — measured 0.57 s. A 4000-char
+    # `old` (the cap before it was calibrated against autojunk=False) measured
+    # 4.6 s on this same fixture shape, which is why the cap is 2000.
+    body = "".join(f"    value_{i} = compute({i})\n" for i in range(20000))
+    old = "\n".join(f"    value_{i} = compute({i})  # drift"
+                    for i in range(9000, 9050))
+    assert 1900 < len(old) <= 2000  # at the cap, not merely near it
+    started = time.perf_counter()
+    msg = _not_found_message(body, old, path="big.py")
+    assert time.perf_counter() - started < 5.0
+    assert " — closest match at line 9001:" in msg
+
+
+def test_many_near_identical_regions_stay_bounded() -> None:
+    # An `old` whose character multiset matches 40 file regions, so
+    # quick_ratio() prunes nothing between candidates. The candidate budget
+    # holds this to a single full ratio(); measured 0.12 s.
+    block = [f"    value_{i} = compute(alpha, beta, gamma, delta)  # step {i}"
+             for i in range(160)]
+    filler = [f"    unique_line_{j} = do_something({j})" for j in range(20000)]
+    lines: list[str] = []
+    cursor = 0
+    per = (20000 - 40 * len(block)) // 40
+    for _ in range(40):
+        lines.extend(block)
+        lines.extend(filler[cursor:cursor + per])
+        cursor += per
+    body = "\n".join(lines[:20000]) + "\n"
+    old = "\n".join(reversed(block[:60]))[:2000]
+    started = time.perf_counter()
+    _not_found_message(body, old, path="big.py")
+    assert time.perf_counter() - started < 5.0
+
+
+def test_old_over_the_char_cap_degrades_to_todays_message() -> None:
+    body = "".join(f"    value_{i} = compute({i})\n" for i in range(20000))
+    old = "z" * 2001
+    started = time.perf_counter()
+    msg = _not_found_message(body, old, path="big.py")
+    assert time.perf_counter() - started < 5.0
+    assert msg == f"{'z' * 200!r}… [2001 chars total] not found in 'big.py'"
+
+
+def test_all_anchors_over_the_hit_cap_degrades_to_todays_message() -> None:
+    body = "\n".join(["        self.name = name.strip()"] * 100000) + "\n"
+    started = time.perf_counter()
+    msg = _not_found_message(body, "        self.name = nameX.strip()",
+                             path="big.py")
+    assert time.perf_counter() - started < 5.0
+    assert msg == (
+        "'        self.name = nameX.strip()' not found in 'big.py'")

@@ -14,6 +14,7 @@ import hashlib
 import os
 import stat
 import tempfile
+from itertools import zip_longest
 from pathlib import Path
 
 import anyio
@@ -279,6 +280,7 @@ _CLOSEST_MATCH_CANDIDATES = 32
 _CLOSEST_MATCH_SCORE_BUDGET = 2_500_000
 _ANCHOR_MAX_HITS = 64
 _ANCHOR_PREFIX_CHARS = 12
+_CLOSEST_MATCH_DIFF_LINES = 6
 # ratio() = 2*M/T with M <= len(old), so a window longer than this multiple of
 # `old` cannot reach the floor however well it matches — skip it unscored.
 _MAX_WINDOW_RATIO = 2 / _CLOSEST_MATCH_FLOOR - 1
@@ -349,6 +351,30 @@ def _closest_region(body: str, old: str) -> tuple[int, list[str]] | None:
     return best[1], lines[best[1]:best[1] + width]
 
 
+def _closest_match_note(body: str, old: str) -> str:
+    """The ` — closest match at line N:` suffix, or "" when no region
+    qualifies — so a genuinely absent string keeps today's exact message.
+    Under a batch, `body` is the partially-edited in-memory text, so an
+    earlier item that changed the line count shifts this line number away
+    from the on-disk file (which the failed batch left untouched)."""
+    region = _closest_region(body, old)
+    if region is None:
+        return ""
+    start, window = region
+    pairs = [(want, have)
+             for want, have in zip_longest(old.split("\n"), window,
+                                           fillvalue="")
+             if want != have]
+    out = [f" — closest match at line {start + 1}:"]
+    for want, have in pairs[:_CLOSEST_MATCH_DIFF_LINES]:
+        out.append(f"    want: {_short_repr(want)}")
+        out.append(f"    file: {_short_repr(have)}")
+    extra = len(pairs) - _CLOSEST_MATCH_DIFF_LINES
+    if extra > 0:
+        out.append(f"    … {extra} more lines differ")
+    return "\n".join(out)
+
+
 def _apply_edit(
     body: str, old: str, new: str, path: str, replace_all: bool, *, label: str = "",
 ) -> tuple[str, int]:
@@ -358,7 +384,8 @@ def _apply_edit(
     `old` is non-empty — callers validate that before invoking."""
     count = body.count(old)
     if count == 0:
-        raise ValueError(f"{label}{_short_repr(old)} not found in {path!r}")
+        raise ValueError(f"{label}{_short_repr(old)} not found in {path!r}"
+                         f"{_closest_match_note(body, old)}")
     if not replace_all and count > 1:
         raise ValueError(f"{label}{_short_repr(old)} not unique in {path!r} "
                          f"(found {count} occurrences)")
