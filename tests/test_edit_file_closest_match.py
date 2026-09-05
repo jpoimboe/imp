@@ -4,15 +4,35 @@
 want:/file: message, and the cause named in _short_repr's docstring."""
 from __future__ import annotations
 
+import difflib
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
 
+import imp.agents.tools.fs as fs
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.fs import _apply_edit, _closest_region, _short_repr
+
+
+@pytest.fixture
+def scored_windows(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    seen: list[int] = []
+    class _Recording(difflib.SequenceMatcher):
+        _active = False
+        def set_seq2(self, b: str) -> None:
+            if b:  # real seq2 set (not the empty-string __init__ call)
+                self._active = True
+            super().set_seq2(b)
+        def set_seq1(self, a: str) -> None:
+            if self._active:
+                seen.append(len(a))
+            super().set_seq1(a)
+    monkeypatch.setattr(fs, "difflib", SimpleNamespace(SequenceMatcher=_Recording))
+    return seen
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -127,20 +147,17 @@ def test_at_the_anchor_hit_cap_still_anchors() -> None:
         0, ["    value = compute(x)"])
 
 
-def test_very_wide_window_is_skipped_unscored() -> None:
-    # len(old) bounds the scan, but not the window's WIDTH IN CHARACTERS: a
-    # file of a few very long lines makes each candidate window megabytes
-    # wide, and quick_ratio() is linear in the window. Such a window can never
-    # reach the floor (ratio() = 2*M/T with M <= len(old)), so it is skipped
-    # before scoring. Unguarded this fixture measured 0.40 s; guarded, 0.01 s.
+def test_very_wide_window_is_skipped_unscored(scored_windows: list[int]) -> None:
+    # Each candidate window is megabytes wide (long_line * width). Such a
+    # window is skipped before scoring: ratio() = 2*M/T with M <= len(old),
+    # so an over-wide window cannot reach the floor however well it matches.
     long_line = "x" * 15000
     body = "\n".join(f"    anchor_{i} = compute({i})" if i % 8 == 0 else long_line
                      for i in range(320)) + "\n"
     old = "    anchor_0 = computeX(0)" + "\n" * 287
     assert body.count(old) == 0
-    started = time.perf_counter()
     assert _closest_region(body, old) is None
-    assert time.perf_counter() - started < 5.0
+    assert scored_windows == []  # width guard skipped every candidate before set_seq1
 
 
 def test_old_over_the_char_cap_is_skipped_even_when_it_would_anchor() -> None:
@@ -325,10 +342,11 @@ def test_worst_case_in_cap_old_stays_bounded() -> None:
     assert " — closest match at line 9001:" in msg
 
 
-def test_many_near_identical_regions_stay_bounded() -> None:
+def test_many_near_identical_regions_stay_bounded(scored_windows: list[int]) -> None:
     # An `old` whose character multiset matches 40 file regions, so
-    # quick_ratio() prunes nothing between candidates. The candidate budget
-    # holds this to a single full ratio(); measured 0.12 s.
+    # quick_ratio() prunes nothing between candidates. With len(old)==2000,
+    # keep=max(1,min(32,2_500_000//2000**2))==1, so the budget holds this to a
+    # single scored candidate; the count is what pins the budget guard.
     block = [f"    value_{i} = compute(alpha, beta, gamma, delta)  # step {i}"
              for i in range(160)]
     filler = [f"    unique_line_{j} = do_something({j})" for j in range(20000)]
@@ -344,6 +362,7 @@ def test_many_near_identical_regions_stay_bounded() -> None:
     started = time.perf_counter()
     _not_found_message(body, old, path="big.py")
     assert time.perf_counter() - started < 5.0
+    assert len(scored_windows) == 1  # exactly one candidate scored
 
 
 def test_old_over_the_char_cap_degrades_to_todays_message() -> None:
