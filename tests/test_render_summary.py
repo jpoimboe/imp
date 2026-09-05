@@ -9,15 +9,16 @@ from imp.cli.render_summary import (
     SubagentRow,
     SummaryHeader,
     _dur_text,
-    _fmt_cost,
     _fmt_tokens,
     _sub_body,
     _tok_total,
     build_summary,
-    header_totals,
+    cost_cell,
+    legend_lines,
     open_span_label,
     render_summary,
     summary_total,
+    summary_totals,
 )
 
 
@@ -685,16 +686,35 @@ def test_fmt_tokens(n, expected):
     assert _fmt_tokens(n) == expected
 
 
-@pytest.mark.parametrize("c, expected", [
-    (-1.0, "—"),
-    (0.0, "—"),
-    (0.004, "<$0.01"),
-    (0.01, "$0.01"),
-    (0.34, "$0.34"),
-    (12.5, "$12.50"),
+@pytest.mark.parametrize("usage, expected", [
+    # No model work at all: the counters are the signal, not the dollar figure.
+    (RowUsage(fresh_input=5), "—"),
+    (RowUsage(), "—"),
+    # Metered — API-key auth or a structurally key-only provider.
+    (RowUsage(dollars=6.43, priced=1), "~$6.43"),
+    (RowUsage(dollars=0.004, priced=1), "~<$0.01"),
+    # Notional — subscription, or an old log with no recoverable auth mode.
+    (RowUsage(dollars=6.43, priced=1, notional=1), "[$6.43]"),
+    (RowUsage(dollars=0.004, priced=1, notional=1), "[<$0.01]"),
+    # Model work imp could not price at all.
+    (RowUsage(fresh_input=900, output=90, unpriced=1), "n/a"),
+    # A floor: something was priced, something else was not.
+    (RowUsage(dollars=6.43, priced=1, unpriced=1), "≥~$6.43"),
+    (RowUsage(dollars=6.43, priced=2, unpriced=1, notional=1), "≥[$6.43]"),
 ])
-def test_fmt_cost(c, expected):
-    assert _fmt_cost(c) == expected
+def test_cost_cell_states(usage, expected):
+    assert cost_cell(usage) == expected
+
+
+def test_legend_lines_follow_the_cells_actually_rendered():
+    assert legend_lines(["—", "n/a"]) == []
+    assert legend_lines(["~$1.00"]) == [
+        "~ estimated at API list price"]
+    # Mixed auth: both lines, tilde first (spec §7 / AC 18).
+    assert legend_lines(["~$1.00", "[$2.00]", "≥[$3.00]"]) == [
+        "~ estimated at API list price",
+        "[ ] list-price equivalent; subscription usage is not billed per token",
+        "≥ excludes steps run on a model absent from the price table"]
 
 
 def test_tok_total_sums_the_input_side_and_output():
@@ -713,36 +733,39 @@ def test_sub_body_with_and_without_label():
         == "↳ explorer (map repo)"
 
 
-def test_header_totals_subtracts_wait_and_rolls_up_steps_and_subs():
+def test_summary_totals_subtracts_wait_and_rolls_up_steps_and_subs():
     rows = [
         StepRow(phase="implement", step="task-lead",
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T00:02:00+00:00",
                 wait_seconds=90.0,
-                usage=RowUsage(fresh_input=1000, dollars=0.20, priced=1),
+                usage=RowUsage(fresh_input=1000, output=40, dollars=0.20,
+                               priced=1),
                 subagents=[SubagentRow(
                     name="coder",
-                    usage=RowUsage(fresh_input=500, dollars=0.05, priced=1))]),
+                    usage=RowUsage(fresh_input=500, output=10, dollars=0.05,
+                                   priced=1))]),
     ]
-    work, tokens, cost = header_totals(rows, 120.0)
-    assert work == 30.0                 # 120s total - 90s wait
-    assert tokens == 1500               # 1000 step + 500 subagent
-    assert cost == pytest.approx(0.25)  # 0.20 step + 0.05 subagent
+    work, total = summary_totals(rows, 120.0)
+    assert work == 30.0                          # 120s total - 90s wait
+    assert total.input_total == 1500             # 1000 step + 500 subagent
+    assert total.output == 50                    # 40 step + 10 subagent
+    assert total.dollars == pytest.approx(0.25)  # 0.20 step + 0.05 subagent
+    assert (total.priced, total.notional) == (2, 0)
 
 
-def test_header_totals_floors_work_at_zero():
+def test_summary_totals_floors_work_at_zero():
     rows = [StepRow(phase="p", step="s",
                     start_ts="2026-01-01T00:00:00+00:00",
                     end_ts="2026-01-01T00:00:10+00:00", wait_seconds=999.0)]
-    work, _, _ = header_totals(rows, 10.0)
+    work, _total = summary_totals(rows, 10.0)
     assert work == 0.0
 
 
-def test_header_totals_none_total_gives_none_work():
-    work, tokens, cost = header_totals([], None)
+def test_summary_totals_none_total_gives_none_work():
+    work, total = summary_totals([], None)
     assert work is None
-    assert tokens == 0
-    assert cost == 0.0
+    assert total == RowUsage()
 
 
 def test_step_row_shows_token_and_cost_columns():
@@ -753,14 +776,15 @@ def test_step_row_shows_token_and_cost_columns():
                                  priced=1))
     out = render_summary([row], header=_HDR, color=False, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
-    assert line == "  plan-writer  1m 30s  12.3k  $0.34"
+    assert line == "  plan-writer  1m 30s  12.3k  ~$0.34"
 
 
-def test_cost_column_dash_fallback_when_zero():
+def test_cost_column_is_a_dash_when_the_step_did_no_model_work():
+    # No priced and no unpriced contribution: the row ran no model at all.
     row = StepRow(phase="plan", step="s",
                   start_ts="2026-01-01T00:00:00+00:00",
                   end_ts="2026-01-01T00:00:10+00:00",
-                  usage=RowUsage(fresh_input=5, priced=1))
+                  usage=RowUsage(fresh_input=5))
     out = render_summary([row], header=_HDR, color=False, width=80)
     line = next(ln for ln in out if "10s" in ln)
     assert line == "  s  10s  5  —"
@@ -782,8 +806,8 @@ def test_token_and_cost_columns_carry_no_color():
     out = render_summary([row], header=_HDR, color=True, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
     # Duration is hued for contrast, but the token/cost columns stay default
-    # foreground: the line ends with the plain "12.3k  $0.34" and no SGR reset.
-    assert line.endswith("  12.3k  $0.34")
+    # foreground: the line ends with the plain "12.3k  ~$0.34" and no SGR reset.
+    assert line.endswith("  12.3k  ~$0.34")
     assert "\x1b[34m1m 30s\x1b[0m" in line
 
 
@@ -837,8 +861,8 @@ def test_subagent_row_indented_with_own_figures():
     out = render_summary([step], header=_HDR, color=False, width=80)
     step_line = next(ln for ln in out if "task-lead" in ln)
     sub_line = next(ln for ln in out if "explorer" in ln)
-    assert step_line == "  task-lead     1m 0s  300  $0.15"
-    assert sub_line == "    ↳ explorer    45s  200  $0.05"
+    assert step_line == "  task-lead     1m 0s  300  ~$0.15"
+    assert sub_line == "    ↳ explorer    45s  200  ~$0.05"
 
 
 def test_subagent_label_shown_in_parens():
@@ -1226,8 +1250,96 @@ def test_f2_a_subagents_usage_folds_into_the_quest_total():
         _subresult("blk1", "lead1", "2026-01-01T00:00:09+00:00"),
         _completed("task-lead", "2026-01-01T00:00:10+00:00"),
     ])
-    _work, tokens, cost = header_totals(rows, 10.0)
+    _work, total = summary_totals(rows, 10.0)
     assert rows[0].totals.fresh_input == 1000   # 100 parent + 900 subagent
     assert rows[0].totals.output == 12
-    assert tokens == 1012
-    assert cost == pytest.approx(0.03)          # 0.01 parent + 0.02 subagent
+    assert total.input_total + total.output == 1012
+    assert total.dollars == pytest.approx(0.03)  # 0.01 parent + 0.02 subagent
+
+
+def _openai_msg(agent_id: str, ts: str, *, input: int, output: int) -> dict:
+    """The nested ResponseUsage shape the raw openai path records."""
+    return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
+            "payload": {"provider": "openai", "model": "gpt-5.6-sol",
+                        "usage": {"input_tokens": input,
+                                  "output_tokens": output,
+                                  "input_tokens_details": {"cached_tokens": 0},
+                                  "output_tokens_details": {
+                                      "reasoning_tokens": 0}}}}
+
+
+def _one_step(*events: dict) -> StepRow:
+    rows = build_summary([
+        _started("s", "p", "2026-01-01T00:00:00+00:00"),
+        *events,
+        _completed("s", "2026-01-01T00:00:20+00:00"),
+    ])
+    return rows[0]
+
+
+def test_metered_marker_reads_anthropic_and_openai_from_provider_alone():
+    # AC 16(a): neither payload carries auth_mode; both are key-only providers.
+    anthropic = _one_step(_llm("a1", "2026-01-01T00:00:05+00:00",
+                               input=100, output=10))
+    assert anthropic.totals.notional == 0            # metered from provider
+    # sonnet: 100*$3 + 10*$15 per million = $0.00045 -> sub-cent tilde form
+    assert cost_cell(anthropic.totals) == "~<$0.01"
+
+    openai = _one_step(_openai_msg("a1", "2026-01-01T00:00:05+00:00",
+                                   input=100_000, output=10_000))
+    # sol: 100k*$4 + 10k*$20 per million = $0.60, prompt 100k is under 272k
+    assert cost_cell(openai.totals) == "~$0.60"
+
+
+def test_metered_marker_reads_auth_mode_on_codex_and_claude_code():
+    apikey = _one_step(_codex("a1", "2026-01-01T00:00:05+00:00",
+                              auth_mode="apikey"),
+                       _patch("a1", input=100_000, output=10_000,
+                              context_tokens=100_000))
+    assert cost_cell(apikey.totals) == "~$0.60"      # AC 16(b)
+
+    subscription = _one_step(_codex("a1", "2026-01-01T00:00:05+00:00"),
+                             _patch("a1", input=100_000, output=10_000,
+                                    context_tokens=100_000))
+    assert cost_cell(subscription.totals) == "[$0.60]"
+
+    old_log = _one_step(
+        _cc("a1", "2026-01-01T00:00:05+00:00"),
+        _qr("a1", "2026-01-01T00:00:06+00:00", 6.43, model_usage={
+            "claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 10,
+                                  "cacheReadInputTokens": 0,
+                                  "cacheCreationInputTokens": 0}}))
+    assert cost_cell(old_log.totals) == "[$6.43]"    # AC 16(c)
+
+
+def test_an_unpriced_model_renders_n_a_and_floors_the_aggregate():
+    # AC 15 / AC 17(b): the model is absent from the price table, so its tokens
+    # count but its dollars cannot; the aggregate says so rather than shrinking.
+    priced = StepRow(phase="p", step="a",
+                     start_ts="2026-01-01T00:00:00+00:00",
+                     end_ts="2026-01-01T00:00:30+00:00",
+                     usage=RowUsage(fresh_input=100, output=10, dollars=2.00,
+                                    priced=1))
+    unpriced = _one_step(_llm("a1", "2026-01-01T00:00:05+00:00",
+                              input=900, output=90, model="claude-mythic-9"))
+    assert cost_cell(unpriced.totals) == "n/a"
+    _work, total = summary_totals([priced, unpriced], 60.0)
+    assert cost_cell(total) == "≥~$2.00"
+
+
+def test_a_step_row_mixing_vendors_brackets_while_the_leaf_keeps_its_form():
+    # AC 17(c): a metered subagent under a notional parent. The step row
+    # aggregates both and is not a metered figure; the subagent row is.
+    step = StepRow(phase="build", step="coder",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:01:00+00:00",
+                   usage=RowUsage(fresh_input=100, output=10, dollars=1.00,
+                                  priced=1, notional=1),
+                   subagents=[SubagentRow(
+                       name="explorer",
+                       start_ts="2026-01-01T00:00:05+00:00",
+                       end_ts="2026-01-01T00:00:50+00:00",
+                       usage=RowUsage(fresh_input=50, output=5, dollars=0.50,
+                                      priced=1))])
+    assert cost_cell(step.totals) == "[$1.50]"
+    assert cost_cell(step.subagents[0].usage) == "~$0.50"

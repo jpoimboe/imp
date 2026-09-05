@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.render_summary import build_summary, header_totals
+from imp.cli.render_summary import build_summary, summary_totals
 from imp.engine import archive
 from imp.engine.archive import record
 from imp.engine.archive.blobstore import LocalBlobStore
@@ -106,8 +106,8 @@ def _blob_events(control: Path, cid: str) -> list[dict]:
 
 def _totals(events: list[dict]) -> tuple[int, float]:
     rows = build_summary(events)
-    _work, tokens, cost = header_totals(rows, 300.0)
-    return tokens, cost
+    _work, total = summary_totals(rows, 300.0)
+    return total.input_total + total.output, total.dollars
 
 
 def test_an_unmigrated_log_mis_reports_the_cost() -> None:

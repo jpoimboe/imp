@@ -451,10 +451,10 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
     header = SummaryHeader(workflow="imp", quest_id="c",
                            status="merged", total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
-    assert "| task-lead | 1m 0s | 12.5k | $0.39 |" in out
-    assert "| ↳ explorer (map repo) | 45s | 200 | $0.05 |" in out
+    assert "| task-lead | 1m 0s | 12.5k | ~$0.39 |" in out
+    assert "| ↳ explorer (map repo) | 45s | 200 | ~$0.05 |" in out
     assert "**Tokens:** 12.5k" in out    # 12345 step + 200 subagent = 12545
-    assert "**Cost:** $0.39" in out       # 0.34 step + 0.05 subagent
+    assert "**Cost:** ~$0.39" in out     # 0.34 step + 0.05 subagent, metered
 
 
 def test_summary_markdown_open_step_reflects_paused_status() -> None:

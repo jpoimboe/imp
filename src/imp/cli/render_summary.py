@@ -253,13 +253,33 @@ def _fmt_tokens(total: int) -> str:
     return f"{total / 1_000_000:.1f}M"
 
 
-def _fmt_cost(cost: float) -> str:
-    """Dollar cost: '—' for none, '<$0.01' for a sub-cent figure, else $X.XX."""
-    if cost <= 0:
+LEGEND_METERED = "~ estimated at API list price"
+LEGEND_NOTIONAL = "[ ] list-price equivalent; subscription usage is not billed per token"
+LEGEND_FLOOR = "≥ excludes steps run on a model absent from the price table"
+
+
+def cost_cell(u: RowUsage) -> str:
+    """The cost figure for any row, leaf or aggregate; the counters are the state."""
+    if u.priced + u.unpriced == 0:
         return "—"
-    if cost < 0.01:
-        return "<$0.01"
-    return f"${cost:.2f}"
+    if u.priced == 0:
+        return "n/a"
+    body = "<$0.01" if u.dollars < 0.01 else f"${u.dollars:.2f}"
+    marked = f"[{body}]" if u.notional else f"~{body}"
+    return f"≥{marked}" if u.unpriced else marked
+
+
+def legend_lines(cells: list[str]) -> list[str]:
+    """The legend for exactly the cells rendered, tilde first."""
+    bodies = [c.removeprefix("≥") for c in cells]
+    lines: list[str] = []
+    if any(b.startswith("~") for b in bodies):
+        lines.append(LEGEND_METERED)
+    if any(b.startswith("[") for b in bodies):
+        lines.append(LEGEND_NOTIONAL)
+    if any(c.startswith("≥") for c in cells):
+        lines.append(LEGEND_FLOOR)
+    return lines
 
 
 def _sub_body(sub: SubagentRow) -> str:
@@ -270,19 +290,20 @@ def _sub_body(sub: SubagentRow) -> str:
     return text
 
 
-def header_totals(
+def summary_totals(
     summary: list[StepRow], total_seconds: float | None
-) -> tuple[float | None, int, float]:
-    """Header rollup: work time (raw wall minus every step's human wait, floored
-    at 0; None when the run has no total yet) plus tokens and cost summed over
-    every step row's whole subtree."""
+) -> tuple[float | None, RowUsage]:
+    """The totals row: work time (raw wall minus every step's human wait,
+    floored at 0; None when the run has no total yet) and the accounting sum
+    over every step row's whole subtree."""
     if total_seconds is None:
         work: float | None = None
     else:
         work = max(0.0, total_seconds - sum(r.wait_seconds for r in summary))
-    tokens = sum(_tok_total(r.totals) for r in summary)
-    cost = sum((r.totals.dollars for r in summary), 0.0)
-    return work, tokens, cost
+    total = RowUsage()
+    for r in summary:
+        total = total + r.totals
+    return work, total
 
 
 @dataclass
@@ -303,14 +324,12 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
 
 
 def _header_line(h: SummaryHeader, work_seconds: float | None,
-                 tokens: int, cost: float, *, color: bool) -> str:
+                 total: RowUsage, *, color: bool) -> str:
     workflow = pal.ansi(h.workflow, *pal.NODE_COLORS["workflow"], enabled=color)
     status = pal.ansi(display_word(h.status), *STATUS_COLORS.get(h.status, ()), enabled=color)
-    total = _dur_text(work_seconds)
-    tok = _fmt_tokens(tokens)
-    cst = _fmt_cost(cost)
     return (f"{workflow}  ·  {h.quest_id}  ·  {status}"
-            f"  ·  {total}  ·  {tok}  ·  {cst}")
+            f"  ·  {_dur_text(work_seconds)}"
+            f"  ·  {_fmt_tokens(_tok_total(total))}  ·  {cost_cell(total)}")
 
 
 def _column_widths(summary: list[StepRow], open_label: str) -> tuple[int, int, int, int]:
@@ -323,11 +342,11 @@ def _column_widths(summary: list[StepRow], open_label: str) -> tuple[int, int, i
     for r in summary:
         durs.append(len(r.dur_cell(open_label)))
         toks.append(len(_fmt_tokens(_tok_total(r.totals))))
-        costs.append(len(_fmt_cost(r.totals.dollars)))
+        costs.append(len(cost_cell(r.totals)))
         for s in r.subagents:
             durs.append(len(s.dur_cell(open_label)))
             toks.append(len(_fmt_tokens(_tok_total(s.usage))))
-            costs.append(len(_fmt_cost(s.usage.dollars)))
+            costs.append(len(cost_cell(s.usage)))
     return (max(names, default=0), max(durs, default=0),
             max(toks, default=0), max(costs, default=0))
 
@@ -338,7 +357,7 @@ def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
     name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     tok = f"{_fmt_tokens(_tok_total(row.totals)):>{tok_w}}"
-    cost = f"{_fmt_cost(row.totals.dollars):>{cost_w}}"
+    cost = f"{cost_cell(row.totals):>{cost_w}}"
     return f"  {name}  {dur}  {tok}  {cost}"
 
 
@@ -350,7 +369,7 @@ def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int,
     body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
     dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
     tok = f"{_fmt_tokens(_tok_total(sub.usage)):>{tok_w}}"
-    cost = f"{_fmt_cost(sub.usage.dollars):>{cost_w}}"
+    cost = f"{cost_cell(sub.usage):>{cost_w}}"
     return f"    {body}  {dur}  {tok}  {cost}"
 
 
@@ -358,8 +377,8 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int) -> list[str]:
     open_label = open_span_label(header.status)
     name_w, dur_w, tok_w, cost_w = _column_widths(summary, open_label)
-    work, tokens, cost = header_totals(summary, header.total_seconds)
-    lines = [_header_line(header, work, tokens, cost, color=color)]
+    work, total = summary_totals(summary, header.total_seconds)
+    lines = [_header_line(header, work, total, color=color)]
     cur_phase: str | None = None
     hues: dict[str, str] = {}
     next_hue = 0

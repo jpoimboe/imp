@@ -14,12 +14,12 @@ from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
     _dur_text,
-    _fmt_cost,
     _fmt_tokens,
     _sub_body,
     _tok_total,
-    header_totals,
+    cost_cell,
     open_span_label,
+    summary_totals,
 )
 
 _MAX_HEADING = 6
@@ -280,14 +280,14 @@ def render_markdown(tree: nv.NarrativeTree, *, full: bool) -> str:
 def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
-    work, tokens, cost = header_totals(summary, header.total_seconds)
+    work, total = summary_totals(summary, header.total_seconds)
     open_label = open_span_label(header.status)
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),
         (f"**Status:** {_md_escape(header.status)}"
          f" · **Total:** {_dur_text(work)}"
-         f" · **Tokens:** {_fmt_tokens(tokens)}"
-         f" · **Cost:** {_fmt_cost(cost)}"),
+         f" · **Tokens:** {_fmt_tokens(_tok_total(total))}"
+         f" · **Cost:** {cost_cell(total)}"),
     ]
     grouped: list[tuple[str, list[str]]] = []
     for row in summary:
@@ -296,12 +296,12 @@ def render_summary_markdown(summary: list[StepRow], *,
         step = _md_escape(row.step).replace("|", "\\|")
         grouped[-1][1].append(
             f"| {step} | {row.dur_cell(open_label)}"
-            f" | {_fmt_tokens(_tok_total(row.totals))} | {_fmt_cost(row.totals.dollars)} |")
+            f" | {_fmt_tokens(_tok_total(row.totals))} | {cost_cell(row.totals)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")
             grouped[-1][1].append(
                 f"| {body} | {sub.dur_cell(open_label)}"
-                f" | {_fmt_tokens(_tok_total(sub.usage))} | {_fmt_cost(sub.usage.dollars)} |")
+                f" | {_fmt_tokens(_tok_total(sub.usage))} | {cost_cell(sub.usage)} |")
     for phase, rows in grouped:
         table = "\n".join([
             _heading(2, _md_escape(phase)),
