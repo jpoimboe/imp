@@ -376,6 +376,25 @@ def _closest_match_note(body: str, old: str) -> str:
     return "\n".join(out)
 
 
+_NOT_UNIQUE_MAX_LINES = 5
+
+
+def _occurrence_lines(body: str, old: str) -> str:
+    """1-based starting lines of `old`'s occurrences, comma-joined and capped.
+    Each step resumes past the line the match started on, so a line bearing many
+    occurrences yields one entry and the walk costs at most six finds."""
+    starts: list[int] = []
+    pos = body.find(old)
+    while pos != -1 and len(starts) <= _NOT_UNIQUE_MAX_LINES:
+        starts.append(body.count("\n", 0, pos) + 1)
+        nl = body.find("\n", pos)
+        if nl == -1:
+            break
+        pos = body.find(old, max(pos + len(old), nl + 1))
+    shown = ", ".join(str(n) for n in starts[:_NOT_UNIQUE_MAX_LINES])
+    return f"{shown}, …" if len(starts) > _NOT_UNIQUE_MAX_LINES else shown
+
+
 def _apply_edit(
     body: str, old: str, new: str, path: str, replace_all: bool, *, label: str = "",
 ) -> tuple[str, int]:
@@ -389,7 +408,8 @@ def _apply_edit(
                          f"{_closest_match_note(body, old)}")
     if not replace_all and count > 1:
         raise ValueError(f"{label}{_short_repr(old)} not unique in {path!r} "
-                         f"(found {count} occurrences)")
+                         f"(found {count} occurrences: "
+                         f"lines {_occurrence_lines(body, old)})")
     edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
     return edited, count
 

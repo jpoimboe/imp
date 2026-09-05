@@ -236,7 +236,7 @@ def test_long_old_capped_in_not_unique_message(tmp_path: Path) -> None:
         _edit(_ctx(tmp_path), path="x.py", old=long_old, new="y")
     msg = str(exc.value)
     assert "not unique" in msg
-    assert "(found 2 occurrences)" in msg
+    assert "(found 2 occurrences: lines 1)" in msg
     assert "[1000 chars total]" in msg
     assert len(msg) < 300
 
@@ -268,7 +268,8 @@ def test_apply_edit_helper_computes_body_count_and_labels() -> None:
     # Non-unique without replace_all carries the label prefix and count.
     with pytest.raises(
         ValueError,
-        match=r"edit #3: 'a' not unique in 'f\.py' \(found 2 occurrences\)",
+        match=r"edit #3: 'a' not unique in 'f\.py' "
+              r"\(found 2 occurrences: lines 1\)",
     ):
         _apply_edit("a a", "a", "Y", "f.py", False, label="edit #3: ")
 
@@ -336,7 +337,8 @@ def test_batch_item_without_replace_all_rejects_non_unique(tmp_path: Path) -> No
     p.write_text("a a\n")
     before = p.read_text()
     with pytest.raises(
-        ValueError, match=r"edit #1: 'a' not unique in 'x\.py' \(found 2 occurrences\)"
+        ValueError,
+        match=r"edit #1: 'a' not unique in 'x\.py' \(found 2 occurrences: lines 1\)"
     ):
         _edit(_ctx(tmp_path), path="x.py", edits=[{"old": "a", "new": "X"}])
     assert p.read_text() == before
@@ -392,3 +394,77 @@ def test_edit_file_description_documents_edits_batch() -> None:
     assert "replace_all?" in desc
     assert "sequential" in desc.lower()
     assert "all-or-nothing" in desc.lower()
+
+
+def test_not_unique_lists_occurrence_lines(tmp_path: Path) -> None:
+    (tmp_path / "edchk.txt").write_text("alpha\nbeta\ngamma\nbeta\n")
+    with pytest.raises(ValueError) as exc:
+        _edit(_ctx(tmp_path), path="edchk.txt", old="beta", new="B")
+    assert str(exc.value) == (
+        "'beta' not unique in 'edchk.txt' (found 2 occurrences: lines 2, 4)")
+
+
+def test_not_unique_lists_at_most_five_distinct_lines(tmp_path: Path) -> None:
+    hits = {1, 3, 8, 11, 29, 30, 31}
+    body = "".join("beta\n" if i in hits else f"line {i}\n" for i in range(40))
+    (tmp_path / "x.py").write_text(body)
+    with pytest.raises(ValueError) as exc:
+        _edit(_ctx(tmp_path), path="x.py", old="beta", new="B")
+    assert str(exc.value) == (
+        "'beta' not unique in 'x.py' (found 7 occurrences: "
+        "lines 2, 4, 9, 12, 30, …)")
+
+
+def test_occurrences_sharing_a_line_are_listed_once() -> None:
+    from imp.agents.tools.fs import _apply_edit
+
+    with pytest.raises(ValueError) as exc:
+        _apply_edit("a a", "a", "X", "f.py", False)
+    assert str(exc.value) == (
+        "'a' not unique in 'f.py' (found 2 occurrences: lines 1)")
+
+    with pytest.raises(ValueError) as exc:
+        _apply_edit("a a a a a a", "a", "X", "f.py", False)
+    assert str(exc.value) == (
+        "'a' not unique in 'f.py' (found 6 occurrences: lines 1)")
+
+
+def test_multiline_old_lists_its_starting_lines() -> None:
+    from imp.agents.tools.fs import _apply_edit
+
+    with pytest.raises(ValueError) as exc:
+        _apply_edit("one\ntwo\nONE\ntwo\n", "two\n", "X", "f.py", False)
+    assert str(exc.value) == (
+        "'two\\n' not unique in 'f.py' (found 2 occurrences: lines 2, 4)")
+
+
+def test_batch_not_unique_keeps_prefix_and_writes_nothing(tmp_path: Path) -> None:
+    p = tmp_path / "x.py"
+    p.write_text("alpha\nbeta\ngamma\nbeta\n")
+    before = p.read_bytes()
+    with pytest.raises(ValueError) as exc:
+        _edit(_ctx(tmp_path), path="x.py", edits=[
+            {"old": "alpha", "new": "A"},
+            {"old": "beta", "new": "B"},
+        ])
+    assert str(exc.value) == (
+        "edit #2: 'beta' not unique in 'x.py' (found 2 occurrences: lines 2, 4)")
+    assert p.read_bytes() == before
+
+
+def test_many_occurrences_on_one_line_stay_bounded() -> None:
+    # A 5 MB single-line file (minified JS is the realistic shape) with five
+    # million occurrences. The walk resumes past the matched line, so it stops
+    # after one find; a per-occurrence walk measured 0.91 s here, and one that
+    # recomputes the line number from the file start on each occurrence is
+    # quadratic and does not finish. Measured 0.003 s.
+    import time
+
+    from imp.agents.tools.fs import _apply_edit
+
+    body = "a" * 5_000_000
+    started = time.perf_counter()
+    with pytest.raises(ValueError) as exc:
+        _apply_edit(body, "a", "X", "big.js", False)
+    assert time.perf_counter() - started < 5.0
+    assert str(exc.value).endswith("(found 5000000 occurrences: lines 1)")
