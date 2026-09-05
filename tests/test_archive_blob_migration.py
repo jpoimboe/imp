@@ -258,8 +258,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_seven() -> None:
-    assert archive._DATA_VERSION == 7
+def test_data_version_bumped_to_eight() -> None:
+    assert archive._DATA_VERSION == 8
 
 
 def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:
@@ -450,3 +450,74 @@ def test_blob_with_nothing_to_migrate_keeps_its_events_hash(tmp_path: Path) -> N
     rec = record.read_record(archive.records_root(tmp_path), "ns002")
     assert rec is not None
     assert rec["events_hash"] == old_hash
+
+
+# A triad-shaped blob (migrate_events is a no-op on it) whose query_result rows
+# predate the session_id field: two cumulative rows, a step_started that ends the
+# series, then a third row opening a new one.
+_PRE_SESSION_ID = [
+    {"id": "q1", "parent_id": None, "agent_id": "step:build/coder",
+     "timestamp": "2026-06-02T03:00:00+00:00", "type": "query_result",
+     "payload": {"total_cost_usd": 3.00, "usage": {}, "model_usage": {}}},
+    {"id": "q2", "parent_id": None, "agent_id": "step:build/coder",
+     "timestamp": "2026-06-02T03:01:00+00:00", "type": "query_result",
+     "payload": {"total_cost_usd": 12.50, "usage": {}, "model_usage": {}}},
+    {"id": "s1", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-02T03:02:00+00:00", "type": "step_started",
+     "payload": {"phase": "build", "step": "coder", "provider": "claude_code",
+                 "model": "claude-sonnet-4-6"}},
+    {"id": "q3", "parent_id": None, "agent_id": "step:build/coder",
+     "timestamp": "2026-06-02T03:03:00+00:00", "type": "query_result",
+     "payload": {"total_cost_usd": 6.40, "usage": {}, "model_usage": {}}},
+]
+
+
+def _session_costs(control: Path, cid: str) -> dict[str, float]:
+    """Cumulative rows collapse to the last one per session — what Part 4 sums."""
+    last: dict[str, float] = {}
+    for e in _events_of(control, cid):
+        if e["type"] == "query_result":
+            last[e["payload"]["session_id"]] = e["payload"]["total_cost_usd"]
+    return last
+
+
+def test_migrate_backfills_query_result_session_ids_in_the_blob(
+    tmp_path: Path,
+) -> None:
+    old_hash = _seed_old_archived_quest(tmp_path, "qr001", _PRE_SESSION_ID)
+
+    archive.ensure_current(tmp_path)
+
+    rec = record.read_record(archive.records_root(tmp_path), "qr001")
+    assert rec is not None
+    assert rec["events_hash"] != old_hash        # blob rewritten, record repointed
+    events = _events_of(tmp_path, "qr001")
+    ids = [e["payload"]["session_id"]
+           for e in events if e["type"] == "query_result"]
+    assert ids[0] == ids[1]                      # one cumulative series
+    assert ids[1] != ids[2]                      # the step_started closed it
+    # 12.50 + 6.40 — the last row of each session, not the naive 21.90
+    assert round(sum(_session_costs(tmp_path, "qr001").values()), 2) == 18.90
+    # session_id is the ONLY key added, on the archive side as on the live one:
+    # spec §4 leaves auth mode unrecoverable and deliberately unbackfilled.
+    assert set(events[0]["payload"]) == {
+        "session_id", "total_cost_usd", "usage", "model_usage"}
+    assert events[2] == _PRE_SESSION_ID[2]       # step_started passes through
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_a_forced_second_pass_leaves_the_backfilled_blob_alone(
+    tmp_path: Path,
+) -> None:
+    _seed_old_archived_quest(tmp_path, "qr002", _PRE_SESSION_ID)
+    archive.ensure_current(tmp_path)
+    first = record.read_record(archive.records_root(tmp_path), "qr002")
+    assert first is not None
+
+    archive._migrate_archive_blobs(tmp_path)     # forced re-run, marker bypassed
+
+    again = record.read_record(archive.records_root(tmp_path), "qr002")
+    assert again is not None
+    assert again["events_hash"] == first["events_hash"]   # no second rewrite
+    assert len(set(_session_costs(tmp_path, "qr002"))) == 2
