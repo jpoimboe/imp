@@ -3313,3 +3313,14 @@ def test_conventions_doc_records_the_narrowed_caret_rule() -> None:
     assert "the `--md`/`--html` exports strip SGR entirely" in flat
     # The section names the primitive; a rename must not strand the reader.
     assert hasattr(rt, "_caret_escape")
+
+
+def test_lifted_fence_is_not_dropped_when_slot_key_wraps() -> None:
+    # A prose run of 25 U+FFFF nonchars makes the slot key 53 chars wide;
+    # at width 40 rich wraps the placeholder line so no single rendered line
+    # holds the whole key. The fallback must append the content at the end
+    # rather than silently drop it.
+    long_run = rt._SLOT_UNIT * 25
+    text = f"intro {long_run} done\n\n```\n\x1b[1;33mmock\x1b[0m\n```\n"
+    out = rt._markdown_to_ansi(text, 40, True)
+    assert "\x1b[1;33mmock\x1b[0m" in out

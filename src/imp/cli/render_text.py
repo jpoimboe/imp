@@ -340,9 +340,18 @@ def _lift_colored_fences(text: str, color: bool) -> tuple[str, dict[str, list[st
 
 def _splice_lifted_fences(rendered: str, lifted: dict[str, list[str]]) -> str:
     out: list[str] = []
+    unmatched = dict(lifted)
     for line in rendered.split("\n"):
         slot = next((k for k in lifted if k in line), None)
-        out.extend(lifted[slot] if slot is not None else [line])
+        if slot is None:
+            out.append(line)
+        else:
+            unmatched.pop(slot, None)
+            out.extend(lifted[slot])
+    # A slot key wrapped by rich matches no single line; appending the lifted
+    # lines at the end loses position but never silently drops the content.
+    for lines in unmatched.values():
+        out.extend(lines)
     return "\n".join(out)
 
 
