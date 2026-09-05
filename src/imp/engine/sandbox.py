@@ -83,6 +83,7 @@ class SandboxPolicy:
     quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
     state_mask: str = ""                     # fail-closed tmpfs mask ("" → none)
     projects_ro: str = ""                    # ro bind of imp_home()/projects ("" → none)
+    state_repo_ro: str = ""                  # ro re-expose of <state dir>/repo ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     disposable_tree: bool = False            # agent runs in a disposable git worktree
@@ -122,8 +123,10 @@ class SandboxPolicy:
         worktree is deliberately NOT re-bound after it. In BOTH cases the quest_home
         rebind and the own steps/events masks come AFTER the tmpfs. Invariant: after the
         whole plan applies, the exposed set under the mask is EXACTLY the current
-        quest's own home (minus its own steps/events) plus the current worktree iff
-        the worktree is a descendant of the mask; everything else under it is masked.
+        quest's own home (minus its own steps/events), the read-only `repo` ownership
+        marker (state_repo_ro, so the $IMP_STATE_DIR guard can still read it), plus the
+        current worktree iff the worktree is a descendant of the mask; everything else
+        under it is masked.
         Mis-ordering buries a live quest's own bookkeeping (normal) or leaks every
         sibling (draft).
 
@@ -136,6 +139,7 @@ class SandboxPolicy:
         state_block = [
             *([(self.projects_ro, "ro")] if self.projects_ro else []),
             *([(self.state_mask, "mask_dir")] if self.state_mask else []),
+            *([(self.state_repo_ro, "ro")] if self.state_repo_ro else []),
         ]
         nested = bool(self.state_mask) and Path(self.worktree).is_relative_to(
             Path(self.state_mask))
