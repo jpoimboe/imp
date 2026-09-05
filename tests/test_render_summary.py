@@ -136,9 +136,12 @@ def test_plain_output_has_no_sgr_and_expected_lines():
     rows = [_row("plan", "plan-writer", 90)]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged  ·  39m 2s  ·  —  ·  —",
+        "feature  ·  abc  ·  merged",
+        "                 time  in  out  cost",
         "plan",
-        "  plan-writer  1m 30s  —  —",
+        "  plan-writer  1m 30s   —    —     —",
+        "",
+        "  total        39m 2s   —    —     —",
     ]
 
 
@@ -150,12 +153,15 @@ def test_plain_multi_step_shows_column_padding():
     ]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged  ·  39m 2s  ·  —  ·  —",
+        "feature  ·  abc  ·  merged",
+        "                 time  in  out  cost",
         "plan",
-        "  plan-writer  1m 30s  —  —",
-        "  plan-review   2m 0s  —  —",
+        "  plan-writer  1m 30s   —    —     —",
+        "  plan-review   2m 0s   —    —     —",
         "implement",
-        "  verify          30s  —  —",
+        "  verify          30s   —    —     —",
+        "",
+        "  total        39m 2s   —    —     —",
     ]
 
 
@@ -207,7 +213,7 @@ def test_open_trailing_step_renders_running():
                         status="running", total_seconds=None)
     rows = [_row("implement", "task-lead", 0, open_=True)]
     out = render_summary(rows, header=hdr, color=False, width=80)
-    assert "  task-lead  running" in out[-1]
+    assert "  task-lead  running" in out[3]
 
 
 def test_open_trailing_step_on_paused_change_reflects_status():
@@ -215,8 +221,8 @@ def test_open_trailing_step_on_paused_change_reflects_status():
                         status="paused", total_seconds=100.0)
     rows = [_row("implement", "task-lead", 0, open_=True)]
     out = render_summary(rows, header=hdr, color=False, width=80)
-    assert "  task-lead  paused" in out[-1]
-    assert "running" not in out[-1]
+    assert "  task-lead  paused" in out[3]
+    assert "running" not in out[3]
 
 
 def test_header_status_color_and_workflow_magenta():
@@ -776,7 +782,7 @@ def test_step_row_shows_token_and_cost_columns():
                                  priced=1))
     out = render_summary([row], header=_HDR, color=False, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
-    assert line == "  plan-writer  1m 30s  12.3k  ~$0.34"
+    assert line == "  plan-writer  1m 30s  12.0k  345  ~$0.34"
 
 
 def test_cost_column_is_a_dash_when_the_step_did_no_model_work():
@@ -787,7 +793,7 @@ def test_cost_column_is_a_dash_when_the_step_did_no_model_work():
                   usage=RowUsage(fresh_input=5))
     out = render_summary([row], header=_HDR, color=False, width=80)
     line = next(ln for ln in out if "10s" in ln)
-    assert line == "  s  10s  5  —"
+    assert line == "  s         10s   5    —     —"
 
 
 def test_duration_renders_in_step_hue():
@@ -806,8 +812,8 @@ def test_token_and_cost_columns_carry_no_color():
     out = render_summary([row], header=_HDR, color=True, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
     # Duration is hued for contrast, but the token/cost columns stay default
-    # foreground: the line ends with the plain "12.3k  ~$0.34" and no SGR reset.
-    assert line.endswith("  12.3k  ~$0.34")
+    # foreground: the line ends with the plain "12.0k  345  ~$0.34" and no SGR reset.
+    assert line.endswith("  12.0k  345  ~$0.34")
     assert "\x1b[34m1m 30s\x1b[0m" in line
 
 
@@ -815,36 +821,56 @@ def test_errored_step_duration_follows_error_color():
     rows = [_row("implement", "task-lead", 10, errored=True)]
     out = render_summary(rows, header=_HDR, color=True, width=80)
     line = next(ln for ln in out if "task-lead" in ln)
-    assert "\x1b[1m\x1b[31m10s\x1b[0m" in line
+    assert "\x1b[1m\x1b[31m   10s\x1b[0m" in line
 
 
-def test_header_total_is_work_time_excluding_wait():
+def test_header_carries_identity_only_and_the_total_row_carries_the_numbers():
     rows = [StepRow(phase="implement", step="verify",
                     start_ts="2026-01-01T00:00:00+00:00",
-                    end_ts="2026-01-01T00:02:00+00:00", wait_seconds=90.0)]
+                    end_ts="2026-01-01T00:02:00+00:00", wait_seconds=90.0,
+                    usage=RowUsage(fresh_input=1000, output=40, dollars=0.20,
+                                   priced=1))]
     hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=120.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
-    assert "30s" in out[0]     # 120s total - 90s wait = 30s work
-    assert "2m 0s" not in out[0]
+    assert out[0] == "f  ·  c  ·  merged"     # AC 19: identity only
+    assert "$" not in out[0]
+    assert "1.0k" not in out[0]
+    total = next(ln for ln in out if ln.startswith("  total"))
+    assert total == "  total    30s  1.0k   40  ~$0.20"  # 120s - 90s wait
 
 
-def test_header_rolls_up_step_tokens_and_cost():
+def test_total_row_is_the_sum_of_the_step_rows_including_subagents():
     rows = [
         StepRow(phase="plan", step="a",
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T00:00:30+00:00",
-                usage=RowUsage(fresh_input=1000, dollars=0.20, priced=1)),
+                usage=RowUsage(fresh_input=1000, output=40, dollars=0.20,
+                               priced=1)),
         StepRow(phase="plan", step="b",
                 start_ts="2026-01-01T00:00:30+00:00",
                 end_ts="2026-01-01T00:01:00+00:00",
-                usage=RowUsage(fresh_input=1500, dollars=0.30, priced=1)),
+                usage=RowUsage(fresh_input=1000, output=10, dollars=0.10,
+                               priced=1),
+                subagents=[SubagentRow(
+                    name="coder",
+                    start_ts="2026-01-01T00:00:35+00:00",
+                    end_ts="2026-01-01T00:00:55+00:00",
+                    usage=RowUsage(fresh_input=500, output=10, dollars=0.20,
+                                   priced=1))]),
     ]
-    hdr = SummaryHeader(workflow="feature", quest_id="abc", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
-    assert "2.5k" in out[0]    # 1000 + 1500 tokens rolled up
-    assert "$0.50" in out[0]   # 0.20 + 0.30 cost rolled up
+    # AC 19/20: 1000 + (1000 + 500) in, 40 + (10 + 10) out, 0.20 + 0.30 cost.
+    assert next(ln for ln in out if ln.startswith("  total")) \
+        == "  total      1m 0s  2.5k   60  ~$0.50"
+    # Step b's own row already folds its subagent in; the subagent still shows
+    # its own figures on the indented line.
+    assert next(ln for ln in out if ln.startswith("  b ")) \
+        == "  b            30s  1.5k   20  ~$0.30"
+    assert next(ln for ln in out if "coder" in ln) \
+        == "    ↳ coder    20s   500   10  ~$0.20"
 
 
 def test_subagent_row_indented_with_own_figures():
@@ -861,8 +887,8 @@ def test_subagent_row_indented_with_own_figures():
     out = render_summary([step], header=_HDR, color=False, width=80)
     step_line = next(ln for ln in out if "task-lead" in ln)
     sub_line = next(ln for ln in out if "explorer" in ln)
-    assert step_line == "  task-lead     1m 0s  300  ~$0.15"
-    assert sub_line == "    ↳ explorer    45s  200  ~$0.05"
+    assert step_line == "  task-lead      1m 0s  300    —  ~$0.15"
+    assert sub_line == "    ↳ explorer     45s  200    —  ~$0.05"
 
 
 def test_subagent_label_shown_in_parens():
@@ -888,7 +914,7 @@ def test_subagent_duration_follows_subagent_color():
                        end_ts="2026-01-01T00:00:50+00:00")])
     out = render_summary([step], header=_HDR, color=True, width=80)
     sub_line = next(ln for ln in out if "explorer" in ln)
-    assert "\x1b[35m  45s\x1b[0m" in sub_line   # magenta subagent duration
+    assert "\x1b[35m   45s\x1b[0m" in sub_line   # magenta subagent duration
 
 
 def test_errored_subagent_duration_follows_error_color():
@@ -901,25 +927,7 @@ def test_errored_subagent_duration_follows_error_color():
                        end_ts="2026-01-01T00:00:50+00:00")])
     out = render_summary([step], header=_HDR, color=True, width=80)
     sub_line = next(ln for ln in out if "coder" in ln)
-    assert "\x1b[1m\x1b[31m  45s\x1b[0m" in sub_line
-
-
-def test_header_rollup_includes_subagent_tokens_and_cost():
-    step = StepRow(phase="implement", step="task-lead",
-                   start_ts="2026-01-01T00:00:00+00:00",
-                   end_ts="2026-01-01T00:00:30+00:00",
-                   usage=RowUsage(fresh_input=1000, dollars=0.20, priced=1),
-                   subagents=[SubagentRow(
-                       name="coder",
-                       start_ts="2026-01-01T00:00:05+00:00",
-                       end_ts="2026-01-01T00:00:25+00:00",
-                       usage=RowUsage(fresh_input=1500, dollars=0.30,
-                                      priced=1))])
-    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
-                        total_seconds=30.0)
-    out = render_summary([step], header=hdr, color=False, width=80)
-    assert "2.5k" in out[0]    # 1000 step + 1500 subagent
-    assert "$0.50" in out[0]   # 0.20 step + 0.30 subagent
+    assert "\x1b[1m\x1b[31m   45s\x1b[0m" in sub_line
 
 
 def test_header_merge_blocked_renders_two_words_bold():
@@ -1143,9 +1151,9 @@ def test_inferred_ends_render_with_a_tilde_on_step_and_subagent():
                                           end_ts="2026-01-01T00:02:24+00:00",
                                           end_inferred=True)])
     out = render_summary([step], header=_HDR, color=False, width=80)
-    assert out[-2:] == [
-        "  task-lead   ~5m 0s  —  —",
-        "    ↳ coder  ~2m 14s  —  —",
+    assert out[3:5] == [
+        "  task-lead   ~5m 0s   —    —     —",
+        "    ↳ coder  ~2m 14s   —    —     —",
     ]
 
 
@@ -1155,9 +1163,9 @@ def test_open_spans_in_a_finished_quest_read_interrupted():
                    subagents=[SubagentRow(name="coder",
                                           start_ts="2026-01-01T00:00:10+00:00")])
     out = render_summary([step], header=_HDR, color=False, width=80)   # _HDR is merged
-    assert out[-2:] == [
-        "  task-lead  interrupted  —  —",
-        "    ↳ coder  interrupted  —  —",
+    assert out[3:5] == [
+        "  task-lead  interrupted   —    —     —",
+        "    ↳ coder  interrupted   —    —     —",
     ]
     assert "merged" not in "\n".join(out[1:])   # the status word stays in the header
 
@@ -1168,8 +1176,8 @@ def test_other_finished_statuses_also_read_interrupted(status):
                         total_seconds=100.0)
     out = render_summary([_row("implement", "task-lead", 0, open_=True)],
                          header=hdr, color=False, width=80)
-    assert "  task-lead  interrupted" in out[-1]
-    assert status not in out[-1]
+    assert "  task-lead  interrupted" in out[3]
+    assert status not in out[3]
 
 
 def test_merge_blocked_open_step_reads_two_words():
@@ -1177,8 +1185,8 @@ def test_merge_blocked_open_step_reads_two_words():
                         status="merge_blocked", total_seconds=100.0)
     out = render_summary([_row("implement", "task-lead", 0, open_=True)],
                          header=hdr, color=False, width=80)
-    assert "  task-lead  merge blocked" in out[-1]
-    assert "merge_blocked" not in out[-1]
+    assert "  task-lead  merge blocked" in out[3]
+    assert "merge_blocked" not in out[3]
 
 
 def test_alignment_across_tilde_plain_and_interrupted_cells():
@@ -1196,13 +1204,14 @@ def test_alignment_across_tilde_plain_and_interrupted_cells():
                 start_ts="2026-01-01T00:02:00+00:00", end_ts=None),
     ]
     out = render_summary(rows, header=_HDR, color=False, width=80)
-    assert out[2:] == [
-        "  a                1m 0s  —  —",
-        "    ↳ coder          45s  —  —",
-        "  b                 ~45s  —  —",
-        "  c          interrupted  —  —",
+    assert out[3:7] == [
+        "  a                1m 0s   —    —     —",
+        "    ↳ coder          45s   —    —     —",
+        "  b                 ~45s   —    —     —",
+        "  c          interrupted   —    —     —",
     ]
-    assert len({len(ln) for ln in out[2:]}) == 1   # one column grid for every row
+    # titles, every row and the totals line share one column grid
+    assert len({len(ln) for ln in [out[1], *out[3:7], out[8]]}) == 1
 
 
 def test_step_totals_include_every_subagent_while_own_usage_does_not():
@@ -1343,3 +1352,125 @@ def test_a_step_row_mixing_vendors_brackets_while_the_leaf_keeps_its_form():
                                       priced=1))])
     assert cost_cell(step.totals) == "[$1.50]"
     assert cost_cell(step.subagents[0].usage) == "~$0.50"
+
+
+def test_title_row_is_dim_and_absent_when_there_are_no_step_rows():
+    # AC 21: the dim title row appears with the first step row, not before it.
+    # The totals row still renders, so a range with no step rows keeps its time.
+    assert render_summary([], header=_HDR, color=False, width=80) == [
+        "feature  ·  abc  ·  merged",
+        "",
+        "  total  39m 2s   —    —     —",
+    ]
+    out = render_summary([_row("plan", "plan-writer", 90)], header=_HDR,
+                         color=True, width=80)
+    assert out[1] == "\x1b[2m                 time  in  out  cost\x1b[0m"
+
+
+def test_a_range_with_no_step_rows_still_reports_the_runs_time():
+    # `imp log -s <id> 1-3` on a window with no step_started still has a span:
+    # main.py:2486 selects events before the summary branch reads them.
+    hdr = SummaryHeader(workflow="default", quest_id="abc",
+                        status="running", total_seconds=2342.0)
+    assert render_summary([], header=hdr, color=False, width=80)[-1] \
+        == "  total  39m 2s   —    —     —"
+    # No span recorded at all: the duration reads open, not a fabricated zero.
+    blank = SummaryHeader(workflow="default", quest_id="abc",
+                          status="running", total_seconds=None)
+    assert render_summary([], header=blank, color=False, width=80)[-1] \
+        == "  total  running   —    —     —"
+
+
+def test_the_reference_after_state_renders_verbatim():
+    # The spec's §7 reference block for a subscription run, byte for byte.
+    def _sub_row(name, label, secs, usage):
+        return SubagentRow(
+            name=name, label=label,
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts=f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00",
+            usage=usage)
+
+    def _step(phase, step, secs, usage, subs=()):
+        return StepRow(
+            phase=phase, step=step,
+            start_ts="2026-01-01T00:00:00+00:00",
+            end_ts=f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00",
+            usage=usage, subagents=list(subs))
+
+    notional = dict(priced=1, notional=1)
+    rows = [
+        _step("scoping", "threshold", 720,
+              RowUsage(fresh_input=163_000, output=3_000, dollars=0.27,
+                       **notional)),
+        _step("build", "coder", 2160,
+              RowUsage(fresh_input=3_350_000, output=60_000, dollars=5.76,
+                       **notional),
+              [_sub_row("explorer", "exploring codebase", 420,
+                        RowUsage(fresh_input=350_000, output=4_000,
+                                 dollars=0.40, **notional))]),
+        _step("integration", "integrate", 120, RowUsage()),
+    ]
+    hdr = SummaryHeader(workflow="default", quest_id="zita45",
+                        status="merged", total_seconds=3120.0)
+    assert render_summary(rows, header=hdr, color=False, width=80) == [
+        "default  ·  zita45  ·  merged",
+        "                                       time      in    out     cost",
+        "scoping",
+        "  threshold                          12m 0s  163.0k   3.0k  [$0.27]",
+        "build",
+        "  coder                              36m 0s    3.7M  64.0k  [$6.16]",
+        "    ↳ explorer (exploring codebase)   7m 0s  350.0k   4.0k  [$0.40]",
+        "integration",
+        "  integrate                           2m 0s       —      —        —",
+        "",
+        "  total                              52m 0s    3.9M  67.0k  [$6.43]",
+        "  [ ] list-price equivalent; subscription usage is not billed per token",
+    ]
+
+
+def test_a_mixed_auth_run_shows_both_legend_lines_tilde_first():
+    # AC 18: a metered step and a notional step; the total brackets (AC 17a).
+    rows = [
+        StepRow(phase="p", step="metered",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:00:30+00:00",
+                usage=RowUsage(fresh_input=100, output=10, dollars=2.00,
+                               priced=1)),
+        StepRow(phase="p", step="subscription",
+                start_ts="2026-01-01T00:00:30+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                usage=RowUsage(fresh_input=100, output=10, dollars=4.00,
+                               priced=1, notional=1)),
+    ]
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+                        total_seconds=60.0)
+    out = render_summary(rows, header=hdr, color=False, width=80)
+    assert out[3].endswith("~$2.00")
+    assert out[4].endswith("[$4.00]")
+    assert out[-3].endswith("[$6.00]")          # the total brackets under a mix
+    assert out[-2:] == [
+        "  ~ estimated at API list price",
+        "  [ ] list-price equivalent; subscription usage is not billed per token",
+    ]
+
+
+def test_an_unpriced_step_floors_the_total_and_adds_the_third_legend_line():
+    # AC 17(b): one step ran on a model absent from the price table.
+    rows = [
+        StepRow(phase="p", step="a", start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:00:30+00:00",
+                usage=RowUsage(fresh_input=100, output=10, dollars=2.00,
+                               priced=1)),
+        StepRow(phase="p", step="b", start_ts="2026-01-01T00:00:30+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                usage=RowUsage(fresh_input=900, output=90, unpriced=1)),
+    ]
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+                        total_seconds=60.0)
+    out = render_summary(rows, header=hdr, color=False, width=80)
+    assert out[4].endswith("n/a")
+    assert out[-3] == "  total  1m 0s  1.0k  100  ≥~$2.00"
+    assert out[-2:] == [
+        "  ~ estimated at API list price",
+        "  ≥ excludes steps run on a model absent from the price table",
+    ]

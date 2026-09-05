@@ -93,8 +93,8 @@ _INTERRUPTED_EVENTS = [
     "argv,inferred_cell,interrupted_cell",
     [
         (["log", "alpha", "-s", "--no-pager"],
-         "    ↳ coder      ~4m 50s  —  —",
-         "  verify     interrupted  —  —"),
+         "    ↳ coder      ~4m 50s   —    —     —",
+         "  verify     interrupted   —    —     —"),
         (["log", "alpha", "-s", "--md=-"],
          "| ↳ coder | ~4m 50s | — | — |",
          "| verify | interrupted | — | — |"),

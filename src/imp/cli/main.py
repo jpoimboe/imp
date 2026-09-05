@@ -3988,7 +3988,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log_mode.add_argument(
         "-s", "--summary", action="store_true",
         help="Compact run-overview timeline: one line per step occurrence, "
-             "grouped by phase, with wall-clock durations.",
+             "grouped by phase, with work time, tokens and cost per step.",
     )
     p_log.add_argument(
         "--no-pager", action="store_true",

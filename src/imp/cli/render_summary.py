@@ -323,62 +323,91 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
     return elapsed_seconds(events[0].get("timestamp"), events[-1].get("timestamp"))
 
 
-def _header_line(h: SummaryHeader, work_seconds: float | None,
-                 total: RowUsage, *, color: bool) -> str:
+def _header_line(h: SummaryHeader, *, color: bool) -> str:
     workflow = pal.ansi(h.workflow, *pal.NODE_COLORS["workflow"], enabled=color)
     status = pal.ansi(display_word(h.status), *STATUS_COLORS.get(h.status, ()), enabled=color)
-    return (f"{workflow}  ·  {h.quest_id}  ·  {status}"
-            f"  ·  {_dur_text(work_seconds)}"
-            f"  ·  {_fmt_tokens(_tok_total(total))}  ·  {cost_cell(total)}")
+    return f"{workflow}  ·  {h.quest_id}  ·  {status}"
 
 
-def _column_widths(summary: list[StepRow], open_label: str) -> tuple[int, int, int, int]:
-    """Column widths measured across every step AND subagent so numbers align."""
+_TITLES = ("time", "in", "out", "cost")
+_TOTAL_LABEL = "total"
+
+
+def _column_widths(summary: list[StepRow], open_label: str,
+                   total_work: float | None,
+                   total_usage: RowUsage) -> tuple[int, int, int, int, int]:
+    """Widths measured across step rows, subagent rows, the totals row, and title labels."""
     names = [len(r.step) for r in summary]
     names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
-    durs: list[int] = []
-    toks: list[int] = []
-    costs: list[int] = []
+    names.append(len(_TOTAL_LABEL))
+    durs = [len(_dur_text(total_work)), len(_TITLES[0])]
+    ins = [len(_fmt_tokens(total_usage.input_total)), len(_TITLES[1])]
+    outs = [len(_fmt_tokens(total_usage.output)), len(_TITLES[2])]
+    costs = [len(cost_cell(total_usage)), len(_TITLES[3])]
     for r in summary:
         durs.append(len(r.dur_cell(open_label)))
-        toks.append(len(_fmt_tokens(_tok_total(r.totals))))
+        ins.append(len(_fmt_tokens(r.totals.input_total)))
+        outs.append(len(_fmt_tokens(r.totals.output)))
         costs.append(len(cost_cell(r.totals)))
         for s in r.subagents:
             durs.append(len(s.dur_cell(open_label)))
-            toks.append(len(_fmt_tokens(_tok_total(s.usage))))
+            ins.append(len(_fmt_tokens(s.usage.input_total)))
+            outs.append(len(_fmt_tokens(s.usage.output)))
             costs.append(len(cost_cell(s.usage)))
-    return (max(names, default=0), max(durs, default=0),
-            max(toks, default=0), max(costs, default=0))
+    return (max(names), max(durs), max(ins), max(outs), max(costs))
+
+
+def _cells(u: RowUsage, in_w: int, out_w: int, cost_w: int) -> str:
+    """The three numeric cells, right-justified and never coloured."""
+    return (f"{_fmt_tokens(u.input_total):>{in_w}}  "
+            f"{_fmt_tokens(u.output):>{out_w}}  {cost_cell(u):>{cost_w}}")
 
 
 def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
-               tok_w: int, cost_w: int, color: bool, open_label: str) -> str:
+               in_w: int, out_w: int, cost_w: int, color: bool,
+               open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
     name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    tok = f"{_fmt_tokens(_tok_total(row.totals)):>{tok_w}}"
-    cost = f"{cost_cell(row.totals):>{cost_w}}"
-    return f"  {name}  {dur}  {tok}  {cost}"
+    return f"  {name}  {dur}  {_cells(row.totals, in_w, out_w, cost_w)}"
 
 
-def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int,
-              tok_w: int, cost_w: int, color: bool, open_label: str) -> str:
+def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int, in_w: int,
+              out_w: int, cost_w: int, color: bool, open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if sub.errored else pal.NODE_COLORS["subagent"]
     # The extra two-space indent is absorbed by narrowing the label field, so the
     # numeric columns stay aligned with the step rows (see _column_widths).
     body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
     dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    tok = f"{_fmt_tokens(_tok_total(sub.usage)):>{tok_w}}"
-    cost = f"{cost_cell(sub.usage):>{cost_w}}"
-    return f"    {body}  {dur}  {tok}  {cost}"
+    return f"    {body}  {dur}  {_cells(sub.usage, in_w, out_w, cost_w)}"
+
+
+def _title_line(*, name_w: int, dur_w: int, in_w: int, out_w: int,
+                cost_w: int, color: bool) -> str:
+    time_t, in_t, out_t, cost_t = _TITLES
+    body = (f"  {'':<{name_w}}  {time_t:>{dur_w}}  {in_t:>{in_w}}  "
+            f"{out_t:>{out_w}}  {cost_t:>{cost_w}}")
+    return pal.ansi(body, *pal.NODE_COLORS["metadata"], enabled=color)
+
+
+def _total_line(work: float | None, total: RowUsage, *, name_w: int,
+                dur_w: int, in_w: int, out_w: int, cost_w: int) -> str:
+    # Work time, not a column sum: it includes the gaps between steps.
+    return (f"  {_TOTAL_LABEL:<{name_w}}  {_dur_text(work):>{dur_w}}  "
+            f"{_cells(total, in_w, out_w, cost_w)}")
 
 
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int) -> list[str]:
     open_label = open_span_label(header.status)
-    name_w, dur_w, tok_w, cost_w = _column_widths(summary, open_label)
     work, total = summary_totals(summary, header.total_seconds)
-    lines = [_header_line(header, work, total, color=color)]
+    name_w, dur_w, in_w, out_w, cost_w = _column_widths(
+        summary, open_label, work, total)
+    lines = [_header_line(header, color=color)]
+    if summary:
+        lines.append(_title_line(name_w=name_w, dur_w=dur_w, in_w=in_w,
+                                 out_w=out_w, cost_w=cost_w, color=color))
+    cells = [cost_cell(total)]
     cur_phase: str | None = None
     hues: dict[str, str] = {}
     next_hue = 0
@@ -390,11 +419,19 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
         if row.step not in hues:
             hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
             next_hue += 1
+        cells.append(cost_cell(row.totals))
         lines.append(_step_line(row, hue=hues[row.step], name_w=name_w,
-                                dur_w=dur_w, tok_w=tok_w, cost_w=cost_w, color=color,
+                                dur_w=dur_w, in_w=in_w, out_w=out_w,
+                                cost_w=cost_w, color=color,
                                 open_label=open_label))
         for sub in row.subagents:
-            lines.append(_sub_line(sub, name_w=name_w, dur_w=dur_w,
-                                   tok_w=tok_w, cost_w=cost_w, color=color,
+            cells.append(cost_cell(sub.usage))
+            lines.append(_sub_line(sub, name_w=name_w, dur_w=dur_w, in_w=in_w,
+                                   out_w=out_w, cost_w=cost_w, color=color,
                                    open_label=open_label))
+    lines.append("")
+    lines.append(_total_line(work, total, name_w=name_w, dur_w=dur_w,
+                             in_w=in_w, out_w=out_w, cost_w=cost_w))
+    lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)
+              for t in legend_lines(cells)]
     return lines
