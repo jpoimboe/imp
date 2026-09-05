@@ -2,6 +2,7 @@
 journals one audit event per check."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -301,3 +302,121 @@ async def test_a_non_auth_error_triggers_no_probe(
     assert [e["payload"]["category"] for e in errs] == ["network"]
     refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
     assert [e["payload"] for e in refreshes] == [{"outcome": "not_applicable"}]
+
+
+def _write_canonical(base: Path, expires_at: int) -> None:
+    base.mkdir(parents=True, exist_ok=True)
+    (base / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": "x", "refreshToken": "y",
+                                      "expiresAt": expires_at}}),
+        encoding="utf-8")
+
+
+def _canonical_env(monkeypatch: pytest.MonkeyPatch, base: Path) -> None:
+    """Point the canonical reader at `base`; the autouse conftest fixture sets
+    ANTHROPIC_API_KEY, which would otherwise short-circuit the read to None."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(base))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+
+@pytest.mark.anyio
+async def test_fresh_spawn_records_the_post_refresh_canonical_expiry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recorded value is the expiry as of AFTER the pre-spawn refresh: the
+    fake refresh rotates the file, and the pre-refresh value must not be what
+    lands on the runner."""
+    (tmp_path / "art").mkdir()
+    canonical = tmp_path / "canonical"
+    _write_canonical(canonical, NOW + 60_000)          # pre-refresh
+    _canonical_env(monkeypatch, canonical)
+    order: list[str] = []
+
+    def _fake_refresh(now_ms: int, *, env: Any = None,
+                      force: bool = False) -> ctr.RefreshOutcome:
+        order.append("refresh")
+        _write_canonical(canonical, NOW + 3600 * 1000)  # the refresh rotates it
+        return ctr.RefreshOutcome(ctr.REFRESHED, expires_at=NOW + 3600 * 1000)
+
+    def _fake_materialize() -> Path:
+        order.append("materialize")
+        cfg = tmp_path / "cfg"
+        (cfg / "projects").mkdir(parents=True, exist_ok=True)
+        return cfg
+
+    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(
+        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert order == ["refresh", "materialize"]   # fresh disposition, refresh first
+    assert runner._spawn_token_expiry == NOW + 3600 * 1000
+
+
+@pytest.mark.anyio
+async def test_native_resume_records_the_canonical_expiry_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No ephemeral config dir is materialized on this path (_config_dir stays
+    None), and the expiry is recorded anyway."""
+    (tmp_path / "art").mkdir()
+    canonical = tmp_path / "canonical"
+    _write_canonical(canonical, NOW + 7200 * 1000)
+    _canonical_env(monkeypatch, canonical)
+    materialized: list[Any] = []
+
+    def _fake_refresh(now_ms: int, *, env: Any = None,
+                      force: bool = False) -> ctr.RefreshOutcome:
+        return ctr.RefreshOutcome(ctr.SKIPPED_FRESH)
+
+    def _fake_materialize() -> Path:
+        materialized.append(True)
+        raise AssertionError("native resume must not copy a fresh config dir")
+
+    monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
+    monkeypatch.setattr(
+        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="hi"),)))
+    t.append(Message(role="user", content=(TextBlock(text="keep going"),)))
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
+    events = [ev async for ev in runner.run(inv)]
+
+    assert materialized == []                               # native path: no config copy
+    assert events[-1]["type"] == "agent_result"            # no exception swallowed
+    assert runner._spawn_token_expiry == NOW + 7200 * 1000
+
+
+@pytest.mark.anyio
+async def test_torn_canonical_file_records_none_without_derailing_the_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A torn credential file leaves the signal absent rather than raising: the
+    spawn proceeds to its normal agent_result."""
+    (tmp_path / "art").mkdir()
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    (canonical / ".credentials.json").write_text(
+        '{"claudeAiOauth": {"expiresAt": 17', encoding="utf-8")
+    _canonical_env(monkeypatch, canonical)
+    _probe_seam(monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.NOT_APPLICABLE))
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert events[-1]["type"] == "agent_result"
+    assert runner._spawn_token_expiry is None

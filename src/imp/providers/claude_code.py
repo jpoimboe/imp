@@ -116,6 +116,7 @@ from imp.providers.claude_code_session_store import (
 from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     RefreshOutcome,
+    canonical_expires_at,
     refresh_canonical_token,
 )
 from imp.providers.observe_classify import (
@@ -1265,6 +1266,7 @@ class ClaudeCodeSession(ObserveSession):
         fresh_stream = shape_native_eligible and resume_base == 0
         native_resume = shape_native_eligible
         _pre_spawn_token_refresh(elog, aid)
+        runner._spawn_token_expiry = canonical_expires_at()
         config_dir: Path | None = None
         if is_fresh or fresh_stream:
             config_dir = materialize_fresh_config_dir()
@@ -1948,6 +1950,9 @@ class ClaudeCodeAgentRunner:
         self._stderr_sink: Any = None
         # ephemeral CLAUDE_CONFIG_DIR for a fresh run; run()'s finally removes it
         self._config_dir: Path | None = None
+        # canonical expiry this spawn started from; a different value at 401 time
+        # means a peer rotated the token underneath us
+        self._spawn_token_expiry: int | None = None
         # Cooperative-interrupt (steer) state. _steer_requested is the distinct
         # intent flag (separate from _cancel, which keeps meaning hard-cancel /
         # teardown); the receive loop sets _steer_unblocked when the
