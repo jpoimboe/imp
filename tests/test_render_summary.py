@@ -1295,6 +1295,18 @@ def test_metered_marker_reads_anthropic_and_openai_from_provider_alone():
     assert cost_cell(openai.totals) == "~$0.60"
 
 
+def test_an_openai_request_over_272k_is_surcharged_end_to_end():
+    # AC 7(a): boundary is exclusive — 272k is not surcharged, 272k+1 is.
+    # Unsurcharged: 272000*$4/1e6 + 10000*$20/1e6 = $1.088 + $0.200 = $1.288
+    # Surcharged:   272001*$4*2/1e6 + 10000*$20*1.5/1e6 = $2.176008 + $0.300 = $2.476008
+    at_boundary = _one_step(_openai_msg("a1", "2026-01-01T00:00:05+00:00",
+                                        input=272_000, output=10_000))
+    over_boundary = _one_step(_openai_msg("a1", "2026-01-01T00:00:05+00:00",
+                                          input=272_001, output=10_000))
+    assert at_boundary.totals.dollars == pytest.approx(1.288)
+    assert over_boundary.totals.dollars == pytest.approx(2.476008)
+
+
 def test_metered_marker_reads_auth_mode_on_codex_and_claude_code():
     apikey = _one_step(_codex("a1", "2026-01-01T00:00:05+00:00",
                               auth_mode="apikey"),
