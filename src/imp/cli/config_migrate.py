@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """One-shot startup migrations: the global config file's move into $IMP_HOME, the
-project config file's staged rename, and the per-project state directory's move out
-of the checkout. Run by the console-script entrypoint (`imp.__main__:main`), never
-by `imp.cli.main:main` — the suite drives the latter in-process, where a migration
+project config file's staged rename, the `repo` ownership marker's backfill into
+imp-owned state directories, and the per-project state directory's move out of the
+checkout. Run by the console-script entrypoint (`imp.__main__:main`), never by
+`imp.cli.main:main` — the suite drives the latter in-process, where a migration
 would rearrange the developer's own files."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -16,7 +18,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-from imp.paths import display_path
+from imp.paths import display_path, imp_home
 
 
 def migrate_global_config(legacy: Path, new: Path) -> None:
@@ -161,7 +163,6 @@ def migrate_config_layers(cwd: Path) -> None:
     ~/.imp locations go first: only the checkout needs git to resolve, and
     resolving it can raise outside a work tree — which under the caller's one
     `suppress` would otherwise take the machine-wide files down with it."""
-    from imp.paths import imp_home
     from imp.providers.paths import global_config_path
 
     rewrite_config_file(global_config_path())
@@ -170,6 +171,17 @@ def migrate_config_layers(cwd: Path) -> None:
     checkout = _checkout_config(cwd)
     if checkout is not None:
         rewrite_config_file(checkout)
+
+
+def _state_candidates(state_dir: Path) -> list[Path]:
+    """Every project_root a state directory's own records name. The archive is a
+    first-class source, not a fallback: terminal quest homes are reaped, so a project
+    between quests has records and no live quest at all."""
+    roots = [str(json.loads(meta.read_text()).get("project_root") or "")
+             for meta in sorted((state_dir / "quests").glob("*/quest.json"))]
+    roots += [str(json.loads(rec.read_text()).get("quest_meta", {}).get("project_root") or "")
+              for rec in sorted((state_dir / "archive" / "records").glob("*.json"))]
+    return [Path(root) for root in roots if root]
 
 
 def run_startup_migrations() -> None:
