@@ -2663,3 +2663,38 @@ def test_draft_ordering_holds_under_the_override(tmp_path, monkeypatch):
         override.resolve() / "quests" / "sibling" / "state.json") is False
     assert pol.allows_read(
         quest_dir.resolve() / "artifacts" / "spec" / "abc.md") is True
+
+
+def test_resolve_policy_re_exposes_this_projects_repo_marker(tmp_path):
+    # AC 20: a policy for a REAL quest — the field must be wired at the one place
+    # state_mask is set, not just constructible by hand.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    marker = project_state_dir(control).resolve() / "repo"
+    assert pol.state_repo_ro == str(marker)
+    assert pol.state_mask == str(marker.parent)
+    assert (pol.state_repo_ro, "ro") in pol.bind_plan()
+    # The slug walk already minted it, so the guard has a real file to read in-sandbox.
+    assert marker.read_text() == f"{control.resolve()}\n"
+    assert pol.allows_read(marker) is True
+    assert pol.allows_write(marker) is False
+
+
+def test_an_inactive_policy_carries_no_repo_re_expose(tmp_path):
+    # AC 20's second half: the inactive policy binds nothing, so it must not claim a
+    # path either — build_sandbox_argv would never emit it, and the mirror must agree.
+    control, _wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=control, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(allow_unsandboxed=True), engine_env_result={},
+        environ={}, available=False,
+    )
+    assert pol.active is False
+    assert pol.note == "unsandboxed_by_config"
+    assert pol.state_repo_ro == ""
+    assert not [b for b, _ in pol.bind_plan() if b.endswith("/repo")]
+    assert build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}) == [
+        "sh", "-c", "x"]

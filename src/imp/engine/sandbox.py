@@ -716,6 +716,7 @@ def resolve_policy(
         git_common_dir=str(git),
         quest_home=str(quest_dir) if quest_dir is not None else "",
         state_mask=state_mask,
+        state_repo_ro=f"{state_mask}/repo",
         projects_ro=projects_ro,
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
