@@ -820,7 +820,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
         return
 
     if isinstance(node, nv.AgentTextNode):
-        yield from _render_markdown_block(_caret_escape(node.text), width, depth,
+        yield from _render_markdown_block(_caret_escape_prose(node.text), width, depth,
                                           color, display_width, gutters)
         return
 

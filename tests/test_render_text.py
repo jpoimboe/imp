@@ -3239,3 +3239,66 @@ def test_both_fence_scans_see_the_same_text() -> None:
             "\x1b[32mB\x1b[0m\n```\n")
     assert "\x1b" not in "\n".join(
         rt._render_markdown_block(rt._caret_escape_prose(text), 70, 0, color=False))
+
+
+def _agent_lines(text: str, *, color: bool, width: int = 80) -> list[str]:
+    tree = nv.build_tree([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": text}]}),
+    ])
+    return list(render_tree(tree, full=True, color=color, width=width))
+
+
+def test_agent_prose_fence_reaches_the_screen_in_color() -> None:
+    out = "\n".join(_agent_lines(
+        "Look:\n\n```\n\x1b[1;33m▌ imp\x1b[0m done\n```\n", color=True))
+    assert "\x1b[1;33m▌ imp\x1b[0m done" in out
+    assert "^[[1;33m" not in out
+
+
+def test_agent_prose_carets_every_control_byte_that_is_not_fenced_sgr() -> None:
+    out = "\n".join(_agent_lines(
+        "Look:\n\n```\n\x1b[31mred\x1b[0m \x07 \x1b[2J \x1b[5A \x1b]0;title\x07\n```\n\n"
+        "and \x1b[32mgreen\x1b[0m in prose\n", color=True))
+    assert "\x1b[31mred\x1b[0m" in out                    # fenced SGR survives
+    assert "^G" in out and "^[[2J" in out and "^[[5A" in out
+    assert "^[]0;title^G" in out
+    assert "\x07" not in out
+    assert "^[[32mgreen^[[0m" in out                      # outside a fence: caret
+    assert "\x1b[32m" not in out
+
+
+def test_agent_prose_tilde_fence_matches_backtick_and_indented_code_carets() -> None:
+    tilde = _agent_lines(f"Look:\n\n~~~\n{_STATUS_LINE}\n~~~\n", color=True, width=70)
+    hits = [ln for ln in tilde if "planning" in _visible(ln)]
+    assert len(hits) == 1                                 # same width accounting
+    assert "\x1b[1;33m▌ imp\x1b[0m" in hits[0]
+    indented = "\n".join(_agent_lines("Look:\n\n    \x1b[31mred\x1b[0m\n", color=True))
+    assert "^[[31mred^[[0m" in indented                   # indented block: no exception
+
+
+def test_agent_prose_with_color_off_emits_no_escape_at_all() -> None:
+    out = "\n".join(_agent_lines(f"Look:\n\n```\n{_STATUS_LINE}\n```\n", color=False))
+    assert "\x1b" not in out
+    assert "▌ imp planning · step 3 of 7 · writing the plan summary" in out
+
+
+def test_a_leading_code_span_does_not_strand_a_later_mockup() -> None:
+    # "```x``` explained" is a paragraph, not a fence opener. If it were treated as
+    # one, every later span shifts and the real mockup below renders as caret noise.
+    out = "\n".join(_agent_lines(
+        "```code``` explained\n\nHere:\n\n```\n\x1b[1;33m▌ imp\x1b[0m planning\n```\n",
+        color=True))
+    assert "\x1b[1;33m▌ imp\x1b[0m planning" in out
+    assert "^[[" not in out
+    assert "explained" in _visible(out)          # the paragraph's text is not swallowed
+
+
+def test_literal_text_node_colored_fence_stays_caret_escaped() -> None:
+    node = nv.LiteralTextNode(text="Look:\n\n```\n\x1b[1;33m▌ imp\x1b[0m\n```\n")
+    out = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert "^[[1;33m" in out                              # literal text keeps absolute escaping
+    assert "\x1b[1;33m" not in out
