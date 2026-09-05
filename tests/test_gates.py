@@ -1,6 +1,8 @@
 # tests/test_gates.py — rewrite
+import contextlib
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -764,6 +766,59 @@ def test_graceful_kill_reaps_on_sigterm_without_waiting_grace(tmp_path) -> None:
 
     assert elapsed < GATE_KILL_GRACE_S             # exited on SIGTERM, no grace burn
     assert proc.returncode is not None
+    assert proc.stdout.closed and proc.stderr.closed
+
+
+def _pid_gone_or_zombie(pid: int) -> bool:
+    """True once `pid` has exited or is an unreaped zombie (state Z) — a zombie
+    counts as terminated, tolerating the window before init reaps an orphan."""
+    try:
+        data = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return True
+    return data.rpartition(")")[2].split()[0] == "Z"
+
+
+def test_graceful_kill_escalates_when_group_leader_exits_first(tmp_path) -> None:
+    """The sandbox shape, reproduced without bwrap: the group LEADER exits on
+    SIGTERM at ~0s while a TERM-ignoring member of its group keeps running.
+    Escalation must key on group liveness, not on the leader's exit, or the
+    member is leaked."""
+    from imp.engine.gates import _graceful_kill
+
+    pidfile = tmp_path / "member.pid"
+    # sleep(3600), not sleep(30): the member must outlive the poll budget below by a
+    # wide margin, or a leaked member exits on its own and the test passes vacuously.
+    prog = ("import os, pathlib, signal, sys, time; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
+            "time.sleep(3600)")
+    # `sh` is the group leader and dies on SIGTERM immediately (no trap), exactly
+    # like the outer bwrap of a sandboxed gate; the python member ignores SIGTERM.
+    proc = subprocess.Popen(
+        ["sh", "-c",
+         f"{shlex.quote(sys.executable)} -c {shlex.quote(prog)} "
+         f"{shlex.quote(str(pidfile))} & wait"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + 20.0        # generous: only bounds process startup
+    while not (pidfile.exists() and pidfile.read_text().strip()):
+        if time.monotonic() > deadline:
+            pytest.fail("the TERM-ignoring group member never started")
+        time.sleep(0.02)
+    member_pid = int(pidfile.read_text())
+
+    _graceful_kill(proc)
+
+    deadline = time.monotonic() + 20.0        # generous; only burned when the fix is absent
+    while not _pid_gone_or_zombie(member_pid):
+        if time.monotonic() > deadline:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(member_pid, signal.SIGKILL)   # don't leak the runaway on failure
+            pytest.fail(f"pid {member_pid} survived teardown — the SIGKILL was skipped")
+        time.sleep(0.05)
+    assert proc.returncode is not None                # leader reaped, no zombie
     assert proc.stdout.closed and proc.stderr.closed
 
 
