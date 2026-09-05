@@ -29,16 +29,6 @@ def test_node_dataclasses_construct_and_default_collapsible() -> None:
     assert nv.StepContextNode(payload={}).collapsible is True
 
 
-def test_tokentotals_add_usage_tolerates_missing_keys() -> None:
-    tt = nv.TokenTotals()
-    tt.add_usage({"input_tokens": 10, "output_tokens": 3,
-                  "cache_read_input_tokens": 2, "cache_creation_input_tokens": 1})
-    tt.add_usage({"input_tokens": 5})          # missing keys default to 0
-    tt.add_usage(None)                          # None is a no-op
-    assert (tt.input, tt.output, tt.cache_read, tt.cache_creation) == (15, 3, 2, 1)
-
-
-
 def test_build_tree_empty_yields_root_only() -> None:
     tree = nv.build_tree([])
     assert isinstance(tree.root, nv.WorkflowNode)
@@ -68,17 +58,6 @@ def test_malformed_events_become_error_nodes_and_never_abort() -> None:
     errs = [c for c in tree.root.children if isinstance(c, nv.ErrorNode)]
     assert len(errs) == 2
     assert any(isinstance(c, nv.PhaseNode) for c in tree.root.children)
-
-
-def test_token_totals_accumulate_across_all_agent_messages() -> None:
-    tree = nv.build_tree([
-        {"id": "a", "agent_id": "step:p/s", "type": "agent_message",
-         "payload": {"usage": {"input_tokens": 100, "output_tokens": 20}}},
-        {"id": "b", "agent_id": "step:p/s", "type": "agent_message",
-         "payload": {"usage": {"input_tokens": 50, "output_tokens": 5}}},
-    ])
-    assert tree.tokens.input == 150
-    assert tree.tokens.output == 25
 
 
 def _ev(eid, etype, agent_id=None, **payload):
@@ -328,8 +307,6 @@ def test_interleaved_sub_events_route_into_fold_without_breaking_burst() -> None
     # The parent text after the fold is a sibling of the fold, not inside it.
     after = [c for c in step.children if isinstance(c, nv.AgentTextNode)]
     assert len(after) == 1 and after[0].text == "parent resumes"
-    # Subagent tokens count toward the change total (F2): 7+3 in, 2+1 out.
-    assert tree.tokens.input == 10 and tree.tokens.output == 3
 
 
 def test_subagent_running_until_task_result_arrives() -> None:
@@ -426,8 +403,6 @@ def test_incremental_equals_batch_on_interleaved_log() -> None:
     # Compare structure after the terminal event (design §5.4): open-node and
     # `· running` transients can't differ here because the log is complete.
     assert nv.structural_repr(batch.root) == nv.structural_repr(incremental.root)
-    assert (batch.tokens.input, batch.tokens.output) == \
-           (incremental.tokens.input, incremental.tokens.output)
 
 
 def test_parity_holds_with_open_step_when_paused() -> None:
@@ -597,7 +572,6 @@ def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None
         b.add(e)
     assert b.current_activity() == nv.Activity(
         verb="thinking", model="m", provider="anthropic", kind="agent")
-
 
 
 def test_subagent_current_activity_includes_nested_detail() -> None:
@@ -2417,7 +2391,6 @@ def test_latest_prompt_tokens_tracks_most_recent_turn_not_cumulative() -> None:
              model="sonnet",
              usage={"input_tokens": 200, "output_tokens": 4}, raw={"content": []}))
     assert b.latest_prompt_tokens == 200           # latest turn REPLACES, does not sum
-    assert b.tree.tokens.input == 300              # cumulative total is unchanged behavior
 
 
 def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
@@ -2448,8 +2421,6 @@ def test_subagent_agent_message_does_not_move_latest_prompt_tokens() -> None:
              model="m", stop_reason="end_turn",
              usage={"input_tokens": 999, "output_tokens": 7}, raw={"content": []}))
     assert b.latest_prompt_tokens == 100        # frozen at the parent's last value
-    assert b.tree.tokens.input == 1099          # cumulative still folds in subagent (F2)
-    assert b.tree.tokens.output == 12
 
 
 def test_current_activity_carries_current_step_model() -> None:
@@ -2748,36 +2719,6 @@ def test_current_activity_two_running_subagents_show_the_count_not_a_detail() ->
     assert act.detail is None or "+" not in (act.detail or "")   # no "+N subagents" tail
 
 
-def test_claude_code_totals_come_from_query_result_not_agent_message() -> None:
-    # The coalesced claude_code llm_response usage is streaming-partial and must
-    # NOT drive the displayed totals; query_result is authoritative.
-    b = nv.NarrativeBuilder()
-    b.add(ev("1", "agent_message", agent_id="step:p/s", provider="claude_code",
-             model="served-x", stop_reason="end_turn",
-             usage={"input_tokens": 9999, "output_tokens": 8888},
-             raw={"content": []}))
-    b.add(ev("2", "query_result", agent_id="step:p/s",
-             total_cost_usd=0.05, num_turns=1,
-             usage={"input_tokens": 1000, "output_tokens": 200}))
-    tree = b.tree
-    assert tree.tokens.input == 1000           # from query_result, not 9999
-    assert tree.tokens.output == 200           # from query_result, not 8888
-    assert tree.tokens.cost == 0.05
-
-
-def test_anthropic_totals_still_sum_from_agent_message() -> None:
-    # Non-claude_code providers (no query_result) keep summing llm_response usage.
-    b = nv.NarrativeBuilder()
-    b.add(ev("1", "agent_message", agent_id="step:p/s", provider="anthropic",
-             model="m", stop_reason="end_turn",
-             usage={"input_tokens": 100, "output_tokens": 20}, raw={"content": []}))
-    b.add(ev("2", "agent_message", agent_id="step:p/s", provider="anthropic",
-             model="m", stop_reason="end_turn",
-             usage={"input_tokens": 50, "output_tokens": 5}, raw={"content": []}))
-    assert b.tree.tokens.input == 150
-    assert b.tree.tokens.output == 25
-
-
 def test_query_result_renders_without_fallback() -> None:
     tree = nv.build_tree([
         ev("c", "quest_created", title="t"),
@@ -2792,25 +2733,6 @@ def test_query_result_renders_without_fallback() -> None:
             yield from _walk(c)
 
     assert not any(isinstance(n, nv.FallbackLine) for n in _walk(tree.root))
-
-
-def test_subagent_query_result_folds_into_change_total() -> None:
-    # A subagent's authoritative per-query totals still fold into the change
-    # total (token accumulation happens before sub-routing).
-    b = nv.NarrativeBuilder()
-    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
-             provider="claude_code"))
-    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
-             input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(ev("p1", "query_result", agent_id="step:p/s",
-             total_cost_usd=0.01, num_turns=1,
-             usage={"input_tokens": 100, "output_tokens": 5}))
-    b.add(ev("s1", "query_result", agent_id="sub:tk1",
-             total_cost_usd=0.02, num_turns=1,
-             usage={"input_tokens": 900, "output_tokens": 7}))
-    assert b.tree.tokens.input == 1000
-    assert b.tree.tokens.output == 12
-    assert b.tree.tokens.cost == pytest.approx(0.03)
 
 
 def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:

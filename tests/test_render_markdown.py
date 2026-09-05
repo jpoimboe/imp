@@ -140,7 +140,7 @@ def test_user_turn_escaped_and_multiline_blockquote() -> None:
 def test_literal_text_node_is_escaped() -> None:
     root = nv.WorkflowNode(title="t")
     root.children = [nv.LiteralTextNode(text="<script>x</script>")]
-    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    tree = nv.NarrativeTree(root=root)
     out = render_markdown(tree, full=False)
     assert "&lt;script&gt;x&lt;/script&gt;" in out
     assert "<script>" not in out
@@ -198,7 +198,7 @@ def test_step_context_fold_default_full_and_hostile_prompt() -> None:
                                       "max_tool_calls": 50})
     root = nv.WorkflowNode(title="t")
     root.children = [sys_node, ctx]
-    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    tree = nv.NarrativeTree(root=root)
 
     default = render_markdown(tree, full=False)
     assert "<summary>Internal context — anthropic/claude</summary>" in default
@@ -322,7 +322,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
         nv.MergedNode(quest_id="gumu81", base="main"),
         nv.FallbackLine(event_type="odd_event", payload={"k": "v"}),
     ]
-    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    tree = nv.NarrativeTree(root=root)
     out = render_markdown(tree, full=True)
     assert "loading skill brainstorming" in out        # SkillLoadNode
     assert "→ continue" in out                         # OutcomeLine
@@ -341,7 +341,7 @@ def test_error_node_detail_block_rendered_and_escaped() -> None:
     root = nv.WorkflowNode(title="t")
     root.children = [nv.ErrorNode(message="boom", category="script",
                                   detail="line1 <x>\nline2")]
-    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    tree = nv.NarrativeTree(root=root)
     out = render_markdown(tree, full=True)
     assert "> **error:** [script] boom" in out
     assert "> line1 &lt;x&gt;" in out     # detail escaped + per-line blockquoted
@@ -352,7 +352,7 @@ def test_error_node_detail_block_rendered_and_escaped() -> None:
 def test_error_node_warning_callout() -> None:
     root = nv.WorkflowNode(title="t")
     root.children = [nv.ErrorNode(message="disk low", is_warning=True)]
-    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    tree = nv.NarrativeTree(root=root)
     out = render_markdown(tree, full=True)
     assert "> **warning:** disk low" in out
     assert "> **error:**" not in out
@@ -365,7 +365,7 @@ def test_tiers_resolved_suppressed_in_default_mode() -> None:
                                                  "model": "claude",
                                                  "differ_tier": None,
                                                  "differ_from": None}])]
-    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    tree = nv.NarrativeTree(root=root)
     assert "tiers resolved" not in render_markdown(tree, full=False)
     assert "tiers resolved" in render_markdown(tree, full=True)
 
@@ -373,7 +373,7 @@ def test_tiers_resolved_suppressed_in_default_mode() -> None:
 def test_breadcrumb_interrupted_variant() -> None:
     root = nv.WorkflowNode(title="t")
     root.children = [nv.BreadcrumbLine(step_name="spec", interrupted=True)]
-    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    tree = nv.NarrativeTree(root=root)
     out = render_markdown(tree, full=True)
     assert "_spec interrupted_" in out
 

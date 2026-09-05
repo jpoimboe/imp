@@ -61,24 +61,6 @@ def agent_message_has_prose(payload: dict[str, Any]) -> bool:
     return bool(AgentTextNode(payload=payload).text.strip())
 
 
-# ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
-@dataclass
-class TokenTotals:
-    input: int = 0
-    output: int = 0
-    cache_read: int = 0
-    cache_creation: int = 0
-    cost: float = 0.0
-
-    def add_usage(self, usage: dict[str, Any] | None) -> None:
-        if not usage:
-            return
-        self.input += int(usage.get("input_tokens", 0) or 0)
-        self.output += int(usage.get("output_tokens", 0) or 0)
-        self.cache_read += int(usage.get("cache_read_input_tokens", 0) or 0)
-        self.cache_creation += int(usage.get("cache_creation_input_tokens", 0) or 0)
-
-
 def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
     """One turn's BILLING prompt sum (input + both cache buckets); equals live occupancy
     only on the anthropic/openai push paths (single model request), not on codex.
@@ -458,7 +440,6 @@ class TiersResolvedNode:
 @dataclass
 class NarrativeTree:
     root: WorkflowNode
-    tokens: TokenTotals
 
 
 # ── builder ──────────────────────────────────────────────────────────────────
@@ -474,13 +455,12 @@ class NarrativeBuilder:
     """Per-agent_id state machine. add(event) routes one event into the tree.
 
     Routing order in add() (design §5.3):
-      0. accumulate token usage for EVERY agent_message (before sub routing, so
-         subagent tokens count toward the quest total — F2). latest_prompt_tokens
-         (the context-bar value) updates for THIS builder's own agent only: the
-         top-level builder (own_agent_id None) records its non-sub: turns, a nested
-         builder records the sub: turns of the subagent it represents; a turn that
-         belongs to a registered child folds into the cumulative total but does not
-         move this builder's bar.
+      0. update latest_prompt_tokens (the context-bar value) for THIS builder's
+         own agent: the top-level builder (own_agent_id None) records its non-sub:
+         turns, a nested builder records the sub: turns of the subagent it
+         represents; a turn that belongs to a registered child does not move this
+         builder's bar. Token and cost totals are not this builder's job — the
+         accounting path in imp.cli.accounting owns them.
       1. if agent_id is a registered child subagent fold → delegate down.
       2. else dispatch by event type at the current open scope.
     """
@@ -490,7 +470,6 @@ class NarrativeBuilder:
         self._warnings: list[str] = []
         self._warnings_flushed: bool = False
         self._pause_outcome_shown: bool = False
-        self._tokens = TokenTotals()
         self._latest_prompt_tokens: int | None = None
         self._latest_context_pct: float | None = None
         self._latest_context_window: int | None = None
@@ -565,7 +544,7 @@ class NarrativeBuilder:
     # -- public API -----------------------------------------------------------
     @property
     def tree(self) -> NarrativeTree:
-        return NarrativeTree(root=self._root, tokens=self._tokens)
+        return NarrativeTree(root=self._root)
 
     @property
     def latest_prompt_tokens(self) -> int | None:
@@ -851,17 +830,10 @@ class NarrativeBuilder:
             self._reset_wait = None
             self._dep_wait = None
 
-        # 0. token accumulation — before sub routing (F2) so subagent events fold
-        #    into the quest total. The context-bar value (_latest_prompt_tokens)
-        #    tracks THIS builder's own agent: the top level (own_agent_id None) records
-        #    its non-sub: turns; a nested builder records the turns of the subagent it
-        #    represents (agent_id == own_agent_id). A registered child's turn never moves it.
+        # 0. context-bar update: latest_prompt_tokens tracks THIS builder's own agent.
+        #    Token and cost totals are the accounting path's job (imp.cli.accounting).
         if etype == "agent_message":
             usage = payload.get("usage")
-            # claude_code's coalesced usage is streaming-partial; its authoritative
-            # totals come from query_result, not from summing agent_message usage.
-            if payload.get("provider") != "claude_code":
-                self._tokens.add_usage(usage)
             pt = usage_prompt_tokens(usage)
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
             # pt==0 is an all-zero "empty reply" (e.g. freshly-resumed
@@ -896,12 +868,6 @@ class NarrativeBuilder:
                     self._latest_prompt_tokens = ctoks
                     self._latest_context_window = cwin
                 self._last_agent_context = (ctoks, cwin)
-        elif etype == "query_result":
-            # Authoritative per-query totals/cost from claude_code. Accumulated
-            # BEFORE sub-routing so a subagent's query_result still folds in.
-            self._tokens.add_usage(payload.get("usage"))
-            self._tokens.cost += float(payload.get("total_cost_usd") or 0)
-
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
         #    a nested builder's own events carry a sub: id that is NOT one of
         #    its registered children; only delegate ids we actually registered).
@@ -1842,9 +1808,7 @@ def _h_agent_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 
 def _h_query_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # Token totals + cost are accumulated in add() (pre-routing, so subagent
-    # query_results fold into the quest total). No visible node.
-    return
+    return  # no visible node
 
 
 def _h_agent_message_usage_patch(

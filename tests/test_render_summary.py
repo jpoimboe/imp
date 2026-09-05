@@ -1205,3 +1205,29 @@ def test_a_leaf_step_totals_are_its_own_usage():
     step = StepRow(phase="p", step="s", start_ts=None,
                    usage=RowUsage(fresh_input=7, dollars=0.01, priced=1))
     assert step.totals == step.usage
+
+
+def test_f2_a_subagents_usage_folds_into_the_quest_total():
+    # Re-points test_narrative.py's F2 assertions (a subagent's tokens and its
+    # query_result cost fold into the cumulative total) at the accounting path.
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _cc("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("tk1", "blk1", "lead1", "2026-01-01T00:00:05+00:00", "reviewer"),
+        _qr("lead1", "2026-01-01T00:00:06+00:00", 0.01, session="s1",
+            model_usage={"claude-sonnet-4-6": {
+                "inputTokens": 100, "outputTokens": 5,
+                "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0}}),
+        _cc("sub:tk1", "2026-01-01T00:00:07+00:00"),
+        _qr("sub:tk1", "2026-01-01T00:00:08+00:00", 0.02, session="s2",
+            model_usage={"claude-sonnet-4-6": {
+                "inputTokens": 900, "outputTokens": 7,
+                "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0}}),
+        _subresult("blk1", "lead1", "2026-01-01T00:00:09+00:00"),
+        _completed("task-lead", "2026-01-01T00:00:10+00:00"),
+    ])
+    _work, tokens, cost = header_totals(rows, 10.0)
+    assert rows[0].totals.fresh_input == 1000   # 100 parent + 900 subagent
+    assert rows[0].totals.output == 12
+    assert tokens == 1012
+    assert cost == pytest.approx(0.03)          # 0.01 parent + 0.02 subagent

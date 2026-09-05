@@ -88,19 +88,3 @@ def test_nested_subagent_builder_records_its_own_context() -> None:
     assert b.latest_context_pct == 42.0
     assert b.latest_prompt_tokens == 80_000
 
-
-def test_token_totals_are_untouched_by_the_gauge_guard() -> None:
-    b = nv.NarrativeBuilder()
-    # provider "anthropic" accumulates agent_message usage into _tokens.
-    b.add(_ev("a", "agent_message", agent_id="step:p/s", provider="anthropic",
-              model="m", stop_reason="end_turn",
-              usage={"input_tokens": 100, "output_tokens": 20}))
-    b.add(_ev("b", "agent_message", agent_id="step:p/s", provider="anthropic",
-              model="m", stop_reason="end_turn",
-              usage={"input_tokens": 0, "output_tokens": 0}))
-    b.add(_ev("c", "agent_message", agent_id="step:p/s", provider="anthropic",
-              model="m", stop_reason="end_turn",
-              usage={"input_tokens": 200, "output_tokens": 30}))
-    # the empty middle reading skips the gauge but every usage still accumulates
-    assert b.tree.tokens.input == 300
-    assert b.tree.tokens.output == 50
