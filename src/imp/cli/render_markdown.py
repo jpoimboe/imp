@@ -296,12 +296,12 @@ def render_summary_markdown(summary: list[StepRow], *,
         step = _md_escape(row.step).replace("|", "\\|")
         grouped[-1][1].append(
             f"| {step} | {row.dur_cell(open_label)}"
-            f" | {_fmt_tokens(_tok_total(row.tokens))} | {_fmt_cost(row.cost)} |")
+            f" | {_fmt_tokens(_tok_total(row.usage))} | {_fmt_cost(row.usage.dollars)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")
             grouped[-1][1].append(
                 f"| {body} | {sub.dur_cell(open_label)}"
-                f" | {_fmt_tokens(_tok_total(sub.tokens))} | {_fmt_cost(sub.cost)} |")
+                f" | {_fmt_tokens(_tok_total(sub.usage))} | {_fmt_cost(sub.usage.dollars)} |")
     for phase, rows in grouped:
         table = "\n".join([
             _heading(2, _md_escape(phase)),

@@ -7,7 +7,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from imp.cli import palette as pal
-from imp.cli.narrative import TokenTotals, elapsed_seconds
+from imp.cli.accounting import (
+    RowUsage,
+    billing_from_agent_message,
+    billing_from_usage_patch,
+    collapse_cumulative_query_results,
+    computed_contribution,
+    is_metered,
+    vendor_contribution,
+)
+from imp.cli.narrative import elapsed_seconds
 from imp.cli.quest_row import STATUS_COLORS, display_word
 from imp.cli.render_text import fmt_seconds
 
@@ -35,8 +44,7 @@ class SubagentRow:
     end_ts: str | None = None
     end_inferred: bool = False
     errored: bool = False
-    tokens: TokenTotals = field(default_factory=TokenTotals)
-    cost: float = 0.0
+    usage: RowUsage = field(default_factory=RowUsage)
 
     @property
     def wall_seconds(self) -> float | None:
@@ -57,8 +65,7 @@ class StepRow:
     wait_seconds: float = 0.0
     errored: bool = False
     agent_id: str | None = None
-    tokens: TokenTotals = field(default_factory=TokenTotals)
-    cost: float = 0.0
+    usage: RowUsage = field(default_factory=RowUsage)
     subagents: list[SubagentRow] = field(default_factory=list)
 
     @property
@@ -89,10 +96,14 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     rows: list[StepRow] = []
     open_row: StepRow | None = None        # the currently-open occurrence
     pending_wait_start: str | None = None  # ts of an unresolved awaiting_user_input
-    subs_by_agent: dict[str, SubagentRow] = {}   # "sub:<event id>" -> row (tokens/cost)
+    subs_by_agent: dict[str, SubagentRow] = {}   # "sub:<event id>" -> row (usage)
     # (call was id_ns-stamped, block id) -> row. Keying on the stamping is what stops an
     # unstamped result from closing a stamped call: codex block ids repeat every turn.
     open_subs: dict[tuple[bool, str], SubagentRow] = {}
+    # provider/model/auth_mode of the last agent_message per agent: the patch
+    # and query_result rows carry none of the three and inherit all of them.
+    last_msg: dict[str, tuple[str | None, str | None, str | None]] = {}
+    agent_id: Any = None  # function-scope so the _credit closure reads the current event's id
 
     def _close_wait(now_ts: str | None) -> None:
         nonlocal pending_wait_start
@@ -112,7 +123,15 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         open_subs.clear()
         subs_by_agent.clear()
 
-    for e in events:
+    def _credit(usage: RowUsage) -> None:
+        sub = subs_by_agent.get(agent_id) if isinstance(agent_id, str) else None
+        if sub is not None:
+            sub.usage = sub.usage + usage
+        elif (open_row is not None
+              and agent_id is not None and agent_id == open_row.agent_id):
+            open_row.usage = open_row.usage + usage
+
+    for e in collapse_cumulative_query_results(list(events)):
         etype = e.get("type")
         ts = e.get("timestamp")
         agent_id = e.get("agent_id")
@@ -151,33 +170,52 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         elif etype == "awaiting_user_input":
             pending_wait_start = ts
         elif etype == "agent_message":
-            sub = subs_by_agent.get(agent_id) if isinstance(agent_id, str) else None
-            if sub is not None:
-                sub.tokens.add_usage(p.get("usage"))
-            elif (open_row is not None
-                  and agent_id is not None and agent_id == open_row.agent_id):
-                open_row.tokens.add_usage(p.get("usage"))
+            if isinstance(agent_id, str):
+                last_msg[agent_id] = (p.get("provider"), p.get("model"),
+                                      p.get("auth_mode"))
+            # claude_code's agent_message usage is the unreliable start-of-message
+            # snapshot; its authoritative figures arrive on query_result.
+            billing = (None if p.get("provider") == "claude_code"
+                       else billing_from_agent_message(p))
+            if billing is not None:
+                _credit(computed_contribution(
+                    p.get("model"), billing,
+                    billing.fresh_input + billing.cached_input + billing.cache_write,
+                    metered=is_metered(p.get("provider"), p.get("auth_mode"))))
+        elif etype == "agent_message_usage_patch":
+            billing = billing_from_usage_patch(p)
+            if billing is not None:
+                provider, model, auth_mode = last_msg.get(
+                    agent_id if isinstance(agent_id, str) else "",
+                    (None, None, None))
+                # context_tokens is codex's own occupancy reading; absent means
+                # no reading, and absent evidence is never a 2x charge.
+                _credit(computed_contribution(
+                    model, billing, p.get("context_tokens"),
+                    metered=is_metered(provider, auth_mode)))
         elif etype == "query_result":
-            cost = float(p.get("total_cost_usd") or 0)
-            sub = subs_by_agent.get(agent_id) if isinstance(agent_id, str) else None
-            if sub is not None:
-                sub.cost += cost
-            elif (open_row is not None
-                  and agent_id is not None and agent_id == open_row.agent_id):
-                open_row.cost += cost
+            provider, _model, auth_mode = last_msg.get(
+                agent_id if isinstance(agent_id, str) else "", (None, None, None))
+            # The vendor's own cost, never the price table: it already folds in
+            # web search and covers models the table does not carry.
+            vendor = vendor_contribution(
+                p.get("model_usage") or {}, p.get("total_cost_usd"),
+                metered=is_metered(provider, auth_mode))
+            if vendor is not None:
+                _credit(vendor)
         elif etype == "tool_call" and p.get("name") == "sub_agent":
             if open_row is not None and open_row.end_ts is None:
                 event_id = str(e.get("id", ""))
                 block_id = str(p.get("id", ""))
                 inp = p.get("input") or {}
-                sub = SubagentRow(
+                new_sub = SubagentRow(
                     name=str(inp.get("subagent_name", "?")),
                     label=p.get("label"),
                     start_ts=ts)
-                open_row.subagents.append(sub)
-                subs_by_agent[f"sub:{event_id}"] = sub
+                open_row.subagents.append(new_sub)
+                subs_by_agent[f"sub:{event_id}"] = new_sub
                 if block_id:
-                    open_subs[(p.get("id_ns") == "block", block_id)] = sub
+                    open_subs[(p.get("id_ns") == "block", block_id)] = new_sub
         elif etype == "tool_result":
             id_ns = p.get("id_ns")
             if id_ns is None or id_ns == "block":
@@ -191,9 +229,9 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     return rows
 
 
-def _tok_total(t: TokenTotals) -> int:
-    """A row's single token figure: input + output + both cache buckets."""
-    return t.input + t.output + t.cache_read + t.cache_creation
+def _tok_total(u: RowUsage) -> int:
+    """A row's single token figure: the whole input side plus output."""
+    return u.input_total + u.output
 
 
 def _fmt_tokens(total: int) -> str:
@@ -234,10 +272,10 @@ def header_totals(
         work: float | None = None
     else:
         work = max(0.0, total_seconds - sum(r.wait_seconds for r in summary))
-    tokens = sum(_tok_total(r.tokens) for r in summary)
-    tokens += sum(_tok_total(s.tokens) for r in summary for s in r.subagents)
-    cost = sum((r.cost for r in summary), 0.0)
-    cost += sum(s.cost for r in summary for s in r.subagents)
+    tokens = sum(_tok_total(r.usage) for r in summary)
+    tokens += sum(_tok_total(s.usage) for r in summary for s in r.subagents)
+    cost = sum((r.usage.dollars for r in summary), 0.0)
+    cost += sum(s.usage.dollars for r in summary for s in r.subagents)
     return work, tokens, cost
 
 
@@ -278,12 +316,12 @@ def _column_widths(summary: list[StepRow], open_label: str) -> tuple[int, int, i
     costs: list[int] = []
     for r in summary:
         durs.append(len(r.dur_cell(open_label)))
-        toks.append(len(_fmt_tokens(_tok_total(r.tokens))))
-        costs.append(len(_fmt_cost(r.cost)))
+        toks.append(len(_fmt_tokens(_tok_total(r.usage))))
+        costs.append(len(_fmt_cost(r.usage.dollars)))
         for s in r.subagents:
             durs.append(len(s.dur_cell(open_label)))
-            toks.append(len(_fmt_tokens(_tok_total(s.tokens))))
-            costs.append(len(_fmt_cost(s.cost)))
+            toks.append(len(_fmt_tokens(_tok_total(s.usage))))
+            costs.append(len(_fmt_cost(s.usage.dollars)))
     return (max(names, default=0), max(durs, default=0),
             max(toks, default=0), max(costs, default=0))
 
@@ -293,8 +331,8 @@ def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
     name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    tok = f"{_fmt_tokens(_tok_total(row.tokens)):>{tok_w}}"
-    cost = f"{_fmt_cost(row.cost):>{cost_w}}"
+    tok = f"{_fmt_tokens(_tok_total(row.usage)):>{tok_w}}"
+    cost = f"{_fmt_cost(row.usage.dollars):>{cost_w}}"
     return f"  {name}  {dur}  {tok}  {cost}"
 
 
@@ -305,8 +343,8 @@ def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int,
     # numeric columns stay aligned with the step rows (see _column_widths).
     body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
     dur = pal.ansi(f"{sub.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    tok = f"{_fmt_tokens(_tok_total(sub.tokens)):>{tok_w}}"
-    cost = f"{_fmt_cost(sub.cost):>{cost_w}}"
+    tok = f"{_fmt_tokens(_tok_total(sub.usage)):>{tok_w}}"
+    cost = f"{_fmt_cost(sub.usage.dollars):>{cost_w}}"
     return f"    {body}  {dur}  {tok}  {cost}"
 
 

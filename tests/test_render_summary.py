@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from imp.cli.narrative import TokenTotals, elapsed_seconds
+from imp.cli.accounting import RowUsage
+from imp.cli.narrative import elapsed_seconds
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
@@ -258,9 +259,7 @@ def test_step_row_work_seconds_is_none_while_open():
 def test_step_row_new_usage_fields_default_empty():
     row = StepRow(phase="plan", step="plan-writer", start_ts=None)
     assert row.agent_id is None
-    assert row.cost == 0.0
-    assert row.tokens.input == 0
-    assert row.tokens.output == 0
+    assert row.usage == RowUsage()
     assert row.subagents == []
 
 
@@ -271,8 +270,7 @@ def test_subagent_row_wall_seconds_and_defaults():
     assert sub.wall_seconds == 45.0
     assert sub.label is None
     assert sub.errored is False
-    assert sub.cost == 0.0
-    assert sub.tokens.input == 0
+    assert sub.usage == RowUsage()
 
 
 def _context(agent_id: str, ts: str) -> dict:
@@ -281,16 +279,55 @@ def _context(agent_id: str, ts: str) -> dict:
 
 
 def _llm(agent_id: str, ts: str, *, input=0, output=0,
-         cache_read=0, cache_creation=0) -> dict:
+         cache_read=0, cache_creation=0, provider="anthropic",
+         model="claude-sonnet-4-6") -> dict:
     return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
-            "payload": {"usage": {"input_tokens": input, "output_tokens": output,
+            "payload": {"provider": provider, "model": model,
+                        "usage": {"input_tokens": input,
+                                  "output_tokens": output,
                                   "cache_read_input_tokens": cache_read,
                                   "cache_creation_input_tokens": cache_creation}}}
 
 
-def _qr(agent_id: str, ts: str, cost: float) -> dict:
+def _codex(agent_id: str, ts: str, *, model="gpt-5.6-sol",
+           auth_mode=None) -> dict:
+    """A codex agent_message carries `usage={}` on the wire
+    (`codex_runner.py:1057`, `:1283`) — the real figures arrive on the
+    usage-patch row that follows."""
+    payload = {"provider": "codex", "model": model, "usage": {}}
+    if auth_mode is not None:
+        payload["auth_mode"] = auth_mode
+    return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
+            "payload": payload}
+
+
+def _cc(agent_id: str, ts: str, *, auth_mode=None) -> dict:
+    """A claude_code agent_message: ignored by the accounting path entirely —
+    its usage is the unreliable start-of-message snapshot."""
+    return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
+            "payload": {"provider": "claude_code", "model": "claude-sonnet-4-6",
+                        "usage": {"input_tokens": 9999, "output_tokens": 8888},
+                        **({"auth_mode": auth_mode} if auth_mode else {})}}
+
+
+def _qr(agent_id: str, ts: str, cost: float, *, session: str = "s1",
+        model_usage: dict | None = None) -> dict:
     return {"type": "query_result", "agent_id": agent_id, "timestamp": ts,
-            "payload": {"total_cost_usd": cost}}
+            "payload": {"session_id": session, "total_cost_usd": cost,
+                        "usage": {},
+                        "model_usage": model_usage if model_usage is not None
+                        else {}}}
+
+
+def _patch(agent_id: str, *, input=0, output=0, cache_read=0,
+           cache_creation=0, context_tokens=None) -> dict:
+    payload = {"usage": {"input_tokens": input, "output_tokens": output,
+                         "cache_read_input_tokens": cache_read,
+                         "cache_creation_input_tokens": cache_creation}}
+    if context_tokens is not None:
+        payload["context_tokens"] = context_tokens
+    return {"type": "agent_message_usage_patch", "agent_id": agent_id,
+            "payload": payload}
 
 
 def _subcall(event_id: str, block_id: str, agent_id: str, ts: str,
@@ -322,21 +359,55 @@ def test_step_own_tokens_summed_from_matching_agent_id():
         _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
     ])
     assert rows[0].agent_id == "a1"
-    assert rows[0].tokens.input == 110
-    assert rows[0].tokens.output == 22
-    assert rows[0].tokens.cache_read == 5
-    assert rows[0].tokens.cache_creation == 3
+    usage = rows[0].usage
+    assert (usage.fresh_input, usage.output) == (110, 22)
+    assert (usage.cached_input, usage.cache_write) == (5, 3)
+    # sonnet, per million: 110*$3 + 5*$0.30 + 3*$3.75 + 22*$15 = $0.00067275
+    assert usage.dollars == pytest.approx(0.00067275)
+    assert (usage.priced, usage.unpriced, usage.notional) == (2, 0, 0)
 
 
-def test_step_own_cost_summed_from_matching_agent_id():
+def test_cumulative_query_results_in_one_session_take_the_last():
+    # The over-report this quest exists to end: these two rows are cumulative
+    # within one SDK session, so the step cost is 0.40 — not 0.34 + 0.40.
     rows = build_summary([
         _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
-        _context("a1", "2026-01-01T00:00:01+00:00"),
-        _qr("a1", "2026-01-01T00:00:05+00:00", 0.34),
-        _qr("a1", "2026-01-01T00:00:10+00:00", 0.06),
+        _cc("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:05+00:00", 0.34, session="s1"),
+        _qr("a1", "2026-01-01T00:00:10+00:00", 0.40, session="s1"),
         _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
     ])
-    assert rows[0].cost == pytest.approx(0.40)
+    assert rows[0].usage.dollars == pytest.approx(0.40)
+
+
+def test_query_results_from_two_sessions_add():
+    rows = build_summary([
+        _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:05+00:00", 0.34, session="s1"),
+        _qr("a1", "2026-01-01T00:00:10+00:00", 0.40, session="s1"),
+        _qr("a1", "2026-01-01T00:00:15+00:00", 0.06, session="s2"),
+        _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
+    ])
+    assert rows[0].usage.dollars == pytest.approx(0.46)
+
+
+def test_the_hava67_shape_totals_28_11_not_45_01():
+    # AC 3, at the measured figures: five cumulative rows across two sessions.
+    # Summing every row naively gives $45.01 (what imp reports today); taking
+    # the last of each session gives the true $28.11.
+    series = [("s1", 3.00), ("s1", 9.50), ("s1", 16.90),
+              ("s2", 4.40), ("s2", 11.21)]
+    events = [_started("coder", "build", "2026-01-01T00:00:00+00:00"),
+              _cc("a1", "2026-01-01T00:00:01+00:00")]
+    for i, (session, cost) in enumerate(series):
+        events.append(_qr("a1", f"2026-01-01T00:0{i}:30+00:00", cost,
+                          session=session))
+    events.append(_completed("coder", "2026-01-01T00:09:00+00:00"))
+    # Both figures derive from `series`, so the contrast cannot go stale.
+    assert sum(cost for _session, cost in series) == pytest.approx(45.01)
+    rows = build_summary(events)
+    assert rows[0].usage.dollars == pytest.approx(28.11)
 
 
 def test_usage_from_other_agent_id_is_not_attributed():
@@ -347,8 +418,7 @@ def test_usage_from_other_agent_id_is_not_attributed():
         _qr("other", "2026-01-01T00:00:06+00:00", 5.0),
         _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
     ])
-    assert rows[0].tokens.input == 0
-    assert rows[0].cost == 0.0
+    assert rows[0].usage == RowUsage()
 
 
 def test_step_tokens_accumulate_across_resume_reentry():
@@ -362,7 +432,7 @@ def test_step_tokens_accumulate_across_resume_reentry():
     ])
     assert len(rows) == 1
     assert rows[0].agent_id == "a1"
-    assert rows[0].tokens.input == 80
+    assert rows[0].usage.fresh_input == 80
 
 
 def test_sub_prefixed_agent_does_not_establish_step_mapping_or_tokens():
@@ -373,7 +443,7 @@ def test_sub_prefixed_agent_does_not_establish_step_mapping_or_tokens():
         _completed("task-lead", "2026-01-01T00:00:20+00:00"),
     ])
     assert rows[0].agent_id == "a1"
-    assert rows[0].tokens.input == 10
+    assert rows[0].usage.fresh_input == 10
 
 
 def test_subagent_captured_with_name_label_and_duration():
@@ -398,18 +468,19 @@ def test_subagent_tokens_and_cost_keyed_by_sub_agent_id():
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         _context("lead1", "2026-01-01T00:00:01+00:00"),
         _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
-        _llm("sub:ev9", "2026-01-01T00:00:20+00:00", input=200, output=40),
-        _qr("sub:ev9", "2026-01-01T00:00:30+00:00", 0.12),
+        _cc("sub:ev9", "2026-01-01T00:00:20+00:00"),
+        _qr("sub:ev9", "2026-01-01T00:00:30+00:00", 0.12, model_usage={
+            "claude-sonnet-4-6": {"inputTokens": 200, "outputTokens": 40,
+                                  "cacheReadInputTokens": 0,
+                                  "cacheCreationInputTokens": 0}}),
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
     ])
     sub = rows[0].subagents[0]
-    assert sub.tokens.input == 200
-    assert sub.tokens.output == 40
-    assert sub.cost == pytest.approx(0.12)
-    # Subagent usage must NOT leak into the parent step's own totals.
-    assert rows[0].tokens.input == 0
-    assert rows[0].cost == 0.0
+    assert (sub.usage.fresh_input, sub.usage.output) == (200, 40)
+    assert sub.usage.dollars == pytest.approx(0.12)
+    # The subagent's usage is its own; the parent's OWN figures stay empty.
+    assert rows[0].usage == RowUsage()
 
 
 def test_subagent_errored_from_tool_result_error_flag():
@@ -434,8 +505,168 @@ def test_parent_and_subagent_tokens_accrue_independently_while_sub_open():
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
     ])
-    assert rows[0].tokens.input == 100
-    assert rows[0].subagents[0].tokens.input == 200
+    assert rows[0].usage.fresh_input == 100
+    assert rows[0].subagents[0].usage.fresh_input == 200
+
+
+def test_codex_tokens_and_cost_come_from_the_usage_patch_row():
+    # AC 1: the agent_message carries usage={}; the real figures arrive on the
+    # patch row build_summary used to ignore entirely.
+    rows = build_summary([
+        _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+        _codex("a1", "2026-01-01T00:00:01+00:00", auth_mode="chatgpt"),
+        _patch("a1", input=1000, output=200, cache_read=4000,
+               cache_creation=500, context_tokens=5000),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ])
+    usage = rows[0].usage
+    assert (usage.fresh_input, usage.cached_input, usage.cache_write,
+            usage.output) == (1000, 4000, 500, 200)
+    # gpt-5.6-sol, per million: 1000*$4 + 4000*$0.40 + 500*$5 + 200*$20
+    assert usage.dollars == pytest.approx(0.0121)
+    assert (usage.priced, usage.notional) == (1, 1)   # chatgpt auth -> notional
+
+
+def test_a_usage_patch_is_priced_against_the_preceding_message_model():
+    # AC 24: the run's configured model on step_started is gpt-5, the turn ran
+    # on gpt-5.6-sol. 1000 fresh + 1000 out is $0.024 on sol, $0.01125 on gpt-5.
+    rows = build_summary([
+        {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
+         "payload": {"step": "coder", "phase": "build", "model": "gpt-5"}},
+        _codex("a1", "2026-01-01T00:00:01+00:00", auth_mode="apikey"),
+        _patch("a1", input=1000, output=1000, context_tokens=2000),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].usage.dollars == pytest.approx(0.024)
+    assert rows[0].usage.notional == 0          # apikey -> metered
+    assert rows[0].usage.priced == 1            # the patch row, once
+
+
+def test_a_codex_turn_is_surcharged_on_context_tokens_not_the_patch_sum():
+    # AC 7(b)/(c): the patch usage sums to 410k, over the 272k breakpoint, but
+    # the turn's own occupancy reading is 100k — and an absent reading is never
+    # surcharged either. Unsurcharged on gpt-5.6-sol, per million:
+    #   200000*$4 + 200000*$0.40 + 10000*$20 = $1.08; surcharged = $2.06.
+    def _cost(**patch_kw):
+        rows = build_summary([
+            _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+            _codex("a1", "2026-01-01T00:00:01+00:00"),
+            _patch("a1", input=200_000, cache_read=200_000, output=10_000,
+                   **patch_kw),
+            _completed("coder", "2026-01-01T00:01:00+00:00"),
+        ])
+        return rows[0].usage.dollars
+
+    assert _cost(context_tokens=100_000) == pytest.approx(1.08)
+    assert _cost() == pytest.approx(1.08)                  # no reading at all
+    assert _cost(context_tokens=300_000) == pytest.approx(2.06)
+
+
+def test_codex_subagent_figures_routed_via_usage_patch():
+    # _credit's sub-branch crossed with the last_msg lookup inside the patch
+    # branch for a sub:-prefixed agent id — the path the step-level tests skip.
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("a1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "a1", "2026-01-01T00:00:10+00:00", "coder"),
+        _codex("sub:ev9", "2026-01-01T00:00:15+00:00"),
+        _patch("sub:ev9", input=500, output=200, context_tokens=1000),
+        _subresult("blk9", "a1", "2026-01-01T00:00:55+00:00"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert (sub.usage.fresh_input, sub.usage.output) == (500, 200)
+    # gpt-5.6-sol, per million: 500*$4 + 200*$20 = $0.006
+    assert sub.usage.dollars == pytest.approx(0.006)
+    assert rows[0].usage == RowUsage()
+
+
+def test_claude_code_tokens_come_solely_from_model_usage():
+    # AC 2: the agent_message says 9999/8888 and must not contribute; the
+    # model_usage rollup says 110+1100+200 in and 55 out, haiku included.
+    rows = build_summary([
+        _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:02+00:00", 0.42, model_usage={
+            "claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 50,
+                                  "cacheReadInputTokens": 1000,
+                                  "cacheCreationInputTokens": 200},
+            "claude-haiku-4-5-20251001": {"inputTokens": 10, "outputTokens": 5,
+                                          "cacheReadInputTokens": 100,
+                                          "cacheCreationInputTokens": 0}}),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ])
+    usage = rows[0].usage
+    assert (usage.input_total, usage.output) == (1410, 55)
+    assert usage.fresh_input == 110          # not 9999, and no partial sum of it
+
+
+def test_claude_code_cost_is_the_vendor_figure_not_the_price_table():
+    # AC 5: the table would compute $0.00018 for these tokens; the vendor says
+    # $0.99, and the vendor figure is what the row carries.
+    rows = build_summary([
+        _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:02+00:00", 0.99, model_usage={
+            "claude-sonnet-4-6": {"inputTokens": 10, "outputTokens": 10,
+                                  "cacheReadInputTokens": 0,
+                                  "cacheCreationInputTokens": 0,
+                                  "costUSD": 0.99}}),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].usage.dollars == pytest.approx(0.99)
+    assert rows[0].usage.unpriced == 0       # claude_code never falls to n/a
+
+
+def test_a_model_absent_from_the_price_table_counts_as_unpriced():
+    rows = build_summary([
+        _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+        _llm("a1", "2026-01-01T00:00:01+00:00", provider="openai",
+             model="gpt-9-imaginary", input=1000, output=100),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ])
+    usage = rows[0].usage
+    assert usage.fresh_input == 1000         # the tokens are still real
+    assert (usage.priced, usage.unpriced) == (0, 1)
+    assert usage.dollars == 0.0
+
+
+def test_anthropic_and_openai_rows_are_metered_without_an_auth_mode():
+    # AC 16(a): neither provider has a subscription mode, so neither carries an
+    # auth_mode field and both read as metered from provider identity alone.
+    for provider, model in (("anthropic", "claude-sonnet-4-6"),
+                            ("openai", "gpt-5.6-sol")):
+        rows = build_summary([
+            _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+            _llm("a1", "2026-01-01T00:00:01+00:00", provider=provider,
+                 model=model, input=100, output=10),
+            _completed("coder", "2026-01-01T00:01:00+00:00"),
+        ])
+        assert rows[0].usage.notional == 0, provider
+        assert rows[0].usage.priced == 1, provider
+
+
+def test_a_claude_code_row_with_no_auth_mode_is_notional():
+    # AC 16(c): an old log records no auth mode, and unknown renders notional.
+    rows = build_summary([
+        _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:02+00:00", 0.42),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].usage.notional == 1
+
+
+def test_a_claude_code_row_with_apikey_auth_is_metered():
+    # AC 16(b): auth_mode rides on the agent_message; the query_result inherits
+    # it from the preceding message for that agent.
+    rows = build_summary([
+        _started("coder", "build", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00", auth_mode="apikey"),
+        _qr("a1", "2026-01-01T00:00:02+00:00", 0.42),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].usage.notional == 0
 
 
 @pytest.mark.parametrize("n, expected", [
@@ -466,9 +697,9 @@ def test_fmt_cost(c, expected):
     assert _fmt_cost(c) == expected
 
 
-def test_tok_total_sums_all_four_buckets():
-    t = TokenTotals(input=1, output=2, cache_read=3, cache_creation=4)
-    assert _tok_total(t) == 10
+def test_tok_total_sums_the_input_side_and_output():
+    usage = RowUsage(fresh_input=1, cached_input=3, cache_write=4, output=2)
+    assert _tok_total(usage) == 10
 
 
 def test_dur_text_running_when_none_else_compact():
@@ -488,10 +719,10 @@ def test_header_totals_subtracts_wait_and_rolls_up_steps_and_subs():
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T00:02:00+00:00",
                 wait_seconds=90.0,
-                tokens=TokenTotals(input=1000), cost=0.20,
-                subagents=[SubagentRow(name="coder",
-                                       tokens=TokenTotals(input=500),
-                                       cost=0.05)]),
+                usage=RowUsage(fresh_input=1000, dollars=0.20, priced=1),
+                subagents=[SubagentRow(
+                    name="coder",
+                    usage=RowUsage(fresh_input=500, dollars=0.05, priced=1))]),
     ]
     work, tokens, cost = header_totals(rows, 120.0)
     assert work == 30.0                 # 120s total - 90s wait
@@ -518,7 +749,8 @@ def test_step_row_shows_token_and_cost_columns():
     row = StepRow(phase="plan", step="plan-writer",
                   start_ts="2026-01-01T00:00:00+00:00",
                   end_ts="2026-01-01T00:01:30+00:00",
-                  tokens=TokenTotals(input=12000, output=345), cost=0.34)
+                  usage=RowUsage(fresh_input=12000, output=345, dollars=0.34,
+                                 priced=1))
     out = render_summary([row], header=_HDR, color=False, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
     assert line == "  plan-writer  1m 30s  12.3k  $0.34"
@@ -528,7 +760,7 @@ def test_cost_column_dash_fallback_when_zero():
     row = StepRow(phase="plan", step="s",
                   start_ts="2026-01-01T00:00:00+00:00",
                   end_ts="2026-01-01T00:00:10+00:00",
-                  tokens=TokenTotals(input=5), cost=0.0)
+                  usage=RowUsage(fresh_input=5, priced=1))
     out = render_summary([row], header=_HDR, color=False, width=80)
     line = next(ln for ln in out if "10s" in ln)
     assert line == "  s  10s  5  —"
@@ -545,7 +777,8 @@ def test_token_and_cost_columns_carry_no_color():
     row = StepRow(phase="plan", step="plan-writer",
                   start_ts="2026-01-01T00:00:00+00:00",
                   end_ts="2026-01-01T00:01:30+00:00",
-                  tokens=TokenTotals(input=12000, output=345), cost=0.34)
+                  usage=RowUsage(fresh_input=12000, output=345, dollars=0.34,
+                                 priced=1))
     out = render_summary([row], header=_HDR, color=True, width=80)
     line = next(ln for ln in out if "plan-writer" in ln)
     # Duration is hued for contrast, but the token/cost columns stay default
@@ -577,11 +810,11 @@ def test_header_rolls_up_step_tokens_and_cost():
         StepRow(phase="plan", step="a",
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T00:00:30+00:00",
-                tokens=TokenTotals(input=1000), cost=0.20),
+                usage=RowUsage(fresh_input=1000, dollars=0.20, priced=1)),
         StepRow(phase="plan", step="b",
                 start_ts="2026-01-01T00:00:30+00:00",
                 end_ts="2026-01-01T00:01:00+00:00",
-                tokens=TokenTotals(input=1500), cost=0.30),
+                usage=RowUsage(fresh_input=1500, dollars=0.30, priced=1)),
     ]
     hdr = SummaryHeader(workflow="feature", quest_id="abc", status="merged",
                         total_seconds=60.0)
@@ -594,12 +827,13 @@ def test_subagent_row_indented_with_own_figures():
     step = StepRow(phase="implement", step="task-lead",
                    start_ts="2026-01-01T00:00:00+00:00",
                    end_ts="2026-01-01T00:01:00+00:00",
-                   tokens=TokenTotals(input=100), cost=0.10,
+                   usage=RowUsage(fresh_input=100, dollars=0.10, priced=1),
                    subagents=[SubagentRow(
                        name="explorer",
                        start_ts="2026-01-01T00:00:05+00:00",
                        end_ts="2026-01-01T00:00:50+00:00",
-                       tokens=TokenTotals(input=200), cost=0.05)])
+                       usage=RowUsage(fresh_input=200, dollars=0.05,
+                                      priced=1))])
     out = render_summary([step], header=_HDR, color=False, width=80)
     step_line = next(ln for ln in out if "task-lead" in ln)
     sub_line = next(ln for ln in out if "explorer" in ln)
@@ -650,12 +884,13 @@ def test_header_rollup_includes_subagent_tokens_and_cost():
     step = StepRow(phase="implement", step="task-lead",
                    start_ts="2026-01-01T00:00:00+00:00",
                    end_ts="2026-01-01T00:00:30+00:00",
-                   tokens=TokenTotals(input=1000), cost=0.20,
+                   usage=RowUsage(fresh_input=1000, dollars=0.20, priced=1),
                    subagents=[SubagentRow(
                        name="coder",
                        start_ts="2026-01-01T00:00:05+00:00",
                        end_ts="2026-01-01T00:00:25+00:00",
-                       tokens=TokenTotals(input=1500), cost=0.30)])
+                       usage=RowUsage(fresh_input=1500, dollars=0.30,
+                                      priced=1))])
     hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=30.0)
     out = render_summary([step], header=hdr, color=False, width=80)

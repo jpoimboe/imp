@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from imp.cli import narrative as nv
+from imp.cli.accounting import RowUsage
 from imp.cli.render_markdown import (
     _md_escape,
     _subagent_status_md,
@@ -439,12 +440,13 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
         StepRow(phase="implement", step="task-lead",
                 start_ts="2024-01-01T00:00:00Z",
                 end_ts="2024-01-01T00:01:00Z",
-                tokens=nv.TokenTotals(input=12000, output=345), cost=0.34,
+                usage=RowUsage(fresh_input=12000, output=345, dollars=0.34,
+                               priced=1),
                 subagents=[SubagentRow(
                     name="explorer", label="map repo",
                     start_ts="2024-01-01T00:00:05Z",
                     end_ts="2024-01-01T00:00:50Z",
-                    tokens=nv.TokenTotals(input=200), cost=0.05)]),
+                    usage=RowUsage(fresh_input=200, dollars=0.05, priced=1))]),
     ]
     header = SummaryHeader(workflow="imp", quest_id="c",
                            status="merged", total_seconds=60.0)
