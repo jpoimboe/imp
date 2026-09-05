@@ -279,6 +279,10 @@ def run_startup_migrations() -> None:
         migrate_project_config(Path.cwd())
     with suppress(Exception):
         migrate_config_layers(Path.cwd())
+    # Before the state move: that step mints through project_state_dir itself, so
+    # backfilling first means it resolves against repaired markers instead of racing them.
+    with suppress(Exception):
+        backfill_repo_markers()
     # Lazy: state_migrate imports _git_toplevel from here, so a module-scope import
     # would be circular.
     from imp.cli.state_migrate import migrate_project_state

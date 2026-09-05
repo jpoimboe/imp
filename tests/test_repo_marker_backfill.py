@@ -8,10 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.config_migrate import _derive_owner, _state_candidates, backfill_repo_markers
+from imp.cli import config_migrate, state_migrate
+from imp.cli.config_migrate import (
+    _derive_owner,
+    _state_candidates,
+    backfill_repo_markers,
+    run_startup_migrations,
+)
 from imp.paths import imp_home, project_state_dir
 from tests._dac import dac_enforced
-from tests.conftest import _init_repo
+from tests.conftest import _assert_outside_a_git_work_tree, _init_repo
 
 # Every fixture builds real git checkouts; git spawns are slow under a saturated -n auto.
 pytestmark = pytest.mark.timeout(240)
@@ -441,6 +447,54 @@ def test_a_marker_written_this_pass_does_not_block_a_later_directory(
     assert (second / "repo").read_text() == f"{control}\n"
 
 
+def test_startup_performs_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 10a."""
+    monkeypatch.chdir(tmp_path)   # never resolve the state step against the real checkout
+    _assert_outside_a_git_work_tree(tmp_path)
+    control = _checkout(tmp_path, "widget")
+    state = _state_dir("widget")
+    _quest(state, "aaa111", control)
+
+    run_startup_migrations()
+
+    assert (state / "repo").read_text() == f"{control}\n"
+
+
+def test_a_failing_sweep_does_not_kill_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 10b: best-effort like every config step — retried next invocation."""
+    monkeypatch.chdir(tmp_path)
+    _assert_outside_a_git_work_tree(tmp_path)
+
+    def boom() -> None:
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(config_migrate, "backfill_repo_markers", boom)
+
+    run_startup_migrations()   # must not raise
+
+
+def test_the_sweep_runs_before_the_state_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 10c: the state move mints through project_state_dir, so a backfill
+    wired after it would let a legacy layout split into `<slug>-2` first."""
+    monkeypatch.chdir(tmp_path)
+    _assert_outside_a_git_work_tree(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(config_migrate, "backfill_repo_markers",
+                        lambda: calls.append("backfill"))
+    monkeypatch.setattr(state_migrate, "migrate_project_state",
+                        lambda _cwd: calls.append("state"))
+
+    run_startup_migrations()
+
+    assert calls == ["backfill", "state"]
+
+
 def test_worktree_candidate_with_symlinked_imp_home_is_not_dropped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -459,3 +513,21 @@ def test_worktree_candidate_with_symlinked_imp_home_is_not_dropped(
     backfill_repo_markers()
 
     assert (state / "repo").read_text() == f"{control}\n"
+
+
+def test_a_directory_outside_projects_is_never_marked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec AC 11: a hand-pinned $IMP_STATE_DIR stays unmarked, so
+    architecture.md's "no marker written" promise holds."""
+    monkeypatch.chdir(tmp_path)
+    _assert_outside_a_git_work_tree(tmp_path)
+    control = _checkout(tmp_path, "widget")
+    pinned = tmp_path / "pinned"
+    pinned.mkdir()
+    _quest(pinned, "aaa111", control)
+    monkeypatch.setenv("IMP_STATE_DIR", str(pinned))
+
+    run_startup_migrations()
+
+    assert not (pinned / "repo").exists()
