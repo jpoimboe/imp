@@ -9,6 +9,7 @@ sandbox mirror like `bash` (allow-all when unsandboxed).
 from __future__ import annotations
 
 import contextlib
+import difflib
 import hashlib
 import os
 import stat
@@ -270,6 +271,82 @@ def _short_repr(s: str, cap: int = 200) -> str:
     if len(s) <= cap:
         return repr(s)
     return f"{s[:cap]!r}… [{len(s)} chars total]"
+
+
+_CLOSEST_MATCH_FLOOR = 0.6
+_CLOSEST_MATCH_OLD_CAP = 2000
+_CLOSEST_MATCH_CANDIDATES = 32
+_CLOSEST_MATCH_SCORE_BUDGET = 2_500_000
+_ANCHOR_MAX_HITS = 64
+_ANCHOR_PREFIX_CHARS = 12
+# ratio() = 2*M/T with M <= len(old), so a window longer than this multiple of
+# `old` cannot reach the floor however well it matches — skip it unscored.
+_MAX_WINDOW_RATIO = 2 / _CLOSEST_MATCH_FLOOR - 1
+
+
+def _anchor_votes(lines: list[str], old_lines: list[str], max_start: int,
+                  *, key_chars: int | None) -> dict[int, int]:
+    index: dict[str, list[int]] = {}
+    for i, line in enumerate(lines):
+        key = "".join(line.split())[:key_chars]
+        if key:
+            index.setdefault(key, []).append(i)
+    votes: dict[int, int] = {}
+    for j, old_line in enumerate(old_lines):
+        hits = index.get("".join(old_line.split())[:key_chars])
+        if hits is None or len(hits) > _ANCHOR_MAX_HITS:
+            continue
+        for hit in hits:
+            start = min(max(hit - j, 0), max_start)
+            votes[start] = votes.get(start, 0) + 1
+    return votes
+
+
+def _closest_region(body: str, old: str) -> tuple[int, list[str]] | None:
+    """The file region most similar to a missing `old` as (0-based start line,
+    window lines), or None when nothing anchors or nothing reaches the floor.
+    Anchoring first keeps the cost linear in file size and independent of
+    len(old): an exhaustive slide measured ~20 s on a 20k-line file, and
+    _apply_edit runs synchronously inside the event loop."""
+    if len(old) > _CLOSEST_MATCH_OLD_CAP:
+        return None
+    lines = body.split("\n")
+    old_lines = old.split("\n")
+    width = len(old_lines)
+    max_start = max(0, len(lines) - width)
+    votes = _anchor_votes(lines, old_lines, max_start, key_chars=None)
+    if not votes:
+        votes = _anchor_votes(lines, old_lines, max_start,
+                              key_chars=_ANCHOR_PREFIX_CHARS)
+    if not votes:
+        return None
+    # autojunk=False: the default heuristic discards any character in >1% of a
+    # 200+-char sequence, collapsing the score of the multi-line content drift
+    # this diagnostic exists for. That makes each ratio() truly quadratic, so
+    # the cap and this budget are calibrated together: total scored chars^2
+    # stays under the budget, holding the measured worst case at 0.57 s.
+    keep = max(1, min(_CLOSEST_MATCH_CANDIDATES,
+                      _CLOSEST_MATCH_SCORE_BUDGET // (len(old) * len(old))))
+    ranked = sorted(sorted(votes, key=lambda s: (-votes[s], s))[:keep])
+    matcher = difflib.SequenceMatcher(None, autojunk=False)
+    matcher.set_seq2(old)
+    # quick_ratio() is linear in the WINDOW, which len(old) does not bound: a
+    # few very long lines make each window megabytes wide.
+    width_limit = _MAX_WINDOW_RATIO * len(old)
+    best: tuple[float, int] | None = None
+    for start in ranked:
+        window = "\n".join(lines[start:start + width])
+        if len(window) > width_limit:
+            continue
+        matcher.set_seq1(window)
+        if matcher.quick_ratio() < (best[0] if best else _CLOSEST_MATCH_FLOOR):
+            continue
+        score = matcher.ratio()
+        if score >= _CLOSEST_MATCH_FLOOR and (best is None or score > best[0]):
+            best = (score, start)
+    if best is None:
+        return None
+    return best[1], lines[best[1]:best[1] + width]
 
 
 def _apply_edit(
