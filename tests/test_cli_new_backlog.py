@@ -8,7 +8,7 @@ import pytest
 
 from imp.cli import main
 from imp.engine.quest import Quest
-from imp.paths import project_state_dir
+from imp.paths import display_path, project_state_dir
 from tests.conftest import _seed_control
 
 
@@ -231,3 +231,29 @@ def test_interactive_backlog_files_instantly_no_session(
     assert quest.title == "My backlog item"
     assert quest.materialized is False
     assert quest.seed_opening == "My backlog item\n\na longer brief"
+
+
+def test_new_backlog_refuses_a_state_dir_owned_by_another_checkout(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    # AC 16 — the vave28 shape end to end: a scratch checkout, the quest vars unset, but
+    # $IMP_STATE_DIR still inherited from the real project. It must not reach the board.
+    owner = tmp_path / "owner"   # a plain path: the marker is text, never resolved via git
+    owner.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    _seed_control(scratch)          # seeds before the override: it writes a config layer
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "repo").write_text(f"{owner.resolve()}\n")
+    monkeypatch.setenv("IMP_STATE_DIR", str(state))
+    monkeypatch.chdir(scratch)
+    rc = main.main(["new", "--backlog", "junk idea"])
+    assert rc == 2
+    assert capsys.readouterr().err == (
+        f"imp: IMP_STATE_DIR={display_path(state)} holds state for "
+        f"{display_path(owner.resolve())} — refusing to use it here. Fix: to run imp "
+        "against a scratch checkout, unset IMP_STATE_DIR and point IMP_HOME at a "
+        "throwaway directory.\n"
+    )
+    # Nothing was filed: the state dir still holds only its marker.
+    assert sorted(p.name for p in state.iterdir()) == ["repo"]

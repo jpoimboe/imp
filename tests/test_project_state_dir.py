@@ -5,13 +5,15 @@ resolves under each test's own tmp_path.
 """
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from imp import paths
-from imp.engine.worktree import PreconditionError
+from imp.engine.worktree import PreconditionError, find_control_root
 from imp.paths import display_path, imp_home, project_state_dir
+from tests.conftest import _git, _init_repo
 
 
 def _repo(parent: Path, name: str) -> Path:
@@ -111,7 +113,8 @@ def test_override_marked_for_this_checkout_is_accepted(
 def test_override_without_a_marker_is_accepted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The in-sandbox shape: the directory exists but the marker is masked away.
+    # Not the in-sandbox shape any more (the mask re-exposes the marker): this is the
+    # hand-pinned $IMP_STATE_DIR, and the legacy _pin window, which carry no marker.
     override = tmp_path / "state"
     override.mkdir()
     monkeypatch.setenv("IMP_STATE_DIR", str(override))
@@ -147,4 +150,38 @@ def test_the_guard_docstring_no_longer_calls_an_absent_marker_the_sandbox_shape(
     assert "masked in-sandbox shape" not in doc
     assert "hand-pinned" in doc
     assert "read-only" in doc
+
+
+def test_a_bare_probe_root_is_refused_not_handed_the_live_state_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 17 — the archive-probe shape: an agent that resolves state from a throwaway
+    # directory must be refused, not handed the live project's state dir to write into.
+    root = _repo(tmp_path, "widget")
+    override = tmp_path / "state"
+    override.mkdir()
+    (override / "repo").write_text(f"{root.resolve()}\n")
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    probe = Path(tempfile.mkdtemp(dir=tmp_path))
+    with pytest.raises(PreconditionError):
+        project_state_dir(probe)
+
+
+def test_the_marked_owner_resolves_from_its_checkout_and_from_a_linked_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 18: every legitimate imp run happens either in the main checkout or in a quest
+    # worktree, and both must keep resolving — the guard keys on the control root, which
+    # git's common dir maps a linked worktree back onto.
+    root = _repo(tmp_path, "widget")
+    _init_repo(root)
+    linked = tmp_path / "linked"
+    _git(root, "worktree", "add", "-q", "-b", "feat", str(linked), "main")
+    override = tmp_path / "state"
+    override.mkdir()
+    (override / "repo").write_text(f"{root.resolve()}\n")
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    for cwd in (root, linked):
+        assert find_control_root(cwd) == root.resolve()
+        assert project_state_dir(find_control_root(cwd)) == override
 
