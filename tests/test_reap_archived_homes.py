@@ -65,6 +65,20 @@ def test_reap_is_idempotent(tmp_path: Path) -> None:
     assert not done.exists()
 
 
+def test_live_locked_home_is_not_reaped(tmp_path: Path) -> None:
+    done = _home(tmp_path, "done", "completed")
+    _archive(tmp_path, done, "done")
+    lock = done / "lock"
+    lock.write_text(str(os.getpid()))   # this process is definitely alive
+
+    assert reap_archived_homes(tmp_path) == 0
+    assert done.exists()
+
+    lock.unlink()
+    assert reap_archived_homes(tmp_path) == 1
+    assert not done.exists()
+
+
 def test_reap_removes_overlay_residue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
