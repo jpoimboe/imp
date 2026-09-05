@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from imp import paths
 from imp.engine.worktree import PreconditionError
 from imp.paths import display_path, imp_home, project_state_dir
 
@@ -132,6 +133,18 @@ def test_override_holding_another_checkouts_state_is_refused(
         project_state_dir(root)
     assert str(excinfo.value) == (
         f"IMP_STATE_DIR={display_path(override)} holds state for "
-        f"{display_path(other)} — refusing to use it here"
+        f"{display_path(other)} — refusing to use it here. Fix: to run imp against a "
+        "scratch checkout, unset IMP_STATE_DIR and point IMP_HOME at a throwaway "
+        "directory."
     )
+
+
+def test_the_guard_docstring_no_longer_calls_an_absent_marker_the_sandbox_shape() -> None:
+    # The sandbox re-exposes <state dir>/repo read-only through the state tmpfs, so an
+    # absent marker no longer means "in-sandbox" — it means a hand-pinned state dir, which
+    # is unguarded by choice. The docstring is the only place that rule is written down.
+    doc = paths._checked_override.__doc__ or ""
+    assert "masked in-sandbox shape" not in doc
+    assert "hand-pinned" in doc
+    assert "read-only" in doc
 
