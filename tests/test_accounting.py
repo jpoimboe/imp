@@ -4,9 +4,13 @@ import pytest
 
 from imp.cli.accounting import (
     RowUsage,
+    billing_from_agent_message,
+    billing_from_model_usage,
+    billing_from_usage_patch,
     collapse_cumulative_query_results,
     contribution,
     is_metered,
+    vendor_contribution,
 )
 from imp.providers.catalog import BillingUsage
 
@@ -115,3 +119,123 @@ def test_collapse_preserves_event_order_and_leaves_other_types_alone() -> None:
     kept = collapse_cumulative_query_results(events)
     assert [e["type"] for e in kept] == [
         "agent_message", "query_result", "step_completed", "query_result"]
+
+
+def test_anthropic_usage_bills_input_in_full_beside_its_cache_buckets() -> None:
+    # AC 9(c): the buckets are disjoint on this path — nothing is subtracted.
+    billing = billing_from_agent_message({
+        "provider": "anthropic", "model": "claude-sonnet-4-6",
+        "usage": {"input_tokens": 1000, "output_tokens": 500,
+                  "cache_read_input_tokens": 2000,
+                  "cache_creation_input_tokens": 300,
+                  "server_tool_use": {"web_search_requests": 2}}})
+    assert billing == BillingUsage(fresh_input=1000, cached_input=2000,
+                                   cache_write=300, output=500,
+                                   web_search_requests=2)
+
+
+def test_openai_usage_is_normalized_out_of_its_nested_shape() -> None:
+    # AC 10: cached is subtracted out of fresh (1000 - 600), and reasoning is
+    # already inside output_tokens, so output stays 400 rather than 650.
+    billing = billing_from_agent_message({
+        "provider": "openai", "model": "gpt-5.6-sol",
+        "usage": {"input_tokens": 1000,
+                  "input_tokens_details": {"cached_tokens": 600},
+                  "output_tokens": 400,
+                  "output_tokens_details": {"reasoning_tokens": 250}}})
+    assert billing == BillingUsage(fresh_input=400, cached_input=600,
+                                   cache_write=0, output=400)
+
+
+def test_a_usage_less_agent_message_bills_nothing() -> None:
+    # codex writes usage={} on the message and the real figures on the patch.
+    assert billing_from_agent_message(
+        {"provider": "codex", "model": "gpt-5.6-sol", "usage": {}}) is None
+    assert billing_from_agent_message({"provider": "anthropic"}) is None
+
+
+def test_the_usage_patch_row_is_taken_verbatim_with_no_second_subtraction() -> None:
+    # AC 9(b): codex_runner already wrote fresh = input - cached - cache_write,
+    # so 300 must survive here; subtracting again would clamp it toward 0.
+    billing = billing_from_usage_patch({
+        "usage": {"input_tokens": 300, "output_tokens": 50,
+                  "cache_read_input_tokens": 600,
+                  "cache_creation_input_tokens": 100,
+                  "reasoning_output_tokens": 20},
+        "context_tokens": 5000})
+    assert billing == BillingUsage(fresh_input=300, cached_input=600,
+                                   cache_write=100, output=50)
+
+
+def test_an_empty_usage_patch_bills_nothing() -> None:
+    assert billing_from_usage_patch({"usage": {}, "context_tokens": 10}) is None
+
+
+def test_an_all_zero_quadruple_is_not_billable_work() -> None:
+    # An all-zero usage dict is a real on-disk shape — the "empty reply" of a
+    # freshly-resumed session (`narrative.py:867`). It is truthy, so a falsy
+    # check alone would let it through and count a turn that billed nothing as
+    # priced model work, flipping the renderer's "step did no model work" state.
+    zero = {"input_tokens": 0, "output_tokens": 0,
+            "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+    assert billing_from_agent_message(
+        {"provider": "anthropic", "model": "m", "usage": zero}) is None
+    assert billing_from_agent_message(
+        {"provider": "openai", "model": "m",
+         "usage": {"input_tokens": 0, "output_tokens": 0}}) is None
+    assert billing_from_usage_patch({"usage": zero}) is None
+
+
+def test_a_web_search_with_no_tokens_is_still_billable_work() -> None:
+    # $10/1,000 requests is a flat charge that does not need a token to exist.
+    billing = billing_from_agent_message({
+        "provider": "anthropic", "model": "claude-sonnet-4-6",
+        "usage": {"input_tokens": 0, "output_tokens": 0,
+                  "server_tool_use": {"web_search_requests": 2}}})
+    assert billing == BillingUsage(web_search_requests=2)
+
+
+def test_model_usage_sums_every_model_including_haiku() -> None:
+    # AC 2(b): haiku is present only in model_usage — the background model never
+    # appears in the agent_message stream at all. The web-search count is NOT
+    # carried: claude_code renders the vendor's own cost, which already folds
+    # web search in, so pricing it again here would be dead arithmetic.
+    billing = billing_from_model_usage({
+        "claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 50,
+                              "cacheReadInputTokens": 1000,
+                              "cacheCreationInputTokens": 200,
+                              "webSearchRequests": 3, "costUSD": 0.40},
+        "claude-haiku-4-5-20251001": {"inputTokens": 10, "outputTokens": 5,
+                                      "cacheReadInputTokens": 100,
+                                      "cacheCreationInputTokens": 0,
+                                      "webSearchRequests": 0, "costUSD": 0.02}})
+    assert billing == BillingUsage(fresh_input=110, cached_input=1100,
+                                   cache_write=200, output=55)
+
+
+def test_an_empty_model_usage_rollup_bills_nothing() -> None:
+    assert billing_from_model_usage({}) == BillingUsage()
+
+
+def test_a_query_result_with_neither_dollars_nor_usage_is_not_work() -> None:
+    # `total_cost_usd` is `float | None` on the wire (`state.py:598`), so a row
+    # can carry no cost at all. With an empty rollup beside it there is nothing
+    # to bill, and crediting it would count a query that billed nothing as
+    # priced model work — the same category error the quadruple guard prevents.
+    assert vendor_contribution({}, None, metered=False) is None
+
+
+def test_a_query_result_counts_when_either_half_is_present() -> None:
+    # The vendor's cost alone is billable work even with an empty rollup...
+    cost_only = vendor_contribution({}, 0.42, metered=False)
+    assert cost_only is not None
+    assert cost_only.dollars == pytest.approx(0.42)
+    assert (cost_only.priced, cost_only.notional) == (1, 1)
+    # ...and so are tokens alone, which carry no dollars but are still real.
+    tokens_only = vendor_contribution(
+        {"claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 5}},
+        None, metered=True)
+    assert tokens_only is not None
+    assert (tokens_only.fresh_input, tokens_only.output) == (100, 5)
+    assert tokens_only.dollars == 0.0
+    assert (tokens_only.priced, tokens_only.unpriced) == (1, 0)
