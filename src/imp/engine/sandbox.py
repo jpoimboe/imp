@@ -83,6 +83,7 @@ class SandboxPolicy:
     quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
     state_mask: str = ""                     # fail-closed tmpfs mask ("" → none)
     projects_ro: str = ""                    # ro bind of imp_home()/projects ("" → none)
+    state_repo_ro: str = ""                  # ro re-expose of <state dir>/repo ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     disposable_tree: bool = False            # agent runs in a disposable git worktree
@@ -122,8 +123,10 @@ class SandboxPolicy:
         worktree is deliberately NOT re-bound after it. In BOTH cases the quest_home
         rebind and the own steps/events masks come AFTER the tmpfs. Invariant: after the
         whole plan applies, the exposed set under the mask is EXACTLY the current
-        quest's own home (minus its own steps/events) plus the current worktree iff
-        the worktree is a descendant of the mask; everything else under it is masked.
+        quest's own home (minus its own steps/events), the read-only `repo` ownership
+        marker (state_repo_ro, so the $IMP_STATE_DIR guard can still read it), plus the
+        current worktree iff the worktree is a descendant of the mask; everything else
+        under it is masked.
         Mis-ordering buries a live quest's own bookkeeping (normal) or leaks every
         sibling (draft).
 
@@ -136,6 +139,7 @@ class SandboxPolicy:
         state_block = [
             *([(self.projects_ro, "ro")] if self.projects_ro else []),
             *([(self.state_mask, "mask_dir")] if self.state_mask else []),
+            *([(self.state_repo_ro, "ro")] if self.state_repo_ro else []),
         ]
         nested = bool(self.state_mask) and Path(self.worktree).is_relative_to(
             Path(self.state_mask))
@@ -375,10 +379,15 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     policy creation; bwrap must still bind each ro path over the read-only floor,
     so a spawn carrying a vanished path dies in sandbox SETUP ("Read-only file
     system") before the command runs. A mask over a gone path protects nothing, so
-    existence-gating at spawn is always safe. Own binds (worktree, quest_home) and
-    stable config (caches, extra_*) never churn and are left untouched. Scoped to
-    the spawn argv only; the in-process allows_read/allows_write mirrors keep the
-    unpruned policy (a gone path is denied either way).
+    existence-gating at spawn is always safe. Own binds (worktree, quest_home) and stable config
+    (caches, extra_*) never churn and are left untouched. Scoped to the spawn argv only; the
+    in-process allows_read/allows_write mirrors keep the unpruned policy (a gone path is denied
+    either way).
+
+    The repo marker re-expose (state_repo_ro) is gated on the same terms _checked_override
+    reads it on — is_file() — so the bind exists exactly when the guard has something to
+    read; a hand-pinned $IMP_STATE_DIR carries no marker, and an un-gated --ro-bind of a
+    missing source would abort bwrap setup for those users.
 
     It also MINTS this spawn's home-overlay layer when policy.overlay_root is set:
     a fresh mkdtemp dir under the root holding its own upper/work/merged. Minting
@@ -410,6 +419,8 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
         git_ro_remask=_existing(list(policy.git_ro_remask)),
         secret_dirs=_existing(list(policy.secret_dirs)),
         secret_files=_existing(list(policy.secret_files)),
+        state_repo_ro=(policy.state_repo_ro
+                       if Path(policy.state_repo_ro).is_file() else ""),
     )
 
 
@@ -712,6 +723,7 @@ def resolve_policy(
         git_common_dir=str(git),
         quest_home=str(quest_dir) if quest_dir is not None else "",
         state_mask=state_mask,
+        state_repo_ro=f"{state_mask}/repo",
         projects_ro=projects_ro,
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,

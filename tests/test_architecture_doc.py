@@ -140,6 +140,8 @@ def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
     assert "$IMP_STATE_DIR" in text
     assert "$IMP_HOME" in text
     assert "`repo` marker" in text
+    # AC 26(b): the backfill touches only imp-owned dirs, so this promise stays true.
+    assert "overrides the per-project path verbatim — no slug walk, no marker written" in text
     for entry in ("`quests/<id>/`", "`worktrees/<id>/`", "`archive/`"):
         assert entry in text, entry
     # the one imp path left in a worktree is the symlink into the quest home
@@ -182,6 +184,16 @@ def test_operator_notes_document_archive_version_skew() -> None:
     assert "imp resume <id>" in section
     assert "a new index column must be nullable" in section
     assert "index.ingest" in section
+
+
+def test_operator_notes_document_the_unguarded_pinned_state_dir() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    flat = " ".join(text.split())
+    # A pinned dir is deliberately never marked by imp, so the ownership guard is off
+    # until the operator writes the marker — the page has to say so and show the form.
+    assert "A pinned directory carries no `repo` marker" in flat
+    assert "Opt in to the ownership guard by writing the marker yourself" in flat
+    assert 'pwd -P > "$DIR/repo"' in text
 
 
 OVERVIEW_DIAGRAM = """flowchart LR

@@ -421,6 +421,35 @@ def test_prepare_spawn_policy_keeps_worktrees_mask_even_if_absent(tmp_path):
     assert pruned.git_worktree_self == str(gone / "self")
 
 
+def test_prepare_spawn_policy_drops_a_vanished_repo_marker(tmp_path):
+    # AC 22(a). A hand-pinned $IMP_STATE_DIR carries no marker by design, and bwrap
+    # aborts SETUP on a missing --ro-bind source — every sandboxed step for those users
+    # would die before its command ran.
+    state = tmp_path / "state"
+    state.mkdir()
+    marker = state / "repo"
+    p = _policy(state_mask=str(state), state_repo_ro=str(marker))
+    prepared = prepare_spawn_policy(p)
+    assert prepared.state_repo_ro == ""
+    assert str(marker) not in build_sandbox_argv(
+        "x", cwd="/wt", policy=prepared, engine_env={})
+
+
+def test_prepare_spawn_policy_keeps_a_present_repo_marker(tmp_path):
+    # AC 22(b): gating must not cost the marker where it exists — that is the whole
+    # point of the re-expose.
+    state = tmp_path / "state"
+    state.mkdir()
+    marker = state / "repo"
+    marker.write_text(f"{tmp_path}\n")
+    p = _policy(state_mask=str(state), state_repo_ro=str(marker))
+    prepared = prepare_spawn_policy(p)
+    assert prepared.state_repo_ro == str(marker)
+    assert (str(marker), "ro") in prepared.bind_plan()
+    assert f"--ro-bind {marker} {marker}" in " ".join(
+        build_sandbox_argv("x", cwd="/wt", policy=prepared, engine_env={}))
+
+
 def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"
@@ -2435,6 +2464,69 @@ def test_argv_binds_match_bind_plan_with_projects_ro():
         assert ("/home/u/.imp/projects", "ro") in p.bind_plan()
 
 
+def test_the_repo_marker_is_re_exposed_read_only_through_the_state_tmpfs():
+    # AC 21: the mask hides the whole state dir, so the marker the $IMP_STATE_DIR guard
+    # reads has to come back on top of it — and read-only, since nothing in-sandbox may
+    # repoint a checkout's ownership.
+    p = _cross_project_policy(state_repo_ro="/home/u/.imp/projects/mine/repo")
+    plan = p.bind_plan()
+    paths = [b for b, _ in plan]
+    assert ("/home/u/.imp/projects/mine/repo", "ro") in plan
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index(
+        "/home/u/.imp/projects/mine/repo")
+    assert paths.index("/home/u/.imp/projects/mine/repo") < paths.index("/home/u/.ssh")
+    assert paths.index("/home/u/.imp/projects/mine/repo") < paths.index(
+        "/run/user/1000")
+    assert paths.index("/home/u/.imp/projects/mine/repo") < paths.index("/home/u/.netrc")
+    # The in-process mirror the fs tools consult agrees: readable, never writable.
+    assert p.allows_read(Path("/home/u/.imp/projects/mine/repo")) is True
+    assert p.allows_write(Path("/home/u/.imp/projects/mine/repo")) is False
+    # The re-expose is ONE file: a sibling quest under the same mask stays hidden.
+    assert p.allows_read(
+        Path("/home/u/.imp/projects/mine/quests/sib/quest.json")) is False
+
+
+def test_the_repo_re_expose_follows_the_mask_in_the_draft_shape():
+    # Draft agent: worktree == control root, OUTSIDE the mask, so the whole state_block
+    # is emitted after the worktree rw bind. The marker must still land after the tmpfs.
+    p = _cross_project_policy(worktree="/ctl",
+                              state_repo_ro="/home/u/.imp/projects/mine/repo")
+    paths = [b for b, _ in p.bind_plan()]
+    assert paths.index("/ctl") < paths.index("/home/u/.imp/projects/mine")
+    assert paths.index("/home/u/.imp/projects/mine") < paths.index(
+        "/home/u/.imp/projects/mine/repo")
+    assert p.allows_read(Path("/home/u/.imp/projects/mine/repo")) is True
+
+
+def test_no_repo_bind_when_the_field_is_empty():
+    # A hand-pinned $IMP_STATE_DIR carries no marker; an unset field must emit nothing
+    # at all, or bwrap aborts setup on a missing --ro-bind source.
+    p = _cross_project_policy()
+    assert p.state_repo_ro == ""
+    assert not [b for b, _ in p.bind_plan() if b.endswith("/repo")]
+    assert p.allows_read(Path("/home/u/.imp/projects/mine/repo")) is False
+
+
+def test_argv_binds_match_bind_plan_with_the_repo_re_expose():
+    # Drift guard for all three worktree shapes: an ro bind that does not round-trip
+    # through the argv parser means allows_read/allows_write lie about bwrap.
+    for worktree in ("/home/u/.imp/projects/mine/worktrees/abc", "/ctl", "/home/u"):
+        p = _cross_project_policy(worktree=worktree,
+                                  state_repo_ro="/home/u/.imp/projects/mine/repo")
+        argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+        assert _parse_argv_binds(argv) == p.bind_plan()
+        assert ("--ro-bind /home/u/.imp/projects/mine/repo "
+                "/home/u/.imp/projects/mine/repo") in " ".join(argv)
+
+
+def test_the_bind_plan_invariant_names_the_repo_re_expose():
+    # AC 25(b): the exposed-set invariant is the contract every future bind edit is
+    # read against, so it must account for the one path the mask no longer hides.
+    doc = SandboxPolicy.bind_plan.__doc__ or ""
+    invariant = doc[doc.index("Invariant:"):]
+    assert "state_repo_ro" in invariant
+
+
 def test_retired_overlay_symbols_are_gone():
     import imp.engine.sandbox as sb
     for name in ("OVERLAY_SETUP_FAILED_MARKER", "OVERLAY_SETUP_FAILED_CODE",
@@ -2600,3 +2692,38 @@ def test_draft_ordering_holds_under_the_override(tmp_path, monkeypatch):
         override.resolve() / "quests" / "sibling" / "state.json") is False
     assert pol.allows_read(
         quest_dir.resolve() / "artifacts" / "spec" / "abc.md") is True
+
+
+def test_resolve_policy_re_exposes_this_projects_repo_marker(tmp_path):
+    # AC 20: a policy for a REAL quest — the field must be wired at the one place
+    # state_mask is set, not just constructible by hand.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    marker = project_state_dir(control).resolve() / "repo"
+    assert pol.state_repo_ro == str(marker)
+    assert pol.state_mask == str(marker.parent)
+    assert (pol.state_repo_ro, "ro") in pol.bind_plan()
+    # The slug walk already minted it, so the guard has a real file to read in-sandbox.
+    assert marker.read_text() == f"{control.resolve()}\n"
+    assert pol.allows_read(marker) is True
+    assert pol.allows_write(marker) is False
+
+
+def test_an_inactive_policy_carries_no_repo_re_expose(tmp_path):
+    # AC 20's second half: the inactive policy binds nothing, so it must not claim a
+    # path either — build_sandbox_argv would never emit it, and the mirror must agree.
+    control, _wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=control, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(allow_unsandboxed=True), engine_env_result={},
+        environ={}, available=False,
+    )
+    assert pol.active is False
+    assert pol.note == "unsandboxed_by_config"
+    assert pol.state_repo_ro == ""
+    assert not [b for b, _ in pol.bind_plan() if b.endswith("/repo")]
+    assert build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}) == [
+        "sh", "-c", "x"]

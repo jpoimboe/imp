@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
 """One-shot startup migrations: the global config file's move into $IMP_HOME, the
-project config file's staged rename, and the per-project state directory's move out
-of the checkout. Run by the console-script entrypoint (`imp.__main__:main`), never
-by `imp.cli.main:main` — the suite drives the latter in-process, where a migration
+project config file's staged rename, the `repo` ownership marker's backfill into
+imp-owned state directories, and the per-project state directory's move out of the
+checkout. Run by the console-script entrypoint (`imp.__main__:main`), never by
+`imp.cli.main:main` — the suite drives the latter in-process, where a migration
 would rearrange the developer's own files."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -16,7 +18,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-from imp.paths import display_path
+from imp.paths import _slug, display_path, imp_home
 
 
 def migrate_global_config(legacy: Path, new: Path) -> None:
@@ -161,7 +163,6 @@ def migrate_config_layers(cwd: Path) -> None:
     ~/.imp locations go first: only the checkout needs git to resolve, and
     resolving it can raise outside a work tree — which under the caller's one
     `suppress` would otherwise take the machine-wide files down with it."""
-    from imp.paths import imp_home
     from imp.providers.paths import global_config_path
 
     rewrite_config_file(global_config_path())
@@ -170,6 +171,98 @@ def migrate_config_layers(cwd: Path) -> None:
     checkout = _checkout_config(cwd)
     if checkout is not None:
         rewrite_config_file(checkout)
+
+
+def _state_candidates(state_dir: Path) -> list[Path]:
+    """Every project_root a state directory's own records name. The archive is a
+    first-class source, not a fallback: terminal quest homes are reaped, so a project
+    between quests has records and no live quest at all."""
+    roots = [str(json.loads(meta.read_text()).get("project_root") or "")
+             for meta in sorted((state_dir / "quests").glob("*/quest.json"))]
+    roots += [str(json.loads(rec.read_text()).get("quest_meta", {}).get("project_root") or "")
+              for rec in sorted((state_dir / "archive" / "records").glob("*.json"))]
+    return [Path(root) for root in roots if root]
+
+
+def _owner_of(candidate: Path, state_dir: Path) -> Path | None:
+    """The checkout a recorded project_root belongs to. None when the candidate cannot
+    be trusted — it vanished, its git dir is unresolvable, or it is not itself a
+    checkout — which drops that candidate only, never the whole directory."""
+    from imp.engine.worktree import PreconditionError, find_control_root
+
+    if not candidate.is_dir():
+        return None
+    try:
+        control = find_control_root(candidate)
+    except PreconditionError:
+        return None
+    if candidate.resolve().is_relative_to((state_dir / "worktrees").resolve()):
+        return control
+    return control if control == candidate.resolve() else None
+
+
+def _could_be_minted(dir_name: str, root: Path) -> bool:
+    """The exact inverse of the slug walk's mint rule (paths.py:50): `<slug>`, or
+    `<slug>-N` for N >= 2. This is what stops a leaked scratch quest — whose recorded
+    root lives in the live state dir — from marking that dir for the scratch checkout."""
+    base = _slug(root.name)
+    if dir_name == base:
+        return True
+    suffix = dir_name.removeprefix(f"{base}-")
+    return (suffix.isdecimal() and int(suffix) >= 2
+            and dir_name == f"{base}-{int(suffix)}")
+
+
+def _derive_owner(state_dir: Path) -> Path | None:
+    """The one checkout a marker-less state directory belongs to, or None when its
+    surviving candidates do not agree on exactly one."""
+    # Deduplicated: one git spawn per DISTINCT candidate, however many records name it.
+    owners = {owner for candidate in dict.fromkeys(_state_candidates(state_dir))
+              if (owner := _owner_of(candidate, state_dir)) is not None
+              and _could_be_minted(state_dir.name, owner)}
+    return owners.pop() if len(owners) == 1 else None
+
+
+def _holds_state(directory: Path) -> bool:
+    quests = directory / "quests"
+    return ((quests.is_dir() and any(quests.iterdir()))
+            or (directory / "archive").is_dir())
+
+
+def _live_claims(projects: Path) -> set[str]:
+    """The owner paths a sibling directory already claims AND holds real state for.
+    A marker-only stub is not a claim — it has no quests to orphan — so it never blocks
+    the repair; marking the live directory beside it retires the stub in the walk."""
+    claims: set[str] = set()
+    for directory in sorted(projects.iterdir()):
+        with suppress(Exception):   # isolated per sibling, like the sweep itself
+            marker = directory / "repo"
+            if marker.is_file() and _holds_state(directory):
+                claims.add(marker.read_text().strip())
+    return claims
+
+
+def backfill_repo_markers() -> None:
+    """Write the missing `repo` ownership marker into every imp-owned state directory
+    whose own records determine its owner, so `_checked_override` has something to
+    refuse a foreign checkout with. Bounded to `imp_home()/projects/`: a hand-pinned
+    $IMP_STATE_DIR is never marked. Each directory is isolated — a malformed record or
+    a read-only directory skips that one and the sweep continues. Siblings are read
+    once up front, so a marker this pass writes cannot change a later directory's
+    outcome."""
+    projects = imp_home() / "projects"
+    if not projects.is_dir():
+        return
+    claimed = _live_claims(projects)
+    for directory in sorted(projects.iterdir()):
+        with suppress(Exception):
+            marker = directory / "repo"
+            if not directory.is_dir() or marker.exists():
+                continue
+            owner = _derive_owner(directory)
+            if owner is None or str(owner) in claimed:
+                continue
+            marker.write_text(f"{owner}\n")
 
 
 def run_startup_migrations() -> None:
@@ -187,6 +280,10 @@ def run_startup_migrations() -> None:
         migrate_project_config(Path.cwd())
     with suppress(Exception):
         migrate_config_layers(Path.cwd())
+    # Before the state move: that step mints through project_state_dir itself, so
+    # backfilling first means it resolves against repaired markers instead of racing them.
+    with suppress(Exception):
+        backfill_repo_markers()
     # Lazy: state_migrate imports _git_toplevel from here, so a module-scope import
     # would be circular.
     from imp.cli.state_migrate import migrate_project_state

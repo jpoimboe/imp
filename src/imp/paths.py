@@ -63,9 +63,11 @@ def project_state_dir(control_root: Path) -> Path:
 
 
 def _checked_override(state_dir: Path, control_root: Path) -> Path:
-    """$IMP_STATE_DIR verbatim — creating nothing, marking nothing. Refuses only
-    when the directory already carries another checkout's `repo` marker; an absent
-    marker is the masked in-sandbox shape and reads clean."""
+    """$IMP_STATE_DIR verbatim — creating nothing, marking nothing. Refuses only when the
+    directory already carries another checkout's `repo` marker, which the sandbox re-exposes
+    read-only through the state mask so an in-sandbox read sees it too. An absent marker
+    reads clean: a hand-pinned state dir (or the legacy `_pin` window) carries none and is
+    unguarded by choice."""
     marker = state_dir / "repo"
     owner = marker.read_text().strip() if marker.is_file() else None
     if owner is not None and owner != str(control_root):
@@ -74,6 +76,8 @@ def _checked_override(state_dir: Path, control_root: Path) -> Path:
 
         raise PreconditionError(
             f"IMP_STATE_DIR={display_path(state_dir)} holds state for "
-            f"{display_path(Path(owner))} — refusing to use it here"
+            f"{display_path(Path(owner))} — refusing to use it here. Fix: to run imp "
+            "against a scratch checkout, unset IMP_STATE_DIR and point IMP_HOME at a "
+            "throwaway directory."
         )
     return state_dir
