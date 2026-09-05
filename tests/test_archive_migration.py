@@ -6,8 +6,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
 from imp.engine import archive
-from imp.engine.archive import read
+from imp.engine.archive import index, read, record
+from imp.engine.archive.blobstore import LocalBlobStore
 
 
 def _seed_change(control: Path, cid: str, last_ts: str) -> None:
@@ -191,15 +194,16 @@ def test_completed_rows_migrates_before_query(tmp_path: Path) -> None:
     assert _user_version(db) == 5
 
 
-def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
+def test_search_archive_content_migrates_before_query(tmp_path: Path) -> None:
     _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
     db = archive.index_path(tmp_path)
     _write_legacy_v0_db(db)  # only the bogus 'stale' row remains in the db
 
-    hits = read.search_archive(tmp_path, "alpha")
+    hits = read.search_archive_content(tmp_path, "alpha")
 
-    # Without the gate the legacy db has no 'alpha' row -> []. With it, the
-    # rebuild restores 'alpha' (title "Alpha") and the search finds it.
+    # Without the gate the legacy db has neither an 'alpha' row nor a `content`
+    # column. With it, the rebuild restores 'alpha' (title "Alpha") and the
+    # search finds it.
     assert [h[0] for h in hits] == ["alpha"]
     assert _user_version(db) == 5
 
@@ -375,3 +379,129 @@ def test_rebuild_backfills_events_content_column(tmp_path: Path) -> None:
         conn.close()
     assert "stale" not in rows                    # rebuilt from records, not the old db
     assert "BACKFILL_TRACE" in rows["evt"]        # events_content backfilled from the blob
+
+
+def _stamp_floors_ahead(control: Path) -> None:
+    """Make the archive on disk look like a newer imp wrote it: both floors one ahead."""
+    archive.data_version_path(control).write_text(str(archive._DATA_VERSION + 1))
+    conn = sqlite3.connect(archive.index_path(control))
+    try:
+        conn.execute(f"PRAGMA user_version = {index._SCHEMA_VERSION + 1}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_archive_quest_stamps_both_floors_to_this_writers_versions(
+    tmp_path: Path,
+) -> None:
+    _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
+    _stamp_floors_ahead(tmp_path)
+
+    _seed_change(tmp_path, "beta", "2026-06-02T00:00:02+00:00")
+
+    db = archive.index_path(tmp_path)
+    assert _rows_by_id(db)["beta"] == "2026-06-02T00:00:02+00:00"
+    assert (archive.data_version_path(tmp_path).read_text().strip()
+            == str(archive._DATA_VERSION))
+    assert _user_version(db) == index._SCHEMA_VERSION
+
+
+def _seed_legacy_id_ns_change(control: Path, cid: str, last_ts: str) -> None:
+    """Archive one change whose events blob still carries the pre-v7 "event" id_ns."""
+    events = control / f"{cid}.jsonl"
+    events.write_text(json.dumps({
+        "id": f"{cid}-e0", "timestamp": last_ts, "type": "tool_result",
+        "payload": {"id": "t1", "id_ns": "event", "content": "HEAL_TRACE"}}) + "\n")
+    quest_json = control / f"{cid}-quest.json"
+    quest_json.write_text(json.dumps({
+        "id": cid, "title": cid.title(), "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = control / f"{cid}-state.json"
+    state_json.write_text(json.dumps({
+        "id": cid, "status": "merged", "step": "finalize"}))
+    archive.archive_quest(
+        control, cid, events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+
+def _tool_result_id_ns(blob: bytes) -> str | None:
+    for line in blob.decode().splitlines():
+        event = json.loads(line)
+        if event.get("type") == "tool_result":
+            return event["payload"].get("id_ns")
+    return None
+
+
+def test_an_older_writers_index_row_is_rebuilt_by_the_next_read(tmp_path: Path) -> None:
+    """An older imp knows a lower index schema; its write lowers the floor, so the next
+    current read rebuilds instead of trusting the row it left behind."""
+    _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
+    db = archive.index_path(tmp_path)
+    schema_now = index._SCHEMA_VERSION
+
+    # A scoped MonkeyPatch, not the `monkeypatch` fixture: undoing that fixture
+    # mid-test would also undo conftest's autouse IMP_HOME isolation, moving the
+    # archive root out from under the assertions below.
+    with pytest.MonkeyPatch.context() as older_imp:
+        older_imp.setattr(index, "_SCHEMA_VERSION", schema_now - 1)
+        _seed_prose_change(tmp_path, "beta", "the 300s deadline is enforced")
+
+    assert _user_version(db) == schema_now - 1
+
+    # events_content is the column a genuine v4 ingest would not have written
+    # (see _write_stale_v4_db above): blank it, as that older writer leaves it.
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("UPDATE quests SET events_content = NULL WHERE id = 'beta'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    ids = {r[0] for r in read.completed_rows(tmp_path)}
+
+    assert ids == {"alpha", "beta"}
+    assert _user_version(db) == schema_now
+    conn = sqlite3.connect(db)
+    try:
+        events_content = conn.execute(
+            "SELECT events_content FROM quests WHERE id = 'beta'").fetchone()[0]
+    finally:
+        conn.close()
+    assert "300s" in events_content
+
+
+def test_an_older_writers_record_is_healed_by_the_next_read(tmp_path: Path) -> None:
+    """Both floors lowered: the next current read re-migrates the blob and rebuilds."""
+    _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
+    db = archive.index_path(tmp_path)
+    data_now, schema_now = archive._DATA_VERSION, index._SCHEMA_VERSION
+
+    with pytest.MonkeyPatch.context() as older_imp:
+        older_imp.setattr(archive, "_DATA_VERSION", data_now - 1)
+        older_imp.setattr(index, "_SCHEMA_VERSION", schema_now - 1)
+        _seed_legacy_id_ns_change(tmp_path, "beta", "2026-06-02T00:00:02+00:00")
+
+    assert (archive.data_version_path(tmp_path).read_text().strip()
+            == str(data_now - 1))
+    assert _user_version(db) == schema_now - 1
+
+    ids = {r[0] for r in read.completed_rows(tmp_path)}
+
+    rec = record.read_record(archive.records_root(tmp_path), "beta")
+    assert rec is not None
+    blob = LocalBlobStore(archive.blobs_root(tmp_path)).get(rec["events_hash"])
+    assert blob is not None
+    assert _tool_result_id_ns(blob) == "block"
+    assert ids == {"alpha", "beta"}
+    assert (archive.data_version_path(tmp_path).read_text().strip() == str(data_now))
+    assert _user_version(db) == schema_now
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute(
+            "SELECT last_event_ts, events_content FROM quests"
+            " WHERE id = 'beta'").fetchone()
+    finally:
+        conn.close()
+    assert row[0] == "2026-06-02T00:00:02+00:00"
+    assert "HEAL_TRACE" in row[1]

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.api import QuestSummary, create_quest, list_quests
+from imp.api import ImpError, QuestSummary, create_quest, list_quests
 from tests.conftest import _archive_with_event, _seed_control
 
 _EVENT = json.dumps(
@@ -97,3 +97,19 @@ def test_a_session_socket_in_the_env_does_not_retarget_the_listing(
     monkeypatch.setenv("IMP_SESSION_SOCKET", str(tmp_path / "nonexistent.sock"))
 
     assert [s.id for s in list_quests(tmp_path)] == [handle.id]
+
+
+def test_an_archive_newer_than_this_install_raises_imp_error(tmp_path: Path) -> None:
+    # AC 1: the floor check fires on completed_rows. A consumer catching ImpError
+    # must not have to also catch an imp.engine.* type to survive version skew.
+    from imp.engine import archive
+
+    _seed_control(tmp_path)
+    _archive_with_event(tmp_path, "gone78", "Finished one", _EVENT)
+    ahead = archive._DATA_VERSION + 1
+    archive.data_version_path(tmp_path).write_text(str(ahead))
+
+    with pytest.raises(ImpError) as excinfo:
+        list_quests(tmp_path)
+
+    assert f"archive data is at v{ahead}" in str(excinfo.value)

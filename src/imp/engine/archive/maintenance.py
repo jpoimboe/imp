@@ -9,11 +9,12 @@ from pathlib import Path
 
 from imp.engine.archive import ensure_current, index, index_path
 from imp.engine.sandbox import _force_rmtree
+from imp.engine.state import lock_is_live
 from imp.paths import project_state_dir
 
 
 def reap_archived_homes(control_root: Path) -> int:
-    """Reap live quest homes already terminal and durable in the archive; return the count."""
+    """Reap quest homes already terminal and durable in the archive; return the count."""
     from imp.cli.store import _INFLIGHT, _list_quest_homes, _quest_home
 
     ensure_current(control_root)
@@ -30,6 +31,9 @@ def reap_archived_homes(control_root: Path) -> int:
             except (FileNotFoundError, json.JSONDecodeError):
                 continue
             if state.get("status") in _INFLIGHT:
+                continue
+            # a live process still owns its home after archive_quest commits the index row
+            if lock_is_live(home / "lock"):
                 continue
             if not index.has_quest(conn, cid):
                 continue

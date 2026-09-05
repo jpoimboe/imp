@@ -35,6 +35,12 @@ def connect(index_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def stamp_version(conn: sqlite3.Connection) -> None:
+    """An older writer lowers the floor, so the next current imp rebuilds its row."""
+    conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+    conn.commit()
+
+
 def ingest(
     conn: sqlite3.Connection, record: dict[str, Any], events: list[dict[str, Any]],
 ) -> None:
@@ -71,19 +77,6 @@ def has_quest(conn: sqlite3.Connection, quest_id: str) -> bool:
         "SELECT 1 FROM quests WHERE id = ?", (quest_id,)).fetchone() is not None
 
 
-def most_recent_id(conn: sqlite3.Connection) -> str | None:
-    row = conn.execute(
-        "SELECT id FROM quests WHERE last_event_ts IS NOT NULL"
-        " ORDER BY last_event_ts DESC, id DESC LIMIT 1").fetchone()
-    return row[0] if row else None
-
-
-def last_event_ts(conn: sqlite3.Connection, quest_id: str) -> str | None:
-    row = conn.execute(
-        "SELECT last_event_ts FROM quests WHERE id = ?", (quest_id,)).fetchone()
-    return row[0] if row and row[0] else None
-
-
 def completed_rows(
     conn: sqlite3.Connection,
 ) -> list[tuple[str, str, str, str, str, str, str | None]]:
@@ -101,22 +94,6 @@ def _like_pattern(query: str) -> str:
     # literally instead of acting as a wildcard.
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
-
-
-def search(
-    conn: sqlite3.Connection, query: str,
-) -> list[tuple[str, str, str, str]]:
-    like = _like_pattern(query)
-    rows = conn.execute(
-        "SELECT id, title, status, created_at FROM quests"
-        " WHERE id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
-        " OR content LIKE ? ESCAPE '\\'"
-        " ORDER BY created_at DESC, id",
-        (like, like, like)).fetchall()
-    return [
-        (cid, title or "", status or "", created or "")
-        for (cid, title, status, created) in rows
-    ]
 
 
 def search_content(

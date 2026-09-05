@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass
@@ -140,6 +141,12 @@ class LocalStore:
                 state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
             except FileNotFoundError:
                 state_json = None
+            lock_live = lock_is_live(cdir / "lock")
+            if state_json is not None and not lock_live:
+                # one unarchivable home must not abort the whole listing
+                with contextlib.suppress(Exception):
+                    _archive_stranded_home(
+                        self.control_root, quest_id, cdir, state_json)
             events_path = cdir / "events.jsonl"
             last_iso = _last_event_iso(events_path) or ""
             has_um = _events_have_user_message(events_path)
@@ -150,7 +157,7 @@ class LocalStore:
             out.append(HomeDigest(
                 quest_id, quest_json, state_json, meta, last_iso, has_um,
                 conversation_prose(parsed), _resolve_intent(parsed),
-                lock_is_live(cdir / "lock")))
+                lock_live))
         return out
 
     def quest_card(self, quest_id: str) -> QuestCard | None:
@@ -190,6 +197,31 @@ class LocalStore:
     def search_event_candidates(self, query: str) -> list[tuple[str, str, str, str | None]]:
         from imp.engine.archive import read as archive_read
         return archive_read.search_archive_events_content(self.control_root, query)
+
+
+# Terminal status -> resumable. Explicit, never the _INFLIGHT complement: archiving a
+# shelved home non-resumably would drop its step blobs, so an unknown status is skipped.
+_TERMINAL_ARCHIVE_RESUMABLE: dict[str, bool] = {
+    "merged": False, "done": False, "abandoned": False, "shelved": True,
+}
+
+
+def _archive_stranded_home(
+    control: Path, quest_id: str, home: Path, state_json: bytes
+) -> None:
+    """Finish archiving a terminal home whose process died before it could."""
+    from imp.engine import archive
+    from imp.engine.archive import read as archive_read
+    resumable = _TERMINAL_ARCHIVE_RESUMABLE.get(json.loads(state_json).get("status"))
+    if resumable is None or archive_read.is_archived(control, quest_id):
+        return
+    archive.archive_quest(
+        control, quest_id,
+        events_path=home / "events.jsonl",
+        quest_json_path=home / "quest.json",
+        state_json_path=home / "state" / "state.json",
+        steps_dir=(home / "steps") if resumable else None,
+        resumable=resumable)
 
 
 def make_store(control_root: Path) -> Store:

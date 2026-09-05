@@ -10,6 +10,7 @@ import pytest
 
 from imp.engine import archive
 from imp.engine.archive import read
+from imp.engine.errors import ArchiveMismatch
 
 ARCH = "arqu99"
 
@@ -107,3 +108,19 @@ def test_a_writable_stale_archive_still_migrates(tmp_path: Path) -> None:
     archive.ensure_current(tmp_path)
 
     assert _user_version(tmp_path) == 5          # rebuilt and re-stamped current
+
+
+def test_a_newer_read_only_archive_still_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The floor check precedes ensure_current's writability early return."""
+    _seed_archived_quest(tmp_path)
+    ahead = archive._DATA_VERSION + 1
+    archive.data_version_path(tmp_path).write_text(str(ahead))
+    _clear_lock_file(tmp_path)
+    _deny_writes(monkeypatch, archive.archive_root(tmp_path))
+
+    with pytest.raises(ArchiveMismatch) as excinfo:
+        read.completed_rows(tmp_path)
+
+    assert (excinfo.value.floor, excinfo.value.stored) == ("data", ahead)

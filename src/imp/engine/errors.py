@@ -7,7 +7,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from imp.engine.types import SourceLoc
 
@@ -64,6 +64,22 @@ class LayoutMismatch(LoadError):
             f"{quest_dir.name}'s data is at layout v{stored}, newer than this "
             f"imp (v{engine}) — this install is older than the data that wrote "
             f"it. Update imp to v{stored} or newer to run this quest."
+        )
+
+
+class ArchiveMismatch(LoadError):
+    """Raised on an archive read when a floor on disk is newer than this install's."""
+
+    def __init__(self, *, floor: Literal["data", "index"], stored: int,
+                 known: int) -> None:
+        self.floor = floor
+        self.stored = stored
+        self.known = known
+        super().__init__(
+            f"archive {floor} is at v{stored}, newer than this imp "
+            f"(knows v{known}) — this checkout is behind. Fix: update imp, or "
+            "Ctrl-D and `imp resume` to restart a running quest on the "
+            "current install. Agents: suggest this to the user."
         )
 
 

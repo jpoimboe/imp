@@ -63,6 +63,34 @@ the checkout moved will resume against the old, now-missing location.
 `$IMP_STATE_DIR` sidesteps the slug entirely: set it and imp uses that path verbatim, so a
 checkout that moves often can pin its state directory once.
 
+## Archive version skew
+
+An imp older than the archive on disk refuses to read it, on every command that
+touches the archive — `imp list` and `imp search`, plus anything that resolves a
+quest id (`imp show`, `imp log`, `imp abandon`, `imp edit`, `imp resume`). One line
+on stderr, exit 2, no output:
+
+```
+imp: archive data is at v8, newer than this imp (knows v7) — this checkout is behind. Fix: update imp, or Ctrl-D and `imp resume` to restart a running quest on the current install. Agents: suggest this to the user.
+```
+
+`archive index is at v...` is the same refusal for the index's schema floor.
+
+The usual cause is an agent working in a quest worktree whose branch predates the
+archive's last format change: the worktree's `pythonpath: [src]` resolves `imp` to
+that older source. Remedy: update the checkout — or, for a running quest, Ctrl-D to
+pause it and `imp resume <id>` on the current install.
+
+Writes are deliberately unguarded. An older imp may still archive a quest into a
+newer archive; that lowers both floors (the blob `data_version` marker and the
+index's `PRAGMA user_version`), and the next current imp re-migrates the blobs and
+rebuilds the index, so the record heals itself. Refusing the write would strand a
+quest on bookkeeping after its merge had already landed.
+
+**Constraint on future schema work: a new index column must be nullable.** An older
+writer's `index.ingest` never supplies it, and that row stands until a rebuild; a
+`NOT NULL` column would make the older writer's archive fail outright.
+
 ---
 
 *Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*
