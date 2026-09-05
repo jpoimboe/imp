@@ -837,7 +837,7 @@ def test_subagent_row_indented_with_own_figures():
     out = render_summary([step], header=_HDR, color=False, width=80)
     step_line = next(ln for ln in out if "task-lead" in ln)
     sub_line = next(ln for ln in out if "explorer" in ln)
-    assert step_line == "  task-lead     1m 0s  100  $0.10"
+    assert step_line == "  task-lead     1m 0s  300  $0.15"
     assert sub_line == "    ↳ explorer    45s  200  $0.05"
 
 
@@ -1179,3 +1179,29 @@ def test_alignment_across_tilde_plain_and_interrupted_cells():
         "  c          interrupted  —  —",
     ]
     assert len({len(ln) for ln in out[2:]}) == 1   # one column grid for every row
+
+
+def test_step_totals_include_every_subagent_while_own_usage_does_not():
+    step = StepRow(phase="implement", step="task-lead", start_ts=None,
+                   usage=RowUsage(fresh_input=100, output=10, dollars=0.10,
+                                  priced=1),
+                   subagents=[
+                       SubagentRow(name="explorer",
+                                   usage=RowUsage(fresh_input=200, output=20,
+                                                  dollars=0.05, priced=1)),
+                       SubagentRow(name="coder",
+                                   usage=RowUsage(fresh_input=300, output=30,
+                                                  dollars=0.15, priced=1,
+                                                  notional=1))])
+    assert step.usage.fresh_input == 100        # own is untouched
+    assert step.totals.fresh_input == 600
+    assert step.totals.output == 60
+    assert step.totals.dollars == pytest.approx(0.30)
+    assert step.totals.priced == 3
+    assert step.totals.notional == 1            # the mix is visible to Part 5
+
+
+def test_a_leaf_step_totals_are_its_own_usage():
+    step = StepRow(phase="p", step="s", start_ts=None,
+                   usage=RowUsage(fresh_input=7, dollars=0.01, priced=1))
+    assert step.totals == step.usage

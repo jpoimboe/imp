@@ -69,6 +69,14 @@ class StepRow:
     subagents: list[SubagentRow] = field(default_factory=list)
 
     @property
+    def totals(self) -> RowUsage:
+        """Whole subtree: own usage plus every subagent's, matching the inclusive `time` column."""
+        total = self.usage
+        for sub in self.subagents:
+            total = total + sub.usage
+        return total
+
+    @property
     def wall_seconds(self) -> float | None:
         """start → completion wall clock; None for an open (still-running) step."""
         return elapsed_seconds(self.start_ts, self.end_ts)
@@ -267,15 +275,13 @@ def header_totals(
 ) -> tuple[float | None, int, float]:
     """Header rollup: work time (raw wall minus every step's human wait, floored
     at 0; None when the run has no total yet) plus tokens and cost summed over
-    every step's own usage AND every subagent's own usage."""
+    every step row's whole subtree."""
     if total_seconds is None:
         work: float | None = None
     else:
         work = max(0.0, total_seconds - sum(r.wait_seconds for r in summary))
-    tokens = sum(_tok_total(r.usage) for r in summary)
-    tokens += sum(_tok_total(s.usage) for r in summary for s in r.subagents)
-    cost = sum((r.usage.dollars for r in summary), 0.0)
-    cost += sum(s.usage.dollars for r in summary for s in r.subagents)
+    tokens = sum(_tok_total(r.totals) for r in summary)
+    cost = sum((r.totals.dollars for r in summary), 0.0)
     return work, tokens, cost
 
 
@@ -316,8 +322,8 @@ def _column_widths(summary: list[StepRow], open_label: str) -> tuple[int, int, i
     costs: list[int] = []
     for r in summary:
         durs.append(len(r.dur_cell(open_label)))
-        toks.append(len(_fmt_tokens(_tok_total(r.usage))))
-        costs.append(len(_fmt_cost(r.usage.dollars)))
+        toks.append(len(_fmt_tokens(_tok_total(r.totals))))
+        costs.append(len(_fmt_cost(r.totals.dollars)))
         for s in r.subagents:
             durs.append(len(s.dur_cell(open_label)))
             toks.append(len(_fmt_tokens(_tok_total(s.usage))))
@@ -331,8 +337,8 @@ def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
     name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
     dur = pal.ansi(f"{row.dur_cell(open_label):>{dur_w}}", *codes, enabled=color)
-    tok = f"{_fmt_tokens(_tok_total(row.usage)):>{tok_w}}"
-    cost = f"{_fmt_cost(row.usage.dollars):>{cost_w}}"
+    tok = f"{_fmt_tokens(_tok_total(row.totals)):>{tok_w}}"
+    cost = f"{_fmt_cost(row.totals.dollars):>{cost_w}}"
     return f"  {name}  {dur}  {tok}  {cost}"
 
 

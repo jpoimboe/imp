@@ -296,7 +296,7 @@ def render_summary_markdown(summary: list[StepRow], *,
         step = _md_escape(row.step).replace("|", "\\|")
         grouped[-1][1].append(
             f"| {step} | {row.dur_cell(open_label)}"
-            f" | {_fmt_tokens(_tok_total(row.usage))} | {_fmt_cost(row.usage.dollars)} |")
+            f" | {_fmt_tokens(_tok_total(row.totals))} | {_fmt_cost(row.totals.dollars)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")
             grouped[-1][1].append(
