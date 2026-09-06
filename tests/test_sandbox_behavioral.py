@@ -18,6 +18,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -1960,4 +1961,29 @@ def test_bash_tool_teardown_lets_a_sigterm_trap_finish() -> None:
                     "grace window could be used")
             time.sleep(0.02)
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_sandboxed_shell_cannot_see_or_signal_a_host_process() -> None:
+    """The hole this quest closes: a host process spawned OUTSIDE the sandbox must be
+    invisible to a sandboxed shell (absent from /proc and from ps) and unsignallable
+    (kill(2) returns ESRCH), and it must still be alive afterwards. Without the pid
+    namespace all three go the other way — the shell sees it, ps lists it, and the
+    SIGTERM lands. A host without `ps` degrades to PS_HIDDEN rather than failing: the
+    pipeline yields no match either way, and the /proc and kill clauses stand alone."""
+    root = _make_root()
+    host = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+    try:
+        pid = host.pid
+        ctx = _ctx(root, _active_policy(root))
+        out = _bash(ctx, (
+            f"[ -d /proc/{pid} ] && echo PROC_VISIBLE || echo PROC_HIDDEN; "
+            f"ps -eo pid= | tr -d ' ' | grep -qx {pid} && echo PS_VISIBLE || echo PS_HIDDEN; "
+            f"kill -TERM {pid} 2>/dev/null && echo SIGNAL_OK || echo SIGNAL_FAILED; "
+            "exit 0"))
+        assert str(out["stdout"]).split() == ["PROC_HIDDEN", "PS_HIDDEN", "SIGNAL_FAILED"], out
+        assert host.poll() is None, "the sandboxed kill reached a process outside the sandbox"
+    finally:
+        host.kill()
+        host.wait()
         shutil.rmtree(root, ignore_errors=True)

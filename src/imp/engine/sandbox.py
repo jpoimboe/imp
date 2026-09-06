@@ -11,9 +11,11 @@ writable-home bind (when a home_layer is present) and then the /tmp bind are
 emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
 secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
 a config-driven bind could re-expose a masked secret dir (spec L1-r5). /tmp is
-an identity bind to the real host /tmp. No --unshare-pid / --die-with-parent /
---new-session — all three break the runner's interrupt grace (spec B.9); reaping
-is via the process group.
+an identity bind to the real host /tmp. `--unshare-pid` isolates the process
+table (a shell cannot see or signal anything it did not start); it leaves
+pgid == pid and host-side killpg intact, so group reaping still reaches inside.
+No `--die-with-parent` / `--new-session` — both break the runner's interrupt
+grace (spec B.9); reaping is via the process group.
 """
 
 from __future__ import annotations
@@ -323,8 +325,9 @@ def build_sandbox_argv(
     argv += ["--clearenv"]
     for k, v in setenv.items():
         argv += ["--setenv", k, v]
-    # 14. namespaces — NO --unshare-pid / --die-with-parent / --new-session (B.9)
-    argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts"]
+    # 14. namespaces — NO --die-with-parent / --new-session (B.9); --unshare-pid is
+    # safe (the group kill crosses the namespace)
+    argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-pid"]
     # 15. optional network isolation
     if not policy.network:
         argv += ["--unshare-net"]
