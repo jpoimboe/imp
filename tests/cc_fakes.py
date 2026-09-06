@@ -265,14 +265,16 @@ def context_usage(*, raw_max_tokens: int, percentage: float,
 
 class CooperativeClient:
     """Models the cooperative interrupt: first receive_response() parks until
-    interrupt() fires, then yields ResultMessage(subtype="error_during_execution").
-    After the steer reply is queried, the next receive_response() yields
-    after_steer. Tracks interrupt()/disconnect() in order for ordering assertions
-    and queries to prove the SAME live client continued (no re-run)."""
+    interrupt() fires, then yields each before_result message (if given) followed
+    by ResultMessage(subtype="error_during_execution"). After the steer reply is
+    queried, the next receive_response() yields after_steer. Tracks
+    interrupt()/disconnect() in order for ordering assertions and queries to prove
+    the SAME live client continued (no re-run)."""
 
     def __init__(self, opts: Any, *, after_steer: list[Any],
                  order: list[str] | None = None,
-                 land_gate: asyncio.Event | None = None) -> None:
+                 land_gate: asyncio.Event | None = None,
+                 before_result: list[Any] | None = None) -> None:
         self.opts = opts
         self.queries: list[Any] = []
         self.closed = False
@@ -280,6 +282,7 @@ class CooperativeClient:
         self.interrupt_calls = 0
         self.order = order if order is not None else []
         self._after_steer = list(after_steer)
+        self._before_result = list(before_result or [])
         self._turn = 0
         self._released = asyncio.Event()
         self._land_gate = land_gate
@@ -306,6 +309,8 @@ class CooperativeClient:
             await self._released.wait()
             if self._land_gate is not None:
                 await self._land_gate.wait()
+            for msg in self._before_result:
+                yield msg
             yield FakeResultMessage(
                 subtype="error_during_execution", is_error=True)
             return

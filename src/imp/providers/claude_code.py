@@ -91,6 +91,7 @@ from imp.agents.transcript import (
     deliver_continuation_reply,
     deliver_engine_continuation,
     repair_dangling_tool_use_on_resume,
+    repair_interrupt_marker_on_resume,
     synthesize_native_success_on_resume,
 )
 from imp.engine.agent_run import (
@@ -1245,6 +1246,10 @@ class ClaudeCodeSession(ObserveSession):
         existing = transcript.load(
             ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         is_fresh = not existing
+        # Must precede every classification below: they all read this one list.
+        repair_interrupt_marker_on_resume(
+            existing, transcript,
+            captured=_load_captured_tool_results(invocation.transcript_dir))
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step): re-emit the final text as the deliverable rather than
         # native-resuming or soliciting the human (AWAITING_USER).
@@ -1805,6 +1810,11 @@ class ClaudeCodeSession(ObserveSession):
             runner._steer_unblocked.set()
             runner._steer_requested = False
             self._flush_turn_record()
+            # The marker is still the tail here; _enter's repair is tail-only and
+            # can no longer reach it once the steer reply is appended below.
+            repair_interrupt_marker_on_resume(
+                self.messages, self.transcript,
+                captured=_load_captured_tool_results(invocation.transcript_dir))
             from imp.agents.tools.bg import terminate_background_processes
             from imp.agents.tools.context import terminate_running_processes
             await terminate_running_processes(ctx)

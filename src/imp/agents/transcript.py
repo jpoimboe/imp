@@ -22,11 +22,13 @@ SEND_TO_LLM resume path has a balanced transcript.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from imp.agents.runner import (
+    ContentBlock,
     Message,
     TextBlock,
     ToolResultBlock,
@@ -273,6 +275,75 @@ def repair_dangling_tool_use_on_resume(
         transcript.rewrite(messages)
         return result_blocks
     return None
+
+
+# claude-p's own interrupt marker, matching the pattern the SDK writes
+# (claude_agent_sdk/_internal/sessions.py). The rejection body it pairs with is
+# CLI-version-fragile and is deliberately never matched.
+_INTERRUPT_MARKER_RE = re.compile(r"^\[Request interrupted by user[^\]]*\]$")
+
+
+def _is_interrupt_marker(msg: Message) -> bool:
+    if msg.role != "user" or len(msg.content) != 1:
+        return False
+    block = msg.content[0]
+    return (isinstance(block, TextBlock)
+            and _INTERRUPT_MARKER_RE.match(block.text.strip()) is not None)
+
+
+def repair_interrupt_marker_on_resume(
+    messages: list[Message], transcript: Transcript,
+    captured: dict[str, tuple[str, bool]] | None = None,
+) -> None:
+    """Strip claude-p's interrupt framing before resume classification.
+
+    On a cooperative mid-tool interrupt claude-p writes two turns of its own into
+    the transcript: a tool_result telling the model its call was REJECTED and it
+    must stop, then a text-only '[Request interrupted by user …]' marker turn. The
+    marker makes the tail look like a human turn, so the resume continuation nudge
+    is suppressed and the rejection copy is the model's only framing.
+
+    Drop the marker and restate every is_error result in the turn beneath it as an
+    interruption — from `captured` when the call really completed, else the synthetic
+    body — then rewrite the transcript. Journals nothing: the pause already recorded
+    these results in the event log, so a second entry would falsify it.
+    """
+    if len(messages) < 2 or not _is_interrupt_marker(messages[-1]):
+        return
+    target = messages[-2]
+    # Repair the marker and the rejection it sits on as one unit, never the marker
+    # alone: dropping a lone marker would expose an assistant tail to AWAITING_USER,
+    # which a subagent (no user_input_fn) cannot serve.
+    if target.role != "user" or not any(
+            isinstance(b, ToolResultBlock) for b in target.content):
+        return
+    tool_uses = {
+        b.id: b
+        for m in messages[-3:-2] if m.role == "assistant"
+        for b in m.content if isinstance(b, ToolUseBlock)
+    }
+    blocks: list[ContentBlock] = []
+    for b in target.content:
+        # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
+        if isinstance(b, ToolResultBlock) and b.is_error:
+            tu = tool_uses.get(b.tool_use_id)
+            hit = (captured.get(captured_result_key(tu.name, tu.input))
+                   if tu is not None and captured is not None else None)
+            if hit is not None:
+                blocks.append(ToolResultBlock(
+                    tool_use_id=b.tool_use_id, content=hit[0], is_error=hit[1]))
+            else:
+                blocks.append(ToolResultBlock(
+                    tool_use_id=b.tool_use_id,
+                    content=_synthetic_tool_result_content(tu.name if tu is not None else ""),
+                    is_error=True))
+        else:
+            blocks.append(b)
+    if not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for b in blocks):
+        blocks.append(TextBlock(text=RESUME_DURABILITY_NOTE))
+    messages[-2:] = [Message(role="user", content=tuple(blocks))]
+    transcript.rewrite(messages)
 
 
 def balance_success_on_resume(
