@@ -7,6 +7,7 @@ import types as _types
 from pathlib import Path
 from typing import Any
 
+from imp.cli import narrative as nv
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_mcp import RunState
@@ -325,3 +326,24 @@ def test_close_open_task_folds_pairs_the_dangling_call_and_drains() -> None:
     # Idempotent: the dict is drained, so a second call writes nothing.
     close_open_task_folds(elog, st)
     assert len([e for e in elog.read() if e["type"] == "tool_result"]) == 1
+
+
+def test_closed_fold_renders_interrupted_without_a_resume_sweep() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    st: dict = {}
+    args = {"subagent_name": "explorer", "task_description": "go look"}
+    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
+    close_open_task_folds(elog, st)
+
+    b = nv.NarrativeBuilder()
+    b.add({"id": "st", "agent_id": None, "type": "step_started",
+           "payload": {"step": "s", "kind": "agent", "phase": "p",
+                       "model": "m", "provider": "codex"}})
+    for rec in elog.read():
+        b.add(rec)
+
+    fold = next(c for c in b._step_stack[-1].children
+                if isinstance(c, nv.SubagentFold))
+    assert fold.running is False
+    assert fold.terminal_state == "interrupted"
