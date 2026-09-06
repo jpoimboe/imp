@@ -19,6 +19,7 @@ from imp.cli.accounting import (
 from imp.cli.narrative import elapsed_seconds
 from imp.cli.quest_row import STATUS_COLORS, display_word
 from imp.cli.render_text import fmt_seconds
+from imp.providers.quota import QuotaReading
 
 _FINISHED_STATUSES = frozenset({"merged", "done", "abandoned"})
 
@@ -93,6 +94,87 @@ class StepRow:
         return _dur_text(self.work_seconds, open_label, inferred=self.end_inferred)
 
 
+@dataclass(frozen=True, slots=True)
+class WindowSpan:
+    """Level at first/last reading, plus consumption accumulated across any mid-run reset."""
+    label: str
+    first_pct: float
+    last_pct: float
+    across_reset: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderQuota:
+    provider: str
+    windows: tuple[WindowSpan, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Summary:
+    rows: list[StepRow]
+    quota: tuple[ProviderQuota, ...]
+
+
+@dataclass
+class _WindowAcc:
+    first_pct: float
+    last_pct: float
+    resets_at: int | None
+    accumulated: float = 0.0
+    crossed: bool = False
+
+
+# codex jitters resets_at by seconds; a real reset moves it forward by the whole window (>=5h).
+_RESET_JITTER_SECONDS = 300
+
+
+def _crossed_reset(resets_at: int | None, acc: _WindowAcc) -> bool:
+    """A later deadline means a later window; a level drop is not required."""
+    if resets_at is None or acc.resets_at is None:
+        return False
+    return resets_at - acc.resets_at > _RESET_JITTER_SECONDS
+
+
+def _window_minutes(label: str) -> int:
+    """The canonical `{n}h`/`{n}d` label is the sort key, so windows order by duration ascending."""
+    return int(label[:-1]) * (60 if label.endswith("h") else 1440)
+
+
+class _QuotaAccumulator:
+    """Per-provider/window; the level after a boundary is itself consumption since that boundary."""
+
+    def __init__(self) -> None:
+        self._by_provider: dict[str, dict[str, _WindowAcc]] = {}
+
+    def add(self, payload: dict[str, Any]) -> None:
+        reading = QuotaReading.from_payload(payload)
+        windows = self._by_provider.setdefault(reading.provider, {})
+        for w in reading.windows:
+            acc = windows.get(w.label)
+            if acc is None:
+                windows[w.label] = _WindowAcc(first_pct=w.used_pct,
+                                              last_pct=w.used_pct,
+                                              resets_at=w.resets_at)
+                continue
+            if _crossed_reset(w.resets_at, acc):
+                acc.accumulated += w.used_pct
+                acc.crossed = True
+            elif w.used_pct > acc.last_pct:
+                acc.accumulated += w.used_pct - acc.last_pct
+            acc.last_pct = w.used_pct
+            acc.resets_at = w.resets_at
+
+    def spans(self) -> tuple[ProviderQuota, ...]:
+        return tuple(
+            ProviderQuota(provider=provider, windows=tuple(
+                WindowSpan(label=label, first_pct=a.first_pct,
+                           last_pct=a.last_pct,
+                           across_reset=a.accumulated if a.crossed else None)
+                for label, a in sorted(windows.items(),
+                                       key=lambda kv: _window_minutes(kv[0]))))
+            for provider, windows in self._by_provider.items())
+
+
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
     # Audit-only records are queryable but silent; interrupt marker is not a terminal failure.
     if p.get("audit"):
@@ -100,8 +182,9 @@ def _is_nonterminal_error(p: dict[str, Any]) -> bool:
     return p.get("category") == "config" and p.get("kind") == "interrupted"
 
 
-def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
+def build_summary(events: Iterable[dict[str, Any]]) -> Summary:
     rows: list[StepRow] = []
+    quota = _QuotaAccumulator()
     open_row: StepRow | None = None        # the currently-open occurrence
     pending_wait_start: str | None = None  # ts of an unresolved awaiting_user_input
     subs_by_agent: dict[str, SubagentRow] = {}   # "sub:<event id>" -> row (usage)
@@ -231,10 +314,12 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
                 if sub is not None:
                     sub.end_ts = ts
                     sub.errored = bool(p.get("error", False))
+        elif etype == "quota_reading":
+            quota.add(p)
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
-    return rows
+    return Summary(rows=rows, quota=quota.spans())
 
 
 def _fmt_tokens(total: int) -> str:

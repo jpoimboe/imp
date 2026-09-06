@@ -1,0 +1,121 @@
+"""The `imp log -s` quota block: the aggregate build_summary accumulates and the
+from→to rows both renderers draw from it (spec §5)."""
+
+from __future__ import annotations
+
+from imp.cli.render_summary import build_summary
+
+
+def _reading(provider: str, *windows: tuple[str, float, int | None],
+             ts: str = "2026-01-01T00:00:00+00:00") -> dict:
+    return {"type": "quota_reading", "timestamp": ts,
+            "payload": {"provider": provider, "plan": None,
+                        "windows": [{"label": label, "used_pct": pct,
+                                     "resets_at": resets_at}
+                                    for label, pct, resets_at in windows],
+                        "raw": {}}}
+
+
+def _step(ts: str = "2026-01-01T00:00:00+00:00") -> list[dict]:
+    return [
+        {"type": "step_started", "timestamp": ts,
+         "payload": {"step": "coder", "phase": "implement"}},
+        {"type": "step_completed", "timestamp": "2026-01-01T00:05:00+00:00",
+         "payload": {"step": "coder", "action": {"verb": "continue"}}},
+    ]
+
+
+# AC 17 (producer)
+def test_build_summary_carries_first_and_last_reading_per_window() -> None:
+    summary = build_summary([
+        *_step(),
+        _reading("claude_code", ("5h", 44.0, 100), ("7d", 7.0, 900)),
+        _reading("claude_code", ("5h", 51.0, 100), ("7d", 8.0, 900)),
+        _reading("claude_code", ("5h", 58.0, 100), ("7d", 9.0, 900)),
+    ])
+    assert [r.step for r in summary.rows] == ["coder"]
+    (cc,) = summary.quota
+    assert cc.provider == "claude_code"
+    assert [(w.label, w.first_pct, w.last_pct, w.across_reset)
+            for w in cc.windows] == [("5h", 44.0, 58.0, None),
+                                     ("7d", 7.0, 9.0, None)]
+
+
+def test_readings_are_kept_per_provider_in_first_seen_order() -> None:
+    summary = build_summary([
+        _reading("claude_code", ("5h", 44.0, 100)),
+        _reading("codex", ("5h", 12.0, 200)),
+        _reading("claude_code", ("5h", 78.0, 100)),
+        _reading("codex", ("5h", 20.0, 200)),
+    ])
+    assert [(q.provider, q.windows[0].first_pct, q.windows[0].last_pct)
+            for q in summary.quota] == [("claude_code", 44.0, 78.0),
+                                        ("codex", 12.0, 20.0)]
+
+
+def test_no_readings_leaves_the_aggregate_empty() -> None:
+    assert build_summary(_step()).quota == ()
+
+
+# AC 18
+def test_a_reset_crossing_accumulates_the_post_reset_level() -> None:
+    summary = build_summary([
+        _reading("codex", ("5h", 88.0, 100), ("7d", 40.0, 900)),
+        _reading("codex", ("5h", 95.0, 100), ("7d", 42.0, 900)),
+        _reading("codex", ("5h", 4.0, 20000), ("7d", 43.0, 900)),
+        _reading("codex", ("5h", 12.0, 20000), ("7d", 44.0, 900)),
+    ])
+    (codex,) = summary.quota
+    five, seven = codex.windows
+    # +7 (88→95), +4 (the post-reset level), +8 (4→12).
+    assert (five.first_pct, five.last_pct, five.across_reset) == (88.0, 12.0, 19.0)
+    assert (seven.first_pct, seven.last_pct, seven.across_reset) == (40.0, 44.0, None)
+
+
+def test_resets_at_jitter_without_a_level_drop_is_not_a_reset() -> None:
+    """Real codex payloads re-state resets_at +/-1s between records while the level
+    climbs; treating that as a boundary would add the whole level each time."""
+    summary = build_summary([
+        _reading("codex", ("7d", 17.0, 1788971433)),
+        _reading("codex", ("7d", 19.0, 1788971434)),
+        _reading("codex", ("7d", 22.0, 1788971433)),
+        _reading("codex", ("7d", 27.0, 1788971434)),
+    ])
+    (window,) = summary.quota[0].windows
+    assert window.across_reset is None
+    assert (window.first_pct, window.last_pct) == (17.0, 27.0)
+
+
+def test_a_level_drop_within_the_jitter_tolerance_is_not_a_reset() -> None:
+    """A wobbling level whose reset time did not move on has not rolled over."""
+    summary = build_summary([
+        _reading("codex", ("5h", 44.0, 1788971433)),
+        _reading("codex", ("5h", 43.0, 1788971434)),
+        _reading("codex", ("5h", 47.0, 1788971434)),
+    ])
+    (window,) = summary.quota[0].windows
+    assert window.across_reset is None
+
+
+def test_a_window_that_rolls_over_barely_used_is_still_a_reset() -> None:
+    """The reset time moved on by five hours; the level reads the same on both
+    sides because almost nothing was spent. Requiring a drop would miss it."""
+    summary = build_summary([
+        _reading("codex", ("5h", 1.0, 1788971433)),
+        _reading("codex", ("5h", 1.0, 1788971433 + 18000)),
+        _reading("codex", ("5h", 6.0, 1788971433 + 18000)),
+    ])
+    (window,) = summary.quota[0].windows
+    # 1 consumed since the boundary, then +5 on top of it.
+    assert window.across_reset == 6.0
+    assert (window.first_pct, window.last_pct) == (1.0, 6.0)
+
+
+def test_windows_are_ordered_by_duration_however_they_first_arrived() -> None:
+    """claude drops a window whose reset has passed, so the first reading of a run
+    can carry only 7d."""
+    summary = build_summary([
+        _reading("claude_code", ("7d", 7.0, 900)),
+        _reading("claude_code", ("5h", 44.0, 100), ("7d", 9.0, 900)),
+    ])
+    assert [w.label for w in summary.quota[0].windows] == ["5h", "7d"]

@@ -136,7 +136,7 @@ def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
 # AC 16(a)
 def test_the_live_figure_is_the_vendor_total_the_summary_reports() -> None:
     events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000))
-    total = summary_totals(build_summary(events), None)[1]
+    total = summary_totals(build_summary(events).rows, None)[1]
     # Not $0.00, and not a price-table figure derived from the agent_message.
     assert total.dollars == pytest.approx(4.21)
     assert _position_row(events).endswith(f" · ${total.dollars:.2f}")
@@ -146,7 +146,7 @@ def test_the_live_figure_is_the_vendor_total_the_summary_reports() -> None:
 def test_the_live_figure_sums_usage_patches_that_carry_no_id() -> None:
     events = _codex_events(_usage_patch(100000, 8000, 100000),
                            _usage_patch(50000, 4000, 150000))
-    total = summary_totals(build_summary(events), None)[1]
+    total = summary_totals(build_summary(events).rows, None)[1]
     assert total.priced == 2 and total.dollars > 0     # both rows counted, once each
     assert _position_row(events).endswith(f" · ${total.dollars:.2f}")
 
@@ -156,7 +156,7 @@ def test_the_live_figure_collapses_cumulative_rows_per_session() -> None:
     events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000),
                         _query_result("r2", "sess-1", 5.50, 11000),
                         _query_result("r3", "sess-2", 0.75, 1000))
-    total = summary_totals(build_summary(events), None)[1]
+    total = summary_totals(build_summary(events).rows, None)[1]
     # sess-1 is cumulative — only its last row counts — and sess-2 adds.
     assert total.dollars == pytest.approx(6.25)
     assert _position_row(events).endswith(f" · ${total.dollars:.2f}")
@@ -167,7 +167,7 @@ def test_a_contribution_for_an_unrelated_agent_leaves_the_field_absent() -> None
     events = _cc_events(ev("r1", "query_result", agent_id="step:other/agent",
                            session_id="sess-9", model_usage={},
                            total_cost_usd=9.99))
-    total = summary_totals(build_summary(events), None)[1]
+    total = summary_totals(build_summary(events).rows, None)[1]
     assert total.priced == 0                  # attributed to nothing, priced as nothing
     row = _position_row(events)
     assert "$" not in row and "n/a" not in row
