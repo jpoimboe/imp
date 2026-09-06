@@ -23,7 +23,8 @@ pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 # file. Seeding one from Python is what let this test pass over an unreachable feature.
 _MOCKUP = ("Here is the mockup:\n\n```\n"
            "[38;2;255;154;60mwarning: [auth] retry 2 (1.0s) — another session "
-           "rotated the OAuth token; retrying with the new one[0m\n```\n")
+           "rotated the OAuth token; retrying with the new one[0m\n"
+           "[1;33m▌ imp[0m [36mplanning[0m\n```\n")
 
 
 def _seed_quest(root: Path, quest_id: str, prose: str) -> None:
@@ -70,6 +71,17 @@ def test_colored_mockup_reaches_a_real_screen(tmp_path: Path) -> None:
 
     warn = s.cell(col, y)                       # [38;2;255;154;60m painted these cells
     assert (warn.data, warn.fg) == ("w", "ff9a3c")   # pyte stores truecolor as hex
+
+    status = [y for y, row in enumerate(rows) if "▌ imp planning" in row]
+    assert len(status) == 1, "\n".join(rows)
+    sy = status[0]
+    scol = rows[sy].index("▌")
+    bar = s.cell(scol, sy)                      # [1;33m — bold and a named color
+    assert (bar.fg, bar.bold) == ("brown", True)
+    plan = s.cell(scol + 6, sy)                 # ▌, sp, i, m, p, sp = 6; then [36m
+    assert (plan.data, plan.fg) == ("p", "cyan")
+
     screen = "\n".join(rows)
     assert "[38;2" not in screen                # the code itself never reaches a cell
+    assert "[1;33m" not in screen               # nor the second line's codes
     assert "^[[" not in screen                  # no caret noise on screen
