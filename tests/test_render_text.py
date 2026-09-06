@@ -2282,7 +2282,6 @@ def test_compose_label_joins_present_segments() -> None:
     assert rt.compose_label(["", None]) == ""
 
 
-
 def test_header_line_prepends_phase_label_for_verb_step() -> None:
     step = nv.StepNode(name="finalize", kind="agent",
                        phase_label="implementation phase · plan 1/3",
