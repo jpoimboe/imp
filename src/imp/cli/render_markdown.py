@@ -148,7 +148,7 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
     if isinstance(node, nv.AgentTextNode):
         text = node.text.strip()
         if text:
-            yield _md_escape(text)
+            yield _md_escape(rt._restore_bare_sgr(text))
         return
     if isinstance(node, nv.LiteralTextNode):
         text = node.text.strip()

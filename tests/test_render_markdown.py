@@ -678,3 +678,36 @@ def test_rotation_race_retry_renders_its_copy_in_markdown() -> None:
                   attempt=2, backoff_seconds=1.0, message="401 revoked")]
     assert ("> **warning:** [auth] retry 2 (1.0s) — another session rotated the "
             "OAuth token; retrying with the new one") in _md(events)
+
+
+_BARE_MOCKUP = ("[38;2;255;154;60mwarning: [auth] retry 2 (1.0s) — another session "
+                "rotated the OAuth token; retrying with the new one[0m")
+
+
+def test_agent_prose_bare_sgr_fence_exports_stripped() -> None:
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text",
+                              "text": f"Look:\n\n```\n{_BARE_MOCKUP}\n```\n"}]}),
+    ])
+    assert "38;2" not in out          # the bare code does not leak into the export
+    assert "\x1b" not in out          # nor an escape byte
+    assert "^[[" not in out           # nor caret noise
+    assert "warning: [auth] retry 2 (1.0s)" in out   # the mockup's text survives
+
+
+def test_agent_prose_export_keeps_an_imp_model_id_intact() -> None:
+    # Without the `]` lookahead the normalizer arms `[1m`, and `_strip_sgr` then
+    # DELETES it — silently exporting `claude-opus-4-8]`.
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text",
+                              "text": "```\nhigh: claude-opus-4-8[1m]\n```\n"}]}),
+    ])
+    assert "claude-opus-4-8[1m]" in out

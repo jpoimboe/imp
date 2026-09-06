@@ -3171,6 +3171,62 @@ def test_caret_escape_prose_handles_two_fences_with_prose_between() -> None:
     assert "mid ^[[35mm^[[0m" in out
 
 
+# luge78's message #596, exactly as the model typed it: no ESC byte anywhere.
+_BARE_MOCKUP = ("[38;2;255;154;60mwarning: [auth] retry 2 (1.0s) — another session "
+                "rotated the OAuth token; retrying with the new one[0m")
+
+
+def test_caret_escape_prose_arms_a_bare_sgr_code_inside_a_fence() -> None:
+    out = rt._caret_escape_prose(f"Look:\n\n```\n{_BARE_MOCKUP}\n```\n")
+    assert "\x1b[38;2;255;154;60mwarning: [auth] retry 2 (1.0s)" in out
+    assert out.endswith("retrying with the new one\x1b[0m\n```\n")
+    assert "[38;2" not in _visible(out)      # nothing bare left behind
+    assert "[auth]" in out                   # a non-SGR bracket is not eaten
+
+
+def test_caret_escape_prose_leaves_a_bare_code_in_flowing_prose_alone() -> None:
+    text = f"note: {_BARE_MOCKUP}\n"
+    assert rt._caret_escape_prose(text) == text
+
+
+def test_caret_escape_prose_does_not_rearm_a_caret_escaped_code() -> None:
+    text = "```\n^[[33mdefused^[[0m\n```\n"
+    assert rt._caret_escape_prose(text) == text
+
+
+def test_caret_escape_prose_does_not_double_a_real_escape_in_a_fence() -> None:
+    text = "```\n\x1b[33mreal\x1b[0m\n```\n"
+    assert rt._caret_escape_prose(text) == text
+    assert "\x1b\x1b" not in rt._caret_escape_prose(text)
+
+
+def test_caret_escape_prose_leaves_backslash_escape_spellings_alone() -> None:
+    # A fence carries source as often as a screen; these are string literals.
+    body = r'print("\x1b[31m"); print("\x1B[31m"); print("\033[31m"); print("\e[31m")'
+    text = f"```\n{body}\n```\n"
+    assert rt._caret_escape_prose(text) == text
+
+
+def test_caret_escape_prose_leaves_non_sgr_bracket_text_alone() -> None:
+    text = "```\n[m [hello] [3, 4] [2026-09-05] arr[0] mid[1;33\n```\n"
+    assert rt._caret_escape_prose(text) == text
+
+
+def test_caret_escape_prose_leaves_an_imp_model_id_alone() -> None:
+    # `claude-opus-4-8[1m]` (catalog.py:49) collides with the SGR shape, and an agent
+    # pasting `imp model` output into a fence is this feature's own use case. The
+    # `]` lookahead is what keeps the id intact.
+    text = "```\nhigh: claude-opus-4-8[1m] · window 1M\n```\n"
+    assert rt._caret_escape_prose(text) == text
+
+
+def test_caret_escape_prose_does_not_arm_a_fence_delimiter_line() -> None:
+    # Delimiters are not eligible: the splice lifts content lines only, so a code
+    # armed on the info string would reach rich unlifted.
+    assert (rt._caret_escape_prose("```[31m\n[32mbody[0m\n```\n")
+            == "```[31m\n\x1b[32mbody\x1b[0m\n```\n")
+
+
 # 83 raw chars, 55 visible columns (57 with the 2-col hang indent): at width 70
 # rich counts the escape bytes as visible and wraps it before "summary".
 _STATUS_LINE = ("\x1b[1;33m▌ imp\x1b[0m \x1b[36mplanning\x1b[0m · "
@@ -3286,6 +3342,24 @@ def test_agent_prose_with_color_off_emits_no_escape_at_all() -> None:
     assert "▌ imp planning · step 3 of 7 · writing the plan summary" in out
 
 
+def test_agent_prose_bare_sgr_mockup_reaches_the_screen_in_color() -> None:
+    out = "\n".join(_agent_lines(f"Look:\n\n```\n{_BARE_MOCKUP}\n```\n",
+                                 color=True, width=120))
+    assert "\x1b[38;2;255;154;60m" in out            # a real, armed sequence
+    assert "[38;2" not in _visible(out)              # and no bare code on screen
+    assert "^[[" not in out                          # nor caret noise
+    assert "warning: [auth] retry 2 (1.0s)" in _visible(out)
+
+
+def test_agent_prose_bare_sgr_mockup_with_color_off_strips_the_codes() -> None:
+    out = "\n".join(_agent_lines(f"Look:\n\n```\n{_BARE_MOCKUP}\n```\n",
+                                 color=False, width=120))
+    assert "\x1b" not in out
+    assert "38;2" not in out
+    assert "^[[" not in out
+    assert "warning: [auth] retry 2 (1.0s)" in out
+
+
 def test_a_leading_code_span_does_not_strand_a_later_mockup() -> None:
     # "```x``` explained" is a paragraph, not a fence opener. If it were treated as
     # one, every later span shifts and the real mockup below renders as caret noise.
@@ -3309,6 +3383,10 @@ def test_conventions_doc_records_the_narrowed_caret_rule() -> None:
     flat = " ".join(text.split())
     assert "## Color in agent prose" in text
     assert "SGR color inside a fenced code block in agent prose survives verbatim" in flat
+    # The doc must record that a model-typed bare CSI is armed, not merely that a
+    # real ESC survives — and that a defused `^[` is exempt from the arming.
+    assert "a bare `[1;33m` in a fenced body has the escape restored first" in flat
+    assert "never after a `^[`" in flat
     assert "any escape outside a fence, still renders as `^[`" in flat
     assert "the `--md`/`--html` exports strip SGR entirely" in flat
     # The section names the primitive; a rename must not strand the reader.

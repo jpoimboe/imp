@@ -81,9 +81,11 @@ mechanism.
 
 Content-origin text is caret-escaped (`render_text._caret_escape`) so it cannot
 alter terminal state. The one exception: SGR color inside a fenced code block in
-agent prose survives verbatim, so a design mockup keeps its colors; every other
-control byte, and any escape outside a fence, still renders as `^[`. Color-off
-output and the `--md`/`--html` exports strip SGR entirely.
+agent prose survives verbatim, so a design mockup keeps its colors. An agent
+cannot emit the ESC byte, so a bare `[1;33m` in a fenced body has the escape
+restored first — never after a `^[`, which is a defused code being shown as
+itself. Every other control byte, and any escape outside a fence, still renders
+as `^[`. Color-off output and the `--md`/`--html` exports strip SGR entirely.
 
 ## See also
 

@@ -78,6 +78,13 @@ def _caret_escape(text: str) -> str:
 _SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
 _FENCE_OPEN_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
 _FENCE_CLOSE_RE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*$")
+# An agent cannot type the ESC byte, so a bare CSI is what a model actually emits.
+# The lookbehinds make the ineligible cases unmatchable: after a real ESC (already a
+# complete sequence), after a caret-escaped `^[` (a defused code shown as itself), and
+# after a backslash spelling (`\x1b[31m` in a fence is source text, not a screen). The
+# `]` lookahead spares imp's own `claude-opus-4-8[1m]` model ids.
+_BARE_SGR_RE = re.compile(
+    r"(?<!\x1b)(?<!\^\[)(?<!\\e)(?<!\\[xX]1[bB])(?<!\\033)\[[0-9][0-9;]*m(?!\])")
 
 
 class _Fence(NamedTuple):
@@ -130,17 +137,37 @@ def _sgr_survives(line: str) -> str:
     return "".join(parts)
 
 
+def _fence_body_indices(lines: list[str]) -> set[int]:
+    """Line indices of every fenced block's CONTENT lines. Delimiters are excluded:
+    the splice lifts exactly these, and SGR left raw on a delimiter (a colored info
+    string) would reach rich unlifted."""
+    out: set[int] = set()
+    for span in _fence_spans(lines):
+        out.update(range(span.start + 1, span.body_end))
+    return out
+
+
+def _restore_bare_sgr(text: str) -> str:
+    """Give a model-typed `[1;33m` its ESC byte back inside a fenced body, so the fence
+    machinery sees a real SGR sequence. Fence bodies only; everywhere else, and every
+    ineligible spelling, is left byte-for-byte alone."""
+    lines = text.split("\n")
+    fenced = _fence_body_indices(lines)
+    return "\n".join(
+        _BARE_SGR_RE.sub(lambda m: "\x1b" + m.group(0), ln) if i in fenced else ln
+        for i, ln in enumerate(lines))
+
+
 def _caret_escape_prose(text: str) -> str:
     """`_caret_escape` for agent-authored prose, with one narrowed exception: an SGR
     sequence inside a fenced code block passes through verbatim, so a mockup keeps
-    its colors. Every other control byte, and any escape outside a fence, still
-    caret-escapes — `_caret_escape` itself stays absolute."""
+    its colors. Bare CSI is armed first, so this pass and the later
+    `_lift_colored_fences` scan observe the same real ESC bytes. Every other control
+    byte, and any escape outside a fence, still caret-escapes — `_caret_escape` itself
+    stays absolute."""
+    text = _restore_bare_sgr(text)
     lines = text.split("\n")
-    fenced: set[int] = set()
-    for span in _fence_spans(lines):
-        # Content lines only: the splice lifts exactly these, and an SGR left raw on a
-        # delimiter line (a colored info string) would reach rich unlifted.
-        fenced.update(range(span.start + 1, span.body_end))
+    fenced = _fence_body_indices(lines)
     return "\n".join(_sgr_survives(ln) if i in fenced else _caret_escape(ln)
                      for i, ln in enumerate(lines))
 

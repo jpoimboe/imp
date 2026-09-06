@@ -35,8 +35,10 @@ def test_terminal_ui_skill_closes_by_telling_the_agent_to_paste_the_screen() -> 
     # end-anchor proves it is the closing section the spec asks for.
     section = " ".join(parts[1].split())
     assert section.startswith(
-        "Paste the screen into your message as a fenced block: "
-        "SGR color survives there verbatim."
+        "Paste the screen into your message as a fenced block: color survives there."
     )
-    assert "any control byte that isn't SGR — arrives as literal `^[[33m`" in section
+    # An agent cannot type ESC, so the bare spelling is the load-bearing instruction:
+    # without it the skill describes a feature no model can reach.
+    assert "write each SGR code without it — `[1;33m`" in section
+    assert "any control byte that isn't SGR arrives as literal `^[[33m`" in section
     assert " ".join(body.split()).endswith("give the snapshot PNG path too.")
