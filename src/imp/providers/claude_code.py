@@ -116,6 +116,7 @@ from imp.providers.claude_code_session_store import (
 )
 from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
+    SKIPPED_ROTATED,
     RefreshOutcome,
     canonical_dir,
     canonical_expires_at,
@@ -1878,16 +1879,14 @@ class ClaudeCodeSession(ObserveSession):
         token, so probing would revoke a token imp has never tried."""
         if err.category != "auth":
             return err
-        spawn_expiry = self.runner._spawn_token_expiry
-        current_expiry = canonical_expires_at()
-        if (spawn_expiry is not None and current_expiry is not None
-                and spawn_expiry != current_expiry):
-            err.kind = "token_rotated"  # type: ignore[attr-defined]
-            return err
         outcome = await asyncio.to_thread(
-            refresh_canonical_token, int(time.time() * 1000), force=True
+            refresh_canonical_token, int(time.time() * 1000), force=True,
+            spawn_expires_at=self.runner._spawn_token_expiry,
         )
         _journal_token_refresh(self.elog, self.aid, outcome)
+        if outcome.outcome == SKIPPED_ROTATED:
+            err.kind = "token_rotated"  # type: ignore[attr-defined]
+            return err
         if outcome.outcome != FAILED_INVALID_GRANT:
             return err
         upgraded = perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)

@@ -180,13 +180,14 @@ PROSE_401 = (
 
 def _probe_seam(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, forced_outcome: ctr.RefreshOutcome,
-) -> list[bool]:
-    """Seam: forced calls get forced_outcome, unforced get NOT_APPLICABLE; returns seen flags."""
-    seen: list[bool] = []
+) -> list[tuple[bool, int | None]]:
+    """Seam: forced calls get forced_outcome, unforced get NOT_APPLICABLE; returns the
+    (force, spawn_expires_at) pair of every call, so the wiring is asserted on the value."""
+    calls: list[tuple[bool, int | None]] = []
 
-    def _fake_refresh(now_ms: int, *, env: Any = None,
-                      force: bool = False) -> ctr.RefreshOutcome:
-        seen.append(force)
+    def _fake_refresh(now_ms: int, *, env: Any = None, force: bool = False,
+                      spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
+        calls.append((force, spawn_expires_at))
         return forced_outcome if force else ctr.RefreshOutcome(ctr.NOT_APPLICABLE)
 
     def _fake_materialize() -> Path:
@@ -197,7 +198,7 @@ def _probe_seam(
     monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
         claude_code, "materialize_fresh_config_dir", _fake_materialize)
-    return seen
+    return calls
 
 
 def _run_scripted(tmp_path: Path, log: InMemoryEventLog,
@@ -213,15 +214,15 @@ async def test_dead_grant_probe_upgrades_the_auth_error_to_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
+    calls = _probe_seam(
         monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
         tmp_path, log, [assistant(text(PROSE_401)), result()])]
 
-    # Pre-spawn refresh unforced; the terminality probe forced.
-    assert seen == [False, True]
+    # Pre-spawn refresh unforced and with no spawn token; the terminality probe forced.
+    assert calls == [(False, None), (True, None)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
     assert errs[0]["payload"]["kind"] == "AuthTerminalError"
@@ -239,7 +240,7 @@ async def test_successful_probe_leaves_the_auth_error_retryable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
+    calls = _probe_seam(
         monkeypatch, tmp_path,
         ctr.RefreshOutcome(ctr.REFRESHED, expires_at=NOW + 3600 * 1000))
 
@@ -247,7 +248,7 @@ async def test_successful_probe_leaves_the_auth_error_retryable(
     events = [ev async for ev in _run_scripted(
         tmp_path, log, [assistant(text(PROSE_401)), result()])]
 
-    assert seen == [False, True]
+    assert calls == [(False, None), (True, None)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth"]
     assert errs[0]["payload"]["kind"] == "http_401"
@@ -262,7 +263,7 @@ async def test_probe_fires_on_the_termination_branch_too(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
+    calls = _probe_seam(
         monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
 
     log = InMemoryEventLog()
@@ -271,7 +272,7 @@ async def test_probe_fires_on_the_termination_branch_too(
         assistant(text("Session ended.")),
         result(is_error=True, api_error_status=401)])]
 
-    assert seen == [False, True]
+    assert calls == [(False, None), (True, None)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
     assert errs[0]["payload"]["kind"] == "AuthTerminalError"
@@ -288,7 +289,7 @@ async def test_a_non_auth_error_triggers_no_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
+    calls = _probe_seam(
         monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
 
     log = InMemoryEventLog()
@@ -297,7 +298,7 @@ async def test_a_non_auth_error_triggers_no_probe(
                         result()])]
 
     # Only the unforced pre-spawn refresh ran: no probe, no extra journal row.
-    assert seen == [False]
+    assert calls == [(False, None)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["network"]
     refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
@@ -424,10 +425,9 @@ async def test_torn_canonical_file_records_none_without_derailing_the_spawn(
 
 def _expiry_reads(monkeypatch: pytest.MonkeyPatch,
                   values: list[int | None]) -> list[int | None]:
-    """Script successive canonical_expires_at() reads and return the list of the
-    ones actually taken: [0] is the spawn-time read, [1] the one the 401 path
-    takes. Popping past the end raises, so an implementation that reads more
-    often than scripted cannot pass silently."""
+    """Script successive canonical_expires_at() reads and return the ones actually
+    taken. Only the spawn-time read remains; popping past the end raises, so a 401
+    path that reads the canonical expiry again cannot pass silently."""
     remaining = list(values)
     taken: list[int | None] = []
 
@@ -441,22 +441,22 @@ def _expiry_reads(monkeypatch: pytest.MonkeyPatch,
 
 
 @pytest.mark.anyio
-async def test_rotation_race_on_native_resume_skips_the_probe(
+async def test_rotation_race_on_native_resume_stays_retryable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The incident's shape: a 401 on a native-resume spawn (no ephemeral config
-    dir) whose canonical expiry moved after the spawn started. No forced refresh,
-    no token_refresh row for that error, and the error stays retryable auth."""
+    dir) whose canonical expiry moved after the spawn started. The forced probe
+    runs, reports the race from under the lock, and the error stays retryable auth."""
     (tmp_path / "art").mkdir()
-    seen: list[bool] = []
+    calls: list[tuple[bool, int | None]] = []
     materialized: list[Any] = []
 
-    def _fake_refresh(now_ms: int, *, env: Any = None,
-                      force: bool = False) -> ctr.RefreshOutcome:
-        seen.append(force)
-        # A forced probe here would upgrade to auth_terminal, so the category
-        # and kind assertions below fail loudly if the guard does not fire.
-        return (ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT) if force
+    def _fake_refresh(now_ms: int, *, env: Any = None, force: bool = False,
+                      spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
+        calls.append((force, spawn_expires_at))
+        # A dead-grant verdict here would upgrade to auth_terminal, so the category
+        # and kind assertions below fail loudly if SKIPPED_ROTATED is mishandled.
+        return (ctr.RefreshOutcome(ctr.SKIPPED_ROTATED) if force
                 else ctr.RefreshOutcome(ctr.NOT_APPLICABLE))
 
     def _fake_materialize() -> Path:
@@ -466,7 +466,7 @@ async def test_rotation_race_on_native_resume_skips_the_probe(
     monkeypatch.setattr(claude_code, "refresh_canonical_token", _fake_refresh)
     monkeypatch.setattr(
         claude_code, "materialize_fresh_config_dir", _fake_materialize)
-    reads = _expiry_reads(monkeypatch, [NOW + 3600 * 1000, NOW + 7200 * 1000])
+    reads = _expiry_reads(monkeypatch, [NOW + 3600 * 1000])
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, log)
@@ -483,38 +483,40 @@ async def test_rotation_race_on_native_resume_skips_the_probe(
     events = [ev async for ev in runner.run(inv)]
 
     assert materialized == []                      # native path: config_dir stays None
-    assert seen == [False]                         # pre-spawn refresh only, no probe
-    assert reads == [NOW + 3600 * 1000, NOW + 7200 * 1000]
+    assert calls == [(False, None), (True, NOW + 3600 * 1000)]
+    assert reads == [NOW + 3600 * 1000]            # only the spawn-time read happened
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth"]
     assert errs[0]["payload"]["kind"] == "token_rotated"
     refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
-    assert [e["payload"] for e in refreshes] == [{"outcome": "not_applicable"}]
+    assert [e["payload"] for e in refreshes] == [
+        {"outcome": "not_applicable"}, {"outcome": "skipped_rotated"}]
 
 
 @pytest.mark.anyio
 async def test_rotation_race_on_the_text_classified_401(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The classifier fall-through carries no token_expires_at in its detail, so
-    the guard cannot be reading the error detail to reach its verdict."""
+    """The classifier fall-through carries no token_expires_at in its detail: the
+    verdict comes from the probe's outcome, not from the error detail."""
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
-        monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
-    _expiry_reads(monkeypatch, [NOW + 3600 * 1000, NOW + 3600 * 1000 + 9_000])
+    calls = _probe_seam(
+        monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.SKIPPED_ROTATED))
+    _expiry_reads(monkeypatch, [NOW + 3600 * 1000])
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
         tmp_path, log, [assistant(text(PROSE_401)), result()])]
 
-    assert seen == [False]
+    assert calls == [(False, None), (True, NOW + 3600 * 1000)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth"]
     assert errs[0]["payload"]["kind"] == "token_rotated"
     assert errs[0]["payload"]["detail"]["last_agent_text"] == PROSE_401
     assert "token_expires_at" not in errs[0]["payload"]["detail"]
     refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
-    assert [e["payload"] for e in refreshes] == [{"outcome": "not_applicable"}]
+    assert [e["payload"] for e in refreshes] == [
+        {"outcome": "not_applicable"}, {"outcome": "skipped_rotated"}]
 
 
 @pytest.mark.anyio
@@ -524,40 +526,41 @@ async def test_rotation_race_on_the_termination_branch_replaces_http_401(
     """The structural branch labels the error http_401 before settling; a race
     replaces that kind."""
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
-        monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
-    _expiry_reads(monkeypatch, [NOW + 3600 * 1000, NOW + 7200 * 1000])
+    calls = _probe_seam(
+        monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.SKIPPED_ROTATED))
+    _expiry_reads(monkeypatch, [NOW + 3600 * 1000])
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(tmp_path, log, [
         assistant(text("Session ended.")),
         result(is_error=True, api_error_status=401)])]
 
-    assert seen == [False]
+    assert calls == [(False, None), (True, NOW + 3600 * 1000)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth"]
     assert errs[0]["payload"]["kind"] == "token_rotated"
     assert errs[0]["payload"]["detail"]["api_error_status"] == 401
     refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
-    assert [e["payload"] for e in refreshes] == [{"outcome": "not_applicable"}]
+    assert [e["payload"] for e in refreshes] == [
+        {"outcome": "not_applicable"}, {"outcome": "skipped_rotated"}]
 
 
 @pytest.mark.anyio
-async def test_unmoved_expiry_still_probes_and_upgrades_a_dead_grant(
+async def test_the_probe_gets_the_spawn_expiry_and_still_upgrades_a_dead_grant(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Equal expiries mean no peer rotated: the forced probe runs as today and a
-    dead grant still becomes terminal."""
+    """The spawn expiry rides along to the probe, which compares it under the lock;
+    with no peer rotation, a dead grant still becomes terminal."""
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
+    calls = _probe_seam(
         monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
-    _expiry_reads(monkeypatch, [NOW + 3600 * 1000, NOW + 3600 * 1000])
+    _expiry_reads(monkeypatch, [NOW + 3600 * 1000])
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
         tmp_path, log, [assistant(text(PROSE_401)), result()])]
 
-    assert seen == [False, True]
+    assert calls == [(False, None), (True, NOW + 3600 * 1000)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
     assert errs[0]["payload"]["kind"] == "AuthTerminalError"
@@ -567,50 +570,46 @@ async def test_unmoved_expiry_still_probes_and_upgrades_a_dead_grant(
 
 
 @pytest.mark.anyio
-async def test_terminal_auth_prose_is_untouched_by_a_moved_expiry(
+async def test_terminal_auth_prose_never_reaches_the_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A locally-detected dead credential classifies auth_terminal, so the guard
-    must never reach it: the category gate returns first, leaving the 401-time
-    read untaken and the kind at the class-name default."""
+    """A locally-detected dead credential classifies auth_terminal, so the category
+    gate returns before any forced probe: no second refresh call, no second journal
+    row, and the kind stays at the class-name default."""
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
+    calls = _probe_seam(
         monkeypatch, tmp_path, ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT))
-    reads = _expiry_reads(monkeypatch, [NOW + 3600 * 1000, NOW + 7200 * 1000])
+    _expiry_reads(monkeypatch, [NOW + 3600 * 1000])
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(tmp_path, log, [
         assistant(text("Invalid API key · Please run `/login`")), result()])]
 
-    assert seen == [False]                     # category gate: no probe either way
-    assert reads == [NOW + 3600 * 1000]        # only the spawn-time read happened
+    assert calls == [(False, None)]            # category gate: no probe either way
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
     assert errs[0]["payload"]["kind"] == "AuthTerminalError"
+    refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
+    assert [e["payload"] for e in refreshes] == [{"outcome": "not_applicable"}]
 
 
-@pytest.mark.parametrize(
-    "values",
-    [[None, NOW + 7200 * 1000], [NOW + 3600 * 1000, None], [None, None]],
-    ids=["spawn-unreadable", "current-unreadable", "both-unreadable"],
-)
 @pytest.mark.anyio
-async def test_unreadable_expiry_probes_exactly_as_today(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, values: list[int | None],
+async def test_an_unreadable_spawn_expiry_passes_none_and_probes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An absent signal is untrustworthy, not evidence of a race: today's forced
-    probe runs and the error keeps its http_401 kind."""
+    """An absent spawn-time signal is untrustworthy, not evidence of a race: None
+    goes to the probe, which runs, and the error keeps its http_401 kind."""
     (tmp_path / "art").mkdir()
-    seen = _probe_seam(
+    calls = _probe_seam(
         monkeypatch, tmp_path,
         ctr.RefreshOutcome(ctr.REFRESHED, expires_at=NOW + 3600 * 1000))
-    _expiry_reads(monkeypatch, values)
+    _expiry_reads(monkeypatch, [None])
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
         tmp_path, log, [assistant(text(PROSE_401)), result()])]
 
-    assert seen == [False, True]
+    assert calls == [(False, None), (True, None)]
     errs = [e for e in events if e["type"] == "error"]
     assert [e["payload"]["category"] for e in errs] == ["auth"]
     assert errs[0]["payload"]["kind"] == "http_401"
