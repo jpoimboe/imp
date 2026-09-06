@@ -253,6 +253,7 @@ class CodexSession(ObserveSession):
             "thread_id": None, "complete_step_args": {},
             "complete_step_called": False, "auth_mode": auth_mode,
             "context_reading": None, "context_canary_emitted": False,
+            "quota_reading": None,
             "compaction_canary_emitted": False,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
@@ -1312,6 +1313,9 @@ def process_event(
                 readings = latest_readings(codex_home, thread_id)
         reading = readings.context
         state["context_reading"] = reading
+        if readings.quota is not None:
+            state["quota_reading"] = readings.quota
+            elog.append_quota_reading(agent_id=agent_id, reading=readings.quota)
         if reading is None and not state.get("context_canary_emitted"):
             state["context_canary_emitted"] = True
             elog.append(agent_id=agent_id, type="runner_warning",
