@@ -7,6 +7,7 @@ import pytest
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.engine.state import InMemoryEventLog, JsonlEventLog
 from imp.paths import project_state_dir
+from imp.providers.quota import QuotaReading, QuotaWindow
 
 
 def _read(path: Path) -> list[dict]:
@@ -353,6 +354,68 @@ def test_in_memory_patch_lands_context_window_on_agent_message() -> None:
     resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert resp["payload"]["context_window"] == 258400
     assert resp["payload"]["context_tokens"] == 22389
+
+
+def _quota(*, provider: str = "codex", pct: float = 12.0,
+           resets_at: int | None = 1788403732) -> QuotaReading:
+    return QuotaReading(
+        provider=provider, plan="plus",
+        windows=(QuotaWindow(label="5h", used_pct=pct, resets_at=resets_at),),
+        raw={"plan_type": "plus", "credits": {"balance": "0"}})
+
+
+def test_quota_reading_event_carries_the_normalized_payload(tmp_path: Path) -> None:
+    path = tmp_path / "e.jsonl"
+    log = JsonlEventLog(path)
+    reading = _quota()
+    log.append_quota_reading(agent_id="step:p/s", reading=reading)
+    events = _read(path)
+    assert [e["type"] for e in events] == ["quota_reading"]
+    assert events[0]["agent_id"] == "step:p/s"
+    assert events[0]["payload"] == reading.to_payload()
+
+
+def test_only_a_changed_quota_reading_is_appended(tmp_path: Path) -> None:
+    path = tmp_path / "e.jsonl"
+    log = JsonlEventLog(path)
+    log.append_quota_reading(agent_id="A", reading=_quota(pct=12.0))
+    log.append_quota_reading(agent_id="A", reading=_quota(pct=12.0))
+    log.append_quota_reading(agent_id="A", reading=_quota(pct=13.0))
+    log.append_quota_reading(agent_id="A", reading=_quota(pct=13.0))
+    # same percentage, new reset instant — the window rolled over.
+    log.append_quota_reading(agent_id="A", reading=_quota(pct=13.0, resets_at=1788999999))
+    recorded = [(e["payload"]["windows"][0]["used_pct"],
+                 e["payload"]["windows"][0]["resets_at"])
+                for e in _read(path) if e["type"] == "quota_reading"]
+    assert recorded == [(12.0, 1788403732), (13.0, 1788403732), (13.0, 1788999999)]
+
+
+def test_quota_reading_already_in_history_is_not_re_emitted(tmp_path: Path) -> None:
+    # The resumed-step case: a fresh process builds an EventLog over an existing
+    # log, so the comparison is against what the QUEST recorded, not this process.
+    path = tmp_path / "e.jsonl"
+    JsonlEventLog(path).append_quota_reading(agent_id="step:p/s1", reading=_quota())
+
+    resumed = JsonlEventLog(path)
+    resumed.append_quota_reading(agent_id="step:p/s2", reading=_quota())
+    resumed.append_quota_reading(agent_id="step:p/s2", reading=_quota(pct=20.0))
+
+    pcts = [e["payload"]["windows"][0]["used_pct"] for e in _read(path)
+            if e["type"] == "quota_reading"]
+    assert pcts == [12.0, 20.0]
+
+
+def test_quota_readings_dedupe_per_provider(tmp_path: Path) -> None:
+    # A mixed-provider run: one carrier's reading must never suppress another's,
+    # and each carrier's own repeat is still suppressed.
+    path = tmp_path / "e.jsonl"
+    log = JsonlEventLog(path)
+    log.append_quota_reading(agent_id="A", reading=_quota(provider="codex"))
+    log.append_quota_reading(agent_id="A", reading=_quota(provider="claude_code"))
+    log.append_quota_reading(agent_id="A", reading=_quota(provider="codex"))
+    providers = [e["payload"]["provider"] for e in _read(path)
+                 if e["type"] == "quota_reading"]
+    assert providers == ["codex", "claude_code"]
 
 
 def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:
