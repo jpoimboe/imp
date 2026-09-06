@@ -10,6 +10,7 @@ import pytest
 
 import imp.providers.codex_runner as cr
 from imp.engine.state import InMemoryEventLog
+from imp.providers.codex_rollout import RolloutReadings
 from imp.providers.codex_runner import process_event
 from tests.codex_fakes import agent_message, turn_completed
 
@@ -93,11 +94,11 @@ def test_unreadable_rollout_does_not_kill_the_turn(
     """codex writes the rollout from another process while imp reads it, so the
     locator's rglob->stat window can lose the file. A gauge read must never take
     the turn down with it."""
-    def _boom(codex_home: Path, thread_id: str) -> tuple[int, int] | None:
+    def _boom(codex_home: Path, thread_id: str) -> RolloutReadings:
         raise OSError("rollout vanished mid-turn")
 
     home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
-    monkeypatch.setattr(cr, "latest_context_reading", _boom)
+    monkeypatch.setattr(cr, "latest_readings", _boom)
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
     process_event(agent_message("done"), elog=elog, agent_id="step:a",

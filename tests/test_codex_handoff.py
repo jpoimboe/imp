@@ -11,6 +11,7 @@ from imp.engine.completion import build_continuation_fn
 from imp.engine.reincarnation import handoff_path_for
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.providers.codex_rollout import RolloutReadings
 from imp.providers.codex_runner import CodexAgentRunner
 from tests.codex_fakes import FakeCodex, agent_message, thread_started, turn_completed
 
@@ -57,8 +58,9 @@ async def test_threshold_crossing_elicits_codex_handoff(
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
     # FakeCodex writes no rollout, so stand in for codex's own reading.
-    monkeypatch.setattr(cr, "latest_context_reading",
-                        lambda home, tid: (350_000, 400_000))
+    monkeypatch.setattr(
+        cr, "latest_readings",
+        lambda home, tid: RolloutReadings(context=(350_000, 400_000), quota=None))
 
     scripted = [
         # Turn 1: the reading crosses (350000/400000 = 0.875), no complete_step.
@@ -103,8 +105,9 @@ async def test_silent_handoff_turn_does_not_write_note(
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
-    monkeypatch.setattr(cr, "latest_context_reading",
-                        lambda home, tid: (350_000, 400_000))
+    monkeypatch.setattr(
+        cr, "latest_readings",
+        lambda home, tid: RolloutReadings(context=(350_000, 400_000), quota=None))
 
     scripted = [
         # Turn 1: the reading crosses (350000/400000 = 0.875).
@@ -176,8 +179,9 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     crossing must be real, not absent."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
-    monkeypatch.setattr(cr, "latest_context_reading",
-                        lambda home, tid: (350_000, 400_000))
+    monkeypatch.setattr(
+        cr, "latest_readings",
+        lambda home, tid: RolloutReadings(context=(350_000, 400_000), quota=None))
 
     from tests.codex_fakes import mcp_call
     scripted = [[
@@ -214,8 +218,9 @@ async def test_rollout_reading_at_cutoff_elicits_handoff(
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
-    monkeypatch.setattr(cr, "latest_context_reading",
-                        lambda home, tid: (206_720, 258_400))
+    monkeypatch.setattr(
+        cr, "latest_readings",
+        lambda home, tid: RolloutReadings(context=(206_720, 258_400), quota=None))
 
     scripted = [
         [thread_started("thr-1"), agent_message("working on it"),
@@ -255,7 +260,8 @@ async def test_low_or_absent_reading_suppresses_handoff_on_a_huge_turn_sum(
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     from tests.codex_fakes import mcp_call
-    monkeypatch.setattr(cr, "latest_context_reading", lambda home, tid: reading)
+    monkeypatch.setattr(cr, "latest_readings",
+                        lambda home, tid: RolloutReadings(context=reading, quota=None))
 
     scripted = [
         [thread_started("thr-1"), agent_message("still working"),

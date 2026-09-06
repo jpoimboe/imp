@@ -63,7 +63,7 @@ from imp.providers.codex_mcp import (
     start_impty_server,
     start_server,
 )
-from imp.providers.codex_rollout import compaction_seen, latest_context_reading
+from imp.providers.codex_rollout import RolloutReadings, compaction_seen, latest_readings
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
@@ -1305,12 +1305,12 @@ def process_event(
         # `normalized` is a billing sum over every model request in this turn,
         # not prompt occupancy — read codex's own per-request record for that.
         thread_id = state.get("thread_id")
-        reading = None
+        readings = RolloutReadings(context=None, quota=None)
         if codex_home is not None and thread_id:
-            try:
-                reading = latest_context_reading(codex_home, thread_id)
-            except OSError:  # codex writes this file concurrently
-                reading = None
+            # codex writes this file concurrently, so the read can lose it
+            with contextlib.suppress(OSError):
+                readings = latest_readings(codex_home, thread_id)
+        reading = readings.context
         state["context_reading"] = reading
         if reading is None and not state.get("context_canary_emitted"):
             state["context_canary_emitted"] = True

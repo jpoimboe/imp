@@ -8,7 +8,7 @@ import pytest
 
 from imp.providers.codex_rollout import (
     compaction_seen,
-    latest_context_reading,
+    latest_readings,
     persist_rollout,
     quota_from_rate_limits,
     restore_rollout,
@@ -96,9 +96,18 @@ def test_restore_fails_loudly_when_rollout_bytes_missing(tmp_path: Path) -> None
 
 
 _WINDOW = 258400
+_RATE_LIMITS = {
+    "limit_id": "codex", "limit_name": None,
+    "primary": {"used_percent": 12.0, "window_minutes": 300, "resets_at": 1788403732},
+    "secondary": {"used_percent": 14.0, "window_minutes": 10080, "resets_at": 1788971433},
+    "credits": {"has_credits": False, "unlimited": False, "balance": "0"},
+    "individual_limit": None, "spend_control_reached": None,
+    "plan_type": "plus", "rate_limit_reached_type": None,
+}
 
 
-def _token_count_line(*, total_tokens: object = 22389, window: object = _WINDOW) -> str:
+def _token_count_line(*, total_tokens: object = 22389, window: object = _WINDOW,
+                      rate_limits: object = None) -> str:
     """One codex `token_count` record, verbatim in shape. The distractor values
     (82956 turn sum, 22290 input_tokens) pin which field the reader must take."""
     return json.dumps({
@@ -117,7 +126,7 @@ def _token_count_line(*, total_tokens: object = 22389, window: object = _WINDOW)
                 },
                 "model_context_window": window,
             },
-            "rate_limits": {},
+            "rate_limits": rate_limits,
         },
     }) + "\n"
 
@@ -129,65 +138,88 @@ def _home_with(tmp_path: Path, body: str) -> Path:
     return home
 
 
-def test_latest_context_reading_returns_occupancy_and_window(tmp_path: Path) -> None:
+def test_latest_readings_returns_occupancy_and_window(tmp_path: Path) -> None:
     home = _home_with(tmp_path, _token_count_line(total_tokens=22389))
-    assert latest_context_reading(home, "thr-1") == (22389, _WINDOW)
+    assert latest_readings(home, "thr-1").context == (22389, _WINDOW)
 
 
-def test_latest_context_reading_takes_the_last_record(tmp_path: Path) -> None:
+def test_latest_readings_takes_the_last_record(tmp_path: Path) -> None:
     body = "".join(_token_count_line(total_tokens=t)
                    for t in (20115, 22389, 21223))
     home = _home_with(tmp_path, body)
-    assert latest_context_reading(home, "thr-1") == (21223, _WINDOW)
+    assert latest_readings(home, "thr-1").context == (21223, _WINDOW)
 
 
-def test_latest_context_reading_returns_none_when_rollout_absent(tmp_path: Path) -> None:
+def test_latest_readings_returns_none_when_rollout_absent(tmp_path: Path) -> None:
     home = tmp_path / "codex_home"
     (home / "sessions").mkdir(parents=True)  # exists but empty
-    assert latest_context_reading(home, "thr-1") is None
+    readings = latest_readings(home, "thr-1")
+    assert readings.context is None
+    assert readings.quota is None
 
 
-def test_latest_context_reading_returns_none_without_token_count_record(
+def test_latest_readings_returns_none_without_token_count_record(
         tmp_path: Path) -> None:
     body = (json.dumps({"type": "session_meta", "payload": {"id": "thr-1"}}) + "\n"
             + json.dumps({"type": "event_msg",
                           "payload": {"type": "agent_message",
                                       "message": "hi"}}) + "\n")
     home = _home_with(tmp_path, body)
-    assert latest_context_reading(home, "thr-1") is None
+    assert latest_readings(home, "thr-1").context is None
 
 
 @pytest.mark.parametrize("window", [None, 0, -1])
-def test_latest_context_reading_returns_none_for_unusable_window(
+def test_latest_readings_returns_none_for_unusable_window(
         tmp_path: Path, window: object) -> None:
     home = _home_with(tmp_path, _token_count_line(window=window))
-    assert latest_context_reading(home, "thr-1") is None
+    assert latest_readings(home, "thr-1").context is None
 
 
 @pytest.mark.parametrize("total_tokens", [None, 0, -1])
-def test_latest_context_reading_returns_none_for_unusable_tokens(
+def test_latest_readings_returns_none_for_unusable_tokens(
         tmp_path: Path, total_tokens: object) -> None:
     home = _home_with(tmp_path, _token_count_line(total_tokens=total_tokens))
-    assert latest_context_reading(home, "thr-1") is None
+    assert latest_readings(home, "thr-1").context is None
 
 
-def test_latest_context_reading_skips_a_trailing_unusable_record(
-        tmp_path: Path) -> None:
+def test_latest_readings_skips_a_trailing_unusable_record(tmp_path: Path) -> None:
     # A later drifted record must not erase an earlier complete reading.
     body = (_token_count_line(total_tokens=22389)
             + _token_count_line(total_tokens=22500, window=None))
     home = _home_with(tmp_path, body)
-    assert latest_context_reading(home, "thr-1") == (22389, _WINDOW)
+    assert latest_readings(home, "thr-1").context == (22389, _WINDOW)
 
 
-def test_latest_context_reading_returns_none_when_usage_missing(tmp_path: Path) -> None:
+def test_latest_readings_returns_none_when_usage_missing(tmp_path: Path) -> None:
     body = json.dumps({
         "type": "event_msg",
         "payload": {"type": "token_count",
                     "info": {"model_context_window": _WINDOW}},
     }) + "\n"
     home = _home_with(tmp_path, body)
-    assert latest_context_reading(home, "thr-1") is None
+    assert latest_readings(home, "thr-1").context is None
+
+
+def test_latest_readings_returns_both_readings_from_one_pass(tmp_path: Path) -> None:
+    home = _home_with(tmp_path, _token_count_line(rate_limits=_RATE_LIMITS))
+    readings = latest_readings(home, "thr-1")
+    assert readings.context == (22389, _WINDOW)
+    assert readings.quota is not None
+    assert [(w.label, w.used_pct) for w in readings.quota.windows] == [
+        ("5h", 12.0), ("7d", 14.0)]
+
+
+def test_latest_readings_takes_the_last_valid_of_each_independently(
+        tmp_path: Path) -> None:
+    # `rate_limits` can be null on a record whose token counts are valid: the
+    # newer record advances the context reading without erasing the quota one.
+    body = (_token_count_line(total_tokens=22389, rate_limits=_RATE_LIMITS)
+            + _token_count_line(total_tokens=22500, rate_limits=None))
+    home = _home_with(tmp_path, body)
+    readings = latest_readings(home, "thr-1")
+    assert readings.context == (22500, _WINDOW)
+    assert readings.quota is not None
+    assert readings.quota.plan == "plus"
 
 
 def _compacted_line() -> str:
@@ -238,16 +270,6 @@ def test_compaction_seen_false_when_rollout_absent(tmp_path: Path) -> None:
     home = tmp_path / "codex_home"
     (home / "sessions").mkdir(parents=True)  # exists but empty
     assert compaction_seen(home, "thr-1") is False
-
-
-_RATE_LIMITS = {
-    "limit_id": "codex", "limit_name": None,
-    "primary": {"used_percent": 12.0, "window_minutes": 300, "resets_at": 1788403732},
-    "secondary": {"used_percent": 14.0, "window_minutes": 10080, "resets_at": 1788971433},
-    "credits": {"has_credits": False, "unlimited": False, "balance": "0"},
-    "individual_limit": None, "spend_control_reached": None,
-    "plan_type": "plus", "rate_limit_reached_type": None,
-}
 
 
 def test_quota_from_rate_limits_labels_each_window_from_its_own_duration() -> None:
