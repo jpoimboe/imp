@@ -3020,6 +3020,112 @@ async def test_cooperative_interrupt_steer_continues_no_pause(
 
 
 @pytest.mark.anyio
+async def test_cooperative_steer_repairs_the_interrupt_marker_tail(
+    tmp_path: Path,
+) -> None:
+    """Steer site repairs the interrupt marker before the steer reply strands it mid-transcript."""
+    import asyncio
+
+    from imp.agents.runner import TextBlock as RealTextBlock
+    from imp.agents.runner import ToolResultBlock as RealToolResultBlock
+    from imp.agents.transcript import RESUME_DURABILITY_NOTE, Transcript
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+
+    reject = (
+        "The user doesn't want to proceed with this tool use. The tool use was "
+        "rejected (eg. if it was a file edit, the new_string was NOT written to "
+        "the file). STOP what you are doing and wait for the user to tell you "
+        "how to proceed."
+    )
+    marker = "[Request interrupted by user for tool use]"
+    before_result = [
+        assistant(tool_use("t1", "mcp__imp__sub_agent",
+                           {"subagent_name": "coder", "task_description": "task 1"})),
+        user(tool_result("t1", reject, True)),
+        user(text(marker)),
+    ]
+    after_steer = [
+        assistant(text("ok"), tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer,
+                              before_result=before_result)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "actually, run the tests first")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    # Poll until the client has been queried (runner._client is set and query() ran),
+    # so signal_pause() triggers a cooperative steer rather than a hard cancel.
+    for _ in range(2000):  # up to ~10 s
+        if holder.get("c") is not None and holder["c"].queries:
+            break
+        await asyncio.sleep(0.005)
+    else:
+        raise AssertionError("client was never queried — interrupt would hard-cancel")
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=10)
+
+    assert events[-1]["type"] == "agent_result"
+    assert events[-1]["payload"]["status"] == "Success"
+
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+
+    # No rejection body or interrupt marker should survive in any turn
+    for m in loaded:
+        for b in m.content:
+            if isinstance(b, RealTextBlock):
+                assert "The tool use was rejected" not in b.text
+                assert "[Request interrupted by user" not in b.text
+            if isinstance(b, RealToolResultBlock):
+                assert isinstance(b.content, str)
+                assert "The tool use was rejected" not in b.content
+                assert "[Request interrupted by user" not in b.content
+
+    # The t1 tool_result should carry the synthetic interrupted body
+    t1_turn = next(
+        m for m in loaded
+        if m.role == "user" and any(
+            isinstance(b, RealToolResultBlock) and b.tool_use_id == "t1"
+            for b in m.content
+        )
+    )
+    t1_result = next(
+        b for b in t1_turn.content
+        if isinstance(b, RealToolResultBlock) and b.tool_use_id == "t1"
+    )
+    assert isinstance(t1_result.content, str)
+    assert t1_result.content.startswith(
+        "[interrupted] The run was paused before this call's result was captured")
+    assert any(
+        isinstance(b, RealTextBlock) and b.text == RESUME_DURABILITY_NOTE
+        for b in t1_turn.content
+    )
+
+    # Steer reply was delivered to the next query
+    assert holder["c"].queries[-1] == "actually, run the tests first"
+
+
+@pytest.mark.anyio
 async def test_cooperative_interrupt_headless_pauses_balanced(
     tmp_path: Path,
 ) -> None:

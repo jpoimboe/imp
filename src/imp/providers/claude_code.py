@@ -1810,6 +1810,11 @@ class ClaudeCodeSession(ObserveSession):
             runner._steer_unblocked.set()
             runner._steer_requested = False
             self._flush_turn_record()
+            # The marker is still the tail here; _enter's repair is tail-only and
+            # can no longer reach it once the steer reply is appended below.
+            repair_interrupt_marker_on_resume(
+                self.messages, self.transcript,
+                captured=_load_captured_tool_results(invocation.transcript_dir))
             from imp.agents.tools.bg import terminate_background_processes
             from imp.agents.tools.context import terminate_running_processes
             await terminate_running_processes(ctx)
