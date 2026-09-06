@@ -136,3 +136,25 @@ async def test_executor_hands_the_persona_source_to_the_quest_context(
     assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
     # the RAW source rides the QuestContext; subagents.py re-renders it per dispatch
     assert sink[0].quest_context.persona_source == _PERSONA_TEXT
+
+
+def _agent_body(name: str) -> str:
+    wf = load_workflow(bundled_workflow_dir("default"))
+    return wf.agents[name].prompt_template_source
+
+
+def test_spiker_carve_out_overrides_the_persona() -> None:
+    body = _agent_body("spiker")
+    assert "**The full-suite rule does not bind you here.**" in body
+    assert "a full suite run" in body
+    # the carve-out closes the disposable-worktree section it qualifies
+    assert body.index("## Your worktree is disposable") < body.index(
+        "**The full-suite rule does not bind you here.**")
+    assert body.index("**The full-suite rule does not bind you here.**") < body.index(
+        "## Investigate empirically")
+
+
+def test_action_care_partial_narrows_to_focused_tests() -> None:
+    text = Path("src/imp/assets/partials/action-care.md").read_text()
+    assert "(edit files, run focused tests)" in text
+    assert "(edit files, run tests)" not in text
