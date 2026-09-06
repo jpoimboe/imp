@@ -13,6 +13,7 @@ import imp.providers.observe_classify as ocls
 from imp.engine.state import InMemoryEventLog
 from imp.providers import errors as perr
 from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.codex_runner import CodexSession
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
@@ -176,3 +177,28 @@ async def test_a_streamed_rate_limit_event_feeds_the_retry_hint(
     assert len(errs) == 1, events
     assert errs[0]["payload"]["category"] == "rate_limit"
     assert 3600 < errs[0]["payload"]["detail"]["retry_after_seconds"] <= 3721
+
+
+@pytest.mark.anyio
+async def test_codex_derives_the_hint_from_its_recorded_reading() -> None:
+    session = CodexSession(None, None)
+    session._proc_state = {"quota_reading": _reading(
+        ("5h", 96.0, int(time.time()) + 3600), provider="codex")}
+
+    payload = await session._terminal_error(_WEEKLY_LIMIT)
+
+    assert payload is not None
+    assert payload["category"] == "rate_limit"
+    assert 3600 < payload["detail"]["retry_after_seconds"] <= 3721
+
+
+@pytest.mark.anyio
+async def test_codex_without_a_reading_falls_to_ordinary_backoff() -> None:
+    session = CodexSession(None, None)
+    session._proc_state = {"quota_reading": None}
+
+    payload = await session._terminal_error(_WEEKLY_LIMIT)
+
+    assert payload is not None
+    assert payload["category"] == "rate_limit"
+    assert "retry_after_seconds" not in payload["detail"]

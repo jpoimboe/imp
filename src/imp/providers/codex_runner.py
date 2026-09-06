@@ -635,7 +635,8 @@ class CodexSession(ObserveSession):
             has_complete_step=bool(ps.get("complete_step_called")))
 
     async def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
-        classified = _classify_agent_text(last_text)
+        classified = _classify_agent_text(
+            last_text, reading=self._proc_state.get("quota_reading"))
         if classified is not None:
             classified.detail["last_agent_text"] = last_text[:500]
             return cast(dict[str, Any], perr.make_error_event(
