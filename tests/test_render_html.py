@@ -115,3 +115,23 @@ def test_quiet_first_retry_is_absent_from_the_lean_html_export() -> None:
          "payload": {"category": "auth", "attempt": 1, "backoff_seconds": 1.0}}])
     assert "retry 1" not in render_html(render_markdown(tree, full=False))
     assert "retry 1" in render_html(render_markdown(tree, full=True))
+
+
+def test_agent_prose_bare_sgr_fence_html_export_is_clean() -> None:
+    bare = ("[38;2;255;154;60mwarning: [auth] retry 2 (1.0s) — another session "
+            "rotated the OAuth token; retrying with the new one[0m")
+    tree = nv.build_tree([
+        {"id": "2", "agent_id": None, "type": "step_started",
+         "payload": {"step": "s", "kind": "agent", "phase": "p",
+                     "model": "m", "provider": "anthropic"}},
+        {"id": "3", "agent_id": "step:p/s", "type": "agent_message",
+         "payload": {"provider": "anthropic", "model": "m",
+                     "stop_reason": "end_turn", "usage": {},
+                     "raw": {"content": [{"type": "text",
+                                          "text": f"Look:\n\n```\n{bare}\n```\n"}]}}},
+    ])
+    out = render_html(render_markdown(tree, full=False))
+    assert "38;2;255;154;60" not in out
+    assert "\x1b" not in out
+    assert "^[[" not in out
+    assert "warning: [auth] retry 2 (1.0s)" in out
