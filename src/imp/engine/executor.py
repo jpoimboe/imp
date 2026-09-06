@@ -1549,6 +1549,7 @@ async def _route_agent(
     backoff = 0
     cumulative_backoff = 0.0
     hint_exempt_sleeps = 0
+    rotation_exempt_sleeps = 0
     while True:
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
@@ -1591,9 +1592,17 @@ async def _route_agent(
         # 3 such sleeps per loop so a pathological hint stream still terminates —
         # the 4th hinted delay is budgeted like any other.
         hinted = result.delay_hinted and hint_exempt_sleeps < 3
+        # A peer rotating the OAuth token is not a failing endpoint — the retry
+        # runs on the token now on disk — so hold the first races at the ladder's
+        # bottom rung. Capped at 3 like the hinted exemption, so a rotator that
+        # never settles falls back to the true rung and still reaches the budget.
+        raced = (result.error is not None
+                 and result.error.kind == "token_rotated"
+                 and rotation_exempt_sleeps < 3)
+        delay = 1.0 if raced else result.delay
         if not hinted:
             budget = budget_for(category)
-            if budget is not None and cumulative_backoff + result.delay > budget:
+            if budget is not None and cumulative_backoff + delay > budget:
                 # Auth exhaustion is actionable: the human must re-authenticate, not wait out a
                 # generic ceiling.
                 reason = "reauth_needed" if category == "auth" else "retry_ceiling"
@@ -1613,7 +1622,7 @@ async def _route_agent(
         retry_payload = {
             "category": category,
             "attempt": backoff,
-            "backoff_seconds": result.delay,
+            "backoff_seconds": delay,
         }
         if result.error is not None and result.error.message:
             retry_payload["message"] = result.error.message
@@ -1624,7 +1633,7 @@ async def _route_agent(
         _emit(log, "agent_retry", retry_payload, agent_id=None)
         coordinator.begin_backoff_wait()
         try:
-            await _interruptible_sleep(result.delay, coordinator)
+            await _interruptible_sleep(delay, coordinator)
         finally:
             coordinator.end_backoff_wait()
         # Consume the retry-now latch so it doesn't leak into the next backoff sleep.
@@ -1634,7 +1643,9 @@ async def _route_agent(
         if hinted:
             hint_exempt_sleeps += 1
         else:
-            cumulative_backoff += result.delay
+            cumulative_backoff += delay
+        if raced:
+            rotation_exempt_sleeps += 1
         if coordinator.should_pause:
             return Pause(), None, {}
 
