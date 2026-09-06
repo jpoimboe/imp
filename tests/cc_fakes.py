@@ -115,6 +115,16 @@ FakeRateLimitInfo.__name__ = "RateLimitInfo"
 
 
 @dataclass
+class FakeRateLimitEvent:
+    rate_limit_info: Any
+    uuid: str = "rl-1"
+    session_id: str = "sess-1"
+
+
+FakeRateLimitEvent.__name__ = "RateLimitEvent"
+
+
+@dataclass
 class FakeResultMessage:
     """End-of-turn marker. The runner reacts to this by checking
     state.complete_step_called and breaking the loop. is_error / api_error_status
@@ -244,6 +254,15 @@ def tool_result(id_: str, content: str, is_error: bool = False) -> FakeToolResul
 
 def thinking(content: str) -> FakeThinkingBlock:
     return FakeThinkingBlock(thinking=content)
+
+
+def rate_limit(raw: dict[str, Any]) -> FakeRateLimitEvent:
+    """One RateLimitEvent per CLI process, after AssistantMessage and before ResultMessage."""
+    return FakeRateLimitEvent(rate_limit_info=FakeRateLimitInfo(
+        status=raw.get("status", "allowed"),
+        resets_at=raw.get("resetsAt"),
+        rate_limit_type=raw.get("rateLimitType"),
+        raw=raw))
 
 
 def message_start(message_id: str, usage: dict[str, Any]) -> FakeStreamEvent:

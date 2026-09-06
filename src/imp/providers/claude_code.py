@@ -1620,6 +1620,11 @@ class ClaudeCodeSession(ObserveSession):
                 self._stream_cur_stop_reason = None
         if cls_name == "SystemMessage" and getattr(raw, "subtype", None) == "init":
             self._auth_mode = _auth_mode_from_init(getattr(raw, "data", None))
+        if cls_name == "RateLimitEvent":
+            reading = quota_from_rate_limit_info(
+                getattr(raw, "rate_limit_info", None))
+            if reading is not None:
+                elog.append_quota_reading(agent_id=aid, reading=reading)
         imp_msg, warns, thinkings = _sdk_message_to_imp(raw)
         for content in thinkings:
             yield Thinking(text=content)

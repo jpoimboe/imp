@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
-from imp.providers.claude_code import quota_from_rate_limit_info
+from pathlib import Path
+
+import pytest
+
+from imp.engine.state import InMemoryEventLog
+from imp.providers.claude_code import ClaudeCodeAgentRunner, quota_from_rate_limit_info
 from imp.providers.quota import QuotaWindow
-from tests.cc_fakes import FakeRateLimitInfo
+from tests.cc_fakes import (
+    FakeClaudeSDKClient,
+    FakeRateLimitInfo,
+    assistant,
+    rate_limit,
+    result,
+    system_init,
+    text,
+    tool_use,
+)
+from tests.test_claude_code_runner import _inv
 
 # The live 2.1.259 payload, verbatim from the quest's spike capture.
 _RAW = {
@@ -59,3 +74,71 @@ def test_a_single_window_with_no_reset_normalizes_alone() -> None:
     assert reading is not None
     assert reading.windows == (
         QuotaWindow(label="7d", used_pct=81.0, resets_at=None),)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_a_streamed_rate_limit_event_records_the_reading(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        system_init("none"),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        rate_limit(_RAW),
+        result(),
+    ]
+
+    def factory(opts: object) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+                                   client_factory=factory)
+    events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
+
+    # The event translates to no driver item and no warning.
+    assert [e["type"] for e in events
+            if e["type"] != "tool_heartbeat"] == ["agent_result"], events
+
+    readings = [e for e in log.read() if e["type"] == "quota_reading"]
+    assert len(readings) == 1
+    assert readings[0]["agent_id"] == "step:p/s"
+    assert readings[0]["payload"] == {
+        "provider": "claude_code", "plan": None,
+        "windows": [
+            {"label": "5h", "used_pct": 44.0, "resets_at": 1788565200},
+            {"label": "7d", "used_pct": 7.0, "resets_at": 1788559200},
+        ],
+        "raw": _RAW,
+    }
+
+
+@pytest.mark.anyio
+async def test_an_event_without_unified_windows_records_nothing(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    old = {k: v for k, v in _RAW.items() if k != "unifiedWindows"}
+    scripted = [
+        system_init("none"),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        rate_limit(old),
+        result(),
+    ]
+
+    def factory(opts: object) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+                                   client_factory=factory)
+    events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
+
+    assert [e["type"] for e in events
+            if e["type"] != "tool_heartbeat"] == ["agent_result"], events
+    assert "quota_reading" not in [e["type"] for e in log.read()]
