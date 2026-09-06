@@ -1912,7 +1912,6 @@ def test_worktrees_mask_draft_concierge_prune_spares_siblings() -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
-
 def test_bash_tool_teardown_lets_a_sigterm_trap_finish() -> None:
     """Interrupting the bash tool leaves a sandboxed command its grace: the trap
     sleeps 0.3s and only then writes a marker into the worktree, host-visible through
