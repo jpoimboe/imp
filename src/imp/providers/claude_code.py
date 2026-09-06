@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import shutil
 import signal
 import time
@@ -116,6 +117,8 @@ from imp.providers.claude_code_session_store import (
 from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     RefreshOutcome,
+    canonical_dir,
+    canonical_expires_at,
     refresh_canonical_token,
 )
 from imp.providers.observe_classify import (
@@ -137,23 +140,28 @@ if TYPE_CHECKING:
 
 def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object]:
     """Best-effort read of the OAuth access-token expiry from the spawn's
-    credential file. Never raises: a missing / locked / torn file (the CLI
+    credential file (or, with no config_dir, the canonical one $CLAUDE_CONFIG_DIR
+    resolves to). Never raises: a missing / locked / torn file (the CLI
     writes .credentials.json non-atomically, so a concurrent read can see a torn
     file) yields token_expires_at=None. Only the expiry timestamp is read, never
     token material. expiresAt is epoch milliseconds; the 5-minute buffer matches
     the CLI's own proactive-refresh window, so a token within 5 min of expiry
     already reads as expired."""
-    base = config_dir if config_dir is not None else Path.home() / ".claude"
+    base = config_dir
+    if base is None:
+        with contextlib.suppress(RuntimeError):     # no resolvable home dir
+            base = canonical_dir(os.environ)
     expires_at: int | None = None
-    try:
-        data = json.loads((base / ".credentials.json").read_text(encoding="utf-8"))
-        oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
-        if isinstance(oauth, dict):
-            value = oauth.get("expiresAt")
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                expires_at = int(value)
-    except (OSError, ValueError):
-        expires_at = None
+    if base is not None:
+        try:
+            data = json.loads((base / ".credentials.json").read_text(encoding="utf-8"))
+            oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+            if isinstance(oauth, dict):
+                value = oauth.get("expiresAt")
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    expires_at = int(value)
+        except (OSError, ValueError):
+            expires_at = None
     buffer_ms = 5 * 60 * 1000
     return {
         "token_expires_at": expires_at,
@@ -1265,6 +1273,7 @@ class ClaudeCodeSession(ObserveSession):
         fresh_stream = shape_native_eligible and resume_base == 0
         native_resume = shape_native_eligible
         _pre_spawn_token_refresh(elog, aid)
+        runner._spawn_token_expiry = canonical_expires_at()
         config_dir: Path | None = None
         if is_fresh or fresh_stream:
             config_dir = materialize_fresh_config_dir()
@@ -1864,8 +1873,16 @@ class ClaudeCodeSession(ObserveSession):
             err, kind=getattr(err, "kind", ""))["payload"])
 
     async def _settle_auth_terminality(self, err: perr.ProviderError) -> perr.ProviderError:
-        """Probe the token on a server 401; upgrade to AuthTerminalError if the grant is dead."""
+        """Probe the token on a server 401; upgrade to AuthTerminalError if the grant is dead.
+        A canonical expiry that moved since this spawn started means a peer rotated the
+        token, so probing would revoke a token imp has never tried."""
         if err.category != "auth":
+            return err
+        spawn_expiry = self.runner._spawn_token_expiry
+        current_expiry = canonical_expires_at()
+        if (spawn_expiry is not None and current_expiry is not None
+                and spawn_expiry != current_expiry):
+            err.kind = "token_rotated"  # type: ignore[attr-defined]
             return err
         outcome = await asyncio.to_thread(
             refresh_canonical_token, int(time.time() * 1000), force=True
@@ -1948,6 +1965,9 @@ class ClaudeCodeAgentRunner:
         self._stderr_sink: Any = None
         # ephemeral CLAUDE_CONFIG_DIR for a fresh run; run()'s finally removes it
         self._config_dir: Path | None = None
+        # canonical expiry this spawn started from; a different value at 401 time
+        # means a peer rotated the token underneath us
+        self._spawn_token_expiry: int | None = None
         # Cooperative-interrupt (steer) state. _steer_requested is the distinct
         # intent flag (separate from _cancel, which keeps meaning hard-cancel /
         # teardown); the receive loop sets _steer_unblocked when the

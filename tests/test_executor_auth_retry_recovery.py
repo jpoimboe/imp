@@ -216,11 +216,30 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
     assert "agent_message" in log_types
 
 
+@pytest.mark.parametrize("readable_expiry", [False, True],
+                         ids=["expiry-unreadable", "expiry-unmoved"])
 @pytest.mark.anyio
 async def test_dead_grant_probe_pauses_on_the_first_401(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+    readable_expiry: bool,
 ) -> None:
+    """A dead grant pauses on the first 401 whether or not the canonical expiry
+    is readable — an unmoved expiry is not a rotation race."""
     quest = _seed_single_agent(tmp_path)
+
+    if readable_expiry:
+        # The autouse ANTHROPIC_API_KEY stub blanks every canonical read, so
+        # without this the run only exercises the guard's unreadable arm.
+        canonical = tmp_path / "canonical"
+        canonical.mkdir()
+        (canonical / ".credentials.json").write_text(
+            json.dumps({"claudeAiOauth": {
+                "accessToken": "x", "refreshToken": "y",
+                "expiresAt": 1_000_000_000_000 + 3600 * 1000}}),
+            encoding="utf-8")
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(canonical))
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 
     script = [
         assistant(text(

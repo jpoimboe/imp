@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from imp.providers import errors as perr
 from imp.providers.claude_code import _read_token_expiry, _termination_from_result
 from tests.cc_fakes import result
@@ -71,14 +73,39 @@ def test_bool_expires_at_is_rejected(tmp_path: Path) -> None:
     assert out["token_expired"] is None
 
 
-def test_falls_back_to_home_claude_when_config_dir_none(tmp_path: Path,
-                                                        monkeypatch) -> None:
+def test_falls_back_to_home_claude_when_no_config_dir_env(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     _write_creds(home / ".claude", NOW - 5000)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.setattr(Path, "home", lambda: home)
     out = _read_token_expiry(None, NOW)
     assert out["token_expires_at"] == NOW - 5000
     assert out["token_expired"] is True
+
+
+def test_config_dir_none_reads_the_claude_config_dir_env(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """$CLAUDE_CONFIG_DIR wins over ~/.claude — the two files disagree here, so a
+    read of the wrong one is visible in both fields."""
+    home = tmp_path / "home"
+    _write_creds(home / ".claude", NOW + 10 * 60 * 60 * 1000)   # 10h out, live
+    override = tmp_path / "override"
+    _write_creds(override, NOW - 5000)                          # already expired
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(override))
+    out = _read_token_expiry(None, NOW)
+    assert out["token_expires_at"] == NOW - 5000
+    assert out["token_expired"] is True
+
+
+def test_config_dir_none_with_no_readable_file_yields_null(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "no-home")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "empty"))
+    out = _read_token_expiry(None, NOW)
+    assert out == {"token_expires_at": None, "token_expired": None,
+                   "checked_at": NOW}
 
 
 def test_auth_error_carries_token_expiry_from_config_dir(tmp_path: Path) -> None:

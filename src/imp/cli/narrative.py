@@ -2187,6 +2187,14 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
             message=f"[{cat}] waiting for limit reset — retry {attempt} in {_fmt_hm(secs)}",
             category=cat, is_warning=True))
         return
+    if p.get("kind") == "token_rotated":
+        # The provider's 401 prose blames auth; the real cause is a peer session.
+        self._append(ErrorNode(
+            message=(f"[{cat}] retry {attempt} ({secs}s) — another session rotated"
+                     " the OAuth token; retrying with the new one"),
+            category=cat, is_warning=True,
+            full_only=backoff and isinstance(attempt, int) and attempt == 1))
+        return
     # Routine when it heals on retry 1 — the status line already narrates the wait.
     self._append(ErrorNode(
         message=f"[{cat}] retry {attempt} ({secs}s){_retry_message(p.get('message'))}",
