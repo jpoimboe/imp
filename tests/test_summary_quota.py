@@ -3,7 +3,10 @@ from→to rows both renderers draw from it (spec §5)."""
 
 from __future__ import annotations
 
-from imp.cli.render_summary import build_summary
+from imp.cli.render_summary import SummaryHeader, build_summary, render_summary
+
+_HDR = SummaryHeader(workflow="default", quest_id="pazo49", status="merged",
+                     total_seconds=300.0)
 
 
 def _reading(provider: str, *windows: tuple[str, float, int | None],
@@ -119,3 +122,88 @@ def test_windows_are_ordered_by_duration_however_they_first_arrived() -> None:
         _reading("claude_code", ("5h", 44.0, 100), ("7d", 9.0, 900)),
     ])
     assert [w.label for w in summary.quota[0].windows] == ["5h", "7d"]
+
+
+# AC 17 (a), (c) and AC 18 rendering
+def test_the_block_renders_after_total_with_bands_on_the_to_value() -> None:
+    summary = build_summary([
+        *_step(),
+        _reading("claude_code", ("5h", 44.0, 100), ("7d", 7.0, 900)),
+        _reading("claude_code", ("5h", 58.0, 100), ("7d", 9.0, 900)),
+    ])
+    lines = render_summary(summary.rows, header=_HDR, color=False, width=100,
+                           quota=summary.quota)
+    assert lines[-1] == "  quota   claude_code  ·  5h 44% → 58%, 7d 7% → 9%"
+    assert lines[-2].startswith("  total")
+    colored = render_summary(summary.rows, header=_HDR, color=True, width=100,
+                             quota=summary.quota)[-1]
+    # The from value is plain and the to value carries the gold band; both labels gray.
+    assert " 44% → \x1b[33m58%\x1b[0m" in colored
+    assert "\x1b[90m5h\x1b[0m" in colored
+    assert "\x1b[90mquota\x1b[0m" in colored
+    assert "\x1b[90mclaude_code\x1b[0m" in colored
+
+
+def test_the_heading_appears_once_and_providers_align() -> None:
+    summary = build_summary([
+        _reading("claude_code", ("5h", 44.0, 100), ("7d", 81.0, 900)),
+        _reading("claude_code", ("5h", 78.0, 100), ("7d", 96.0, 900)),
+        _reading("codex", ("5h", 12.0, 200), ("7d", 3.0, 800)),
+        _reading("codex", ("5h", 20.0, 200), ("7d", 5.0, 800)),
+    ])
+    lines = render_summary(summary.rows, header=_HDR, color=False, width=100,
+                           quota=summary.quota)
+    assert lines[-2:] == [
+        "  quota   claude_code  ·  5h 44% → 78%, 7d 81% → 96%",
+        "          codex        ·  5h 12% → 20%, 7d 3% → 5%",
+    ]
+
+
+def test_a_reset_crossing_renders_its_accumulated_total() -> None:
+    summary = build_summary([
+        _reading("codex", ("5h", 88.0, 100), ("7d", 40.0, 900)),
+        _reading("codex", ("5h", 95.0, 100), ("7d", 42.0, 900)),
+        _reading("codex", ("5h", 4.0, 20000), ("7d", 43.0, 900)),
+        _reading("codex", ("5h", 12.0, 20000), ("7d", 44.0, 900)),
+    ])
+    lines = render_summary(summary.rows, header=_HDR, color=False, width=100,
+                           quota=summary.quota)
+    assert lines[-1] == ("  quota   codex  ·  5h 88% → 12% (+19 across reset), "
+                         "7d 40% → 44%")
+    colored = render_summary(summary.rows, header=_HDR, color=True, width=100,
+                             quota=summary.quota)[-1]
+    assert "\x1b[90m(+19 across reset)\x1b[0m" in colored
+
+
+# AC 20 (a)
+def test_a_fully_metered_run_renders_the_legend_and_no_quota_block() -> None:
+    """No quota reading → block absent; total row and legend render as today."""
+    priced = {"type": "agent_message", "agent_id": "a1",
+              "timestamp": "2026-01-01T00:01:00+00:00",
+              "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6",
+                          "usage": {"input_tokens": 20000, "output_tokens": 900}}}
+    events = [_step()[0], {"type": "step_context", "agent_id": "a1",
+                           "timestamp": "2026-01-01T00:00:30+00:00", "payload": {}},
+              priced, _step()[1]]
+    summary = build_summary(events)
+    assert summary.quota == ()
+    lines = render_summary(summary.rows, header=_HDR, color=False, width=100,
+                           quota=summary.quota)
+    assert not any("quota" in ln for ln in lines)
+    # The legend still closes the block, immediately after `total`.
+    assert lines[-1] == "  ~ estimated at API list price"
+    assert lines[-2].startswith("  total") and lines[-2].endswith("~$0.07")
+    assert lines == render_summary(summary.rows, header=_HDR, color=False,
+                                   width=100)
+
+
+def test_the_block_leaves_the_numeric_columns_byte_identical() -> None:
+    events = [*_step(),
+              _reading("claude_code", ("5h", 44.0, 100), ("7d", 7.0, 900)),
+              _reading("claude_code", ("5h", 58.0, 100), ("7d", 9.0, 900))]
+    summary = build_summary(events)
+    without = render_summary(summary.rows, header=_HDR, color=False, width=100)
+    with_quota = render_summary(summary.rows, header=_HDR, color=False,
+                                width=100, quota=summary.quota)
+    assert with_quota[:len(without)] == without
+    assert len(with_quota) == len(without) + 1

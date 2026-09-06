@@ -2522,7 +2522,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
                                status=status, total_seconds=summary_total(events))
         summary = build_summary(events)
         lines = render_summary(summary.rows, header=header,
-                               color=color, width=width)
+                               color=color, width=width, quota=summary.quota)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 

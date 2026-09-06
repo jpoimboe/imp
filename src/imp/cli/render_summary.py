@@ -2,7 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -477,8 +477,41 @@ def _total_line(work: float | None, total: RowUsage, *, name_w: int,
             f"{_cells(total, in_w, out_w, cost_w)}")
 
 
+_QUOTA_LABEL = "quota"
+
+
+def quota_windows(windows: Sequence[WindowSpan], *, color: bool) -> str:
+    """`5h 44% → 58%, 7d 7% → 9%`: labels gray, the from value plain, the to value in its band."""
+    segs: list[str] = []
+    for w in windows:
+        last = pal.quota_pct(w.last_pct)
+        seg = (pal.ansi(w.label, "gray", enabled=color)
+               + f" {pal.quota_pct(w.first_pct)}% → "
+               + pal.ansi(f"{last}%", pal.quota_hue(last), enabled=color))
+        if w.across_reset is not None:
+            seg += " " + pal.ansi(
+                f"(+{pal.quota_pct(w.across_reset)} across reset)",
+                "gray", enabled=color)
+        segs.append(seg)
+    return ", ".join(segs)
+
+
+def _quota_lines(quota: Sequence[ProviderQuota], *, color: bool) -> list[str]:
+    """One row per provider under `total`, outside the numeric columns so it cannot perturb them."""
+    prov_w = max((len(q.provider) for q in quota), default=0)
+    lines = []
+    for i, q in enumerate(quota):
+        head = (pal.ansi(_QUOTA_LABEL, "gray", enabled=color) if i == 0
+                else " " * len(_QUOTA_LABEL))
+        provider = pal.ansi(f"{q.provider:<{prov_w}}", "gray", enabled=color)
+        lines.append(f"  {head}   {provider}  ·  "
+                     f"{quota_windows(q.windows, color=color)}")
+    return lines
+
+
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
-                   color: bool, width: int) -> list[str]:
+                   color: bool, width: int,
+                   quota: Sequence[ProviderQuota] = ()) -> list[str]:
     open_label = open_span_label(header.status)
     work, total = summary_totals(summary, header.total_seconds)
     name_w, dur_w, in_w, out_w, cost_w = _column_widths(
@@ -512,6 +545,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
     lines.append("")
     lines.append(_total_line(work, total, name_w=name_w, dur_w=dur_w,
                              in_w=in_w, out_w=out_w, cost_w=cost_w))
+    lines += _quota_lines(quota, color=color)
     lines += [pal.ansi(f"  {t}", *pal.NODE_COLORS["metadata"], enabled=color)
               for t in legend_lines(cells)]
     return lines

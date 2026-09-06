@@ -192,3 +192,25 @@ def test_summary_export_surfaces_match_the_terminal_cells(
     out = capsys.readouterr().out
     for cell in cells:
         assert cell in out
+
+
+def _append_quota(control: Path, slug: str) -> None:
+    """Two readings on one window: 44% at the first, 58% at the last."""
+    path = project_state_dir(control) / "quests" / slug / "events.jsonl"
+    with path.open("a") as fh:
+        for pct in (44.0, 58.0):
+            fh.write(json.dumps({
+                "type": "quota_reading",
+                "timestamp": "2026-01-01T00:02:00+00:00",
+                "payload": {"provider": "claude_code", "plan": None,
+                            "windows": [{"label": "5h", "used_pct": pct,
+                                         "resets_at": 100}],
+                            "raw": {}}}) + "\n")
+
+
+def test_summary_renders_the_quota_block_under_total(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    _append_quota(tmp_path, slug)
+    assert main(["log", "-s", slug]) == 0
+    out = capsys.readouterr().out
+    assert "\n  quota   claude_code  ·  5h 44% → 58%\n" in out
