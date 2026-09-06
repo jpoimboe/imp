@@ -40,7 +40,6 @@ from imp.cli.live_status import LiveStatus, term_width
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
-_CONTEXT_WIDTH = 10
 _AMBER_AT = 0.75          # of the cutoff
 
 
@@ -78,15 +77,12 @@ def context_bar(provider: str | None, model: str | None,
     warn = checkpoint_cutoff(info, window)
     if warn is None:
         warn = DEFAULT_CHECKPOINT_FRACTION
-    filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
     pct = round(frac * 100)
     hue = ("red" if frac >= warn
            else "wordmark" if frac >= _AMBER_AT * warn
            else "green")
-    fill = _paint("█" * filled, hue, color=color, over_bg=over_bg) if filled else ""
-    track = (_paint("░" * (_CONTEXT_WIDTH - filled), "gray", color=color, over_bg=over_bg)
-             if filled < _CONTEXT_WIDTH else "")
-    return f"{fill}{track} {pct}%"
+    label = _paint("context", "gray", color=color, over_bg=over_bg)
+    return f"{label} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
 
 
 def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
@@ -153,7 +149,7 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          context_window: int | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
-    project · id · title · phase · plan · counter · model context-bar."""
+    project · id · title · phase · plan · counter · model · context."""
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     project_seg = (_paint(project, "gray", color=color, over_bg=over)
@@ -177,7 +173,7 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                           color=color, over_bg=over)
     body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
                              phase_seg, plan_seg, counter_seg,
-                             rt.join_space(model_seg, bar)])
+                             model_seg, bar])
     return _band_wrap(body, bg, width)
 
 
