@@ -1,9 +1,12 @@
 """Interrupt-path regression guards (spec B.9). Auto-skip without bwrap."""
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -16,13 +19,14 @@ import pytest
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
-from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.agents.tools.context import ToolContext, descendant_pids, terminate_running_processes
 from imp.engine.sandbox import (
     SandboxPolicy,
     make_home_layer,
     overlay_mode,
     sandbox_available,
 )
+from imp.engine.types import Pause, SourceLoc, Step
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -305,3 +309,113 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
     finally:
         cleanup()
         shutil.rmtree(base, ignore_errors=True)
+
+
+def _delay_kill_until_ready(monkeypatch: pytest.MonkeyPatch, ready: Path) -> list[int]:
+    """Hold the gate's teardown until the sandboxed command has signalled readiness,
+    so bwrap startup latency under load cannot race the SIGTERM. Returns the list
+    that the wrapper fills with the live host-side tree (bwrap plus everything under
+    it) as of that instant — the only moment it can be enumerated, since run_command
+    owns `proc`. The real helper then runs unchanged."""
+    from imp.engine import gates
+
+    real_kill = gates._graceful_kill
+    recorded: list[int] = []
+
+    def _delayed(proc: subprocess.Popen[bytes]) -> None:
+        deadline = time.monotonic() + 20.0
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        recorded.append(proc.pid)
+        recorded.extend(descendant_pids(proc.pid))
+        real_kill(proc)
+
+    monkeypatch.setattr(gates, "_graceful_kill", _delayed)
+    return recorded
+
+
+def _gate_step(command: str) -> Step:
+    return Step(
+        name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
+        max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
+        command=command, timeout_seconds=1,
+    )
+
+
+def test_gate_teardown_leaves_no_survivors_when_command_ignores_sigterm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A TERM-ignoring gate command under an active sandbox policy leaves ZERO live
+    processes behind. The host-side tree is enumerated before the kill; every pid
+    must end up gone or a zombie. Regression for the escalation leak: without the
+    group-liveness poll the outer bwrap satisfies the wait at ~0s, the SIGKILL is
+    skipped, and the inner shell loops on forever as an orphan."""
+    from imp.engine import gates
+
+    worktree = _sandbox_worktree()
+    ready = worktree / "up"
+    recorded = _delay_kill_until_ready(monkeypatch, ready)
+    try:
+        step = _gate_step(
+            f"trap '' TERM; touch {shlex.quote(str(ready))}; "
+            "while :; do sleep 0.2; done")
+        with pytest.raises(subprocess.TimeoutExpired):
+            gates.run_script(step, cwd=worktree, policy=_active_policy(worktree))
+    finally:
+        shutil.rmtree(worktree, ignore_errors=True)
+
+    assert len(recorded) >= 2, "the sandboxed process tree was never observed"
+    deadline = time.monotonic() + 20.0
+    while True:
+        alive = [pid for pid in recorded if not _pid_gone_or_zombie(pid)]
+        if not alive:
+            break
+        if time.monotonic() > deadline:
+            for pid in alive:                     # don't leak the runaway tree on failure
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+            pytest.fail(f"pids {alive} survived gate teardown — SIGKILL escalation skipped")
+        time.sleep(0.05)
+
+
+def test_gate_teardown_lets_sigterm_trap_finish_before_sigkill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The grace window is a real window for the sandboxed children. The command's
+    SIGTERM trap sleeps 0.3s and only then writes a marker into the worktree,
+    host-visible through the rw bind; the marker must exist once TimeoutExpired has
+    been raised. This is the falsifier for the escalation shape: keying on proc's
+    exit lands the SIGKILL milliseconds after the SIGTERM — the outer bwrap exits at
+    ~0s — so the trap never reaches its write. Nothing here asserts elapsed time;
+    the marker is polled."""
+    from imp.engine import gates
+
+    # The grace is widened from its real 2.0s so the trap's 0.3s has ~25x headroom
+    # instead of ~6x: the only fixed duration in this test must not race a saturated
+    # -n auto run. Costs nothing on the passing path (teardown short-circuits the
+    # moment the trap exits and the group empties) and does not weaken Step 4's
+    # falsification, where the SIGKILL lands within ms of the SIGTERM regardless.
+    monkeypatch.setattr(gates, "GATE_KILL_GRACE_S", 8.0)
+
+    worktree = _sandbox_worktree()
+    ready = worktree / "up"
+    marker = worktree / "trap-finished"
+    # The readiness delay is what this test needs from the wrapper; the pid list it
+    # returns is the sibling test's concern.
+    _delay_kill_until_ready(monkeypatch, ready)
+    try:
+        step = _gate_step(
+            f"trap 'sleep 0.3; touch {shlex.quote(str(marker))}; exit 0' TERM; "
+            f"touch {shlex.quote(str(ready))}; "
+            "while :; do sleep 0.2; done")
+        with pytest.raises(subprocess.TimeoutExpired):
+            gates.run_script(step, cwd=worktree, policy=_active_policy(worktree))
+
+        deadline = time.monotonic() + 20.0
+        while not marker.exists():
+            if time.monotonic() > deadline:
+                pytest.fail("the SIGTERM trap never completed — the group SIGKILL "
+                            "landed before the grace window could be used")
+            time.sleep(0.02)
+    finally:
+        shutil.rmtree(worktree, ignore_errors=True)
