@@ -3,18 +3,36 @@
 from __future__ import annotations
 
 import time
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
+
+import pytest
 
 import imp.providers.claude_code as cc
 import imp.providers.observe_classify as ocls
+from imp.engine.state import InMemoryEventLog
 from imp.providers import errors as perr
+from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.quota import QuotaReading, QuotaWindow
-from tests.cc_fakes import result
+from tests.cc_fakes import (
+    FakeClaudeSDKClient,
+    assistant,
+    rate_limit,
+    result,
+    system_init,
+    text,
+)
+from tests.test_claude_code_runner import _inv
 
 _NOW = 1788400000.0
 _SESSION_LIMIT = "You've hit your session limit · resets 4am (America/Los_Angeles)"
 _LIMIT_NO_RESET = "You have hit a weekly limit."
 _WEEKLY_LIMIT = "You've hit your weekly limit · resets Jul 16, 8pm (America/Los_Angeles)"
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 def _reading(*windows: tuple[str, float, int | None],
@@ -121,3 +139,40 @@ def test_the_wall_clock_parse_is_gone() -> None:
     exc = ocls._classify_agent_text(_SESSION_LIMIT)
     assert isinstance(exc, perr.RateLimitError)
     assert "retry_after_seconds" not in exc.detail
+
+
+def test_the_hint_survives_the_termination_merge() -> None:
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=None), _SESSION_LIMIT, {},
+        reading=_reading(("5h", 96.0, int(time.time()) + 3600)))
+    assert isinstance(term, perr.RateLimitError)
+    assert 3600 < term.detail["retry_after_seconds"] <= 3721
+    assert term.detail["is_error"] is True
+
+
+@pytest.mark.anyio
+async def test_a_streamed_rate_limit_event_feeds_the_retry_hint(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    raw = {"status": "rejected", "rateLimitType": "five_hour",
+           "unifiedWindows": {"five_hour": {"utilization": 0.96,
+                                            "resetsAt": int(time.time()) + 3600}}}
+    scripted = [
+        system_init("none"),
+        assistant(text(_SESSION_LIMIT)),
+        rate_limit(raw),
+        result(is_error=True, api_error_status=429),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5",
+                                   client_factory=factory)
+    events = [e async for e in runner.run(
+        _inv(tmp_path, event_log=InMemoryEventLog()))]
+
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1, events
+    assert errs[0]["payload"]["category"] == "rate_limit"
+    assert 3600 < errs[0]["payload"]["detail"]["retry_after_seconds"] <= 3721

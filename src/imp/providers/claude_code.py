@@ -195,7 +195,7 @@ def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
 
 def _termination_from_result(
     sdk_msg: Any, last_text: str, diag: dict[str, Any],
-    config_dir: Path | None = None,
+    config_dir: Path | None = None, reading: QuotaReading | None = None,
 ) -> perr.ProviderError | None:
     """P2: a ResultMessage flagged is_error (or a nonzero subprocess exit) is a
     real termination — return a typed-or-unknown ProviderError carrying every
@@ -221,7 +221,7 @@ def _termination_from_result(
         "stderr_tail": diag.get("stderr_tail"),
         "errors": getattr(sdk_msg, "errors", None),
     }
-    labeled = _classify_agent_text(last_text, anchored=False)
+    labeled = _classify_agent_text(last_text, anchored=False, reading=reading)
     status = detail["api_error_status"]
     if (isinstance(status, int) and status == 400
             and "tool use concurrency" in last_text.lower()):
@@ -1465,6 +1465,7 @@ class ClaudeCodeSession(ObserveSession):
         self._llm_stop_reason: Any = None
         self._llm_usage: dict[str, Any] = {}
         self._auth_mode: str | None = None
+        self._quota_reading: QuotaReading | None = None
         self._stream_usage_by_msg: dict[str, tuple[dict[str, Any], Any]] = {}
         self._stream_cur_msg_id: str | None = None
         self._stream_cur_usage: dict[str, Any] = {}
@@ -1624,6 +1625,7 @@ class ClaudeCodeSession(ObserveSession):
             reading = quota_from_rate_limit_info(
                 getattr(raw, "rate_limit_info", None))
             if reading is not None:
+                self._quota_reading = reading
                 elog.append_quota_reading(agent_id=aid, reading=reading)
         imp_msg, warns, thinkings = _sdk_message_to_imp(raw)
         for content in thinkings:
@@ -1910,9 +1912,10 @@ class ClaudeCodeSession(ObserveSession):
             self._last_raw, last_text,
             {**_subprocess_diag(client),
              "stderr_tail": self.runner._stderr_sink.tail()},
-            config_dir=self.runner._config_dir)
+            config_dir=self.runner._config_dir,
+            reading=self._quota_reading)
         if err is None:
-            err = _classify_agent_text(last_text)
+            err = _classify_agent_text(last_text, reading=self._quota_reading)
             if err is None:
                 return None
             err.detail["last_agent_text"] = last_text[:500]
