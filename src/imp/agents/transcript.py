@@ -293,6 +293,7 @@ def _is_interrupt_marker(msg: Message) -> bool:
 
 def repair_interrupt_marker_on_resume(
     messages: list[Message], transcript: Transcript,
+    captured: dict[str, tuple[str, bool]] | None = None,
 ) -> None:
     """Strip claude-p's interrupt framing before resume classification.
 
@@ -303,8 +304,9 @@ def repair_interrupt_marker_on_resume(
     is suppressed and the rejection copy is the model's only framing.
 
     Drop the marker and restate every is_error result in the turn beneath it as an
-    interruption, then rewrite the transcript. Journals nothing: the pause already
-    recorded these results in the event log, so a second entry would falsify it.
+    interruption — from `captured` when the call really completed, else the synthetic
+    body — then rewrite the transcript. Journals nothing: the pause already recorded
+    these results in the event log, so a second entry would falsify it.
     """
     if len(messages) < 2 or not _is_interrupt_marker(messages[-1]):
         return
@@ -325,10 +327,16 @@ def repair_interrupt_marker_on_resume(
         # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
         if isinstance(b, ToolResultBlock) and b.is_error:
             tu = tool_uses.get(b.tool_use_id)
-            blocks.append(ToolResultBlock(
-                tool_use_id=b.tool_use_id,
-                content=_synthetic_tool_result_content(tu.name if tu is not None else ""),
-                is_error=True))
+            hit = (captured.get(captured_result_key(tu.name, tu.input))
+                   if tu is not None and captured is not None else None)
+            if hit is not None:
+                blocks.append(ToolResultBlock(
+                    tool_use_id=b.tool_use_id, content=hit[0], is_error=hit[1]))
+            else:
+                blocks.append(ToolResultBlock(
+                    tool_use_id=b.tool_use_id,
+                    content=_synthetic_tool_result_content(tu.name if tu is not None else ""),
+                    is_error=True))
         else:
             blocks.append(b)
     if not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE

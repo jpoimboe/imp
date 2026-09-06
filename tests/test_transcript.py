@@ -1049,3 +1049,57 @@ def test_interrupt_marker_left_alone_after_plain_assistant_text(tmp_path: Path) 
 
     assert msgs == before
     assert path.read_bytes() == bytes_before
+
+
+def test_interrupt_marker_repair_prefers_captured_result(tmp_path: Path) -> None:
+    """Criterion 4: a call that really completed before the interrupt is restored from
+    the capture sidecar — real content and its captured is_error — while an unmatched
+    sibling keeps the synthetic interrupted body. The transcript block is
+    mcp__imp__-prefixed; captured_result_key strips the prefix."""
+    from imp.agents.transcript import captured_result_key
+
+    done = ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                        input={"path": "a.py", "content": "X"})
+    killed = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "x"})
+    msgs, t = _interrupt_tail(tmp_path, done, killed)
+    captured = {
+        captured_result_key("write_file", {"path": "a.py", "content": "X"}):
+            ("wrote 42 bytes to a.py", False),
+    }
+
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+
+    by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
+    assert by_id["w1"].content == "wrote 42 bytes to a.py"
+    assert by_id["w1"].is_error is False
+    assert by_id["b1"].content == _SYNTHETIC_BASH
+    assert by_id["b1"].is_error is True
+    # Survives the rewrite — this is what gets replayed to the model on resume.
+    reloaded = Transcript(tmp_path / "transcript.jsonl").load()
+    assert reloaded == msgs
+
+
+def test_interrupt_marker_repair_appends_durability_note_even_all_captured_success(
+    tmp_path: Path,
+) -> None:
+    """Note always appended — unlike repair_dangling_tool_use_on_resume's all-success gate."""
+    from imp.agents.transcript import captured_result_key
+
+    done1 = ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                         input={"path": "a.py", "content": "X"})
+    done2 = ToolUseBlock(id="w2", name="mcp__imp__write_file",
+                         input={"path": "b.py", "content": "Y"})
+    msgs, t = _interrupt_tail(tmp_path, done1, done2)
+    captured = {
+        captured_result_key("write_file", {"path": "a.py", "content": "X"}):
+            ("wrote a.py", False),
+        captured_result_key("write_file", {"path": "b.py", "content": "Y"}):
+            ("wrote b.py", False),
+    }
+
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+
+    by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
+    assert by_id["w1"].is_error is False
+    assert by_id["w2"].is_error is False
+    assert msgs[-1].content[-1] == TextBlock(text=RESUME_DURABILITY_NOTE)
