@@ -1007,3 +1007,45 @@ def test_interrupt_marker_repair_ignores_ordinary_text_tail(tmp_path: Path) -> N
 
     assert msgs == before
     assert path.read_bytes() == bytes_before
+
+
+def test_interrupt_marker_left_alone_after_dangling_tool_use(tmp_path: Path) -> None:
+    """Criterion 6(a): interrupt between turns — the marker sits on an assistant turn
+    with a dangling tool_use. Untouched: repairing it would strand an assistant tail."""
+    path = tmp_path / "transcript.jsonl"
+    t = Transcript(path)
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "x"}),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    before = list(msgs)
+    bytes_before = path.read_bytes()
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs == before
+    assert path.read_bytes() == bytes_before
+
+
+def test_interrupt_marker_left_alone_after_plain_assistant_text(tmp_path: Path) -> None:
+    """Criterion 6(b): same, with no dangling tool_use beneath the marker."""
+    path = tmp_path / "transcript.jsonl"
+    t = Transcript(path)
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="thinking about it"),)),
+        Message(role="user", content=(TextBlock(text=_MARKER),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    before = list(msgs)
+    bytes_before = path.read_bytes()
+
+    repair_interrupt_marker_on_resume(msgs, t)
+
+    assert msgs == before
+    assert path.read_bytes() == bytes_before

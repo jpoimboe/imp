@@ -309,6 +309,12 @@ def repair_interrupt_marker_on_resume(
     if len(messages) < 2 or not _is_interrupt_marker(messages[-1]):
         return
     target = messages[-2]
+    # Repair the marker and the rejection it sits on as one unit, never the marker
+    # alone: dropping a lone marker would expose an assistant tail to AWAITING_USER,
+    # which a subagent (no user_input_fn) cannot serve.
+    if target.role != "user" or not any(
+            isinstance(b, ToolResultBlock) for b in target.content):
+        return
     tool_uses = {
         b.id: b
         for m in messages[-3:-2] if m.role == "assistant"
