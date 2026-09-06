@@ -19,6 +19,9 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from typing import Any
+
+from imp.providers.quota import QuotaReading, QuotaWindow
 
 _THREAD_JSON = "codex_thread.json"
 _ROLLOUT_SUBDIR = "codex_rollout"
@@ -39,6 +42,40 @@ def _newest_matching_rollout(codex_home: Path, thread_id: str) -> Path | None:
     if len(rollouts) == 1:
         return rollouts[0]
     return None
+
+
+def _window_label(minutes: int) -> str:
+    """From duration, never position: 300 -> `5h`, 10080 -> `7d`."""
+    return f"{minutes // 60}h" if minutes < 1440 else f"{minutes // 1440}d"
+
+
+def quota_from_rate_limits(block: Any) -> QuotaReading | None:
+    """codex's `rate_limits` block from a `token_count` record, normalized.
+    None when it carries no usable window — the caller then records nothing."""
+    if not isinstance(block, dict):
+        return None
+    windows: list[tuple[int, QuotaWindow]] = []
+    for key in ("primary", "secondary"):
+        w = block.get(key)
+        if not isinstance(w, dict):
+            continue
+        minutes = w.get("window_minutes")
+        used = w.get("used_percent")
+        if not isinstance(minutes, int) or minutes <= 0:
+            continue
+        if not isinstance(used, (int, float)):
+            continue
+        resets = w.get("resets_at")
+        windows.append((minutes, QuotaWindow(
+            label=_window_label(minutes), used_pct=float(used),
+            resets_at=resets if isinstance(resets, int) else None)))
+    if not windows:
+        return None
+    plan = block.get("plan_type")
+    return QuotaReading(
+        provider="codex", plan=plan if isinstance(plan, str) else None,
+        windows=tuple(w for _, w in sorted(windows, key=lambda pair: pair[0])),
+        raw=block)
 
 
 def latest_context_reading(codex_home: Path, thread_id: str) -> tuple[int, int] | None:

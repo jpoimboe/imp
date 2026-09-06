@@ -10,6 +10,7 @@ from imp.providers.codex_rollout import (
     compaction_seen,
     latest_context_reading,
     persist_rollout,
+    quota_from_rate_limits,
     restore_rollout,
 )
 
@@ -237,3 +238,75 @@ def test_compaction_seen_false_when_rollout_absent(tmp_path: Path) -> None:
     home = tmp_path / "codex_home"
     (home / "sessions").mkdir(parents=True)  # exists but empty
     assert compaction_seen(home, "thr-1") is False
+
+
+_RATE_LIMITS = {
+    "limit_id": "codex", "limit_name": None,
+    "primary": {"used_percent": 12.0, "window_minutes": 300, "resets_at": 1788403732},
+    "secondary": {"used_percent": 14.0, "window_minutes": 10080, "resets_at": 1788971433},
+    "credits": {"has_credits": False, "unlimited": False, "balance": "0"},
+    "individual_limit": None, "spend_control_reached": None,
+    "plan_type": "plus", "rate_limit_reached_type": None,
+}
+
+
+def test_quota_from_rate_limits_labels_each_window_from_its_own_duration() -> None:
+    reading = quota_from_rate_limits(_RATE_LIMITS)
+    assert reading is not None
+    assert reading.provider == "codex"
+    assert reading.plan == "plus"
+    assert [(w.label, w.used_pct, w.resets_at) for w in reading.windows] == [
+        ("5h", 12.0, 1788403732), ("7d", 14.0, 1788971433)]
+
+
+def test_quota_from_rate_limits_handles_the_pro_shape() -> None:
+    # On a `pro` account the WEEKLY window is reported in `primary`, with a null
+    # `secondary`: nothing may assume `primary` means 5h.
+    block = {"primary": {"used_percent": 31.0, "window_minutes": 10080,
+                         "resets_at": 1788971433},
+             "secondary": None, "plan_type": "pro"}
+    reading = quota_from_rate_limits(block)
+    assert reading is not None
+    assert reading.plan == "pro"
+    assert [(w.label, w.used_pct) for w in reading.windows] == [("7d", 31.0)]
+
+
+def test_quota_from_rate_limits_orders_by_duration_not_position() -> None:
+    block = {"primary": {"used_percent": 5, "window_minutes": 10080, "resets_at": 2},
+             "secondary": {"used_percent": 9, "window_minutes": 300, "resets_at": 1},
+             "plan_type": "plus"}
+    reading = quota_from_rate_limits(block)
+    assert reading is not None
+    assert [(w.label, w.used_pct) for w in reading.windows] == [("5h", 9.0), ("7d", 5.0)]
+    assert isinstance(reading.windows[0].used_pct, float)
+
+
+def test_quota_from_rate_limits_labels_a_day_long_window_in_days() -> None:
+    block = {"primary": {"used_percent": 4.0, "window_minutes": 1440, "resets_at": None}}
+    reading = quota_from_rate_limits(block)
+    assert reading is not None
+    assert [w.label for w in reading.windows] == ["1d"]
+    assert reading.windows[0].resets_at is None
+    assert reading.plan is None
+
+
+def test_quota_from_rate_limits_carries_the_block_verbatim() -> None:
+    reading = quota_from_rate_limits(_RATE_LIMITS)
+    assert reading is not None
+    assert reading.raw == _RATE_LIMITS
+    assert reading.raw["credits"] == {"has_credits": False, "unlimited": False,
+                                      "balance": "0"}
+    assert reading.raw["rate_limit_reached_type"] is None
+
+
+@pytest.mark.parametrize("block", [
+    None,
+    {},
+    {"primary": None, "secondary": None, "plan_type": "plus"},
+    {"primary": {"used_percent": 3.0}},                 # no window_minutes
+    {"primary": {"window_minutes": 300}},               # no used_percent
+    {"primary": {"used_percent": "high", "window_minutes": 300}},
+    {"primary": {"used_percent": 3.0, "window_minutes": 0}},  # zero rejected
+])
+def test_quota_from_rate_limits_without_a_usable_window_is_none(block: object) -> None:
+    assert quota_from_rate_limits(block) is None
