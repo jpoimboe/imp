@@ -21,3 +21,9 @@ Flaky tests under load are a major problem. Write tests to tolerate
 timing/load variance: poll for the actual signal instead of fixed sleeps, give
 inner waits generous budgets that never false-fire under saturated `-n auto`
 CI, and rely on a single outer timeout to catch genuine hangs.
+
+imp's git history was squashed to a single `imp: initial commit`; the complete
+pre-squash history lives in a separate clone at `~/imp-orig`. For any git
+archaeology — resolving a commit SHA from a bug report, tracing when a prompt
+or partial changed — run git there (e.g. `git -C ~/imp-orig log -S<string> --
+<path>`), since those commits are unreachable in the working checkout.
