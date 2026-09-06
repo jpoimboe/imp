@@ -3,6 +3,7 @@ from→to rows both renderers draw from it (spec §5)."""
 
 from __future__ import annotations
 
+from imp.cli.render_markdown import render_summary_markdown
 from imp.cli.render_summary import SummaryHeader, build_summary, render_summary
 
 _HDR = SummaryHeader(workflow="default", quest_id="pazo49", status="merged",
@@ -207,3 +208,29 @@ def test_the_block_leaves_the_numeric_columns_byte_identical() -> None:
                                 width=100, quota=summary.quota)
     assert with_quota[:len(without)] == without
     assert len(with_quota) == len(without) + 1
+
+
+# AC 19
+def test_markdown_carries_the_same_rows() -> None:
+    summary = build_summary([
+        *_step(),
+        _reading("claude_code", ("5h", 44.0, 100), ("7d", 7.0, 900)),
+        _reading("claude_code", ("5h", 58.0, 100), ("7d", 9.0, 900)),
+        _reading("codex", ("5h", 12.0, 200)),
+        _reading("codex", ("5h", 20.0, 200)),
+    ])
+    out = render_summary_markdown(summary.rows, header=_HDR,
+                                  quota=summary.quota)
+    assert "**quota**" in out
+    assert "- claude_code · 5h 44% → 58%, 7d 7% → 9%" in out
+    assert "- codex · 5h 12% → 20%" in out
+    assert "\x1b[" not in out
+    # Ordering: total row → **quota** → first bullet; fixture is unpriced so no legend.
+    assert out.index("| total |") < out.index("**quota**") < out.index("- claude_code")
+
+
+def test_markdown_of_a_run_with_no_readings_carries_no_block() -> None:
+    summary = build_summary(_step())
+    out = render_summary_markdown(summary.rows, header=_HDR,
+                                  quota=summary.quota)
+    assert "quota" not in out

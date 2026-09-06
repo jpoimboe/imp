@@ -2552,7 +2552,8 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         summary = build_summary(events)
-        document = render_summary_markdown(summary.rows, header=header)
+        document = render_summary_markdown(summary.rows, header=header,
+                                           quota=summary.quota)
     else:
         from imp.cli import narrative
         from imp.cli.render_markdown import render_markdown
