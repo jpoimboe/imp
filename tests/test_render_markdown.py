@@ -671,3 +671,10 @@ def test_summary_markdown_with_no_steps_keeps_the_time_and_drops_the_legend():
     assert "| total | 39m 2s | — | — | — | — | — |" in out
     assert "estimated at API list price" not in out   # nothing was priced
     assert "##" not in out                            # no phase headings
+
+
+def test_rotation_race_retry_renders_its_copy_in_markdown() -> None:
+    events = [_ev("r1", "agent_retry", category="auth", kind="token_rotated",
+                  attempt=2, backoff_seconds=1.0, message="401 revoked")]
+    assert ("> **warning:** [auth] retry 2 (1.0s) — another session rotated the "
+            "OAuth token; retrying with the new one") in _md(events)

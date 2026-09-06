@@ -253,3 +253,52 @@ def test_stalled_subagent_retry_leaves_no_parent_level_line() -> None:
     assert "code-reviewer" in lean   # the fold's status row is still there
     assert "warning:" not in lean
     assert "warning: resuming — verifying prior work, not redoing it" in _full(events)
+
+
+ROTATED_2 = ("warning: [auth] retry 2 (1.0s) — another session rotated the "
+             "OAuth token; retrying with the new one")
+
+
+def _rotation_retry(attempt: int) -> list[dict[str, Any]]:
+    return [{"id": "r1", "parent_id": None, "agent_id": None,
+             "type": "agent_retry",
+             "payload": {"category": "auth", "kind": "token_rotated",
+                         "attempt": attempt, "backoff_seconds": 1.0,
+                         "message": "claude CLI: Failed to authenticate. API "
+                                    "Error: 401 OAuth access token has been "
+                                    "revoked."}}]
+
+
+def _lines(events: list[dict[str, Any]], *, full: bool) -> list[str]:
+    from imp.cli.render_text import render_tree
+
+    return [line.strip() for line in
+            render_tree(nv.build_tree(events), full=full, color=False, width=160)]
+
+
+def test_rotation_race_retry_renders_its_own_copy() -> None:
+    lines = _lines(_rotation_retry(2), full=False)
+
+    assert ROTATED_2 in lines
+    # The provider's raw prose is replaced, not appended.
+    assert not any("OAuth access token has been revoked" in ln for ln in lines)
+
+
+def test_rotation_race_retry_stays_quiet_on_attempt_one() -> None:
+    assert not any("rotated the OAuth token" in ln
+                   for ln in _lines(_rotation_retry(1), full=False))
+    assert any("[auth] retry 1 (1.0s) — another session rotated the OAuth token;"
+               " retrying with the new one" in ln
+               for ln in _lines(_rotation_retry(1), full=True))
+
+
+def test_ordinary_auth_retry_copy_is_unchanged() -> None:
+    events = [{"id": "r1", "parent_id": None, "agent_id": None,
+               "type": "agent_retry",
+               "payload": {"category": "auth", "kind": "http_401",
+                           "attempt": 2, "backoff_seconds": 2.0,
+                           "message": "Failed to authenticate. API Error: 401 "
+                                      "OAuth access token has been revoked."}}]
+
+    assert ("warning: [auth] retry 2 (2.0s) — Failed to authenticate. API Error: "
+            "401 OAuth access token has been revoked.") in _lines(events, full=False)
