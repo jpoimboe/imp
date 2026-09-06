@@ -15,6 +15,7 @@ from imp.engine.expr import Binary, BoolLit, Name, StrLit
 from imp.engine.gates import evaluate_rules, run_script
 from imp.engine.types import Continue, Goto, Pause, Rule, SourceLoc, Step
 from imp.paths import project_state_dir
+from tests.conftest import _pid_gone_or_zombie
 
 
 def loc(line=1): return SourceLoc(file=Path("x"), line=line)
@@ -767,16 +768,6 @@ def test_graceful_kill_reaps_on_sigterm_without_waiting_grace(tmp_path) -> None:
     assert elapsed < GATE_KILL_GRACE_S             # exited on SIGTERM, no grace burn
     assert proc.returncode is not None
     assert proc.stdout.closed and proc.stderr.closed
-
-
-def _pid_gone_or_zombie(pid: int) -> bool:
-    """True once `pid` has exited or is an unreaped zombie (state Z) — a zombie
-    counts as terminated, tolerating the window before init reaps an orphan."""
-    try:
-        data = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
-        return True
-    return data.rpartition(")")[2].split()[0] == "Z"
 
 
 def test_graceful_kill_escalates_when_group_leader_exits_first(tmp_path) -> None:

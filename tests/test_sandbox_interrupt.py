@@ -27,6 +27,7 @@ from imp.engine.sandbox import (
     sandbox_available,
 )
 from imp.engine.types import Pause, SourceLoc, Step
+from tests.conftest import _pid_gone_or_zombie
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -141,18 +142,6 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
         overlay_root=overlay_root,
     )
     return pol, cleanup
-
-
-def _pid_gone_or_zombie(pid: int) -> bool:
-    """True once `pid` has exited or is a reaped-pending zombie (state Z). Every pid
-    passed here is captured HOST-side (proc.pid / descendant_pids), never read from
-    inside the sandbox, so /proc/<pid>/stat reads it directly. A zombie counts as
-    terminated — it tolerates the brief window before the orphaned child is reaped."""
-    try:
-        data = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
-        return True
-    return data.rpartition(")")[2].split()[0] == "Z"
 
 
 def test_bash_inner_observes_sigterm_and_survives_grace() -> None:

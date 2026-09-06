@@ -16,16 +16,7 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import PermissionDenied
 from imp.engine.sandbox import SandboxPolicy
 from imp.paths import project_state_dir
-
-
-def _pid_gone_or_zombie(pid: int) -> bool:
-    """True once `pid` has exited or is an unreaped zombie (state Z) — a zombie counts
-    as terminated, tolerating the window before init reaps an orphan."""
-    try:
-        data = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
-        return True
-    return data.rpartition(")")[2].split()[0] == "Z"
+from tests.conftest import _pid_gone_or_zombie
 
 
 def _await_death(pid: int, complaint: str) -> None:
