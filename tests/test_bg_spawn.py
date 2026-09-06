@@ -61,9 +61,8 @@ def _fds_open_to(path: Path) -> int:
 def test_spawn_returns_immediately_registers_and_keeps_running(tmp_path: Path) -> None:
     async def main() -> None:
         ctx = _ctx(tmp_path)
-        t0 = anyio.current_time()
-        out = await _spawn(ctx, "sleep 30")
-        assert anyio.current_time() - t0 < 5.0          # returned immediately
+        with anyio.fail_after(HANG_BACKSTOP):  # deadlock backstop only
+            out = await _spawn(ctx, "sleep 30")
         assert out["id"] == "bg1"
         assert out["status"] == "running"
         assert isinstance(out["pid"], int)
@@ -73,7 +72,7 @@ def test_spawn_returns_immediately_registers_and_keeps_running(tmp_path: Path) -
         assert (tmp_path / out["out_path"]).exists()
         assert (tmp_path / out["err_path"]).exists()
         bp = ctx.background_processes["bg1"]
-        assert bp.proc.returncode is None               # still running
+        assert bp.proc.returncode is None               # child outlived the spawn call
         # registered ONLY on background_processes — never running_processes
         assert ctx.running_processes == []
         # parent-side fd copies are closed after spawn (no fd leak)
