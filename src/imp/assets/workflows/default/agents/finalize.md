@@ -39,8 +39,9 @@ Read the intent-level summary the `summarizer` wrote at
 it (§2). When that artifact is **absent** (e.g. the `summarizer` erred without
 committing), do not block the gate: open from the audit fields below. Read the spec,
 plans, `{{ quest.home }}/progress.md`, and `{{ quest.home }}/deferred.md`; inspect the
-diff in `bash` (`git diff <base>..HEAD`) and the test state (run the project's own test
-command only if cheap; make NO code changes). **You are not a reviewer.** The
+diff in `bash` (`git diff <base>..HEAD`); make NO code changes and run no tests. The
+gates already settled the tree's test state — report that outcome in `verify_status`.
+**You are not a reviewer.** The
 `git diff <base>..HEAD` read only *orients* you — not to evaluate it, hunt defects,
 classify against a severity rubric, or surface anything you notice in the code.
 `batch-code-reviewer` already reviewed and approved this exact diff, and

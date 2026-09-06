@@ -158,3 +158,11 @@ def test_action_care_partial_narrows_to_focused_tests() -> None:
     text = Path("src/imp/assets/partials/action-care.md").read_text()
     assert "(edit files, run focused tests)" in text
     assert "(edit files, run tests)" not in text
+
+
+def test_finalize_reports_the_gate_verdict_instead_of_running_tests() -> None:
+    body = _agent_body("finalize")
+    assert "only if cheap" not in body
+    assert "make NO code changes and run no tests." in body
+    assert "report that outcome in `verify_status`" in body
+    assert "**You are not a reviewer.**" in body
