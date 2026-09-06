@@ -128,6 +128,7 @@ from imp.providers.observe_classify import (
     classifies_as_provider_error,
 )
 from imp.providers.observe_session import ObserveSession
+from imp.providers.quota import QuotaReading, QuotaWindow
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     CC_WEB_BUILTIN_TO_NORM,
@@ -1127,6 +1128,38 @@ def _auth_mode_from_init(data: dict[str, Any] | None) -> str | None:
     if source is None:
         return None
     return "subscription" if source == "none" else "apikey"
+
+
+# Ascending by duration; `seven_day_overage_included` is absent: it ties `seven_day`.
+_CLAUDE_QUOTA_WINDOWS = (("five_hour", "5h"), ("seven_day", "7d"))
+
+
+def quota_from_rate_limit_info(info: Any) -> QuotaReading | None:
+    """A RateLimitEvent's per-window levels, normalized: they live only in the raw
+    CLI dict, since the typed `utilization` is None in every live capture."""
+    block = getattr(info, "raw", None)
+    if not isinstance(block, dict):
+        return None
+    unified = block.get("unifiedWindows")
+    if not isinstance(unified, dict):
+        return None
+    windows: list[QuotaWindow] = []
+    for key, label in _CLAUDE_QUOTA_WINDOWS:
+        w = unified.get(key)
+        if not isinstance(w, dict):
+            continue
+        util = w.get("utilization")
+        if not isinstance(util, (int, float)):
+            continue
+        resets = w.get("resetsAt")
+        # 0.07 * 100 is 7.000000000000001 in binary float, and this is persisted.
+        windows.append(QuotaWindow(
+            label=label, used_pct=round(float(util) * 100.0, 4),
+            resets_at=resets if isinstance(resets, int) else None))
+    if not windows:
+        return None
+    return QuotaReading(provider="claude_code", plan=None,
+                        windows=tuple(windows), raw=block)
 
 
 async def _context_usage_fields(client: Any) -> dict[str, Any]:

@@ -18,7 +18,7 @@ those line up the runner is happy.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -96,6 +96,22 @@ class FakeSystemMessage:
 
 
 FakeSystemMessage.__name__ = "SystemMessage"
+
+
+@dataclass
+class FakeRateLimitInfo:
+    """claude_agent_sdk.types.RateLimitInfo; `raw` is the untouched CLI dict."""
+    status: str = "allowed"
+    resets_at: int | None = None
+    rate_limit_type: str | None = None
+    utilization: float | None = None
+    overage_status: str | None = None
+    overage_resets_at: int | None = None
+    overage_disabled_reason: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+FakeRateLimitInfo.__name__ = "RateLimitInfo"
 
 
 @dataclass
