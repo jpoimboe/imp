@@ -27,20 +27,27 @@ the same render_text path `imp log --full` uses.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus, term_width
 
+if TYPE_CHECKING:
+    from imp.cli.accounting import RowUsage
+    from imp.providers.quota import QuotaReading
+
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
 _AMBER_AT = 0.75          # of the cutoff
+_QUOTA_GOLD_AT = 50
+_QUOTA_RED_AT = 85
 
 
 def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
@@ -83,6 +90,46 @@ def context_bar(provider: str | None, model: str | None,
            else "green")
     label = _paint("context", "gray", color=color, over_bg=over_bg)
     return f"{label} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
+
+
+def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | None:
+    """Time until this window resets. None when the carrier stated none or it has
+    already passed: the percentage is still true, only the countdown is unknown."""
+    if resets_at is None:
+        return None
+    remaining = resets_at - (time.time() if now_epoch is None else now_epoch)
+    if remaining <= 0:
+        return None
+    return nv._fmt_hm(remaining)
+
+
+def quota_field(reading: QuotaReading, *, now_epoch: float | None,
+                color: bool, over_bg: bool) -> str:
+    """`quota 5h 62% (40m), 7d 7%` — the account-wide levels, ordered by window
+    duration. Only the percentage carries color, and the bands are evaluated on
+    the displayed integer so a number can never disagree with its own hue."""
+    windows: list[str] = []
+    for w in reading.windows:
+        pct = int(w.used_pct + 0.5)          # half-up; used_pct is never negative
+        hue = ("red" if pct >= _QUOTA_RED_AT
+               else "wordmark" if pct >= _QUOTA_GOLD_AT else "green")
+        seg = (_paint(w.label, "gray", color=color, over_bg=over_bg) + " "
+               + _paint(f"{pct}%", hue, color=color, over_bg=over_bg))
+        left = (_reset_countdown(w.resets_at, now_epoch)
+                if pct >= _QUOTA_GOLD_AT else None)
+        if left is not None:
+            seg += " " + _paint(f"({left})", "gray", color=color, over_bg=over_bg)
+        windows.append(seg)
+    return (_paint("quota", "gray", color=color, over_bg=over_bg)
+            + " " + ", ".join(windows))
+
+
+def cost_field(usage: RowUsage | None) -> str | None:
+    """The quest-total dollars, bare: the footer carries no legend, so it carries
+    none of the summary cell's sigils either. None when nothing is priced yet."""
+    if usage is None or usage.priced == 0:
+        return None
+    return "<$0.01" if usage.dollars < 0.01 else f"${usage.dollars:.2f}"
 
 
 def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
@@ -147,9 +194,16 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          context_window: int | None = None,
+                         auth_mode: str | None = None,
+                         quota: QuotaReading | None = None,
+                         cost: RowUsage | None = None,
+                         now_epoch: float | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
-    project · id · title · phase · plan · counter · model · context."""
+    project · id · title · phase · plan · counter · model · context · quota-or-cost."""
+    # Lazy import keeps `import live_driver` free of the providers package.
+    from imp.cli.accounting import is_metered
+
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     project_seg = (_paint(project, "gray", color=color, over_bg=over)
@@ -171,9 +225,14 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         bar = context_bar(activity.provider, activity.model, prompt_tokens,
                           context_pct=context_pct, context_window=context_window,
                           color=color, over_bg=over)
+    if is_metered(activity.provider, auth_mode):
+        tail = cost_field(cost)
+    else:
+        tail = (quota_field(quota, now_epoch=now_epoch, color=color, over_bg=over)
+                if quota is not None else None)
     body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
                              phase_seg, plan_seg, counter_seg,
-                             model_seg, bar])
+                             model_seg, bar, tail])
     return _band_wrap(body, bg, width)
 
 
