@@ -6,10 +6,9 @@ from __future__ import annotations
 
 import re
 import time
-import zoneinfo
-from datetime import datetime, timedelta
 
 from imp.providers import errors as perr
+from imp.providers.quota import QuotaReading
 
 # Prose Anthropic emits locally after clearing the saved credentials: terminal,
 # unless the same scan carries a routable status code (see _classify_agent_text).
@@ -40,94 +39,36 @@ _USAGE_LIMIT_RE = re.compile(
 # wrong nudge loop.
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
-# Matches the CLI usage-limit reset announcement in two shapes:
-#   bare-time (session):  "resets 4am (America/Los_Angeles)", "resets 16:00 (...)"
-#   dated (weekly):       "resets Jul 16, 8pm (America/Los_Angeles)"
-# The optional leading "<Mon> <DD>," group (present only on the weekly form)
-# selects the dated branch in _reset_hint_seconds.
-_RESET_RE = re.compile(
-    r"resets\s+(?:([A-Za-z]{3})\s+(\d{1,2}),\s+)?"
-    r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(([^)]+)\)",
-    re.IGNORECASE,
-)
-_MONTH_ABBR = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-}
 _RESET_MARGIN_SECONDS = 120.0
-_MAX_RESET_WAIT_SECONDS = 6 * 3600.0
 _MAX_WEEKLY_WAIT_SECONDS = 8 * 24 * 3600.0
+# Forgiving: a codex reading is taken from the previous turn's rollout record.
+_HINT_FLOOR_PCT = 90.0
 
 
-def _reset_hint_seconds(text: str, now: float) -> float | None:
-    """Seconds to wait until the announced usage-limit reset, + a 2-minute
-    margin, or None. `now` is epoch seconds, injected for testability.
-
-    Two shapes, keyed off whether the match carries a date:
-      - Bare-time (session): today-or-tomorrow, distrusted beyond 6 h
-        (session windows are 5 h, so a larger figure means a bad parse).
-      - Dated (weekly): the explicit month/day + time in the stated zone,
-        this year and rolled forward a year if already past; distrusted
-        beyond 8 days.
-    Returns None on any parse failure, an unknown month or zone, an
-    out-of-range time, a still-past target, or an over-ceiling wait.
-    None means exactly today's fall-back backoff behavior.
-    """
-    m = _RESET_RE.search(text)
-    if m is None:
+def _hint_from_reading(reading: QuotaReading | None, now: float) -> float | None:
+    """Seconds until the earliest reset among saturated windows, + a 2-minute
+    margin, or None. Earliest, not highest: over-waiting idles the quest for up
+    to a week, under-waiting costs one retry that carries a fresher reading."""
+    if reading is None:
         return None
-    month_s, day_s, hour_s, minute_s, ampm, zone_name = m.groups()
-    try:
-        tz = zoneinfo.ZoneInfo(zone_name)
-    except (KeyError, ValueError):
-        # ZoneInfoNotFoundError subclasses KeyError; a malformed name -> ValueError.
+    resets = [w.resets_at for w in reading.windows
+              if w.used_pct >= _HINT_FLOOR_PCT and w.resets_at is not None]
+    if not resets:
         return None
-    hour = int(hour_s)
-    minute = int(minute_s) if minute_s else 0
-    if ampm:
-        if not 1 <= hour <= 12:
-            return None
-        if ampm.lower() == "pm" and hour != 12:
-            hour += 12
-        elif ampm.lower() == "am" and hour == 12:
-            hour = 0
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return None
-    now_local = datetime.fromtimestamp(now, tz=tz)
-    if month_s is not None:
-        month = _MONTH_ABBR.get(month_s.lower())
-        if month is None:
-            return None
-        try:
-            target = now_local.replace(
-                month=month, day=int(day_s), hour=hour, minute=minute,
-                second=0, microsecond=0)
-            if target <= now_local:
-                target = target.replace(year=target.year + 1)
-        except ValueError:
-            # An impossible day for the month (e.g. "Feb 30") or a Feb-29
-            # roll into a non-leap year.
-            return None
-        if target <= now_local:
-            return None
-        ceiling = _MAX_WEEKLY_WAIT_SECONDS
-    else:
-        target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now_local:
-            target += timedelta(days=1)
-        ceiling = _MAX_RESET_WAIT_SECONDS
-    delta = target.timestamp() - now
-    if delta > ceiling:
+    delta = min(resets) - now
+    if delta <= 0 or delta > _MAX_WEEKLY_WAIT_SECONDS:
         return None
     return delta + _RESET_MARGIN_SECONDS
 
 
-def _rate_limit_with_reset_hint(text: str) -> perr.RateLimitError:
-    """Build the usage-limit RateLimitError, attaching the parsed reset time as
+def _rate_limit_with_reset_hint(
+    text: str, reading: QuotaReading | None,
+) -> perr.RateLimitError:
+    """Build the usage-limit RateLimitError, attaching the derived reset time as
     detail={"retry_after_seconds": <hint>} when one is available. The key is
     disjoint from every diagnostic key _termination_from_result later merges via
     labeled.detail.update(...), so a hint set here survives that merge."""
-    hint = _reset_hint_seconds(text, time.time())
+    hint = _hint_from_reading(reading, time.time())
     detail: dict[str, object] | None = (
         {"retry_after_seconds": hint} if hint is not None else None
     )
@@ -135,7 +76,7 @@ def _rate_limit_with_reset_hint(text: str) -> perr.RateLimitError:
 
 
 def _classify_agent_text(
-    text: str, *, anchored: bool = True,
+    text: str, *, anchored: bool = True, reading: QuotaReading | None = None,
 ) -> perr.ProviderError | None:
     """Detect known claude CLI terminal-error patterns in agent text.
 
@@ -185,10 +126,10 @@ def _classify_agent_text(
         if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")
     if _USAGE_LIMIT_RE.search(scan):
-        return _rate_limit_with_reset_hint(text)
+        return _rate_limit_with_reset_hint(text, reading)
     if code is not None:
         if code == 429:
-            return _rate_limit_with_reset_hint(text)
+            return _rate_limit_with_reset_hint(text, reading)
         if code in (401, 403):
             auth_exc = perr.AuthError(f"claude CLI: {text[:200]}")
             auth_exc.kind = f"http_{code}"  # type: ignore[attr-defined]
