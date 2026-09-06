@@ -253,3 +253,14 @@ def test_the_two_carve_outs_are_the_only_other_occurrences() -> None:
         assert carve in low, name
         rest = low.replace(carve, "")
         assert not any(ph in rest for ph in _SWEEP_PHRASES), name
+
+
+def test_batch_code_reviewer_names_the_out_of_tree_render_fallback() -> None:
+    body = _agent_body("batch-code-reviewer")
+    assert "**Both renders obey the read-only tree** and the sandbox enforces it" in body
+    assert "If a render needs to write inside the tree, copy what it needs" in body
+    assert "to a scratch directory outside the tree and run it there." in body
+    # it governs BOTH render bullets, so it follows them and leaves the two
+    # skill references adjacent (tests/test_shipped_skill_refs.py pins that seam)
+    assert body.index("**Terminal-UI changes — see them.**") < body.index(
+        "**Browser-UI changes") < body.index("**Both renders obey the read-only tree**")

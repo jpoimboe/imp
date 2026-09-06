@@ -69,6 +69,10 @@ render the result with your impty tools before judging it — the diff won't sho
 `imp-driving-web-uis` (`load_skill(name="imp-driving-web-uis")`) and render the affected pages
 before judging them — neither the diff nor an HTML-string assertion shows a rendered page.
 
+**Both renders obey the read-only tree** and the sandbox enforces it: render from what the
+verification gate just built. If a render needs to write inside the tree, copy what it needs
+to a scratch directory outside the tree and run it there.
+
 ## Severity Classification
 
 Classify each finding against the canonical severity rubric:
