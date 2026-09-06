@@ -1873,8 +1873,16 @@ class ClaudeCodeSession(ObserveSession):
             err, kind=getattr(err, "kind", ""))["payload"])
 
     async def _settle_auth_terminality(self, err: perr.ProviderError) -> perr.ProviderError:
-        """Probe the token on a server 401; upgrade to AuthTerminalError if the grant is dead."""
+        """Probe the token on a server 401; upgrade to AuthTerminalError if the grant is dead.
+        A canonical expiry that moved since this spawn started means a peer rotated the
+        token, so probing would revoke a token imp has never tried."""
         if err.category != "auth":
+            return err
+        spawn_expiry = self.runner._spawn_token_expiry
+        current_expiry = canonical_expires_at()
+        if (spawn_expiry is not None and current_expiry is not None
+                and spawn_expiry != current_expiry):
+            err.kind = "token_rotated"  # type: ignore[attr-defined]
             return err
         outcome = await asyncio.to_thread(
             refresh_canonical_token, int(time.time() * 1000), force=True
