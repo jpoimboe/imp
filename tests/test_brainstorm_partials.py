@@ -141,10 +141,10 @@ def test_brainstorm_dialogue_carries_enumeration_and_grill_mode() -> None:
     # (a) enumerate-before-commit for user-visible outcomes
     assert "Enumerate before committing" in text
     assert "unenumerated deferral" in text
-    # (b) whole-surface after-state inventory with the real-ANSI mockup constraint
+    # (b) whole-surface after-state inventory with the bare-spelling mockup constraint
     assert "Walk the whole surface" in text
     assert "after-state inventory" in text
-    assert "real ANSI SGR colors" in text
+    assert "without its ESC byte" in text
     assert "never depict a color the codes cannot produce" in text
     # (c) confirmed values are written into the spec verbatim
     assert "Enumerated values are spec content" in text
@@ -271,12 +271,14 @@ def test_brainstorm_mockup_copy_pastes_the_terminal_and_renders_the_web() -> Non
     flat = " ".join((PARTIALS / "brainstorm-dialogue.md").read_text().split())
     sentences = (
         "Use concrete mockups where the change is visual: paste a terminal mockup into "
-        "your message as a fenced block with its real ANSI SGR colors; never depict a "
-        "color the codes cannot produce. Write a web mockup as real HTML, never ASCII: "
-        "render it, look at it, and give the human its path."
+        "your message as a fenced block, writing each SGR code without its ESC byte "
+        "(`[1;33m`); never depict a color the codes cannot produce. Write a web mockup "
+        "as real HTML, never ASCII: render it, look at it, and give the human its path."
     )
     assert sentences in flat
-    # The old framing was unfollowable: it told agents to put ANSI where prose is escaped.
+    # The old framings were unfollowable: an agent cannot type the ESC byte, so an
+    # instruction to paste "real ANSI SGR colors" yields the bare codes as words.
+    assert "with its real ANSI SGR colors" not in flat
     assert "terminal mockups use real ANSI SGR colors" not in flat
     assert "it is real HTML you render and hand the human a path to" not in flat
     # Still inside the surface-inventory beat it qualifies, before the next beat.

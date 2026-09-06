@@ -94,9 +94,9 @@ Batch the defaults, but show the actual values.
 bar, the scrollback log, a screen — present the complete after-state inventory of that
 surface: every element and its final text, color, and visibility, not only the elements
 the user named. Use concrete mockups where the change is visual: paste a terminal
-mockup into your message as a fenced block with its real ANSI SGR colors;
-never depict a color the codes cannot produce. Write a web mockup as real HTML,
-never ASCII: render it, look at it, and give the human its path.
+mockup into your message as a fenced block, writing each SGR code without its ESC byte
+(`[1;33m`); never depict a color the codes cannot produce. Write a web mockup as real
+HTML, never ASCII: render it, look at it, and give the human its path.
 
 When a design turns on how a terminal surface actually looks, load `imp-driving-terminal-uis`
 (`load_skill(name="imp-driving-terminal-uis")`) and snapshot the *current* appearance with
