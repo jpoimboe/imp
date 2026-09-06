@@ -66,3 +66,13 @@ def test_tool_reference_documents_sandbox_note() -> None:
     assert ("A denied write (a sandbox-masked path) surfaces the raw OS error "
             "plus a `sandbox_note` naming the boundary — foreground only; "
             "retrying never helps.") in body
+
+
+def test_tool_reference_documents_per_call_pid_namespaces() -> None:
+    # The bash section warns that pids are namespace-local and names bash_kill(id) as
+    # the way to stop a background task. Whitespace-normalized: the prose is wrapped.
+    body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
+    assert ("Each call gets its own pid namespace, so `ps` shows only that call's own "
+            "processes and a pid recorded in one call means nothing in the next.") in body
+    assert ("The `pid` in a background descriptor is a host-side handle — a shell command "
+            "cannot signal it; stop a background task with `bash_kill(id)`.") in body

@@ -115,6 +115,10 @@ anyway.
   under `.imp/`). Background output is file-redirected, so most programs
   block-buffer (~4 KB): early lines (e.g. a server's 'listening' banner) may lag
   until a flush.
+- Each call gets its own pid namespace, so `ps` shows only that call's own processes
+  and a pid recorded in one call means nothing in the next. The `pid` in a background
+  descriptor is a host-side handle — a shell command cannot signal it; stop a
+  background task with `bash_kill(id)`.
 
 ## bash_output
 
