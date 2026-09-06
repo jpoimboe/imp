@@ -3073,7 +3073,7 @@ async def test_cooperative_steer_repairs_the_interrupt_marker_tail(
             events.append(ev)
 
     task = asyncio.create_task(drive())
-    # Poll until the client has been queried (runner._client is set and query() ran),
+    # Poll until the runner has latched its live client and query() has run,
     # so signal_pause() triggers a cooperative steer rather than a hard cancel.
     for _ in range(2000):  # up to ~10 s
         if holder.get("c") is not None and holder["c"].queries:
