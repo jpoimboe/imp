@@ -60,6 +60,13 @@ def test_quota_reading_is_bookkeeping_with_no_curated_rendering() -> None:
     assert any("quota_reading" in line for line in full)   # kept under --full
 
 
+def test_from_payload_reconstructs_the_reading_a_recorded_event_carries() -> None:
+    # The footer and the summary read readings back out of the event log, so the
+    # projection must round-trip through JSON unchanged.
+    payload = json.loads(json.dumps(_reading().to_payload()))
+    assert QuotaReading.from_payload(payload) == _reading()
+
+
 def test_a_log_written_before_this_change_takes_a_reading_additively(
         tmp_path: Path) -> None:
     # A quest home recorded before this change carries no `quota_reading`, so

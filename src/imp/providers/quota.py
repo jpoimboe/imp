@@ -32,6 +32,18 @@ class QuotaReading:
     windows: tuple[QuotaWindow, ...]
     raw: dict[str, Any]
 
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> QuotaReading:
+        """The inverse of to_payload, over a `quota_reading` event this module wrote."""
+        return cls(
+            provider=payload["provider"],
+            plan=payload["plan"],
+            windows=tuple(
+                QuotaWindow(label=w["label"], used_pct=w["used_pct"],
+                            resets_at=w["resets_at"])
+                for w in payload["windows"]),
+            raw=payload["raw"])
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "provider": self.provider,
