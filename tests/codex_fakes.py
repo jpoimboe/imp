@@ -197,6 +197,14 @@ def mcp_call(name: str, *, args: dict[str, Any] | None = None,
                              result=result, id=item_id))
 
 
+def mcp_started(name: str, *, args: dict[str, Any] | None = None,
+                item_id: str = "call-1") -> FakeItemEvent:
+    return FakeItemEvent(type="item.started",
+                         item=FakeMcpToolCallItem(
+                             tool=name, arguments=args or {},
+                             status="in_progress", id=item_id))
+
+
 def file_change(path: str) -> FakeItemEvent:
     return FakeItemEvent(type="item.completed",
                          item=FakeFileChangeItem(

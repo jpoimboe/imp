@@ -767,6 +767,11 @@ class CodexAgentRunner:
             # is wrapped so a rollout-IO failure never skips the auth-shredding
             # teardown_codex_home.
             try:
+                if self._ctx is not None:
+                    # Stream is definitively closed here, so no race with a late
+                    # item.completed; covers every abnormal exit, not just cancel.
+                    with contextlib.suppress(Exception):
+                        close_open_task_folds(self._ctx.event_log, self._proc_state)
                 if self._stderr_token is not None:
                     current_stderr_sink.reset(self._stderr_token)
                 if self._stderr_sink is not None:
