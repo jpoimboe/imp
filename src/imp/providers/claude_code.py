@@ -128,6 +128,7 @@ from imp.providers.observe_classify import (
     classifies_as_provider_error,
 )
 from imp.providers.observe_session import ObserveSession
+from imp.providers.quota import QuotaReading, QuotaWindow
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     CC_WEB_BUILTIN_TO_NORM,
@@ -194,7 +195,7 @@ def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
 
 def _termination_from_result(
     sdk_msg: Any, last_text: str, diag: dict[str, Any],
-    config_dir: Path | None = None,
+    config_dir: Path | None = None, reading: QuotaReading | None = None,
 ) -> perr.ProviderError | None:
     """P2: a ResultMessage flagged is_error (or a nonzero subprocess exit) is a
     real termination — return a typed-or-unknown ProviderError carrying every
@@ -220,7 +221,7 @@ def _termination_from_result(
         "stderr_tail": diag.get("stderr_tail"),
         "errors": getattr(sdk_msg, "errors", None),
     }
-    labeled = _classify_agent_text(last_text, anchored=False)
+    labeled = _classify_agent_text(last_text, anchored=False, reading=reading)
     status = detail["api_error_status"]
     if (isinstance(status, int) and status == 400
             and "tool use concurrency" in last_text.lower()):
@@ -1129,6 +1130,38 @@ def _auth_mode_from_init(data: dict[str, Any] | None) -> str | None:
     return "subscription" if source == "none" else "apikey"
 
 
+# Ascending by duration; `seven_day_overage_included` is absent: it ties `seven_day`.
+_CLAUDE_QUOTA_WINDOWS = (("five_hour", "5h"), ("seven_day", "7d"))
+
+
+def quota_from_rate_limit_info(info: Any) -> QuotaReading | None:
+    """A RateLimitEvent's per-window levels, normalized: they live only in the raw
+    CLI dict, since the typed `utilization` is None in every live capture."""
+    block = getattr(info, "raw", None)
+    if not isinstance(block, dict):
+        return None
+    unified = block.get("unifiedWindows")
+    if not isinstance(unified, dict):
+        return None
+    windows: list[QuotaWindow] = []
+    for key, label in _CLAUDE_QUOTA_WINDOWS:
+        w = unified.get(key)
+        if not isinstance(w, dict):
+            continue
+        util = w.get("utilization")
+        if not isinstance(util, (int, float)):
+            continue
+        resets = w.get("resetsAt")
+        # 0.07 * 100 is 7.000000000000001 in binary float, and this is persisted.
+        windows.append(QuotaWindow(
+            label=label, used_pct=round(float(util) * 100.0, 4),
+            resets_at=resets if isinstance(resets, int) else None))
+    if not windows:
+        return None
+    return QuotaReading(provider="claude_code", plan=None,
+                        windows=tuple(windows), raw=block)
+
+
 async def _context_usage_fields(client: Any) -> dict[str, Any]:
     try:
         cu = await client.get_context_usage()
@@ -1432,6 +1465,7 @@ class ClaudeCodeSession(ObserveSession):
         self._llm_stop_reason: Any = None
         self._llm_usage: dict[str, Any] = {}
         self._auth_mode: str | None = None
+        self._quota_reading: QuotaReading | None = None
         self._stream_usage_by_msg: dict[str, tuple[dict[str, Any], Any]] = {}
         self._stream_cur_msg_id: str | None = None
         self._stream_cur_usage: dict[str, Any] = {}
@@ -1587,6 +1621,12 @@ class ClaudeCodeSession(ObserveSession):
                 self._stream_cur_stop_reason = None
         if cls_name == "SystemMessage" and getattr(raw, "subtype", None) == "init":
             self._auth_mode = _auth_mode_from_init(getattr(raw, "data", None))
+        if cls_name == "RateLimitEvent":
+            reading = quota_from_rate_limit_info(
+                getattr(raw, "rate_limit_info", None))
+            if reading is not None:
+                self._quota_reading = reading
+                elog.append_quota_reading(agent_id=aid, reading=reading)
         imp_msg, warns, thinkings = _sdk_message_to_imp(raw)
         for content in thinkings:
             yield Thinking(text=content)
@@ -1872,9 +1912,10 @@ class ClaudeCodeSession(ObserveSession):
             self._last_raw, last_text,
             {**_subprocess_diag(client),
              "stderr_tail": self.runner._stderr_sink.tail()},
-            config_dir=self.runner._config_dir)
+            config_dir=self.runner._config_dir,
+            reading=self._quota_reading)
         if err is None:
-            err = _classify_agent_text(last_text)
+            err = _classify_agent_text(last_text, reading=self._quota_reading)
             if err is None:
                 return None
             err.detail["last_agent_text"] = last_text[:500]

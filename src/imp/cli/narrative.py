@@ -19,9 +19,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from imp.engine.feedback import truncate_detail
+
+if TYPE_CHECKING:
+    from imp.providers.quota import QuotaReading
 
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
@@ -540,6 +543,10 @@ class NarrativeBuilder:
         # Deferred rename: rendered after its narration, not at the quest_renamed position.
         self._pending_rename: RenameNode | None = None
         self._pending_error_prose: AgentTextNode | None = None
+        # Live-footer inputs, one slot per provider so a mixed-provider run never
+        # shows one carrier's figures against the other's step.
+        self._auth_mode_by_provider: dict[str, str] = {}
+        self._quota_by_provider: dict[str, QuotaReading] = {}
 
     # -- public API -----------------------------------------------------------
     @property
@@ -565,6 +572,15 @@ class NarrativeBuilder:
         anthropic/openai paths, codex's own derated window from agent_message_usage_patch rows.
         None before any has arrived."""
         return self._latest_context_window
+
+    def auth_mode_for(self, provider: str | None) -> str | None:
+        """auth_mode of this provider's most recent agent_message; None before one
+        arrives. Feeds the footer's metered-or-subscription choice."""
+        return self._auth_mode_by_provider.get(provider) if provider else None
+
+    def quota_for(self, provider: str | None) -> QuotaReading | None:
+        """This provider's latest recorded quota reading, or None before one exists."""
+        return self._quota_by_provider.get(provider) if provider else None
 
     @property
     def current_burst(self) -> ToolBurstFold | None:
@@ -833,6 +849,12 @@ class NarrativeBuilder:
         # 0. context-bar update: latest_prompt_tokens tracks THIS builder's own agent.
         #    Token and cost totals are the accounting path's job (imp.cli.accounting).
         if etype == "agent_message":
+            prov = payload.get("provider")
+            auth = payload.get("auth_mode")
+            # Only a stated mode is recorded: a subagent's turn carries the same
+            # provider and states none, and must not erase what the step reported.
+            if isinstance(prov, str) and auth is not None:
+                self._auth_mode_by_provider[prov] = auth
             usage = payload.get("usage")
             pt = usage_prompt_tokens(usage)
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
@@ -868,6 +890,12 @@ class NarrativeBuilder:
                     self._latest_prompt_tokens = ctoks
                     self._latest_context_window = cwin
                 self._last_agent_context = (ctoks, cwin)
+        elif etype == "quota_reading":
+            # Account-wide, so it is retained whichever agent read it — which is why
+            # this sits above the subagent delegation that would otherwise hide it.
+            from imp.providers.quota import QuotaReading
+            self._quota_by_provider[str(payload["provider"])] = (
+                QuotaReading.from_payload(payload))
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
         #    a nested builder's own events carry a sub: id that is NOT one of
         #    its registered children; only delegate ids we actually registered).
@@ -2118,9 +2146,13 @@ def _h_sandbox_overlay_unavailable(
 
 
 def _fmt_hm(seconds: float) -> str:
-    """`2h 13m` / `45m` compact duration; hours segment shown only when non-zero."""
+    """`2d 4h` / `2h 13m` / `45m` compact duration; the day form takes over at 48
+    hours, where `52h 0m` stops reading as a duration. Every caller can wait days."""
     total_minutes = int(seconds // 60)
     hours, minutes = divmod(total_minutes, 60)
+    if hours >= 48:
+        days, hours = divmod(hours, 24)
+        return f"{days}d {hours}h"
     if hours:
         return f"{hours}h {minutes}m"
     return f"{minutes}m"

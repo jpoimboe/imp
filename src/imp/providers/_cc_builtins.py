@@ -15,7 +15,7 @@ a built-in is reachable from every claude_code step; add it here.
 
 Source of truth: the tool registry advertised by the CLI bundled with the
 pinned SDK — not the `claude` on PATH, which the SDK never spawns.
-Pin: claude-agent-sdk>=0.2.87,<1.0
+Pin: claude-agent-sdk>=0.2.152,<1.0
 """
 
 from __future__ import annotations

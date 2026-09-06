@@ -307,6 +307,21 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "agent": (),                       # calm baseline — plain default fg; eye rests
 }
 
+QUOTA_GOLD_AT = 50
+QUOTA_RED_AT = 85
+
+
+def quota_pct(used_pct: float) -> int:
+    """Half-up: the bands are evaluated on this displayed integer, so a rendered
+    percentage can never disagree with its own color."""
+    return int(used_pct + 0.5)
+
+
+def quota_hue(pct: int) -> str:
+    return ("red" if pct >= QUOTA_RED_AT
+            else "wordmark" if pct >= QUOTA_GOLD_AT else "green")
+
+
 _FOLD_UNICODE = {"collapsed": "▸", "expanded": "▾"}
 _FOLD_ASCII = {"collapsed": ">", "expanded": "v"}
 

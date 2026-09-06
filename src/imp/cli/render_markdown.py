@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import html
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from imp.cli import narrative as nv
@@ -12,6 +12,7 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.accounting import RowUsage
 from imp.cli.render_summary import (
+    ProviderQuota,
     StepRow,
     SummaryHeader,
     _dur_text,
@@ -20,6 +21,7 @@ from imp.cli.render_summary import (
     cost_cell,
     legend_lines,
     open_span_label,
+    quota_windows,
     summary_totals,
 )
 
@@ -289,7 +291,8 @@ def _md_cells(u: RowUsage) -> str:
 
 
 def render_summary_markdown(summary: list[StepRow], *,
-                            header: SummaryHeader) -> str:
+                            header: SummaryHeader,
+                            quota: Sequence[ProviderQuota] = ()) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
     work, total = summary_totals(summary, header.total_seconds)
     open_label = open_span_label(header.status)
@@ -319,5 +322,10 @@ def render_summary_markdown(summary: list[StepRow], *,
     blocks.append("\n".join([
         _MD_HEADER, _MD_RULE,
         f"| total | {_dur_text(work)} | {_md_cells(total)} |"]))
+    if quota:
+        blocks.append("**quota**")
+        blocks.append("\n".join(
+            f"- {_md_escape(q.provider)} · {quota_windows(q.windows, color=False)}"
+            for q in quota))
     blocks += legend_lines(cells)
     return "\n\n".join(blocks).strip() + "\n"

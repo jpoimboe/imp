@@ -10,20 +10,24 @@ import pytest
 
 import imp.providers.codex_runner as cr
 from imp.engine.state import InMemoryEventLog
+from imp.providers.codex_rollout import RolloutReadings
 from imp.providers.codex_runner import process_event
 from tests.codex_fakes import agent_message, turn_completed
 
 _WINDOW = 258_400
 
 
-def _codex_home(tmp_path: Path, *, records: list[tuple[int, int]]) -> Path:
+def _codex_home(tmp_path: Path, *, records: list[tuple[int, int]],
+                rate_limits: object = None) -> Path:
     """A CODEX_HOME whose rollout for thread `thr-1` carries one codex
-    `token_count` record per (occupancy, window) pair. The distractor values
-    (82628/82956 turn sums, 22290 input_tokens) pin which field is read."""
+    `token_count` record per (occupancy, window) pair, each with the same
+    `rate_limits` block codex stamps on it. The distractor values (82628/82956
+    turn sums, 22290 input_tokens) pin which field is read. Re-callable: a
+    second call re-plants the rollout in place."""
     home = tmp_path / "codex_home"
     dest = (home / "sessions" / "2026" / "06" / "05"
             / "rollout-2026-06-05T00-00-00-thr-1.jsonl")
-    dest.parent.mkdir(parents=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("".join(
         json.dumps({
             "type": "event_msg",
@@ -37,10 +41,18 @@ def _codex_home(tmp_path: Path, *, records: list[tuple[int, int]]) -> Path:
                                          "total_tokens": tokens},
                     "model_context_window": window,
                 },
+                "rate_limits": rate_limits,
             },
         }) + "\n"
         for tokens, window in records))
     return home
+
+
+_LIMITS: dict[str, Any] = {
+    "primary": {"used_percent": 34.0, "window_minutes": 300, "resets_at": 1788403732},
+    "secondary": {"used_percent": 7.0, "window_minutes": 10080, "resets_at": 1788971433},
+    "plan_type": "plus",
+}
 
 
 def test_turn_completed_lands_the_rollout_reading(tmp_path: Path) -> None:
@@ -93,11 +105,11 @@ def test_unreadable_rollout_does_not_kill_the_turn(
     """codex writes the rollout from another process while imp reads it, so the
     locator's rglob->stat window can lose the file. A gauge read must never take
     the turn down with it."""
-    def _boom(codex_home: Path, thread_id: str) -> tuple[int, int] | None:
+    def _boom(codex_home: Path, thread_id: str) -> RolloutReadings:
         raise OSError("rollout vanished mid-turn")
 
     home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
-    monkeypatch.setattr(cr, "latest_context_reading", _boom)
+    monkeypatch.setattr(cr, "latest_readings", _boom)
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
     process_event(agent_message("done"), elog=elog, agent_id="step:a",
@@ -243,9 +255,82 @@ def test_unreadable_rollout_does_not_kill_the_compaction_check(
     assert payload["context_tokens"] == 22_389
 
 
-def test_proc_state_seeds_both_canary_latches() -> None:
+def test_repeated_turns_record_one_quota_reading(tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)], rate_limits=_LIMITS)
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home)
+    quota = [e for e in elog.read() if e["type"] == "quota_reading"]
+    assert len(quota) == 1
+    assert quota[0]["payload"]["plan"] == "plus"
+    assert [(w["label"], w["used_pct"], w["resets_at"])
+            for w in quota[0]["payload"]["windows"]] == [
+        ("5h", 34.0, 1788403732), ("7d", 7.0, 1788971433)]
+    # The carrier's block reaches the recorded event unmodified, key for key.
+    assert quota[0]["payload"]["raw"] == _LIMITS
+
+
+def test_a_moved_reading_records_a_second_quota_event(tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)], rate_limits=_LIMITS)
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
+    _drive_turn(elog, state, home)
+    moved = {**_LIMITS, "primary": {**_LIMITS["primary"], "used_percent": 36.0}}
+    _codex_home(tmp_path, records=[(22_500, _WINDOW)], rate_limits=moved)
+    _drive_turn(elog, state, home)
+    pcts = [e["payload"]["windows"][0]["used_pct"] for e in elog.read()
+            if e["type"] == "quota_reading"]
+    assert pcts == [34.0, 36.0]
+
+
+def test_turn_completed_lands_the_quota_reading_in_proc_state(tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)], rate_limits=_LIMITS)
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
+                            "quota_reading": None}
+    _drive_turn(elog, state, home)
+    assert state["quota_reading"].windows[0].label == "5h"
+    # Still held on the repeat turn, where nothing is appended.
+    _drive_turn(elog, state, home)
+    assert state["quota_reading"].windows[0].used_pct == 34.0
+
+
+def test_a_lost_rollout_read_keeps_the_last_quota_reading(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """codex writes the rollout from another process, so a read can lose the
+    file. A lost read is not a reading of zero: the last one stands, so a
+    rate-limit rejection right after one still has a reset time to wait on."""
+    def _boom(codex_home: Path, thread_id: str) -> RolloutReadings:
+        raise OSError("rollout vanished mid-turn")
+
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)], rate_limits=_LIMITS)
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
+                            "quota_reading": None}
+    _drive_turn(elog, state, home)
+    monkeypatch.setattr(cr, "latest_readings", _boom)
+    _drive_turn(elog, state, home)
+    assert state["quota_reading"].windows[0].used_pct == 34.0
+
+
+def test_a_rollout_without_rate_limits_records_no_quota_event(tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
+                            "quota_reading": None}
+    _drive_turn(elog, state, home)
+    assert [e for e in elog.read() if e["type"] == "quota_reading"] == []
+    assert state["quota_reading"] is None
+    payload = next(e for e in elog.read()
+                   if e["type"] == "agent_message")["payload"]
+    assert payload["context_tokens"] == 22_389
+
+
+def test_proc_state_seeds_the_canary_latches_and_the_quota_slot() -> None:
     # `_enter` provisions an MCP server and a codex subprocess, so the seed is
     # pinned at the source (the repo's established idiom for unreachable structure).
     src = inspect.getsource(cr.CodexSession._enter)
     assert '"context_canary_emitted": False' in src
     assert '"compaction_canary_emitted": False' in src
+    assert '"quota_reading": None' in src

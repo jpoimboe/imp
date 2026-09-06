@@ -10,15 +10,20 @@ that file across the pause: copy it (and the thread_id) into the durable
 `transcript_dir` on pause, restore it into the fresh CODEX_HOME on resume, then
 call `Codex.resume_thread(thread_id)`.
 
-The same file is also the only place codex reports live context occupancy, so
-`latest_context_reading` reads it in place — no stdout JSON mode emits it — and
-the only place codex records that it compacted history (`compaction_seen`).
+The same file is also the only place codex reports live context occupancy and
+its rate-limit level, so `latest_readings` reads both in place — no stdout JSON
+mode emits them — and the only place codex records that it compacted history
+(`compaction_seen`).
 """
 from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from imp.providers.quota import QuotaReading, QuotaWindow
 
 _THREAD_JSON = "codex_thread.json"
 _ROLLOUT_SUBDIR = "codex_rollout"
@@ -41,15 +46,71 @@ def _newest_matching_rollout(codex_home: Path, thread_id: str) -> Path | None:
     return None
 
 
-def latest_context_reading(codex_home: Path, thread_id: str) -> tuple[int, int] | None:
-    """codex's own live context reading from its rollout: the newest usable
-    `(last_token_usage.total_tokens, model_context_window)` pair, or None when
-    the rollout is absent or carries no usable `token_count` record. Never a
-    partial reading — both halves come from the same record."""
+def _window_label(minutes: int) -> str:
+    """From duration, never position: 300 -> `5h`, 10080 -> `7d`."""
+    return f"{minutes // 60}h" if minutes < 1440 else f"{minutes // 1440}d"
+
+
+def quota_from_rate_limits(block: Any) -> QuotaReading | None:
+    """codex's `rate_limits` block from a `token_count` record, normalized.
+    None when it carries no usable window — the caller then records nothing."""
+    if not isinstance(block, dict):
+        return None
+    windows: list[tuple[int, QuotaWindow]] = []
+    for key in ("primary", "secondary"):
+        w = block.get(key)
+        if not isinstance(w, dict):
+            continue
+        minutes = w.get("window_minutes")
+        used = w.get("used_percent")
+        if not isinstance(minutes, int) or minutes <= 0:
+            continue
+        if not isinstance(used, (int, float)):
+            continue
+        resets = w.get("resets_at")
+        windows.append((minutes, QuotaWindow(
+            label=_window_label(minutes), used_pct=float(used),
+            resets_at=resets if isinstance(resets, int) else None)))
+    if not windows:
+        return None
+    plan = block.get("plan_type")
+    return QuotaReading(
+        provider="codex", plan=plan if isinstance(plan, str) else None,
+        windows=tuple(w for _, w in sorted(windows, key=lambda pair: pair[0])),
+        raw=block)
+
+
+@dataclass(frozen=True, slots=True)
+class RolloutReadings:
+    """Both readings one rollout pass yields. Each is the last VALID of its own
+    kind: `rate_limits` can be null on a record whose token counts are good."""
+
+    context: tuple[int, int] | None
+    quota: QuotaReading | None
+
+
+def _context_from_info(info: Any) -> tuple[int, int] | None:
+    "`(last_token_usage.total_tokens, model_context_window)`, never partial."
+    if not isinstance(info, dict):
+        return None
+    usage = info.get("last_token_usage")
+    tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
+    window = info.get("model_context_window")
+    if (isinstance(tokens, int) and tokens > 0
+            and isinstance(window, int) and window > 0):
+        return (tokens, window)
+    return None
+
+
+def latest_readings(codex_home: Path, thread_id: str) -> RolloutReadings:
+    """codex's own live context occupancy and rate-limit level, from one pass
+    over the rollout — the only place either is reported. Both halves are
+    absent when the rollout is missing or carries no usable `token_count`."""
     rollout = _newest_matching_rollout(codex_home, thread_id)
     if rollout is None:
-        return None
-    reading: tuple[int, int] | None = None
+        return RolloutReadings(context=None, quota=None)
+    context: tuple[int, int] | None = None
+    quota: QuotaReading | None = None
     with rollout.open(encoding="utf-8", errors="replace") as f:
         for line in f:
             # Pre-filter: rollouts run to megabytes, few lines are token_count.
@@ -60,15 +121,15 @@ def latest_context_reading(codex_home: Path, thread_id: str) -> tuple[int, int] 
                 payload = rec["payload"]
                 if rec["type"] != "event_msg" or payload["type"] != "token_count":
                     continue
-                info = payload["info"]
-                tokens = info["last_token_usage"]["total_tokens"]
-                window = info["model_context_window"]
             except (ValueError, KeyError, TypeError):
                 continue
-            if (isinstance(tokens, int) and tokens > 0
-                    and isinstance(window, int) and window > 0):
-                reading = (tokens, window)
-    return reading
+            reading = _context_from_info(payload.get("info"))
+            if reading is not None:
+                context = reading
+            block = quota_from_rate_limits(payload.get("rate_limits"))
+            if block is not None:
+                quota = block
+    return RolloutReadings(context=context, quota=quota)
 
 
 def compaction_seen(codex_home: Path, thread_id: str) -> bool:

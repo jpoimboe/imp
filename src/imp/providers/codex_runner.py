@@ -63,7 +63,7 @@ from imp.providers.codex_mcp import (
     start_impty_server,
     start_server,
 )
-from imp.providers.codex_rollout import compaction_seen, latest_context_reading
+from imp.providers.codex_rollout import RolloutReadings, compaction_seen, latest_readings
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     refresh_canonical_token,
@@ -253,6 +253,7 @@ class CodexSession(ObserveSession):
             "thread_id": None, "complete_step_args": {},
             "complete_step_called": False, "auth_mode": auth_mode,
             "context_reading": None, "context_canary_emitted": False,
+            "quota_reading": None,
             "compaction_canary_emitted": False,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
@@ -634,7 +635,8 @@ class CodexSession(ObserveSession):
             has_complete_step=bool(ps.get("complete_step_called")))
 
     async def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
-        classified = _classify_agent_text(last_text)
+        classified = _classify_agent_text(
+            last_text, reading=self._proc_state.get("quota_reading"))
         if classified is not None:
             classified.detail["last_agent_text"] = last_text[:500]
             return cast(dict[str, Any], perr.make_error_event(
@@ -1305,13 +1307,16 @@ def process_event(
         # `normalized` is a billing sum over every model request in this turn,
         # not prompt occupancy — read codex's own per-request record for that.
         thread_id = state.get("thread_id")
-        reading = None
+        readings = RolloutReadings(context=None, quota=None)
         if codex_home is not None and thread_id:
-            try:
-                reading = latest_context_reading(codex_home, thread_id)
-            except OSError:  # codex writes this file concurrently
-                reading = None
+            # codex writes this file concurrently, so the read can lose it
+            with contextlib.suppress(OSError):
+                readings = latest_readings(codex_home, thread_id)
+        reading = readings.context
         state["context_reading"] = reading
+        if readings.quota is not None:
+            state["quota_reading"] = readings.quota
+            elog.append_quota_reading(agent_id=agent_id, reading=readings.quota)
         if reading is None and not state.get("context_canary_emitted"):
             state["context_canary_emitted"] = True
             elog.append(agent_id=agent_id, type="runner_warning",

@@ -392,7 +392,7 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
     ]
     header = SummaryHeader(workflow="imp", quest_id="gumu81",
                            status="merged", total_seconds=summary_total(events))
-    out = render_summary_markdown(build_summary(events), header=header)
+    out = render_summary_markdown(build_summary(events).rows, header=header)
     assert "# imp — gumu81" in out               # SummaryHeader workflow/id
     assert "merged" in out                        # status carried
     assert "## design" in out                     # phase grouping heading

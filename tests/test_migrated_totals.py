@@ -105,7 +105,7 @@ def _blob_events(control: Path, cid: str) -> list[dict]:
 
 
 def _totals(events: list[dict]) -> tuple[int, float]:
-    rows = build_summary(events)
+    rows = build_summary(events).rows
     _work, total = summary_totals(rows, 300.0)
     return total.input_total + total.output, total.dollars
 

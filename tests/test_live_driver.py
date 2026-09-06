@@ -1650,10 +1650,10 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
     assert out2.getvalue().split("\n")[0] == "> do the thing"
 
 
-def test_context_bar_renders_filled_track_and_percent_plain() -> None:
+def test_context_bar_renders_a_gray_label_and_the_percentage() -> None:
     from imp.cli.live_driver import context_bar
     bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
-    assert bar == "█░░░░░░░░░ 13%"        # 26000/200000 = 0.13 -> 1 of 10 filled
+    assert bar == "context 13%"        # 26000/200000 = 0.13
 
 
 def test_context_bar_bands_are_relative_to_the_cutoff() -> None:
@@ -1694,7 +1694,7 @@ def test_context_bar_bands_follow_a_capped_model_down() -> None:
     at_10 = context_bar("openai", "gpt-5.6-sol", 105_000, color=True, over_bg=False)
     assert at_30 is not None and at_50 is not None
     assert at_19 is not None and at_10 is not None
-    assert "\x1b[31m" in at_30 and at_30.endswith(" 30%")
+    assert "\x1b[31m" in at_30 and at_30.endswith("30%\x1b[0m")
     assert "\x1b[31m" in at_50
     assert "\x1b[33m" in at_19 and "\x1b[31m" not in at_19   # 19% >= 0.75 * 24.8%
     assert "\x1b[32m" in at_10
@@ -1734,9 +1734,8 @@ def test_context_bar_resolves_a_dated_id_through_limits_for() -> None:
     dated = limits_for("anthropic", "claude-opus-5-20260315")
     assert dated is not None
     assert dated.window == 200_000                 # longest-prefix, not substring
-    # 40000/200000 = 0.2 -> round(0.2*10) = 2 filled cells, 8 track.
     assert context_bar("anthropic", "claude-opus-5-20260315", 40000,
-                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
+                       color=False, over_bg=False) == "context 20%"
 
 
 def test_context_bar_prefers_sdk_percentage_over_tokens() -> None:
@@ -1745,8 +1744,7 @@ def test_context_bar_prefers_sdk_percentage_over_tokens() -> None:
     # ~100% is ignored when the SDK percentage is present.
     bar = context_bar("claude_code", "claude-opus-4-8[1m]", 999_999,
                       context_pct=42.0, color=False, over_bg=False)
-    # 42% -> round(0.42*10) = 4 filled cells, 6 track.
-    assert bar == "████░░░░░░ 42%"
+    assert bar == "context 42%"
 
 
 def test_live_driver_has_no_context_windows_symbol() -> None:
@@ -1780,7 +1778,7 @@ def test_context_bar_unresolvable_provider_draws_nothing_on_the_tokens_path() ->
     assert "\x1b[31m" in red
 
 
-def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
+def test_position_row_separates_model_from_the_gauge_with_a_middle_dot() -> None:
     from imp.cli.live_driver import compose_position_row, context_bar
     act = nv.Activity(kind="agent", model="sonnet", provider="anthropic",
                       phase="review")
@@ -1788,8 +1786,8 @@ def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
                                 prompt_tokens=26000, color=False, width=200)
     bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
     assert bar is not None
-    assert f"sonnet {bar}" in line
-    assert "sonnet · " not in line
+    assert f"sonnet · {bar}" in line          # model and gauge are two fields now
+    assert "sonnet context" not in line       # never space-bound on this row
 
 
 def test_subagent_row_orders_elapsed_before_model_graph() -> None:
@@ -1821,9 +1819,8 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     assert bar is not None
     rows = compose_subagent_rows(b, color=False, width=200,
                                  now_iso="2026-01-01T00:00:05+00:00")
-    assert f"sonnet {bar}" in rows[0]       # single space still binds model to graph
-    assert "sonnet · " not in rows[0]       # no middle-dot before the graph
-    # new segment order: role · elapsed · model context-bar
+    assert f"sonnet · {bar}" in rows[0]     # · separates model from gauge
+    # new segment order: role · elapsed · model · context-bar
     assert "coder · 5s · sonnet" in rows[0]              # role · elapsed · model, in order
     assert rows[0].index("5s") < rows[0].index("sonnet")  # elapsed precedes model
     assert rows[0].rstrip().endswith(bar)                # model context-bar now trailing
@@ -3555,8 +3552,7 @@ def test_context_bar_prefers_a_provider_reported_window() -> None:
     bar = context_bar("codex", "gpt-5.6-sol", 206_720, context_window=258_400,
                       color=True, over_bg=False)
     assert bar is not None
-    assert bar.count("█") == 8
-    assert bar.endswith(" 80%")
+    assert bar.endswith("80%\x1b[0m")
     assert "\x1b[31m" in bar
 
 
@@ -3565,7 +3561,7 @@ def test_context_bar_without_a_reported_window_falls_back_to_the_catalog() -> No
     from imp.cli.live_driver import context_bar
     # Same call, no reading: unchanged behavior — 206720/1_050_000 = 20%.
     assert context_bar("codex", "gpt-5.6-sol", 206_720,
-                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
+                       color=False, over_bg=False) == "context 20%"
 
 
 # AC 8
@@ -3603,3 +3599,14 @@ def test_compose_subagent_rows_take_the_window_from_a_usage_patch() -> None:
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert len(rows) == 1
     assert "9%" in rows[0]      # the sub's own reading, against 258400 not 1.05M
+
+
+def test_activity_countdown_renders_a_multi_day_wait_in_days() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    # 187260s total, 60s elapsed -> 187200s left = 2d 4h.
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=187260.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:01:00+00:00")
+
+    assert "2d 4h left" in line

@@ -27,21 +27,29 @@ the same render_text path `imp log --full` uses.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus, term_width
 
+if TYPE_CHECKING:
+    from imp.cli.accounting import RowUsage
+    from imp.providers.quota import QuotaReading
+
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
-_CONTEXT_WIDTH = 10
 _AMBER_AT = 0.75          # of the cutoff
+
+# The events that can move the quest-total dollars; everything else leaves it.
+_COST_BEARING = frozenset({"agent_message", "agent_message_usage_patch",
+                           "query_result"})
 
 
 def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
@@ -78,15 +86,50 @@ def context_bar(provider: str | None, model: str | None,
     warn = checkpoint_cutoff(info, window)
     if warn is None:
         warn = DEFAULT_CHECKPOINT_FRACTION
-    filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
     pct = round(frac * 100)
     hue = ("red" if frac >= warn
            else "wordmark" if frac >= _AMBER_AT * warn
            else "green")
-    fill = _paint("█" * filled, hue, color=color, over_bg=over_bg) if filled else ""
-    track = (_paint("░" * (_CONTEXT_WIDTH - filled), "gray", color=color, over_bg=over_bg)
-             if filled < _CONTEXT_WIDTH else "")
-    return f"{fill}{track} {pct}%"
+    label = _paint("context", "gray", color=color, over_bg=over_bg)
+    return f"{label} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
+
+
+def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | None:
+    """Time until this window resets. None when the carrier stated none or it has
+    already passed: the percentage is still true, only the countdown is unknown."""
+    if resets_at is None:
+        return None
+    remaining = resets_at - (time.time() if now_epoch is None else now_epoch)
+    if remaining <= 0:
+        return None
+    return nv._fmt_hm(remaining)
+
+
+def quota_field(reading: QuotaReading, *, now_epoch: float | None,
+                color: bool, over_bg: bool) -> str:
+    """`quota 5h 62% (40m), 7d 7%` — the account-wide levels, ordered by window
+    duration. Only the percentage carries color, and the bands are evaluated on
+    the displayed integer so a number can never disagree with its own hue."""
+    windows: list[str] = []
+    for w in reading.windows:
+        pct = pal.quota_pct(w.used_pct)
+        seg = (_paint(w.label, "gray", color=color, over_bg=over_bg) + " "
+               + _paint(f"{pct}%", pal.quota_hue(pct), color=color, over_bg=over_bg))
+        left = (_reset_countdown(w.resets_at, now_epoch)
+                if pct >= pal.QUOTA_GOLD_AT else None)
+        if left is not None:
+            seg += " " + _paint(f"({left})", "gray", color=color, over_bg=over_bg)
+        windows.append(seg)
+    return (_paint("quota", "gray", color=color, over_bg=over_bg)
+            + " " + ", ".join(windows))
+
+
+def cost_field(usage: RowUsage | None) -> str | None:
+    """The quest-total dollars, bare: the footer carries no legend, so it carries
+    none of the summary cell's sigils either. None when nothing is priced yet."""
+    if usage is None or usage.priced == 0:
+        return None
+    return "<$0.01" if usage.dollars < 0.01 else f"${usage.dollars:.2f}"
 
 
 def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
@@ -151,9 +194,16 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          context_window: int | None = None,
+                         auth_mode: str | None = None,
+                         quota: QuotaReading | None = None,
+                         cost: RowUsage | None = None,
+                         now_epoch: float | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
-    project · id · title · phase · plan · counter · model context-bar."""
+    project · id · title · phase · plan · counter · model · context · quota-or-cost."""
+    # Lazy import keeps `import live_driver` free of the providers package.
+    from imp.cli.accounting import is_metered
+
     bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     project_seg = (_paint(project, "gray", color=color, over_bg=over)
@@ -175,9 +225,14 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         bar = context_bar(activity.provider, activity.model, prompt_tokens,
                           context_pct=context_pct, context_window=context_window,
                           color=color, over_bg=over)
+    if is_metered(activity.provider, auth_mode):
+        tail = cost_field(cost)
+    else:
+        tail = (quota_field(quota, now_epoch=now_epoch, color=color, over_bg=over)
+                if quota is not None else None)
     body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
                              phase_seg, plan_seg, counter_seg,
-                             rt.join_space(model_seg, bar)])
+                             model_seg, bar, tail])
     return _band_wrap(body, bg, width)
 
 
@@ -232,7 +287,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
         inner = arrow + " " + rt.compose_label(
-            [role_seg, el_seg, rt.join_space(model_seg, bar)])
+            [role_seg, el_seg, model_seg, bar])
         if bg:
             pad = width - 2 - pal.display_width(inner)
             if pad > 0:
@@ -322,6 +377,12 @@ class LiveDriver:
         self._emissions = 0
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
+        # Every event this driver consumed, and the accounting total derived from
+        # them by the summary's own code — one computation, so the live figure and
+        # `imp log -s` cannot disagree. Each driver sees each event exactly once.
+        self._events: list[dict[str, Any]] = []
+        self._cost: RowUsage | None = None
+        self._cost_stale = False
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
             _Cursor(container=self._builder.tree.root, depth=0)]
@@ -343,6 +404,10 @@ class LiveDriver:
             self._footer_live = True
             self._refresh_status()
             return
+        if isinstance(event, dict):
+            self._events.append(event)
+            if event.get("type") in _COST_BEARING:
+                self._cost_stale = True
         self._builder.add(event)
         self._walk()
         self._maybe_reemit_header()
@@ -416,6 +481,9 @@ class LiveDriver:
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
+            auth_mode=self._builder.auth_mode_for(activity.provider),
+            quota=self._builder.quota_for(activity.provider),
+            cost=self._quest_cost(),
             unsandboxed=self._unsandboxed)
         rows = [a_line, "", p_row]
         rows += compose_subagent_rows(
@@ -462,7 +530,21 @@ class LiveDriver:
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
+            auth_mode=self._builder.auth_mode_for(activity.provider),
+            quota=self._builder.quota_for(activity.provider),
+            cost=self._quest_cost(),
             unsandboxed=self._unsandboxed)
+
+    def _quest_cost(self) -> RowUsage | None:
+        """The quest total, by the summary's own computation over the retained
+        events — evaluated per drawn frame, not per event."""
+        if self._cost_stale:
+            # Lazily imported, like context_bar's catalog import.
+            from imp.cli.render_summary import build_summary, summary_totals
+            _work, self._cost = summary_totals(
+                build_summary(self._events).rows, None)
+            self._cost_stale = False
+        return self._cost
 
     # -- emission -------------------------------------------------------------
     def _cur_width(self) -> int:

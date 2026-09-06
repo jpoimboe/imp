@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from imp.agents.runner import Message
     from imp.providers.config import ProviderModel
+    from imp.providers.quota import QuotaReading
 
 import filelock
 
@@ -311,7 +312,17 @@ _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "tool_call": ("id", "name", "input"),
     "tool_result": ("id", "content", "error"),
     "skill_load": ("name", "source"),
+    "quota_reading": ("provider", "plan", "windows", "raw"),
 }
+
+
+def _quota_key(payload: Any) -> tuple[tuple[Any, Any, Any], ...]:
+    """What "changed" means for a reading: any window's percentage or reset."""
+    windows = payload.get("windows") if isinstance(payload, dict) else None
+    if not isinstance(windows, list):
+        return ()
+    return tuple((w.get("label"), w.get("used_pct"), w.get("resets_at"))
+                 for w in windows if isinstance(w, dict))
 
 
 def _tool_result_content_for_event(content: Any) -> Any:
@@ -400,6 +411,8 @@ class EventLog(Protocol):
                payload: dict[str, Any]) -> dict[str, Any]: ...
     def append_stderr_warning(self, *, agent_id: str | None,
                               message: str) -> None: ...
+    def append_quota_reading(self, *, agent_id: str | None,
+                             reading: QuotaReading) -> None: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
     def tail(self, n: int) -> list[dict[str, Any]]: ...
     def update_last_agent_message_usage(
@@ -417,6 +430,7 @@ class _BaseEventLog:
         self._strict = strict
         self._last: dict[str, str] = {}   # agent_id → last event id (non-None only)
         self._seen_stderr_warnings: set[str] = set()
+        self._last_quota: dict[str, tuple[tuple[Any, Any, Any], ...]] = {}
         self._rebuild_from_history()
 
     def _rebuild_from_history(self) -> None:
@@ -430,6 +444,8 @@ class _BaseEventLog:
                 message = payload.get("message")
                 if isinstance(message, str):
                     self._seen_stderr_warnings.add(message)
+            if e.get("type") == "quota_reading" and isinstance(payload, dict):
+                self._last_quota[str(payload.get("provider"))] = _quota_key(payload)
 
     # --- core emit -----------------------------------------------------------
 
@@ -636,6 +652,18 @@ class _BaseEventLog:
         self._seen_stderr_warnings.add(message)
         self._emit(agent_id=agent_id, type="runner_warning",
                    payload={"message": message})
+
+    def append_quota_reading(self, *, agent_id: str | None,
+                             reading: QuotaReading) -> None:
+        """Change-only, scoped to this quest's log: codex reports the same
+        account-wide level every turn, and a resumed step re-reads the one
+        already recorded. Per provider, so one carrier never masks another."""
+        payload = reading.to_payload()
+        key = _quota_key(payload)
+        if self._last_quota.get(reading.provider) == key:
+            return
+        self._last_quota[reading.provider] = key
+        self._emit(agent_id=agent_id, type="quota_reading", payload=payload)
 
     # --- abstract ------------------------------------------------------------
 

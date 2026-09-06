@@ -18,7 +18,7 @@ those line up the runner is happy.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -96,6 +96,32 @@ class FakeSystemMessage:
 
 
 FakeSystemMessage.__name__ = "SystemMessage"
+
+
+@dataclass
+class FakeRateLimitInfo:
+    """claude_agent_sdk.types.RateLimitInfo; `raw` is the untouched CLI dict."""
+    status: str = "allowed"
+    resets_at: int | None = None
+    rate_limit_type: str | None = None
+    utilization: float | None = None
+    overage_status: str | None = None
+    overage_resets_at: int | None = None
+    overage_disabled_reason: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+FakeRateLimitInfo.__name__ = "RateLimitInfo"
+
+
+@dataclass
+class FakeRateLimitEvent:
+    rate_limit_info: Any
+    uuid: str = "rl-1"
+    session_id: str = "sess-1"
+
+
+FakeRateLimitEvent.__name__ = "RateLimitEvent"
 
 
 @dataclass
@@ -228,6 +254,15 @@ def tool_result(id_: str, content: str, is_error: bool = False) -> FakeToolResul
 
 def thinking(content: str) -> FakeThinkingBlock:
     return FakeThinkingBlock(thinking=content)
+
+
+def rate_limit(raw: dict[str, Any]) -> FakeRateLimitEvent:
+    """One RateLimitEvent per CLI process, after AssistantMessage and before ResultMessage."""
+    return FakeRateLimitEvent(rate_limit_info=FakeRateLimitInfo(
+        status=raw.get("status", "allowed"),
+        resets_at=raw.get("resetsAt"),
+        rate_limit_type=raw.get("rateLimitType"),
+        raw=raw))
 
 
 def message_start(message_id: str, usage: dict[str, Any]) -> FakeStreamEvent:
