@@ -19,6 +19,7 @@ from imp.providers import claude_code
 from imp.providers import claude_token_refresh as ctr
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+from tests.golive_fakes import GoLiveOnce, patch_policy_builder
 
 
 @pytest.fixture
@@ -81,6 +82,41 @@ def _seed_single_agent(root: Path) -> Quest:
         payload={"id": "c", "title": "t"},
     )
     return quest
+
+
+def _seed_draft_quest(root: Path, quest_id: str) -> Quest:
+    """The same one-step workflow as _seed_single_agent, committed into a real
+    git repo and left as a DRAFT so the step can go live mid-invocation."""
+    from tests.conftest import _git, _init_repo
+
+    _init_repo(root)
+    wf = root / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [create_and_enter_worktree, complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+    )
+    (root / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\ndefault-base: main\n")
+    (project_state_dir(root) / "config.yaml").write_text(
+        "providers: [fake]\n"
+        "tiers:\n"
+        "  low: {fake: m}\n"
+        "  medium: {fake: m}\n"
+        "  high: {fake: m}\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "imp setup")
+    return Quest.create_draft(
+        root, title="t", quest_id=quest_id, base_branch="main")
 
 
 @pytest.mark.anyio
@@ -284,3 +320,116 @@ async def test_dead_grant_probe_pauses_on_the_first_401(
     assert len(paused) == 1
     assert paused[0]["payload"]["reason"] == "reauth_needed"
     assert paused[0]["payload"]["kind"] == "AuthTerminalError"
+
+
+@pytest.mark.anyio
+async def test_retry_after_go_live_rebinds_policy_to_the_worktree(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A step that goes live and is then retried through the backoff loop must
+    re-enter with its policy re-rooted at the new worktree — the window in which
+    a live agent's sandbox still pointed at the user's main checkout."""
+    scripts = [
+        [assistant(text("API Error: 401 rejected by gateway")),
+         result(is_error=True, api_error_status=401)],
+        [assistant(text("done"),
+                   tool_use("c1", "complete_step",
+                            {"status": "Success", "outcome": "done"})),
+         result()],
+    ]
+    calls: dict[str, int] = {"n": 0}
+
+    def client_factory(opts: Any) -> FakeClaudeSDKClient:
+        script = scripts[calls["n"]]
+        calls["n"] += 1
+        return FakeClaudeSDKClient(opts, scripted_messages=script)
+
+    sink: list[AgentInvocation] = []
+    roots: list[Path] = []
+    fired: list[bool] = []
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, inv: AgentInvocation) -> AgentRunner:
+            sink.append(inv)
+            # Dispatch-time: completion resets quest.project_root to the control root.
+            roots.append(inv.quest.project_root)
+            return GoLiveOnce(
+                ClaudeCodeAgentRunner(model_name="m",
+                                      client_factory=client_factory), fired)
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    quest = _seed_draft_quest(tmp_path, "gl1")
+    patch_policy_builder(monkeypatch)
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    out = await run_quest(quest)
+
+    assert out is RunResult.COMPLETED
+    assert calls["n"] == 2
+    assert len(sink) == 2
+    wt = project_state_dir(tmp_path) / "worktrees" / "gl1"
+    assert roots == [tmp_path, wt]     # go-live really forked the worktree
+    # Drive 1 was dispatched with the pre-go-live policy…
+    assert sink[0].sandbox_policy.worktree == str(tmp_path)
+    # …and the retry re-entered with it re-rooted at the worktree.
+    assert sink[1].sandbox_policy.worktree == str(wt)
+    assert sink[1].sandbox_policy.git_worktree_self == str(
+        tmp_path / ".git" / "worktrees" / "gl1")
+
+
+@pytest.mark.anyio
+async def test_retry_without_go_live_passes_the_policy_through_unchanged(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quest that never materializes mid-invocation gets the SAME policy
+    object back on re-entry: no replace, no rebuild, no emitted event."""
+    scripts = [
+        [assistant(text("API Error: 401 rejected by gateway")),
+         result(is_error=True, api_error_status=401)],
+        [assistant(text("done"),
+                   tool_use("c1", "complete_step",
+                            {"status": "Success", "outcome": "done"})),
+         result()],
+    ]
+    calls: dict[str, int] = {"n": 0}
+
+    def client_factory(opts: Any) -> FakeClaudeSDKClient:
+        script = scripts[calls["n"]]
+        calls["n"] += 1
+        return FakeClaudeSDKClient(opts, scripted_messages=script)
+
+    sink: list[AgentInvocation] = []
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, inv: AgentInvocation) -> AgentRunner:
+            sink.append(inv)
+            return ClaudeCodeAgentRunner(
+                model_name="m", client_factory=client_factory)
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    quest = _seed_single_agent(tmp_path)
+    builds = patch_policy_builder(monkeypatch)
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    out = await run_quest(quest)
+
+    assert out is RunResult.COMPLETED
+    assert len(sink) == 2
+    assert sink[1].sandbox_policy is sink[0].sandbox_policy   # same object: no replace
+    assert builds["n"] == 1      # built once at run start; never rebuilt

@@ -1796,6 +1796,24 @@ def _action_payload(action: Action) -> dict[str, Any]:
     return {"verb": "unknown"}
 
 
+def _reconcile_sandbox_policy(policy: Any, quest: Quest) -> Any:
+    """Re-root a policy baked before go-live at the current quest.project_root.
+
+    Materialization flips project_root mid-step; every re-entry (backoff retry,
+    errored retry, both reincarnations) funnels through _run_agent_invocation,
+    so reconciling here covers all of them. Materialization changes exactly the
+    two fields create_and_enter_worktree patches on its own ToolContext.
+    """
+    if policy is None or policy.worktree == str(quest.project_root):
+        return policy
+    return dataclasses.replace(
+        policy,
+        worktree=str(quest.project_root),
+        git_worktree_self=str(
+            quest.control_root / ".git" / "worktrees" / quest.project_root.name),
+    )
+
+
 async def _run_agent_invocation(
     *,
     agent_id: str,
@@ -1836,6 +1854,7 @@ async def _run_agent_invocation(
     sleep loop lives in _route_agent (it owns agent_retry events + transcript
     re-entry). See drive_invocation for the field semantics of the result.
     """
+    sandbox_policy = _reconcile_sandbox_policy(sandbox_policy, quest)
     assert state.resolved_tiers is not None  # set by run_quest before dispatch
     # Per-step override if differ_from was used, else the tier default
     resolved_steps = state.resolved_steps or {}
