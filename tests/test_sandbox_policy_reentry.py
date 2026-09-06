@@ -4,6 +4,7 @@ subagent dispatch after a retry, and a reincarnated session."""
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
+from imp.engine.reincarnation import handoff_path_for
 from imp.paths import project_state_dir
 from imp.providers.scripted import ScriptedAgentRunner
 from tests.conftest import _git, _init_repo
@@ -123,3 +125,48 @@ async def test_subagent_after_go_live_retry_inherits_the_reconciled_policy(
     assert subs[0].sandbox_policy.worktree == str(wt)
     assert subs[0].sandbox_policy.git_worktree_self == str(
         tmp_path / ".git" / "worktrees" / "gl2")
+
+
+@pytest.mark.anyio
+async def test_reincarnated_step_reenters_with_the_reconciled_policy(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The choke-point reconcile reaches the reincarnation re-entry too, with no
+    per-site change at either reincarnation call."""
+    class _HandoffRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Any]:
+            hp = handoff_path_for(inv.transcript_dir)
+            hp.parent.mkdir(parents=True, exist_ok=True)
+            hp.write_text("# handoff\n")
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            return None
+
+    sink: list[AgentInvocation] = []
+    fired: list[bool] = []
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, inv: AgentInvocation) -> AgentRunner:
+            sink.append(inv)
+            return GoLiveOnce(_HandoffRunner(), fired)
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    quest = _seed_draft(tmp_path, "rc1")
+    patch_policy_builder(monkeypatch)
+
+    events: list[dict[str, Any]] = []
+    out = await run_quest(quest, on_event=events.append)
+
+    assert out is RunResult.PAUSED           # reincarnated once, then the cap
+    assert [e["type"] for e in events].count("reincarnating") == 1
+    assert len(sink) == 2
+    wt = project_state_dir(tmp_path) / "worktrees" / "rc1"
+    assert sink[0].sandbox_policy.worktree == str(tmp_path)
+    assert sink[1].sandbox_policy.worktree == str(wt)
+    assert sink[1].sandbox_policy.git_worktree_self == str(
+        tmp_path / ".git" / "worktrees" / "rc1")
