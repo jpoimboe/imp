@@ -1,6 +1,13 @@
 # tests/test_tool_context.py
 from __future__ import annotations
 
+import contextlib
+import os
+import shlex
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -9,6 +16,30 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import PermissionDenied
 from imp.engine.sandbox import SandboxPolicy
 from imp.paths import project_state_dir
+
+
+def _pid_gone_or_zombie(pid: int) -> bool:
+    """True once `pid` has exited or is an unreaped zombie (state Z) — a zombie counts
+    as terminated, tolerating the window before init reaps an orphan."""
+    try:
+        data = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return True
+    return data.rpartition(")")[2].split()[0] == "Z"
+
+
+def _await_death(pid: int, complaint: str) -> None:
+    """Poll until `pid` is gone or a zombie, then return; fail with `complaint` if it
+    is still running at the budget. Observing the pid POSITIVELY is what keeps a
+    starved survivor under a saturated -n auto run from reading as a pass: a process
+    that has not been scheduled is still present in /proc."""
+    deadline = time.monotonic() + 20.0     # generous; only burned on the failure path
+    while not _pid_gone_or_zombie(pid):
+        if time.monotonic() > deadline:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)   # don't leak the runaway on failure
+            pytest.fail(complaint)
+        time.sleep(0.05)
 
 
 def test_resolve_project_path(tmp_path: Path) -> None:
@@ -114,6 +145,159 @@ def test_terminate_uses_named_grace_constant():
     sig = inspect.signature(context.terminate_running_processes)
     assert sig.parameters["timeout"].default == PROCESS_KILL_GRACE_S
     assert PROCESS_KILL_GRACE_S == 4.0
+
+
+def test_terminate_lets_a_group_member_finish_its_sigterm_trap(tmp_path: Path) -> None:
+    """The kill grace belongs to the GROUP, not to the registered leader. The leader
+    (`sh`) dies on SIGTERM at ~0s — exactly what the outer bwrap of a sandboxed
+    command does — while a group member is still running its own SIGTERM handler.
+    Ending the grace at the leader's exit SIGKILLs that member mid-cleanup, so its
+    marker write never lands. Spawned to DEVNULL, not to inherited pipes: the
+    foreground bash tool spawns to files, and a pipe the member holds open would keep
+    proc.wait() blocked until the member exits and hide the bug entirely."""
+    import anyio
+
+    from imp.agents.tools.context import ToolContext, terminate_running_processes
+
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
+    ready = tmp_path / "member-up"
+    marker = tmp_path / "trap-finished"
+    prog = ("import pathlib, signal, sys, time\n"
+            "def _trap(sig, frame):\n"
+            "    time.sleep(0.3)\n"
+            "    pathlib.Path(sys.argv[2]).write_text('done')\n"
+            "    sys.exit(0)\n"
+            "signal.signal(signal.SIGTERM, _trap)\n"
+            "pathlib.Path(sys.argv[1]).write_text('up')\n"
+            "time.sleep(3600)\n")
+
+    async def go() -> None:
+        proc = await anyio.open_process(
+            ["sh", "-c",
+             f"{shlex.quote(sys.executable)} -c {shlex.quote(prog)} "
+             f"{shlex.quote(str(ready))} {shlex.quote(str(marker))} & wait"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        ctx.running_processes.append(proc)
+        deadline = time.monotonic() + 20.0     # generous: only bounds process startup
+        while not ready.exists():
+            assert time.monotonic() < deadline, "the group member never started"
+            await anyio.sleep(0.02)
+        # 8.0, not the 4.0 default: the member's 0.3s handler then has ~25x headroom,
+        # so a saturated -n auto run cannot race it. Free on the passing path —
+        # teardown returns as soon as the group empties.
+        await terminate_running_processes(ctx, timeout=8.0)
+
+    anyio.run(go)
+
+    assert marker.exists(), (
+        "the member's SIGTERM handler was SIGKILLed inside the grace — the grace was "
+        "keyed on the leader's exit, not on the group")
+
+
+def test_terminate_sigkills_a_member_spawned_during_the_grace(tmp_path: Path) -> None:
+    """The other end of the same teardown: escalation must not be skipped just because
+    the leader was reaped. The leader's SIGTERM trap spawns a NEW in-group member and
+    exits, so that member is in neither by-pid capture — not the one taken before the
+    SIGTERM, nor the post-grace re-enumeration, whose PPid links died with the parent.
+    Only an unconditional group SIGKILL reaches it."""
+    import anyio
+
+    from imp.agents.tools.context import ToolContext, terminate_running_processes
+
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
+    ready = tmp_path / "leader-up"
+    late_pid = tmp_path / "late.pid"
+    member = tmp_path / "member.py"
+    member.write_text(
+        "import os, pathlib, signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+        "time.sleep(3600)\n")
+    script = tmp_path / "run.sh"
+    script.write_text(
+        f"trap '{shlex.quote(sys.executable)} {shlex.quote(str(member))} "
+        f"{shlex.quote(str(late_pid))} & exit 0' TERM\n"
+        f"touch {shlex.quote(str(ready))}\n"
+        "while :; do sleep 0.2; done\n")
+
+    async def go() -> None:
+        proc = await anyio.open_process(
+            ["sh", str(script)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        ctx.running_processes.append(proc)
+        deadline = time.monotonic() + 20.0     # generous: only bounds process startup
+        while not ready.exists():
+            assert time.monotonic() < deadline, "the leader never started"
+            await anyio.sleep(0.02)
+        await terminate_running_processes(ctx, timeout=2.0)
+
+    anyio.run(go)
+
+    deadline = time.monotonic() + 20.0
+    while not (late_pid.exists() and late_pid.read_text().strip()):
+        if time.monotonic() > deadline:
+            pytest.fail("the trap never spawned the late member")
+        time.sleep(0.02)
+    _await_death(
+        int(late_pid.read_text()),
+        "a member spawned during the grace outlived teardown — the group SIGKILL was "
+        "skipped because the leader had already been reaped")
+
+
+def test_terminate_reaps_the_group_even_when_the_caller_deadline_fires(
+    tmp_path: Path,
+) -> None:
+    """Holding the grace open for the group means a CALLER's deadline can now land
+    inside it: signals.py:629 gives each att.interrupt() 2.0s, and agent_run.py:179
+    caps interrupt()+aclose() at the grace's own 4.0s. The registry is drained at
+    entry, so a cancellation that unwinds past the escalation leaks the whole group
+    with nothing left to retry it — and skips the provider's following
+    terminate_background_processes. The escalation must therefore be shielded. The
+    leader exits on SIGTERM at ~0s (the sandboxed bwrap shape) while a TERM-ignoring
+    member keeps the group alive, so the poll is still running when the deadline
+    fires."""
+    import anyio
+
+    from imp.agents.tools.context import ToolContext, terminate_running_processes
+
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
+    ready = tmp_path / "member.pid"
+    member = tmp_path / "member.py"
+    member.write_text(
+        "import os, pathlib, signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+        "time.sleep(3600)\n")
+    script = tmp_path / "run.sh"
+    script.write_text(
+        f"{shlex.quote(sys.executable)} {shlex.quote(str(member))} "
+        f"{shlex.quote(str(ready))} &\n"
+        "wait\n")
+
+    async def go() -> None:
+        proc = await anyio.open_process(
+            ["sh", str(script)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        ctx.running_processes.append(proc)
+        deadline = time.monotonic() + 20.0     # generous: only bounds process startup
+        while not (ready.exists() and ready.read_text().strip()):
+            assert time.monotonic() < deadline, "the group member never started"
+            await anyio.sleep(0.02)
+        # 0.5 well under the 8.0 grace, so the deadline lands mid-poll — the shape
+        # signals.py's 2.0s budget produces against the real 4.0s grace.
+        with anyio.move_on_after(0.5) as scope:
+            await terminate_running_processes(ctx, timeout=8.0)
+        assert scope.cancelled_caught, (
+            "the caller deadline did not fire — the test is not exercising the hazard")
+
+    anyio.run(go)
+    _await_death(
+        int(ready.read_text()),
+        "the group survived a caller deadline that fired mid-grace — the escalation "
+        "was cancelled and the drained registry leaves nothing to retry it")
 
 
 def test_tool_context_has_event_log_field(tmp_path) -> None:
