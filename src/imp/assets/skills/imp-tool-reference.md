@@ -102,7 +102,10 @@ anyway.
   promoted to a background task instead of being killed: the call returns the
   same `{id, pid, command, status, out_path, err_path}` descriptor plus a
   `note`, and the task is thereafter read via `bash_output(id)` and stopped via
-  `bash_kill(id)`.
+  `bash_kill(id)`. The deadline starts when the command actually starts — not
+  when you issued it. A bash call sharing an assistant message with `sub_agent`
+  calls can wait for the entire subagent batch first, then burn its full budget
+  and be promoted; issue bash in a separate message.
 - A denied write (a sandbox-masked path) surfaces the raw OS error plus a
   `sandbox_note` naming the boundary — foreground only; retrying never helps.
 - Background (`run_in_background=true`): returns `{id, pid, command, status,

@@ -97,10 +97,11 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
             "Returns the subagent's final message as a plain string. "
             "Independent subtasks issued as multiple sub_agent calls in ONE "
             "assistant message run concurrently; issue dependent subtasks "
-            "sequentially across turns. The relative ordering of sub_agent "
-            "calls and non-sub_agent tools issued in the same message is "
-            "unspecified: do not place a non-sub_agent tool that depends on a "
-            "sub_agent's effects (or vice versa) in the same message as sub_agent calls."
+            "sequentially across turns. A non-sub_agent tool issued in the "
+            "same message may not start until every sub_agent in that message "
+            "has finished — stalling it for minutes and starting its own "
+            "timeout only then. Issue other tools in a separate message, and "
+            "never one that depends on a sub_agent's effects (or vice versa)."
         ),
         input_schema=schema,
         fn=_invoke,

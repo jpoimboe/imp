@@ -6,23 +6,23 @@ from imp.agents.subagents import make_task_tool
 
 # §4 semantics the description MUST convey (derived from the spec, not from the
 # implementation string): independent task calls in one message run concurrently,
-# and the relative ordering of task vs non-task calls in one message is unspecified.
+# and a non-task call in the same message may stall until the whole batch ends.
 _CONCURRENT = "run concurrently"
-_UNSPECIFIED = "unspecified"
+_BATCH_WAIT = "may not start until every sub_agent"
 
 
 def test_anthropic_task_description_has_elicitation_language() -> None:
     from imp.providers.anthropic import _anthropic_tool_schema
     desc = _anthropic_tool_schema(make_task_tool())["description"]
     assert _CONCURRENT in desc
-    assert _UNSPECIFIED in desc
+    assert _BATCH_WAIT in desc
 
 
 def test_openai_task_description_has_elicitation_language() -> None:
     from imp.providers.openai import _responses_tool_schema
     desc = _responses_tool_schema(make_task_tool())["description"]
     assert _CONCURRENT in desc
-    assert _UNSPECIFIED in desc
+    assert _BATCH_WAIT in desc
 
 
 def test_codex_task_description_has_elicitation_language(tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_codex_task_description_has_elicitation_language(tmp_path: Path) -> None
     _register_tool(app, make_task_tool(), ctx=ctx, state=RunState(cap=10))
     desc = app._tool_manager._tools["sub_agent"].description
     assert _CONCURRENT in desc
-    assert _UNSPECIFIED in desc
+    assert _BATCH_WAIT in desc
 
 
 def test_claude_code_task_description_has_elicitation_language(
@@ -56,4 +56,4 @@ def test_claude_code_task_description_has_elicitation_language(
     )
     wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, _RunState(), sdk_tool)
     assert _CONCURRENT in wrapped.description
-    assert _UNSPECIFIED in wrapped.description
+    assert _BATCH_WAIT in wrapped.description

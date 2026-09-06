@@ -1002,7 +1002,7 @@ async def test_dispatch_task_holds_limiter_during_drive(tmp_path: Path) -> None:
 def test_make_task_tool_description_has_parallel_guidance() -> None:
     """§4/AC35: the single task description carries the parallel-dispatch
     guidance every provider advertises (concurrency for independent subtasks,
-    sequencing for dependent ones, unspecified task-vs-non-task ordering)."""
+    sequencing for dependent ones, the co-issued-tool stall hazard)."""
     desc = make_task_tool().description
     # Still names what the tool does.
     assert "subagent" in desc
@@ -1010,8 +1010,12 @@ def test_make_task_tool_description_has_parallel_guidance() -> None:
     assert "concurrently" in desc
     # Dependent subtasks sequence across turns.
     assert "sequentially across turns" in desc
-    # task-vs-non-task ordering within one message is not guaranteed.
-    assert "unspecified" in desc
+    # A non-sub_agent tool in the same message can stall behind the batch,
+    # and only then start its own timeout.
+    assert "may not start until every sub_agent" in desc
+    assert "starting its own timeout only then" in desc
+    # The dependency warning survives the rewrite.
+    assert "depends on a sub_agent's effects" in desc
     # The tier-bearing variant shares the same description.
     assert make_task_tool(("low", "high")).description == desc
 
