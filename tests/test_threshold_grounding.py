@@ -147,7 +147,7 @@ def test_threshold_concierge_routes_to_corpus_not_removed_spokes() -> None:
     assert "the skills it maps to" not in concierge
 
 
-def test_sandbox_limits_partial_documents_both_hatches() -> None:
+def test_sandbox_limits_partial_documents_the_hatch_and_the_dump_recipe() -> None:
     text = (PARTIALS / "sandbox-limits.md").read_text()
     # Self-contained section header.
     assert "## When the sandbox blocks you" in text

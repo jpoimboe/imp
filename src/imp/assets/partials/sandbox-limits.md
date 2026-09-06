@@ -12,10 +12,11 @@ one: give the user the exact command to run in their own shell.
 
 ## When the sandbox blocks you
 
-imp's bash sandbox runs every shell command in a fresh user namespace, so an agent
-cannot attach a debugger (`gdb`, `py-spy`, `strace`) to any live process, and cannot
-read the masked paths (secrets, and this project's imp state outside this quest's own
-home). Two escape hatches exist; recommend the fitting one.
+imp's bash sandbox runs every shell command in a fresh user and pid namespace, so an
+agent cannot attach a debugger (`gdb`, `py-spy`, `strace`) to any live process, cannot
+see or signal any process outside its own command, and cannot read the masked paths
+(secrets, and this project's imp state outside this quest's own home). One escape hatch
+exists, plus one recipe that needs it.
 
 **`/sandbox off` — run this session unsandboxed.** Whenever the sandbox itself is what
 blocks the task — a debugger on a live host process, or a read of a masked path — tell
@@ -26,14 +27,13 @@ human-only — only the user can type it, and no agent or tool path reaches it. 
 re-enables itself when the step ends; remind the user they can type `/sandbox on` to
 re-confine sooner.
 
-**`kill -USR1 <pid>` — dump a wedged imp process's own stacks.** Introspecting
-imp's *own* long-lived processes — especially a session daemon whose event loop
-looks wedged — needs no unsandboxing, because signals cross user namespaces. A
-daemon's live pid sits in this quest's lock file `{{ quest.home }}/lock`. The handler
-appends an all-thread traceback plus asyncio-task section — captured even when
-the loop is stuck — to that process's dump file `{{ quest.home }}/stack-dump.txt`;
-read it to see where it hangs. Repeated signals append repeated timestamped
-sections.
+**Stack-dumping a wedged imp process needs `/sandbox off`.** Introspecting imp's *own*
+long-lived processes — especially a session daemon whose event loop looks wedged —
+means signalling a host pid, which the pid namespace puts out of reach. After
+`/sandbox off`, `kill -USR1 <pid>` against the live pid in this quest's lock file
+`{{ quest.home }}/lock` appends an all-thread traceback plus asyncio-task section —
+captured even when the loop is stuck — to `{{ quest.home }}/stack-dump.txt`. Repeated
+signals append repeated timestamped sections.
 
 ## imp state on disk is masked — load `imp-knowledge`
 
