@@ -654,3 +654,61 @@ async def test_claude_code_provider_retry_resume_journals_the_retry_note(
              and e["payload"].get("subtype") == "continuation"]
     assert len(conts) == 1, log.read()
     assert conts[0]["payload"]["content"][0]["text"] == RESUME_RETRY_NUDGE
+
+
+def _seed_between_turns_marker_transcript(inv_dir: Path) -> None:
+    """An interrupt that landed BETWEEN turns: the marker sits on an assistant
+    turn, with no rejection beneath it to re-frame. Left untouched by design."""
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(role="assistant", content=(
+        TextBlock(text="partial thought, cut off"),)))
+    transcript.append(Message(role="user", content=(TextBlock(text=_MARKER),)))
+
+
+@pytest.mark.anyio
+async def test_claude_code_subagent_interrupt_marker_resume_continues(
+    tmp_path: Path,
+) -> None:
+    """Criterion 11(a): at subagent_depth > 0 with no user_input_fn the repaired
+    resume delivers the nudge and runs to a real complete_step — not the
+    no_user_input_fn error terminal, and not a bare EndOfTurn re-emitting the
+    interrupted turn's partial text as the subagent's deliverable."""
+    log, _created, _records, events = await _run_claude_code_resume(
+        tmp_path, subagent_depth=1)
+
+    assert not any(
+        e["type"] == "error" and e["payload"].get("kind") == "no_user_input_fn"
+        for e in events), events
+    assert events[-1]["type"] == "agent_result"
+    # A repair that dropped the tool_result turn too would leave an assistant
+    # tail: EndOfTurn at depth, carrying "Dispatching the coder." here instead.
+    assert events[-1]["payload"] == {"status": "Success"}
+    conts = _continuations(log)
+    assert len(conts) == 1, log.read()
+    assert conts[0]["payload"]["content"][0]["text"] == RESUME_CONTINUE_NUDGE
+
+
+@pytest.mark.anyio
+async def test_claude_code_subagent_between_turns_marker_resume_unchanged(
+    tmp_path: Path,
+) -> None:
+    """Criterion 11(b): the between-turns marker at subagent_depth > 0 resumes
+    exactly as on main — the helper is a no-op, the marker stays on disk and
+    streams as the delta, and pending_human_tail still suppresses the nudge."""
+    from imp.agents.runner import TextBlock
+    from imp.agents.transcript import Transcript
+
+    log, created, _records, events = await _run_claude_code_resume(
+        tmp_path, seed=_seed_between_turns_marker_transcript, subagent_depth=1)
+
+    assert events[-1]["type"] == "agent_result"
+    assert events[-1]["payload"] == {"status": "Success"}
+    assert _continuations(log) == []
+    loaded = Transcript(tmp_path / "step" / "transcript.jsonl").load()
+    assert loaded[2].role == "user"
+    assert loaded[2].content == (TextBlock(text=_MARKER),)
+    assert _MARKER in _shipped_blob(created, [])
