@@ -218,3 +218,38 @@ def test_trimmed_reviewers_keep_their_own_rationale() -> None:
     assert "base-side incoming diff" in ir
     assert "ran immediately before this review" in ir
     assert "already passed at the current tree" not in ir
+
+
+def test_code_reviewer_no_longer_grants_a_full_run() -> None:
+    body = _agent_body("code-reviewer")
+    for gone in ("specific reason to doubt", "verify independently",
+                 "e.g. running a linter"):
+        assert gone not in body, gone
+    assert "run the narrowest checks that cover the change" in body
+    assert "**Never commit, `git add`/stage, or edit files.**" in body
+
+
+def test_plan_reviewer_aims_reconstruction_and_names_its_scratch_scope() -> None:
+    body = _agent_body("plan-reviewer")
+    assert "Reconstructing the prescribed code in a scratch copy" in body
+    assert "Never run the whole suite" in body
+    assert "You may write exactly one file" in body
+    assert "temporary directory outside the tree, which is where any reconstruction" in body
+    assert "Write no other file." not in body
+    assert "Scratch files aside, this is the only file you may write" in body
+
+
+def test_only_the_four_exempt_bodies_still_name_the_full_suite() -> None:
+    bodies = sorted(p.name for p in _AGENTS_DIR.glob("*.md"))
+    assert len(bodies) == 19
+    assert {n for n in bodies if _names_the_full_suite(n)} == {
+        "task-lead.md", "deferred-sweep.md", "plan-reviewer.md", "spiker.md"}
+
+
+def test_the_two_carve_outs_are_the_only_other_occurrences() -> None:
+    for name, carve in (("plan-reviewer.md", "never run the whole suite"),
+                        ("spiker.md", "a full suite run")):
+        low = (_AGENTS_DIR / name).read_text().lower()
+        assert carve in low, name
+        rest = low.replace(carve, "")
+        assert not any(ph in rest for ph in _SWEEP_PHRASES), name
