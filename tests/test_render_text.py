@@ -3383,6 +3383,10 @@ def test_conventions_doc_records_the_narrowed_caret_rule() -> None:
     flat = " ".join(text.split())
     assert "## Color in agent prose" in text
     assert "SGR color inside a fenced code block in agent prose survives verbatim" in flat
+    # The doc must record that a model-typed bare CSI is armed, not merely that a
+    # real ESC survives — and that a defused `^[` is exempt from the arming.
+    assert "a bare `[1;33m` in a fenced body has the escape restored first" in flat
+    assert "never after a `^[`" in flat
     assert "any escape outside a fence, still renders as `^[`" in flat
     assert "the `--md`/`--html` exports strip SGR entirely" in flat
     # The section names the primitive; a rename must not strand the reader.
