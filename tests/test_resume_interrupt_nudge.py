@@ -712,3 +712,21 @@ async def test_claude_code_subagent_between_turns_marker_resume_unchanged(
     assert loaded[2].role == "user"
     assert loaded[2].content == (TextBlock(text=_MARKER),)
     assert _MARKER in _shipped_blob(created, [])
+
+
+@pytest.mark.anyio
+async def test_claude_code_interject_wins_over_repaired_interrupt_nudge(
+    tmp_path: Path,
+) -> None:
+    """Criterion 13: a Ctrl-C steer's typed text is drained and delivered instead
+    of the nudge, and the repair means it no longer contradicts a tool_result
+    telling the model it was rejected."""
+    _log, created, records, events = await _run_claude_code_resume(
+        tmp_path, queued=["actually, run the tests first"])
+
+    assert events[-1]["type"] == "agent_result"
+    blob = _shipped_blob(created, records)
+    assert "actually, run the tests first" in blob
+    assert RESUME_CONTINUE_NUDGE not in blob
+    assert "The tool use was rejected" not in blob
+    assert _INTERRUPTED_PREFIX in blob
