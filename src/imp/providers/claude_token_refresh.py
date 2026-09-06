@@ -56,7 +56,7 @@ class RefreshOutcome:
     expires_at: int | None = None
 
 
-def _canonical_dir(env: Mapping[str, str]) -> Path:
+def canonical_dir(env: Mapping[str, str]) -> Path:
     override = env.get("CLAUDE_CONFIG_DIR")
     return Path(override) if override else Path.home() / ".claude"
 
@@ -163,7 +163,7 @@ def refresh_canonical_token(
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return RefreshOutcome(NOT_APPLICABLE)
     try:
-        base = _canonical_dir(env)
+        base = canonical_dir(env)
     except RuntimeError:
         return RefreshOutcome(NOT_APPLICABLE)
     creds_path = base / ".credentials.json"
@@ -208,7 +208,7 @@ def _oauth_timestamp(key: str, env: Mapping[str, str] | None) -> int | None:
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return None
     try:
-        base = _canonical_dir(env)
+        base = canonical_dir(env)
     except RuntimeError:
         return None
     oauth = _oauth_of(_load_credentials(base / ".credentials.json"))

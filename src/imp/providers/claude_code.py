@@ -117,7 +117,7 @@ from imp.providers.claude_code_session_store import (
 from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     RefreshOutcome,
-    _canonical_dir,
+    canonical_dir,
     canonical_expires_at,
     refresh_canonical_token,
 )
@@ -150,7 +150,7 @@ def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object
     base = config_dir
     if base is None:
         with contextlib.suppress(RuntimeError):     # no resolvable home dir
-            base = _canonical_dir(os.environ)
+            base = canonical_dir(os.environ)
     expires_at: int | None = None
     if base is not None:
         try:
