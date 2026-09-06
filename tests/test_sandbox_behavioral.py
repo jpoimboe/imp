@@ -15,9 +15,11 @@ import contextlib
 import dataclasses
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -29,7 +31,7 @@ from imp import __version__
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.bg import terminate_background_processes
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine import worktree as wt
 from imp.engine.sandbox import (
     SandboxConfig,
@@ -1908,3 +1910,54 @@ def test_worktrees_mask_draft_concierge_prune_spares_siblings() -> None:
             wt.remove_worktree(control, "B", force=True)
         shutil.rmtree(control, ignore_errors=True)
 
+
+
+def test_bash_tool_teardown_lets_a_sigterm_trap_finish() -> None:
+    """Interrupting the bash tool leaves a sandboxed command its grace: the trap
+    sleeps 0.3s and only then writes a marker into the worktree, host-visible through
+    the rw bind. The marker must exist once terminate_running_processes has returned.
+    Nothing here asserts elapsed time — the marker is polled — and the teardown is
+    held until the command signals readiness, so bwrap startup latency cannot race
+    the SIGTERM."""
+    root = _make_root()
+    ready = root / "up"
+    marker = root / "trap-finished"
+    ctx = _ctx(root, _active_policy(root))
+    out_holder: dict[str, object] = {}
+
+    async def _runner() -> None:
+        out_holder["out"] = json.loads(await get_registry()["bash"].async_invoke(
+            ctx,
+            {"command":
+             f"trap 'sleep 0.3; touch {shlex.quote(str(marker))}; exit 0' TERM; "
+             f"touch {shlex.quote(str(ready))}; "
+             "while :; do sleep 0.2; done"}))
+
+    async def _killer() -> None:
+        deadline = time.monotonic() + 20.0
+        while not ready.exists():
+            if time.monotonic() > deadline:
+                raise AssertionError("the sandboxed command never signalled readiness")
+            await anyio.sleep(0.02)
+        # 8.0, not the 4.0 default: ~25x headroom for the trap's 0.3s under a
+        # saturated -n auto run. Free on the passing path — teardown returns as soon
+        # as the group empties.
+        out_holder["killed"] = await terminate_running_processes(ctx, timeout=8.0)
+
+    async def _scenario() -> None:
+        with anyio.fail_after(90.0):  # single outer hang-catcher (generous)
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(_runner)
+                tg.start_soon(_killer)
+
+    try:
+        anyio.run(_scenario)
+        deadline = time.monotonic() + 20.0
+        while not marker.exists():
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    "the SIGTERM trap never completed — the SIGKILL landed before the "
+                    "grace window could be used")
+            time.sleep(0.02)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
