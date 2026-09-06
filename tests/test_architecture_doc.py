@@ -497,6 +497,20 @@ def test_invariants_forbid_handing_an_agent_a_masked_path() -> None:
     assert "Never hand an agent a path its sandbox masks." in layering
 
 
+def test_invariants_pin_the_policy_to_the_quests_project_root() -> None:
+    text = Path("docs/internals/invariants.md").read_text()
+    flat = " ".join(text.split())
+    assert ("- **The sandbox policy handed to an invocation must agree with "
+            "`quest.project_root`.** Going live mid-step flips `project_root` "
+            "to the new worktree; `_run_agent_invocation` reconciles the "
+            "policy's `worktree` and `git_worktree_self` on every entry, so a "
+            "retry or reincarnation cannot re-enter the step with a policy "
+            "still rooted at the control root.") in flat
+    # it is a live layering invariant, not a future/unbuilt aspiration
+    layering, _, _future = flat.partition("## Future / unbuilt")
+    assert "must agree with `quest.project_root`" in layering
+
+
 def test_architecture_engine_half_names_the_current_default_subagents() -> None:
     text = ARCH.read_text()
     assert (
