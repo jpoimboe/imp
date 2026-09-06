@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import stat
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -460,4 +462,198 @@ def test_force_with_an_api_key_env_is_not_applicable(tmp_path: Path) -> None:
     _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
     out = ctr.refresh_canonical_token(
         NOW, env=_env(tmp_path, ANTHROPIC_API_KEY="sk-x"), force=True)
+    assert out.outcome == ctr.NOT_APPLICABLE
+
+
+_UNREADABLE_EXPIRIES = [
+    pytest.param({}, id="missing"),
+    pytest.param({"expiresAt": True}, id="boolean"),
+    pytest.param({"expiresAt": "soon"}, id="non-numeric"),
+    pytest.param({"expiresAt": float("nan")}, id="nan"),
+    pytest.param({"expiresAt": float("inf")}, id="inf"),
+]
+
+
+def test_expires_at_of_reads_a_numeric_expiry() -> None:
+    assert ctr._expires_at_of({"expiresAt": NOW + 1000}) == NOW + 1000
+    assert ctr._expires_at_of({"expiresAt": float(NOW + 1000)}) == NOW + 1000
+
+
+@pytest.mark.parametrize("oauth", _UNREADABLE_EXPIRIES)
+def test_expires_at_of_is_none_for_an_unreadable_expiry(oauth: dict[str, Any]) -> None:
+    assert ctr._expires_at_of(oauth) is None
+
+
+@pytest.mark.parametrize("oauth", _UNREADABLE_EXPIRIES)
+def test_an_unreadable_expiry_needs_refresh_and_never_raises(
+    oauth: dict[str, Any],
+) -> None:
+    assert ctr._needs_refresh(oauth, NOW) is True
+
+
+def test_needs_refresh_keeps_the_five_minute_buffer() -> None:
+    assert ctr._needs_refresh({"expiresAt": NOW + 10 * 60 * 1000}, NOW) is False
+    assert ctr._needs_refresh({"expiresAt": NOW + 5 * 60 * 1000}, NOW) is True
+    assert ctr._needs_refresh({"expiresAt": NOW - 1}, NOW) is True
+
+
+_ABSENT = object()
+
+
+def _write_creds_expiry(base: Path, value: Any) -> Path:
+    """`json.dumps` emits a bare NaN literal, which `json.loads` accepts on the way back."""
+    oauth: dict[str, Any] = {
+        "accessToken": "old-access",
+        "refreshToken": "old-refresh",
+        "subscriptionType": "max",
+    }
+    if value is not _ABSENT:
+        oauth["expiresAt"] = value
+    path = base / ".credentials.json"
+    path.write_text(json.dumps({"claudeAiOauth": oauth}), encoding="utf-8")
+    return path
+
+
+def test_a_moved_expiry_skips_the_forced_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
+    before = path.read_bytes()
+
+    def _no_http(refresh_token: str) -> dict[str, Any]:
+        raise AssertionError("a peer already rotated; no HTTP expected")
+
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True,
+        spawn_expires_at=NOW + 9 * 60 * 60 * 1000)
+
+    assert out.outcome == ctr.SKIPPED_ROTATED
+    assert out.expires_at is None
+    assert path.read_bytes() == before
+
+
+def test_a_peer_rotating_while_we_wait_for_the_lock_is_caught(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The comparison must sit inside the lock: a rotation that lands while this call
+    waits for the lock is invisible to any pre-lock read."""
+    spawn_expiry = NOW + 10 * 60 * 60 * 1000
+    path = _write_creds(tmp_path, expires_at=spawn_expiry)
+
+    @contextlib.contextmanager
+    def _lock_that_rotates(lock_path: Path, *, timeout: float) -> Iterator[None]:
+        _write_creds(tmp_path, expires_at=spawn_expiry + 1,
+                     refresh_token="peer-refresh", access_token="peer-access")
+        yield
+
+    def _no_http(refresh_token: str) -> dict[str, Any]:
+        raise AssertionError("the peer's rotation must be seen under the lock")
+
+    monkeypatch.setattr(ctr, "_token_lock", _lock_that_rotates)
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=spawn_expiry)
+
+    assert out.outcome == ctr.SKIPPED_ROTATED
+    oauth = json.loads(path.read_text(encoding="utf-8"))["claudeAiOauth"]
+    assert oauth["accessToken"] == "peer-access"
+    assert oauth["expiresAt"] == spawn_expiry + 1
+
+
+def test_no_spawn_expiry_still_rotates_a_far_from_expiry_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
+
+    def _fake(refresh_token: str) -> dict[str, Any]:
+        return {"access_token": "forced-access",
+                "refresh_token": "forced-refresh", "expires_in": 3600}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=None)
+
+    assert out.outcome == ctr.REFRESHED
+    assert out.expires_at == NOW + 3600 * 1000
+    oauth = json.loads(path.read_text(encoding="utf-8"))["claudeAiOauth"]
+    assert oauth["accessToken"] == "forced-access"
+    assert oauth["expiresAt"] == NOW + 3600 * 1000
+
+
+@pytest.mark.parametrize("value", [
+    pytest.param(_ABSENT, id="missing"),
+    pytest.param(True, id="boolean"),
+    pytest.param("soon", id="non-numeric"),
+    pytest.param(float("nan"), id="nan"),
+])
+def test_an_unreadable_under_lock_expiry_probes_instead_of_skipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: Any,
+) -> None:
+    path = _write_creds_expiry(tmp_path, value)
+    calls: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, Any]:
+        calls.append(refresh_token)
+        return {"access_token": "probe-access",
+                "refresh_token": "probe-refresh", "expires_in": 3600}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True,
+        spawn_expires_at=NOW + 10 * 60 * 60 * 1000)
+
+    assert out.outcome == ctr.REFRESHED
+    assert calls == ["old-refresh"]
+    oauth = json.loads(path.read_text(encoding="utf-8"))["claudeAiOauth"]
+    assert oauth["accessToken"] == "probe-access"
+
+
+def test_a_matching_expiry_still_rotates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawn_expiry = NOW + 10 * 60 * 60 * 1000
+    path = _write_creds(tmp_path, expires_at=spawn_expiry)
+
+    def _fake(refresh_token: str) -> dict[str, Any]:
+        return {"access_token": "probe-access",
+                "refresh_token": "probe-refresh", "expires_in": 3600}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=spawn_expiry)
+
+    assert out.outcome == ctr.REFRESHED
+    oauth = json.loads(path.read_text(encoding="utf-8"))["claudeAiOauth"]
+    assert oauth["accessToken"] == "probe-access"
+
+
+def test_a_matching_expiry_still_reports_a_dead_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawn_expiry = NOW + 10 * 60 * 60 * 1000
+    path = _write_creds(tmp_path, expires_at=spawn_expiry, refresh_token="dead")
+    before = path.read_bytes()
+
+    monkeypatch.setattr(ctr, "_request_refresh", _raise_invalid_grant)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=spawn_expiry)
+
+    assert out.outcome == ctr.FAILED_INVALID_GRANT
+    assert path.read_bytes() == before
+
+
+def test_the_env_guard_precedes_the_rotation_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_creds(tmp_path, expires_at=NOW + 10 * 60 * 60 * 1000)
+
+    def _no_read(creds_path: Path) -> dict[str, Any]:
+        raise AssertionError("the env guard must return before any credential read")
+
+    monkeypatch.setattr(ctr, "_load_credentials", _no_read)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path, CLAUDE_CODE_OAUTH_TOKEN="tok"), force=True,
+        spawn_expires_at=NOW + 9 * 60 * 60 * 1000)
+
     assert out.outcome == ctr.NOT_APPLICABLE

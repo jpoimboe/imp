@@ -24,6 +24,7 @@ import httpx
 
 REFRESHED = "refreshed"
 SKIPPED_FRESH = "skipped_fresh"
+SKIPPED_ROTATED = "skipped_rotated"
 NOT_APPLICABLE = "not_applicable"
 FAILED_TRANSIENT = "failed_transient"
 FAILED_INVALID_GRANT = "failed_invalid_grant"
@@ -81,11 +82,18 @@ def _refresh_token_of(oauth: dict[str, Any]) -> str | None:
     return rt if isinstance(rt, str) and rt else None
 
 
-def _needs_refresh(oauth: dict[str, Any], now_ms: int) -> bool:
+def _expires_at_of(oauth: dict[str, Any]) -> int | None:
     v = oauth.get("expiresAt")
     if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return True
-    return int(v) <= now_ms + _BUFFER_MS
+        return None
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    return int(v)
+
+
+def _needs_refresh(oauth: dict[str, Any], now_ms: int) -> bool:
+    v = _expires_at_of(oauth)
+    return v is None or v <= now_ms + _BUFFER_MS
 
 
 def _request_refresh(refresh_token: str) -> dict[str, Any]:
@@ -157,8 +165,13 @@ def _atomic_write_creds(creds_path: Path, data: dict[str, Any]) -> None:
 
 def refresh_canonical_token(
     now_ms: int, *, env: Mapping[str, str] | None = None, force: bool = False,
+    spawn_expires_at: int | None = None,
 ) -> RefreshOutcome:
-    """`force` skips both `_needs_refresh` short-circuits; SKIPPED_FRESH is unreachable."""
+    """`force` skips both `_needs_refresh` short-circuits; SKIPPED_FRESH is unreachable.
+    `spawn_expires_at` is compared under the lock against the expiry about to be rotated
+    and is not suppressed by `force`, which means "ignore expiry", never "ignore that a
+    peer already rotated". Both expiries must be readable for SKIPPED_ROTATED to fire: an
+    unreadable one is no trustworthy signal of a race, so the refresh proceeds."""
     env = os.environ if env is None else env
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return RefreshOutcome(NOT_APPLICABLE)
@@ -181,6 +194,10 @@ def refresh_canonical_token(
                 return RefreshOutcome(NOT_APPLICABLE)
             if not force and not _needs_refresh(oauth, now_ms):
                 return RefreshOutcome(SKIPPED_FRESH)
+            current_expires_at = _expires_at_of(oauth)
+            if (spawn_expires_at is not None and current_expires_at is not None
+                    and current_expires_at != spawn_expires_at):
+                return RefreshOutcome(SKIPPED_ROTATED)
             try:
                 tokens = _request_refresh(refresh_token)
             except RefreshInvalidGrant:
