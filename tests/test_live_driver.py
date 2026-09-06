@@ -1819,9 +1819,8 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     assert bar is not None
     rows = compose_subagent_rows(b, color=False, width=200,
                                  now_iso="2026-01-01T00:00:05+00:00")
-    assert f"sonnet {bar}" in rows[0]       # single space still binds model to graph
-    assert "sonnet · " not in rows[0]       # no middle-dot before the graph
-    # new segment order: role · elapsed · model context-bar
+    assert f"sonnet · {bar}" in rows[0]     # · separates model from gauge
+    # new segment order: role · elapsed · model · context-bar
     assert "coder · 5s · sonnet" in rows[0]              # role · elapsed · model, in order
     assert rows[0].index("5s") < rows[0].index("sonnet")  # elapsed precedes model
     assert rows[0].rstrip().endswith(bar)                # model context-bar now trailing
