@@ -261,8 +261,8 @@ async def test_dead_grant_probe_pauses_on_the_first_401(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    def _dead_on_force(now_ms: int, *, env: Any = None,
-                       force: bool = False) -> ctr.RefreshOutcome:
+    def _dead_on_force(now_ms: int, *, env: Any = None, force: bool = False,
+                       spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
         if not force:
             return ctr.RefreshOutcome(ctr.NOT_APPLICABLE)
         return ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT)

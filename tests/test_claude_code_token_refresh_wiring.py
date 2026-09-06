@@ -71,8 +71,8 @@ async def test_fresh_spawn_refreshes_before_config_dir_copy(
     (tmp_path / "art").mkdir()
     order: list[str] = []
 
-    def _fake_refresh(now_ms: int, *, env: Any = None,
-                      force: bool = False) -> ctr.RefreshOutcome:
+    def _fake_refresh(now_ms: int, *, env: Any = None, force: bool = False,
+                      spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
         order.append("refresh")
         return ctr.RefreshOutcome(ctr.REFRESHED, expires_at=NOW + 3600 * 1000)
 
@@ -109,8 +109,8 @@ async def test_native_resume_refreshes_without_materializing(
     (tmp_path / "art").mkdir()
     calls: list[str] = []
 
-    def _fake_refresh(now_ms: int, *, env: Any = None,
-                      force: bool = False) -> ctr.RefreshOutcome:
+    def _fake_refresh(now_ms: int, *, env: Any = None, force: bool = False,
+                      spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
         calls.append("refresh")
         return ctr.RefreshOutcome(ctr.SKIPPED_FRESH)
 
@@ -149,8 +149,8 @@ async def test_dead_token_raises_terminal_auth_without_materializing(
 ) -> None:
     (tmp_path / "art").mkdir()
 
-    def _dead(now_ms: int, *, env: Any = None,
-              force: bool = False) -> ctr.RefreshOutcome:
+    def _dead(now_ms: int, *, env: Any = None, force: bool = False,
+              spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
         return ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT)
 
     def _fake_materialize() -> Path:
@@ -333,8 +333,8 @@ async def test_fresh_spawn_records_the_post_refresh_canonical_expiry(
     _canonical_env(monkeypatch, canonical)
     order: list[str] = []
 
-    def _fake_refresh(now_ms: int, *, env: Any = None,
-                      force: bool = False) -> ctr.RefreshOutcome:
+    def _fake_refresh(now_ms: int, *, env: Any = None, force: bool = False,
+                      spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
         order.append("refresh")
         _write_canonical(canonical, NOW + 3600 * 1000)  # the refresh rotates it
         return ctr.RefreshOutcome(ctr.REFRESHED, expires_at=NOW + 3600 * 1000)
@@ -370,8 +370,8 @@ async def test_native_resume_records_the_canonical_expiry_too(
     _canonical_env(monkeypatch, canonical)
     materialized: list[Any] = []
 
-    def _fake_refresh(now_ms: int, *, env: Any = None,
-                      force: bool = False) -> ctr.RefreshOutcome:
+    def _fake_refresh(now_ms: int, *, env: Any = None, force: bool = False,
+                      spawn_expires_at: int | None = None) -> ctr.RefreshOutcome:
         return ctr.RefreshOutcome(ctr.SKIPPED_FRESH)
 
     def _fake_materialize() -> Path:
