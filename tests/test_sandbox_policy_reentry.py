@@ -11,9 +11,10 @@ from typing import Any
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner
-from imp.engine.executor import RunResult, run_quest
+from imp.engine.executor import RunResult, _reconcile_sandbox_policy, run_quest
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import handoff_path_for
+from imp.engine.sandbox import SandboxPolicy
 from imp.paths import project_state_dir
 from imp.providers.scripted import ScriptedAgentRunner
 from tests.conftest import _git, _init_repo
@@ -170,3 +171,26 @@ async def test_reincarnated_step_reenters_with_the_reconciled_policy(
     assert sink[1].sandbox_policy.worktree == str(wt)
     assert sink[1].sandbox_policy.git_worktree_self == str(
         tmp_path / ".git" / "worktrees" / "rc1")
+
+
+def test_draft_quest_reconcile_clears_git_worktree_self(tmp_path: Path) -> None:
+    # A control-root-rooted quest must not be handed a worktree-self bind.
+    quest = _seed_draft(tmp_path, "dr1")
+    worktree_path = str(project_state_dir(tmp_path) / "worktrees" / "dr1")
+    policy = SandboxPolicy(
+        active=False,
+        worktree=worktree_path,
+        git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(),
+        writable_caches=(),
+        extra_readable=(),
+        extra_writable=(),
+        secret_dirs=(),
+        secret_files=(),
+        setenv=(),
+        network=False,
+        git_worktree_self=str(tmp_path / ".git" / "worktrees" / "dr1"),
+    )
+    reconciled = _reconcile_sandbox_policy(policy, quest)
+    assert reconciled.worktree == str(quest.project_root)
+    assert reconciled.git_worktree_self == ""

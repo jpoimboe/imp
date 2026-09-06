@@ -1809,8 +1809,9 @@ def _reconcile_sandbox_policy(policy: Any, quest: Quest) -> Any:
     return dataclasses.replace(
         policy,
         worktree=str(quest.project_root),
-        git_worktree_self=str(
-            quest.control_root / ".git" / "worktrees" / quest.project_root.name),
+        git_worktree_self=(
+            str(quest.control_root / ".git" / "worktrees" / quest.project_root.name)
+            if quest.project_root != quest.control_root else ""),
     )
 
 
