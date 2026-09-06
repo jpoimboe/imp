@@ -302,3 +302,33 @@ def test_ordinary_auth_retry_copy_is_unchanged() -> None:
 
     assert ("warning: [auth] retry 2 (2.0s) — Failed to authenticate. API Error: "
             "401 OAuth access token has been revoked.") in _lines(events, full=False)
+
+
+def test_fmt_hm_renders_a_day_form_at_and_above_48_hours() -> None:
+    from imp.cli.narrative import _fmt_hm
+
+    assert _fmt_hm(187200) == "2d 4h"      # 52h — the weekly-window countdown shape
+    assert _fmt_hm(172800) == "2d 0h"      # exactly 48h: the day form starts here
+    assert _fmt_hm(172799) == "47h 59m"    # one second below: byte-unchanged
+    assert _fmt_hm(691200) == "8d 0h"      # the 8-day ceiling a reset hint may carry
+
+
+def test_the_retry_line_renders_a_multi_day_wait_in_days() -> None:
+    from imp.cli.render_text import render_tree
+
+    tree = nv.build_tree([
+        {"id": "e1", "parent_id": None, "agent_id": None, "type": "agent_retry",
+         "payload": {"category": "rate_limit", "attempt": 1,
+                     "backoff_seconds": 187200.0, "hinted": True}},
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+
+    assert "[rate_limit] waiting for limit reset — retry 1 in 2d 4h" in out
+
+
+def test_the_subagent_retry_mirror_renders_a_multi_day_wait_in_days() -> None:
+    events = _sub_retry_events(category="rate_limit", attempt=1,
+                               backoff_seconds=187200.0, hinted=True)
+
+    assert ("warning: [rate_limit] code-reviewer waiting for limit reset"
+            " — retry 1 in 2d 4h") in _lean(events)

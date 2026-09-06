@@ -2118,9 +2118,13 @@ def _h_sandbox_overlay_unavailable(
 
 
 def _fmt_hm(seconds: float) -> str:
-    """`2h 13m` / `45m` compact duration; hours segment shown only when non-zero."""
+    """`2d 4h` / `2h 13m` / `45m` compact duration; the day form takes over at 48
+    hours, where `52h 0m` stops reading as a duration. Every caller can wait days."""
     total_minutes = int(seconds // 60)
     hours, minutes = divmod(total_minutes, 60)
+    if hours >= 48:
+        days, hours = divmod(hours, 24)
+        return f"{days}d {hours}h"
     if hours:
         return f"{hours}h {minutes}m"
     return f"{minutes}m"

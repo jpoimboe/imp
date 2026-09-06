@@ -3603,3 +3603,14 @@ def test_compose_subagent_rows_take_the_window_from_a_usage_patch() -> None:
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert len(rows) == 1
     assert "9%" in rows[0]      # the sub's own reading, against 258400 not 1.05M
+
+
+def test_activity_countdown_renders_a_multi_day_wait_in_days() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    # 187260s total, 60s elapsed -> 187200s left = 2d 4h.
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=187260.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:01:00+00:00")
+
+    assert "2d 4h left" in line
