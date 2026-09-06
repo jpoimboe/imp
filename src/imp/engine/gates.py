@@ -63,7 +63,8 @@ def _graceful_kill(proc: subprocess.Popen[bytes]) -> None:
         if proc.poll() is not None:
             try:
                 os.killpg(proc.pid, 0)
-            except (ProcessLookupError, PermissionError):  # gone, or the pgid was recycled by another uid
+            # gone, or the pgid was recycled by another uid (EPERM)
+            except (ProcessLookupError, PermissionError):
                 break
         time.sleep(_KILL_POLL_INTERVAL_S)
     else:
