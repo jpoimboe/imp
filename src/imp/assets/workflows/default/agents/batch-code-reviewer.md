@@ -54,11 +54,12 @@ not behavior. A genuine plan-echo on a key test is a **Major** finding: name the
 `findings` and route it as a blocking task_gap; uncertain or lesser instances are **Minor**.
 
 **Don't re-run the suite.** The verification gate already passed at the current tree
-immediately before this review, and you cannot have changed that tree (you do not commit),
-so re-running the full suite tells you nothing new; don't. Your job is to read the tests,
-not re-run them — judge whether they verify real behavior (falsifiability, above). For a
-specific hypothesis that a runtime behavior broke, run only the
-single narrowest check that tests it.
+immediately before this review, so re-running tells you nothing new. Read the tests
+rather than re-running them — judge whether they verify real behavior (falsifiability,
+above). When you genuinely doubt a key test and reading cannot settle it, copy that
+test and the code it covers to a scratch directory outside the tree, revert the change
+there, and run the one test: still green against unpatched code means plan-echo. Never
+write inside the worktree.
 
 **Terminal-UI changes — see them.** When the change alters how a terminal program looks or
 behaves, load `imp-driving-terminal-uis` (`load_skill(name="imp-driving-terminal-uis")`) and
@@ -67,6 +68,10 @@ render the result with your impty tools before judging it — the diff won't sho
 **Browser-UI changes — see them.** When the change alters a browser-rendered surface, load
 `imp-driving-web-uis` (`load_skill(name="imp-driving-web-uis")`) and render the affected pages
 before judging them — neither the diff nor an HTML-string assertion shows a rendered page.
+
+**Both renders obey the read-only tree** and the sandbox enforces it: render from what the
+verification gate just built. If a render needs to write inside the tree, copy what it needs
+to a scratch directory outside the tree and run it there.
 
 ## Severity Classification
 

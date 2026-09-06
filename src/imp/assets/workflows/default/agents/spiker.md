@@ -30,6 +30,10 @@ home is never mutated. Each command starts from the real home again, so a `pip
 install --user` or `git config --global` will not be there for the next one — do
 it in the same command that needs it, or install into the worktree.
 
+**The full-suite rule does not bind you here.** Your worktree is disposable and your
+job is empirical: if answering the question needs a patched tree, a reconstructed
+module, or a full suite run, do it.
+
 ## Investigate empirically
 
 - Reproduce the question as runnable code: a script, a patch, a probe, a

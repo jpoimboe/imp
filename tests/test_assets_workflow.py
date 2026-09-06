@@ -780,8 +780,9 @@ def test_review_steps_read_only_tightening():
     # Write-free, test-free reviewers are locked to a read-only worktree.
     assert steps["spec-reviewer"].read_only == (".",)
     assert steps["plan-reviewer"].read_only == (".",)
-    # Reviewers that run tests in-tree stay loose (cannot be confined).
-    assert steps["quest-review"].read_only == ()
+    # quest-review runs no in-tree checks either, so it is confinable too.
+    assert steps["quest-review"].read_only == (".",)
+    # integration-reviewer shares the merge lane's worktree, so it stays loose.
     assert steps["integration-reviewer"].read_only == ()
 
 

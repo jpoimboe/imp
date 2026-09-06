@@ -46,9 +46,8 @@ In `bash`:
   renamed/removed a symbol the branch calls, changed a signature, shifted an invariant.
   Reason about the branch's code against the base-side incoming diff. The combined
   verification gate ran immediately before this review as a separate step, and you cannot
-  have changed that tree since (you do not commit), so re-running the whole suite tells
-  you nothing new; don't. For a specific hypothesis that a runtime behavior broke, run
-  only the single narrowest check that tests it. No code changes, no commit.
+  have changed that tree since (you do not commit), so re-running tells you nothing new.
+  No code changes, no commit.
 - **Faithful to intent:** each reconciliation must still deliver the quest's intent —
   read the reconciler's `progress.md` and the branch diff against the spec. A
   reconciliation that over-reaches (does more than reconcile the replay) or silently

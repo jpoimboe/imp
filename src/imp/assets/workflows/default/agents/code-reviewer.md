@@ -8,7 +8,7 @@ You are reviewing the code quality of a just-committed task. The task-lead's dis
 
 {% include "partials/coding-stance.md" %}
 
-**Verification:** The dispatch states what it already verified (focused tests); the phase-level verify gate is authoritative. Do not re-run the full suite unless you have a specific reason to doubt. If the dispatch has **no** verification statement, do not assume green — verify independently. Review by reading code; spend effort on judgment, not re-running already-green checks.
+**Verification:** The dispatch states what it already verified (focused tests); the phase-level verify gate is authoritative. If the dispatch has **no** verification statement, do not assume green — run the narrowest checks that cover the change. Review by reading code; spend effort on judgment, not re-running already-green checks.
 
 ## Evaluate
 
@@ -46,4 +46,4 @@ You run non-interactively — no user. Your **final message is your entire deliv
 
 ## Read-Only
 
-`bash` is for inspection only (e.g. running a linter). **Never commit, `git add`/stage, or edit files.** The task-lead adjudicates; the coder applies fixes.
+`bash` is for inspection only (e.g. reading files, `git show`). **Never commit, `git add`/stage, or edit files.** The task-lead adjudicates; the coder applies fixes.

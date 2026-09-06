@@ -111,17 +111,13 @@ unimplemented task, or the re-opened task from injected feedback):
    contradictory framing.
 
    **State what was already verified.** In the reviewer's dispatch, state what the
-   coder verified for this quest — the focused tests it ran. Do **not** run the
-   project's full suite, lint, or typecheck yourself: the phase-level `verify` gate
-   is the authoritative combined check and runs once after the implement phase, so a
-   run here only duplicates it. State only what was actually run.
+   coder verified for this quest — the focused tests it ran.
+   State only what was actually run.
 
    {% if vars.fast_path %}
    **Fast-path: the spec waived tests.** Tell the coder in the dispatch: "the spec
    waived **new** tests — do **not** add or modify tests; make exactly the task's
-   edits, then commit. Do **not** run the project's full suite or lint/typecheck —
-   the phase-level `verify` gate runs the project's combined checks after this
-   phase." **One reviewer:** dispatch ONLY `code-reviewer` at the **`medium` tier**:
+   edits, then commit." **One reviewer:** dispatch ONLY `code-reviewer` at the **`medium` tier**:
    `sub_agent(subagent_name="code-reviewer", tier="medium", …)`. (Trivial diffs
    waived new tests, so spec-conformance is least likely to be the failure mode;
    end-of-run spec coverage lives in the whole-diff batch-code-reviewer.)

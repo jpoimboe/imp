@@ -28,13 +28,21 @@ Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
    `imp events {{ quest.id }}` — the provenance record of what was decided, not current state.
 
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
-plan files: a requirement absent here may belong to another plan. You are read-only with a single exception — the sole file you may write is `{{ quest.home }}/deferred.md`, only to append an untagged scope-out line (see backstop below). Write no other file.
+plan files: a requirement absent here may belong to another plan. The project tree is read-only and the sandbox enforces it. You may write exactly one file of record — `{{ quest.home }}/deferred.md`, to append an untagged scope-out line (see backstop below) — plus whatever scratch files you need in a temporary directory outside the tree, which is where any reconstruction belongs.
 
 ## Review the prescribed code like a diff (primary)
 
 Trust nothing the plan asserts. Verify every factual claim yourself — file paths,
 current signatures, what existing code returns or does — by opening the source
 with `read_file`/`grep`. A confident-sounding claim is not evidence.
+
+Reconstructing the prescribed code in a scratch copy and running **targeted** checks
+is legitimate — aim it at what a green suite cannot tell you: a prescribed test that
+already passes against the unpatched baseline, or a silent behavior change no test
+covers. Scope runs to the files the change touches. Never run the whole suite: the
+`verify` gate catches a lint error or a broken existing assertion on its own, and a
+scratch copy is not a git checkout, so a full run fails tests the real tree passes and
+needs a second baseline run to cancel its own noise.
 
 Then review the prescribed code the way a senior engineer reviews a diff:
 
@@ -74,7 +82,7 @@ When a spec-mandated item is neither delivered, assigned to a later plan by the 
 
 `- [ ] DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: quest]`
 
-This is the one file you may write. `gap-check` still enforces the clause regardless; the untagged line makes the scope-out durable so the sweep can drain it and the user is never re-asked.
+Scratch files aside, this is the only file you may write. `gap-check` still enforces the clause regardless; the untagged line makes the scope-out durable so the sweep can drain it and the user is never re-asked.
 
 ## The Decisions section
 

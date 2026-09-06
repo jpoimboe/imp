@@ -208,6 +208,7 @@ phases:
         file: agents/batch-code-reviewer.md
         tier: high
         label: reviewing entire diff
+        read_only: ["."]
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The batch-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}

@@ -97,9 +97,9 @@ SUBAGENT_DELIVERABLE_NOTE = engine_prompt("subagent-deliverable.md")
 
 # Universal behavioral base, split into a HEAD (identity + `# System`) and a TAIL
 # (`# Using your tools` onward) — injected into every agent regardless of workflow.
-# A workflow may supply a `persona.md`, rendered and injected between HEAD and TAIL
-# (the persona MECHANISM is retained for other workflows), but imp itself ships none:
-# imp's coding stance is an opt-in `partials/coding-stance.md` include in agent bodies.
+# A workflow may supply a `persona.md`, rendered and injected between HEAD and TAIL;
+# the default workflow ships one carrying the verify-gate rule. imp's coding stance
+# is separate — an opt-in `partials/coding-stance.md` include in agent bodies.
 # CC's harness fiction is removed (no permission modes, no context compaction, no
 # `<system-reminder>` semantics, no env/gitStatus block).
 _CORE_HEAD = engine_prompt("core-head.md")

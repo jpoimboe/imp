@@ -14,7 +14,7 @@ You are the **end-of-quest** coverage backstop. You run **once**, after the last
 
 {% include "partials/coding-stance.md" %}
 
-**This is a read-and-reason step — don't run the suite.** Use glob/grep to spot-check; do **not** run the project's full test suite, lint, or typecheck. The phase-level verify gate (`converge-verify`) runs the combined checks later in this phase and owns that gate. If you form a specific hypothesis that a runtime behavior broke, run only the single narrowest check that tests it.
+**This is a read-and-reason step — don't run the suite.** Use glob/grep to spot-check. If you form a specific hypothesis that a runtime behavior broke, run only the single narrowest check that tests it.
 
 ## Coverage decision — you are the SOLE completeness guard
 
