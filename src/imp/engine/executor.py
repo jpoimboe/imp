@@ -1617,6 +1617,8 @@ async def _route_agent(
         }
         if result.error is not None and result.error.message:
             retry_payload["message"] = result.error.message
+        if result.error is not None and result.error.kind:
+            retry_payload["kind"] = result.error.kind
         if hinted:
             retry_payload["hinted"] = True
         _emit(log, "agent_retry", retry_payload, agent_id=None)
