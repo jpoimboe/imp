@@ -205,3 +205,16 @@ def test_stripped_bodies_defer_to_the_persona() -> None:
     assert "integration-verify" in rec
     assert "the very next step" in rec
     assert "State only what was actually run" in _agent_body("task-lead")
+
+
+def test_trimmed_reviewers_keep_their_own_rationale() -> None:
+    for name in ("batch-code-reviewer.md", "integration-review.md"):
+        assert not _names_the_full_suite(name), name
+    bcr = _agent_body("batch-code-reviewer")
+    assert "nothing new" in bcr
+    assert "still green against unpatched code means plan-echo" in bcr
+    ir = _agent_body("integration-review")
+    assert "nothing new" in ir
+    assert "base-side incoming diff" in ir
+    assert "ran immediately before this review" in ir
+    assert "already passed at the current tree" not in ir
