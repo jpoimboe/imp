@@ -81,11 +81,18 @@ def _refresh_token_of(oauth: dict[str, Any]) -> str | None:
     return rt if isinstance(rt, str) and rt else None
 
 
-def _needs_refresh(oauth: dict[str, Any], now_ms: int) -> bool:
+def _expires_at_of(oauth: dict[str, Any]) -> int | None:
     v = oauth.get("expiresAt")
     if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return True
-    return int(v) <= now_ms + _BUFFER_MS
+        return None
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    return int(v)
+
+
+def _needs_refresh(oauth: dict[str, Any], now_ms: int) -> bool:
+    v = _expires_at_of(oauth)
+    return v is None or v <= now_ms + _BUFFER_MS
 
 
 def _request_refresh(refresh_token: str) -> dict[str, Any]:

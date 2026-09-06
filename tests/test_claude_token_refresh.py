@@ -461,3 +461,35 @@ def test_force_with_an_api_key_env_is_not_applicable(tmp_path: Path) -> None:
     out = ctr.refresh_canonical_token(
         NOW, env=_env(tmp_path, ANTHROPIC_API_KEY="sk-x"), force=True)
     assert out.outcome == ctr.NOT_APPLICABLE
+
+
+_UNREADABLE_EXPIRIES = [
+    pytest.param({}, id="missing"),
+    pytest.param({"expiresAt": True}, id="boolean"),
+    pytest.param({"expiresAt": "soon"}, id="non-numeric"),
+    pytest.param({"expiresAt": float("nan")}, id="nan"),
+    pytest.param({"expiresAt": float("inf")}, id="inf"),
+]
+
+
+def test_expires_at_of_reads_a_numeric_expiry() -> None:
+    assert ctr._expires_at_of({"expiresAt": NOW + 1000}) == NOW + 1000
+    assert ctr._expires_at_of({"expiresAt": float(NOW + 1000)}) == NOW + 1000
+
+
+@pytest.mark.parametrize("oauth", _UNREADABLE_EXPIRIES)
+def test_expires_at_of_is_none_for_an_unreadable_expiry(oauth: dict[str, Any]) -> None:
+    assert ctr._expires_at_of(oauth) is None
+
+
+@pytest.mark.parametrize("oauth", _UNREADABLE_EXPIRIES)
+def test_an_unreadable_expiry_needs_refresh_and_never_raises(
+    oauth: dict[str, Any],
+) -> None:
+    assert ctr._needs_refresh(oauth, NOW) is True
+
+
+def test_needs_refresh_keeps_the_five_minute_buffer() -> None:
+    assert ctr._needs_refresh({"expiresAt": NOW + 10 * 60 * 1000}, NOW) is False
+    assert ctr._needs_refresh({"expiresAt": NOW + 5 * 60 * 1000}, NOW) is True
+    assert ctr._needs_refresh({"expiresAt": NOW - 1}, NOW) is True
