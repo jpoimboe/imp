@@ -71,3 +71,8 @@ def test_explorer_toolset_description_word_budget() -> None:
     # AC 2a: down from ~1,230 words to ~500 or fewer (a 60%+ cut).
     # The pinned text stays well under the 500-word ceiling.
     assert total <= 500, f"explorer toolset description budget exceeded: {total} words"
+
+
+def test_bash_description_warns_pids_do_not_carry_across_calls() -> None:
+    assert ("Each call gets its own pid namespace, so pids never carry across calls."
+            in _desc("bash"))

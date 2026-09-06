@@ -38,6 +38,21 @@ def test_partial_states_the_write_bounds_ahead_of_the_hatches() -> None:
     assert flat.index("## What you cannot write") < flat.index("## When the sandbox blocks you")
 
 
+def test_partial_documents_the_pid_namespace_and_routes_usr1_through_sandbox_off() -> None:
+    flat = _flat(PARTIAL.read_text())
+    assert ("imp's bash sandbox runs every shell command in a fresh user and pid "
+            "namespace") in flat
+    assert "cannot see or signal any process outside its own command" in flat
+    assert "One escape hatch exists, plus one recipe that needs it." in flat
+    # The USR1 recipe no longer works from inside the sandbox: it leads with /sandbox off.
+    assert "**Stack-dumping a wedged imp process needs `/sandbox off`.**" in flat
+    assert "means signalling a host pid, which the pid namespace puts out of reach" in flat
+    assert "After `/sandbox off`, `kill -USR1 <pid>`" in flat
+    # The stale claims are gone, not re-worded.
+    assert "signals cross user namespaces" not in flat
+    assert "needs no unsandboxing" not in flat
+
+
 def test_no_source_or_test_file_references_the_old_partial_name() -> None:
     assert not (PARTIAL.parent / f"{_OLD_NAME}.md").exists()
     hits = [

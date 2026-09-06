@@ -1,9 +1,12 @@
 """Interrupt-path regression guards (spec B.9). Auto-skip without bwrap."""
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -16,13 +19,15 @@ import pytest
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
-from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.agents.tools.context import ToolContext, descendant_pids, terminate_running_processes
 from imp.engine.sandbox import (
     SandboxPolicy,
     make_home_layer,
     overlay_mode,
     sandbox_available,
 )
+from imp.engine.types import Pause, SourceLoc, Step
+from tests.conftest import _pid_gone_or_zombie
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -139,22 +144,10 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
     return pol, cleanup
 
 
-def _pid_gone_or_zombie(pid: int) -> bool:
-    """True once `pid` has exited or is a reaped-pending zombie (state Z). The
-    wrapper uses no PID namespace, so the inner shell's $$ is a host-visible PID;
-    /proc/<pid>/stat reads it directly. A zombie counts as terminated — it tolerates
-    the brief window before the orphaned child is reaped."""
-    try:
-        data = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
-        return True
-    return data.rpartition(")")[2].split()[0] == "Z"
-
-
 def test_bash_inner_observes_sigterm_and_survives_grace() -> None:
     """The inner command traps SIGTERM and keeps running through the grace, then
-    dies on the final killpg(SIGKILL). Direct guard for dropping --unshare-pid AND
-    --die-with-parent (either would collapse the grace).
+    dies on the final killpg(SIGKILL). Direct guard against --die-with-parent, which
+    would collapse the grace.
 
     Regression: if --die-with-parent were present, the inner sh would be
     instant-killed the moment bwrap exits on SIGTERM, collapsing the grace window.
@@ -240,13 +233,28 @@ def test_gate_timeout_kills_group_no_orphan() -> None:
     assert elapsed < 10, f"gate took {elapsed:.1f}s — possible orphan/hang"
 
 
+def _runs_the_command(pid: int, marker: str) -> bool:
+    """True if `pid` is the shell running the sandboxed command — argv is
+    `sh -c <command>` and the command text carries `marker`. Readable host-side only
+    while the process is alive, so callers probe BEFORE the kill. Excludes the bwrap
+    wrapper, whose argv also carries the command text but starts with `bwrap`."""
+    try:
+        parts = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\x00")
+    except OSError:
+        return False
+    return parts[:2] == ["sh", "-c"] and any(marker in part for part in parts[2:])
+
+
 @requires_overlay
 def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
     """AC7: drive the real bash-tool -> terminate_running_processes path (the same
     path Ctrl-C hits) under a real COW-overlay policy, and prove killpg
-    SIGTERM->grace->SIGKILL reaps the INNER child through the unshare + overlay +
-    bwrap layers. The crux is the recorded inner PID being terminated, not merely
-    the top unshare process dying. Runs offline (no live provider)."""
+    SIGTERM->grace->SIGKILL reaps the processes INSIDE the sandbox through the
+    unshare + overlay + bwrap layers. The crux is that the shell actually running the
+    command dies, not merely the top unshare process: it is identified host-side by
+    /proc/<pid>/cmdline among the descendants enumerated while the tree is still
+    alive. An inner `$$` cannot serve — under a pid namespace it is a namespace-local
+    pid that names an unrelated host process. Runs offline (no live provider)."""
     base = Path(tempfile.mkdtemp(prefix="imp-test-ovl-int-", dir="/var/tmp"))
     pol, cleanup = _overlay_policy(base)
     try:
@@ -257,24 +265,31 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
             title="t", project_root=wt, workflow_dir=wt / ".imp" / "wf")
         ctx.base_sandbox_policy = pol
 
-        pid_file = wt / "inner.pid"
+        ready = wt / "inner.up"
         out_holder: dict[str, object] = {}
 
         async def _runner() -> None:
             out_holder["out"] = json.loads(await get_registry()["bash"].async_invoke(
                 ctx,
                 {"command":
-                 f"echo $$ > {shlex.quote(str(pid_file))}; "
+                 f"touch {shlex.quote(str(ready))}; "
                  "trap 'echo GOTTERM' TERM; "
                  "for i in $(seq 1 600); do sleep 0.1; done; echo DONE"}))
 
         async def _killer() -> None:
             deadline = time.monotonic() + 20.0  # generous inner budget
-            while not (pid_file.exists() and pid_file.read_text().strip()):
+            while not ready.exists():
                 if time.monotonic() > deadline:
-                    raise AssertionError("inner PID file never appeared")
+                    raise AssertionError("the sandboxed command never signalled readiness")
                 await anyio.sleep(0.02)
-            out_holder["inner_pid"] = int(pid_file.read_text().strip())
+            procs = list(ctx.running_processes)
+            assert procs, "the bash tool registered no process"
+            # Enumerate WHILE the tree is alive: once the root dies the PPid links
+            # are gone, and /proc/<pid>/cmdline with them.
+            inner = descendant_pids(procs[0].pid)
+            out_holder["inner_pids"] = inner
+            out_holder["command_pids"] = [
+                pid for pid in inner if _runs_the_command(pid, str(ready))]
             out_holder["killed"] = await terminate_running_processes(ctx, timeout=2.0)
 
         async def _scenario() -> None:
@@ -287,21 +302,135 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
 
         assert ctx.running_processes == []          # registry drained
         assert len(out_holder["killed"]) >= 1       # >=1 process was signalled
-        inner_pid = out_holder["inner_pid"]
-        # The recorded inner child is terminated. Poll a generous-but-bounded budget:
-        # a SIGKILL'd process becomes a zombie within milliseconds once scheduled, so
-        # 60 s never false-fires even under saturated -n auto CI, yet stays bounded so a
-        # genuinely unreached signal still fails with the diagnostic below rather than
-        # hanging. Tolerates the brief zombie window; failure here proves the signal did
-        # NOT reach the child through the layers (it survived as an orphan) -- the crux
-        # falsifier.
+        inner_pids = out_holder["inner_pids"]
+        assert out_holder["command_pids"], (
+            f"none of {inner_pids} was the sandboxed shell running the command")
+        # Every process that was inside the sandbox is terminated. Poll a
+        # generous-but-bounded budget: a SIGKILL'd process becomes a zombie within
+        # milliseconds once scheduled, so 60 s never false-fires even under saturated
+        # -n auto CI, yet stays bounded so a genuinely unreached signal still fails
+        # with the diagnostic below rather than hanging. Failure here proves the
+        # signal did NOT reach the children through the layers -- the crux falsifier.
         deadline = time.monotonic() + 60.0
-        while not _pid_gone_or_zombie(inner_pid):
+        while True:
+            alive = [pid for pid in inner_pids if not _pid_gone_or_zombie(pid)]
+            if not alive:
+                break
             if time.monotonic() > deadline:
                 raise AssertionError(
-                    f"inner pid {inner_pid} survived termination -- the signal did "
-                    "not reach the child through unshare+overlay+bwrap")
+                    f"inner pids {alive} survived termination -- the signal did not "
+                    "reach the children through unshare+overlay+bwrap")
             time.sleep(0.05)
     finally:
         cleanup()
         shutil.rmtree(base, ignore_errors=True)
+
+
+def _delay_kill_until_ready(monkeypatch: pytest.MonkeyPatch, ready: Path) -> list[int]:
+    """Hold the gate's teardown until the sandboxed command has signalled readiness,
+    so bwrap startup latency under load cannot race the SIGTERM. Returns the list
+    that the wrapper fills with the live host-side tree (bwrap plus everything under
+    it) as of that instant — the only moment it can be enumerated, since run_command
+    owns `proc`. The real helper then runs unchanged."""
+    from imp.engine import gates
+
+    real_kill = gates._graceful_kill
+    recorded: list[int] = []
+
+    def _delayed(proc: subprocess.Popen[bytes]) -> None:
+        deadline = time.monotonic() + 20.0
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        recorded.append(proc.pid)
+        recorded.extend(descendant_pids(proc.pid))
+        real_kill(proc)
+
+    monkeypatch.setattr(gates, "_graceful_kill", _delayed)
+    return recorded
+
+
+def _gate_step(command: str) -> Step:
+    return Step(
+        name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
+        max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
+        command=command, timeout_seconds=1,
+    )
+
+
+def test_gate_teardown_leaves_no_survivors_when_command_ignores_sigterm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A TERM-ignoring gate command under an active sandbox policy leaves ZERO live
+    processes behind. The host-side tree is enumerated before the kill; every pid
+    must end up gone or a zombie. Regression for the escalation leak: without the
+    group-liveness poll the outer bwrap satisfies the wait at ~0s, the SIGKILL is
+    skipped, and the inner shell loops on forever as an orphan."""
+    from imp.engine import gates
+
+    worktree = _sandbox_worktree()
+    ready = worktree / "up"
+    recorded = _delay_kill_until_ready(monkeypatch, ready)
+    try:
+        step = _gate_step(
+            f"trap '' TERM; touch {shlex.quote(str(ready))}; "
+            "while :; do sleep 0.2; done")
+        with pytest.raises(subprocess.TimeoutExpired):
+            gates.run_script(step, cwd=worktree, policy=_active_policy(worktree))
+    finally:
+        shutil.rmtree(worktree, ignore_errors=True)
+
+    assert len(recorded) >= 2, "the sandboxed process tree was never observed"
+    deadline = time.monotonic() + 20.0
+    while True:
+        alive = [pid for pid in recorded if not _pid_gone_or_zombie(pid)]
+        if not alive:
+            break
+        if time.monotonic() > deadline:
+            for pid in alive:                     # don't leak the runaway tree on failure
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+            pytest.fail(f"pids {alive} survived gate teardown — SIGKILL escalation skipped")
+        time.sleep(0.05)
+
+
+def test_gate_teardown_lets_sigterm_trap_finish_before_sigkill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The grace window is a real window for the sandboxed children. The command's
+    SIGTERM trap sleeps 0.3s and only then writes a marker into the worktree,
+    host-visible through the rw bind; the marker must exist once TimeoutExpired has
+    been raised. This is the falsifier for the escalation shape: keying on proc's
+    exit lands the SIGKILL milliseconds after the SIGTERM — the outer bwrap exits at
+    ~0s — so the trap never reaches its write. Nothing here asserts elapsed time;
+    the marker is polled."""
+    from imp.engine import gates
+
+    # The grace is widened from its real 2.0s so the trap's 0.3s has ~25x headroom
+    # instead of ~6x: the only fixed duration in this test must not race a saturated
+    # -n auto run. Costs nothing on the passing path (teardown short-circuits the
+    # moment the trap exits and the group empties) and does not weaken Step 4's
+    # falsification, where the SIGKILL lands within ms of the SIGTERM regardless.
+    monkeypatch.setattr(gates, "GATE_KILL_GRACE_S", 8.0)
+
+    worktree = _sandbox_worktree()
+    ready = worktree / "up"
+    marker = worktree / "trap-finished"
+    # The readiness delay is what this test needs from the wrapper; the pid list it
+    # returns is the sibling test's concern.
+    _delay_kill_until_ready(monkeypatch, ready)
+    try:
+        step = _gate_step(
+            f"trap 'sleep 0.3; touch {shlex.quote(str(marker))}; exit 0' TERM; "
+            f"touch {shlex.quote(str(ready))}; "
+            "while :; do sleep 0.2; done")
+        with pytest.raises(subprocess.TimeoutExpired):
+            gates.run_script(step, cwd=worktree, policy=_active_policy(worktree))
+
+        deadline = time.monotonic() + 20.0
+        while not marker.exists():
+            if time.monotonic() > deadline:
+                pytest.fail("the SIGTERM trap never completed — the group SIGKILL "
+                            "landed before the grace window could be used")
+            time.sleep(0.02)
+    finally:
+        shutil.rmtree(worktree, ignore_errors=True)

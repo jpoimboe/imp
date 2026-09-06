@@ -26,6 +26,8 @@ from imp.agents.tools.errors import PermissionDenied
 from imp.engine.env import ALL_DECIDED, TestGates, Undecided
 from imp.engine.types import AgentDef
 
+_KILL_POLL_INTERVAL_S = 0.05  # group-liveness probe cadence inside the kill grace
+
 
 @dataclass(frozen=True)
 class ReadRecord:
@@ -350,15 +352,34 @@ async def kill_process_tree(proc: Any, sig: int) -> None:
     _signal_pids(descendants, sig)
 
 
+def _group_alive(proc: Any) -> bool:
+    """True while any process remains in `proc`'s group. `proc` itself may already be
+    reaped while its children keep running — that is the normal sandboxed shape, since
+    the outer bwrap exits on SIGTERM at ~0s."""
+    if getattr(proc, "returncode", None) is None:
+        return True
+    pid = getattr(proc, "pid", None)
+    if pid is None or not _supports_killpg():
+        return False
+    try:
+        os.killpg(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False       # gone, or the pgid was recycled by another uid
+    return True
+
+
 async def terminate_running_processes(
     ctx: ToolContext, *, timeout: float = PROCESS_KILL_GRACE_S,
 ) -> list[Any]:
     """SIGTERM the process GROUP of every registered process AND its transitive
-    descendants, wait `timeout` (named grace, default 4 s), then SIGKILL the group
-    + descendants of any survivor. Drain the registry. Returns the processes that
-    were signalled (caller emits tool_killed from it). Escalation is TIME-gated,
-    not count-gated. Descendants that left the group (setpgid/setsid) are reached
-    by pid via a /proc walk, captured while the parent tree is still alive."""
+    descendants, wait `timeout` (named grace, default 4 s) for the GROUP to empty,
+    then SIGKILL the group + descendants of any survivor. Drain the registry. Returns
+    the processes that were signalled (caller emits tool_killed from it). Escalation
+    is TIME-gated, not count-gated. Waiting on the registered proc alone would end the
+    grace at ~0s for a sandboxed command — the outer bwrap exits on SIGTERM while its
+    children are still shutting down — so the wait polls group liveness after the
+    reap. Descendants that left the group (setpgid/setsid) are reached by pid via a
+    /proc walk, captured while the parent tree is still alive."""
     import anyio
 
     if not ctx.running_processes:
@@ -378,23 +399,30 @@ async def terminate_running_processes(
         with contextlib.suppress(Exception):
             await p.wait()
 
-    with anyio.move_on_after(timeout):
-        async with anyio.create_task_group() as tg:
+    try:
+        with anyio.move_on_after(timeout):
+            async with anyio.create_task_group() as tg:
+                for p in procs:
+                    tg.start_soon(_wait_one, p)
+            while any(_group_alive(p) for p in procs):
+                await anyio.sleep(_KILL_POLL_INTERVAL_S)
+    finally:
+        # Shielded like bg.py's _kill_group_escalate: the registry is already
+        # drained, so a caller deadline (signals.py's 2s cooperative budget)
+        # landing mid-grace would otherwise skip the escalation with no later
+        # sweep to retry it. Only the WAIT above is cancellable.
+        with anyio.CancelScope(shield=True):
             for p in procs:
-                tg.start_soon(_wait_one, p)
-
-    for p in procs:
-        pid = getattr(p, "pid", None)
-        # Re-enumerate BEFORE the group SIGKILL severs the ppid links, then union
-        # with the SIGTERM-stage capture so an escapee whose in-group parent already
-        # died during grace (now reparented to init) is still reached by pid.
-        fresh = set(descendant_pids(pid)) if pid is not None else set()
-        survivors = captured[id(p)] | fresh
-        if getattr(p, "returncode", None) is None:
-            await kill_process_group(p, _signal.SIGKILL)
-            # Bound the reap like bg.py: a D-state child could block here forever.
-            with anyio.move_on_after(timeout):
-                with contextlib.suppress(Exception):
-                    await p.wait()
-        _signal_pids(survivors, _signal.SIGKILL)
+                pid = getattr(p, "pid", None)
+                # Re-enumerate BEFORE the group SIGKILL severs the ppid links, then union
+                # with the SIGTERM-stage capture so an escapee whose in-group parent already
+                # died during grace (now reparented to init) is still reached by pid.
+                fresh = set(descendant_pids(pid)) if pid is not None else set()
+                survivors = captured[id(p)] | fresh
+                await kill_process_group(p, _signal.SIGKILL)
+                # Bound the reap like bg.py: a D-state child could block here forever.
+                with anyio.move_on_after(timeout):
+                    with contextlib.suppress(Exception):
+                        await p.wait()
+                _signal_pids(survivors, _signal.SIGKILL)
     return procs

@@ -288,9 +288,9 @@ def test_no_pythonpath_setenv_when_engine_env_lacks_it():
     assert "PYTHONPATH" not in argv
 
 
-def test_no_unshare_pid_and_no_die_with_parent():
+def test_requires_pid_namespace_and_no_die_with_parent():
     argv = build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={})
-    assert "--unshare-pid" not in argv      # B.9.1
+    assert "--unshare-pid" in argv          # process-table isolation
     assert "--die-with-parent" not in argv  # B.9.2 (H-A)
     assert "--new-session" not in argv      # B.9.3 (F-8)
     assert "--unshare-user" in argv

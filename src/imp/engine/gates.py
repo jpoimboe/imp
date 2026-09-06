@@ -20,6 +20,7 @@ from imp.engine.sandbox import SandboxPolicy, build_sandbox_argv, prepare_spawn_
 from imp.engine.types import Action, Continue, Rule, Step
 
 GATE_KILL_GRACE_S = 2.0  # SIGTERM-to-SIGKILL grace window for a gate subprocess group
+_KILL_POLL_INTERVAL_S = 0.05  # group-liveness probe cadence inside the grace window
 _POLL_INTERVAL_S = 0.5  # max interrupt-to-kill latency: one poll tick
 _READ_CHUNK_BYTES = 64 * 1024  # per os.read() chunk off each stream
 GATE_OUTPUT_CAP_BYTES = 128 * 1024 * 1024  # total stdout+stderr retained before teardown
@@ -44,16 +45,29 @@ def _graceful_kill(proc: subprocess.Popen[bytes]) -> None:
 
     SIGTERM the group (with start_new_session=True, proc.pid is the group
     leader, so this reaches the whole bwrap -> sh -> make -> pytest -> xdist
-    tree), wait GATE_KILL_GRACE_S for it to flush and exit, SIGKILL any
-    survivors, then reap. The final proc.wait() cannot deadlock on a full pipe:
-    a SIGKILLed process is already dead, so wait returns regardless of unread
-    buffer. Closing proc.stdout/proc.stderr releases the parent-side read FDs
-    that a timed-out or aborted selector drain leaves open."""
+    tree), then poll the GROUP's liveness — not proc's exit — for
+    GATE_KILL_GRACE_S: under a sandbox the outer bwrap exits on SIGTERM at
+    ~0.00s while its children are still shutting down, so keying escalation on
+    proc.wait() would skip the SIGKILL entirely and leak them. Each tick reaps
+    proc non-blockingly and then probes with killpg(pid, 0) — reaping FIRST is
+    what makes a group whose leader has just exited read as empty, which is the
+    short-circuit that leaves the window to the children. A group still alive at
+    the deadline is SIGKILLed unconditionally, then reaped; that final wait
+    cannot deadlock on a full pipe, since a SIGKILLed process is already dead.
+    Closing proc.stdout/proc.stderr releases the parent-side read FDs that a
+    timed-out or aborted selector drain leaves open."""
     with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGTERM)
-    try:
-        proc.wait(timeout=GATE_KILL_GRACE_S)
-    except subprocess.TimeoutExpired:
+    deadline = time.monotonic() + GATE_KILL_GRACE_S
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            try:
+                os.killpg(proc.pid, 0)
+            # gone, or the pgid was recycled by another uid (EPERM)
+            except (ProcessLookupError, PermissionError):
+                break
+        time.sleep(_KILL_POLL_INTERVAL_S)
+    else:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()

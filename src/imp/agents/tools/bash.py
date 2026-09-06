@@ -165,7 +165,8 @@ def _cap_combined(out: str, err: str) -> tuple[str, str, bool]:
         "(default 120 s; pass `timeout`, positive seconds, max 600, to extend) "
         "is promoted to a background task readable via `bash_output`/killable "
         "via `bash_kill`. No "
-        "permission gate. "
+        "permission gate. Each call gets its own pid namespace, so pids never "
+        "carry across calls. "
         "See `imp-tool-reference` for buffering and path details."
     ),
 )
