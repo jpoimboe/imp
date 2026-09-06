@@ -100,7 +100,7 @@ def test_stdin_is_devnull_so_reader_sees_eof(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, 'read line; echo "got:[$line]"')
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(30):  # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):  # deadlock backstop only
             await bp.proc.wait()
         assert (tmp_path / out["out_path"]).read_text() == "got:[]\n"
     anyio.run(main)
