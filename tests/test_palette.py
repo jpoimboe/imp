@@ -316,3 +316,13 @@ def test_theme_override_is_none_when_absent_or_unknown(
     assert pal.theme_override() is None
     monkeypatch.setenv("IMP_THEME", "solarized")
     assert pal.theme_override() is None
+
+
+def test_quota_bands_are_evaluated_on_the_displayed_percent() -> None:
+    assert [pal.quota_hue(p) for p in (49, 50, 84, 85)] == [
+        "green", "wordmark", "wordmark", "red"]
+    # 49.5 displays as 50, so it must color as 50 too — half-up, never truncated.
+    # 84.5 is the banker's-rounding trap: Python's round(84.5) returns 84.
+    assert pal.quota_pct(49.5) == 50
+    assert pal.quota_pct(84.5) == 85
+    assert pal.quota_hue(pal.quota_pct(49.5)) == "wordmark"

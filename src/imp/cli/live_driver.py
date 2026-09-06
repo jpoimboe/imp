@@ -46,8 +46,6 @@ _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
 _AMBER_AT = 0.75          # of the cutoff
-_QUOTA_GOLD_AT = 50
-_QUOTA_RED_AT = 85
 
 # The events that can move the quest-total dollars; everything else leaves it.
 _COST_BEARING = frozenset({"agent_message", "agent_message_usage_patch",
@@ -114,13 +112,11 @@ def quota_field(reading: QuotaReading, *, now_epoch: float | None,
     the displayed integer so a number can never disagree with its own hue."""
     windows: list[str] = []
     for w in reading.windows:
-        pct = int(w.used_pct + 0.5)          # half-up; used_pct is never negative
-        hue = ("red" if pct >= _QUOTA_RED_AT
-               else "wordmark" if pct >= _QUOTA_GOLD_AT else "green")
+        pct = pal.quota_pct(w.used_pct)
         seg = (_paint(w.label, "gray", color=color, over_bg=over_bg) + " "
-               + _paint(f"{pct}%", hue, color=color, over_bg=over_bg))
+               + _paint(f"{pct}%", pal.quota_hue(pct), color=color, over_bg=over_bg))
         left = (_reset_countdown(w.resets_at, now_epoch)
-                if pct >= _QUOTA_GOLD_AT else None)
+                if pct >= pal.QUOTA_GOLD_AT else None)
         if left is not None:
             seg += " " + _paint(f"({left})", "gray", color=color, over_bg=over_bg)
         windows.append(seg)
