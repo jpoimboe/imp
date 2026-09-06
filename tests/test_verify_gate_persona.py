@@ -175,3 +175,33 @@ def test_no_stale_no_persona_claim() -> None:
     # the claim is corrected, not merely deleted; short anchor so re-wording is free
     assert "the default workflow ships one" in engine
     assert "imp ships no persona" not in golden
+
+
+_AGENTS_DIR = Path("src/imp/assets/workflows/default/agents")
+_SWEEP_PHRASES = ("full suite", "full test suite", "whole suite")
+_STRICTER = ("never run the gate, the full suite, lint, or typecheck yourself "
+             "— not even to confirm a fix")
+
+
+def _names_the_full_suite(name: str) -> bool:
+    low = (_AGENTS_DIR / name).read_text().lower()
+    return any(ph in low for ph in _SWEEP_PHRASES)
+
+
+def test_gate_triage_bodies_keep_only_the_stricter_sentence() -> None:
+    for name in ("task-lead.md", "deferred-sweep.md"):
+        low = (_AGENTS_DIR / name).read_text().lower()
+        assert _STRICTER in low, name
+        rest = low.replace(_STRICTER, "")
+        assert not any(ph in rest for ph in _SWEEP_PHRASES), name
+
+
+def test_stripped_bodies_defer_to_the_persona() -> None:
+    for name in ("coder.md", "gap-check.md", "reconciler.md"):
+        assert not _names_the_full_suite(name), name
+    assert "that focused test" in _agent_body("coder")
+    assert "read-and-reason" in _agent_body("gap-check")
+    rec = _agent_body("reconciler")
+    assert "integration-verify" in rec
+    assert "the very next step" in rec
+    assert "State only what was actually run" in _agent_body("task-lead")
