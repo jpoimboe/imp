@@ -44,6 +44,10 @@ Read this when editing imp's engine/renderer or workflow prompts.
   masked for every agent by `resolve_policy`. Engine-authored text that points a
   sandboxed agent at recovery data must inline the content or route through
   `imp events`, which the daemon resolves outside the sandbox.
+- **The sandbox policy handed to an invocation must agree with `quest.project_root`.**
+  Going live mid-step flips `project_root` to the new worktree; `_run_agent_invocation`
+  reconciles the policy's `worktree` and `git_worktree_self` on every entry, so a retry
+  or reincarnation cannot re-enter the step with a policy still rooted at the control root.
 
 ## Future / unbuilt
 
