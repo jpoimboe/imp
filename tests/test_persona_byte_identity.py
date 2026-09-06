@@ -27,7 +27,7 @@ def _build(tmp_path, tools):
     return build_agent_invocation(
         agent_def=_agent(tools), provider_name="anthropic", model_name="m",
         rendered_system_prompt="STEP BODY",
-        rendered_persona="",  # imp ships no persona; coding stance is an opt-in partial
+        rendered_persona="",  # golden pins the personaless base prompt
         initial_messages=(),
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=_ASSET),

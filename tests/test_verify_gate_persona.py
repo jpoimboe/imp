@@ -166,3 +166,12 @@ def test_finalize_reports_the_gate_verdict_instead_of_running_tests() -> None:
     assert "make NO code changes and run no tests." in body
     assert "report that outcome in `verify_status`" in body
     assert "**You are not a reviewer.**" in body
+
+
+def test_no_stale_no_persona_claim() -> None:
+    engine = Path("src/imp/engine/agent_run.py").read_text()
+    golden = Path("tests/test_persona_byte_identity.py").read_text()
+    assert "imp itself ships none" not in engine
+    # the claim is corrected, not merely deleted; short anchor so re-wording is free
+    assert "the default workflow ships one" in engine
+    assert "imp ships no persona" not in golden
