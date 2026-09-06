@@ -2571,6 +2571,28 @@ def test_a_real_quests_worktree_is_nested_in_the_mask(tmp_path):
     assert paths.index(pol.state_mask) < paths.index(str(wt.resolve()))
 
 
+def test_bind_plan_re_exposes_the_chdir_target_after_the_state_mask(tmp_path):
+    # Pins the production failure: a --chdir target the plan never re-exposed.
+    control, wt = _layout(tmp_path)
+    quest_dir = project_state_dir(control) / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+        quest_dir=quest_dir,
+    )
+    plan = pol.bind_plan()
+    assert pol.worktree == str(wt)
+    assert (plan.index((pol.state_mask, "mask_dir"))
+            < plan.index((pol.worktree, "rw")))
+
+    argv = build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={})
+    chdir = argv[argv.index("--chdir") + 1]
+    assert chdir == str(wt)
+    assert pol.allows_read(Path(chdir)) is True
+    assert pol.allows_write(Path(chdir)) is True
+
+
 def test_a_symlinked_state_path_still_exposes_the_quests_own_home(
     tmp_path, monkeypatch,
 ):
