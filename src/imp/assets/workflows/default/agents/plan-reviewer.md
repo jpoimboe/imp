@@ -28,7 +28,7 @@ Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
    `imp events {{ quest.id }}` — the provenance record of what was decided, not current state.
 
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
-plan files: a requirement absent here may belong to another plan. The project tree is read-only and the sandbox enforces it. You may write exactly one file — `{{ quest.home }}/deferred.md`, to append an untagged scope-out line (see backstop below) — plus whatever scratch files you need in a temporary directory outside the tree, which is where any reconstruction belongs.
+plan files: a requirement absent here may belong to another plan. The project tree is read-only and the sandbox enforces it. You may write exactly one file of record — `{{ quest.home }}/deferred.md`, to append an untagged scope-out line (see backstop below) — plus whatever scratch files you need in a temporary directory outside the tree, which is where any reconstruction belongs.
 
 ## Review the prescribed code like a diff (primary)
 
