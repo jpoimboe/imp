@@ -144,10 +144,10 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
 
 
 def _pid_gone_or_zombie(pid: int) -> bool:
-    """True once `pid` has exited or is a reaped-pending zombie (state Z). The
-    wrapper uses no PID namespace, so the inner shell's $$ is a host-visible PID;
-    /proc/<pid>/stat reads it directly. A zombie counts as terminated — it tolerates
-    the brief window before the orphaned child is reaped."""
+    """True once `pid` has exited or is a reaped-pending zombie (state Z). Every pid
+    passed here is captured HOST-side (proc.pid / descendant_pids), never read from
+    inside the sandbox, so /proc/<pid>/stat reads it directly. A zombie counts as
+    terminated — it tolerates the brief window before the orphaned child is reaped."""
     try:
         data = Path(f"/proc/{pid}/stat").read_text()
     except FileNotFoundError:
@@ -157,8 +157,8 @@ def _pid_gone_or_zombie(pid: int) -> bool:
 
 def test_bash_inner_observes_sigterm_and_survives_grace() -> None:
     """The inner command traps SIGTERM and keeps running through the grace, then
-    dies on the final killpg(SIGKILL). Direct guard for dropping --unshare-pid AND
-    --die-with-parent (either would collapse the grace).
+    dies on the final killpg(SIGKILL). Direct guard against --die-with-parent, which
+    would collapse the grace.
 
     Regression: if --die-with-parent were present, the inner sh would be
     instant-killed the moment bwrap exits on SIGTERM, collapsing the grace window.
@@ -244,13 +244,28 @@ def test_gate_timeout_kills_group_no_orphan() -> None:
     assert elapsed < 10, f"gate took {elapsed:.1f}s — possible orphan/hang"
 
 
+def _runs_the_command(pid: int, marker: str) -> bool:
+    """True if `pid` is the shell running the sandboxed command — argv is
+    `sh -c <command>` and the command text carries `marker`. Readable host-side only
+    while the process is alive, so callers probe BEFORE the kill. Excludes the bwrap
+    wrapper, whose argv also carries the command text but starts with `bwrap`."""
+    try:
+        parts = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\x00")
+    except OSError:
+        return False
+    return parts[:2] == ["sh", "-c"] and any(marker in part for part in parts[2:])
+
+
 @requires_overlay
 def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
     """AC7: drive the real bash-tool -> terminate_running_processes path (the same
     path Ctrl-C hits) under a real COW-overlay policy, and prove killpg
-    SIGTERM->grace->SIGKILL reaps the INNER child through the unshare + overlay +
-    bwrap layers. The crux is the recorded inner PID being terminated, not merely
-    the top unshare process dying. Runs offline (no live provider)."""
+    SIGTERM->grace->SIGKILL reaps the processes INSIDE the sandbox through the
+    unshare + overlay + bwrap layers. The crux is that the shell actually running the
+    command dies, not merely the top unshare process: it is identified host-side by
+    /proc/<pid>/cmdline among the descendants enumerated while the tree is still
+    alive. An inner `$$` cannot serve — under a pid namespace it is a namespace-local
+    pid that names an unrelated host process. Runs offline (no live provider)."""
     base = Path(tempfile.mkdtemp(prefix="imp-test-ovl-int-", dir="/var/tmp"))
     pol, cleanup = _overlay_policy(base)
     try:
@@ -261,24 +276,31 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
             title="t", project_root=wt, workflow_dir=wt / ".imp" / "wf")
         ctx.base_sandbox_policy = pol
 
-        pid_file = wt / "inner.pid"
+        ready = wt / "inner.up"
         out_holder: dict[str, object] = {}
 
         async def _runner() -> None:
             out_holder["out"] = json.loads(await get_registry()["bash"].async_invoke(
                 ctx,
                 {"command":
-                 f"echo $$ > {shlex.quote(str(pid_file))}; "
+                 f"touch {shlex.quote(str(ready))}; "
                  "trap 'echo GOTTERM' TERM; "
                  "for i in $(seq 1 600); do sleep 0.1; done; echo DONE"}))
 
         async def _killer() -> None:
             deadline = time.monotonic() + 20.0  # generous inner budget
-            while not (pid_file.exists() and pid_file.read_text().strip()):
+            while not ready.exists():
                 if time.monotonic() > deadline:
-                    raise AssertionError("inner PID file never appeared")
+                    raise AssertionError("the sandboxed command never signalled readiness")
                 await anyio.sleep(0.02)
-            out_holder["inner_pid"] = int(pid_file.read_text().strip())
+            procs = list(ctx.running_processes)
+            assert procs, "the bash tool registered no process"
+            # Enumerate WHILE the tree is alive: once the root dies the PPid links
+            # are gone, and /proc/<pid>/cmdline with them.
+            inner = descendant_pids(procs[0].pid)
+            out_holder["inner_pids"] = inner
+            out_holder["command_pids"] = [
+                pid for pid in inner if _runs_the_command(pid, str(ready))]
             out_holder["killed"] = await terminate_running_processes(ctx, timeout=2.0)
 
         async def _scenario() -> None:
@@ -291,20 +313,24 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
 
         assert ctx.running_processes == []          # registry drained
         assert len(out_holder["killed"]) >= 1       # >=1 process was signalled
-        inner_pid = out_holder["inner_pid"]
-        # The recorded inner child is terminated. Poll a generous-but-bounded budget:
-        # a SIGKILL'd process becomes a zombie within milliseconds once scheduled, so
-        # 60 s never false-fires even under saturated -n auto CI, yet stays bounded so a
-        # genuinely unreached signal still fails with the diagnostic below rather than
-        # hanging. Tolerates the brief zombie window; failure here proves the signal did
-        # NOT reach the child through the layers (it survived as an orphan) -- the crux
-        # falsifier.
+        inner_pids = out_holder["inner_pids"]
+        assert out_holder["command_pids"], (
+            f"none of {inner_pids} was the sandboxed shell running the command")
+        # Every process that was inside the sandbox is terminated. Poll a
+        # generous-but-bounded budget: a SIGKILL'd process becomes a zombie within
+        # milliseconds once scheduled, so 60 s never false-fires even under saturated
+        # -n auto CI, yet stays bounded so a genuinely unreached signal still fails
+        # with the diagnostic below rather than hanging. Failure here proves the
+        # signal did NOT reach the children through the layers -- the crux falsifier.
         deadline = time.monotonic() + 60.0
-        while not _pid_gone_or_zombie(inner_pid):
+        while True:
+            alive = [pid for pid in inner_pids if not _pid_gone_or_zombie(pid)]
+            if not alive:
+                break
             if time.monotonic() > deadline:
                 raise AssertionError(
-                    f"inner pid {inner_pid} survived termination -- the signal did "
-                    "not reach the child through unshare+overlay+bwrap")
+                    f"inner pids {alive} survived termination -- the signal did not "
+                    "reach the children through unshare+overlay+bwrap")
             time.sleep(0.05)
     finally:
         cleanup()
