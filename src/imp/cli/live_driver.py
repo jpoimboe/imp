@@ -49,6 +49,10 @@ _AMBER_AT = 0.75          # of the cutoff
 _QUOTA_GOLD_AT = 50
 _QUOTA_RED_AT = 85
 
+# The events that can move the quest-total dollars; everything else leaves it.
+_COST_BEARING = frozenset({"agent_message", "agent_message_usage_patch",
+                           "query_result"})
+
 
 def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
     if not color or not codes:
@@ -377,6 +381,12 @@ class LiveDriver:
         self._emissions = 0
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
+        # Every event this driver consumed, and the accounting total derived from
+        # them by the summary's own code — one computation, so the live figure and
+        # `imp log -s` cannot disagree. Each driver sees each event exactly once.
+        self._events: list[dict[str, Any]] = []
+        self._cost: RowUsage | None = None
+        self._cost_stale = False
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
             _Cursor(container=self._builder.tree.root, depth=0)]
@@ -398,6 +408,10 @@ class LiveDriver:
             self._footer_live = True
             self._refresh_status()
             return
+        if isinstance(event, dict):
+            self._events.append(event)
+            if event.get("type") in _COST_BEARING:
+                self._cost_stale = True
         self._builder.add(event)
         self._walk()
         self._maybe_reemit_header()
@@ -471,6 +485,9 @@ class LiveDriver:
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
+            auth_mode=self._builder.auth_mode_for(activity.provider),
+            quota=self._builder.quota_for(activity.provider),
+            cost=self._quest_cost(),
             unsandboxed=self._unsandboxed)
         rows = [a_line, "", p_row]
         rows += compose_subagent_rows(
@@ -517,7 +534,20 @@ class LiveDriver:
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
+            auth_mode=self._builder.auth_mode_for(activity.provider),
+            quota=self._builder.quota_for(activity.provider),
+            cost=self._quest_cost(),
             unsandboxed=self._unsandboxed)
+
+    def _quest_cost(self) -> RowUsage | None:
+        """The quest total, by the summary's own computation over the retained
+        events — evaluated per drawn frame, not per event."""
+        if self._cost_stale:
+            # Lazily imported, like context_bar's catalog import.
+            from imp.cli.render_summary import build_summary, summary_totals
+            _work, self._cost = summary_totals(build_summary(self._events), None)
+            self._cost_stale = False
+        return self._cost
 
     # -- emission -------------------------------------------------------------
     def _cur_width(self) -> int:
