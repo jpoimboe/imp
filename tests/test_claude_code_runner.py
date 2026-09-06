@@ -5294,3 +5294,67 @@ async def test_no_init_message_leaves_auth_mode_off_the_agent_message(
     ams = [e for e in log.read() if e["type"] == "agent_message"]
     assert len(ams) == 1
     assert "auth_mode" not in ams[0]["payload"]
+
+
+@pytest.mark.anyio
+async def test_mid_tool_interrupt_persists_claude_p_marker_turn(
+    tmp_path: Path,
+) -> None:
+    """The live-captured post-interrupt SDK sequence, pinned: claude-p's
+    'rejected / STOP' tool_result AND its '[Request interrupted by user …]'
+    marker are both persisted to transcript.jsonl — the on-disk shape
+    repair_interrupt_marker_on_resume keys on — while the sub_agent call stays
+    unjournaled (is_task suppression)."""
+    from imp.agents.runner import TextBlock as RealTextBlock
+    from imp.agents.runner import ToolResultBlock as RealToolResultBlock
+    from imp.agents.runner import ToolUseBlock as RealToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    reject = (
+        "The user doesn't want to proceed with this tool use. The tool use was "
+        "rejected (eg. if it was a file edit, the new_string was NOT written to "
+        "the file). STOP what you are doing and wait for the user to tell you "
+        "how to proceed."
+    )
+    marker = "[Request interrupted by user for tool use]"
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}),
+               event_log=log)
+    (tmp_path / "art").mkdir()
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    scripted = [
+        assistant(text("Dispatching the coder.")),
+        assistant(tool_use("toolu_1", "mcp__imp__sub_agent",
+                           {"subagent_name": "coder",
+                            "task_description": "do the thing"})),
+        user(tool_result("toolu_1", reject, True)),
+        user(text(marker)),
+        result(subtype="error_during_execution", is_error=True),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert [m.role for m in loaded] == [
+        "user", "assistant", "assistant", "user", "user"]
+    assert loaded[2].content == (
+        RealToolUseBlock(id="toolu_1", name="mcp__imp__sub_agent",
+                         input={"subagent_name": "coder",
+                                "task_description": "do the thing"}),)
+    assert loaded[3].content == (
+        RealToolResultBlock(tool_use_id="toolu_1", content=reject,
+                            is_error=True),)
+    assert loaded[4].content == (RealTextBlock(text=marker),)
+
+    # The task call is deliberately unjournaled at both ends (is_task).
+    assert not any(
+        e["type"] in ("tool_call", "tool_result")
+        and e["payload"].get("id") == "toolu_1"
+        for e in log.read()), list(log.read())
