@@ -56,7 +56,8 @@ Snapshots work even where the worktree is read-only.
 
 ## Showing the human
 
-Paste the screen into your message as a fenced block: SGR color survives there
-verbatim. Anywhere else — and any control byte that isn't SGR — arrives as
-literal `^[[33m`. When the look matters beyond color, give the snapshot PNG path
-too.
+Paste the screen into your message as a fenced block: color survives there. You
+cannot type the ESC byte in prose, so write each SGR code without it — `[1;33m`,
+`[0m` — and imp restores it inside the fence. Outside a fence nothing is
+restored, and any control byte that isn't SGR arrives as literal `^[[33m`. When
+the look matters beyond color, give the snapshot PNG path too.
