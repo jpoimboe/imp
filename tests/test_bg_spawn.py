@@ -16,6 +16,7 @@ from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.paths import project_state_dir
 from tests._dac import dac_enforced
+from tests.async_wait import HANG_BACKSTOP
 
 
 def _ctx(tmp_path: Path, agent_id: str = "step:t/coder") -> ToolContext:
@@ -60,9 +61,8 @@ def _fds_open_to(path: Path) -> int:
 def test_spawn_returns_immediately_registers_and_keeps_running(tmp_path: Path) -> None:
     async def main() -> None:
         ctx = _ctx(tmp_path)
-        t0 = anyio.current_time()
-        out = await _spawn(ctx, "sleep 30")
-        assert anyio.current_time() - t0 < 5.0          # returned immediately
+        with anyio.fail_after(HANG_BACKSTOP):  # deadlock backstop only
+            out = await _spawn(ctx, "sleep 30")
         assert out["id"] == "bg1"
         assert out["status"] == "running"
         assert isinstance(out["pid"], int)
@@ -72,7 +72,7 @@ def test_spawn_returns_immediately_registers_and_keeps_running(tmp_path: Path) -
         assert (tmp_path / out["out_path"]).exists()
         assert (tmp_path / out["err_path"]).exists()
         bp = ctx.background_processes["bg1"]
-        assert bp.proc.returncode is None               # still running
+        assert bp.proc.returncode is None               # child outlived the spawn call
         # registered ONLY on background_processes — never running_processes
         assert ctx.running_processes == []
         # parent-side fd copies are closed after spawn (no fd leak)
@@ -99,7 +99,7 @@ def test_stdin_is_devnull_so_reader_sees_eof(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, 'read line; echo "got:[$line]"')
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(30):  # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):  # deadlock backstop only
             await bp.proc.wait()
         assert (tmp_path / out["out_path"]).read_text() == "got:[]\n"
     anyio.run(main)
@@ -178,25 +178,37 @@ def test_run_in_background_refused_when_not_enabled(tmp_path: Path) -> None:
     anyio.run(main)
 
 
+_ID_CHILD = (
+    "import os, sys; "
+    "sys.stdout.write(f'out:[{sys.stdin.read()}] "
+    "{os.getpid()} {os.getpgid(0)} {os.getsid(0)}\\n'); "
+    "sys.stderr.write('err\\n')"
+)
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"),
                     reason="/proc/self/fd is Linux-only")
 def test_spawn_to_files_redirects_devnull_and_new_session(tmp_path: Path) -> None:
     """The shared core redirects stdout/stderr to the given files, feeds the
-    child DEVNULL on stdin (a `read` sees instant EOF), and makes it a session
-    leader (pgid == pid) so the group is kill-reachable."""
+    child DEVNULL on stdin (its read sees instant EOF), and makes it a session
+    leader (pid == pgid == sid) so the group is kill-reachable. The child
+    self-reports its ids: a parent-side os.getpgid races the reaper, which
+    collects this short-lived child before a loaded parent can observe it."""
     async def main() -> None:
         from imp.agents.tools.bg import _spawn_to_files
         out_path = tmp_path / "core.out"
         err_path = tmp_path / "core.err"
         proc = await _spawn_to_files(
-            ["sh", "-c", 'read line; echo "out:[$line]"; echo err 1>&2'],
+            [sys.executable, "-c", _ID_CHILD],
             out_path=out_path, err_path=err_path,
             cwd=str(tmp_path), env=dict(os.environ),
         )
-        assert os.getpgid(proc.pid) == proc.pid          # start_new_session
-        with anyio.fail_after(30):  # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):  # deadlock backstop only
             await proc.wait()
-        assert out_path.read_text() == "out:[]\n"        # DEVNULL stdin -> EOF
+        echo, pid, pgid, sid = out_path.read_text().split()
+        assert echo == "out:[]"                       # DEVNULL stdin -> EOF
+        assert int(pid) == proc.pid
+        assert int(pgid) == int(sid) == proc.pid      # start_new_session
         assert err_path.read_text() == "err\n"
         # Parent fd copies are closed by the core (no leak to the scratch files).
         assert _fds_open_to(out_path) == 0
