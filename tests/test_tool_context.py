@@ -291,6 +291,64 @@ def test_terminate_reaps_the_group_even_when_the_caller_deadline_fires(
         "was cancelled and the drained registry leaves nothing to retry it")
 
 
+def test_terminate_reaps_all_groups_when_caller_deadline_fires_mid_escalation(
+    tmp_path: Path,
+) -> None:
+    """The leader here ignores SIGTERM, so it is still unreaped when the escalation
+    runs; the caller's cancellation is therefore delivered at proc #1's ``await
+    p.wait()`` inside the escalation loop, and only ``CancelScope(shield=True)``
+    carries the loop on to proc #2.  The existing single-proc guard cannot pin this:
+    with one leader that exits on SIGTERM the wait returns synchronously and no
+    cancellation can land inside the loop."""
+    import anyio
+
+    from imp.agents.tools.context import ToolContext, terminate_running_processes
+
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
+    ready1 = tmp_path / "ready1"
+    ready2 = tmp_path / "ready2"
+    script = tmp_path / "leader.py"
+    script.write_text(
+        "import pathlib, signal, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "pathlib.Path(sys.argv[1]).write_text('ready')\n"
+        "time.sleep(3600)\n")
+    pids: list[int] = []
+
+    async def go() -> None:
+        proc1 = await anyio.open_process(
+            [sys.executable, str(script), str(ready1)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        ctx.running_processes.append(proc1)
+        pids.append(proc1.pid)
+        proc2 = await anyio.open_process(
+            [sys.executable, str(script), str(ready2)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        ctx.running_processes.append(proc2)
+        pids.append(proc2.pid)
+        deadline = time.monotonic() + 20.0     # generous: only bounds process startup
+        while not (ready1.exists() and ready2.exists()):
+            assert time.monotonic() < deadline, "the leaders never installed their SIGTERM handlers"
+            await anyio.sleep(0.02)
+        # 0.5 well under the 8.0 grace — the deadline lands mid-grace, and during the
+        # shielded escalation at proc #1's await p.wait() inside the loop.
+        with anyio.move_on_after(0.5) as scope:
+            await terminate_running_processes(ctx, timeout=8.0)
+        assert scope.cancelled_caught, (
+            "the caller deadline did not fire — the test is not exercising the hazard")
+
+    anyio.run(go)
+    _await_death(
+        pids[0],
+        "the first group survived a caller deadline that fired mid-grace")
+    _await_death(
+        pids[1],
+        "the escalation was abandoned partway through the registry, leaving a later "
+        "process group alive with only a SIGTERM it ignores")
+
+
 def test_tool_context_has_event_log_field(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
