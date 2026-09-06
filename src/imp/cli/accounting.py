@@ -119,37 +119,54 @@ def _billed_or_none(billing: BillingUsage) -> BillingUsage | None:
     return None
 
 
+def _model_row_billing(row: dict[str, Any]) -> BillingUsage:
+    """One `model_usage` entry — the SDK's own camelCase key names."""
+    return BillingUsage(
+        fresh_input=int(row.get("inputTokens", 0) or 0),
+        cached_input=int(row.get("cacheReadInputTokens", 0) or 0),
+        cache_write=int(row.get("cacheCreationInputTokens", 0) or 0),
+        output=int(row.get("outputTokens", 0) or 0))
+
+
+def _model_rows(model_usage: dict[str, Any]) -> list[tuple[str, BillingUsage]]:
+    """The rollup as one (model id, quadruple) pair per model, so a fallback can
+    price each id separately."""
+    return [(str(model), _model_row_billing(row))
+            for model, row in model_usage.items() if isinstance(row, dict)]
+
+
 def billing_from_model_usage(model_usage: dict[str, Any]) -> BillingUsage:
     """A claude_code `query_result.model_usage` rollup -> one quadruple over
-    every model in it, the background haiku included.
-
-    No web-search count: this path renders the vendor's own `costUSD`, which
-    already folds web search in, so a count here would never be priced.
-    """
+    every model in it, the background haiku included."""
     total = BillingUsage()
-    for row in model_usage.values():
-        if not isinstance(row, dict):
-            continue
+    for _model, row in _model_rows(model_usage):
         total = BillingUsage(
-            fresh_input=total.fresh_input + int(row.get("inputTokens", 0) or 0),
-            cached_input=(total.cached_input
-                          + int(row.get("cacheReadInputTokens", 0) or 0)),
-            cache_write=(total.cache_write
-                         + int(row.get("cacheCreationInputTokens", 0) or 0)),
-            output=total.output + int(row.get("outputTokens", 0) or 0))
+            fresh_input=total.fresh_input + row.fresh_input,
+            cached_input=total.cached_input + row.cached_input,
+            cache_write=total.cache_write + row.cache_write,
+            output=total.output + row.output,
+            web_search_requests=(total.web_search_requests
+                                 + row.web_search_requests))
     return total
 
 
 def vendor_contribution(model_usage: dict[str, Any],
                         total_cost_usd: float | None, *,
                         metered: bool) -> RowUsage | None:
-    """A claude_code `query_result` as a row contribution: the vendor's own cost,
-    never the price table. None when the row carries neither dollars nor usage —
+    """A claude_code `query_result` as a row contribution: the vendor's own cost
+    when it carries one, else each model in the rollup priced from the table.
+    None when the row carries neither dollars nor billable usage —
     `total_cost_usd` is `float | None` on the wire, so that row is reachable."""
-    billing = billing_from_model_usage(model_usage)
-    if total_cost_usd is None and _billed_or_none(billing) is None:
-        return None
-    return contribution(billing, float(total_cost_usd or 0.0), metered=metered)
+    if total_cost_usd is not None:
+        return contribution(billing_from_model_usage(model_usage),
+                            float(total_cost_usd), metered=metered)
+    total: RowUsage | None = None
+    for model, billing in _model_rows(model_usage):
+        if _billed_or_none(billing) is None:
+            continue
+        credit = computed_contribution(model, billing, None, metered=metered)
+        total = credit if total is None else total + credit
+    return total
 
 
 def billing_usage_from_openai(usage: dict[str, Any] | None) -> BillingUsage:
@@ -181,7 +198,7 @@ def _billing_from_flat(usage: dict[str, Any]) -> BillingUsage:
 def computed_contribution(model: str | None, billing: BillingUsage,
                           prompt_tokens: int | None, *,
                           metered: bool) -> RowUsage:
-    """A contribution priced from the table — every provider but claude_code,
-    which renders the vendor's own figure and never consults the table."""
+    """A contribution priced from the table — every provider, claude_code
+    included whenever its own dollar figure never arrived."""
     return contribution(billing, cost_usd(model, billing, prompt_tokens),
                         metered=metered)

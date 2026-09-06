@@ -316,13 +316,24 @@ def _cc(agent_id: str, ts: str, *, auth_mode=None) -> dict:
                         **({"auth_mode": auth_mode} if auth_mode else {})}}
 
 
-def _qr(agent_id: str, ts: str, cost: float, *, session: str = "s1",
-        model_usage: dict | None = None) -> dict:
+def _qr(agent_id: str, ts: str, cost: float | None = None, *,
+        session: str = "s1", model_usage: dict | None = None) -> dict:
+    """`total_cost_usd` is `float | None` on the wire; passing no cost omits the
+    key entirely — the shape that falls back to the price table."""
+    payload: dict = {"session_id": session, "usage": {},
+                     "model_usage": model_usage if model_usage is not None
+                     else {}}
+    if cost is not None:
+        payload["total_cost_usd"] = cost
     return {"type": "query_result", "agent_id": agent_id, "timestamp": ts,
-            "payload": {"session_id": session, "total_cost_usd": cost,
-                        "usage": {},
-                        "model_usage": model_usage if model_usage is not None
-                        else {}}}
+            "payload": payload}
+
+
+# 5,000*$3 + 200,000*$0.30 + 8,000*$15 per million = $0.195 on claude-sonnet-4-6.
+_FALLBACK_USAGE = {"claude-sonnet-4-6": {"inputTokens": 5000,
+                                         "outputTokens": 8000,
+                                         "cacheReadInputTokens": 200_000,
+                                         "cacheCreationInputTokens": 0}}
 
 
 def _patch(agent_id: str, *, input=0, output=0, cache_read=0,
@@ -621,7 +632,114 @@ def test_claude_code_cost_is_the_vendor_figure_not_the_price_table():
         _completed("coder", "2026-01-01T00:01:00+00:00"),
     ]).rows
     assert rows[0].usage.dollars == pytest.approx(0.99)
-    assert rows[0].usage.unpriced == 0       # claude_code never falls to n/a
+    assert rows[0].usage.unpriced == 0       # a vendor figure is priced by definition
+
+
+def _fallback_events(model_usage: dict, *, auth_mode: str | None = None,
+                     with_query_result: bool = True) -> list[dict]:
+    """A claude_code step whose query_result carries no `total_cost_usd`."""
+    events = [
+        _started("reviewer", "build", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00", auth_mode=auth_mode),
+    ]
+    if with_query_result:
+        events.append(_qr("a1", "2026-01-01T00:00:02+00:00",
+                          model_usage=model_usage))
+    events.append(_completed("reviewer", "2026-01-01T00:01:00+00:00"))
+    return events
+
+
+def test_a_claude_code_row_with_no_vendor_cost_is_priced_from_the_table():
+    # AC 1: the SDK declares total_cost_usd as `float | None`; with none on the
+    # wire the row is priced per model instead of being credited $0.00.
+    rows = build_summary(_fallback_events(_FALLBACK_USAGE)).rows
+    assert rows[0].usage.dollars == pytest.approx(0.195)
+    assert cost_cell(rows[0].totals) == "[$0.20]"
+    without = build_summary(
+        _fallback_events(_FALLBACK_USAGE, with_query_result=False)).rows
+    assert (summary_totals(rows, 60.0)[1].dollars
+            - summary_totals(without, 60.0)[1].dollars) == pytest.approx(0.195)
+
+
+def test_a_metered_claude_code_row_priced_from_the_table_renders_a_tilde():
+    # AC 2: apikey auth is metered, so the same computed figure loses the
+    # brackets and takes the tilde.
+    rows = build_summary(
+        _fallback_events(_FALLBACK_USAGE, auth_mode="apikey")).rows
+    assert cost_cell(rows[0].totals) == "~$0.20"
+
+
+def test_a_vendor_zero_renders_as_the_vendors_own_zero():
+    # AC 4: $0.00 from the vendor IS a vendor figure, so the table is never
+    # consulted and the cell keeps its sub-cent form rather than showing $0.20.
+    rows = build_summary([
+        _started("reviewer", "build", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:02+00:00", 0.0,
+            model_usage=_FALLBACK_USAGE),
+        _completed("reviewer", "2026-01-01T00:01:00+00:00"),
+    ]).rows
+    assert rows[0].usage.dollars == 0.0
+    assert cost_cell(rows[0].totals) == "[<$0.01]"
+
+
+def test_a_vendor_less_row_floors_when_one_model_is_absent_from_the_table():
+    # AC 5: the priced model's dollars alone, prefixed ≥, and the legend states
+    # the one cause a ≥ has ever had.
+    rows = build_summary(_fallback_events({
+        **_FALLBACK_USAGE,
+        "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}})).rows
+    assert cost_cell(rows[0].totals) == "≥[$0.20]"
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+                        total_seconds=60.0)
+    out = render_summary(rows, header=hdr, color=False, width=80)
+    assert out[-1] == \
+        "  ≥ excludes steps run on a model absent from the price table"
+
+
+def test_a_vendor_less_row_of_unknown_models_renders_n_a_and_floors_the_total():
+    # AC 6: every id absent from the table — the tokens count, the dollars
+    # cannot, and the total says so rather than shrinking.
+    rows = build_summary([
+        _started("reviewer", "build", "2026-01-01T00:00:00+00:00"),
+        _cc("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:02+00:00", model_usage={
+            "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}}),
+        _completed("reviewer", "2026-01-01T00:00:30+00:00"),
+        _started("coder", "build", "2026-01-01T00:00:30+00:00"),
+        _cc("a2", "2026-01-01T00:00:31+00:00"),
+        _qr("a2", "2026-01-01T00:00:32+00:00", session="s2",
+            model_usage=_FALLBACK_USAGE),
+        _completed("coder", "2026-01-01T00:01:00+00:00"),
+    ]).rows
+    assert cost_cell(rows[0].totals) == "n/a"
+    assert cost_cell(summary_totals(rows, 60.0)[1]) == "≥[$0.20]"
+
+
+def test_a_vendor_less_row_sums_three_priced_models_without_a_floor():
+    # AC 7: per million — sonnet $0.018, haiku $0.006, opus $0.030 = $0.054.
+    # The priced counter trips three times and the cell is unprefixed anyway.
+    rows = build_summary(_fallback_events({
+        "claude-sonnet-4-6": {"inputTokens": 1000, "outputTokens": 1000},
+        "claude-haiku-4-5-20251001": {"inputTokens": 1000, "outputTokens": 1000},
+        "claude-opus-5": {"inputTokens": 1000, "outputTokens": 1000}})).rows
+    assert rows[0].usage.dollars == pytest.approx(0.054)
+    assert rows[0].usage.priced == 3
+    assert cost_cell(rows[0].totals) == "[$0.05]"
+
+
+def test_a_vendor_less_row_with_no_billable_usage_renders_dashes():
+    # AC 8: no dollars and nothing to bill — the step did no model work at all.
+    rows = build_summary(_fallback_events({
+        "claude-sonnet-4-6": {"inputTokens": 0, "outputTokens": 0,
+                              "cacheReadInputTokens": 0,
+                              "cacheCreationInputTokens": 0,
+                              "webSearchRequests": 0}})).rows
+    assert cost_cell(rows[0].totals) == "—"
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
+                        total_seconds=60.0)
+    out = render_summary(rows, header=hdr, color=False, width=80)
+    assert out[3].split() == ["reviewer", "1m", "0s", "—", "—", "—"]
 
 
 def test_a_model_absent_from_the_price_table_counts_as_unpriced():

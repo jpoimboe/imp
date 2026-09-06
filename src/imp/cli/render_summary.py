@@ -287,8 +287,9 @@ def build_summary(events: Iterable[dict[str, Any]]) -> Summary:
         elif etype == "query_result":
             provider, _model, auth_mode = last_msg.get(
                 agent_id if isinstance(agent_id, str) else "", (None, None, None))
-            # The vendor's own cost, never the price table: it already folds in
-            # web search and covers models the table does not carry.
+            # The vendor's own cost when it carries one — it already folds in
+            # web search and covers models the table does not; else the
+            # model_usage rollup, priced per model from the table.
             vendor = vendor_contribution(
                 p.get("model_usage") or {}, p.get("total_cost_usd"),
                 metered=is_metered(provider, auth_mode))
