@@ -270,8 +270,10 @@ is NOT a failure — do not skip a step because you expect it to fail.
    with exactly the content `MCP-OK`.
 
 Then call `mcp__imp__complete_step` with `patch_error` set to step 1's verbatim
-error text and `exec_error` set to step 2's verbatim error text. If a step
-somehow succeeded, set that field to the literal text `NO ERROR — IT SUCCEEDED`.
+error text and `exec_error` set to step 2's verbatim error text.
+Report it VERBATIM — do not summarise or paraphrase it.
+If a step somehow succeeded, set that field to the literal text
+`NO ERROR — IT SUCCEEDED`.
 """
 
 _PROBE_ATTEMPTS = 5
