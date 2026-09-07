@@ -69,6 +69,10 @@ class TerminalStream(pyte.ByteStream):
                     out += b"\x1b["
                     self._state = _State.GROUND
                     i -= 1
-            elif self._state is _State.PRIVATE and 0x40 <= byte <= 0x7E:
-                self._state = _State.GROUND  # final byte ends the sequence
+            elif self._state is _State.PRIVATE:
+                if 0x40 <= byte <= 0x7E:  # final byte ends the sequence
+                    self._state = _State.GROUND
+                elif not (0x20 <= byte <= 0x3F):  # not a param/intermediate
+                    self._state = _State.GROUND
+                    i -= 1
         super().feed(bytes(out))

@@ -83,3 +83,20 @@ def test_plain_sgr_still_applies() -> None:
     screen, stream, _ = _stream()
     stream.feed(b"\x1b[1mX")
     assert screen.buffer[0][0].bold is True
+
+
+def test_malformed_private_csi_hands_an_embedded_c0_to_pyte() -> None:
+    # \r\n arriving mid-sequence must execute — a real terminal executes C0
+    # controls inside a CSI — not vanish with the aborted drop.
+    screen, stream, _ = _stream()
+    stream.feed(b"\x1b[>1\r\nX")
+    assert screen.cursor.y == 1
+    assert screen.display[1].rstrip() == "X"
+
+
+def test_malformed_private_csi_hands_an_embedded_esc_to_pyte() -> None:
+    # The ESC ends the drop and opens a fresh sequence, so the SGR still bolds.
+    screen, stream, _ = _stream()
+    stream.feed(b"\x1b[>1\x1b[1mZ")
+    assert screen.display[0].rstrip() == "Z"
+    assert screen.buffer[0][0].bold is True
