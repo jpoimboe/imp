@@ -2468,7 +2468,7 @@ def test_reauth_needed_pause_renders_plain_speak_copy() -> None:
     ], width=200))
     assert "authentication failed" in out
     assert "the quest is paused and resumable" in out
-    assert "re-authenticate to Claude" in out
+    assert "re-login to the provider (codex login / claude login)" in out
     assert "then resume" in out
     # The raw internal token never reaches the user.
     assert "reauth_needed" not in out
@@ -3037,7 +3037,7 @@ def test_other_pause_reasons_render_exactly_as_before() -> None:
 
     assert line("reauth_needed") == (
         "paused — authentication failed; the quest is paused and resumable; "
-        "re-authenticate to Claude (e.g. re-login), then resume")
+        "re-login to the provider (codex login / claude login), then resume")
     assert line("sandbox_spawn_failed") == (
         "paused — the OS sandbox could not start the step (a sandbox-setup "
         "failure, not a gate result); the quest is paused and resumable — the "
@@ -3116,7 +3116,7 @@ def test_auth_terminal_pause_renders_the_reauth_copy() -> None:
     ], width=200))
     assert "authentication failed" in out
     assert "kept failing" not in out   # auth_terminal pauses on the first failure
-    assert "re-authenticate to Claude" in out
+    assert "re-login to the provider (codex login / claude login)" in out
     assert "auth_terminal" not in out
     assert "AuthTerminalError" not in out
 
