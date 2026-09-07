@@ -147,3 +147,15 @@ def test_plain_cursor_position_report_still_answers(prefix: bytes, expected: str
 
 def test_plain_primary_device_attributes_still_answers() -> None:
     assert _replies(b"\x1b[c") == ["\x1b[?6c"]
+
+
+@pytest.mark.parametrize(
+    "seq",
+    [
+        b"\x1b[?1;2;3;4;5c",  # a DA response echoed back by a raw-mode child
+        b"\x1b[1;2;3;4;5c",   # the same, unprefixed
+    ],
+    ids=repr,
+)
+def test_multi_parameter_device_attributes_is_ignored(seq: bytes) -> None:
+    assert _replies(seq) == []

@@ -79,6 +79,12 @@ class TerminalScreen(pyte.HistoryScreen):
             return
         super().report_device_status(modes[0])
 
+    def report_device_attributes(self, *modes: int, **kwargs: Any) -> None:
+        # A longer form is a DA *response* echoed back by a raw-mode child.
+        if len(modes) > 1:
+            return
+        super().report_device_attributes(*modes, **kwargs)
+
     # --- alt-screen entry / exit ------------------------------------------
     def set_mode(self, *modes: int, **kwargs: Any) -> None:
         if kwargs.get("private") and _ALT_MODES & set(modes):
