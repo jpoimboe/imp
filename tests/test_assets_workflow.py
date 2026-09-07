@@ -175,7 +175,7 @@ def test_minors_integrated_vars_declared_default_false() -> None:
     assert defaults["plan_minors_integrated"] is False
 
 
-def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
+def test_spec_reviewer_critical_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
@@ -184,7 +184,7 @@ def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": True},
-        output={"blocking": True, "has_minor_findings": False},
+        output={"critical": 1, "major": 0, "minor": 0},
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "spec-finalizer" and m.action.resume is True
@@ -200,7 +200,7 @@ def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},
     )
     assert m.var_mutations["spec_minors_integrated"] is True
     assert isinstance(m.action, Goto)
@@ -216,7 +216,7 @@ def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": True},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},
     )
     assert m.var_mutations["spec_minors_integrated"] is False
     assert isinstance(m.action, Goto)
@@ -231,7 +231,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": False},
+        output={"critical": 0, "major": 0, "minor": 0},
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is False

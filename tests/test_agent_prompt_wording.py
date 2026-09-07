@@ -516,7 +516,7 @@ _CALIBRATION_SENTENCE = (
     "An area that returns lap after lap means the design is unsettled, not the spec "
     "under-written: say so in `findings` — another Major buys another lap, not a "
     "decision — and don't manufacture minors to justify one more pass; on such a "
-    "review `has_minor_findings = false` is the honest answer."
+    "review `minor = 0` is the honest answer."
 )
 
 
@@ -586,21 +586,39 @@ def test_summarizer_rereads_its_own_earlier_draft() -> None:
             "revising your own earlier draft):") in _normalized_prompt("summarizer")
 
 
-def test_spec_reviewer_output_schema_stays_the_four_fields() -> None:
+def test_spec_reviewer_output_schema_is_status_findings_and_counts() -> None:
     wf = load_workflow(bundled_workflow_dir("default"))
     fields = wf.agents["spec-reviewer"].output_schema.fields
     assert [f.name for f in fields] == [
-        "status", "findings", "blocking", "has_minor_findings"]
+        "status", "findings", "critical", "major", "minor"]
+    assert [f.type for f in fields if f.name in ("critical", "major", "minor")] == [
+        "int", "int", "int"]
     text = (bundled_workflow_dir("default")
             / "agents" / "spec-reviewer.md").read_text()
     assert (
         "output:\n"
         "  status: {type: enum, values: [Success, Error]}\n"
         "  findings: {type: string}\n"
-        "  blocking: {type: bool}\n"
-        "  has_minor_findings: {type: bool}\n"
+        "  critical: {type: int}\n"
+        "  major: {type: int}\n"
+        "  minor: {type: int}\n"
         "---\n"
     ) in text
+
+
+def test_spec_reviewer_output_copy_counts_findings_and_excludes_nits() -> None:
+    body = _normalized_prompt("spec-reviewer")
+    assert (
+        "Report `critical`, `major`, and `minor` as the number of findings you "
+        "listed at each severity. **Nits are never counted** — a spec whose only "
+        "findings are cosmetic Nits reports `minor = 0`."
+    ) in body
+    assert (
+        "Any Critical or Major sends the spec back for rework. `minor` is consulted "
+        "only when `critical` and `major` are both `0`, deciding whether the writer "
+        "does one final minors-integration pass before the spec is accepted; it has "
+        "no effect otherwise. Count honestly regardless."
+    ) in body
 
 
 def _render_plan_reviewer(tmp_path, prior_laps=None) -> str:

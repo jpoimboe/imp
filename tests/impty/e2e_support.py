@@ -170,7 +170,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                      complexity="trivial"),
             ]}],
             "spec-reviewer": [{"text": "review", "tools": [
-                done(findings="No findings.", blocking=False, has_minor_findings=False),
+                done(findings="No findings.", critical=0, major=0, minor=0),
             ]}],
             "plan-writer": [{"text": "plan", "tools": [
                 bash(plan_cmd),

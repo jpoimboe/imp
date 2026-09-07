@@ -94,10 +94,10 @@ phases:
         # state — so a clean *verification* review stops and drops its own minors.
         rules:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
-          - {if: {blocking: true}, set: {spec_minors_integrated: false},
+          - {if: "output.critical + output.major > 0", set: {spec_minors_integrated: false},
              resume: spec-finalizer, label: "addressing spec review feedback", feedback: "Here's review feedback to address:"}
           # Clean with actionable minors, not yet integrated -> one minors pass; owe a verification review.
-          - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
+          - {if: "var.spec_minors_integrated == false and output.minor > 0", set: {spec_minors_integrated: true},
              resume: spec-finalizer, label: "addressing spec review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
           - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
