@@ -72,6 +72,19 @@ class TerminalScreen(pyte.HistoryScreen):
         if self.reply is not None:
             self.reply(data)
 
+    # Silence, never a fabricated reply, for queries impty doesn't emulate.
+    def report_device_status(self, *modes: int, **kwargs: Any) -> None:
+        # pyte's report_device_status(mode) has no default: never delegate zero.
+        if kwargs.get("private") or len(modes) != 1:
+            return
+        super().report_device_status(modes[0])
+
+    def report_device_attributes(self, *modes: int, **kwargs: Any) -> None:
+        # A longer form is a DA *response* echoed back by a raw-mode child.
+        if len(modes) > 1:
+            return
+        super().report_device_attributes(*modes, **kwargs)
+
     # --- alt-screen entry / exit ------------------------------------------
     def set_mode(self, *modes: int, **kwargs: Any) -> None:
         if kwargs.get("private") and _ALT_MODES & set(modes):

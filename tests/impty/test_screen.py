@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pyte
+import pytest
 
 from impty.screen import Regime, TerminalScreen
 
@@ -112,3 +113,49 @@ def test_resize_during_alt_resizes_saved_buffer_and_clamps_cursor() -> None:
     # The cursor assertion catches an un-clamped saved cursor (cell/display clamp
     # independently and would pass regardless).
     assert 0 <= screen.cursor.x <= 9 and 0 <= screen.cursor.y <= 3
+
+
+def _replies(seq: bytes) -> list[str]:
+    screen, stream = _ts()
+    got: list[str] = []
+    screen.reply = got.append
+    stream.feed(seq)
+    return got
+
+
+@pytest.mark.parametrize(
+    "seq",
+    [
+        b"\x1b[?996n",    # tmux 3.7's color-scheme query - the reported crash
+        b"\x1b[?6n",      # DECXCPR - deliberately unanswered
+        b"\x1b[?997;1n",  # a DSR-996 response echoed back by a raw-mode child
+    ],
+    ids=repr,
+)
+def test_private_device_status_query_is_ignored(seq: bytes) -> None:
+    assert _replies(seq) == []
+
+
+@pytest.mark.parametrize(
+    ("prefix", "expected"),
+    [(b"", "\x1b[1;1R"), (b"hi\r\nthere", "\x1b[2;6R")],
+    ids=["origin", "moved"],
+)
+def test_plain_cursor_position_report_still_answers(prefix: bytes, expected: str) -> None:
+    assert _replies(prefix + b"\x1b[6n") == [expected]
+
+
+def test_plain_primary_device_attributes_still_answers() -> None:
+    assert _replies(b"\x1b[c") == ["\x1b[?6c"]
+
+
+@pytest.mark.parametrize(
+    "seq",
+    [
+        b"\x1b[?1;2;3;4;5c",  # a DA response echoed back by a raw-mode child
+        b"\x1b[1;2;3;4;5c",   # the same, unprefixed
+    ],
+    ids=repr,
+)
+def test_multi_parameter_device_attributes_is_ignored(seq: bytes) -> None:
+    assert _replies(seq) == []

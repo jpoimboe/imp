@@ -33,6 +33,39 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 By default the child inherits your environment with `TERM=xterm-256color` so a real
 program's color emission (and thus `cell().fg`) is deterministic; pass `env=` to override.
 
+## Sequences pyte can't parse (the `TerminalStream` filter)
+
+Child output goes through `impty.stream.TerminalStream` before pyte's parser. It
+drops exactly two classes of sequence whole, and nothing else:
+
+- **Private-prefixed CSI** — `ESC [` followed by `<`, `=` or `>`: secondary DA
+  (`ESC[>c`), XTVERSION, XTMODKEYS (`ESC[>4;2m`), the kitty keyboard protocol.
+  pyte gets these wrong two different ways. It swallows a `>` and dispatches the
+  sequence as if unprefixed, so a secondary DA answers with a surplus primary-DA
+  reply the program never reads — it comes back as *keystrokes* and is typed into
+  the pane — and XTMODKEYS lands as SGR `4;2`, underlining everything after it.
+  `<` and `=` it treats as *final* bytes, so the rest of the sequence is drawn as
+  screen text (`ESC[=5u` leaves a stray `5u`).
+- **String sequences** — DCS (`ESC P`), SOS (`ESC X`), PM (`ESC ^`), APC
+  (`ESC _`), through their `ESC \` or BEL terminator. pyte does not implement
+  them and draws the payload as screen text (a kitty-graphics app splatters
+  base64 across the grid).
+
+OSC (`ESC ]`) and `?`-prefixed CSI are deliberately left to pyte, which handles
+both correctly — and `?` carries the DECSET alt-screen switch `regime()` depends
+on. The filter is a byte-level state machine, not a regex, so it is safe across
+chunk boundaries and holds at most two bytes.
+
+Nothing is answered in a dropped sequence's place. A query impty does not
+genuinely emulate gets silence, never a fabricated reply, so a program falls back
+to conservative defaults instead of being told about capabilities impty cannot
+render; `TerminalScreen` follows the same rule for private device-status queries
+(`ESC[?996n`, `ESC[?6n`), and ignores a multi-parameter device-attributes
+response echoed back by a raw-mode child rather than crashing on its arity, while
+plain CPR (`ESC[6n`) still gets its real answer. If a sequence still trips pyte,
+the chunk is dropped and logged rather than propagating out of a read — a
+degraded screen, not a dead session.
+
 ## Seeing the UI (color images, not just text)
 
 `lines()` and the MCP `view` tool return the grid as text. To actually *see* a TUI —

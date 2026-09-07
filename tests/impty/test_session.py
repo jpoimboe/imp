@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from impty import Regime, TerminalSession
-from tests.impty.e2e_support import can_pty
+from tests.impty.e2e_support import E2E_POLL_TIMEOUT, _poll, can_pty
 
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
@@ -238,9 +239,98 @@ def test_drainer_survives_a_feed_error_and_keeps_draining(caplog) -> None:
             time.sleep(1.2)
         out = "\n".join(s.lines())
         assert s._drainer.is_alive()        # daemon survived the bad feed
-        assert "draining pty" in caplog.text  # and logged it (observable, not silent)
+        # and logged it (observable, not silent)
+        assert "impty: unparseable output dropped; continuing" in caplog.text
         assert "BOOM" not in out            # the bad chunk was dropped
         assert "GOOD" in out                # later output still drained
+
+
+def test_close_ends_the_drainer_with_no_error(caplog) -> None:
+    # Removing the drainer's broad catch must not make ordinary teardown noisy:
+    # close() sets _stop and joins BEFORE closing the master, so the drainer
+    # exits via _stop and nothing is logged.
+    prog = "import time; print('READY', flush=True); time.sleep(30)"
+    with caplog.at_level("ERROR", logger="impty.session"):
+        s = TerminalSession([sys.executable, "-c", prog])
+        try:
+            s.wait_idle(idle=0.2, hard=30.0)
+        finally:
+            s.close()
+        assert _poll(lambda: not s._drainer.is_alive(),
+                     timeout=E2E_POLL_TIMEOUT), "drainer outlived close()"
+    assert [r for r in caplog.records if r.name == "impty.session"] == []
+
+
+_PRIVATE_QUERY_CHILD = (
+    "import sys, time\n"
+    "sys.stdout.write('\\x1b[?996n')\n"   # tmux 3.7's color-scheme query
+    "sys.stdout.write('QUERY-SURVIVED\\n')\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(5)\n"
+)
+
+
+def test_private_status_query_does_not_kill_the_session(caplog) -> None:
+    # The reported bug end to end: ESC[?996n reached pyte's parser and raised
+    # TypeError out of _read_step -> wait_idle -> start, killing the session.
+    with (
+        caplog.at_level("ERROR", logger="impty.session"),
+        TerminalSession([sys.executable, "-c", _PRIVATE_QUERY_CHILD]) as s,
+    ):
+        assert s.wait_idle(idle=0.2, hard=30.0) is True
+        assert "QUERY-SURVIVED" in "\n".join(s.lines())
+    # Not merely survived: the screen handler swallowed the query, so the
+    # _read_step guard never fired. Without this, the guard alone would pass.
+    assert "impty: unparseable output dropped" not in caplog.text
+
+
+_XTMODKEYS_CHILD = (
+    "import sys, time\n"
+    "sys.stdout.write('\\x1b[>4;2m')\n"   # XTMODKEYS, mis-parsed by pyte as SGR 4;2
+    "sys.stdout.write('MODKEYS-PROBE\\n')\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(5)\n"
+)
+
+
+def test_xtmodkeys_does_not_underline_later_output() -> None:
+    probe = "MODKEYS-PROBE"
+    with TerminalSession([sys.executable, "-c", _XTMODKEYS_CHILD]) as s:
+        s.wait_idle(idle=0.2, hard=30.0)
+        assert s.lines(limit=s.rows)[0].rstrip() == probe
+        underlined = [s.cell(x, 0).underscore for x in range(len(probe))]
+        assert underlined == [False] * len(probe)
+
+
+@pytest.mark.timeout(240)
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
+def test_tmux_starts_and_is_drivable(tmp_path: Path, caplog) -> None:
+    socket = str(tmp_path / "s")
+    # TMUX must go: TerminalSession copies os.environ wholesale, so running the
+    # suite from inside tmux would make `new-session` refuse to nest.
+    # TERM goes too: an inherited unusable value (e.g. "dumb") makes new-session
+    # fail for an unrelated reason; TerminalSession's xterm-256color default applies.
+    env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TERM")}
+    argv = ["tmux", "-S", socket, "-f", "/dev/null", "new-session", "/bin/sh"]
+    try:
+        with (
+            caplog.at_level("ERROR", logger="impty.session"),
+            TerminalSession(argv, env=env, cols=80, rows=24) as s,
+        ):
+            s.wait_idle(idle=0.3, hard=30.0)
+            assert _poll(lambda: "[0]" in s.lines(limit=s.rows)[-1],
+                         timeout=E2E_POLL_TIMEOUT), "status line never painted"
+            s.send("echo IMPTY-$((6*7))\r")
+            assert _poll(lambda: "IMPTY-42" in "\n".join(s.lines(limit=s.rows)),
+                         timeout=E2E_POLL_TIMEOUT), "sentinel never appeared"
+            # pyte answered tmux's secondary DA with a surplus primary-DA reply;
+            # tmux had already consumed one, so it arrived back as keystrokes.
+            assert "[?6c" not in "\n".join(s.lines())
+        # Nothing in tmux's real startup burst tripped pyte.
+        assert "impty: unparseable output dropped" not in caplog.text
+    finally:
+        subprocess.run(["tmux", "-S", socket, "kill-server"],
+                       capture_output=True, check=False, timeout=30)
 
 
 def test_cursor_parks_after_prompt_string() -> None:
