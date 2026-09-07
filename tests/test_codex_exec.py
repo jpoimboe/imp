@@ -2,7 +2,29 @@
 stderr drain, and group-reaping teardown."""
 from __future__ import annotations
 
-from imp.providers.codex_exec import ThreadOptions, build_command_args
+import contextlib
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from imp.providers.codex_exec import (
+    CODEX_STREAM_LIMIT,
+    CodexExecError,
+    ThreadOptions,
+    _run_exec,
+    build_command_args,
+)
+from tests.conftest import _pid_gone_or_zombie
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 _OPTS_HIGH = ThreadOptions(
     model="gpt-5-codex", sandbox_mode="read-only", approval_policy="never",
@@ -48,3 +70,168 @@ def test_argv_carries_the_current_json_flag_and_no_web_search_option() -> None:
     assert "--json" in args
     assert "--experimental-json" not in args
     assert not any("features.web_search_request" in a for a in args)
+
+
+# --- Fake codex children ----------------------------------------------------
+
+def _fake_codex(tmp_path: Path, body: str, name: str = "codex") -> Path:
+    script = tmp_path / name
+    script.write_text(f"#!{sys.executable}\n{body}")
+    script.chmod(0o755)
+    return script
+
+
+_BIG_LINE = 200 * 1024
+
+_ECHO_STDIN = """\
+import sys
+prompt = sys.stdin.read()
+sys.stdout.write(prompt.replace("\\n", " ") + "\\n")
+sys.stdout.write(repr(sys.argv[1:]) + "\\n")
+sys.stdout.flush()
+"""
+
+_BIG_WRITER = f"""\
+import sys
+sys.stdin.read()
+sys.stdout.write("x" * {_BIG_LINE} + "\\n")
+sys.stdout.flush()
+"""
+
+_PGID_REPORTER = """\
+import os, sys
+sys.stdin.read()
+sys.stdout.write(f"{os.getpid()} {os.getpgid(0)}\\n")
+sys.stdout.flush()
+"""
+
+_CHATTY_STDERR = """\
+import sys
+sys.stdin.read()
+sys.stderr.write("e" * (1024 * 1024))
+sys.stderr.flush()
+sys.stdout.write("done\\n")
+sys.stdout.flush()
+"""
+
+_FAILING = """\
+import sys
+sys.stdin.read()
+sys.stderr.write("boom: codex could not start\\n")
+sys.stderr.flush()
+sys.exit(3)
+"""
+
+_GRANDPARENT = """\
+import os, subprocess, sys, time
+sys.stdin.read()
+kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+sys.stdout.write(f"{os.getpid()} {kid.pid}\\n")
+sys.stdout.flush()
+time.sleep(300)
+"""
+
+
+_ESCAPEE = """\
+import os, subprocess, sys, time
+sys.stdin.read()
+kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"],
+                       start_new_session=True)
+sys.stdout.write(f"{os.getpid()} {kid.pid}\\n")
+sys.stdout.flush()
+time.sleep(300)
+"""
+
+
+def _await_death(pid: int, complaint: str) -> None:
+    deadline = time.monotonic() + 20.0  # generous; only burned on the failure path
+    while not _pid_gone_or_zombie(pid):
+        if time.monotonic() > deadline:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+            pytest.fail(complaint)
+        time.sleep(0.05)
+
+
+async def _collect(exe: Path, prompt: str, args: list[str] | None = None) -> list[str]:
+    lines: list[str] = []
+    gen = _run_exec(str(exe), args or [], dict(os.environ), prompt)
+    async with contextlib.aclosing(gen):
+        async for line in gen:
+            lines.append(line)
+    return lines
+
+
+# --- The read loop ----------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_the_prompt_reaches_the_child_on_stdin_and_never_in_argv(tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _ECHO_STDIN)
+    lines = await _collect(exe, "solve the thing", ["exec", "--json"])
+    assert lines[0] == "solve the thing"
+    assert lines[1] == repr(["exec", "--json"])
+
+
+@pytest.mark.anyio
+async def test_a_jsonl_line_over_64_kib_is_read_whole(tmp_path: Path) -> None:
+    """asyncio's 64 KiB default would raise ValueError('Separator is found, but ...')."""
+    exe = _fake_codex(tmp_path, _BIG_WRITER)
+    lines = await _collect(exe, "go")
+    assert len(lines[0]) == _BIG_LINE
+    assert CODEX_STREAM_LIMIT == 64 * 1024 * 1024
+
+
+@pytest.mark.anyio
+async def test_the_child_is_its_own_session_leader(tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _PGID_REPORTER)
+    lines = await _collect(exe, "go")
+    pid, pgid = (int(x) for x in lines[0].split())
+    assert pid == pgid
+    assert pgid != os.getpgid(0)
+
+
+@pytest.mark.anyio
+async def test_a_child_flooding_stderr_completes_instead_of_deadlocking(
+        tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _CHATTY_STDERR)
+    assert await _collect(exe, "go") == ["done"]
+
+
+@pytest.mark.anyio
+async def test_a_non_zero_exit_raises_carrying_the_child_stderr(tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _FAILING)
+    with pytest.raises(CodexExecError) as excinfo:
+        await _collect(exe, "go")
+    assert "boom: codex could not start" in str(excinfo.value)
+    assert "3" in str(excinfo.value)
+
+
+@pytest.mark.anyio
+async def test_closing_the_line_stream_kills_the_child_and_its_grandchild(
+        tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _GRANDPARENT)
+    gen = _run_exec(str(exe), [], dict(os.environ), "go")
+    async with contextlib.aclosing(gen):
+        async for line in gen:
+            child, grandchild = (int(x) for x in line.split())
+            break
+    _await_death(child, f"codex child {child} survived teardown")
+    _await_death(grandchild, f"codex grandchild {grandchild} survived teardown")
+
+
+@pytest.mark.anyio
+async def test_teardown_returns_when_a_descendant_escapes_the_group(tmp_path: Path) -> None:
+    """Process.wait() returns only once the child's pipes disconnect, so an escapee
+    still holding them would hang teardown forever without the bounded reap."""
+    exe = _fake_codex(tmp_path, _ESCAPEE)
+    gen = _run_exec(str(exe), [], dict(os.environ), "go")
+    async with contextlib.aclosing(gen):
+        async for line in gen:
+            child, escapee = (int(x) for x in line.split())
+            break
+    try:
+        _await_death(child, f"codex child {child} survived teardown")
+        assert not _pid_gone_or_zombie(escapee)  # it left the group by design
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(escapee, signal.SIGKILL)

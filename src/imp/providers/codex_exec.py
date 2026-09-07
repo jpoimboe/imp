@@ -9,8 +9,16 @@ the child's whole group rather than orphaning its grandchildren.
 """
 from __future__ import annotations
 
+import asyncio
+import codecs
+import contextlib
+import signal
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Literal
+
+from imp.agents.timeouts import PROCESS_KILL_GRACE_S
+from imp.agents.tools.context import kill_process_group
 
 # 64 MiB ceiling for one JSONL line: asyncio's 64 KiB default makes
 # StreamReader.readline() raise on a larger codex event line.
@@ -22,6 +30,12 @@ CODEX_ORIGINATOR = "codex_sdk_py"
 SandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
 ApprovalMode = Literal["never", "on-request", "on-failure", "untrusted"]
 ModelReasoningEffort = Literal["minimal", "low", "medium", "high"]
+
+
+class CodexExecError(Exception):
+    """`codex exec` exited non-zero; carries the child's stderr. Deliberately not a
+    ProviderError: the runner's broad `except Exception` classifies it
+    unknown-category and attaches the stderr tail."""
 
 
 @dataclass(frozen=True)
@@ -52,3 +66,60 @@ def build_command_args(options: ThreadOptions, thread_id: str | None) -> list[st
     if thread_id is not None:
         args += ["resume", thread_id]
     return args
+
+
+async def _drain_stderr(stream: asyncio.StreamReader) -> str:
+    """Read stderr to EOF. Must run concurrently with the stdout loop: a full
+    stderr pipe blocks the child, which stops stdout, which hangs the read loop."""
+    # Incremental so a multi-byte char split across two reads decodes correctly
+    # instead of becoming U+FFFD on the boundary.
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    parts: list[str] = []
+    while True:
+        chunk = await stream.read(4096)
+        text = decoder.decode(chunk, final=not chunk)
+        if text:
+            parts.append(text)
+        if not chunk:
+            return "".join(parts)
+
+
+async def _run_exec(
+    executable: str, args: list[str], env: dict[str, str], prompt: str,
+) -> AsyncGenerator[str, None]:
+    proc = await asyncio.create_subprocess_exec(
+        executable, *args,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        limit=CODEX_STREAM_LIMIT,
+        start_new_session=True,
+    )
+    stdin, stdout, stderr = proc.stdin, proc.stdout, proc.stderr
+    assert stdin is not None and stdout is not None and stderr is not None
+    stderr_task = asyncio.create_task(_drain_stderr(stderr))
+    try:
+        stdin.write(prompt.encode("utf-8"))
+        await stdin.drain()
+        stdin.close()  # codex reads stdin to EOF: without the close every turn hangs
+
+        while True:
+            line = await stdout.readline()
+            if not line:
+                break
+            yield line.decode("utf-8").rstrip("\n")
+
+        returncode = await proc.wait()
+        stderr_text = await stderr_task
+        if returncode != 0:
+            raise CodexExecError(f"codex exec exited with code {returncode}: {stderr_text}")
+    finally:
+        stderr_task.cancel()
+        if proc.returncode is None:
+            await kill_process_group(proc, signal.SIGKILL)
+            # Bounded: Process.wait() returns only once the child's pipes
+            # disconnect, so a descendant that escaped the group would otherwise
+            # hang teardown forever. The group already took SIGKILL.
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=PROCESS_KILL_GRACE_S)
