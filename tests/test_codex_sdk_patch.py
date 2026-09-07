@@ -1,4 +1,4 @@
-"""Tests for the codex SDK subprocess spawn patch (read-limit + session isolation).
+"""Tests for imp's patches against the pinned codex SDK (subprocess spawn + item models).
 
 Covers:
 - Behavioral regression: a line > 64 KiB raises ValueError at asyncio's default limit.
@@ -7,24 +7,36 @@ Covers:
   rather than waiting on it.
 - _SubprocessPatchingAsyncio proxy: injects default limit AND start_new_session,
   respects explicit values for each, forwards other attrs.
-- install_codex_subprocess_patches: idempotent, replaces the SDK module ref, forwards real attrs.
+- install_codex_sdk_patches: idempotent, replaces the SDK module ref, forwards real attrs.
+- Widened item models: the three real codex wire payloads parse; each model is
+  registered exactly once.
+- Parse-failure policy: fatal for the item types imp consumes, degraded-and-skipped
+  for the rest; bad JSON and normal items stay strict.
 - Real grouping: a child spawned through the proxy lands in its own process group.
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from openai_codex_sdk.types import UnknownThreadItem
 
-from imp.providers.codex_subprocess_patch import (
+from imp.providers.codex_sdk_patch import (
     CODEX_STREAM_LIMIT,
+    CodexEventParseError,
+    _CommandExecutionItem,
+    _FileChangeItem,
+    _McpToolCallItem,
     _SubprocessPatchingAsyncio,
-    install_codex_subprocess_patches,
+    _UnparsedThreadItem,
+    install_codex_sdk_patches,
 )
 
 
@@ -150,19 +162,15 @@ async def test_proxy_injects_limit_and_session_isolation() -> None:
 # Installer: idempotency + real attr forwarding
 # ---------------------------------------------------------------------------
 
-def test_install_is_idempotent_and_forwards() -> None:
-    """install_codex_subprocess_patches() is idempotent; the proxy forwards real asyncio attrs."""
+def test_install_is_idempotent_and_forwards(sdk_patch_sandbox: dict[str, Any]) -> None:
+    """install_codex_sdk_patches() is idempotent; the proxy forwards real asyncio attrs."""
     from openai_codex_sdk import exec as codex_exec  # type: ignore[import-untyped]
 
-    original = codex_exec.asyncio
-    try:
-        install_codex_subprocess_patches()
-        install_codex_subprocess_patches()  # second call must be a no-op
-        assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
-        assert codex_exec.asyncio.FIRST_COMPLETED is asyncio.FIRST_COMPLETED
-        assert codex_exec.asyncio.create_subprocess_exec is not None
-    finally:
-        codex_exec.asyncio = original  # restore so the patch doesn't leak
+    install_codex_sdk_patches()
+    install_codex_sdk_patches()  # second call must be a no-op
+    assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
+    assert codex_exec.asyncio.FIRST_COMPLETED is asyncio.FIRST_COMPLETED
+    assert codex_exec.asyncio.create_subprocess_exec is not None
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +291,215 @@ async def test_tee_decodes_multibyte_char_split_across_reads(tmp_path: Path) -> 
     assert out == b"caf\xc3\xa9\n"
     # ...and the sink decodes the split 'é' correctly (no U+FFFD replacement).
     assert sink.tail() == "café\n"
+
+
+# ---------------------------------------------------------------------------
+# Item models: the pinned SDK's models vs. the codex CLI's real wire contract
+# ---------------------------------------------------------------------------
+
+# Real codex 0.153 wire lines (codex-rs exec/src/exec_events.rs at rust-v0.153.2).
+_WIRE_FILE_CHANGE_STARTED = (
+    '{"type":"item.started","item":{"id":"i1","type":"file_change",'
+    '"changes":[{"path":"a","kind":"add"}],"status":"in_progress"}}'
+)
+_WIRE_COMMAND_DECLINED = (
+    '{"type":"item.completed","item":{"id":"i2","type":"command_execution",'
+    '"command":"ls","aggregated_output":"","exit_code":null,"status":"declined"}}'
+)
+_WIRE_MCP_STRING_CONTENT = (
+    '{"type":"item.completed","item":{"id":"i3","type":"mcp_tool_call",'
+    '"server":"imp","tool":"bash","arguments":{},'
+    '"result":{"content":["plain string"],"structured_content":null},'
+    '"status":"completed"}}'
+)
+
+
+@pytest.fixture
+def sdk_patch_sandbox() -> Iterator[dict[str, Any]]:
+    """Install the patches inside one test only: snapshot the SDK's item-model
+    registry, its parse_thread_item ref and its exec-module asyncio ref, and
+    restore all three afterwards. Yields the pre-install registry snapshot."""
+    from openai_codex_sdk import exec as codex_exec
+    from openai_codex_sdk import parsing
+
+    saved_models = dict(parsing._ITEM_MODELS)
+    saved_asyncio = codex_exec.asyncio
+    saved_parse_item = parsing.parse_thread_item
+    try:
+        yield saved_models
+    finally:
+        parsing._ITEM_MODELS.clear()
+        parsing._ITEM_MODELS.update(saved_models)
+        codex_exec.asyncio = saved_asyncio
+        parsing.parse_thread_item = saved_parse_item
+
+
+def test_patched_parser_accepts_the_real_wire_lines(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """The three payloads codex actually emits parse, with their real values."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    from imp.providers.codex_runner import _serialize_mcp_result
+
+    install_codex_sdk_patches()
+
+    started = parse_thread_event_line(_WIRE_FILE_CHANGE_STARTED)
+    assert started.item.status == "in_progress"
+    assert [c.path for c in started.item.changes] == ["a"]
+
+    declined = parse_thread_event_line(_WIRE_COMMAND_DECLINED)
+    assert declined.item.status == "declined"
+    assert declined.item.command == "ls"
+
+    mcp = parse_thread_event_line(_WIRE_MCP_STRING_CONTENT)
+    assert mcp.item.result.content == ["plain string"]
+    assert _serialize_mcp_result(mcp.item.result) == "plain string"
+
+
+def test_install_registers_each_item_model_exactly_once(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """Two calls leave one registration per key and one subprocess proxy."""
+    from openai_codex_sdk import exec as codex_exec
+    from openai_codex_sdk import parsing
+
+    install_codex_sdk_patches()
+    install_codex_sdk_patches()
+
+    assert set(parsing._ITEM_MODELS) == set(sdk_patch_sandbox)
+    assert parsing._ITEM_MODELS["file_change"] is _FileChangeItem
+    assert parsing._ITEM_MODELS["command_execution"] is _CommandExecutionItem
+    assert parsing._ITEM_MODELS["mcp_tool_call"] is _McpToolCallItem
+    assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
+    assert not isinstance(codex_exec.asyncio._real, _SubprocessPatchingAsyncio)
+
+
+def test_unpatched_sdk_models_still_reject_the_real_wire_payloads() -> None:
+    """Obsolescence guard: if upstream ever fixes these models, this test fails
+    and tells us imp's widened subclasses are dead code."""
+    import pydantic
+    from openai_codex_sdk.types import (
+        CommandExecutionItem,
+        FileChangeItem,
+        McpToolCallResult,
+    )
+
+    with pytest.raises(pydantic.ValidationError):
+        FileChangeItem.model_validate(json.loads(_WIRE_FILE_CHANGE_STARTED)["item"])
+    with pytest.raises(pydantic.ValidationError):
+        CommandExecutionItem.model_validate(json.loads(_WIRE_COMMAND_DECLINED)["item"])
+    with pytest.raises(pydantic.ValidationError):
+        McpToolCallResult.model_validate(json.loads(_WIRE_MCP_STRING_CONTENT)["item"]["result"])
+
+
+# ---------------------------------------------------------------------------
+# Parse-failure policy: fatal for consumed item types, degraded for the rest
+# ---------------------------------------------------------------------------
+
+_WIRE_FILE_CHANGE_UNKNOWN_STATUS = (
+    '{"type":"item.started","item":{"id":"i9","type":"file_change",'
+    '"changes":[{"path":"a","kind":"add"}],"status":"brand_new"}}'
+)
+_WIRE_MCP_UNKNOWN_STATUS = (
+    '{"type":"item.completed","item":{"id":"i8","type":"mcp_tool_call",'
+    '"server":"imp","tool":"bash","arguments":{},"result":null,'
+    '"status":"brand_new"}}'
+)
+
+
+@pytest.mark.parametrize(
+    "etype", ["item.started", "item.updated", "item.completed"])
+def test_unconsumed_item_type_degrades_instead_of_raising(
+    sdk_patch_sandbox: dict[str, Any], etype: str,
+) -> None:
+    """A file_change imp discards must not kill the stream, at any item phase."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    install_codex_sdk_patches()
+
+    line = _WIRE_FILE_CHANGE_UNKNOWN_STATUS.replace("item.started", etype)
+    event = parse_thread_event_line(line)
+    assert type(event.item) is _UnparsedThreadItem
+    assert event.item.id == "i9"
+    assert event.item.type == "file_change"
+    assert "brand_new" in event.item.imp_parse_error
+    # The rest of the payload is dropped, not half-populated.
+    assert not hasattr(event.item, "changes")
+
+
+def test_consumed_item_type_raises_classified_parse_error(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """mcp_tool_call carries imp's control flow, so drift there is fatal."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    install_codex_sdk_patches()
+
+    with pytest.raises(CodexEventParseError) as excinfo:
+        parse_thread_event_line(_WIRE_MCP_UNKNOWN_STATUS)
+
+    exc = excinfo.value
+    assert exc.category == "config"
+    assert str(exc) == (
+        "codex event parse failure: item type 'mcp_tool_call' does not match the "
+        "pinned openai-codex-sdk model — update src/imp/providers/codex_sdk_patch.py")
+    assert exc.detail["item_type"] == "mcp_tool_call"
+    assert "brand_new" in str(exc.detail["validation_error"])
+
+
+def test_wrapper_keeps_json_and_normal_items_strict(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """The wrapper softens nothing else: bad JSON still raises, good items still
+    parse to the SDK's own models."""
+    from openai_codex_sdk.errors import EventParseError
+    from openai_codex_sdk.parsing import parse_thread_event_line
+    from openai_codex_sdk.types import AgentMessageItem
+
+    install_codex_sdk_patches()
+
+    with pytest.raises(EventParseError):
+        parse_thread_event_line('{"type":"item.completed"')
+
+    ok = parse_thread_event_line(
+        '{"type":"item.completed","item":{"id":"a1","type":"agent_message",'
+        '"text":"hi"}}')
+    assert type(ok.item) is AgentMessageItem
+    assert ok.item.text == "hi"
+
+    unknown = parse_thread_event_line(
+        '{"type":"item.completed","item":{"id":"u1","type":"future_type"}}')
+    assert type(unknown.item) is UnknownThreadItem
+
+
+@pytest.mark.parametrize("raw_id", ["absent", 7])
+def test_degradation_survives_a_payload_with_no_usable_id(
+    sdk_patch_sandbox: dict[str, Any], raw_id: object,
+) -> None:
+    """The degradation constructor must never raise a second ValidationError."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    install_codex_sdk_patches()
+
+    item: dict[str, Any] = {"type": "file_change", "status": "brand_new", "changes": []}
+    if raw_id != "absent":
+        item["id"] = raw_id
+    line = json.dumps({"type": "item.started", "item": item})
+
+    event = parse_thread_event_line(line)
+    assert type(event.item) is _UnparsedThreadItem
+    assert event.item.id == ""
+
+
+def test_install_leaves_exactly_one_parser_wrapper(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """A second install must not wrap the wrapper."""
+    from openai_codex_sdk import parsing
+
+    install_codex_sdk_patches()
+    once = parsing.parse_thread_item
+    install_codex_sdk_patches()
+
+    assert parsing.parse_thread_item is once

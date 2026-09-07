@@ -29,6 +29,8 @@ from openai_codex_sdk.types import (  # noqa: E402
     AgentMessageItem,
     ErrorItem,
     ItemCompletedEvent,
+    ItemStartedEvent,
+    ItemUpdatedEvent,
     McpToolCallItem,
     McpToolCallResult,
     TurnCompletedEvent,
@@ -153,6 +155,34 @@ def test_real_error_item_is_diagnostic_not_unhandled() -> None:
     assert warns[0]["payload"].get("codex_error_item") is True
     assert "unhandled" not in str(warns[0]["payload"]).lower()
     assert "web_search_request" in warns[0]["payload"]["message"]
+
+
+def test_degraded_item_warns_once_per_event_and_emits_no_error() -> None:
+    """A file_change codex emitted with an unmodelled status reaches process_event
+    as the degraded item; every event carrying it warns and is skipped."""
+    from imp.providers.codex_sdk_patch import _UnparsedThreadItem
+
+    item = _UnparsedThreadItem(
+        id="i9", type="file_change",
+        imp_parse_error="1 validation error for _FileChangeItem\nstatus\n  Input should be ...")
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {}
+    for event in (ItemStartedEvent(type="item.started", item=item),
+                  ItemUpdatedEvent(type="item.updated", item=item),
+                  ItemCompletedEvent(type="item.completed", item=item)):
+        process_event(event, elog=elog, agent_id="step:t", state=state,
+                      provider="codex", model="gpt-5.5")
+
+    events = list(elog.read())
+    warns = [e for e in events if e["type"] == "runner_warning"]
+    assert len(warns) == 3, events
+    for warn in warns:
+        assert warn["payload"]["message"] == (
+            "codex file_change item did not match the pinned openai-codex-sdk "
+            "model and was skipped")
+        assert warn["payload"]["codex_parse_error"].startswith("1 validation error")
+    # Skipped, not mapped: no error event and no "unhandled codex item type".
+    assert [e["type"] for e in events] == ["runner_warning"] * 3
 
 
 def test_real_agent_message_records_agent_message_event() -> None:

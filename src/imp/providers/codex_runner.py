@@ -842,8 +842,8 @@ class CodexAgentRunner:
             return self._client_factory(options=None)
         from openai_codex_sdk import Codex
 
-        from imp.providers.codex_subprocess_patch import install_codex_subprocess_patches
-        install_codex_subprocess_patches()
+        from imp.providers.codex_sdk_patch import install_codex_sdk_patches
+        install_codex_sdk_patches()
 
         # `CodexOptions` is not re-exported at the package top level in the
         # pinned SDK (0.1.11) — only `openai_codex_sdk.types` (and .codex/.thread)
@@ -987,7 +987,7 @@ class CodexAgentRunner:
             # imp does NOT group-reap the `codex exec` child on pause. The codex
             # SDK keeps that child's pid local to CodexExec.run() and never exposes
             # it, so there is no handle to killpg. Session isolation
-            # (codex_subprocess_patch) still makes the child its own session leader
+            # (codex_sdk_patch) still makes the child its own session leader
             # so a terminal Ctrl-C reaches imp alone; teardown then relies on the
             # SDK's cooperative AbortSignal -> single proc.kill(), which can orphan
             # the child's own grandchildren. Reaching deeper into SDK internals to
@@ -1096,10 +1096,24 @@ def process_event(
     `state` is a shared dict carrying in-flight thread_id, the latest context
     reading, captured complete_step args, etc.
 
-    The default arm (unknown item type) logs a runner_warning and returns
-    (L3 invariant); only security-relevant types get special handling.
+    The default arm (unknown item type) logs a runner_warning and returns; so
+    does an item the pinned SDK could not parse (see the parse-boundary bullet
+    under Layering invariants in docs/internals/invariants.md). Only
+    security-relevant types get special handling.
     """
     etype = getattr(event, "type", None)
+
+    # A payload codex_sdk_patch could not validate arrives degraded, carrying only
+    # its id/type. Ahead of the etype dispatch so item.started/updated/completed
+    # are covered alike; one warning per event, no seen-id state.
+    degraded = getattr(event, "item", None)
+    parse_error = getattr(degraded, "imp_parse_error", None)
+    if parse_error is not None:
+        elog.append(agent_id=agent_id, type="runner_warning", payload={
+            "message": f"codex {getattr(degraded, 'type', '')} item did not match the "
+                       f"pinned openai-codex-sdk model and was skipped",
+            "codex_parse_error": parse_error})
+        return
 
     # `thread.started` — capture thread_id for resume / re-query.
     if etype == "thread.started":
