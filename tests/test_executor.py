@@ -3942,6 +3942,31 @@ async def test_bare_resume_backstop_rides_on_prior_attempts_preamble(tmp_path: P
 
 
 @pytest.mark.anyio
+async def test_resume_with_feedback_omits_prior_attempts_preamble(tmp_path: Path) -> None:
+    """A resume: back edge that carries feedback delivers exactly that feedback (plus
+    the backstop) — the replayed transcript already holds the agent's own laps, so the
+    engine's prior-attempts preamble would only restate them."""
+    quest = _seed_back_edge_workflow(
+        tmp_path, verb="resume", feedback="reviewer findings:")
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
+    assert coder_feedback[0] is None                     # fresh entry: no wrapper
+    # The coder's lap 1 outcome IS recorded here — the sibling bare-resume test
+    # renders a preamble from the same workflow shape — yet the delivered wrapper
+    # opens on the rework feedback, not on the preamble.
+    assert "Prior attempts at this step" not in coder_feedback[1]
+    assert coder_feedback[1].startswith("reviewer findings:\n")
+    assert coder_feedback[1].endswith(COMPLETION_BACKSTOP)
+    # `_dispatch_step` composes `{action.feedback}\n{render_output_fields(output)}`
+    # (executor.py:1782-1784), so the reviewer's own output fields ride along.
+    assert "verdict: rework" in coder_feedback[1]
+
+
+@pytest.mark.anyio
 async def test_resume_handoff_framed_feedback_ends_with_backstop(tmp_path: Path) -> None:
     """Regression: a handoff-framed feedback string still gets the backstop appended."""
     quest = _seed_back_edge_workflow(
