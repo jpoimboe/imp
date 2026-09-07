@@ -376,14 +376,14 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
         )
 
 
-def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
+def test_plan_reviewer_critical_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": True},
-        output={"blocking": True, "has_minor_findings": False},
+        output={"critical": 1, "major": 0, "minor": 0},   # critical -> rework
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is True
@@ -397,7 +397,7 @@ def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},   # clean with minors
     )
     assert m.var_mutations["plan_minors_integrated"] is True
     assert isinstance(m.action, Goto)
@@ -411,7 +411,7 @@ def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": True},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},   # verification pass
     )
     assert m.var_mutations["plan_minors_integrated"] is False
     assert isinstance(m.action, Goto)
@@ -425,7 +425,7 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": False},
+        output={"critical": 0, "major": 0, "minor": 0},   # clean, nothing actionable
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-finalized" and m.action.resume is False

@@ -717,10 +717,10 @@ def test_plan_reviewer_findings_must_end_with_a_verified_facts_tail() -> None:
     body = _agent_prompt("plan-reviewer")
     assert _VERIFIED_TAIL in body
     # It sits in `## Severity & output`, right after the findings-format sentence
-    # and before the blocking rule — so it is part of the output contract.
+    # and before the counting rule — so it is part of the output contract.
     assert body.index("## Severity & output") < body.index(_VERIFIED_TAIL)
     assert body.index("Report `findings` as classified prose") < body.index(_VERIFIED_TAIL)
-    assert body.index(_VERIFIED_TAIL) < body.index("Set `blocking = true`")
+    assert body.index(_VERIFIED_TAIL) < body.index("Report `critical`, `major`, and `minor`")
 
 
 def test_plan_reviewer_finish_exemplars_carry_the_verified_tail() -> None:
@@ -731,16 +731,37 @@ def test_plan_reviewer_finish_exemplars_carry_the_verified_tail() -> None:
     exemplars = body[body.index("Finish with one of:"):]
     assert (
         'complete_step(findings="No Critical/Major findings. Minor: … '
-        'Verified at <sha>: …", blocking=false, has_minor_findings=true)'
+        'Verified at <sha>: …", critical=0, major=0, minor=2)'
     ) in exemplars
     assert (
         'complete_step(findings="No findings. Plan is complete and ready for '
-        'implementation. Verified at <sha>: …", blocking=false, has_minor_findings=false)'
+        'implementation. Verified at <sha>: …", critical=0, major=0, minor=0)'
     ) in exemplars
     assert (
         'complete_step(findings="Critical: … / Major: … Verified at <sha>: …", '
-        'blocking=true, has_minor_findings=false)'
+        'critical=1, major=2, minor=0)'
     ) in exemplars
+
+
+def test_plan_reviewer_output_schema_is_status_findings_and_counts() -> None:
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(bundled_workflow_dir("default"))
+    fields = wf.agents["plan-reviewer"].output_schema.fields
+    assert [f.name for f in fields] == [
+        "status", "findings", "critical", "major", "minor"]
+    body = _normalized_prompt("plan-reviewer")
+    assert (
+        "Report `critical`, `major`, and `minor` as the number of findings you "
+        "listed at each severity. **Nits are never counted** — a plan whose only "
+        "findings are cosmetic Nits reports `minor = 0`."
+    ) in body
+    assert (
+        "Any Critical or Major sends the plan back for rework. `minor` is consulted "
+        "only when `critical` and `major` are both `0`, deciding whether the writer "
+        "does one final minors-integration pass before the plan is accepted; it has "
+        "no effect otherwise. Count honestly regardless."
+    ) in body
 
 
 def test_plan_reviewer_orient_stays_intact_above_earlier_laps(tmp_path) -> None:

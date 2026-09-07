@@ -128,17 +128,17 @@ phases:
         read_only: ["."]
         # A single plan-reviewer runs directly as the step at its own high tier (the
         # prior medium tier was only the coordinator's dispatch-and-collapse cost); the
-        # engine routes its {status, findings, blocking, has_minor_findings} output
+        # engine routes its {status, findings, critical, major, minor} output
         # through these rules. plan_minors_integrated tracks the writer's one minors-
         # integration pass: set only on the clean-with-minors bounce-back, cleared on
         # every rework/terminal branch. Mirrors the spec minors loop.
         rules:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
-          - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing plan review feedback", feedback: "Here's review feedback to address:"}
+          - {if: "output.critical + output.major > 0", set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing plan review feedback", feedback: "Here's review feedback to address:"}
           # Clean, and the writer already did its minors-integration pass -> stop.
           - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: plan-finalized}
           # Clean with actionable minors -> integrate them, then owe one more (verification) review.
-          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, label: "addressing plan review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          - {if: "output.minor > 0", set: {plan_minors_integrated: true}, resume: plan-writer, label: "addressing plan review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean, nothing to integrate -> stop.
           - {else: true, goto: plan-finalized}
 

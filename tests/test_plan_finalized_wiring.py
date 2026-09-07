@@ -48,10 +48,10 @@ def test_fresh_plan_arrows_route_through_plan_finalized() -> None:
     assert fast.action.target == "plan-finalized"
     minors = evaluate_rules(steps["plan-reviewer"].rules,
                             vars={**_BASE, "plan_minors_integrated": True},
-                            output={"blocking": False, "has_minor_findings": True})
+                            output={"critical": 0, "major": 0, "minor": 2})
     assert minors.action.target == "plan-finalized"
     clean = evaluate_rules(steps["plan-reviewer"].rules, vars=_BASE,
-                           output={"blocking": False, "has_minor_findings": False})
+                           output={"critical": 0, "major": 0, "minor": 0})
     assert clean.action.target == "plan-finalized"
 
 

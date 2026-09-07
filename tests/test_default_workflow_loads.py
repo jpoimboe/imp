@@ -170,10 +170,10 @@ def test_route_labels_assigned() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
 
-    # spec-reviewer: blocking -> feedback rework; minors -> integrate
+    # spec-reviewer: critical/major -> feedback rework; minors -> integrate
     assert by["spec-reviewer"].rules[0].label == "addressing spec review feedback"
     assert by["spec-reviewer"].rules[1].label == "addressing spec review feedback"
-    # plan-reviewer: blocking; minors (has_minor_findings rule)
+    # plan-reviewer: critical/major; minors (output.minor rule)
     assert by["plan-reviewer"].rules[0].label == "addressing plan review feedback"
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
     # batch-code-reviewer task_gap -> task-lead
