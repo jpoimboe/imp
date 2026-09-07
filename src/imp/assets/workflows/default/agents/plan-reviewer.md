@@ -30,6 +30,44 @@ Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
 plan files: a requirement absent here may belong to another plan. The project tree is read-only and the sandbox enforces it. You may write exactly one file of record — `{{ quest.home }}/deferred.md`, to append an untagged scope-out line (see backstop below) — plus whatever scratch files you need in a temporary directory outside the tree, which is where any reconstruction belongs.
 
+## Earlier laps
+
+This is review lap {{ step.lap }}.{% if step.prior_laps %} Prior laps ended — {% for l in step.prior_laps %}{{ l.lap }}: {{ l.outcome }}{% if l.get("head") %} (at {{ l.head[:8] }}){% endif %}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %}
+
+{% if step.lap > 1 %}
+
+Run `git -C "$IMP_PROJECT_ROOT" rev-parse HEAD` first. **One rule sorts every earlier lap:
+its sha against your HEAD.** HEAD advances only when a plan is implemented, so a lap
+stamped with a different sha — or with no sha at all — reviewed an earlier plan or an
+earlier tree; ignore it wholesale, findings and verified facts alike. Laps stamped with
+**your** HEAD reviewed this plan and the writer revised it in place; recover their work
+before you start:
+
+- **Their findings** — `imp events {{ quest.id }} --step plan-reviewer --type agent_result --json`;
+  each lap's `findings` carries its full report, oldest first. Every report ends with its
+  own `Verified at <sha>:` line — apply the same sha rule to it. That in-band stamp is
+  authoritative: the outcome list above keeps only the last few laps, so on a deep loop it
+  is the only stamp a report has.
+- **What the writer changed since** — the plan file's own revision history in the artifact
+  ref. Paths there are tree-root-relative, so use `P=plans/{{ quest.id }}-plan-<N>.md` for
+  the plan you are reviewing — not its `{{ quest.home }}` path, which matches nothing.
+  Each `bash` call is a fresh shell, so set it in the same call:
+
+  ```
+  P=plans/{{ quest.id }}-plan-<N>.md
+  git -C "$IMP_PROJECT_ROOT" log --oneline refs/imp/artifacts/{{ quest.id }} -- "$P"
+  git -C "$IMP_PROJECT_ROOT" diff <second-newest> <newest> -- "$P"
+  ```
+
+An earlier revision of the same file is not a prior plan file; reading it is expected.
+
+This scopes **verification effort, not judgement**. Read the whole plan and form your own
+view of whether it is correct and complete, every lap. What you may skip is re-opening a
+source file to re-confirm a fact a same-sha lap already verified — spend that budget on
+the delta and everything it touches. Prior findings are a floor, not a ceiling: an area no
+earlier lap mentioned is not thereby clean.
+{% endif %}
+
 ## Review the prescribed code like a diff (primary)
 
 Trust nothing the plan asserts. Verify every factual claim yourself — file paths,
@@ -114,6 +152,11 @@ Report `findings` as classified prose, grouped by severity. If there are no issu
 state so explicitly (e.g., "No findings. Plan is complete and ready for
 implementation.").
 
+End `findings` with `Verified at <sha>:` — the sha from `git -C "$IMP_PROJECT_ROOT" rev-parse HEAD`
+— and the tree facts you checked this lap: paths, signatures, what existing code does, each with
+its `file:line`. The next lap reads this instead of re-opening those files; a check you don't
+record is a check it pays for again.
+
 Set `blocking = true` if any Critical or Major findings exist; `false` otherwise.
 
 Set `has_minor_findings = true` only for **Minor** findings worth integrating;
@@ -127,11 +170,11 @@ Finish with one of:
 
 ```
 # Clean, with Minor findings worth integrating:
-complete_step(findings="No Critical/Major findings. Minor: …", blocking=false, has_minor_findings=true)
+complete_step(findings="No Critical/Major findings. Minor: … Verified at <sha>: …", blocking=false, has_minor_findings=true)
 
 # Clean, nothing actionable (no findings, or Nit-only):
-complete_step(findings="No findings. Plan is complete and ready for implementation.", blocking=false, has_minor_findings=false)
+complete_step(findings="No findings. Plan is complete and ready for implementation. Verified at <sha>: …", blocking=false, has_minor_findings=false)
 
 # Blocking issues:
-complete_step(findings="Critical: … / Major: …", blocking=true, has_minor_findings=false)
+complete_step(findings="Critical: … / Major: … Verified at <sha>: …", blocking=true, has_minor_findings=false)
 ```

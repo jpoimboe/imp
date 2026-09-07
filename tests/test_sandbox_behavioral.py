@@ -2014,3 +2014,79 @@ def test_real_child_env_is_exactly_the_paired_env(monkeypatch) -> None:
         assert "IMP_TELEGRAM_TOKEN" not in observed
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Artifact-ref reads from a read_only:["."] step (denu58)
+# ---------------------------------------------------------------------------
+
+def test_artifact_ref_history_readable_from_readonly_sandboxed_worktree() -> None:
+    """A read_only:["."] agent (plan-reviewer) can read the plan file's own revision
+    history out of refs/imp/artifacts/<id> from inside its sandboxed worktree: the
+    git common dir is bound rw and only .git/worktrees plus the ro-remasked
+    crown jewels are covered, so the ref and its objects stay readable.
+
+    Falsifiability: mask refs/imp/artifacts or the object store and both git
+    commands exit non-zero with empty stdout.
+    """
+    control, wt_path = _refprot_repo("imp-test-artref-")
+    srcdir = Path(tempfile.mkdtemp(prefix="imp-test-artref-src-"))
+    try:
+        src = srcdir / "esc1-plan-1.md"
+
+        src.write_text("# Plan\n\nrevision one\n")
+        assert wt.artifact_commit(
+            control, "esc1", {"plans/esc1-plan-1.md": src}, message="plan 1") is True
+        src.write_text("# Plan\n\nrevision two\n")
+        assert wt.artifact_commit(
+            control, "esc1", {"plans/esc1-plan-1.md": src},
+            message="plan 1 revised") is True
+
+        ctx, pol = _refprot_ctx(control, wt_path)
+        # What _apply_readonly_overlay composes for a read_only: ["."] step: the
+        # worktree itself overlaid ro.
+        ctx.base_sandbox_policy = dataclasses.replace(
+            pol, readonly_overlays=(*pol.readonly_overlays, str(wt_path)))
+
+        ref = "refs/imp/artifacts/esc1"
+        p = "plans/esc1-plan-1.md"
+
+        # The tree really is read-only for this policy — the probes below run as
+        # the reviewer runs, not as a privileged writer.
+        blocked = _bash(ctx, f'touch "{wt_path}/nope.txt" 2>&1; echo rc=$?')
+        assert "rc=0" not in blocked["stdout"], blocked
+
+        # $IMP_PROJECT_ROOT is the worktree here: the bash tool builds its child
+        # env from ctx.project_root.
+        oneline = _bash(
+            ctx,
+            f'git -C "$IMP_PROJECT_ROOT" log --oneline {ref} -- {p}; echo rc=$?')
+        assert "rc=0" in oneline["stdout"], (
+            f"artifact-ref log failed from inside the sandbox: {oneline}")
+        revisions = [ln for ln in oneline["stdout"].splitlines()
+                     if ln and not ln.startswith("rc=")]
+        assert len(revisions) == 2, (
+            f"expected both revisions of {p}, got {revisions!r}")
+        assert any("plan 1 revised" in ln for ln in revisions), revisions
+
+        shas = _bash(
+            ctx,
+            f'git -C "$IMP_PROJECT_ROOT" log --format=%H {ref} -- {p}; echo rc=$?')
+        assert "rc=0" in shas["stdout"], shas
+        commits = [ln for ln in shas["stdout"].splitlines()
+                   if ln and not ln.startswith("rc=")]
+        newest, second_newest = commits[0], commits[1]
+
+        delta = _bash(
+            ctx,
+            f'git -C "$IMP_PROJECT_ROOT" diff {second_newest} {newest} -- {p}; '
+            f'echo rc=$?')
+        assert "rc=0" in delta["stdout"], (
+            f"artifact-ref diff failed from inside the sandbox: {delta}")
+        assert "-revision one" in delta["stdout"], delta["stdout"]
+        assert "+revision two" in delta["stdout"], delta["stdout"]
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
+        shutil.rmtree(srcdir, ignore_errors=True)
