@@ -86,11 +86,7 @@ def _hammer_writer(records_dir: str, stop, writes) -> None:
 
 
 def test_write_record_never_exposes_torn_file(tmp_path: Path) -> None:
-    # A reader racing write_record must only ever observe a complete record:
-    # either the file is absent, or read bytes parse. A truncate-then-write
-    # writer fails this within milliseconds (empty/prefix reads). The read loop
-    # exits only once reads and writes have provably overlapped, so nothing here
-    # is governed by a clock; pyproject's 60s timeout is the only hang-catcher.
+    # No clock here: the loops exit on proven overlap; pyproject's 60s timeout catches hangs.
     records_dir = tmp_path / "records"
     records_dir.mkdir(parents=True)
     path = records_dir / "alpha.json"
@@ -104,7 +100,7 @@ def test_write_record_never_exposes_torn_file(tmp_path: Path) -> None:
     reads = 0
     try:
         while not path.exists():
-            pass
+            os.sched_yield()
         base = writes.value
         while reads < _MIN_READS or writes.value - base < _MIN_WRITES:
             try:
