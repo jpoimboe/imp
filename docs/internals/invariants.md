@@ -49,13 +49,13 @@ Read this when editing imp's engine/renderer or workflow prompts.
   reconciles the policy's `worktree` and `git_worktree_self` on every entry, so a retry
   or reincarnation cannot re-enter the step with a policy still rooted at the control root.
 - **The codex parse boundary is drift-visible, not permissive.** A codex item
-  payload the pinned `openai-codex-sdk` cannot parse is **fatal** for the item
+  payload imp's own exec event models cannot parse is **fatal** for the item
   types `process_event` consumes (`mcp_tool_call`, `agent_message`, `reasoning`,
   `web_search`, `error`) — `CodexEventParseError`, a `ConfigError` → Pause — and a
   logged, skipped `runner_warning` for every other type. Unknown *item types*
-  continue to degrade to the SDK's `UnknownThreadItem`. The split lives in
-  `codex_sdk_patch.py`'s `parse_thread_item` wrapper, inside the parser: once an
-  exception escapes the SDK's async generator, iteration cannot be resumed.
+  continue to degrade to `UnknownThreadItem`. The split lives in
+  `codex_events.py`'s `parse_thread_item`, inside the parser: once an exception
+  escapes the event stream's async generator, iteration cannot be resumed.
 
 ## Future / unbuilt
 

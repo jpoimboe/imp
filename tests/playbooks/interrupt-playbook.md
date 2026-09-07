@@ -225,7 +225,7 @@ Provider gating (mirrors imp's `_env_check`):
 | `claude_code` | `claude` on PATH (no key) |
 | `anthropic`   | `ANTHROPIC_API_KEY` (from `~/.anthropic-key`) |
 | `openai`      | `OPENAI_API_KEY` (from `~/.openai-key`) |
-| `codex`       | `codex` on PATH **and** the codex SDK importable in imp's venv **and** `~/.codex/auth.json` |
+| `codex`       | `codex` on PATH **and** `~/.codex/auth.json` |
 
 For any provider missing a prerequisite: **skip and note it** — not a bug. imp's own startup
 env_check is the source of truth: if imp skips or errors a provider at launch, treat that as
