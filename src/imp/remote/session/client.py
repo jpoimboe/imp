@@ -2,12 +2,14 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import contextlib
 import enum
+import socket
 from collections.abc import Callable
 from typing import Any
 
 import anyio
-from anyio.abc import SocketStream
+from anyio.abc import SocketAttribute, SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import (
@@ -95,6 +97,14 @@ class SessionClient:
             if self._stream is None:
                 raise RuntimeError("call connect() before send_set_lease()")
             await self._stream.send((encode_set_lease(value) + "\n").encode("utf-8"))
+
+    def shutdown_socket(self) -> None:
+        """Shutdown(2) is sync-safe from any thread; aclose() needs the possibly-frozen loop."""
+        stream = self._stream
+        if stream is None:
+            return
+        with contextlib.suppress(OSError):
+            stream.extra(SocketAttribute.raw_socket).shutdown(socket.SHUT_RDWR)
 
     async def aclose(self) -> None:
         async with self._send_lock:

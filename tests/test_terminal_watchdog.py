@@ -9,7 +9,9 @@ import pty
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
+import anyio
 import pytest
 
 from imp.cli.live_driver import LiveDriver
@@ -21,7 +23,13 @@ from imp.cli.terminal_watchdog import (
     WatchedStream,
     WriteWatchdog,
 )
-from tests.async_wait import HANG_BACKSTOP
+from imp.remote.session.client import SessionClient
+from tests.async_wait import HANG_BACKSTOP, wait_until
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 class _TTY(io.StringIO):
@@ -321,3 +329,69 @@ def test_watchdog_trips_on_a_real_live_status_footer_wedged_against_a_pty() -> N
         os.close(master)
     assert trips == ["wedged"]     # tripped exactly once, by the watchdog
     assert watched.write_started_at is None
+
+
+@pytest.mark.anyio
+async def test_shutdown_socket_from_a_thread_delivers_eof_while_the_loop_is_wedged(
+    tmp_path: Path,
+) -> None:
+    eof: list[bool] = []
+
+    async def _handler(stream: anyio.abc.SocketStream) -> None:
+        try:
+            while True:
+                await stream.receive()
+        except anyio.EndOfStream:
+            eof.append(True)
+
+    path = str(tmp_path / "s.sock")
+    master, slave = pty.openpty()
+    watched = WatchedStream(os.fdopen(slave, "w", buffering=1, errors="replace"))
+    torn = threading.Event()
+    done = threading.Event()
+    failures: list[Exception] = []
+    drainer = threading.Thread(target=_drain_until, args=(master, torn, done), daemon=True)
+    drainer.start()
+    # Parenthesized rather than nested (SIM117); exit order is unchanged.
+    async with (
+        await anyio.create_unix_listener(path) as listener,
+        anyio.create_task_group() as tg,
+    ):
+        tg.start_soon(listener.serve, _handler)
+        client = SessionClient(path, "fefu01", "T", on_event=lambda _e: None)
+        await client.connect()
+
+        def _tear_down() -> None:
+            # Act only once a terminal write has genuinely been in flight a while:
+            # that IS the frozen-loop condition this teardown must survive.
+            deadline = time.monotonic() + HANG_BACKSTOP
+            try:
+                while time.monotonic() < deadline:
+                    started = watched.write_started_at
+                    if started is not None and time.monotonic() - started > 0.2:
+                        break
+                    time.sleep(0.01)
+                client.shutdown_socket()
+            except Exception as err:
+                failures.append(err)
+            finally:
+                # Release the drainer whatever the teardown did: the main thread sits in a
+                # write(2) the kernel restarts across SIGALRM, so pytest-timeout cannot
+                # free it and a broken teardown would hang the worker instead of failing.
+                torn.set()
+
+        tearer = threading.Thread(target=_tear_down, daemon=True)
+        tearer.start()
+        # Freeze the loop inside write(2) on a pty nobody reads.
+        for _ in range(400):
+            watched.write("x" * 512 + "\n")
+        tearer.join(HANG_BACKSTOP)
+        assert not failures
+        await wait_until(lambda: bool(eof))
+        tg.cancel_scope.cancel()
+    done.set()
+    drainer.join(HANG_BACKSTOP)
+    with contextlib.suppress(OSError):
+        watched.close()
+    os.close(master)
+    assert eof == [True]
