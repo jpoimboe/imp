@@ -238,3 +238,40 @@ def test_evict_records_base_head_from_before_the_pop(
     assert post_pop != pre_pop                     # the stub really moved main
     assert state.lane_restore is not None
     assert state.lane_restore.base_head == pre_pop
+
+
+def test_entry_guard_eviction_clears_restore_and_replays_the_phase(
+        tmp_path: Path, provider_registry) -> None:
+    """A hold mark surviving from a run that died holding: the entry guard must
+    neither record nor honor a restore point — the phase replays from `lane`."""
+    from tests.test_executor_rename import _FakeProvider
+    provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
+    _seed_control(tmp_path)
+    _write_serialize_workflow(tmp_path, "true")     # touch-base succeeds
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    state = State.load(ch.state_dir)
+    state.held_lane = "main"
+    state.held_acquire_step = "lane"
+    state.step = "touch-base"
+    state.status = "running"
+    # A restore point left on disk by the crash, with a fingerprint that still
+    # matches — only the entry guard's clear stops it from firing.
+    state.lane_restore = LaneRestore(
+        step="touch-base",
+        base_head=worktree.head_of(tmp_path, "main"),
+        quest_head=_worktree_head(ch))
+    state.save(ch.state_dir)
+
+    anyio.run(run_quest, ch)
+
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(ch.control_root, ch.id)
+    events = list(JsonlEventLog(ch.events_path).read())
+    types_seen = [e.get("type") for e in events]
+    assert "lane_evicted" in types_seen              # entry eviction fired
+    assert "lane_restored" not in types_seen         # …and no restore was honored
+    started = [(e.get("payload") or {}).get("step")
+               for e in events if e.get("type") == "step_started"]
+    assert started == ["lane", "touch-base"]         # replayed from the acquire step
+    assert State.load(ch.state_dir).lane_restore is None

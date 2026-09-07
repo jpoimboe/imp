@@ -542,7 +542,9 @@ async def run_quest(
                 state.lane_retained = False
                 state.save(quest.state_dir)
             else:
-                _evict_if_holding(quest, state, log)
+                # Fires at resume, an unknown interval after the crash, so a
+                # fingerprint taken here would gate nothing — decline and clear.
+                _evict_if_holding(quest, state, log, record_restore=False)
                 state.save(quest.state_dir)
 
         # In-memory, never persisted: last step this run dispatched (a resume never wipes).
