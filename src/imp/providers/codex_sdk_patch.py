@@ -138,26 +138,24 @@ class _UnparsedThreadItem(UnknownThreadItem):
     imp_parse_error: str
 
 
-def _str_or_empty(value: Any) -> str:
-    return value if isinstance(value, str) else ""
-
-
 def _parse_thread_item(data: Any) -> ThreadItem:
     """Delegate to the SDK's parser, splitting a validation failure by whether imp
     consumes the item type: fatal for consumed types, degraded for the rest."""
     try:
         return _sdk_parse_thread_item(data)
     except ValidationError as exc:
-        # Reached only past the SDK's own checks, so `data` is a dict here.
-        item_type = _str_or_empty(data.get("type"))
+        # Reached past the SDK's own checks, so `data` is a dict and `data["type"]` a `str`.
+        item_type = data["type"]
         if item_type in _CONSUMED_ITEM_TYPES:
             raise CodexEventParseError(
                 f"codex event parse failure: item type {item_type!r} does not match the "
                 "pinned openai-codex-sdk model — update src/imp/providers/codex_sdk_patch.py",
                 detail={"item_type": item_type, "validation_error": str(exc)},
             ) from exc
+        item_id = data.get("id")
         return _UnparsedThreadItem(
-            id=_str_or_empty(data.get("id")), type=item_type, imp_parse_error=str(exc))
+            id=item_id if isinstance(item_id, str) else "",
+            type=item_type, imp_parse_error=str(exc))
 
 
 def install_codex_sdk_patches() -> None:
