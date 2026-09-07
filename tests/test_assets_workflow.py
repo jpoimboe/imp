@@ -432,21 +432,22 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
     assert m.var_mutations == {}
 
 
-def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
-    from imp.assets import bundled_workflow_dir
+def _flat_prompt(agent: str) -> str:
     wf = load_workflow(bundled_workflow_dir("default"))
-    body = wf.agents["spec-finalizer"].prompt_template_source
-    # The clean-review branch keys on the injected `blocking:` line and integrates minors.
-    assert "blocking: false" in body
+    return " ".join(wf.agents[agent].prompt_template_source.split())
+
+
+def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
+    body = _flat_prompt("spec-finalizer")
+    # The clean-review branch keys on the injected severity counts and integrates minors.
+    assert "`critical: 0` with `major: 0` means the spec already passed" in body
     assert "minors" in body.lower()
     assert "without changing the file" in body.lower()
 
 
 def test_plan_writer_prompt_has_minors_integration_branch() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    body = wf.agents["plan-writer"].prompt_template_source
-    assert "blocking: false" in body
+    body = _flat_prompt("plan-writer")
+    assert "`critical: 0` with `major: 0` means the plan already passed" in body
     assert "minors" in body.lower()
     assert "without changing the file" in body.lower()
 

@@ -31,8 +31,8 @@ Before writing, determine plan number N and whether you author fresh or revise a
 | Newest plan exists AND `progress.md` does NOT mark it complete (or file absent) | `read_file` then revise `…-plan-N.md` in place |
 
 **Recognition is preamble-primary.** Identify a resumed turn first by its injected
-`feedback:` preamble; structured fields (`blocking:`, rendered capitalized — match
-case-insensitively) are secondary. **Two arrival kinds:** a `resume` continues this
+`feedback:` preamble; structured fields (the severity counts `critical:` / `major:` /
+`minor:`) are secondary. **Two arrival kinds:** a `resume` continues this
 session and opens — before the preamble — with a synthesized `is_error` tool_result whose
 content is the rework feedback, framed
 "[revision required] Your previous complete_step output was recorded, then sent back for revision — this is NOT a system failure. Address the feedback below and re-run the step; call complete_step again when the work is done."
@@ -44,16 +44,17 @@ exception):
 | Shape | Kind | Arrives as | Behavior |
 |---|---|---|---|
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
-| Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
-| Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
+| Reviewer rework | resume | "Here's review feedback to address:" + `critical:` or `major:` above `0` | Rework protocol (verify findings first). |
+| Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `critical: 0` and `major: 0` | One-pass minors protocol (non-soliciting). |
 | Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`); the quest is materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (author a corrective plan N+1). |
 | Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (author a corrective plan N+1 from `comments`). |
 | Integration-pass plan gap | goto (fresh session) | "The integration pass found the plan needs revision. Findings:" | Rework mode (author a corrective plan N+1). |
 
-Do NOT key any goto on the *absence* of a `blocking:` line — a schema coincidence pinned
-by no test; the preamble plus the missing synthesized tool_result are the cues that hold.
+Do NOT key any goto on the *absence* of the severity-count lines — a schema coincidence
+pinned by no test; the preamble plus the missing synthesized tool_result are the cues
+that hold.
 
 **Verify each finding before acting (reviewer rework).** A finding can rest on a false
 premise — a misread of the spec or plan, or an untrue claim about the code. Confirm the
@@ -430,16 +431,14 @@ separate commit step.
 
 ## Minors-integration pass (a review follows)
 
-A resumed turn whose injected feedback carries `blocking: false` is **not** a rework — the
-plan already passed review (no Critical/Major findings). This is your one pass to fold in the
-reviewer's **Minor** improvements. You do **not** get the last word: a fresh verification
-review runs after this pass and will **not** ask you to integrate further minors — so
-integrate what is worthwhile now. The engine's feedback wrapper still opens with "Your
-previous attempt completed but was not accepted" even on this clean resume — **ignore that
-framing and trust the `blocking:` line.** (The engine renders the bool capitalized — you
-will see `blocking: True` or `blocking: False`; match it case-insensitively.) `blocking:
-false` means the plan already passed; the reviewer's Minor/Nit `findings:` are advisory, not
-a rejection.
+A resumed turn whose injected feedback carries `critical: 0` and `major: 0` is **not** a
+rework — the plan already passed review (no Critical/Major findings). This is your one pass
+to fold in the reviewer's **Minor** improvements. You do **not** get the last word: a fresh
+verification review runs after this pass and will **not** ask you to integrate further
+minors — so integrate what is worthwhile now. The engine's feedback wrapper still opens with
+"Your previous attempt completed but was not accepted" even on this clean resume — **ignore
+that framing and trust the counts.** `critical: 0` with `major: 0` means the plan already
+passed; the reviewer's Minor/Nit `findings:` are advisory, not a rejection.
 
 You revise the existing plan N in place (a minors pass is a resume on a not-yet-complete
 plan: the newest plan exists and `progress.md` does not mark it complete). On this pass:
@@ -469,5 +468,5 @@ complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.
 
 (Substitute the actual integer for N.)
 
-(On a **minors-integration pass** — `blocking: false` — follow the *Minors-integration pass*
+(On a **minors-integration pass** — `critical: 0`, `major: 0` — follow the *Minors-integration pass*
 section above; do not also run the steps here.)
