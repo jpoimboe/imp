@@ -726,3 +726,43 @@ def test_an_unreadable_expiry_refreshes_instead_of_skipping(
     assert seen == ["old-refresh"]
     tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
     assert tokens["refresh_token"] == "probe-refresh"
+
+
+def test_canonical_expires_at_reads_the_access_token_jwt(tmp_path: Path) -> None:
+    _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+    assert ctr.canonical_expires_at(env=_env(tmp_path)) == (NOW // 1000 + 3600) * 1000
+
+
+def test_canonical_expires_at_still_reads_with_an_api_key_exported(
+    tmp_path: Path,
+) -> None:
+    # Rotation detection must not go blind for a chatgpt file with a key exported.
+    _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600),
+                extra_top={"auth_mode": "chatgpt"})
+    env = _env(tmp_path, OPENAI_API_KEY="sk-x")
+    assert ctr.canonical_expires_at(env=env) == (NOW // 1000 + 3600) * 1000
+
+
+@pytest.mark.parametrize("payload", [
+    pytest.param(None, id="no-file"),
+    pytest.param({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-x"}, id="apikey-body"),
+    pytest.param({"tokens": {"access_token": "opaque", "refresh_token": "r"}},
+                 id="opaque-access-token"),
+    pytest.param({"tokens": "not-an-object"}, id="tokens-not-an-object"),
+])
+def test_canonical_expires_at_is_none_when_unreadable(
+    tmp_path: Path, payload: dict[str, object] | None,
+) -> None:
+    if payload is not None:
+        (tmp_path / "auth.json").write_text(json.dumps(payload), encoding="utf-8")
+    assert ctr.canonical_expires_at(env=_env(tmp_path)) is None
+
+
+def test_canonical_expires_at_is_none_when_home_is_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(ctr.Path, "home", staticmethod(_boom))
+    assert ctr.canonical_expires_at(env={}) is None

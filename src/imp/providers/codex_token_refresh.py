@@ -3,8 +3,8 @@
 """Best-effort refresh of the canonical codex OAuth access token.
 
 Keeps <CODEX_HOME|~/.codex>/auth.json fresh so imp-spawned codex subprocesses
-always copy a live access token. Never raises: every failure is reported as a
-RefreshOutcome. No token material is ever returned or logged.
+always copy a live access token. Never raises: every failure is reported
+structurally in the return value. No token material is ever returned or logged.
 """
 from __future__ import annotations
 
@@ -306,3 +306,19 @@ def refresh_canonical_token(
         return RefreshOutcome(FAILED_TRANSIENT)
     except OSError:
         return RefreshOutcome(FAILED_TRANSIENT)
+
+
+def canonical_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
+    """The canonical access token's expiry — the value a rotation race moves."""
+    env = os.environ if env is None else env
+    try:
+        base = _canonical_dir(env)
+    except RuntimeError:
+        return None
+    data = _load_auth(base / "auth.json")
+    if data is None:
+        return None
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    return _jwt_exp_ms(tokens.get("access_token"))
