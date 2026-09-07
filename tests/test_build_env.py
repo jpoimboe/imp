@@ -165,13 +165,12 @@ def test_the_makefile_no_longer_pins_pythonpath() -> None:
         assert "PYTEST_PYTHONPATH" not in (_REPO_ROOT / path).read_text(), path
 
 
-def test_the_sandbox_comment_credits_conftest_for_the_pythonpath_prefix() -> None:
-    # test_sandbox.py never spelled the variable's name, so a token check there
-    # would pass vacuously; the stale claim is prose naming the Makefile as the
-    # thing that sets PYTHONPATH, and after this change conftest is what does.
+def test_the_sandbox_comment_does_not_credit_the_makefile_for_pythonpath() -> None:
+    # The stale claim to guard against is prose naming the Makefile as the thing
+    # that sets PYTHONPATH; the conftest half went with its subject, since the
+    # policy-bake tests now set PYTHONPATH per-test instead of reading the pin.
     text = (_REPO_ROOT / "tests" / "test_sandbox.py").read_text()
     assert "Makefile sets PYTHONPATH" not in text
-    assert "tests/conftest.py pins PYTHONPATH for every pytest run" in text
 
 
 def test_conftest_still_pins_this_worktree_on_the_subprocess_path(

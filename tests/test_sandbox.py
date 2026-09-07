@@ -772,25 +772,33 @@ def test_build_child_env_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
     assert "PYTHONPATH" not in keys
 
 
-def test_build_child_env_drops_ambient_imp_vars(tmp_path):
-    # AC 1-3: a non-engine IMP_* var set in the launching environment must NOT
-    # reach the sandboxed agent; an engine-managed var still arrives
-    # authoritatively from engine_env_result; a var named in env_passthrough and
-    # present in the environment does pass through.
-    control, wt = _layout(tmp_path)
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(env_passthrough=("IMP_ALLOWED",)),
-        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
-        environ={"PATH": "/usr/bin", "IMP_SPIKE_LOG": "1", "IMP_DEBUG": "verbose",
-                 "IMP_ALLOWED": "yes"},
-        available=True,
-    )
-    keys = {k for k, _ in pol.child_env}
-    assert "IMP_SPIKE_LOG" not in keys
-    assert "IMP_DEBUG" not in keys
-    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.child_env
-    assert ("IMP_ALLOWED", "yes") in pol.child_env
+@pytest.mark.real_sandbox_policy
+def test_build_sandbox_policy_drops_ambient_imp_vars(tmp_path, monkeypatch):
+    # AC 4(a, d): through the PRODUCTION bake — this is the re-pointed
+    # test_build_child_env_drops_ambient_imp_vars. An ambient IMP_* var must not reach
+    # the sandboxed agent; an engine-authored var still arrives authoritatively; a var
+    # named in env_passthrough still passes through from the environment. It formerly
+    # called resolve_policy with a hand-built engine_env_result and a synthetic
+    # environ — an input production never supplied — so it passed while production
+    # handed the whole ambient IMP_* set to every agent and gate.
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: True)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    monkeypatch.setenv("IMP_DEBUG", "verbose")
+    monkeypatch.setenv("IMP_ALLOWED", "yes")
+
+    quest = _fake_quest(tmp_path)
+    pol = ex._build_sandbox_policy(
+        quest, _fake_config(sandbox={"env_passthrough": ["IMP_ALLOWED"]}),
+        _CaptureLog())
+
+    child = dict(pol.child_env)
+    assert "IMP_TELEGRAM_TOKEN" not in child
+    assert "IMP_DEBUG" not in child
+    assert child["IMP_PROJECT_ROOT"] == str(quest.project_root)
+    assert child["IMP_ALLOWED"] == "yes"
 
 
 def test_child_env_pythonpath_puts_the_engine_prefix_ahead_of_the_ambient(tmp_path):
@@ -1032,8 +1040,9 @@ def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monke
 
 @pytest.mark.real_sandbox_policy
 def test_build_sandbox_policy_threads_pythonpath_to_child_env(tmp_path, monkeypatch):
-    """config.pythonpath reaches the sandbox policy's child_env as a worktree-resolved
-    PYTHONPATH (imp-on-imp shadow through the general path)."""
+    """AC 9(a): config.pythonpath reaches the policy's child_env as the
+    worktree-resolved prefix merged ahead of the ambient PYTHONPATH — prefix first,
+    empty entries dropped, surviving ambient entries in order."""
     import imp.engine.executor as ex
     monkeypatch.setattr(ex, "sandbox_available", lambda: True)
     from imp.engine import sandbox as _sb
@@ -1041,16 +1050,29 @@ def test_build_sandbox_policy_threads_pythonpath_to_child_env(tmp_path, monkeypa
 
     quest = _fake_quest(tmp_path)
     config = _fake_config(pythonpath=("src",))
+    monkeypatch.setenv("PYTHONPATH", f"/amb/lib{os.pathsep}{os.pathsep}/amb/two")
     log = _CaptureLog()
     pol = ex._build_sandbox_policy(quest, config, log)
-    # `_build_sandbox_policy` overlays engine_env onto the real `os.environ`, and
-    # overlay_engine_env APPENDS any ambient PYTHONPATH after the prefix.
-    # tests/conftest.py pins PYTHONPATH for every pytest run, so child_env's
-    # PYTHONPATH is a joined string, not the bare prefix — assert the prefix is
-    # FIRST (the robust idiom the isolated test below also uses), not an exact
-    # (key, value) pair.
-    assert dict(pol.child_env)["PYTHONPATH"].startswith(
-        str(quest.project_root / "src"))
+
+    assert dict(pol.child_env)["PYTHONPATH"] == (
+        f"{quest.project_root / 'src'}{os.pathsep}/amb/lib{os.pathsep}/amb/two")
+
+
+@pytest.mark.real_sandbox_policy
+def test_build_sandbox_policy_bakes_no_pythonpath_when_none_configured(
+        tmp_path, monkeypatch):
+    # AC 9(b): PYTHONPATH reaches the sandbox because engine_env EMITS it, never by
+    # inheritance — with no configured pythonpath, an ambient one is not baked.
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: True)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+    monkeypatch.setenv("PYTHONPATH", "/amb/lib")
+
+    pol = ex._build_sandbox_policy(
+        _fake_quest(tmp_path), _fake_config(), _CaptureLog())
+
+    assert "PYTHONPATH" not in dict(pol.child_env)
 
 
 @pytest.mark.real_sandbox_policy
