@@ -4,22 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import signal
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from imp.providers.codex_exec import (
     CODEX_STREAM_LIMIT,
+    Codex,
     CodexExecError,
+    CodexOptions,
     ThreadOptions,
     _drain_stderr,
     _run_exec,
     build_command_args,
 )
+from imp.providers.errors import ConfigError
 from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 from tests.conftest import _pid_gone_or_zombie
 
@@ -305,3 +310,75 @@ async def test_stderr_reaches_the_sink_while_the_child_is_still_running(
                 await asyncio.sleep(0.05)
     finally:
         current_stderr_sink.reset(token)
+
+
+# --- The client and a streamed turn -----------------------------------------
+
+_JSONL_CHILD = """\
+import json, os, sys
+prompt = sys.stdin.read()
+print(json.dumps({"type": "thread.started", "thread_id": "thr-9"}), flush=True)
+print(json.dumps({"type": "item.completed", "item": {
+    "id": "a1", "type": "agent_message",
+    "text": json.dumps({"prompt": prompt, "argv": sys.argv[1:],
+                        "env": dict(os.environ)})}}), flush=True)
+"""
+
+
+def _client(tmp_path: Path, body: str, monkeypatch: pytest.MonkeyPatch,
+            env: dict[str, str] | None = None) -> Codex:
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    _fake_codex(bindir, body)
+    monkeypatch.setenv("PATH", str(bindir))
+    return Codex(CodexOptions(env=env if env is not None else dict(os.environ)))
+
+
+async def _first_report(thread: Any, prompt: str) -> dict[str, Any]:
+    turn = await thread.run_streamed(prompt)
+    async with contextlib.aclosing(turn.events) as events:
+        async for event in events:
+            if event.type == "item.completed":
+                return json.loads(event.item.text)  # type: ignore[no-any-return]
+    raise AssertionError("child produced no item.completed event")
+
+
+def test_a_missing_codex_binary_fails_client_construction(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    with pytest.raises(ConfigError) as excinfo:
+        Codex(CodexOptions(env={}))
+    assert str(excinfo.value) == "codex CLI not found on PATH"
+
+
+@pytest.mark.anyio
+async def test_a_turn_streams_parsed_events_and_keeps_the_prompt_out_of_argv(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(tmp_path, _JSONL_CHILD, monkeypatch)
+    thread = client.start_thread(_OPTS_HIGH)
+    report = await _first_report(thread, "do the thing")
+    assert report["prompt"] == "do the thing"
+    assert not any("do the thing" in a for a in report["argv"])
+    assert report["argv"] == build_command_args(_OPTS_HIGH, None)
+
+
+@pytest.mark.anyio
+async def test_the_supplied_env_reaches_the_child_with_the_originator_added(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    supplied = {**os.environ, "CODEX_HOME": "/tmp/codex-home", "IMP_MCP_TOKEN": "tok-1"}
+    client = _client(tmp_path, _JSONL_CHILD, monkeypatch, env=supplied)
+    report = await _first_report(client.start_thread(_OPTS_HIGH), "go")
+    assert report["env"]["CODEX_HOME"] == "/tmp/codex-home"
+    assert report["env"]["IMP_MCP_TOKEN"] == "tok-1"
+    assert report["env"]["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] == "codex_sdk_py"
+
+
+@pytest.mark.anyio
+async def test_an_explicit_originator_is_left_alone(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    supplied = {**os.environ, "CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "mine"}
+    client = _client(tmp_path, _JSONL_CHILD, monkeypatch, env=supplied)
+    report = await _first_report(client.start_thread(_OPTS_HIGH), "go")
+    assert report["env"]["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] == "mine"

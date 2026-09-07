@@ -12,13 +12,16 @@ from __future__ import annotations
 import asyncio
 import codecs
 import contextlib
+import shutil
 import signal
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from typing import Literal
 
 from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.context import kill_process_group
+from imp.providers.codex_events import ThreadEvent, parse_thread_event_line
+from imp.providers.errors import ConfigError
 from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 
 # 64 MiB ceiling for one JSONL line: asyncio's 64 KiB default makes
@@ -126,3 +129,42 @@ async def _run_exec(
             # hang teardown forever. The group already took SIGKILL.
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(proc.wait(), timeout=PROCESS_KILL_GRACE_S)
+
+
+@dataclass(frozen=True)
+class StreamedTurn:
+    events: AsyncIterator[ThreadEvent]
+
+
+class Thread:
+    def __init__(
+        self, executable: str, env: dict[str, str], options: ThreadOptions,
+    ) -> None:
+        self._executable = executable
+        self._env = env
+        self._options = options
+        self._id: str | None = None
+
+    async def run_streamed(self, prompt: str) -> StreamedTurn:
+        return StreamedTurn(events=self._stream(prompt))
+
+    async def _stream(self, prompt: str) -> AsyncGenerator[ThreadEvent, None]:
+        args = build_command_args(self._options, self._id)
+        async with contextlib.aclosing(
+                _run_exec(self._executable, args, self._env, prompt)) as lines:
+            async for line in lines:
+                yield parse_thread_event_line(line)
+
+
+class Codex:
+    def __init__(self, options: CodexOptions) -> None:
+        executable = shutil.which("codex")
+        if executable is None:
+            raise ConfigError("codex CLI not found on PATH")
+        self._executable = executable
+        env = dict(options.env)
+        env.setdefault(INTERNAL_ORIGINATOR_ENV, CODEX_ORIGINATOR)
+        self._env = env
+
+    def start_thread(self, options: ThreadOptions) -> Thread:
+        return Thread(self._executable, self._env, options)
