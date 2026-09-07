@@ -2006,7 +2006,8 @@ def test_step_label_and_resumed_land_on_step_and_breadcrumb() -> None:
     step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
                 for c in p.children if isinstance(c, nv.StepNode))
     assert step.label == "reviewing code"
-    assert step.resumed is True
+    # The payload flag alone is a routing loop, not a resume.
+    assert step.resumed is False
     bc = next(c for c in step.children if isinstance(c, nv.BreadcrumbLine))
     assert bc.step_label == "reviewing code"
 
@@ -2044,6 +2045,162 @@ def test_resume_reentry_updates_position_label_on_step_node() -> None:
     step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
                 for c in p.children if isinstance(c, nv.StepNode))
     assert step.position_label is True
+
+
+def _only_step(tree: nv.NarrativeTree) -> nv.StepNode:
+    return next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+                for c in p.children if isinstance(c, nv.StepNode))
+
+
+def test_routed_reentry_without_pause_or_resume_is_not_marked() -> None:
+    from imp.cli import render_text as rt
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="plan-writer", kind="agent", phase="planning",
+           model="m", provider="anthropic", resumed=True,
+           label="addressing plan review feedback",
+           route_label="addressing plan review feedback"),
+    ])
+    step = _only_step(tree)
+    assert step.resumed is False
+    assert "(resume)" not in rt.header_line(step, depth=0, color=False)
+
+
+@pytest.mark.parametrize("restarted", [True, False])
+def test_replayed_resume_marks_step_and_header(restarted: bool) -> None:
+    from imp.cli import render_text as rt
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2"),
+        ev("3", "workflow_paused", reason="ctrl-c"),
+        ev("4", "workflow_resumed"),
+        ev("5", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2", resumed=True,
+           restarted=restarted),
+    ])
+    step = _only_step(tree)
+    assert step.resumed is True
+    assert " (resume)" in rt.header_line(step, depth=0, color=False)
+
+
+@pytest.mark.parametrize("reason", ["ctrl-c", "awaiting_user"])
+def test_in_session_resume_without_resumed_event_marks_step(reason: str) -> None:
+    # The sequence an ATTACHED client receives: workflow_resumed is never
+    # broadcast, so only the pause is visible. Both reasons take an early return
+    # out of _h_workflow_paused and render no PauseNode.
+    from imp.cli import render_text as rt
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2"),
+        ev("3", "workflow_paused", reason=reason),
+        ev("4", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2", resumed=True),
+    ])
+    step = _only_step(tree)
+    assert step.resumed is True
+    assert " (resume)" in rt.header_line(step, depth=0, color=False)
+
+
+def test_crash_shaped_resume_without_a_pause_marks_step() -> None:
+    # A crash journals no workflow_paused; the recovery-path workflow_resumed is
+    # the only boundary marker.
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2"),
+        ev("3", "workflow_resumed"),
+        ev("4", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2", resumed=True),
+    ])
+    assert _only_step(tree).resumed is True
+
+
+def test_retry_of_a_resumed_step_keeps_the_marker_and_refreshes_the_label() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2"),
+        ev("3", "workflow_paused", reason="ctrl-c"),
+        ev("4", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2", resumed=True),
+        # Internal transient-error retry: no step_completed, no new pause/resume.
+        ev("5", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 2/2", resumed=True,
+           restarted=True),
+    ])
+    step = _only_step(tree)
+    assert step.resumed is True          # set-only never clears an earned marker
+    assert step.label == "task 2/2"      # the existing label refresh still applies
+
+
+def test_retry_of_a_routed_step_stays_unmarked() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="plan-writer", kind="agent", phase="planning",
+           model="m", provider="anthropic", resumed=True,
+           label="addressing plan review feedback"),
+        ev("3", "step_started", step="plan-writer", kind="agent", phase="planning",
+           model="m", provider="anthropic", resumed=True, restarted=True,
+           label="addressing plan review feedback"),
+    ])
+    assert _only_step(tree).resumed is False
+
+
+def test_a_consumed_pause_does_not_latch_for_the_rest_of_the_session() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2"),
+        ev("3", "workflow_paused", reason="ctrl-c"),
+        ev("4", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2", resumed=True),
+        ev("5", "step_completed", step="task-lead", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        # A routed re-entry later in the same session: follows the CONSUMED pause,
+        # but no new one.
+        ev("6", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="fixing test failures",
+           resumed=True, route_label="fixing test failures"),
+    ])
+    steps = [c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+             for c in p.children if isinstance(c, nv.StepNode)]
+    assert [s.resumed for s in steps] == [True, False]
+
+
+def test_a_resume_signal_alone_does_not_mark_a_fresh_step() -> None:
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic", label="drafting the spec"),
+        ev("3", "step_completed", step="spec-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("4", "workflow_paused", reason="ctrl-c"),
+        ev("5", "workflow_resumed"),
+        ev("6", "step_started", step="spec-finalizer", kind="agent", phase="spec",
+           model="m", provider="anthropic", label="finalizing the spec",
+           resumed=False),
+    ])
+    fresh = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+                 for c in p.children
+                 if isinstance(c, nv.StepNode) and c.name == "spec-finalizer")
+    assert fresh.resumed is False
+
+
+def test_resume_window_reuse_derives_the_flag_from_the_payload() -> None:
+    # The reuse branch is gated on the resume window, not on the payload flag, so
+    # a payload resumed=False inside that window must stay unmarked.
+    tree = nv.build_tree([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2"),
+        ev("3", "workflow_paused", reason="ctrl-c"),
+        ev("4", "workflow_resumed"),
+        ev("5", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="m", provider="anthropic", label="task 1/2", resumed=False),
+    ])
+    assert _only_step(tree).resumed is False
 
 
 def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:

@@ -130,7 +130,8 @@ class StepNode:
     lane_wait: bool = False            # parked in a lane semaphore wait (test or merge); live-only
     phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
-    resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
+    resumed: bool = False              # genuine resume: the payload flag AND a
+                                       # pause-or-resume signal (never a routing loop)
     route_label: str | None = None     # route reason (rule label) of the entering rule
     rotate_phrase: bool = False        # opt-in: rotate status phrase per work segment
     rotated_phrase: str | None = None  # per-segment phrase; live status line only, never persisted
@@ -527,6 +528,10 @@ class NarrativeBuilder:
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
         self._resuming = False
+        # Armed by EVERY workflow_paused, consumed by the next step_started: an
+        # attached client never receives workflow_resumed, so _resuming alone
+        # would miss a live in-session resume.
+        self._pause_seen = False
         # Armed by an engine_message completion nudge; the next prose agent_message
         # consumes it and drops a bare WAITING protocol reply (pure plumbing).
         # Survives non-prose events.
@@ -1286,6 +1291,9 @@ def _ensure_phase(self: NarrativeBuilder, name: str,
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_pending_rename()
     self._flush_burst()
+    # Consumed HERE, not at the _resuming capture below: the internal-retry branch
+    # returns early and must still see it.
+    pause_seen, self._pause_seen = self._pause_seen, False
     self._span_start_ts = event.get("timestamp")
     self._stretch_start_ts = event.get("timestamp")
     self._stretch_backoff_base = self.backoff_wait_seconds(None)
@@ -1324,7 +1332,10 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     top.lane_wait_label = None
                 elif p.get("route_label"):
                     top.label = p.get("label")
-                top.resumed = True
+                # Set-only: a later retry arrives with both signals consumed, and
+                # a plain assignment would clear a marker earned at entry.
+                if pause_seen:
+                    top.resumed = True
             return
     # Resume re-entry: the first step_started after a resume re-enters the
     # interrupted step in the still-open phase. `restarted` (always present on a
@@ -1334,6 +1345,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # pre-interrupt children and the original clock, only reopening the node for
     # appending. Consume the re-entry window regardless of whether a match is found.
     resuming, self._resuming = self._resuming, False
+    resume_signal = resuming or pause_seen
     if (resuming and self._current_phase is not None
             and not self._current_phase.closed
             and self._current_phase.name == phase):
@@ -1346,7 +1358,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.outcome = None
             existing.closed = False
             existing.interrupted = False
-            existing.resumed = True
+            existing.resumed = bool(p.get("resumed", False)) and resume_signal
             if p.get("restarted"):
                 # Genuine re-run from scratch: the fresh run supersedes the
                 # interrupted partial, so revert the label to the re-emitted seed,
@@ -1394,7 +1406,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     label=p.get("label"),
                     phase_label=p.get("phase_label"),
                     command=p.get("command"),
-                    resumed=bool(p.get("resumed", False)),
+                    resumed=bool(p.get("resumed", False)) and resume_signal,
                     route_label=p.get("route_label"),
                     rotate_phrase=bool(p.get("rotate_phrase", False)))
     self._append(node)
@@ -1462,6 +1474,9 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     # line; for an error-driven pause the underlying failure was already shown as
     # its own `error:` event just above, so re-stating it as an error here would
     # both double up and mismatch the live view (the bug this fixes).
+    # Above the `if reason:` gate and its early returns: those suppress a redundant
+    # rendered pause line, they do not mean the run did not pause.
+    self._pause_seen = True
     self._flush_pending_rename()
     self._flush_burst()
     self._root.status = "paused"
