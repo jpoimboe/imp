@@ -11,6 +11,16 @@ Probing under the deny posture rather than bare is load-bearing: some
 built-ins only materialize once others are denied, so a baseline probe
 never sees them.
 
+probe_advertised_tools has three outcomes and no fourth: it returns the registry
+the CLI advertised, skips when the CLI declined to start a session (it exited 0
+without writing a byte on every attempt — an environment fault, and the check did
+NOT run), or raises. Nothing that never saw an init frame returns, so a dead probe
+can never be mistaken for an empty registry.
+
+read_init_frame names which of four exits it took — INIT, EOF, PROCESS_EXITED (the
+CLI is gone yet stdout is still open, so a descendant inherited the pipe) or
+BUDGET_EXPIRED — and PROCESS_EXITED is what arms the /proc pipe-holder diagnostic.
+
 The probes that spawn the CLI are in tests/test_cc_builtins_drift_live.py;
 tests/test_cc_builtins_drift.py drives this module's reader against stubs.
 """
@@ -303,14 +313,28 @@ def _state_text(attempt: ProbeAttempt) -> str:
             else f"process exited {attempt.exit_status}")
 
 
+def _attempt_note(n: int, attempt: ProbeAttempt) -> str:
+    return (f"#{n} {_state_text(attempt)} after {attempt.elapsed:.1f}s,"
+            f" {attempt.stdout_bytes} stdout bytes")
+
+
+def _declined_silently(attempt: ProbeAttempt) -> bool:
+    """Exited 0 having said nothing — the CLI never started a session. Narrower than
+    "no init frame": a CLI that errored exits non-zero and one that drifted still puts
+    bytes on stdout, and both of those stay loud failures."""
+    return attempt.exit_status == 0 and attempt.stdout_bytes == 0
+
+
 def probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[str], str]:
     """Spawn `cli` in imp's posture with `deny` and return the tool registry it
     advertises in the `init` system message. The init frame precedes the model
     turn, so no model round-trip occurs. Returns (advertised_tools, stderr_text).
     A spawn that yields no init frame is retried: everything the CLI does before
-    init is external work a fresh spawn redoes. Raises AssertionError when no
-    attempt yields an init frame, so a dead probe can never be mistaken for an
-    empty registry."""
+    init is external work a fresh spawn redoes. When no attempt yields one, skips
+    if every attempt exited 0 without writing a byte — the CLI declined to start a
+    session, an environment fault, and the check did NOT run — and otherwise raises
+    AssertionError. Neither path returns, so a dead probe can never be mistaken for
+    an empty registry."""
     t0 = time.monotonic()
     notes: list[str] = []
     attempt_stderrs: list[tuple[int, str]] = []
@@ -320,7 +344,7 @@ def probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[st
         attempts.append(probe)
         if probe.frame is not None:
             break
-        notes.append(f"#{n} {_state_text(probe)} after {probe.elapsed:.1f}s")
+        notes.append(_attempt_note(n, probe))
         attempt_stderrs.append((n, probe.stderr_text))
         if n < PROBE_ATTEMPTS:
             time.sleep(PROBE_RETRY_BACKOFF)
@@ -332,12 +356,24 @@ def probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[st
         stderr_sections = "\n".join(
             f"CLI stderr (attempt {n}):\n{s}" for n, s in attempt_stderrs
         )
+        attempts_note = ", ".join(notes)
+        if all(_declined_silently(a) for a in attempts):
+            pytest.skip(
+                "The bundled claude CLI declined to start a session: it exited 0 without"
+                f" writing a byte to stdout on every one of {PROBE_ATTEMPTS} attempts"
+                f" ({total_elapsed:.1f}s total). The deny-posture check DID NOT RUN on"
+                ' this host — this is an environment fault, not a "no built-ins escaped"'
+                " result. Run the guard on a host where the CLI reaches its init frame.\n"
+                f"CLI: {cli}\n"
+                f"Attempts: {attempts_note}\n"
+                f"{stderr_sections}"
+            )
         raise AssertionError(
             f"No init frame from the claude CLI after {PROBE_ATTEMPTS} attempts"
             f" in {total_elapsed:.1f}s ({_state_text(last)}).\n"
             "Node startup, an rg --files scan, a ps aux, and a deferred git config precede init,\n"
             "so a stall here is the CLI's environment, not imp's deny posture.\n"
-            f"Attempts: {', '.join(notes)}\n"
+            f"Attempts: {attempts_note}\n"
             f"{stderr_sections}"
         )
 

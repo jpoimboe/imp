@@ -259,3 +259,54 @@ def test_spawn_attempt_has_no_pipe_holders_when_stdout_reaches_eof(tmp_path: Pat
     assert attempt.exit_status == 0
     assert attempt.stdout_bytes == 0
     assert attempt.elapsed < 15.0
+
+
+def test_probe_skips_when_the_cli_exits_zero_in_silence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reported environment fault: a CLI that exits 0 having written nothing has
+    declined to start a session, so the guard reports that it did not run — never a pass."""
+    spawns = tmp_path / "spawns"
+    stub = _sh_stub(
+        tmp_path / "declining-cli",
+        f"#!/bin/sh\necho x >> {spawns}\nexit 0\n",
+    )
+    monkeypatch.setattr(cc_probe, "PROBE_RETRY_BACKOFF", 0.0)
+
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        probe_advertised_tools(str(stub), ["Bash"], tmp_path)
+
+    reason = str(excinfo.value)
+    assert "The bundled claude CLI declined to start a session" in reason
+    assert "DID NOT RUN" in reason
+    assert "process exited 0" in reason
+    assert "0 stdout bytes" in reason
+    assert str(stub) in reason, "the skip must name the CLI it could not exercise"
+    # This stub's pipe closes with it: nothing anomalous, so no holder clause (AC 9b).
+    assert "stdout pipe still held by" not in reason
+    assert len(spawns.read_text().splitlines()) == PROBE_ATTEMPTS, (
+        "the silent exit is still retried before it is believed")
+
+
+def test_probe_raises_when_the_cli_speaks_but_never_inits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drift, not a declined session: a CLI that emitted frames without init has changed
+    or broken, so it stays a loud failure — only total silence earns the skip."""
+    stub = _sh_stub(
+        tmp_path / "chatty-cli",
+        "#!/bin/sh\n"
+        "echo '{\"type\": \"system\", \"subtype\": \"compact\"}'\n"
+        "exit 0\n",
+    )
+    monkeypatch.setattr(cc_probe, "PROBE_RETRY_BACKOFF", 0.0)
+
+    with pytest.raises(AssertionError) as excinfo:
+        probe_advertised_tools(str(stub), ["Bash"], tmp_path)
+
+    message = str(excinfo.value)
+    assert "No init frame from the claude CLI" in message
+    assert "declined to start a session" not in message
+    written = re.search(r"#1 process exited 0 after [\d.]+s, (\d+) stdout bytes", message)
+    assert written is not None, message
+    assert int(written.group(1)) > 0, "bytes on stdout must be visible in the evidence"
