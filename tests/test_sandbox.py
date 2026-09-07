@@ -24,8 +24,10 @@ from imp.engine.sandbox import (
     prepare_spawn_policy,
     resolve_policy,
     sandbox_available,
+    sandbox_config_from_raw,
 )
 from imp.paths import imp_home, project_state_dir
+from imp.providers.config import parse_config_layer
 
 
 def _policy(**over) -> SandboxPolicy:
@@ -835,6 +837,26 @@ def test_sandboxed_child_gets_a_custom_imp_home(tmp_path, monkeypatch):
     spawn = build_sandbox_spawn("x", cwd=str(wt), policy=pol, engine_env=eng,
                                 environ={})
     assert spawn.env["IMP_HOME"] == str(tmp_path / "alt-home")
+
+
+def test_repo_config_names_the_e2e_poll_timeout_passthrough(tmp_path, monkeypatch):
+    # AC 10: with engine_env the sole IMP_* authority, the one ambient IMP_* var the
+    # in-sandbox test run wants reaches the child only because THIS repo's config
+    # names it; with no such entry it does not. Read through parse_config_layer, imp's
+    # OWN project-layer parser (it routes `sandbox:` to _parse_sandbox), so a block
+    # imp would reject fails here rather than passing a raw yaml.safe_load.
+    monkeypatch.setenv("IMP_E2E_POLL_TIMEOUT", "180")
+    layer, _src = parse_config_layer(
+        Path(__file__).resolve().parents[1] / "imp" / "config.yaml")
+    control, wt = _layout(tmp_path)
+
+    def _bake(cfg):
+        return dict(resolve_policy(
+            worktree=wt, control_root=control, quest_id="abc", cfg=cfg,
+            engine_env_result={}, environ=os.environ, available=True).child_env)
+
+    assert _bake(sandbox_config_from_raw(layer["sandbox"]))["IMP_E2E_POLL_TIMEOUT"] == "180"
+    assert "IMP_E2E_POLL_TIMEOUT" not in _bake(SandboxConfig())
 
 
 def test_build_child_env_strips_provider_api_keys(tmp_path):

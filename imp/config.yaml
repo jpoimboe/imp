@@ -23,3 +23,9 @@ pythonpath: [src]
 # Command imp runs in each newly created quest worktree, before the first step:
 # `git worktree` materializes only tracked files, so a new tree has no .venv.
 worktree_setup: uv sync --all-extras
+
+# Ambient vars forwarded into the sandbox by name. IMP_E2E_POLL_TIMEOUT lifts the
+# in-sandbox e2e poll ceilings on a loaded host; engine vars come from engine_env,
+# never from the ambient environment.
+sandbox:
+  env_passthrough: [IMP_E2E_POLL_TIMEOUT]
