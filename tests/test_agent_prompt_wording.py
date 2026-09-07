@@ -565,6 +565,27 @@ def test_spec_reviewer_calibration_carries_the_unsettled_design_sentence() -> No
     assert body.index(_CALIBRATION_SENTENCE) < body.index("## Output")
 
 
+def _normalized_prompt(name: str) -> str:
+    return " ".join(_agent_prompt(name).split())
+
+
+def test_task_lead_reads_progress_with_read_file_not_bash_cat() -> None:
+    assert ("`{{ quest.home }}/progress.md` if it exists — `read_file` it, not "
+            "`bash cat` (only `read_file` discharges the read-before-write gate) — "
+            "**bounded** and **rewritable**") in _normalized_prompt("task-lead")
+
+
+def test_plan_writer_revise_row_says_read_file_first() -> None:
+    assert ("| `read_file` then revise `…-plan-N.md` in place |"
+            in _normalized_prompt("plan-writer"))
+
+
+def test_summarizer_rereads_its_own_earlier_draft() -> None:
+    assert ("Write `{{ quest.home }}/artifacts/summary/{{ quest.id }}.md` — "
+            "`read_file` it first if it exists (you are being re-entered and "
+            "revising your own earlier draft):") in _normalized_prompt("summarizer")
+
+
 def test_spec_reviewer_output_schema_stays_the_four_fields() -> None:
     wf = load_workflow(bundled_workflow_dir("default"))
     fields = wf.agents["spec-reviewer"].output_schema.fields

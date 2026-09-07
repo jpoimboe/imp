@@ -76,3 +76,33 @@ def test_tool_reference_documents_per_call_pid_namespaces() -> None:
             "processes and a pid recorded in one call means nothing in the next.") in body
     assert ("The `pid` in a background descriptor is a host-side handle — a shell command "
             "cannot signal it; stop a background task with `bash_kill(id)`.") in body
+
+
+def _write_file_section() -> str:
+    body = load_internal_skill(_skills_dir(), "imp-tool-reference")
+    section = body.split("## write_file", 1)[1].split("\n## ", 1)[0]
+    return " ".join(section.split())
+
+
+def test_write_file_section_states_the_gate_applies_to_existing_files() -> None:
+    assert ("overwriting an EXISTING file needs a `read_file` of it earlier in "
+            "this step, unchanged since") in _write_file_section()
+
+
+def test_write_file_section_says_any_window_discharges_the_gate() -> None:
+    section = _write_file_section()
+    assert "Any window discharges it" in section
+    assert "`limit=5` on a huge file is enough" in section
+
+
+def test_write_file_section_says_read_state_is_per_step() -> None:
+    assert ("Read state is per step: a re-entered step starts empty, so revising "
+            "an artifact your own earlier invocation wrote still needs a fresh "
+            "`read_file`.") in _write_file_section()
+
+
+def test_write_file_section_says_bash_writes_do_not_update_the_record() -> None:
+    section = _write_file_section()
+    assert ("`bash` writes (`cat >`, `tee`, `sed -i`) don't update the read record"
+            in section)
+    assert "Never use a shell redirect to get around a refusal." in section

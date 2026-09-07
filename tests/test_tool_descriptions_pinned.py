@@ -76,3 +76,8 @@ def test_explorer_toolset_description_word_budget() -> None:
 def test_bash_description_warns_pids_do_not_carry_across_calls() -> None:
     assert ("Each call gets its own pid namespace, so pids never carry across calls."
             in _desc("bash"))
+
+
+def test_write_file_description_states_the_read_before_write_gate() -> None:
+    assert ("An existing file must have been read_file'd this step "
+            "(any window will do)." in _desc("write_file"))

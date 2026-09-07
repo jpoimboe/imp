@@ -28,7 +28,7 @@ Before writing, determine plan number N and whether you author fresh or revise a
 |-----------|--------|
 | No plan files exist | Author `…-plan-1.md` (fresh) |
 | Newest plan exists AND `progress.md` marks it COMPLETE | Author `…-plan-(N+1).md` (fresh) |
-| Newest plan exists AND `progress.md` does NOT mark it complete (or file absent) | Revise `…-plan-N.md` in place |
+| Newest plan exists AND `progress.md` does NOT mark it complete (or file absent) | `read_file` then revise `…-plan-N.md` in place |
 
 **Recognition is preamble-primary.** Identify a resumed turn first by its injected
 `feedback:` preamble; structured fields (`blocking:`, rendered capitalized — match
