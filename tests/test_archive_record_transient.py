@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import multiprocessing
-import time
+import os
 from pathlib import Path
 
 import pytest
@@ -69,31 +69,40 @@ def test_read_record_persistent_corruption_raises_after_retries(
     assert (records_dir / "bad.json").read_bytes() == bad
 
 
-def _hammer_writer(records_dir: str, stop: float) -> None:
+_MIN_READS = 50
+_MIN_WRITES = 50
+
+
+def _hammer_writer(records_dir: str, stop, writes) -> None:
     from imp.engine.archive import record as rec_mod
     rec = rec_mod.build_record(
         {"id": "alpha", "title": "Alpha", "base_branch": "main",
          "created_at": "2026-06-01T00:00:00+00:00"},
         {"id": "alpha", "status": "merged", "vars": {"pad": "x" * 8192}},
         "hash123")
-    while time.monotonic() < stop:
+    while not stop.is_set():
         rec_mod.write_record(Path(records_dir), rec)
+        writes.value += 1
 
 
 def test_write_record_never_exposes_torn_file(tmp_path: Path) -> None:
-    # A reader racing write_record must only ever observe a complete record:
-    # either the file is absent, or read bytes parse. A truncate-then-write
-    # writer fails this within milliseconds (empty/prefix reads).
+    # No clock here: the loops exit on proven overlap; pyproject's 60s timeout catches hangs.
     records_dir = tmp_path / "records"
     records_dir.mkdir(parents=True)
     path = records_dir / "alpha.json"
-    stop = time.monotonic() + 0.6
     ctx = multiprocessing.get_context("spawn")
-    writer = ctx.Process(target=_hammer_writer, args=(str(records_dir), stop))
+    stop = ctx.Event()
+    writes = ctx.Value("i", 0)
+    writer = ctx.Process(
+        target=_hammer_writer, args=(str(records_dir), stop, writes))
     writer.start()
+    pid = writer.pid
+    reads = 0
     try:
-        reads = 0
-        while time.monotonic() < stop:
+        while not path.exists():
+            os.sched_yield()
+        base = writes.value
+        while reads < _MIN_READS or writes.value - base < _MIN_WRITES:
             try:
                 raw = path.read_bytes()
             except FileNotFoundError:
@@ -101,8 +110,14 @@ def test_write_record_never_exposes_torn_file(tmp_path: Path) -> None:
             reads += 1
             json.loads(raw)              # any torn state fails here
     finally:
-        writer.join(timeout=10)
-    assert reads > 0                     # the race actually ran
+        stop.set()
+        writer.join(timeout=30)
+        if writer.is_alive():
+            writer.kill()
+            writer.join(timeout=30)
+    assert reads >= _MIN_READS
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)                  # joined => reaped, not a zombie
 
 
 def test_write_record_leaves_no_temp_droppings(tmp_path: Path) -> None:

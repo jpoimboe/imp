@@ -103,7 +103,7 @@ async def test_project_root_flip_does_not_duplicate_the_warning(
 
 @pytest.mark.anyio
 @pytest.mark.bare_sandbox
-async def test_second_run_quest_entry_in_the_same_process_stays_silent(
+async def test_outer_imp_warning_silent_on_second_entry(
         tmp_path: Path) -> None:
     """The daemon hold loop re-enters run_quest after every user reply; _SNAPSHOT_CAPTURED
     gates those later entries, so the warning is emitted at most once per process."""
