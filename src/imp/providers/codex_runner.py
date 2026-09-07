@@ -770,8 +770,12 @@ class CodexAgentRunner:
                 if self._ctx is not None:
                     # Stream is definitively closed here, so no race with a late
                     # item.completed; covers every abnormal exit, not just cancel.
-                    with contextlib.suppress(Exception):
+                    try:
                         close_open_task_folds(self._ctx.event_log, self._proc_state)
+                    except Exception as exc:  # fold-close must not skip teardown
+                        _logger.warning(
+                            "codex: closing open sub_agent folds failed (events.jsonl"
+                            " may carry a dangling tool_call): %s", exc)
                 if self._stderr_token is not None:
                     current_stderr_sink.reset(self._stderr_token)
                 if self._stderr_sink is not None:
