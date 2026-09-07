@@ -2127,7 +2127,7 @@ def _ro_policy(tmp_path: Path, *, active: bool = True, readonly: bool = False):
         active=active, worktree=str(tmp_path),
         git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="",
         readonly_overlays=(str(tmp_path),) if readonly else ())
 
 

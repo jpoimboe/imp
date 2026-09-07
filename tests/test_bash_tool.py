@@ -100,7 +100,7 @@ def _active_policy(tmp_path: Path):
         active=True, worktree=str(tmp_path),
         git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note="")
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="")
 
 
 _SANDBOX_NOTE_TEXT = (
@@ -635,7 +635,7 @@ def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.Monke
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(),
-        setenv=(("PATH", "/usr/bin"),), network=True, note="",
+        child_env=(("PATH", "/usr/bin"),), network=True, note="",
     )
     # _run_bash propagates the RuntimeError out via anyio.run
     with pytest.raises(RuntimeError):

@@ -38,7 +38,7 @@ def _policy(**over) -> SandboxPolicy:
         extra_writable=(),
         secret_dirs=("/home/u/.ssh", "/run/user/1000"),
         secret_files=("/home/u/.netrc",),
-        setenv=(("PATH", "/usr/bin"), ("HOME", "/home/u"),
+        child_env=(("PATH", "/usr/bin"), ("HOME", "/home/u"),
                 ("IMP_PROJECT_ROOT", "/state/worktrees/abc"),
                 ("TMPDIR", "/tmp/imp-1000/abc")),
         network=True,
@@ -248,7 +248,7 @@ def test_live_engine_env_supersedes_frozen_imp_vars():
     # rename_quest the live per-spawn engine_env carries the real title;
     # build_sandbox_argv sources IMP_* from it authoritatively, so a title-dependent
     # gate never sees the frozen "".
-    pol = _policy(setenv=(("PATH", "/usr/bin"),
+    pol = _policy(child_env=(("PATH", "/usr/bin"),
                           ("IMP_QUEST_TITLE", ""),
                           ("TMPDIR", "/tmp")))
     argv = build_sandbox_argv(
@@ -334,9 +334,9 @@ def test_resolve_policy_active_when_enabled_and_available(tmp_path):
     assert pol.active is True
     assert pol.worktree == str(wt)
     assert pol.git_common_dir == str(control / ".git")
-    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.child_env
     assert ("TMPDIR",
-            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.setenv
+            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.child_env
 
 
 def test_resolve_policy_masks_worktrees_not_sibling_config(tmp_path):
@@ -484,7 +484,7 @@ def test_resolve_policy_env_drops_secrets_keeps_imp_and_lc(tmp_path):
                  "LC_ALL": "C", "ANTHROPIC_API_KEY": "k"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "PATH" in keys and "LC_ALL" in keys and "IMP_TEST_CMD_FAST" in keys
     assert "AWS_SECRET_ACCESS_KEY" not in keys
     assert "ANTHROPIC_API_KEY" not in keys
@@ -720,7 +720,7 @@ def test_resolve_policy_extra_readable_writable_plumbed(tmp_path):
     assert "/opt/rw" in pol.extra_writable
 
 
-def test_build_setenv_dedups_overlapping_env_passthrough(tmp_path):
+def test_build_child_env_dedups_overlapping_env_passthrough(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -731,13 +731,13 @@ def test_build_setenv_dedups_overlapping_env_passthrough(tmp_path):
     )
     # The per-quest scratch dir override must win over the env_passthrough TMPDIR.
     assert ("TMPDIR",
-            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.setenv
+            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.child_env
     # No key appears more than once.
-    keys = [k for k, _ in pol.setenv]
+    keys = [k for k, _ in pol.child_env]
     assert len(keys) == len(set(keys))
 
 
-def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
+def test_build_child_env_passes_pythonpath_from_engine_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -747,11 +747,11 @@ def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
         environ={"PATH": "/usr/bin"},
         available=True,
     )
-    assert ("PYTHONPATH", str(wt / "src")) in pol.setenv
-    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+    assert ("PYTHONPATH", str(wt / "src")) in pol.child_env
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.child_env
 
 
-def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
+def test_build_child_env_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -760,11 +760,11 @@ def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
         environ={"PATH": "/usr/bin"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "PYTHONPATH" not in keys
 
 
-def test_build_setenv_drops_ambient_imp_vars(tmp_path):
+def test_build_child_env_drops_ambient_imp_vars(tmp_path):
     # AC 1-3: a non-engine IMP_* var set in the launching environment must NOT
     # reach the sandboxed agent; an engine-managed var still arrives
     # authoritatively from engine_env_result; a var named in env_passthrough and
@@ -778,14 +778,14 @@ def test_build_setenv_drops_ambient_imp_vars(tmp_path):
                  "IMP_ALLOWED": "yes"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "IMP_SPIKE_LOG" not in keys
     assert "IMP_DEBUG" not in keys
-    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
-    assert ("IMP_ALLOWED", "yes") in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.child_env
+    assert ("IMP_ALLOWED", "yes") in pol.child_env
 
 
-def test_build_setenv_strips_provider_api_keys(tmp_path):
+def test_build_child_env_strips_provider_api_keys(tmp_path):
     # AC 5: provider key env vars are never on the allowlist (not IMP_-prefixed,
     # not generic/LC_/env_passthrough), so they never reach the agent.
     control, wt = _layout(tmp_path)
@@ -797,12 +797,12 @@ def test_build_setenv_strips_provider_api_keys(tmp_path):
                  "OPENAI_API_KEY": "sk-oai"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "ANTHROPIC_API_KEY" not in keys
     assert "OPENAI_API_KEY" not in keys
 
 
-def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
+def test_build_child_env_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
     # AC 1-2: an ambient IMP_TEST_CMD_FAST that engine_env_result does NOT provide
     # must NOT leak in — ambient IMP_* is never passed through, so the engine's
     # "absent => no fast gate" contract holds.
@@ -814,11 +814,11 @@ def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
         environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "IMP_TEST_CMD_FAST" not in keys
 
 
-def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
+def test_build_child_env_engine_imp_var_wins_over_ambient(tmp_path):
     # AC 2: when both ambient and engine provide IMP_TEST_CMD_FAST, only the engine
     # value reaches the agent (ambient IMP_* is never passed through; the engine
     # loop is the sole IMP_* source).
@@ -830,8 +830,8 @@ def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
         environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
         available=True,
     )
-    assert ("IMP_TEST_CMD_FAST", "real-gate") in pol.setenv
-    assert ("IMP_TEST_CMD_FAST", "stale-gate") not in pol.setenv
+    assert ("IMP_TEST_CMD_FAST", "real-gate") in pol.child_env
+    assert ("IMP_TEST_CMD_FAST", "stale-gate") not in pol.child_env
 
 
 def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
@@ -938,7 +938,7 @@ def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch)
 def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monkeypatch):
     """The active (happy) path: available+enabled → active policy, no posture
     event (active is the silent common case), and the engine_env overlay reaches
-    setenv as IMP_PROJECT_ROOT."""
+    the policy's child_env as IMP_PROJECT_ROOT."""
     import imp.engine.executor as ex
     monkeypatch.setattr(ex, "sandbox_available", lambda: True)
     from imp.engine import sandbox as _sb
@@ -950,15 +950,15 @@ def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monke
     pol = ex._build_sandbox_policy(quest, config, log)
     assert pol.active is True and pol.note == ""
     assert pol.worktree == str(quest.project_root)
-    assert ("IMP_PROJECT_ROOT", str(quest.project_root)) in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(quest.project_root)) in pol.child_env
     # active is the silent common case — no posture event is emitted.
     assert not any(e["type"] in ("sandbox_inactive", "sandbox_unavailable")
                    for e in log.events)
 
 
 @pytest.mark.real_sandbox_policy
-def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch):
-    """config.pythonpath reaches the sandbox policy's setenv as a worktree-resolved
+def test_build_sandbox_policy_threads_pythonpath_to_child_env(tmp_path, monkeypatch):
+    """config.pythonpath reaches the sandbox policy's child_env as a worktree-resolved
     PYTHONPATH (imp-on-imp shadow through the general path)."""
     import imp.engine.executor as ex
     monkeypatch.setattr(ex, "sandbox_available", lambda: True)
@@ -971,11 +971,11 @@ def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch
     pol = ex._build_sandbox_policy(quest, config, log)
     # `_build_sandbox_policy` overlays engine_env onto the real `os.environ`, and
     # overlay_engine_env APPENDS any ambient PYTHONPATH after the prefix.
-    # tests/conftest.py pins PYTHONPATH for every pytest run, so setenv's
+    # tests/conftest.py pins PYTHONPATH for every pytest run, so child_env's
     # PYTHONPATH is a joined string, not the bare prefix — assert the prefix is
     # FIRST (the robust idiom the isolated test below also uses), not an exact
     # (key, value) pair.
-    assert dict(pol.setenv)["PYTHONPATH"].startswith(
+    assert dict(pol.child_env)["PYTHONPATH"].startswith(
         str(quest.project_root / "src"))
 
 
@@ -1727,7 +1727,7 @@ def test_headless_vars_flow_through_build_sandbox_argv():
     assert argv.index("--clearenv") < argv.index("GIT_EDITOR")
 
 
-def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
+def test_build_child_env_bakes_headless_vars_from_engine_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1738,10 +1738,10 @@ def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
         environ={"PATH": "/usr/bin"},
         available=True,
     )
-    assert ("GIT_EDITOR", "true") in pol.setenv
-    assert ("GIT_TERMINAL_PROMPT", "0") in pol.setenv
-    assert ("EDITOR", "true") in pol.setenv
-    assert ("VISUAL", "true") in pol.setenv
+    assert ("GIT_EDITOR", "true") in pol.child_env
+    assert ("GIT_TERMINAL_PROMPT", "0") in pol.child_env
+    assert ("EDITOR", "true") in pol.child_env
+    assert ("VISUAL", "true") in pol.child_env
 
 
 def test_resolve_policy_masks_git_refs_and_reexposes_imp(tmp_path):
@@ -2106,7 +2106,7 @@ def test_resolve_policy_injects_session_socket_marker(tmp_path):
     )
     # No rewriting: the in-sandbox value is the real host socket path.
     assert ("IMP_SESSION_SOCKET",
-            str(session_socket_path("abc"))) in pol.setenv
+            str(session_socket_path("abc"))) in pol.child_env
 
 
 def test_session_socket_marker_absent_when_inactive(tmp_path):
@@ -2116,14 +2116,14 @@ def test_session_socket_marker_absent_when_inactive(tmp_path):
         cfg=SandboxConfig(enabled=False), engine_env_result={},
         environ={}, available=True,
     )
-    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.child_env}
 
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(allow_unsandboxed=True), engine_env_result={},
         environ={}, available=False,
     )
-    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.child_env}
 
 
 def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
@@ -2140,24 +2140,24 @@ def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
     assert argv[i + 1] == str(session_socket_path("abc"))
 
 
-def test_build_setenv_prepends_shim_dir_to_path():
+def test_build_child_env_prepends_shim_dir_to_path():
     import os
 
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, (), shim_dir="/q/imp-shim"))
-    assert setenv["PATH"] == "/q/imp-shim" + os.pathsep + "/usr/bin"
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env({}, {"PATH": "/usr/bin"}, (), shim_dir="/q/imp-shim"))
+    assert child_env["PATH"] == "/q/imp-shim" + os.pathsep + "/usr/bin"
 
 
-def test_build_setenv_no_shim_dir_leaves_path_untouched():
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, ()))
-    assert setenv["PATH"] == "/usr/bin"
+def test_build_child_env_no_shim_dir_leaves_path_untouched():
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env({}, {"PATH": "/usr/bin"}, ()))
+    assert child_env["PATH"] == "/usr/bin"
 
 
-def test_build_setenv_prepends_shim_dir_no_existing_path():
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv({}, {}, (), shim_dir="/q/imp-shim"))
-    assert setenv["PATH"] == "/q/imp-shim"
+def test_build_child_env_prepends_shim_dir_no_existing_path():
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env({}, {}, (), shim_dir="/q/imp-shim"))
+    assert child_env["PATH"] == "/q/imp-shim"
 
 
 def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
@@ -2169,7 +2169,7 @@ def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
         engine_env_result={}, environ={"PATH": "/usr/bin"}, available=True,
         quest_dir=qd,
     )
-    path = dict(pol.setenv)["PATH"]
+    path = dict(pol.child_env)["PATH"]
     assert path.startswith(str(qd / "imp-shim") + os.pathsep)
     assert path.endswith("/usr/bin")
 
@@ -2201,12 +2201,12 @@ def test_worktree_swap_flips_exposure_to_new_worktree(tmp_path):
     assert live.allows_read(sibling) is False
 
 
-def test_build_setenv_session_socket_passes_through():
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv(
+def test_build_child_env_session_socket_passes_through():
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env(
         {}, {"PATH": "/usr/bin"}, (),
         session_socket="/tmp/imp-1000/abc.sock"))
-    assert setenv["IMP_SESSION_SOCKET"] == "/tmp/imp-1000/abc.sock"
+    assert child_env["IMP_SESSION_SOCKET"] == "/tmp/imp-1000/abc.sock"
 
 
 def test_imp_output_env_passes_through_unrewritten():
@@ -2265,7 +2265,7 @@ def test_resolve_policy_tmpdir_is_per_quest_scratch(tmp_path):
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
     expected = str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")
-    assert ("TMPDIR", expected) in pol.setenv
+    assert ("TMPDIR", expected) in pol.child_env
 
 
 def test_var_tmp_source_not_identity_fallback():
@@ -2534,11 +2534,11 @@ def test_retired_overlay_symbols_are_gone():
         assert not hasattr(sb, name), f"{name} should be deleted"
 
 
-def test_setenv_carries_the_state_dir_when_the_spawn_supplies_none():
+def test_child_env_carries_the_state_dir_when_the_spawn_supplies_none():
     # The bash tool passes no control root, so its live engine_env has no
-    # IMP_STATE_DIR — the value baked into policy.setenv at run start must still
+    # IMP_STATE_DIR — the value baked into policy.child_env at run start must still
     # reach the sandbox argv.
-    p = _policy(setenv=(("PATH", "/usr/bin"),
+    p = _policy(child_env=(("PATH", "/usr/bin"),
                         ("IMP_STATE_DIR", "/home/u/.imp/projects/widget")))
     argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
     i = argv.index("IMP_STATE_DIR")

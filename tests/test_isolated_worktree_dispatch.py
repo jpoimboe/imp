@@ -42,7 +42,7 @@ def _active_home_policy(home: str = "/home/u"):
     return SandboxPolicy(
         active=True, worktree="/wt", git_common_dir="/ctl/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), child_env=(),
         network=True, home=home,
     )
 
@@ -462,7 +462,7 @@ def test_attach_isolated_home_noop_for_inactive(tmp_path, monkeypatch):
     inactive = SandboxPolicy(
         active=False, worktree="", git_common_dir="", git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True)
+        secret_dirs=(), secret_files=(), child_env=(), network=True)
     spike = project_state_dir(tmp_path) / "worktrees" / "spike-x-1"
     pol, cleanup = subagents._attach_isolated_home(inactive, spike, tmp_path / "q")
     assert pol is inactive and pol.home_layer is None

@@ -935,7 +935,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(),
-        setenv=(), network=True, note="",
+        child_env=(), network=True, note="",
     )
     ctx.base_sandbox_policy = pol
 
@@ -965,7 +965,7 @@ async def test_dispatch_task_inherits_readonly_overlay(tmp_path: Path) -> None:
     ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="",
         readonly_overlays=(str(tmp_path),),
     )
 

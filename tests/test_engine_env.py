@@ -263,13 +263,13 @@ def test_engine_env_omits_the_state_dir_without_a_control_root(tmp_path: Path) -
 
 
 def test_state_dir_survives_the_policy_env_bake(tmp_path: Path) -> None:
-    from imp.engine.sandbox import _build_setenv
+    from imp.engine.sandbox import _build_child_env
 
     root = tmp_path / "widget"
     root.mkdir()
     eng = engine_env(project_root=root / "wt", quest_id="abc123",
                      quest_title="T", control_root=root)
-    baked = dict(_build_setenv(eng, {}, ()))
+    baked = dict(_build_child_env(eng, {}, ()))
     assert baked["IMP_STATE_DIR"] == str(imp_home() / "projects" / "widget")
 
 

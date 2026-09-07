@@ -89,7 +89,7 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
         extra_writable=(),
         secret_dirs=secret_dirs,
         secret_files=(),
-        setenv=(
+        child_env=(
             ("PATH", os.pathsep.join(
                 p for p in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
                 if "imp-shim" not in p) or "/usr/bin:/bin"),
@@ -351,8 +351,8 @@ def test_secret_env_dropped() -> None:
 
     AWS_SECRET_ACCESS_KEY is not in the allowlist and must NOT be visible inside
     the sandbox even when set in the ambient environment. We use a hand-built
-    policy with setenv that explicitly excludes AWS_* (matching what _build_setenv
-    produces — this is the same allowlist resolve_policy bakes via _build_setenv).
+    policy with setenv that explicitly excludes AWS_* (matching what _build_child_env
+    produces — this is the same allowlist resolve_policy bakes via _build_child_env).
     """
     root = _make_root()
     old = os.environ.get("AWS_SECRET_ACCESS_KEY")
@@ -360,7 +360,7 @@ def test_secret_env_dropped() -> None:
     try:
         # Hand-built policy: setenv does NOT include AWS_SECRET_ACCESS_KEY.
         # This directly tests the bwrap --clearenv + --setenv mechanism.
-        # (resolve_policy produces the same setenv via _build_setenv, which only
+        # (resolve_policy produces the same setenv via _build_child_env, which only
         # allows PATH/HOME/USER/LOGNAME/LANG/TERM/TZ/LC_*/engine-managed IMP_* + env_passthrough.)
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
@@ -449,7 +449,7 @@ def test_network_off_adds_unshare_net() -> None:
         extra_writable=(),
         secret_dirs=(),
         secret_files=(),
-        setenv=(("PATH", "/usr/bin:/bin"),),
+        child_env=(("PATH", "/usr/bin:/bin"),),
         network=False,  # <-- network isolation
         note="",
     )
@@ -510,7 +510,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
     root = _make_root("imp-test-title-")
     try:
         pol = _active_policy(root)
-        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_QUEST_TITLE", "")))
+        pol = dataclasses.replace(pol, child_env=(*pol.child_env, ("IMP_QUEST_TITLE", "")))
         step = Step(
             name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
             max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
@@ -747,7 +747,7 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
 # ---------------------------------------------------------------------------
 # PATH resolution: inside a sandboxed step a bare `imp` runs the OUTER (running)
 # imp, NOT the worktree's shadowed code. src/imp/engine/shim.py writes a per-run
-# shim that sandbox._build_setenv prepends to PATH; the shim puts the outer src
+# shim that sandbox._build_child_env prepends to PATH; the shim puts the outer src
 # root at sys.path[0], so it beats the injected worktree PYTHONPATH shadow.
 # ---------------------------------------------------------------------------
 
@@ -766,12 +766,12 @@ def test_sandboxed_imp_resolves_outer_imp_over_worktree_shadow() -> None:
 
         shim_dir = write_imp_shim(root / "qd")
         base = _active_policy(root)
-        # PATH exactly as _build_setenv composes it: shim dir first, ambient behind.
+        # PATH exactly as _build_child_env composes it: shim dir first, ambient behind.
         path = os.pathsep.join(
-            [str(shim_dir), *(v for k, v in base.setenv if k == "PATH")])
+            [str(shim_dir), *(v for k, v in base.child_env if k == "PATH")])
         pol = dataclasses.replace(
             base,
-            setenv=tuple((k, path if k == "PATH" else v) for k, v in base.setenv))
+            child_env=tuple((k, path if k == "PATH" else v) for k, v in base.child_env))
         engine_env = {"PYTHONPATH": str(root / "src")}
 
         def _run(cmd: str) -> subprocess.CompletedProcess[str]:

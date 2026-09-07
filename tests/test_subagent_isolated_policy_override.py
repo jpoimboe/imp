@@ -10,7 +10,7 @@ def _policy(*, active: bool, note: str = "") -> SandboxPolicy:
     return SandboxPolicy(
         active=active, worktree="/wt", git_common_dir="/wt/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), child_env=(),
         network=True, note=note)
 
 

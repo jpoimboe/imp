@@ -145,7 +145,7 @@ def test_run_script_wraps_with_active_policy(tmp_path, monkeypatch) -> None:
                         git_common_dir=str(tmp_path), git_ro_remask=(),
                         writable_caches=(), extra_readable=(), extra_writable=(),
                         secret_dirs=(), secret_files=(),
-                        setenv=(), network=True, note="")
+                        child_env=(), network=True, note="")
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol)
     assert captured["argv"][0] == "bwrap"
@@ -195,7 +195,7 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
                         git_common_dir=str(tmp_path), git_ro_remask=(),
                         writable_caches=(), extra_readable=(), extra_writable=(),
                         secret_dirs=(), secret_files=(),
-                        setenv=(("IMP_QUEST_ID", ""),), network=True, note="")
+                        child_env=(("IMP_QUEST_ID", ""),), network=True, note="")
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol,
                env_extra={"IMP_QUEST_ID": "realid01"})

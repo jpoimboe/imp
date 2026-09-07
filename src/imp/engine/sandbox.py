@@ -79,7 +79,7 @@ class SandboxPolicy:
     extra_writable: tuple[str, ...]           # config extra_writable (rw)
     secret_dirs: tuple[str, ...]              # --tmpfs masks (existing only) incl. /run/user/$UID
     secret_files: tuple[str, ...]             # --ro-bind /dev/null masks (existing only)
-    setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
+    child_env: tuple[tuple[str, str], ...]     # resolved child environment key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
     quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
@@ -199,7 +199,7 @@ def _is_engine_passthrough(key: str) -> bool:
     overrides (GIT_EDITOR / GIT_TERMINAL_PROMPT / EDITOR / VISUAL) that keep a
     sandboxed git/tool invocation non-interactive. Shared by both allowlist
     sites (the per-spawn loop in build_sandbox_argv and the policy bake in
-    _build_setenv) so they cannot drift."""
+    _build_child_env) so they cannot drift."""
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
@@ -256,7 +256,7 @@ def build_sandbox_argv(
     `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
     prefixed key it carries is emitted via --setenv, authoritatively superseding
-    whatever was baked into `policy.setenv` at run start. The policy is resolved
+    whatever was baked into `policy.child_env` at run start. The policy is resolved
     once per run (the stat-once design), but name-on-intent makes IMP_QUEST_TITLE
     mutate mid-run on a rename — so a gate or tool spawned after
     the rename MUST see the live values, not the empty ones frozen at run start.
@@ -267,7 +267,7 @@ def build_sandbox_argv(
     the IMP_ prefix plus PYTHONPATH (`_is_engine_passthrough`): any new IMP_* var
     flows through with no edit here, and PYTHONPATH passes through as the single
     deliberate non-IMP_ exception — the imp-on-imp import shadow — matching
-    `_build_setenv`.
+    `_build_child_env`.
 
     An ACTIVE policy carrying overlay_root with an un-minted home layer is a
     fail-open bug (it would bind the real $HOME rw) and raises; the INACTIVE
@@ -315,15 +315,15 @@ def build_sandbox_argv(
     argv += ["--chdir", cwd]
     # 13. env allowlist. The IMP_* slice comes authoritatively from the live
     # per-spawn engine_env (prefix allowlist) so a post-rename title wins over
-    # the value frozen into policy.setenv at run start (name-on-intent). Dict
+    # the value frozen into policy.child_env at run start (name-on-intent). Dict
     # preserves first-seen order; reassigning a key updates in place, so no
     # duplicate --setenv is emitted.
-    setenv = dict(policy.setenv)
+    child_env = dict(policy.child_env)
     for k, v in engine_env.items():
         if _is_engine_passthrough(k):
-            setenv[k] = v
+            child_env[k] = v
     argv += ["--clearenv"]
-    for k, v in setenv.items():
+    for k, v in child_env.items():
         argv += ["--setenv", k, v]
     # 14. namespaces — NO --die-with-parent / --new-session (B.9); --unshare-pid is
     # safe (the group kill crosses the namespace)
@@ -743,7 +743,7 @@ def resolve_policy(
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
         quest_var_tmp_dir=quest_var_tmp_dir,
-        setenv=_build_setenv(
+        child_env=_build_child_env(
             engine_env_result, environ, cfg.env_passthrough,
             session_socket=str(session_sock), tmpdir=str(quest_tmp),
             shim_dir=str(imp_shim_dir(quest_dir)) if quest_dir is not None else ""),
@@ -756,16 +756,16 @@ def _inactive(*, note: str) -> SandboxPolicy:
     return SandboxPolicy(
         active=False, worktree="", git_common_dir="", git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note=note,
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note=note,
     )
 
 
-def _build_setenv(
+def _build_child_env(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     env_passthrough: tuple[str, ...], session_socket: str = "",
     shim_dir: str = "", tmpdir: str = "",
 ) -> tuple[tuple[str, str], ...]:
-    """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
+    """The child environment (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative; PYTHONPATH is the single deliberate non-IMP_ exception — the
     imp-on-imp import shadow); generic + LC_* + env_passthrough pass through from
     `environ`. With the socket and every IMP_* path now identical inside and outside

@@ -106,7 +106,7 @@ def _active_policy(worktree: str, **over: object) -> SandboxPolicy:
     base = dict(
         active=True, worktree=worktree, git_common_dir="/ctl/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="",
     )
     base.update(over)
     return SandboxPolicy(**base)

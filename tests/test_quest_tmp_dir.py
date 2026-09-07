@@ -91,7 +91,7 @@ def test_spawn_session_daemon_exports_quest_tmp_without_poisoning_tmpdir(
     """The daemon is spawned with IMP_QUEST_TMP=<quest.tmp_dir> so codex/claude
     homes land under the per-quest dir. The daemon env must NOT set TMPDIR: the
     daemon derives Quest.tmp_dir and the socket from its own paths; only the
-    in-sandbox setenv carries the per-quest TMPDIR."""
+    in-sandbox child_env carries the per-quest TMPDIR."""
     from imp.remote.session import attach as attach_mod
 
     _seed_control(tmp_path)
@@ -109,7 +109,7 @@ def test_spawn_session_daemon_exports_quest_tmp_without_poisoning_tmpdir(
 
     assert captured["env"]["IMP_QUEST_TMP"] == str(ch.tmp_dir)
     # The daemon env must NOT set TMPDIR: it derives Quest.tmp_dir and the socket
-    # from its own paths; only the in-sandbox setenv carries the per-quest TMPDIR.
+    # from its own paths; only the in-sandbox child_env carries the per-quest TMPDIR.
     assert captured["env"].get("TMPDIR") != str(ch.tmp_dir)
 
 
