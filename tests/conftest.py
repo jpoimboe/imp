@@ -300,22 +300,6 @@ def _isolate_run_start_gate() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_provider_registry() -> Generator[None, None, None]:
-    """Restore the process-global provider registry after every test. Many tests
-    reset it and then register only a fake inline; a partially-populated registry
-    leaks onto the next test on the same xdist worker, where _ensure_builtins()
-    self-heals only from an EMPTY one."""
-    from imp.providers import resolve
-    providers = dict(resolve._PROVIDERS)
-    defaults = dict(resolve._PROVIDER_DEFAULTS)
-    yield
-    resolve._PROVIDERS.clear()
-    resolve._PROVIDERS.update(providers)
-    resolve._PROVIDER_DEFAULTS.clear()
-    resolve._PROVIDER_DEFAULTS.update(defaults)
-
-
-@pytest.fixture(autouse=True)
 def _isolate_state_dir() -> Generator[None, None, None]:
     yield
     # The startup migration writes os.environ directly; pop it so it can't leak forward.
