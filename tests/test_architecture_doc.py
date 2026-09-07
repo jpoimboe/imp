@@ -373,7 +373,7 @@ INTEGRATE_DIAGRAM = """flowchart TD
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]
-  IRV -->|"blocking / minors"| REC
+  IRV -->|"critical/major / minor"| REC
   IRV -. Error .-> HUMAN
   IRV --> CC{{"check-cleared"}}
   CC -->|"not cleared"| IV
@@ -432,6 +432,13 @@ def test_architecture_integrate_phase_prose_names_the_merge_door() -> None:
         "reviewer repaired, say — routes back to `integration-verify` instead of "
         "reaching the human." in flat
     )
+
+
+def test_architecture_names_no_retired_reviewer_verdict_field() -> None:
+    text = ARCH.read_text()
+    assert "blocking iff" not in text
+    assert '"blocking / minors"' not in text
+    assert "has_minor_findings" not in text
 
 
 def test_architecture_step_agent_table_pairs_files_with_steps_and_tiers() -> None:

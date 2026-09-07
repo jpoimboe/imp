@@ -309,7 +309,7 @@ flowchart TD
   VM --> IV{{"integration-verify · slow"}}
   IV -. timeout .-> HUMAN
   IV --> IRV["integration-reviewer"]
-  IRV -->|"blocking / minors"| REC
+  IRV -->|"critical/major / minor"| REC
   IRV -. Error .-> HUMAN
   IRV --> CC{{"check-cleared"}}
   CC -->|"not cleared"| IV
@@ -340,9 +340,9 @@ name:
 |---|---|---|---|
 | `threshold` | `threshold` | high | Front-door conversation: answer, scout, or scope; set the ceremony and go live. |
 | `spec-finalizer` | `spec-finalizer` | high | Adopt the threshold draft, commit the final spec with its plan outline, service the review loop. |
-| `spec-reviewer` | `spec-reviewer` | high | Review the spec against captured intent; blocking iff Critical/Major. |
+| `spec-reviewer` | `spec-reviewer` | high | Review the spec against captured intent; any Critical/Major sends it back. |
 | `plan-writer` | `plan-writer` | high | Write this outline plan's slice — the HOW — and commit it. |
-| `plan-reviewer` | `plan-reviewer` | high | Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
+| `plan-reviewer` | `plan-reviewer` | high | Review the newest plan's prescribed code like a diff; any Critical/Major sends it back. |
 | `task-lead` | `task-lead` | high | Implement controller: pick a task, dispatch coder + reviewer, adjudicate, commit one unit, record progress. |
 | `gap-check` | `gap-check` | high | Once-per-quest coverage backstop: do the implemented plans cover the spec, or is a corrective plan needed. |
 | `batch-code-reviewer` | `quest-review` | high | The single quest-wide code review of the whole diff vs the spec; routes approve / task_gap. |
