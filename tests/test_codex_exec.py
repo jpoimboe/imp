@@ -382,3 +382,72 @@ async def test_an_explicit_originator_is_left_alone(
     client = _client(tmp_path, _JSONL_CHILD, monkeypatch, env=supplied)
     report = await _first_report(client.start_thread(_OPTS_HIGH), "go")
     assert report["env"]["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] == "mine"
+
+
+_JSONL_GRANDPARENT = """\
+import json, os, subprocess, sys, time
+sys.stdin.read()
+kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+print(json.dumps({"type": "item.completed", "item": {
+    "id": "a1", "type": "agent_message", "text": f"{os.getpid()} {kid.pid}"}}), flush=True)
+time.sleep(300)
+"""
+
+
+@pytest.mark.anyio
+async def test_the_second_turn_resumes_the_thread_started_id(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(tmp_path, _JSONL_CHILD, monkeypatch)
+    thread = client.start_thread(_OPTS_HIGH)
+    first = await _first_report(thread, "one")
+    assert first["argv"] == build_command_args(_OPTS_HIGH, None)
+    second = await _first_report(thread, "two")
+    assert second["argv"][-2:] == ["resume", "thr-9"]
+
+
+@pytest.mark.anyio
+async def test_a_resumed_thread_sends_resume_on_its_first_turn(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(tmp_path, _JSONL_CHILD, monkeypatch)
+    report = await _first_report(client.resume_thread("thr-old", _OPTS_HIGH), "go")
+    assert report["argv"][-2:] == ["resume", "thr-old"]
+
+
+@pytest.mark.anyio
+async def test_closing_the_event_stream_reaps_the_whole_child_group(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(tmp_path, _JSONL_GRANDPARENT, monkeypatch)
+    turn = await client.start_thread(_OPTS_HIGH).run_streamed("go")
+    async with contextlib.aclosing(turn.events) as events:
+        async for event in events:
+            child, grandchild = (int(x) for x in event.item.text.split())  # type: ignore[union-attr]
+            break
+    _await_death(child, f"codex child {child} survived aclose()")
+    _await_death(grandchild, f"codex grandchild {grandchild} survived aclose()")
+
+
+@pytest.mark.anyio
+async def test_cancelling_the_consumer_reaps_the_whole_child_group(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(tmp_path, _JSONL_GRANDPARENT, monkeypatch)
+    turn = await client.start_thread(_OPTS_HIGH).run_streamed("go")
+    seen: list[Any] = []
+
+    async def _consume() -> None:
+        async for event in turn.events:
+            seen.append(event)
+
+    task = asyncio.create_task(_consume())
+    deadline = time.monotonic() + 20.0
+    while not seen:
+        if time.monotonic() > deadline:
+            task.cancel()
+            pytest.fail("fake codex child never emitted its pids")
+        await asyncio.sleep(0.05)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    child, grandchild = (int(x) for x in seen[0].item.text.split())
+    _await_death(child, f"codex child {child} survived cancellation")
+    _await_death(grandchild, f"codex grandchild {grandchild} survived cancellation")

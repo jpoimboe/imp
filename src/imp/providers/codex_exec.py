@@ -14,13 +14,17 @@ import codecs
 import contextlib
 import shutil
 import signal
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Literal
 
 from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.context import kill_process_group
-from imp.providers.codex_events import ThreadEvent, parse_thread_event_line
+from imp.providers.codex_events import (
+    ThreadEvent,
+    ThreadStartedEvent,
+    parse_thread_event_line,
+)
 from imp.providers.errors import ConfigError
 from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 
@@ -133,17 +137,18 @@ async def _run_exec(
 
 @dataclass(frozen=True)
 class StreamedTurn:
-    events: AsyncIterator[ThreadEvent]
+    events: AsyncGenerator[ThreadEvent, None]
 
 
 class Thread:
     def __init__(
         self, executable: str, env: dict[str, str], options: ThreadOptions,
+        thread_id: str | None,
     ) -> None:
         self._executable = executable
         self._env = env
         self._options = options
-        self._id: str | None = None
+        self._id = thread_id
 
     async def run_streamed(self, prompt: str) -> StreamedTurn:
         return StreamedTurn(events=self._stream(prompt))
@@ -153,7 +158,10 @@ class Thread:
         async with contextlib.aclosing(
                 _run_exec(self._executable, args, self._env, prompt)) as lines:
             async for line in lines:
-                yield parse_thread_event_line(line)
+                event = parse_thread_event_line(line)
+                if isinstance(event, ThreadStartedEvent):
+                    self._id = event.thread_id
+                yield event
 
 
 class Codex:
@@ -167,4 +175,7 @@ class Codex:
         self._env = env
 
     def start_thread(self, options: ThreadOptions) -> Thread:
-        return Thread(self._executable, self._env, options)
+        return Thread(self._executable, self._env, options, thread_id=None)
+
+    def resume_thread(self, thread_id: str, options: ThreadOptions) -> Thread:
+        return Thread(self._executable, self._env, options, thread_id=thread_id)
