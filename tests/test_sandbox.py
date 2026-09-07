@@ -790,6 +790,23 @@ def test_build_child_env_drops_ambient_imp_vars(tmp_path):
     assert ("IMP_ALLOWED", "yes") in pol.child_env
 
 
+def test_child_env_pythonpath_puts_the_engine_prefix_ahead_of_the_ambient(tmp_path):
+    # AC 9(a): the bake merges the engine's worktree prefix with the ambient
+    # PYTHONPATH exactly as overlay_engine_env does — prefix entries first, empty
+    # and prefix-duplicating inherited entries dropped, the rest in order.
+    control, wt = _layout(tmp_path)
+    prefix = f"{wt}/src{os.pathsep}{wt}/vendor"
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result={"PYTHONPATH": prefix},
+        environ={"PATH": "/usr/bin",
+                 "PYTHONPATH": f"{wt}/vendor{os.pathsep}{os.pathsep}/amb/lib"},
+        available=True,
+    )
+    assert dict(pol.child_env)["PYTHONPATH"] == (
+        f"{wt}/src{os.pathsep}{wt}/vendor{os.pathsep}/amb/lib")
+
+
 def test_build_child_env_strips_provider_api_keys(tmp_path):
     # AC 5: provider key env vars are never on the allowlist (not IMP_-prefixed,
     # not generic/LC_/env_passthrough), so they never reach the agent.

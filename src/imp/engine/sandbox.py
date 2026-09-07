@@ -34,7 +34,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import HEADLESS_ENV, overlay_engine_env, quest_var_tmp_root
+from imp.engine.env import (
+    HEADLESS_ENV,
+    merge_pythonpath_prefix,
+    overlay_engine_env,
+    quest_var_tmp_root,
+)
 from imp.engine.shim import imp_shim_dir
 from imp.paths import imp_home, project_state_dir
 from imp.remote.session.discover import session_socket_path
@@ -785,9 +790,11 @@ def _build_child_env(
 ) -> tuple[tuple[str, str], ...]:
     """The child environment (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative; PYTHONPATH is the single deliberate non-IMP_ exception — the
-    imp-on-imp import shadow); generic + LC_* + env_passthrough pass through from
-    `environ`. With the socket and every IMP_* path now identical inside and outside
-    the sandbox, nothing is rewritten — real host paths pass through verbatim.
+    imp-on-imp import shadow, a bare worktree prefix merged ahead of any ambient
+    PYTHONPATH by the same helper overlay_engine_env uses); generic + LC_* +
+    env_passthrough pass through from `environ`. With the socket and every IMP_* path
+    now identical inside and outside the sandbox, nothing is rewritten — real host
+    paths pass through verbatim.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
     its value in place (first-seen position, last value wins). TMPDIR (the per-quest
@@ -806,6 +813,10 @@ def _build_child_env(
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
             d[k] = v
+    pythonpath_prefix = engine_env_result.get("PYTHONPATH")
+    if pythonpath_prefix:
+        d["PYTHONPATH"] = merge_pythonpath_prefix(
+            pythonpath_prefix, environ.get("PYTHONPATH", ""))
     if session_socket:
         d["IMP_SESSION_SOCKET"] = session_socket
     if shim_dir:
