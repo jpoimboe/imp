@@ -2,7 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 """CodexAgentRunner — the heavy lifting for the `codex` provider.
 
-Implements: interrupt() with four effects, fail-fast preflight(), and
+Implements: interrupt() with three effects, fail-fast preflight(), and
 process_event() for basic event types. Native writes need no runner-side guard:
 codex's own `read-only` sandbox refuses them.
 """
@@ -479,16 +479,6 @@ class CodexSession(ObserveSession):
                 if parts:
                     next_prompt = next_prompt + "\n\n" + "\n".join(parts)
         self._next_prompt = next_prompt
-        # AbortController for interrupt() — tolerate a fake/SDK without one.
-        try:
-            from openai_codex_sdk import (
-                AbortController,
-            )
-            abort_controller: Any = AbortController()
-        except ImportError:
-            abort_controller = None
-        self._abort_controller = abort_controller
-        runner._abort_controller = abort_controller
 
         self.guard = LoopGuard(interactive=invocation.interactive)
         self.ceiling = invocation.max_tool_calls  # inert: codex trips mid-stream
@@ -594,11 +584,8 @@ class CodexSession(ObserveSession):
             self._proc_state["complete_step_called"] = True
             self._proc_state["complete_step_args"] = dict(state.complete_step_args)
 
-        # Cap trip from inside the MCP wrapper → abort the SDK + bail.
+        # Cap trip from inside the MCP wrapper → tear the turn down + bail.
         if state.abort_requested:
-            if self._abort_controller is not None:
-                with contextlib.suppress(Exception):
-                    self._abort_controller.abort()
             await terminate_running_processes(self.ctx)
             yield Error(payload={
                 "category": "config",
@@ -626,9 +613,6 @@ class CodexSession(ObserveSession):
     def _fatal_error(self) -> dict[str, Any] | None:
         state = self._state
         if state.fatal_tool_error is not None:
-            if self._abort_controller is not None:
-                with contextlib.suppress(Exception):
-                    self._abort_controller.abort()
             tool_name, msg = state.fatal_tool_error
             return {
                 "category": "config", "kind": "fatal_tool_error",
@@ -737,7 +721,6 @@ class CodexAgentRunner:
         self._user_input_fn = user_input_fn
         self._cancel = False
         self._ctx: ToolContext | None = None
-        self._abort_controller: Any = None
         # Test seam: overrides the canonical codex auth.json path. Read by
         # `_canonical_auth_path()`; declared here so the attribute the tests set
         # is part of the class contract.
@@ -981,38 +964,21 @@ class CodexAgentRunner:
         return prompt
 
     async def interrupt(self) -> None:
-        """Cancel the run — four effects:
+        """Cancel the run — three effects:
           1. set `self._cancel = True`.
           2. `terminate_running_processes(ctx)`.
           3. `terminate_background_processes(ctx)` (Decision 7: pause kills
              bg processes; persisted tombstones explain it on resume).
-          4. SDK `AbortController.abort()`.
-        Idempotent."""
+        Idempotent. The `codex exec` child needs no fourth effect: closing the
+        event stream group-kills its whole session in codex_exec's teardown."""
         from imp.agents.tools.bg import terminate_background_processes
         self._cancel = True
-        try:
-            if self._ctx is not None:
-                await terminate_running_processes(self._ctx)
-                # Decision 7: pause kills background processes too (leak
-                # resistance); the persisted tombstones give the resumed agent an
-                # explanation. Idempotent vs the run() finally (both fire on pause).
-                await terminate_background_processes(self._ctx)
-        finally:
-            # abort() must fire even if a teardown raises (disk-full tombstone
-            # write): it is the only effect that stops a stalled SDK stream.
-            #
-            # KNOWN LIMITATION (codex grandchild-reaping gap): unlike claude_code,
-            # imp does NOT group-reap the `codex exec` child on pause. The codex
-            # SDK keeps that child's pid local to CodexExec.run() and never exposes
-            # it, so there is no handle to killpg. Session isolation
-            # (codex_sdk_patch) still makes the child its own session leader
-            # so a terminal Ctrl-C reaches imp alone; teardown then relies on the
-            # SDK's cooperative AbortSignal -> single proc.kill(), which can orphan
-            # the child's own grandchildren. Reaching deeper into SDK internals to
-            # expose that pid is deliberately out of scope.
-            if self._abort_controller is not None:
-                with contextlib.suppress(Exception):
-                    self._abort_controller.abort()
+        if self._ctx is not None:
+            await terminate_running_processes(self._ctx)
+            # Decision 7: pause kills background processes too (leak
+            # resistance); the persisted tombstones give the resumed agent an
+            # explanation. Idempotent vs the run() finally (both fire on pause).
+            await terminate_background_processes(self._ctx)
 
 
 # ── Event mapping ─────────────────────────────────────────────────────────────

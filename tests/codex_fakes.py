@@ -143,15 +143,6 @@ class FakeThread:
         return FakeStreamedTurn(self._scripted.pop(0))
 
 
-class FakeAbortController:
-    def __init__(self) -> None:
-        self.aborted = False
-        self.signal = self  # the SDK uses `.signal` on the AbortController
-
-    def abort(self) -> None:
-        self.aborted = True
-
-
 class FakeCodex:
     """Client factory injected via `client_factory=` on CodexAgentRunner."""
 

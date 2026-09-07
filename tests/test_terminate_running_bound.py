@@ -134,7 +134,6 @@ async def test_codex_interrupt_commits_cancel_before_abandonable_awaits(
             self.running_processes: list[Any] = []
 
     runner._ctx = _Ctx()
-    runner._abort_controller = None  # no SDK stream in this unit test
     with anyio.move_on_after(0.1):
         await runner.interrupt()
     assert runner._cancel is True
