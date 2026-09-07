@@ -314,8 +314,11 @@ def _state_text(attempt: ProbeAttempt) -> str:
 
 
 def _attempt_note(n: int, attempt: ProbeAttempt) -> str:
-    return (f"#{n} {_state_text(attempt)} after {attempt.elapsed:.1f}s,"
+    note = (f"#{n} {_state_text(attempt)} after {attempt.elapsed:.1f}s,"
             f" {attempt.stdout_bytes} stdout bytes")
+    if attempt.pipe_holders is not None:
+        note += f", stdout pipe still held by: {attempt.pipe_holders}"
+    return note
 
 
 def _declined_silently(attempt: ProbeAttempt) -> bool:

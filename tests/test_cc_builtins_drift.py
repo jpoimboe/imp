@@ -310,3 +310,22 @@ def test_probe_raises_when_the_cli_speaks_but_never_inits(
     written = re.search(r"#1 process exited 0 after [\d.]+s, (\d+) stdout bytes", message)
     assert written is not None, message
     assert int(written.group(1)) > 0, "bytes on stdout must be visible in the evidence"
+
+
+def test_probe_skip_reason_names_the_process_holding_the_stdout_pipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The evidence the original report lacked, carried through to the reader of the skip:
+    which descendant outlived the CLI still holding its stdout pipe."""
+    stub = _sh_stub(tmp_path / "backgrounding-cli", "#!/bin/sh\n(sleep 30) &\nexit 0\n")
+    monkeypatch.setattr(cc_probe, "PROBE_RETRY_BACKOFF", 0.0)
+
+    with pytest.raises(pytest.skip.Exception) as excinfo:
+        probe_advertised_tools(str(stub), ["Bash"], tmp_path)
+
+    reason = str(excinfo.value)
+    assert f"pid {os.getpid()} (" not in reason, "the prober must never name itself"
+    clauses = re.findall(
+        r"stdout pipe still held by: (pid \d+ \([^()]*\)|unknown)", reason
+    )
+    assert len(clauses) == PROBE_ATTEMPTS, reason
