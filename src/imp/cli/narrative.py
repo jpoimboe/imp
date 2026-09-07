@@ -1242,6 +1242,7 @@ def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_acquired
 NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
+NarrativeBuilder._HANDLERS["lane_restored"] = _h_lane_event
 
 
 def _h_dependency_waiting(

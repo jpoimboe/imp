@@ -2505,6 +2505,21 @@ def test_lane_events_render_no_fallback_breadcrumb() -> None:
     assert fbs == []
 
 
+def test_lane_restored_renders_no_visible_line() -> None:
+    base = [
+        _ev("1", "step_started", step="wait-for-head", kind="branch", phase="merge"),
+        _ev("2", "lane_acquired", base="main", step="wait-for-head"),
+    ]
+    with_restore = [*base,
+                    _ev("3", "lane_restored", base="main", step="summarizer")]
+    assert "lane_restored" in nv.NarrativeBuilder._HANDLERS
+    step_with = nv.build_tree(with_restore).root.children[0].children[0]
+    step_without = nv.build_tree(base).root.children[0].children[0]
+    # An unregistered type would render a FallbackLine breadcrumb and grow the step.
+    assert [c for c in step_with.children if isinstance(c, nv.FallbackLine)] == []
+    assert len(step_with.children) == len(step_without.children)
+
+
 def test_error_node_falls_back_to_stderr_tail_when_no_full_summary() -> None:
     # A TerminatedError / unknown-path error carries stderr_tail (and exit_code)
     # but no full_summary. The renderer must surface the real stderr instead of
