@@ -240,8 +240,8 @@ def test_integration_reviewer_accept_edge_records_tolerated() -> None:
     wf = _wf()
     step = {s.name: s for s in wf.flat_steps()}["integration-reviewer"]
     base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
-    clean = {"status": "Success", "findings": "", "blocking": False,
-             "has_minor_findings": False, "tolerated": False}
+    clean = {"status": "Success", "findings": "", "critical": 0,
+             "major": 0, "minor": 0, "tolerated": False}
     m = evaluate_rules(step.rules, vars=base, output=clean)
     assert isinstance(m.action, Goto) and m.action.target == "check-cleared"
     assert m.var_mutations == {"slow_verify_tolerated": False}

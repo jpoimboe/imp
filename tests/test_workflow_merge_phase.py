@@ -91,27 +91,34 @@ def test_integration_verify_routes_failure_to_integration_reviewer() -> None:
     assert m.action.release is None
 
 
-def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
+def test_integration_review_routes_counts_to_reconciler() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integration-reviewer")
     base = {"status": "Success", "findings": "", "tolerated": False}
     m = evaluate_rules(rules, vars={},
-                       output={**base, "blocking": True, "has_minor_findings": False})
+                       output={**base, "critical": 1, "major": 0, "minor": 0})
     assert isinstance(m.action, Goto) and m.action.target == "reconciler"
     assert m.action.resume is True
     m = evaluate_rules(rules, vars={},
-                       output={**base, "blocking": False, "has_minor_findings": True})
+                       output={**base, "critical": 0, "major": 0, "minor": 2})
     assert isinstance(m.action, Goto) and m.action.target == "reconciler"
     assert m.action.resume is True
     m = evaluate_rules(rules, vars={},
-                       output={**base, "blocking": False, "has_minor_findings": False})
-    # both False -> clean, but the merge door re-checks the tree first
+                       output={**base, "critical": 0, "major": 0, "minor": 0})
+    # all zero -> clean, but the merge door re-checks the tree first
     assert isinstance(m.action, Goto) and m.action.target == "check-cleared"
     m = evaluate_rules(rules, vars={},
                        output={"status": "Error", "findings": "",
-                               "blocking": False, "has_minor_findings": False,
+                               "critical": 0, "major": 0, "minor": 0,
                                "tolerated": False})
     assert isinstance(m.action, Pause)
+    # The pause rule stays THIRD: an Error carrying findings still routes to the
+    # reconciler, so a reordering that let the pause pre-empt the counts fails here.
+    m = evaluate_rules(rules, vars={},
+                       output={"status": "Error", "findings": "",
+                               "critical": 1, "major": 0, "minor": 0,
+                               "tolerated": False})
+    assert isinstance(m.action, Goto) and m.action.target == "reconciler"
 
 
 def test_cleanup_merge_routes_by_exit_code() -> None:
@@ -245,8 +252,8 @@ def test_unverified_tree_reruns_the_gate_with_no_human_in_the_loop() -> None:
     gate only once the tree is cleared."""
     wf = load_workflow(WF)
     names = [s.name for s in _phase(wf, "integrate").steps]
-    clean = {"status": "Success", "findings": "", "blocking": False,
-             "has_minor_findings": False, "tolerated": False}
+    clean = {"status": "Success", "findings": "", "critical": 0,
+             "major": 0, "minor": 0, "tolerated": False}
     m = evaluate_rules(_rules(wf, "integration-reviewer"), vars={}, output=clean)
     assert isinstance(m.action, Goto) and m.action.target == "check-cleared"
     back = evaluate_rules(_rules(wf, "check-cleared"), vars={}, output={"exit": 3})

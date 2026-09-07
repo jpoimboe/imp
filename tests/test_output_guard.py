@@ -228,8 +228,9 @@ def _reviewer_schema():
     raw = {
         "status": {"type": "enum", "values": ["Success", "Error"]},
         "findings": {"type": "string"},
-        "blocking": {"type": "bool"},
-        "has_minor_findings": {"type": "bool"},
+        "critical": {"type": "int"},
+        "major": {"type": "int"},
+        "minor": {"type": "int"},
         "outcome": {"type": "string"},
     }
     return parse_output_schema(raw, source=SourceLoc(file=Path("a.yaml"), line=1))
@@ -271,8 +272,9 @@ def test_recover_kibe87_findings_folds_outcome_mirror_close() -> None:
             '</findings>\n<parameter name="outcome">reviewed clean, minors '
             "noted</outcome>\n</invoke>"
         ),
-        "blocking": False,
-        "has_minor_findings": True,
+        "critical": 0,
+        "major": 0,
+        "minor": 1,
     }
     res = validate_output_or_nudge(args, _reviewer_schema(), g)
     assert isinstance(res, Ok)
@@ -284,27 +286,28 @@ def test_recover_kibe87_findings_folds_outcome_mirror_close() -> None:
     assert g.noprogress_streak == 0
 
 
-def test_recover_kibe87_findings_folds_blocking_and_outcome() -> None:
-    # Multi-field fold: `findings` folds BOTH a `blocking` bool and an `outcome`
-    # string; both are recovered and `blocking` is type-coerced "false" -> False.
+def test_recover_kibe87_findings_folds_a_count_and_outcome() -> None:
+    # Multi-field fold: `findings` folds BOTH a `major` count and an `outcome`
+    # string; both are recovered and `major` is type-coerced "2" -> 2.
     g = LoopGuard()
     args = {
         "status": "Success",
         "findings": (
             "Two majors and a minor."
-            '</findings>\n<parameter name="blocking">false</parameter>\n'
+            '</findings>\n<parameter name="major">2</parameter>\n'
             '<parameter name="outcome">sent back for rework</outcome>\n</invoke>'
         ),
-        "has_minor_findings": True,
+        "critical": 0,
+        "minor": 1,
     }
     res = validate_output_or_nudge(args, _reviewer_schema(), g)
     assert isinstance(res, Ok)
     assert res.payload["findings"] == "Two majors and a minor."
-    assert res.payload["blocking"] is False
+    assert res.payload["major"] == 2
     assert res.payload["outcome"] == "sent back for rework"
     assert res.recovered is not None
     assert res.recovered.container == "findings"
-    assert res.recovered.fields == ("blocking", "outcome")
+    assert res.recovered.fields == ("major", "outcome")
     assert g.noprogress_streak == 0
 
 

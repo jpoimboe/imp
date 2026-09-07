@@ -6,8 +6,9 @@ description: At-head semantic-integration review — the base moved, so reason a
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
-  blocking: {type: bool}
-  has_minor_findings: {type: bool}
+  critical: {type: int}
+  major: {type: int}
+  minor: {type: int}
   tolerated: {type: bool}
 ---
 
@@ -63,9 +64,9 @@ You are resumed in **two** modes, told apart by the injected feedback:
   OPAQUE failure text to you; **adjudicate fix-vs-tolerate**, do NOT re-run the suite (a
   re-run tells you nothing new — you cannot have changed the tree). Reason over the
   failure text against the base-side incoming diff:
-  - **Worth fixing** — a genuine silent break against the base-side incoming diff → set
-    `blocking: true` and name the break in `findings`. The reconciler is resumed by that
-    **finding** and fixes it forward — driven by your finding, never raw test output.
+  - **Worth fixing** — a genuine silent break against the base-side incoming diff → count
+    it at Major or above and name the break in `findings`. The reconciler is resumed by
+    that **finding** and fixes it forward — driven by your finding, never raw test output.
   - **Not ours / not worth it** — base regressed its own test, or a flake → record a
     toleration and let it ride to `finalize`. Add a normal `## Deferred Followups` entry
     in `{{ quest.home }}/deferred.md` (create the heading if absent), born in
@@ -73,7 +74,7 @@ You are resumed in **two** modes, told apart by the injected feedback:
 
     `- [ ] DEFERRED integration-verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
 
-    Then return `blocking: false`, `has_minor_findings: false`, `tolerated: true` so the
+    Then return `critical: 0`, `major: 0`, `minor: 0`, `tolerated: true` so the
     workflow falls through to `summarizer` and records the toleration. The accept edge
     copies `tolerated` into the persistent `slow_verify_tolerated` var, so the pre-merge
     gate does not re-litigate this red tree, and the toleration surfaces to the human at
@@ -91,15 +92,15 @@ Classify each finding against the canonical severity rubric:
 
 ## Output
 
-Report findings as classified prose in `findings` (file/line + the exact problem). Set
-the routing flags — the reconciler at the held head absorbs every fix:
-- `blocking: true` on any Critical or Major finding — including an unfaithful or
-  over-reaching reconciliation — the reconciler must fix it before merge.
-- `has_minor_findings: true` on Minor findings with no blocking ones — the reconciler
-  integrates them too.
-- both false (Nit-only, clean, or a triaged "not ours" toleration) — the integration
-  proceeds to `check-cleared`, which re-runs the gate if this tree was never verified,
-  then to `summarizer`.
+Report findings as classified prose in `findings` (file/line + the exact problem). Count
+the findings — the reconciler at the held head absorbs every fix:
+- `critical` / `major` above `0` on any Critical or Major finding — including an
+  unfaithful or over-reaching reconciliation — the reconciler must fix it before merge.
+- `minor` above `0` with `critical` and `major` at `0` — the reconciler integrates them
+  too.
+- all three at `0` (Nit-only, clean, or a triaged "not ours" toleration) — the
+  integration proceeds to `check-cleared`, which re-runs the gate if this tree was never
+  verified, then to `summarizer`.
 - `tolerated: true` **only** in the "not ours / not worth it" triage branch above; else
   `tolerated: false` — on a clean review or the "worth fixing" branch the tree is green
   or about to be fixed forward, so there is nothing to tolerate.
