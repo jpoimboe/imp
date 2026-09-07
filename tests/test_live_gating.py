@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 
 import pytest
+from claude_agent_sdk import CLINotFoundError
+from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 
 from tests._live import KNOWN_PROVIDERS, RUN_LIVE_ALL, parse_run_live
 
@@ -67,16 +69,42 @@ def test_openai_key_prefers_key_file_over_env(monkeypatch, tmp_path):
     assert openai_key() == "file-key"
 
 
-def test_provider_available_claude_code_missing_cli(monkeypatch):
-    import tests._live as live
-    monkeypatch.setattr(live.shutil, "which", lambda _name: None)
-    assert live.provider_available("claude_code") == "claude CLI not on PATH"
+def _raise_cli_not_found(_self):
+    raise CLINotFoundError("Claude Code not found")
 
 
-def test_provider_available_claude_code_present(monkeypatch):
+def _empty_path(monkeypatch, tmp_path):
+    """No `claude` anywhere on PATH: whatever the check answers, it answered from
+    the SDK's own resolution."""
+    empty_bin = tmp_path / "empty-bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+
+
+def test_provider_available_claude_code_resolves_the_sdk_binary(monkeypatch, tmp_path):
+    """The SDK spawns its bundled copy and never consults the PATH `claude`, so a host
+    that has the SDK and no PATH claude must still run the claude_code live lane."""
     import tests._live as live
-    monkeypatch.setattr(live.shutil, "which", lambda _name: "/usr/bin/claude")
+    _empty_path(monkeypatch, tmp_path)
+    # A path that was never created: the check resolves the binary, it must neither
+    # stat nor spawn it (and must not fall back to PATH when it is missing).
+    monkeypatch.setattr(
+        SubprocessCLITransport,
+        "_find_cli",
+        lambda _self: str(tmp_path / "never-created" / "claude"),
+    )
     assert live.provider_available("claude_code") is None
+
+
+def test_provider_available_claude_code_missing_everywhere(monkeypatch, tmp_path):
+    """When the SDK's own resolution comes up empty, the reason names both places it
+    looked — the bundled binary and PATH."""
+    import tests._live as live
+    _empty_path(monkeypatch, tmp_path)
+    monkeypatch.setattr(SubprocessCLITransport, "_find_cli", _raise_cli_not_found)
+    assert live.provider_available("claude_code") == (
+        "claude CLI not found (neither the SDK's bundled binary nor PATH)"
+    )
 
 
 def test_provider_available_codex_missing_sdk(monkeypatch):

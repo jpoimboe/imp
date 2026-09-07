@@ -5,6 +5,11 @@ Live tests carry `@pytest.mark.live(<provider>)` and run only under
 live_skip_reason / provider_available below). A selected provider whose
 toolchain or credentials are absent skips (not fails) at collection.
 
+The claude_code check resolves the CLI the SDK itself spawns -- its bundled
+binary, then PATH, then the SDK's fixed locations -- not whatever `claude`
+happens to be on PATH, which the SDK never consults. It is a presence check:
+resolution only, no spawn.
+
 A test that only launches a provider's CLI, with no model turn, belongs here
 too: the launch itself is the live dependency. Measured on the claude CLI
 (quest bepi35), its pre-init path -- node boot, an `rg --files` scan, a
@@ -82,9 +87,18 @@ def openai_key() -> str | None:
 
 def provider_available(provider: str) -> str | None:
     """None if the provider's toolchain + credentials are present on this
-    machine, else a human-readable reason naming what is missing."""
+    machine, else a human-readable reason naming what is missing. claude_code
+    resolves the binary the SDK will spawn, without spawning it."""
     if provider == "claude_code":
-        return None if shutil.which("claude") else "claude CLI not on PATH"
+        from claude_agent_sdk import ClaudeAgentOptions, CLINotFoundError
+        from claude_agent_sdk._internal.transport.subprocess_cli import (
+            SubprocessCLITransport,
+        )
+        try:
+            SubprocessCLITransport(prompt="", options=ClaudeAgentOptions())._find_cli()
+        except CLINotFoundError:
+            return "claude CLI not found (neither the SDK's bundled binary nor PATH)"
+        return None
     if provider == "codex":
         if shutil.which("codex") is None:
             return "codex CLI not on PATH"
