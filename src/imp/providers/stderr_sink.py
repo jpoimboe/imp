@@ -153,10 +153,11 @@ def build_stderr_sink(
     return StderrSink(path, on_warning=_on_warning, source=source)
 
 
-# Active sink for the codex streaming tee. The codex SDK subprocess spawn is
-# monkeypatched globally (codex_sdk_patch.py), so the patch can't be
-# handed a per-run sink directly — it reads the current one from here. claude_code
-# does NOT use this; it wires the sink straight into the SDK stderr callback.
+# Active sink for the codex streaming tee. `codex_exec`'s spawn reads the current
+# sink from here rather than taking it as an argument: the sink is per-run runner
+# state, and the Codex/Thread/StreamedTurn chain in between carries only thread
+# options. claude_code does NOT use this; it passes `sink.feed` directly as its
+# client's `stderr` callback.
 current_stderr_sink: contextvars.ContextVar[StderrSink | None] = (
     contextvars.ContextVar("current_stderr_sink", default=None)
 )

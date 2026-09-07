@@ -726,8 +726,8 @@ class CodexAgentRunner:
         # is part of the class contract.
         self._canonical_auth_override: Path | None = None
         # Per-step capture of the nested `codex` CLI's stderr. Built in
-        # CodexSession._enter and published to current_stderr_sink for the
-        # subprocess-patch tee. None until built (the stubbed-loop outer-except
+        # CodexSession._enter and published to current_stderr_sink for
+        # `codex_exec`'s tee. None until built (the stubbed-loop outer-except
         # tests never build it).
         self._stderr_sink: Any = None
         # Teardown handles stashed by CodexSession._enter so run()'s finally can
