@@ -144,5 +144,6 @@ def test_build_resume_driver_carries_the_project_name(
     ch = _seed(tmp_path, step_label="reviewing spec")
     st = State.load(ch.state_dir)
     captured = _capture_driver(monkeypatch)
-    m._build_resume_driver(quest=ch, state=st, status=SimpleNamespace(), color=False)
+    m._build_resume_driver(quest=ch, state=st, status=SimpleNamespace(), color=False,
+                           stream=SimpleNamespace())
     assert captured["project"] == ch.control_root.name == tmp_path.name
