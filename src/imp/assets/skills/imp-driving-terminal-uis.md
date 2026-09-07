@@ -24,8 +24,8 @@ send/react loop for interactive programs.
 
 - **`start(argv, cwd=None, cols=80, rows=24, env=None)`** — spawn `argv` on a fresh
   pty; returns the first screen. `cols`/`rows` set the size real programs reflow to.
-  `env`, if given, *replaces* the environment (TERM still defaulted). Replaces any
-  existing session.
+  `env`, if given, *replaces* the environment (TERM still defaulted). Refuses while a
+  program is still running — stop() first.
 - **`view(full=False)`** — read the current screen as text, sending nothing. A cursor
   parked after a prompt means it's waiting for input. `full=True` adds history.
 - **`send(data, wait=True)`** — raw keystrokes: Enter=`\r`, Tab=`\t`, Ctrl-C=`\x03`,
