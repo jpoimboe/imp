@@ -5,11 +5,14 @@
 
 codex resumes via its opaque native rollout (codex_rollout.py), so imp holds no
 parsed message list and cannot run agents.classify.classify_resume. But imp owns
-events.jsonl, which carries the same signal: a turn ended awaiting the user iff
-the agent emitted an agent_message but NO complete_step tool_call (presence-based,
-position-independent — see the Unit F/G coupling note). Mirrors classify_resume's
-AWAITING_USER/MISSING split. DANGLING_TOOL_USE is omitted: codex always emits paired
-tool_call/tool_result events, so a dangling tool_call cannot appear in events.jsonl.
+events.jsonl, which carries the same signal: a turn ended awaiting the user iff the
+agent emitted an agent_message but NO complete_step tool_call — that split is
+presence-based, position-independent (see the Unit F/G coupling note) — AND the last
+awaiting_user_input gate has no tool_call after it (a tool_call after the gate means
+the agent took the reply and went back to work). Mirrors classify_resume's
+AWAITING_USER/MISSING split. DANGLING_TOOL_USE is omitted: a sub_agent tool_call opens
+at item.started and closes at item.completed, so an interrupt between them would
+dangle — codex_runner closes those folds at teardown, keeping events.jsonl paired.
 """
 from __future__ import annotations
 

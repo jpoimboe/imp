@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import imp.providers.codex_resume as codex_resume
 from imp.agents.classify import ResumeState
 from imp.providers.codex_resume import (
     derive_codex_resume_state,
@@ -313,3 +314,14 @@ def test_a_teardown_closer_after_the_gate_still_awaits(tmp_path: Path) -> None:
     state, last = derive_codex_resume_state(ev, "step:t")
     assert state is ResumeState.AWAITING_USER
     assert last == "which file should I look at?"
+
+
+def test_module_docstring_tracks_the_pairing_and_anchor_rules() -> None:
+    # Guard against the retracted invariant creeping back: codex CAN dangle
+    # between item.started and item.completed — the runner's teardown closer is
+    # what keeps events.jsonl paired, and the awaiting rule is now anchored.
+    # Whitespace-normalized so the guard survives any future rewrapping.
+    doc = " ".join((codex_resume.__doc__ or "").split())
+    assert "codex always emits paired" not in doc
+    assert "teardown" in doc
+    assert "last awaiting_user_input gate has no tool_call after it" in doc
