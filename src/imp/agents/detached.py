@@ -14,7 +14,7 @@ import anyio
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import QuestContext
 from imp.engine.agent_run import AgentRunResult, build_agent_invocation, drive_invocation
-from imp.engine.env import engine_env, overlay_engine_env
+from imp.engine.env import engine_env
 from imp.engine.sandbox import (
     SandboxConfig,
     SandboxUnavailable,
@@ -65,11 +65,8 @@ async def run_detached_agent(
     max_tool_calls: int = 25,
     timeout_s: float = 60.0,
 ) -> DetachedResult:
-    eng = overlay_engine_env(
-        os.environ,
-        engine_env(project_root=project_root, quest_id=_DETECT_QUEST_ID,
-                   quest_title=title, control_root=project_root),
-    )
+    eng = engine_env(project_root=project_root, quest_id=_DETECT_QUEST_ID,
+                     quest_title=title, control_root=project_root)
     try:
         policy = resolve_policy(
             worktree=project_root, control_root=project_root,

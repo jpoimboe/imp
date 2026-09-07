@@ -320,8 +320,6 @@ def test_build_isolated_policy_passes_disposable_tree_true(monkeypatch, tmp_path
     )
     monkeypatch.setattr(
         "imp.engine.env.engine_env", lambda **kw: {})
-    monkeypatch.setattr(
-        "imp.engine.env.overlay_engine_env", lambda parent, overlay: {})
 
     quest = SimpleNamespace(
         id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
@@ -355,8 +353,6 @@ def test_build_isolated_policy_does_not_force_network(monkeypatch, tmp_path):
             config=SimpleNamespace(sandbox={"network": False}, pythonpath=())),
     )
     monkeypatch.setattr("imp.engine.env.engine_env", lambda **kw: {})
-    monkeypatch.setattr(
-        "imp.engine.env.overlay_engine_env", lambda parent, overlay: {})
 
     quest = SimpleNamespace(
         id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
@@ -568,3 +564,39 @@ def test_isolated_dispatch_forks_spike_from_base_changed_on_disk(
 
     assert anyio.run(dispatch_task, ctx, "prober", "spike it") == "ok"
     assert seen["head"] == release_tip
+
+
+def test_isolated_policy_bake_keeps_ambient_imp_vars_out_of_the_child_env(
+        monkeypatch, tmp_path):
+    # AC 4(b): the disposable-tree bake feeds resolve_policy the PURE engine_env, so
+    # an ambient IMP_* secret never reaches an isolated subagent. resolve_policy,
+    # engine_env and the child-env build are all REAL here — only the config load and
+    # bwrap availability are stubbed.
+    from types import SimpleNamespace
+
+    import imp.agents.subagents as subagents
+    from imp.engine.sandbox import SandboxConfig
+
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_config_from_raw",
+                        lambda raw: SandboxConfig())
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(config=SimpleNamespace(sandbox={}, pythonpath=())))
+
+    control = tmp_path / "ctl"
+    (control / ".git").mkdir(parents=True)
+    wt = tmp_path / "spike"
+    wt.mkdir()
+    quest_dir = tmp_path / "quest"
+    quest_dir.mkdir()
+    quest = SimpleNamespace(id="abc", title="T", project_root=control,
+                            control_root=control, quest_dir=quest_dir,
+                            base_branch="master")
+
+    policy = subagents._build_isolated_policy(quest, wt, test_gates=None)
+
+    child = dict(policy.child_env)
+    assert "IMP_TELEGRAM_TOKEN" not in child
+    assert child["IMP_PROJECT_ROOT"] == str(wt)

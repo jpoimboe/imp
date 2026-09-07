@@ -23,7 +23,6 @@ def _hermetic(monkeypatch, resolved: SandboxPolicy) -> None:
     monkeypatch.setattr("imp.engine.sandbox.sandbox_config_from_raw",
                         lambda raw: object())
     monkeypatch.setattr("imp.engine.env.engine_env", lambda **k: {})
-    monkeypatch.setattr("imp.engine.env.overlay_engine_env", lambda *a, **k: {})
     monkeypatch.setattr("imp.providers.effective.load_effective_config",
                         lambda **k: SimpleNamespace(
                             config=SimpleNamespace(sandbox={}, pythonpath=())))
