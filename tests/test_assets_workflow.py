@@ -1311,3 +1311,52 @@ def test_spec_finalizer_prompt_renders_clean_in_any_lap_context(tmp_path: Path) 
             workflow_dir=bundled_workflow_dir("default"))
         assert ".imp/quests/abc/artifacts/spike/" in out
         assert "{{" not in out
+
+
+_COUNT_BEARING_ASSETS = (
+    "agents/spec-reviewer.md",
+    "agents/plan-reviewer.md",
+    "agents/integration-review.md",
+    "agents/plan-writer.md",
+    "agents/spec-finalizer.md",
+    "workflow.yaml",
+)
+
+
+def test_has_minor_findings_is_gone_from_every_bundled_workflow() -> None:
+    workflows_root = bundled_workflow_dir("default").parent
+    for path in sorted(workflows_root.rglob("*")):
+        if path.suffix in (".md", ".yaml", ".yml"):
+            assert "has_minor_findings" not in path.read_text(), path
+
+
+def test_blocking_is_never_a_field_reference_in_the_edited_assets() -> None:
+    # `blocking:` / `blocking=` is the mechanical line between a field reference
+    # (schema, rule condition, complete_step example, prose citation) and the
+    # ordinary English adjective, which survives untouched.
+    wf_dir = bundled_workflow_dir("default")
+    for rel in _COUNT_BEARING_ASSETS:
+        text = (wf_dir / rel).read_text()
+        assert re.search(r"blocking\s*[:=]", text) is None, rel
+
+
+def test_plain_english_blocking_survives_the_field_removal() -> None:
+    wf_dir = bundled_workflow_dir("default")
+    assert ("a real but non-blocking improvement"
+            in (wf_dir / "partials" / "severity.md").read_text())
+    assert ("Flag either direction's gap as blocking."
+            in (wf_dir / "agents" / "spec-reviewer.md").read_text())
+    feedback = ("No blocking issues — integrate these minor improvements; "
+                "a final review follows:")
+    assert (wf_dir / "workflow.yaml").read_text().count(feedback) == 3
+
+
+def test_reviewer_descriptions_no_longer_name_the_blocking_field() -> None:
+    wf = load_workflow(bundled_workflow_dir("default"))
+    for name in ("spec-reviewer", "plan-reviewer", "integration-review"):
+        desc = wf.agents[name].description
+        assert "blocking" not in desc, name
+    assert wf.agents["spec-reviewer"].description.endswith(
+        "severity-classified findings; any Critical/Major sends it back.")
+    assert wf.agents["plan-reviewer"].description.endswith(
+        "severity-classified; any Critical/Major sends it back.")
