@@ -69,6 +69,7 @@ from imp.providers.codex_mcp import (
 from imp.providers.codex_rollout import RolloutReadings, compaction_seen, latest_readings
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
+    canonical_expires_at,
     refresh_canonical_token,
 )
 from imp.providers.observe_classify import (
@@ -330,6 +331,7 @@ class CodexSession(ObserveSession):
         if auth_mode == "chatgpt":
             # Refresh canonical auth.json before seed_auth; a dead token raises AuthTerminalError.
             _pre_spawn_token_refresh(elog, aid)
+            runner._spawn_token_expiry = canonical_expires_at()
         seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                   codex_home=codex_home, env=os.environ)
 
@@ -715,6 +717,8 @@ class CodexAgentRunner:
         self._impty_driver: Any = None
         self._stderr_token: Any = None
         self._auth_mode: AuthMode | None = None
+        # Canonical token expiry this spawn seeded from; handed to the probe as spawn_expires_at.
+        self._spawn_token_expiry: int | None = None
         self._canonical_auth: Path | None = None
         self._proc_state: dict[str, Any] = {}
 
