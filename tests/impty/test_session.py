@@ -308,7 +308,9 @@ def test_tmux_starts_and_is_drivable(tmp_path: Path, caplog) -> None:
     socket = str(tmp_path / "s")
     # TMUX must go: TerminalSession copies os.environ wholesale, so running the
     # suite from inside tmux would make `new-session` refuse to nest.
-    env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+    # TERM goes too: an inherited unusable value (e.g. "dumb") makes new-session
+    # fail for an unrelated reason; TerminalSession's xterm-256color default applies.
+    env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TERM")}
     argv = ["tmux", "-S", socket, "-f", "/dev/null", "new-session", "/bin/sh"]
     try:
         with (
