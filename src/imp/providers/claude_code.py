@@ -174,8 +174,7 @@ def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object
     }
 
 
-_DEAD_GRANT_MESSAGE = (
-    "claude: OAuth refresh token is dead; re-authentication required")
+_DEAD_GRANT_MESSAGE = "claude: OAuth refresh token is dead; run `claude login`"
 
 
 def _journal_token_refresh(elog: Any, aid: str, outcome: RefreshOutcome) -> None:
