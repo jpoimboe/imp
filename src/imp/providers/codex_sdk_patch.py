@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""Patch the codex SDK's subprocess spawn: raise its stdout read limit and
-isolate it into its own session.
+"""imp's compensations for the pinned `openai-codex-sdk` (0.1.11).
 
+The pin is head of an unmaintained package, so every local fix for its divergence
+from the codex CLI's real behavior lives here and is installed together by
+`install_codex_sdk_patches()`.
+
+Subprocess spawn — stdout read limit and session isolation.
 `openai_codex_sdk/exec.py` reads the `codex exec` subprocess via
 `proc.stdout.readline()` on a stream created by `asyncio.create_subprocess_exec`
 WITHOUT a `limit=` (so it uses asyncio's 64 KiB default). A single codex JSONL
@@ -72,10 +76,11 @@ class _SubprocessPatchingAsyncio:
         return proc
 
 
-def install_codex_subprocess_patches() -> None:
-    """Idempotently patch the codex SDK's exec module so its
-    `create_subprocess_exec` uses CODEX_STREAM_LIMIT and start_new_session=True.
-    Call before driving a real codex thread. No-op if already installed."""
+def install_codex_sdk_patches() -> None:
+    """Idempotently install imp's patches against the pinned codex SDK: its exec
+    module's `create_subprocess_exec` gets CODEX_STREAM_LIMIT and
+    start_new_session=True. Call before driving a real codex thread. No-op if
+    already installed."""
     import openai_codex_sdk.exec as codex_exec
 
     if isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio):  # type: ignore[attr-defined]

@@ -842,8 +842,8 @@ class CodexAgentRunner:
             return self._client_factory(options=None)
         from openai_codex_sdk import Codex
 
-        from imp.providers.codex_subprocess_patch import install_codex_subprocess_patches
-        install_codex_subprocess_patches()
+        from imp.providers.codex_sdk_patch import install_codex_sdk_patches
+        install_codex_sdk_patches()
 
         # `CodexOptions` is not re-exported at the package top level in the
         # pinned SDK (0.1.11) — only `openai_codex_sdk.types` (and .codex/.thread)
@@ -987,7 +987,7 @@ class CodexAgentRunner:
             # imp does NOT group-reap the `codex exec` child on pause. The codex
             # SDK keeps that child's pid local to CodexExec.run() and never exposes
             # it, so there is no handle to killpg. Session isolation
-            # (codex_subprocess_patch) still makes the child its own session leader
+            # (codex_sdk_patch) still makes the child its own session leader
             # so a terminal Ctrl-C reaches imp alone; teardown then relies on the
             # SDK's cooperative AbortSignal -> single proc.kill(), which can orphan
             # the child's own grandchildren. Reaching deeper into SDK internals to

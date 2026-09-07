@@ -1,4 +1,4 @@
-"""Tests for the codex SDK subprocess spawn patch (read-limit + session isolation).
+"""Tests for imp's patches against the pinned codex SDK (read-limit + session isolation).
 
 Covers:
 - Behavioral regression: a line > 64 KiB raises ValueError at asyncio's default limit.
@@ -7,7 +7,7 @@ Covers:
   rather than waiting on it.
 - _SubprocessPatchingAsyncio proxy: injects default limit AND start_new_session,
   respects explicit values for each, forwards other attrs.
-- install_codex_subprocess_patches: idempotent, replaces the SDK module ref, forwards real attrs.
+- install_codex_sdk_patches: idempotent, replaces the SDK module ref, forwards real attrs.
 - Real grouping: a child spawned through the proxy lands in its own process group.
 """
 from __future__ import annotations
@@ -21,10 +21,10 @@ from typing import Any
 
 import pytest
 
-from imp.providers.codex_subprocess_patch import (
+from imp.providers.codex_sdk_patch import (
     CODEX_STREAM_LIMIT,
     _SubprocessPatchingAsyncio,
-    install_codex_subprocess_patches,
+    install_codex_sdk_patches,
 )
 
 
@@ -151,13 +151,13 @@ async def test_proxy_injects_limit_and_session_isolation() -> None:
 # ---------------------------------------------------------------------------
 
 def test_install_is_idempotent_and_forwards() -> None:
-    """install_codex_subprocess_patches() is idempotent; the proxy forwards real asyncio attrs."""
+    """install_codex_sdk_patches() is idempotent; the proxy forwards real asyncio attrs."""
     from openai_codex_sdk import exec as codex_exec  # type: ignore[import-untyped]
 
     original = codex_exec.asyncio
     try:
-        install_codex_subprocess_patches()
-        install_codex_subprocess_patches()  # second call must be a no-op
+        install_codex_sdk_patches()
+        install_codex_sdk_patches()  # second call must be a no-op
         assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
         assert codex_exec.asyncio.FIRST_COMPLETED is asyncio.FIRST_COMPLETED
         assert codex_exec.asyncio.create_subprocess_exec is not None

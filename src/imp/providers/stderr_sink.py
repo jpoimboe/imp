@@ -154,7 +154,7 @@ def build_stderr_sink(
 
 
 # Active sink for the codex streaming tee. The codex SDK subprocess spawn is
-# monkeypatched globally (codex_subprocess_patch.py), so the patch can't be
+# monkeypatched globally (codex_sdk_patch.py), so the patch can't be
 # handed a per-run sink directly — it reads the current one from here. claude_code
 # does NOT use this; it wires the sink straight into the SDK stderr callback.
 current_stderr_sink: contextvars.ContextVar[StderrSink | None] = (
