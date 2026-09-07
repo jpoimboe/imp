@@ -59,7 +59,7 @@ before you start:
   git -C "$IMP_PROJECT_ROOT" diff <second-newest> <newest> -- "$P"
   ```
 
-  An earlier revision of the same file is not a prior plan file; reading it is expected.
+An earlier revision of the same file is not a prior plan file; reading it is expected.
 
 This scopes **verification effort, not judgement**. Read the whole plan and form your own
 view of whether it is correct and complete, every lap. What you may skip is re-opening a
