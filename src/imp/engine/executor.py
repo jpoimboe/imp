@@ -89,6 +89,7 @@ from imp.engine.state import (
     CurrentStep,
     EventLog,
     JsonlEventLog,
+    LaneRestore,
     State,
     classify_pause_halt,
 )
@@ -1360,13 +1361,42 @@ def _release_lane(step: Step, quest: Quest, state: State, log: EventLog) -> None
     _release_held_lane(step.release, quest, state, log, step_name=step.name)
 
 
-def _evict_if_holding(quest: Quest, state: State, log: EventLog) -> bool:
+def _lane_fingerprint(quest: Quest) -> tuple[str, str] | None:
+    """(base branch tip, quest worktree HEAD), or None when either is unresolvable."""
+    from imp.engine import worktree
+    try:
+        base_head = worktree.head_of(quest.control_root, quest.base_branch)
+    except RuntimeError:
+        return None
+    quest_head = _worktree_head(quest)
+    if not quest_head:
+        return None
+    return base_head, quest_head
+
+
+def _capture_lane_restore(quest: Quest, state: State) -> LaneRestore | None:
+    """All-or-nothing restore point for the cursor about to be rewound."""
+    if state.step is None or state.step == state.held_acquire_step:
+        return None
+    fingerprint = _lane_fingerprint(quest)
+    if fingerprint is None:
+        return None
+    return LaneRestore(
+        step=state.step, base_head=fingerprint[0], quest_head=fingerprint[1])
+
+
+def _evict_if_holding(quest: Quest, state: State, log: EventLog, *,
+                      record_restore: bool = True) -> bool:
     """Release a held lane on pause/crash and rewind the resume cursor to the acquiring step."""
     if state.held_lane is None:
         return False
     from imp.engine import merge_queue
     lane = state.held_lane
     acquire_step = state.held_acquire_step
+    # Capture before the pop: a quest woken by it could otherwise advance the
+    # base into the record. record_restore=False also clears a crash leftover.
+    state.lane_restore = (
+        _capture_lane_restore(quest, state) if record_restore else None)
     merge_queue.pop_and_wake(quest.control_root, quest.id, lane)
     state.held_lane = None
     state.held_acquire_step = None

@@ -4,11 +4,17 @@ import anyio
 
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
-from imp.engine.executor import RunResult, _evict_if_holding, run_quest
+from imp.engine import worktree
+from imp.engine.executor import (
+    RunResult,
+    _evict_if_holding,
+    _worktree_head,
+    run_quest,
+)
 from imp.engine.quest import Quest
-from imp.engine.state import JsonlEventLog, State
+from imp.engine.state import JsonlEventLog, LaneRestore, State
 from imp.paths import project_state_dir
-from tests.conftest import _git, _seed_control
+from tests.conftest import _branch_with_commit, _git, _seed_control
 
 
 def test_evict_releases_lane_and_rewinds(tmp_path: Path, monkeypatch) -> None:
@@ -127,3 +133,108 @@ def test_crash_resume_with_held_mark_evicts_at_entry(tmp_path: Path, provider_re
     # queue is empty rather than leaking the re-acquired entry.
     assert State.load(ch.state_dir).status == "done"
     assert mq.read(tmp_path) == []
+
+
+def _hold(state: State, *, step: str) -> None:
+    state.held_lane = "main"
+    state.held_acquire_step = "lane"
+    state.step = step
+
+
+def test_evict_records_restore_point_with_both_heads(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    mq.enqueue_if_absent(tmp_path, "bbb", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    state = State.load(a.state_dir)
+    _hold(state, step="summarizer")
+    base_head = worktree.head_of(tmp_path, "main")
+    quest_head = _worktree_head(a)
+    assert base_head and quest_head
+
+    assert _evict_if_holding(a, state, JsonlEventLog(a.events_path)) is True
+
+    assert state.lane_restore == LaneRestore(
+        step="summarizer", base_head=base_head, quest_head=quest_head)
+    state.save(a.state_dir)
+    assert State.load(a.state_dir).lane_restore == state.lane_restore
+
+
+def test_evict_at_acquire_step_records_no_restore_point(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    state = State.load(a.state_dir)
+    _hold(state, step="lane")            # cursor already AT the acquiring step
+
+    assert _evict_if_holding(a, state, JsonlEventLog(a.events_path)) is True
+
+    assert state.lane_restore is None
+
+
+def test_evict_records_nothing_when_base_ref_is_unresolvable(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _branch_with_commit(tmp_path, "base")     # control root stays on main
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="base")
+    mq.enqueue_if_absent(tmp_path, "aaa", "base")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    state = State.load(a.state_dir)
+    state.held_lane = "base"
+    state.held_acquire_step = "lane"
+    state.step = "summarizer"
+    _git(tmp_path, "branch", "-D", "base")    # the base ref no longer resolves
+
+    # No RuntimeError escapes, and the lane is still popped and the cursor rewound.
+    assert _evict_if_holding(a, state, JsonlEventLog(a.events_path)) is True
+
+    assert state.lane_restore is None
+    assert state.step == "lane"
+    assert all(e["quest_id"] != "aaa" for e in mq.read(tmp_path))
+
+
+def test_evict_records_nothing_when_worktree_head_is_empty(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "imp.engine.executor._worktree_head", lambda _quest: "")   # unborn HEAD
+    state = State.load(a.state_dir)
+    _hold(state, step="summarizer")
+
+    assert _evict_if_holding(a, state, JsonlEventLog(a.events_path)) is True
+
+    assert state.lane_restore is None
+
+
+def test_evict_records_base_head_from_before_the_pop(
+        tmp_path: Path, monkeypatch) -> None:
+    """The pop wakes the next quest; a base advanced by that wake must never be
+    recorded as the pre-pause base."""
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    pre_pop = worktree.head_of(tmp_path, "main")
+
+    def _advancing_pop(control_root, quest_id, lane):
+        (tmp_path / "woken.txt").write_text("x\n")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-qm", "the woken quest merged")
+
+    monkeypatch.setattr(mq, "pop_and_wake", _advancing_pop)
+    state = State.load(a.state_dir)
+    _hold(state, step="summarizer")
+
+    assert _evict_if_holding(a, state, JsonlEventLog(a.events_path)) is True
+
+    post_pop = worktree.head_of(tmp_path, "main")
+    assert post_pop != pre_pop                     # the stub really moved main
+    assert state.lane_restore is not None
+    assert state.lane_restore.base_head == pre_pop
