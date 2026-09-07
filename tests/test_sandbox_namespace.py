@@ -8,6 +8,7 @@ and outside the namespace.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import shutil
 import signal
@@ -20,8 +21,12 @@ from pathlib import Path
 import pytest
 
 from imp.engine.sandbox import (
+    HomeLayer,
     SandboxNamespace,
+    SandboxOpenFailed,
     SandboxPolicy,
+    make_home_layer,
+    overlay_mode,
     sandbox_available,
 )
 
@@ -44,6 +49,32 @@ _ALIVE = "while :; do sleep 5; done"
 
 def _make_root() -> Path:
     return Path(tempfile.mkdtemp(prefix="imp-test-ns-"))
+
+
+_OVERLAY_BASE = Path("/var/tmp")
+
+
+def _probe_overlay() -> bool | None:
+    """overlay_mode's tri-state at _OVERLAY_BASE: None → no unprivileged overlay
+    here; True/False → the mount shape this host accepts."""
+    if not sandbox_available() or not _OVERLAY_BASE.is_dir():
+        return None
+    try:
+        probe = Path(tempfile.mkdtemp(prefix="imp-nsovl-probe-", dir=_OVERLAY_BASE))
+        home = Path(tempfile.mkdtemp(prefix="imp-nsovl-home-", dir=_OVERLAY_BASE))
+    except OSError:
+        return None
+    try:
+        return overlay_mode(probe, home)
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+        shutil.rmtree(home, ignore_errors=True)
+
+
+requires_overlay = pytest.mark.skipif(
+    _probe_overlay() is None,
+    reason="sandbox unavailable, or the unprivileged overlayfs probe at /var/tmp "
+           "failed (read-only base or stacked overlay under a nested sandbox)")
 
 
 def _policy_for(root: Path, *, network: bool = True, home: Path | None = None,
@@ -207,4 +238,148 @@ def test_a_join_into_a_dead_keeper_fails_closed():
         finally:
             ns.close()   # idempotent, and must not signal the now-recyclable pid
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_an_isolated_keeper_does_not_leave_the_join_in_the_host_network():
+    # Fails OPEN if the --net pin is dropped: the command silently keeps the HOST
+    # network namespace, so this is asserted directly rather than inferred.
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root, network=False),
+                                   engine_env={}, environ=os.environ)
+        try:
+            seen = _join(ns, "readlink /proc/self/ns/net", cwd=str(root))
+            assert seen.stdout.strip() != os.readlink("/proc/self/ns/net")
+            links = _join(ns, "grep -c ':' /proc/net/dev", cwd=str(root))
+            assert links.stdout.strip() == "1"       # loopback only
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_networked_keeper_leaves_the_join_in_the_callers_network():
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root, network=True),
+                                   engine_env={}, environ=os.environ)
+        try:
+            seen = _join(ns, "readlink /proc/self/ns/net", cwd=str(root))
+            assert seen.stdout.strip() == os.readlink("/proc/self/ns/net")
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_join_resolves_its_cwd_in_the_keepers_mount_namespace():
+    # The --wd trap: --wd resolves the path in the CALLER's mount namespace, which
+    # gave a joined shell aimed at a --tmpfs mask a cwd showing the host's real
+    # contents. The inner `cd` must resolve inside the namespace, showing the mask.
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "creds").write_text("SUPER_SECRET_KEY\n")
+    try:
+        ns = SandboxNamespace.open(
+            policy=_policy_for(root, secret_dirs=(str(masked),)),
+            engine_env={}, environ=os.environ)
+        try:
+            listing = _join(ns, "pwd; ls -A .", cwd=str(masked))
+            lines = listing.stdout.splitlines()
+            assert lines[0] == str(masked)   # the inner cd landed in the masked dir
+            assert lines[1:] == []           # the empty tmpfs, not the host's `creds`
+            # and the file is unreachable by name, so nothing leaks by another route.
+            # `cat` is NOT redirected: its own diagnostic names the file, which would
+            # put the needle in stdout and defeat the assertion.
+            leaked = _join(ns, "cat creds", cwd=str(masked))
+            assert leaked.returncode != 0
+            assert "SUPER_SECRET_KEY" not in leaked.stdout
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(300)   # 40 real bwrap spawns; slow under a saturated -n auto
+def test_the_readiness_handshake_holds_over_forty_open_join_cycles():
+    # Joining on the --info-fd child pid alone hit `nsenter: failed to execute sh:
+    # No such file or directory` in 29 of 40 cycles; gating on the sentinel is
+    # what makes this zero, so an empty stderr is the assertion that matters.
+    root = _make_root()
+    policy = _policy_for(root)
+    try:
+        for cycle in range(40):
+            ns = SandboxNamespace.open(policy=policy, engine_env={},
+                                       environ=os.environ)
+            try:
+                done = _join(ns, "echo ok", cwd=str(root))
+                assert (done.returncode, done.stdout.strip(), done.stderr) == (
+                    0, "ok", ""), f"cycle {cycle}"
+            finally:
+                ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_an_unmountable_overlay_fails_the_open_after_the_whole_budget():
+    # The overlay mount runs before the exec and exits nonzero, so the sentinel
+    # never arrives — its absence is the sole failure signal, and no command runs.
+    root = _make_root()
+    policy = dataclasses.replace(
+        _policy_for(root),
+        home_layer=HomeLayer(home=str(root / "home"),
+                             merged=str(root / "absent-merged"),
+                             upper=str(root / "absent-upper"),
+                             work=str(root / "absent-work")))
+    seen: list[tuple[int, str]] = []
+    try:
+        with pytest.raises(SandboxOpenFailed) as exc:
+            SandboxNamespace.open(policy=policy, engine_env={}, environ=os.environ,
+                                  on_retry=lambda n, detail: seen.append((n, detail)))
+        assert [n for n, _ in seen] == [2, 3, 4, 5]     # one per failed attempt
+        assert exc.value.detail != ""                   # what the sandbox said
+        assert all(detail for _, detail in seen)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@requires_overlay
+def test_a_keeper_opened_from_an_overlay_policy_owns_the_pid_namespace():
+    # The production shape: build_sandbox_spawn wraps the whole bwrap argv in
+    # `unshare --user --map-root-user --mount sh -c 'mount -t overlay …; exec bwrap …'`.
+    # Opening at all proves --info-fd survived both extra execs as an inherited fd;
+    # the pid-namespace assertion proves child-pid named the INNER bwrap's child.
+    # Pinning the outer `unshare` instead also "works" — it just has no pid namespace,
+    # so every joined command would quietly get the HOST process table. Fails open.
+    root = Path(tempfile.mkdtemp(prefix="imp-test-nsovl-", dir=_OVERLAY_BASE))
+    home = root / "home"
+    home.mkdir()
+    (home / "lower.txt").write_text("from-the-real-home\n")
+    worktree = root / "wt"          # a SIBLING of home: no later bind may cover it
+    worktree.mkdir()
+    layer, overlay_root, cleanup = make_home_layer(
+        str(home), root=root / "ovl", userxattr=overlay_mode(root / "probe", home))
+    policy = dataclasses.replace(
+        _policy_for(worktree, home=home), home=str(home), home_layer=layer,
+        overlay_root=overlay_root)
+    try:
+        ns = SandboxNamespace.open(policy=policy, engine_env={}, environ=os.environ)
+        try:
+            names = _join(ns, "ps -eo comm=", cwd=str(worktree)).stdout.split()
+            assert names[0] == "bwrap"   # the keeper is pid 1 of the joined namespace
+            assert len(names) <= 5       # the keeper and this command — not the host
+            # one layer per NAMESPACE, so a $HOME write survives into the next join
+            wrote = _join(ns, "echo written-in-A > $HOME/new.txt; cat $HOME/lower.txt",
+                          cwd=str(worktree))
+            assert wrote.stdout == "from-the-real-home\n"    # merged view, not an empty upper
+            again = _join(ns, "cat $HOME/new.txt", cwd=str(worktree))
+            assert again.stdout == "written-in-A\n"
+            # and it landed in the overlay, leaving the real home untouched
+            assert not (home / "new.txt").exists()
+        finally:
+            ns.close()
+    finally:
+        cleanup()
         shutil.rmtree(root, ignore_errors=True)
