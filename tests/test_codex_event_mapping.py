@@ -7,10 +7,11 @@ import types as _types
 from pathlib import Path
 from typing import Any
 
+from imp.cli import narrative as nv
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_mcp import RunState
-from imp.providers.codex_runner import process_event
+from imp.providers.codex_runner import close_open_task_folds, process_event
 from tests.codex_fakes import (
     FakeAgentMessageItem,
     FakeItemEvent,
@@ -273,3 +274,76 @@ def test_task_item_started_handles_string_arguments() -> None:
         subagent_defs={"explorer": _labeled_def("explorer", "exploring codebase")})
     call = next(e for e in elog.read() if e["type"] == "tool_call")
     assert call["payload"]["label"] == "exploring codebase"
+
+
+def test_task_item_started_records_the_open_fold() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    st: dict = {}
+    args = {"subagent_name": "explorer", "task_description": "go look"}
+    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
+    # Keyed to the agent the tool_call was journaled under, so the closer needs
+    # no extra plumbing to know where to write the result.
+    assert st["open_task_ids"] == {"item_1": "step:p/s"}
+
+
+def test_task_item_completed_pops_the_open_fold() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    st: dict = {}
+    args = {"subagent_name": "explorer", "task_description": "go look"}
+    kw = _pe_kwargs(elog, run_state, st)
+    process_event(_started("item_1", args), **kw)
+    process_event(_completed("item_1", args, result='{"r":"A"}'), **kw)
+    assert st["open_task_ids"] == {}
+    # A normally-closed dispatch leaves nothing for the closer to write.
+    close_open_task_folds(elog, st)
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["content"] == '{"r":"A"}'
+    assert "kind" not in results[0]["payload"]
+
+
+def test_close_open_task_folds_pairs_the_dangling_call_and_drains() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    st: dict = {}
+    args = {"subagent_name": "explorer", "task_description": "go look"}
+    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
+
+    close_open_task_folds(elog, st)
+
+    records = list(elog.read())
+    call_ids = {e["payload"]["id"] for e in records if e["type"] == "tool_call"}
+    result_ids = {e["payload"]["id"] for e in records if e["type"] == "tool_result"}
+    assert call_ids - result_ids == set()
+    closer = next(e for e in records if e["type"] == "tool_result")
+    assert closer["agent_id"] == "step:p/s"
+    assert closer["payload"]["error"] is True
+    assert closer["payload"]["kind"] == "interrupted"
+    assert closer["payload"]["id_ns"] == "block"
+    assert closer["payload"]["content"].startswith("[interrupted]")
+    # Idempotent: the dict is drained, so a second call writes nothing.
+    close_open_task_folds(elog, st)
+    assert len([e for e in elog.read() if e["type"] == "tool_result"]) == 1
+
+
+def test_closed_fold_renders_interrupted_without_a_resume_sweep() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    st: dict = {}
+    args = {"subagent_name": "explorer", "task_description": "go look"}
+    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
+    close_open_task_folds(elog, st)
+
+    b = nv.NarrativeBuilder()
+    b.add({"id": "st", "agent_id": None, "type": "step_started",
+           "payload": {"step": "s", "kind": "agent", "phase": "p",
+                       "model": "m", "provider": "codex"}})
+    for rec in elog.read():
+        b.add(rec)
+
+    fold = next(c for c in b._step_stack[-1].children
+                if isinstance(c, nv.SubagentFold))
+    assert fold.running is False
+    assert fold.terminal_state == "interrupted"

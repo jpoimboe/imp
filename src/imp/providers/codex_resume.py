@@ -5,11 +5,14 @@
 
 codex resumes via its opaque native rollout (codex_rollout.py), so imp holds no
 parsed message list and cannot run agents.classify.classify_resume. But imp owns
-events.jsonl, which carries the same signal: a turn ended awaiting the user iff
-the agent emitted an agent_message but NO complete_step tool_call (presence-based,
-position-independent — see the Unit F/G coupling note). Mirrors classify_resume's
-AWAITING_USER/MISSING split. DANGLING_TOOL_USE is omitted: codex always emits paired
-tool_call/tool_result events, so a dangling tool_call cannot appear in events.jsonl.
+events.jsonl, which carries the same signal: a turn ended awaiting the user iff the
+agent emitted an agent_message but NO complete_step tool_call — that split is
+presence-based, position-independent (see the Unit F/G coupling note) — AND the last
+awaiting_user_input gate has no tool_call after it (a tool_call after the gate means
+the agent took the reply and went back to work). Mirrors classify_resume's
+AWAITING_USER/MISSING split. DANGLING_TOOL_USE is omitted: a sub_agent tool_call opens
+at item.started and closes at item.completed, so an interrupt between them would
+dangle — codex_runner closes those folds at teardown, keeping events.jsonl paired.
 """
 from __future__ import annotations
 
@@ -34,6 +37,15 @@ def _read_agent_records(events_path: Path, agent_id: str) -> list[dict[str, Any]
         if rec.get("agent_id") == agent_id:
             records.append(rec)
     return records
+
+
+def _last_gate_index(records: list[dict[str, Any]]) -> int | None:
+    """Index of the LAST awaiting_user_input record, or None if there is none."""
+    last = None
+    for i, rec in enumerate(records):
+        if rec.get("type") == "awaiting_user_input":
+            last = i
+    return last
 
 
 def derive_codex_resume_state(
@@ -71,8 +83,12 @@ def derive_codex_resume_state(
             last_prose_msg = rec
     if has_complete_step or last_prose_msg is None:
         return ResumeState.SEND_TO_LLM, ""
-    has_awaiting = any(
-        rec.get("type") == "awaiting_user_input" for rec in records)
+    # Anchored on the LAST gate, unlike the presence-based checks above: a
+    # tool_call after it means the agent took the reply and went back to work,
+    # so the turn was interrupted mid-work rather than yielding.
+    last_gate = _last_gate_index(records)
+    has_awaiting = last_gate is not None and not any(
+        rec.get("type") == "tool_call" for rec in records[last_gate + 1:])
     last_text = _text_of(last_prose_msg)
     if has_awaiting:
         return ResumeState.AWAITING_USER, last_text
@@ -108,10 +124,7 @@ def pending_human_reply(events_path: Path, agent_id: str) -> str | None:
     if not events_path.exists():
         return None
     records = _read_agent_records(events_path, agent_id)
-    last_gate = None
-    for i, rec in enumerate(records):
-        if rec.get("type") == "awaiting_user_input":
-            last_gate = i
+    last_gate = _last_gate_index(records)
     if last_gate is None:
         return None
     candidate: str | None = None

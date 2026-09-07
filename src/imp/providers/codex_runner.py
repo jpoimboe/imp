@@ -42,7 +42,10 @@ from imp.agents.tools.context import (
     terminate_running_processes,
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.transcript import deliver_continuation_reply
+from imp.agents.transcript import (
+    _synthetic_tool_result_content,
+    deliver_continuation_reply,
+)
 from imp.engine.agent_run import _resolve_wait_reply, continuation_nudge
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.env import quest_scratch_root
@@ -764,6 +767,15 @@ class CodexAgentRunner:
             # is wrapped so a rollout-IO failure never skips the auth-shredding
             # teardown_codex_home.
             try:
+                if self._ctx is not None:
+                    # Stream is definitively closed here, so no race with a late
+                    # item.completed; covers every abnormal exit, not just cancel.
+                    try:
+                        close_open_task_folds(self._ctx.event_log, self._proc_state)
+                    except Exception as exc:  # fold-close must not skip teardown
+                        _logger.warning(
+                            "codex: closing open sub_agent folds failed (events.jsonl"
+                            " may carry a dangling tool_call): %s", exc)
                 if self._stderr_token is not None:
                     current_stderr_sink.reset(self._stderr_token)
                 if self._stderr_sink is not None:
@@ -1061,6 +1073,18 @@ def _flush_codex_prose(
     state["turn_had_llm"] = True
 
 
+def close_open_task_folds(elog: Any, state: dict[str, Any]) -> None:
+    """Emit closing tool_result for any sub_agent fold whose item.completed never arrived."""
+    for sdk_id, agent_id in state.pop("open_task_ids", {}).items():
+        elog.append_tool_result(
+            agent_id=agent_id,
+            block=ToolResultBlock(
+                tool_use_id=sdk_id,
+                content=_synthetic_tool_result_content("sub_agent"),
+                is_error=True),
+            id_ns="block", kind="interrupted")
+
+
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str, run_state: Any = None,
@@ -1117,6 +1141,7 @@ def process_event(
                 agent_id=agent_id,
                 block=ToolUseBlock(id=sdk_id, name="sub_agent", input=args),
                 label=label, id_ns="block")
+            state.setdefault("open_task_ids", {})[sdk_id] = agent_id
         return
 
     # `item.completed` — dispatch on the item's own type.
@@ -1186,6 +1211,7 @@ def process_event(
                 # with the matching result. A task item with no prior item.started
                 # (the no-pair path) still emits a lone keyed result.
                 task_id_ns = "block"
+                state.get("open_task_ids", {}).pop(sdk_id, None)
             else:
                 # Non-task tool: emit the tool_call/result pair keyed on the SDK id.
                 task_id_ns = None
