@@ -664,9 +664,12 @@ def test_plan_reviewer_later_lap_renders_without_a_head_key(tmp_path) -> None:
 
 
 _VERIFIED_TAIL = (
-    "End `findings` with `Verified at <sha>:` — the sha from `git -C \"$IMP_PROJECT_ROOT\" rev-parse HEAD`\n"
-    "— and the tree facts you checked this lap: paths, signatures, what existing code does, each with\n"
-    "its `file:line`. The next lap reads this instead of re-opening those files; a check you don't\n"
+    "End `findings` with `Verified at <sha>:` — the sha from "
+    '`git -C "$IMP_PROJECT_ROOT" rev-parse HEAD`\n'
+    "— and the tree facts you checked this lap: paths, signatures, "
+    "what existing code does, each with\n"
+    "its `file:line`. The next lap reads this instead of re-opening those files; "
+    "a check you don't\n"
     "record is a check it pays for again."
 )
 
