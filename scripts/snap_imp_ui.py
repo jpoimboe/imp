@@ -86,7 +86,9 @@ def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None,
     # Inject imp's own theme so the PNG matches what imp paints on that theme.
     th = _imp_theme(theme)
     screen = _feed_screen(ansi, cols=cols, rows=height, faint=th.pop("faint"))
-    render_screen(screen, str(out), **th)
+    # A mockup is for a human to open, not for a vision budget: keep the full 3x
+    # density that render_screen would otherwise auto-fit away on a tall capture.
+    render_screen(screen, str(out), scale=3, **th)
 
 
 def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
@@ -101,7 +103,7 @@ def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
             sess.wait_idle(idle=0.5, hard=8)
         th = _imp_theme("dark")          # the prompt scene runs the dark theme
         th.pop("faint")                  # live capture, no SGR-2 rewrite needed
-        render_screen(sess._screen, str(out), **th)
+        render_screen(sess._screen, str(out), scale=3, **th)
     finally:
         sess.close()
 
