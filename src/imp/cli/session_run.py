@@ -15,6 +15,7 @@ from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
+from imp.cli.terminal_watchdog import WatchedStream
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.attach import (
@@ -69,6 +70,7 @@ async def run_session_client(
     leave_mode: str,
     leave_state: dict[str, str] | None = None,
     title: TerminalTitle | None = None,
+    stream: WatchedStream | None = None,
     non_interactive: bool = False,
     autonomous: bool = False,
     model: str | None = None,
@@ -77,7 +79,8 @@ async def run_session_client(
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state = {} if leave_state is None else leave_state
     title = title if title is not None else TerminalTitle(
-        sys.stdout, quest.id, quest.title, project=quest.control_root.name)
+        stream if stream is not None else sys.stdout,
+        quest.id, quest.title, project=quest.control_root.name)
     attach = build_session_attach(
         quest, resume=resume,
         non_interactive=non_interactive, autonomous=autonomous, lease=True,
@@ -101,6 +104,7 @@ async def run_session_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
+                stream=stream,
                 local_echo=driver.seed_pending_reply,
                 on_title=lambda new: setattr(quest, "title", new))
         except TimeoutError:

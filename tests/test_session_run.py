@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 from pathlib import Path
@@ -17,6 +18,7 @@ from imp.cli.session_run import (
     run_session_client,
 )
 from imp.cli.signals import InterruptCoordinator
+from imp.cli.terminal_watchdog import WatchedStream
 from imp.engine import archive
 from imp.engine.quest import Quest
 from imp.engine.state import State
@@ -1382,3 +1384,40 @@ def test_stray_live_line_still_renders_merged_from_the_archived_record(
     assert lines[0] == "merged into main"
     assert "done · commits on" not in out
     assert lines[1] == "2026-07-05-keku · > resolve me from archive"
+
+
+@pytest.mark.anyio
+async def test_watched_stream_reaches_the_fallback_title_and_the_terminal_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.session_run as session_run
+
+    quest = _make_quest(tmp_path, "watched-feat")
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+    watched = WatchedStream(io.StringIO())
+    seen: dict[str, Any] = {}
+
+    class _RecordingTitle:
+        def __init__(self, stream: Any, *_a: Any, **_kw: Any) -> None:
+            seen["title_stream"] = stream
+
+        def reset(self) -> None: ...
+
+    async def _stub(**kwargs: Any) -> StreamEnding:
+        seen["client_stream"] = kwargs["stream"]
+        seen["title"] = kwargs["title"]
+        return StreamEnding.CLEAN
+
+    monkeypatch.setattr(session_run, "TerminalTitle", _RecordingTitle)
+    monkeypatch.setattr(session_run, "run_terminal_client", _stub)
+
+    coord = InterruptCoordinator()
+    await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=coord,
+        solicit=lambda _p: _never(), leave_mode="new", stream=watched)
+
+    # The fallback TerminalTitle and run_terminal_client hold the SAME wrapper.
+    assert seen["title_stream"] is watched
+    assert seen["client_stream"] is watched
+    assert isinstance(seen["title"], _RecordingTitle)
