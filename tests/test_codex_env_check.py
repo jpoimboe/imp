@@ -1,7 +1,3 @@
-import importlib.util
-import sys
-from types import ModuleType
-
 from imp.providers.codex import CodexProvider, _env_check, _factory
 
 
@@ -10,19 +6,11 @@ def test_env_check_false_when_codex_binary_missing(monkeypatch) -> None:
     assert _env_check() is False
 
 
-def test_env_check_false_when_sdk_not_importable(monkeypatch) -> None:
+def test_env_check_true_with_only_the_binary_present(monkeypatch) -> None:
+    """Binary-only, like claude_code's: no importable-package half survives, so a
+    run must not be gated on any python package being installed."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    monkeypatch.setattr(
-        "importlib.util.find_spec",
-        lambda name: None if name == "openai_codex_sdk" else importlib.util.find_spec(name),
-    )
-    assert _env_check() is False
-
-
-def test_env_check_true_when_both_present(monkeypatch) -> None:
-    monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    stub = ModuleType("openai_codex_sdk")
-    monkeypatch.setitem(sys.modules, "openai_codex_sdk", stub)
+    monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)
     assert _env_check() is True
 
 
