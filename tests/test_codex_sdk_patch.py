@@ -10,6 +10,8 @@ Covers:
 - install_codex_sdk_patches: idempotent, replaces the SDK module ref, forwards real attrs.
 - Widened item models: the three real codex wire payloads parse; each model is
   registered exactly once.
+- Parse-failure policy: fatal for the item types imp consumes, degraded-and-skipped
+  for the rest; bad JSON and normal items stay strict.
 - Real grouping: a child spawned through the proxy lands in its own process group.
 """
 from __future__ import annotations
@@ -24,13 +26,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from openai_codex_sdk.types import UnknownThreadItem
 
 from imp.providers.codex_sdk_patch import (
     CODEX_STREAM_LIMIT,
+    CodexEventParseError,
     _CommandExecutionItem,
     _FileChangeItem,
     _McpToolCallItem,
     _SubprocessPatchingAsyncio,
+    _UnparsedThreadItem,
     install_codex_sdk_patches,
 )
 
@@ -312,19 +317,21 @@ _WIRE_MCP_STRING_CONTENT = (
 @pytest.fixture
 def sdk_patch_sandbox() -> Iterator[dict[str, Any]]:
     """Install the patches inside one test only: snapshot the SDK's item-model
-    registry and its exec-module asyncio ref and restore both afterwards. Yields
-    the pre-install registry snapshot."""
+    registry, its parse_thread_item ref and its exec-module asyncio ref, and
+    restore all three afterwards. Yields the pre-install registry snapshot."""
     from openai_codex_sdk import exec as codex_exec
     from openai_codex_sdk import parsing
 
     saved_models = dict(parsing._ITEM_MODELS)
     saved_asyncio = codex_exec.asyncio
+    saved_parse_item = parsing.parse_thread_item
     try:
         yield saved_models
     finally:
         parsing._ITEM_MODELS.clear()
         parsing._ITEM_MODELS.update(saved_models)
         codex_exec.asyncio = saved_asyncio
+        parsing.parse_thread_item = saved_parse_item
 
 
 def test_patched_parser_accepts_the_real_wire_lines(
@@ -384,3 +391,115 @@ def test_unpatched_sdk_models_still_reject_the_real_wire_payloads() -> None:
         CommandExecutionItem.model_validate(json.loads(_WIRE_COMMAND_DECLINED)["item"])
     with pytest.raises(pydantic.ValidationError):
         McpToolCallResult.model_validate(json.loads(_WIRE_MCP_STRING_CONTENT)["item"]["result"])
+
+
+# ---------------------------------------------------------------------------
+# Parse-failure policy: fatal for consumed item types, degraded for the rest
+# ---------------------------------------------------------------------------
+
+_WIRE_FILE_CHANGE_UNKNOWN_STATUS = (
+    '{"type":"item.started","item":{"id":"i9","type":"file_change",'
+    '"changes":[{"path":"a","kind":"add"}],"status":"brand_new"}}'
+)
+_WIRE_MCP_UNKNOWN_STATUS = (
+    '{"type":"item.completed","item":{"id":"i8","type":"mcp_tool_call",'
+    '"server":"imp","tool":"bash","arguments":{},"result":null,'
+    '"status":"brand_new"}}'
+)
+
+
+@pytest.mark.parametrize(
+    "etype", ["item.started", "item.updated", "item.completed"])
+def test_unconsumed_item_type_degrades_instead_of_raising(
+    sdk_patch_sandbox: dict[str, Any], etype: str,
+) -> None:
+    """A file_change imp discards must not kill the stream, at any item phase."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    install_codex_sdk_patches()
+
+    line = _WIRE_FILE_CHANGE_UNKNOWN_STATUS.replace("item.started", etype)
+    event = parse_thread_event_line(line)
+    assert type(event.item) is _UnparsedThreadItem
+    assert event.item.id == "i9"
+    assert event.item.type == "file_change"
+    assert "brand_new" in event.item.imp_parse_error
+    # The rest of the payload is dropped, not half-populated.
+    assert not hasattr(event.item, "changes")
+
+
+def test_consumed_item_type_raises_classified_parse_error(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """mcp_tool_call carries imp's control flow, so drift there is fatal."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    install_codex_sdk_patches()
+
+    with pytest.raises(CodexEventParseError) as excinfo:
+        parse_thread_event_line(_WIRE_MCP_UNKNOWN_STATUS)
+
+    exc = excinfo.value
+    assert exc.category == "config"
+    assert str(exc) == (
+        "codex event parse failure: item type 'mcp_tool_call' does not match the "
+        "pinned openai-codex-sdk model — update src/imp/providers/codex_sdk_patch.py")
+    assert exc.detail["item_type"] == "mcp_tool_call"
+    assert "brand_new" in str(exc.detail["validation_error"])
+
+
+def test_wrapper_keeps_json_and_normal_items_strict(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """The wrapper softens nothing else: bad JSON still raises, good items still
+    parse to the SDK's own models."""
+    from openai_codex_sdk.errors import EventParseError
+    from openai_codex_sdk.parsing import parse_thread_event_line
+    from openai_codex_sdk.types import AgentMessageItem
+
+    install_codex_sdk_patches()
+
+    with pytest.raises(EventParseError):
+        parse_thread_event_line('{"type":"item.completed"')
+
+    ok = parse_thread_event_line(
+        '{"type":"item.completed","item":{"id":"a1","type":"agent_message",'
+        '"text":"hi"}}')
+    assert type(ok.item) is AgentMessageItem
+    assert ok.item.text == "hi"
+
+    unknown = parse_thread_event_line(
+        '{"type":"item.completed","item":{"id":"u1","type":"future_type"}}')
+    assert type(unknown.item) is UnknownThreadItem
+
+
+@pytest.mark.parametrize("raw_id", ["absent", 7])
+def test_degradation_survives_a_payload_with_no_usable_id(
+    sdk_patch_sandbox: dict[str, Any], raw_id: object,
+) -> None:
+    """The degradation constructor must never raise a second ValidationError."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    install_codex_sdk_patches()
+
+    item: dict[str, Any] = {"type": "file_change", "status": "brand_new", "changes": []}
+    if raw_id != "absent":
+        item["id"] = raw_id
+    line = json.dumps({"type": "item.started", "item": item})
+
+    event = parse_thread_event_line(line)
+    assert type(event.item) is _UnparsedThreadItem
+    assert event.item.id == ""
+
+
+def test_install_leaves_exactly_one_parser_wrapper(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """A second install must not wrap the wrapper."""
+    from openai_codex_sdk import parsing
+
+    install_codex_sdk_patches()
+    once = parsing.parse_thread_item
+    install_codex_sdk_patches()
+
+    assert parsing.parse_thread_item is once

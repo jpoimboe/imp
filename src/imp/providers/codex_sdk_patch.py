@@ -28,18 +28,32 @@ real event line raises `pydantic.ValidationError` out of the SDK's parser. imp
 registers widened subclasses into `openai_codex_sdk.parsing._ITEM_MODELS`; each
 widening mirrors the exact rust variant set, so genuinely new upstream drift
 still fails loudly.
+
+Parse-failure policy — a payload that still fails to validate is split by whether
+imp consumes the item type. `parse_thread_item` is wrapped: a consumed type
+raises `CodexEventParseError` (a `ConfigError`, so the runner's existing
+`ProviderError` catch classifies it as `config` → pause, no retry); every other
+type degrades to `_UnparsedThreadItem`, which the runner logs and skips. The
+degradation lives inside the parser because once an exception escapes the SDK's
+async generator the event stream cannot be resumed.
 """
 from __future__ import annotations
 
 import codecs
 from typing import Any, Literal
 
+from openai_codex_sdk.parsing import parse_thread_item as _sdk_parse_thread_item
 from openai_codex_sdk.types import (
     CommandExecutionItem,
     FileChangeItem,
     McpToolCallItem,
     McpToolCallResult,
+    ThreadItem,
+    UnknownThreadItem,
 )
+from pydantic import ValidationError
+
+from imp.providers.errors import ConfigError
 
 CODEX_STREAM_LIMIT = 64 * 1024 * 1024  # 64 MiB: bounded ceiling for one JSONL line
 
@@ -110,11 +124,47 @@ class _McpToolCallItem(McpToolCallItem):
     result: _McpToolCallResult | None = None
 
 
+# The item types process_event dispatches on: their payloads carry imp's control
+# flow, so a parse failure there is fatal rather than skippable.
+_CONSUMED_ITEM_TYPES = frozenset(
+    {"mcp_tool_call", "agent_message", "reasoning", "web_search", "error"})
+
+
+class CodexEventParseError(ConfigError):
+    """A codex item type imp consumes failed to validate against the pinned SDK."""
+
+
+class _UnparsedThreadItem(UnknownThreadItem):
+    imp_parse_error: str
+
+
+def _str_or_empty(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _parse_thread_item(data: Any) -> ThreadItem:
+    """Delegate to the SDK's parser, splitting a validation failure by whether imp
+    consumes the item type: fatal for consumed types, degraded for the rest."""
+    try:
+        return _sdk_parse_thread_item(data)
+    except ValidationError as exc:
+        # Reached only past the SDK's own checks, so `data` is a dict here.
+        item_type = _str_or_empty(data.get("type"))
+        if item_type in _CONSUMED_ITEM_TYPES:
+            raise CodexEventParseError(
+                f"codex event parse failure: item type {item_type!r} does not match the "
+                "pinned openai-codex-sdk model — update src/imp/providers/codex_sdk_patch.py",
+                detail={"item_type": item_type, "validation_error": str(exc)},
+            ) from exc
+        return _UnparsedThreadItem(
+            id=_str_or_empty(data.get("id")), type=item_type, imp_parse_error=str(exc))
+
+
 def install_codex_sdk_patches() -> None:
     """Idempotently install imp's patches against the pinned codex SDK: widened
-    item models registered into its parser, and its exec module's
-    `create_subprocess_exec` given CODEX_STREAM_LIMIT and start_new_session=True.
-    Call before driving a real codex thread."""
+    item models and the parse-failure policy registered into its parser, and its
+    exec module's `create_subprocess_exec` given CODEX_STREAM_LIMIT and
+    start_new_session=True. Call before driving a real codex thread."""
     import openai_codex_sdk.exec as codex_exec
     from openai_codex_sdk import parsing
 
@@ -122,6 +172,9 @@ def install_codex_sdk_patches() -> None:
     parsing._ITEM_MODELS["file_change"] = _FileChangeItem
     parsing._ITEM_MODELS["command_execution"] = _CommandExecutionItem
     parsing._ITEM_MODELS["mcp_tool_call"] = _McpToolCallItem
+    # `parse_thread_event` resolves this as a module global, and the wrapper calls
+    # the function object captured at import, so a repeat call cannot re-wrap.
+    parsing.parse_thread_item = _parse_thread_item
 
     if isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio):  # type: ignore[attr-defined]
         return
