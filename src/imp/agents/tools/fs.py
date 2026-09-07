@@ -222,8 +222,10 @@ def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
     record = ctx.read_state.get(resolved)
     if record is None:
         raise ValueError(
-            f"{display_path} hasn't been read this step — read_file it before "
-            f"overwriting (or use edit_file to change part of it)."
+            f"{display_path} hasn't been read this step — read_file it first "
+            f"(any window discharges this; limit=5 is enough on a big file), or "
+            f"use edit_file for a partial change. Don't route around this with a "
+            f"shell redirect."
         )
     try:
         current_mtime = resolved.stat().st_mtime
@@ -236,8 +238,9 @@ def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
         if record.full and _hash_file_capped(resolved) == record.content_sha256:
             return
         raise ValueError(
-            f"{display_path} changed since you read it — read it again before "
-            f"overwriting."
+            f"{display_path} changed since you read it — read_file it again "
+            f"before overwriting. A shell redirect or a subagent write is the "
+            f"usual cause; neither updates this step's read record."
         )
 
 

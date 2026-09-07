@@ -293,6 +293,64 @@ def test_write_after_edit_without_reread_allowed(tmp_path: Path) -> None:
     assert (tmp_path / "x.py").read_text() == "a = 3\n"
 
 
+_BLIND_WRITE_MSG = (
+    "p.md hasn't been read this step — read_file it first (any window discharges "
+    "this; limit=5 is enough on a big file), or use edit_file for a partial "
+    "change. Don't route around this with a shell redirect."
+)
+
+_STALE_WRITE_MSG = (
+    "p.md changed since you read it — read_file it again before overwriting. "
+    "A shell redirect or a subagent write is the usual cause; neither updates "
+    "this step's read record."
+)
+
+
+def test_blind_write_refusal_message_is_verbatim(tmp_path: Path) -> None:
+    (tmp_path / "p.md").write_text("old")
+    ctx = _ctx(tmp_path, "read", "write")
+    with pytest.raises(ValueError) as ei:
+        _write_file(ctx, path="p.md", content="new")
+    assert str(ei.value) == _BLIND_WRITE_MSG
+
+
+def test_stale_write_refusal_message_is_verbatim(tmp_path: Path) -> None:
+    p = tmp_path / "p.md"
+    p.write_text("old")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="p.md")
+    rec = ctx.read_state[ctx.resolve_path("p.md")]
+    p.write_text("changed by someone else")
+    os.utime(p, (rec.mtime + 10, rec.mtime + 10))
+    with pytest.raises(ValueError) as ei:
+        _write_file(ctx, path="p.md", content="new")
+    assert str(ei.value) == _STALE_WRITE_MSG
+
+
+def test_narrow_window_read_discharges_the_gate(tmp_path: Path) -> None:
+    p = tmp_path / "big.md"
+    p.write_text("".join(f"line {i}\n" for i in range(1, 2001)))
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="big.md", limit=1)
+    _write_file(ctx, path="big.md", content="new")
+    assert p.read_text() == "new"
+
+
+def test_narrow_window_read_records_whole_file_hash(tmp_path: Path) -> None:
+    # Only the record.full + whole-file-hash fast-path can admit this write: the
+    # rewrite advances mtime, so the mtime comparison no longer short-circuits.
+    body = "".join(f"line {i}\n" for i in range(1, 2001))
+    p = tmp_path / "big.md"
+    p.write_text(body)
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="big.md", limit=1)
+    rec = ctx.read_state[ctx.resolve_path("big.md")]
+    p.write_text(body)
+    os.utime(p, (rec.mtime + 10, rec.mtime + 10))
+    _write_file(ctx, path="big.md", content="new")
+    assert p.read_text() == "new"
+
+
 def test_gate_has_no_workflow_vocabulary() -> None:
     import imp.agents.tools.context as context_mod
 
