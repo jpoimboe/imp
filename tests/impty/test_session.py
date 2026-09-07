@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -299,6 +300,35 @@ def test_xtmodkeys_does_not_underline_later_output() -> None:
         assert s.lines(limit=s.rows)[0].rstrip() == probe
         underlined = [s.cell(x, 0).underscore for x in range(len(probe))]
         assert underlined == [False] * len(probe)
+
+
+@pytest.mark.timeout(240)
+@pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux not installed")
+def test_tmux_starts_and_is_drivable(tmp_path: Path, caplog) -> None:
+    socket = str(tmp_path / "s")
+    # TMUX must go: TerminalSession copies os.environ wholesale, so running the
+    # suite from inside tmux would make `new-session` refuse to nest.
+    env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+    argv = ["tmux", "-S", socket, "-f", "/dev/null", "new-session", "/bin/sh"]
+    try:
+        with (
+            caplog.at_level("ERROR", logger="impty.session"),
+            TerminalSession(argv, env=env, cols=80, rows=24) as s,
+        ):
+            s.wait_idle(idle=0.3, hard=30.0)
+            assert _poll(lambda: "[0]" in s.lines(limit=s.rows)[-1],
+                         timeout=E2E_POLL_TIMEOUT), "status line never painted"
+            s.send("echo IMPTY-$((6*7))\r")
+            assert _poll(lambda: "IMPTY-42" in "\n".join(s.lines(limit=s.rows)),
+                         timeout=E2E_POLL_TIMEOUT), "sentinel never appeared"
+            # pyte answered tmux's secondary DA with a surplus primary-DA reply;
+            # tmux had already consumed one, so it arrived back as keystrokes.
+            assert "[?6c" not in "\n".join(s.lines())
+        # Nothing in tmux's real startup burst tripped pyte.
+        assert "impty: unparseable output dropped" not in caplog.text
+    finally:
+        subprocess.run(["tmux", "-S", socket, "kill-server"],
+                       capture_output=True, check=False, timeout=30)
 
 
 def test_cursor_parks_after_prompt_string() -> None:
