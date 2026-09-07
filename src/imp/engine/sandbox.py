@@ -21,13 +21,18 @@ grace (spec B.9); reaping is via the process group.
 from __future__ import annotations
 
 import contextlib
+import fcntl
+import json
 import os
 import platform
 import random
+import select
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -416,12 +421,100 @@ _NSENTER_FLAG = {"user": "user", "mnt": "mount", "pid": "pid", "uts": "uts",
                  "ipc": "ipc", "net": "net"}
 _KEEPER_NS_KINDS = ("user", "mnt", "pid", "uts", "ipc")   # + net iff policy isolates it
 
+_NS_GET_USERNS = 0xB701   # ioctl(ns_fd) -> fd on the user namespace that OWNS it
+
 _JOIN_SCRIPT = (
     'cd "$IMP_CWD" || exit 1\n'
     'cmd=$IMP_COMMAND\n'
     'unset IMP_COMMAND IMP_CWD\n'
     'eval "$cmd"\n'
 )
+
+
+_KEEPER_READY_TIMEOUT_S = 30.0   # generous vs the measured 7-15ms spawn-to-ready
+_KEEPER_REAP_TIMEOUT_S = 10.0
+
+
+class SandboxOpenFailed(Exception):
+    """The keeper namespace could not be opened, so no command was spawned."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail or "the sandbox namespace could not be opened")
+        self.detail = detail
+
+
+def _read_chunk(fd: int, deadline: float) -> bytes:
+    """One read from `fd`, bounded by `deadline`; b"" on EOF or timeout."""
+    timeout = deadline - time.monotonic()
+    if timeout <= 0:
+        return b""
+    ready, _, _ = select.select([fd], [], [], timeout)
+    return os.read(fd, 65536) if ready else b""
+
+
+def _read_to_eof(fd: int, deadline: float) -> str:
+    """Read `fd` to EOF: bwrap emits the --info-fd JSON in three separate write()
+    calls, so parsing the first chunk is wrong. bwrap closes the fd once it has
+    written, well before the payload runs, so this cannot wedge on a live keeper."""
+    buf = b""
+    while chunk := _read_chunk(fd, deadline):
+        buf += chunk
+    return buf.decode("utf-8", "replace")
+
+
+def _await_sentinel(fd: int, deadline: float) -> str:
+    """Read the keeper's stderr until the entry sentinel arrives, the pipe hits
+    EOF, or the deadline passes, and return everything read. Load-bearing, not
+    hygiene: bwrap publishes its --info-fd child-pid BEFORE the mount namespace is
+    finished, and joining on the pid alone hit execvp ENOENT 29 times in 40 (unsafe
+    window 10-20ms) where gating on the sentinel failed 0 in 40. The overlay mount
+    runs before the exec and fails loud, so sentinel ABSENCE is the sole failure
+    signal — no bespoke marker or exit code is needed."""
+    buf = b""
+    while SANDBOX_ENTERED_MARKER not in buf.decode("utf-8", "replace"):
+        chunk = _read_chunk(fd, deadline)
+        if not chunk:
+            break
+        buf += chunk
+    return buf.decode("utf-8", "replace")
+
+
+def _abandon_keeper(proc: subprocess.Popen[bytes], ns_fds: list[tuple[str, int]],
+                    err_fd: int) -> None:
+    """Tear down a keeper that never became usable, closing everything a live
+    namespace would have owned. SIGTERM first: bwrap's monitor handles it and takes
+    the sandbox with it, where a SIGKILL to the monitor would leave the ns-init
+    alive and the namespace still joinable."""
+    for _kind, fd in ns_fds:
+        os.close(fd)
+    os.close(err_fd)
+    proc.terminate()
+    try:
+        proc.wait(timeout=_KEEPER_REAP_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+def _ns_owner_fd(fds: dict[str, int]) -> int | None:
+    """An fd on the user namespace that OWNS the keeper's non-user namespaces, or
+    None when that is the payload's own user namespace.
+
+    bwrap nests a SECOND user namespace for the payload whenever the sandbox uid
+    differs from the uid it needed in the first one (--dev forces uid 0 there for
+    devpts), i.e. whenever imp does not run as uid 0. Capabilities gained by
+    entering that child namespace do not reach namespaces owned by its parent, so
+    a join that enters it first can never setns into the ipc/uts/pid/mnt/net
+    namespaces: the owner namespace has to be entered first."""
+    def ident(fd: int) -> tuple[int, int]:
+        st = os.fstat(fd)
+        return (st.st_dev, st.st_ino)
+
+    owner = fcntl.ioctl(fds["ipc"], _NS_GET_USERNS, 0)
+    if ident(owner) == ident(fds["user"]):
+        os.close(owner)
+        return None
+    return owner
 
 
 @dataclass(slots=True)
@@ -442,6 +535,7 @@ class SandboxNamespace:
     policy: SandboxPolicy
     base_policy: SandboxPolicy
     ns_fds: tuple[tuple[str, int], ...]
+    outer_user_fd: int | None
     ns_init_pid: int     # pid 1 of the keeper's pid namespace, as seen from imp
     err_fd: int          # read end of the keeper's stderr; the keeper holds the write end for life
     proc: subprocess.Popen[bytes]
@@ -461,14 +555,144 @@ class SandboxNamespace:
         captured at open(), so a mid-run IMP_* change reaches the next command."""
         if self.closed:
             raise AssertionError("join on a closed SandboxNamespace")
-        argv = ["nsenter"]
+        argv: list[str] = []
+        pass_fds = tuple(fd for _kind, fd in self.ns_fds)
+        if self.outer_user_fd is not None:
+            argv += ["nsenter", f"--user=/proc/self/fd/{self.outer_user_fd}",
+                     "--preserve-credentials", "--"]
+            pass_fds += (self.outer_user_fd,)
+        argv += ["nsenter"]
         argv += [f"--{_NSENTER_FLAG[kind]}=/proc/self/fd/{fd}" for kind, fd in self.ns_fds]
         argv += ["--preserve-credentials", "--", "sh", "-c", _JOIN_SCRIPT]
         env = _spawn_child_env(self.policy, engine_env)
         env["IMP_COMMAND"] = command
         env["IMP_CWD"] = cwd
-        return SandboxSpawn(argv=argv, env=env,
-                            pass_fds=tuple(fd for _kind, fd in self.ns_fds))
+        return SandboxSpawn(argv=argv, env=env, pass_fds=pass_fds)
+
+    @classmethod
+    def open(cls, *, policy: SandboxPolicy, engine_env: Mapping[str, str],
+             environ: Mapping[str, str],
+             on_retry: Callable[[int, str], None] | None = None) -> SandboxNamespace:
+        """Open a keeper namespace from `policy`, retrying the same spawn budget the
+        per-call spawn used to carry. Retry is safe by construction: a failed open
+        spawns no command. `on_retry(next_attempt, detail)` fires once per failed
+        attempt so each caller keeps its own runner_warning wording; on exhaustion
+        this raises SandboxOpenFailed carrying the detail, and the caller decides
+        what to report. Blocking (the keeper handshake is ~7-15ms, the backoffs up
+        to 400ms): async callers run it in a worker thread."""
+        if not policy.active:
+            raise AssertionError("SandboxNamespace.open on an inactive policy")
+        for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
+            try:
+                return cls._open_once(policy=policy, engine_env=engine_env,
+                                      environ=environ)
+            except SandboxOpenFailed as failure:
+                if attempt == SANDBOX_SPAWN_MAX_ATTEMPTS:
+                    raise
+                if on_retry is not None:
+                    on_retry(attempt + 1, failure.detail)
+                time.sleep(sandbox_spawn_backoff_delay(attempt))
+        raise AssertionError("open retry loop must return or raise on the last attempt")
+
+    @classmethod
+    def _open_once(cls, *, policy: SandboxPolicy, engine_env: Mapping[str, str],
+                   environ: Mapping[str, str]) -> SandboxNamespace:
+        # prepare_spawn_policy MUST run first: it mints the home-overlay layer whose
+        # merged path is substituted into the bwrap argv, and the whole bwrap is then
+        # wrapped in an `unshare … mount -t overlay … || exit 1; exec bwrap …` chain,
+        # so the layer paths are INPUTS to building the argv. One layer per namespace.
+        prepared = prepare_spawn_policy(policy)
+        info_r, info_w = os.pipe()
+        err_r, err_w = os.pipe()
+        devnull = os.open(os.devnull, os.O_RDWR)
+        spawn = build_sandbox_spawn(
+            KEEPER_PAYLOAD, cwd=prepared.worktree, policy=prepared,
+            engine_env=engine_env, environ=environ, keeper_info_fd=info_w)
+        try:
+            # The keeper must inherit NO caller pipe (a long-lived holder of a write
+            # end wedges the reader forever), and start_new_session keeps it out of
+            # any interrupted process group — --die-with-parent is its only leash.
+            proc = subprocess.Popen(
+                spawn.argv, env=spawn.env, pass_fds=spawn.pass_fds,
+                stdin=devnull, stdout=devnull, stderr=err_w,
+                start_new_session=True)
+        except OSError as exc:
+            os.close(info_r)
+            os.close(err_r)
+            raise SandboxOpenFailed(str(exc)) from exc
+        finally:
+            os.close(info_w)
+            os.close(err_w)     # our copy; the keeper keeps its own for life
+            os.close(devnull)
+        deadline = time.monotonic() + _KEEPER_READY_TIMEOUT_S
+        ns_fds: list[tuple[str, int]] = []
+        outer_user_fd: int | None = None
+        try:
+            info = _read_to_eof(info_r, deadline)
+            stderr = _await_sentinel(err_r, deadline)
+            if sandbox_spawn_failed(stderr, sandbox_active=True):
+                raise SandboxOpenFailed(sandbox_failure_detail(stderr))
+            # bwrap's --info-fd child, NOT the outer unshare: that is what makes the
+            # pin land on the real ns-init and leaves imp as bwrap's direct parent.
+            # Reaching here means the sentinel arrived, so bwrap finished writing the
+            # JSON; a ValueError or LookupError is still caught below rather than
+            # escaping open()'s retry and leaking a live keeper.
+            child_pid = int(json.loads(info)["child-pid"])
+            kinds = list(_KEEPER_NS_KINDS)
+            if not prepared.network:
+                kinds.append("net")
+            for kind in kinds:
+                ns_fds.append((kind, os.open(f"/proc/{child_pid}/ns/{kind}", os.O_RDONLY)))
+            outer_user_fd = _ns_owner_fd(dict(ns_fds))
+        except SandboxOpenFailed:
+            _abandon_keeper(proc, ns_fds, err_r)
+            raise
+        except (OSError, ValueError, LookupError) as exc:
+            _abandon_keeper(proc, ns_fds, err_r)
+            raise SandboxOpenFailed(str(exc)) from exc
+        finally:
+            os.close(info_r)     # bwrap has closed its end; nothing writes here again
+        # err_r stays OPEN and is owned by the namespace: the keeper holds the write
+        # end for its whole life, so closing the read end here would make any later
+        # write by the bwrap monitor raise EPIPE and take the whole namespace down.
+        return cls(policy=prepared, base_policy=policy, ns_fds=tuple(ns_fds),
+                   outer_user_fd=outer_user_fd,
+                   ns_init_pid=child_pid, err_fd=err_r, proc=proc)
+
+    def _is_ns_init(self) -> bool:
+        """ns_init_pid still names THIS namespace's init, i.e. the pid has not been
+        recycled since open(). Compared against the pid-namespace fd pinned at
+        open(), so a stranger that inherited the pid can never be signalled: it
+        would have to live in our own pid namespace, which cannot outlive its init."""
+        try:
+            live = os.stat(f"/proc/{self.ns_init_pid}/ns/pid")
+        except OSError:
+            return False
+        pinned = os.fstat(dict(self.ns_fds)["pid"])
+        return (live.st_dev, live.st_ino) == (pinned.st_dev, pinned.st_ino)
+
+    def close(self) -> None:
+        """SIGKILL the ns-init: killing pid 1 of a pid namespace makes the kernel kill
+        everything inside, so setsid / nohup / double-fork / re-grouping stop
+        mattering. SIGTERM would be a no-op (a pid-ns init is SIGNAL_UNKILLABLE for
+        default-action signals) and killing the outer bwrap would leave the init
+        alive and still joinable. Idempotent."""
+        if self.closed:
+            return
+        self.closed = True
+        if self._is_ns_init():
+            with contextlib.suppress(OSError):
+                os.kill(self.ns_init_pid, signal.SIGKILL)
+        for _kind, fd in self.ns_fds:
+            os.close(fd)
+        if self.outer_user_fd is not None:
+            os.close(self.outer_user_fd)
+        os.close(self.err_fd)
+        try:
+            self.proc.wait(timeout=_KEEPER_REAP_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait()
 
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:

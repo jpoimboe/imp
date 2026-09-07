@@ -11,13 +11,16 @@ from pathlib import Path
 
 import pytest
 
+import imp.engine.sandbox as sandbox_mod
 from imp.engine.env import engine_env
 from imp.engine.sandbox import (
     KEEPER_PAYLOAD,
+    SANDBOX_SPAWN_MAX_ATTEMPTS,
     HomeLayer,
     OverlayRoot,
     SandboxConfig,
     SandboxNamespace,
+    SandboxOpenFailed,
     SandboxPolicy,
     SandboxUnavailable,
     _force_rmtree,
@@ -2944,7 +2947,7 @@ def test_overlay_home_shell_string_carries_no_environment():
     assert spawn.env["IMP_TELEGRAM_TOKEN"] == "canary-42:secret"
 
 
-def _ns(*, network: bool = True) -> SandboxNamespace:
+def _ns(*, network: bool = True, outer_user_fd: int | None = None) -> SandboxNamespace:
     """A namespace with DUMMY fd numbers: join() is pure given the pins, so its
     argv/env shape needs no real keeper. fds are 10.. in pin order."""
     kinds = ["user", "mnt", "pid", "uts", "ipc"] + ([] if network else ["net"])
@@ -2952,6 +2955,7 @@ def _ns(*, network: bool = True) -> SandboxNamespace:
     return SandboxNamespace(
         policy=pol, base_policy=pol,
         ns_fds=tuple((k, 10 + i) for i, k in enumerate(kinds)),
+        outer_user_fd=outer_user_fd,
         ns_init_pid=4242, err_fd=98, proc=None)
 
 
@@ -3009,6 +3013,26 @@ def test_join_env_overlays_the_live_engine_slice_on_the_policy_env():
     assert "NOT_ENGINE" not in spawn.env
 
 
+def test_join_enters_the_owner_userns_in_a_first_stage_when_bwrap_nested_two():
+    # Two argv shapes, chosen at open() from a measured fact. When bwrap nests a
+    # second userns for the payload (any imp uid != 0), ipc/uts/pid/mnt/net are owned
+    # by the OUTER one and caps never flow up, so it must be entered first. With one
+    # level OWNER == PAYLOAD, re-entering it is EINVAL -- hence None, and the
+    # single-stage argv the tests above pin.
+    spawn = _ns(outer_user_fd=77).join("echo hi", cwd="/masked/dir", engine_env={})
+    argv = spawn.argv
+    assert argv[:4] == ["nsenter", "--user=/proc/self/fd/77",
+                        "--preserve-credentials", "--"]
+    inner = argv[4:]
+    assert inner[:6] == ["nsenter", "--user=/proc/self/fd/10",
+                         "--mount=/proc/self/fd/11", "--pid=/proc/self/fd/12",
+                         "--uts=/proc/self/fd/13", "--ipc=/proc/self/fd/14"]
+    assert inner[6] == "--preserve-credentials"
+    assert 77 in spawn.pass_fds
+    joined = " ".join(argv)
+    assert "echo hi" not in joined and "/masked/dir" not in joined
+
+
 def test_join_on_a_closed_namespace_is_refused():
     # The pinned fd numbers are recycled after close(); an argv naming them would
     # silently enter WHATEVER now holds those numbers.
@@ -3016,3 +3040,50 @@ def test_join_on_a_closed_namespace_is_refused():
     ns.closed = True
     with pytest.raises(AssertionError):
         ns.join("x", cwd="/wt", engine_env={})
+
+
+def test_open_retries_the_whole_spawn_budget_and_reports_each_attempt(monkeypatch):
+    attempts = []
+
+    def boom(cls, **kw):
+        attempts.append(kw)
+        raise SandboxOpenFailed("overlay mount failed")
+
+    monkeypatch.setattr(SandboxNamespace, "_open_once", classmethod(boom))
+    monkeypatch.setattr(sandbox_mod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    seen: list[tuple[int, str]] = []
+    with pytest.raises(SandboxOpenFailed) as exc:
+        SandboxNamespace.open(policy=_policy(), engine_env={}, environ={},
+                              on_retry=lambda n, detail: seen.append((n, detail)))
+    assert len(attempts) == SANDBOX_SPAWN_MAX_ATTEMPTS
+    # one breadcrumb per FAILED attempt, naming the attempt that follows it
+    assert seen == [(n, "overlay mount failed")
+                    for n in range(2, SANDBOX_SPAWN_MAX_ATTEMPTS + 1)]
+    assert exc.value.detail == "overlay mount failed"
+
+
+def test_open_stops_retrying_once_an_attempt_succeeds(monkeypatch):
+    attempts: list[int] = []
+    opened = object()
+
+    def flaky(cls, **kw):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise SandboxOpenFailed("transient")
+        return opened
+
+    monkeypatch.setattr(SandboxNamespace, "_open_once", classmethod(flaky))
+    monkeypatch.setattr(sandbox_mod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    seen: list[tuple[int, str]] = []
+    got = SandboxNamespace.open(policy=_policy(), engine_env={}, environ={},
+                                on_retry=lambda n, detail: seen.append((n, detail)))
+    assert got is opened
+    assert len(attempts) == 2
+    assert seen == [(2, "transient")]
+
+
+def test_open_on_an_inactive_policy_is_refused():
+    # A keeper built from an inactive policy would be a bare host `sh -c`, with
+    # no namespaces to pin — fail closed rather than silently unsandbox the run.
+    with pytest.raises(AssertionError):
+        SandboxNamespace.open(policy=_policy(active=False), engine_env={}, environ={})
