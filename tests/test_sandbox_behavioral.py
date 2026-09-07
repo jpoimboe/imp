@@ -351,16 +351,18 @@ def test_secret_env_dropped() -> None:
 
     AWS_SECRET_ACCESS_KEY is not in the allowlist and must NOT be visible inside
     the sandbox even when set in the ambient environment. We use a hand-built
-    policy with setenv that explicitly excludes AWS_* (matching what _build_child_env
-    produces — this is the same allowlist resolve_policy bakes via _build_child_env).
+    policy whose child_env explicitly excludes AWS_* (matching what _build_child_env
+    produces — the same allowlist resolve_policy bakes).
     """
     root = _make_root()
     old = os.environ.get("AWS_SECRET_ACCESS_KEY")
     os.environ["AWS_SECRET_ACCESS_KEY"] = "supersecret"
     try:
-        # Hand-built policy: setenv does NOT include AWS_SECRET_ACCESS_KEY.
-        # This directly tests the bwrap --clearenv + --setenv mechanism.
-        # (resolve_policy produces the same setenv via _build_child_env, which only
+        # Hand-built policy: child_env does NOT include AWS_SECRET_ACCESS_KEY.
+        # This directly tests the out-of-band child environment: the spawn env is
+        # the whole of what the child gets, so an ambient var absent from it cannot
+        # appear inside the sandbox.
+        # (resolve_policy produces the same child_env via _build_child_env, which only
         # allows PATH/HOME/USER/LOGNAME/LANG/TERM/TZ/LC_*/engine-managed IMP_* + env_passthrough.)
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
@@ -500,7 +502,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
     """Regression: name-on-intent freezes the policy with IMP_QUEST_TITLE="" at run
     start; after rename_quest the gate's fresh env_extra carries the real title.
     Reproduces the dogfood failure where a `${IMP_QUEST_*:?not set by engine}`
-    guard fired inside the bwrap --clearenv jail.
+    guard fired inside the sandbox's engine-supplied environment.
     """
     import dataclasses
 
@@ -985,7 +987,7 @@ def test_change_and_spike_branch_writes_succeed() -> None:
 
         # Quest branch: two commits then an autosquash rebase onto main. The
         # inline GIT_SEQUENCE_EDITOR/GIT_EDITOR=: keep rebase -i non-interactive
-        # (they are shell-assignment prefixes, independent of the --clearenv jail).
+        # (they are shell-assignment prefixes, independent of the spawn environment).
         r1 = _bash(
             ctx,
             "echo a > f.txt && git add f.txt && "

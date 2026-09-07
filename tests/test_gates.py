@@ -164,6 +164,7 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
     class FakePopen:
         def __init__(self, argv, **kw):
             captured["argv"] = argv
+            captured["env"] = kw.get("env")
             self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
                                                   if k in ("cwd", "env", "start_new_session",
                                                            "stdout", "stderr")})
@@ -199,9 +200,8 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol,
                env_extra={"IMP_QUEST_ID": "realid01"})
-    argv = captured["argv"]
-    assert argv.count("IMP_QUEST_ID") == 1
-    assert argv[argv.index("IMP_QUEST_ID") + 1] == "realid01"
+    assert captured["env"]["IMP_QUEST_ID"] == "realid01"
+    assert "realid01" not in " ".join(captured["argv"])
 
 
 def test_run_script_timeout_kills_group(tmp_path) -> None:

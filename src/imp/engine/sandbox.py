@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""Shell sandbox (bubblewrap) — pure policy core + argv builder (spec Part B).
+"""Shell sandbox (bubblewrap) — pure policy core + spawn builder (spec Part B).
 
 Two spawn points consume this: the `bash` tool (agents/tools/bash.py) and script
 gates (engine/gates.py). `resolve_policy` does the one-time stat I/O and bakes a
@@ -198,7 +198,7 @@ def _is_engine_passthrough(key: str) -> bool:
     var, PYTHONPATH (the imp-on-imp import shadow), and the four headless
     overrides (GIT_EDITOR / GIT_TERMINAL_PROMPT / EDITOR / VISUAL) that keep a
     sandboxed git/tool invocation non-interactive. Shared by both allowlist
-    sites (the per-spawn loop in build_sandbox_spawn and the policy bake in
+    sites (the per-spawn overlay in build_sandbox_spawn and the policy bake in
     _build_child_env) so they cannot drift."""
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
@@ -249,9 +249,10 @@ def sandbox_spawn_backoff_delay(attempt: int) -> float:
 @dataclass(frozen=True, slots=True)
 class SandboxSpawn:
     """One spawn's argv AND the environment to spawn it with. Produced by a single
-    call so the two cannot be mismatched: a bwrap argv carrying no --clearenv is
-    unsafe paired with os.environ, which would dump the user's whole environment
-    into the sandbox."""
+    call so the two cannot be mismatched: the argv carries no environment flags, so
+    the env field is the sole source of truth — pairing them prevents a caller from
+    accidentally supplying os.environ and dumping the user's whole environment into
+    the sandbox."""
     argv: list[str]
     env: dict[str, str]
 
@@ -270,10 +271,10 @@ def build_sandbox_spawn(
 
     `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
-    prefixed key it carries is emitted via --setenv, authoritatively superseding
-    whatever was baked into `policy.child_env` at run start. The policy is resolved
-    once per run (the stat-once design), but name-on-intent makes IMP_QUEST_TITLE
-    mutate mid-run on a rename — so a gate or tool spawned after
+    prefixed key it carries enters the returned child environment, authoritatively
+    superseding whatever was baked into `policy.child_env` at run start. The policy
+    is resolved once per run (the stat-once design), but name-on-intent makes
+    IMP_QUEST_TITLE mutate mid-run on a rename — so a gate or tool spawned after
     the rename MUST see the live values, not the empty ones frozen at run start.
 
     Required (not optional) on purpose: a sandboxed spawn without its live engine
@@ -331,18 +332,16 @@ def build_sandbox_spawn(
     argv += ["--proc", "/proc", "--dev", "/dev"]
     # 12. chdir
     argv += ["--chdir", cwd]
-    # 13. env allowlist. The IMP_* slice comes authoritatively from the live
-    # per-spawn engine_env (prefix allowlist) so a post-rename title wins over
-    # the value frozen into policy.child_env at run start (name-on-intent). Dict
-    # preserves first-seen order; reassigning a key updates in place, so no
-    # duplicate --setenv is emitted.
+    # 13. the child environment — delivered out-of-band on the spawn, NOT on argv
+    # (argv is world-readable via /proc). The IMP_* slice comes authoritatively
+    # from the live per-spawn engine_env (prefix allowlist) so a post-rename title
+    # wins over the value frozen into policy.child_env at run start
+    # (name-on-intent). Dict preserves first-seen order; reassigning a key updates
+    # in place.
     child_env = dict(policy.child_env)
     for k, v in engine_env.items():
         if _is_engine_passthrough(k):
             child_env[k] = v
-    argv += ["--clearenv"]
-    for k, v in child_env.items():
-        argv += ["--setenv", k, v]
     # 14. namespaces — NO --die-with-parent / --new-session (B.9); --unshare-pid is
     # safe (the group kill crosses the namespace)
     argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-pid"]

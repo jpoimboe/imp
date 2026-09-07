@@ -124,9 +124,10 @@ def run_command(
     on the timeout, abort, and output-cap paths. `cwd` must lie inside the
     writable set (worktree/`/tmp`); a command pointed at the RO floor fails.
 
-    `env_extra` (an engine_env result) is overlaid authoritatively so engine vars
-    are visible while a stale inherited engine var cannot leak (engine_env's
-    "absent => no gate" contract).
+    `env_extra` (an engine_env result) is the live per-spawn engine env: it refreshes
+    the sandbox child environment's IMP_* slice, and on the unsandboxed path it is
+    overlaid authoritatively so a stale inherited engine var cannot leak
+    (engine_env's "absent => no gate" contract).
     """
     spawn = build_sandbox_spawn(
         command, cwd=cwd,
