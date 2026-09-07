@@ -164,6 +164,10 @@ _DEAD_GRANT_MESSAGE = (
     "~/.codex/auth.json across machines kills it — each refresh rotates a "
     "single-use token.")
 
+_APIKEY_FALLBACK_MESSAGE = (
+    "codex: ChatGPT credential is dead; continuing with OPENAI_API_KEY — this "
+    "bills the OpenAI API, not your ChatGPT subscription")
+
 
 def _journal_token_refresh(elog: Any, aid: str, outcome: RefreshOutcome) -> None:
     payload: dict[str, Any] = {"outcome": outcome.outcome}
@@ -342,7 +346,15 @@ class CodexSession(ObserveSession):
             outcome = _pre_spawn_token_refresh(elog, aid)
             runner._spawn_token_expiry = canonical_expires_at()
             if outcome.outcome == FAILED_INVALID_GRANT:
-                raise perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
+                if not os.environ.get("OPENAI_API_KEY"):
+                    raise perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
+                elog.append(agent_id=aid, type="warning", payload={
+                    "source": "codex_auth_fallback",
+                    "message": _APIKEY_FALLBACK_MESSAGE, "detail": {}})
+                # One flip: seed_auth, metered spend, and Rule A's probe gate.
+                auth_mode = "apikey"
+                runner._auth_mode = auth_mode
+                proc_state["auth_mode"] = auth_mode
         seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                   codex_home=codex_home, env=os.environ)
 

@@ -147,10 +147,14 @@ async def run_codex_turn(
     turn: list[Any],
     pre: str = SKIPPED_FRESH,
     probe: str = SKIPPED_FRESH,
+    api_key: str | None = None,
 ) -> Ran:
     """Drive one codex turn against a chatgpt canonical credential with both
-    refresh call sites stubbed, and return the outer event stream."""
+    refresh call sites stubbed, and return the outer event stream. `api_key`
+    exports OPENAI_API_KEY after seeding, for the spawn-time fallback path."""
     seed_canonical_chatgpt(tmp_path, monkeypatch)
+    if api_key is not None:
+        monkeypatch.setenv("OPENAI_API_KEY", api_key)
     refresh = FakeRefresh(pre=pre, probe=probe)
     monkeypatch.setattr(codex_runner, "refresh_canonical_token", refresh)
     elog = InMemoryEventLog()
