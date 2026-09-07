@@ -13,6 +13,16 @@ def test_no_auth_anywhere_fails_auth(tmp_path: Path) -> None:
     assert exc.value.category == "auth"
 
 
+def test_no_auth_preflight_message_is_unchanged(tmp_path: Path) -> None:
+    """Explicitly out of the dead-credential copy rewrite: this message names
+    both remedies already and must stay byte-identical."""
+    with pytest.raises(PreflightError) as exc:
+        preflight(model="gpt-5.5", canonical_auth=tmp_path / "absent", env={})
+    assert str(exc.value) == (
+        "no usable codex auth (neither ~/.codex/auth.json nor OPENAI_API_KEY); "
+        "run `codex login` or export an API key.")
+
+
 def test_codex_model_under_chatgpt_fails_config(tmp_path: Path) -> None:
     canonical = tmp_path / "auth.json"
     canonical.write_text('{"auth_mode": "chatgpt", "tokens": {"refresh_token": "rt"}}')
