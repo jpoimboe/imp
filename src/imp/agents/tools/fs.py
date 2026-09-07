@@ -249,7 +249,8 @@ def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
     description=(
         "Write (overwrite) a file, creating parent dirs as needed. "
         "`content` must be file-faithful text — never `read_file`'s numbered "
-        "display output (the line-number prefixes would be written literally)."
+        "display output (the line-number prefixes would be written literally). "
+        "An existing file must have been read_file'd this step (any window will do)."
     ),
 )
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
