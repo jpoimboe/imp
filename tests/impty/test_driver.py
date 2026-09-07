@@ -130,7 +130,7 @@ def test_start_refuses_to_replace_a_live_session() -> None:
         assert str(excinfo.value) == "session already running — call stop() first"
         # The refused call killed nothing: same session, same live process, same screen.
         assert d._require().pid == first_pid
-        os.kill(first_pid, 0)
+        assert d._require().is_alive()
         assert "FIRST" in d.view()
         # stop() is the documented recovery path, so the next start() must succeed.
         d.stop()
