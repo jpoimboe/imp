@@ -283,6 +283,13 @@ def _isolate_session_socket(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_run_start_gate() -> None:
+    # _SNAPSHOT_CAPTURED is process-global; recycled tmp_path names collide quest_dirs.
+    import imp.engine.executor as _executor
+    _executor._SNAPSHOT_CAPTURED.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_state_dir() -> Generator[None, None, None]:
     yield
     # The startup migration writes os.environ directly; pop it so it can't leak forward.
