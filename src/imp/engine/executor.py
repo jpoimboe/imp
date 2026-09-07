@@ -763,8 +763,8 @@ async def run_quest(
             if isinstance(action, Goto) and target_idx is not None and target_idx < len(flat):
                 target_name = flat[target_idx].name
                 preamble = None
-                # Backward/self goto = a rework re-entry. A feedback-carrying resume replays
-                # the transcript; only a bare one needs the preamble to keep the backstop riding.
+                # Backward/self goto = a rework re-entry. A feedback-carrying resume normally
+                # replays the transcript; a bare one needs the preamble to keep the backstop.
                 if target_idx <= idx and not (action.resume and feedback_text):
                     entries = state.outcome_history.get(target_name)
                     if entries:
