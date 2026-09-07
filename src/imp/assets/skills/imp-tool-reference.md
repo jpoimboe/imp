@@ -34,6 +34,15 @@ anyway.
 ## write_file
 
 - Overwrites the whole file and creates parent directories as needed.
+- Read-before-write gate: overwriting an EXISTING file needs a `read_file` of it
+  earlier in this step, unchanged since. Any window discharges it — the record
+  hashes everything the read covered, not just the window, so `limit=5` on a huge
+  file is enough. `edit_file` has no gate.
+- Read state is per step: a re-entered step starts empty, so revising an artifact
+  your own earlier invocation wrote still needs a fresh `read_file`.
+- `bash` writes (`cat >`, `tee`, `sed -i`) don't update the read record — a later
+  `write_file` to that path is refused as changed. Never use a shell redirect to
+  get around a refusal.
 
 ## edit_file
 
