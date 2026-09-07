@@ -43,6 +43,9 @@ INIT_FRAME_BUDGET = 30.0
 # network dial — so a spawn that yields no frame is retried, stall included.
 PROBE_ATTEMPTS = 3
 PROBE_RETRY_BACKOFF = 1.0
+# Bounds each select wait so proc.poll() is consulted regularly: a CLI that exits
+# while a descendant holds our stdout pipe never produces EOF to wake us.
+PROC_POLL_INTERVAL = 0.25
 
 
 class InitReadOutcome(Enum):
@@ -93,38 +96,74 @@ def resolve_cli(opts: ClaudeAgentOptions) -> str:
         pytest.skip("claude CLI not found")
 
 
+def _take_init_frame(buf: bytes) -> tuple[dict[str, Any] | None, bytes]:
+    """Consume whole lines from `buf`: the init frame if one parses out, plus the
+    unterminated remainder. Non-JSON and non-init lines are skipped."""
+    while b"\n" in buf:
+        raw, buf = buf.split(b"\n", 1)
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            msg = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if msg.get("type") == "system" and msg.get("subtype") == "init":
+            return msg, buf
+    return None, buf
+
+
 def read_init_frame(proc: subprocess.Popen[bytes], budget: float) -> InitRead:
     """Poll `proc`'s raw stdout fd for the CLI's `init` system message, giving up
     after `budget` seconds. Bytes are buffered and split on newlines, so a frame
     delivered across two writes still parses. Non-JSON and non-init lines are
-    skipped. Returns an InitRead naming which exit was taken: INIT, EOF or
-    BUDGET_EXPIRED. `frame` is set exactly when the outcome is INIT."""
+    skipped. Returns an InitRead naming which of the four exits was taken: INIT
+    (frame read), EOF (stdout closed first), PROCESS_EXITED (the CLI is gone yet
+    stdout is still open, so a descendant inherited the pipe) or BUDGET_EXPIRED.
+    `frame` is set exactly when the outcome is INIT."""
     assert proc.stdout is not None
+    fd = proc.stdout.fileno()
     deadline = time.monotonic() + budget
     buf = b""
     stdout_bytes = 0
+
     with selectors.DefaultSelector() as selector:
         selector.register(proc.stdout, selectors.EVENT_READ)
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not selector.select(remaining):
-                return InitRead(None, stdout_bytes, InitReadOutcome.BUDGET_EXPIRED)
-            chunk = os.read(proc.stdout.fileno(), 65536)
+
+        def consume() -> InitRead | None:
+            """Read one ready chunk; an InitRead once it settles the read, else None."""
+            nonlocal buf, stdout_bytes
+            chunk = os.read(fd, 65536)
             if not chunk:               # EOF: stdout closed before an init message
                 return InitRead(None, stdout_bytes, InitReadOutcome.EOF)
             stdout_bytes += len(chunk)
             buf += chunk
-            while b"\n" in buf:
-                raw, buf = buf.split(b"\n", 1)
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if msg.get("type") == "system" and msg.get("subtype") == "init":
-                    return InitRead(msg, stdout_bytes, InitReadOutcome.INIT)
+            frame, buf = _take_init_frame(buf)
+            if frame is not None:
+                return InitRead(frame, stdout_bytes, InitReadOutcome.INIT)
+            return None
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return InitRead(None, stdout_bytes, InitReadOutcome.BUDGET_EXPIRED)
+            if selector.select(min(remaining, PROC_POLL_INTERVAL)):
+                settled = consume()
+                if settled is not None:
+                    return settled
+                continue
+            if proc.poll() is None:
+                continue
+            # The CLI is gone but the pipe is not at EOF. A select timeout only proves
+            # nothing was readable at that instant, so drain what landed in the window
+            # before the poll: losing those bytes would turn a loud failure into silence.
+            # Still deadline-bound — a descendant streaming without end must not
+            # outlast the budget inside the one function whose job is bounding a wait.
+            while time.monotonic() < deadline and selector.select(0):
+                settled = consume()
+                if settled is not None:
+                    return settled
+            return InitRead(None, stdout_bytes, InitReadOutcome.PROCESS_EXITED)
 
 
 def _spawn_and_read_init(

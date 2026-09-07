@@ -51,10 +51,10 @@ _STUB_INIT_FRAME = '{"type": "system", "subtype": "init", "tools": ["Bash", "Too
 
 
 @contextlib.contextmanager
-def _stub_proc(code: str) -> Iterator[subprocess.Popen[bytes]]:
-    """A short-lived python stub on binary pipes, shaped like the CLI probe's."""
+def _stub_proc(argv: list[str]) -> Iterator[subprocess.Popen[bytes]]:
+    """A short-lived stub on binary pipes, shaped like the CLI probe's."""
     proc = subprocess.Popen(
-        [sys.executable, "-c", code],
+        argv,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
     )
@@ -71,6 +71,13 @@ def _stub_proc(code: str) -> Iterator[subprocess.Popen[bytes]]:
         proc.stdout.close()
 
 
+def _sh_stub(path: Path, script: str) -> Path:
+    """An executable /bin/sh stub at `path`."""
+    path.write_text(script)
+    path.chmod(0o755)
+    return path
+
+
 def test_read_init_frame_returns_the_init_frame() -> None:
     code = (
         "import sys, time\n"
@@ -80,7 +87,7 @@ def test_read_init_frame_returns_the_init_frame() -> None:
         "sys.stdout.flush()\n"
         "time.sleep(30)\n"
     )
-    with _stub_proc(code) as proc:
+    with _stub_proc([sys.executable, "-c", code]) as proc:
         read = read_init_frame(proc, 10.0)
 
     assert read.outcome is InitReadOutcome.INIT
@@ -90,7 +97,7 @@ def test_read_init_frame_returns_the_init_frame() -> None:
 
 
 def test_read_init_frame_honours_its_deadline_on_a_silent_process() -> None:
-    with _stub_proc("import time; time.sleep(30)") as proc:
+    with _stub_proc([sys.executable, "-c", "import time; time.sleep(30)"]) as proc:
         start = time.monotonic()
         read = read_init_frame(proc, 1.0)
         elapsed = time.monotonic() - start
@@ -102,7 +109,7 @@ def test_read_init_frame_honours_its_deadline_on_a_silent_process() -> None:
 
 
 def test_read_init_frame_reports_eof_when_stdout_closes_first() -> None:
-    with _stub_proc("pass") as proc:
+    with _stub_proc([sys.executable, "-c", "pass"]) as proc:
         read = read_init_frame(proc, 10.0)
 
     assert read.outcome is InitReadOutcome.EOF
@@ -121,13 +128,47 @@ def test_read_init_frame_parses_a_frame_split_across_writes() -> None:
         "sys.stdout.flush()\n"
         "time.sleep(30)\n"
     )
-    with _stub_proc(code) as proc:
+    with _stub_proc([sys.executable, "-c", code]) as proc:
         read = read_init_frame(proc, 10.0)
 
     assert read.outcome is InitReadOutcome.INIT
     assert read.stdout_bytes > 0
     assert read.frame is not None
     assert read.frame["tools"] == ["Bash", "ToolSearch"]
+
+
+def test_read_init_frame_gives_up_when_the_cli_exits_holding_the_pipe(tmp_path: Path) -> None:
+    """The reported 93s signature: the CLI exits 0 but a descendant inherited stdout, so
+    the pipe never reaches EOF. The reader must key on the process, not the pipe."""
+    stub = _sh_stub(tmp_path / "backgrounding-cli", "#!/bin/sh\n(sleep 30) &\nexit 0\n")
+
+    with _stub_proc([str(stub)]) as proc:
+        start = time.monotonic()
+        read = read_init_frame(proc, 30.0)
+        elapsed = time.monotonic() - start
+
+    assert read.outcome is InitReadOutcome.PROCESS_EXITED
+    assert read.frame is None
+    assert read.stdout_bytes == 0
+    assert elapsed < 15.0, f"reader waited on pipe EOF, not on the process ({elapsed:.1f}s)"
+
+
+def test_read_init_frame_counts_bytes_written_before_a_held_pipe_exit(tmp_path: Path) -> None:
+    """Bytes that landed before the exit are accounted for, never dropped into an apparent
+    silence — a CLI that spoke must stay a loud failure, not a silent-exit skip."""
+    stub = _sh_stub(
+        tmp_path / "chatty-backgrounding-cli",
+        "#!/bin/sh\n(sleep 30) &\n"
+        "echo '{\"type\": \"system\", \"subtype\": \"compact\"}'\n"
+        "exit 0\n",
+    )
+
+    with _stub_proc([str(stub)]) as proc:
+        read = read_init_frame(proc, 30.0)
+
+    assert read.outcome is InitReadOutcome.PROCESS_EXITED
+    assert read.frame is None
+    assert read.stdout_bytes > 0
 
 
 def test_probe_raises_when_no_init_frame_arrives(
