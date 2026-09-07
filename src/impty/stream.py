@@ -20,7 +20,10 @@ from typing import Any
 import pyte
 
 _ESC = 0x1B
+_BEL = 0x07
 _CSI_INTRO = 0x5B  # '['
+_ST_FINAL = 0x5C  # '\\' — the second byte of ST
+_STRING_INTRO = frozenset(b"PX^_")  # DCS, SOS, PM, APC
 _PRIVATE_PREFIX = frozenset(b"<=>")
 
 
@@ -29,12 +32,15 @@ class _State(enum.Enum):
     ESC = "esc"
     CSI = "csi"
     PRIVATE = "private"
+    STRING = "string"
+    STRING_ESC = "string_esc"
 
 
 class TerminalStream(pyte.ByteStream):
     """Byte-level filter in front of pyte's parser: the output is the input minus
-    whole private-prefixed CSI sequences. The state alone encodes the held bytes,
-    so at most two (`ESC`, `ESC [`) are ever pending across a chunk boundary.
+    whole private-prefixed CSI and string sequences. The state alone encodes the
+    held bytes, so at most two (`ESC`, `ESC [`) are ever pending across a chunk
+    boundary and a string payload costs no buffer at all.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -56,6 +62,8 @@ class TerminalStream(pyte.ByteStream):
             elif self._state is _State.ESC:
                 if byte == _CSI_INTRO:
                     self._state = _State.CSI
+                elif byte in _STRING_INTRO:
+                    self._state = _State.STRING
                 else:
                     # The byte ends this sequence without belonging to it:
                     # release what was held and re-read it in the new state.
@@ -74,5 +82,16 @@ class TerminalStream(pyte.ByteStream):
                     self._state = _State.GROUND
                 elif not (0x20 <= byte <= 0x3F):  # not a param/intermediate
                     self._state = _State.GROUND
+                    i -= 1
+            elif self._state is _State.STRING:
+                if byte == _BEL:
+                    self._state = _State.GROUND
+                elif byte == _ESC:
+                    self._state = _State.STRING_ESC
+            elif self._state is _State.STRING_ESC:
+                if byte == _ST_FINAL:  # ST: both bytes belong to the string
+                    self._state = _State.GROUND
+                else:
+                    self._state = _State.ESC
                     i -= 1
         super().feed(bytes(out))

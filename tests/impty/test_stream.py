@@ -14,6 +14,11 @@ DROPPED = [
     b"\x1b[>1u",      # kitty keyboard protocol: push flags
     b"\x1b[<u",       # kitty keyboard protocol: pop flags
     b"\x1b[=5u",      # kitty keyboard protocol: set flags
+    b"\x1bP0$r1;2m\x1b\\",             # DCS: a DECRQSS reply
+    b"\x1bP+q544e\x1b\\",              # DCS: an XTGETTCAP reply
+    b"\x1b_Gf=100,a=T;SGVsbG8=\x1b\\", # APC: kitty graphics
+    b"\x1b^private\x1b\\",             # PM
+    b"\x1bXsos\x1b\\",                 # SOS
 ]
 
 # Every internal split of b"a" + seq + b"b", as its own case, so a boundary
@@ -100,3 +105,18 @@ def test_malformed_private_csi_hands_an_embedded_esc_to_pyte() -> None:
     stream.feed(b"\x1b[>1\x1b[1mZ")
     assert screen.display[0].rstrip() == "Z"
     assert screen.buffer[0][0].bold is True
+
+
+def test_string_sequence_terminated_by_bel_is_dropped() -> None:
+    screen, stream, replies = _stream()
+    stream.feed(b"a\x1bP+q544e\x07b")
+    _assert_dropped(screen, replies)
+
+
+def test_esc_inside_a_string_payload_opens_a_fresh_sequence() -> None:
+    # xterm's abort rule: the ESC ends the string, and not being followed by
+    # '\' it starts a new sequence — so the SGR must still apply to Z.
+    screen, stream, _ = _stream()
+    stream.feed(b"a\x1bPpayload\x1b[1mZ")
+    assert screen.display[0].rstrip() == "aZ"
+    assert screen.buffer[0][1].bold is True
