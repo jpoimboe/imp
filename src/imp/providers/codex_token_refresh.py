@@ -192,8 +192,10 @@ def _load_auth(auth_path: Path) -> dict[str, Any] | None:
 
 
 def _is_apikey(data: dict[str, Any], env: Mapping[str, str]) -> bool:
-    if data.get("auth_mode") == "apikey":
-        return True
+    """`detect_auth_mode`'s precedence: an explicit auth_mode wins both ways."""
+    mode: object = data.get("auth_mode")
+    if mode in ("chatgpt", "apikey"):
+        return mode == "apikey"
     return bool(data.get("OPENAI_API_KEY") or env.get("OPENAI_API_KEY"))
 
 

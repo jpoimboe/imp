@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from imp.providers import codex_token_refresh as ctr
+from imp.providers.codex_config import detect_auth_mode
 
 NOW = 1_000_000_000_000  # ms
 
@@ -539,3 +540,47 @@ def test_unresolvable_home_is_not_applicable(
     monkeypatch.setattr(ctr.Path, "home", staticmethod(_boom))
     out = ctr.refresh_canonical_token(NOW, env={})
     assert out.outcome == ctr.NOT_APPLICABLE
+
+
+# Every row of the refresh/spawn agreement table: the file's explicit auth_mode
+# is authoritative in both directions, key-presence only fills a missing field.
+_AGREEMENT_ROWS = [
+    pytest.param({"auth_mode": "chatgpt"}, {}, "chatgpt", ctr.REFRESHED, 1,
+                 id="chatgpt-file-no-env-key"),
+    pytest.param({"auth_mode": "chatgpt"}, {"OPENAI_API_KEY": "sk-x"}, "chatgpt",
+                 ctr.REFRESHED, 1, id="chatgpt-file-env-key-set"),
+    pytest.param({}, {"OPENAI_API_KEY": "sk-x"}, "apikey", ctr.NOT_APPLICABLE, 0,
+                 id="no-auth-mode-field-env-key-set"),
+    pytest.param({"auth_mode": "apikey"}, {}, "apikey", ctr.NOT_APPLICABLE, 0,
+                 id="apikey-file-no-env-key"),
+]
+
+
+@pytest.mark.parametrize(
+    "extra_top,extra_env,spawn_mode,expected_outcome,expected_calls",
+    _AGREEMENT_ROWS)
+def test_refresh_agrees_with_detect_auth_mode_on_every_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_top: dict[str, object],
+    extra_env: dict[str, str],
+    spawn_mode: str,
+    expected_outcome: str,
+    expected_calls: int,
+) -> None:
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 - 1),
+                       extra_top=extra_top)
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": None, "access_token": _jwt(NOW // 1000 + 7200),
+                "refresh_token": "rot"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    env = _env(tmp_path, **extra_env)
+
+    assert detect_auth_mode(canonical_path=path, env=env) == spawn_mode
+    out = ctr.refresh_canonical_token(NOW, env=env)
+    assert out.outcome == expected_outcome
+    assert len(seen) == expected_calls
