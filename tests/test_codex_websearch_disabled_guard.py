@@ -1,59 +1,32 @@
 """Regression guard for the Finding A fix (`b0e1658`).
 
 imp disables model-hosted web search via config.toml's top-level `web_search`
-key and must NEVER emit the SDK's deprecated `--config
-features.web_search_request` flag — codex >=0.137 ignores it for disabling, so
-emitting it re-opens a web side channel that bypasses the
-`networkAccessEnabled=False` sandbox lock. The flag is emitted by the SDK iff
-`ThreadOptions.web_search_enabled is not None` (openai_codex_sdk exec.py), so the
-invariant is: imp's ThreadOptions leaves it None on every invocation, regardless
-of whether the agent declared the `web_search` tool.
-
-This is a structural guard so a future `web_search_enabled=` can't silently
-re-introduce the bug behind a live-only check.
+key and must NEVER emit the deprecated `--config features.web_search_request`
+flag — codex >=0.137 ignores it for disabling, so emitting it re-opens a web
+side channel that bypasses the `network_access_enabled=False` sandbox lock.
+imp's own ThreadOptions carries no web-search field at all, so the flag is
+structurally unemittable; this file pins that at the argv the runner's real
+options produce, resume leg included.
 """
 
 from __future__ import annotations
 
-import importlib.util
-
 import pytest
 
+from imp.providers.codex_exec import build_command_args
 from imp.providers.codex_runner import CodexAgentRunner
 
-pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("openai_codex_sdk") is None,
-    reason="openai_codex_sdk not importable",
-)
 
-
-def test_thread_options_never_set_web_search_enabled() -> None:
-    opts = CodexAgentRunner(model_name="gpt-5.5")._build_thread_options()
-    assert opts is not None
-    # The imp-side invariant: control is via config.toml, never this SDK flag.
-    assert opts.web_search_enabled is None
-    assert "webSearchEnabled" not in opts.model_dump(exclude_none=True)
-
-
-def test_sdk_args_never_emit_deprecated_web_search_flag() -> None:
-    # End-to-end at the SDK seam: the command args the SDK builds from imp's
-    # ThreadOptions must not contain the deprecated flag (the exact bug b0e1658
-    # closed), whether or not a resume thread_id is present.
-    from openai_codex_sdk.exec import CodexExec, CodexExecArgs
-
-    opts = CodexAgentRunner(model_name="gpt-5.5")._build_thread_options()
-    exec_ = CodexExec(executable_path="codex")  # dummy path; args build is pure
+def test_runner_options_build_the_production_argv_with_no_web_search_flag() -> None:
+    opts = CodexAgentRunner(model_name="gpt-5.5")._build_thread_options("high")
+    assert build_command_args(opts, None) == [
+        "exec", "--json", "--model", "gpt-5.5", "--sandbox", "read-only",
+        "--config", 'model_reasoning_effort="high"',
+        "--config", "sandbox_workspace_write.network_access=false",
+        "--config", 'approval_policy="never"']
     for thread_id in (None, "thr-resume-1"):
-        args = CodexExecArgs(
-            input="x",
-            thread_id=thread_id,
-            model=opts.model,
-            sandbox_mode=opts.sandbox_mode,
-            web_search_enabled=opts.web_search_enabled,
-            network_access_enabled=opts.network_access_enabled,
-        )
-        cmd = exec_._build_command_args(args)
-        assert not any("features.web_search_request" in a for a in cmd), cmd
+        args = build_command_args(opts, thread_id)
+        assert not any("web_search" in a for a in args), args
 
 
 @pytest.mark.parametrize("tier", ["medium", "high"])
@@ -61,16 +34,10 @@ def test_thinking_tiers_pin_high_reasoning_effort(tier: str) -> None:
     """Matches the anthropic/claude_code per-tier posture: medium and high both
     run at effort 'high', so the tier picks the model, not the effort."""
     opts = CodexAgentRunner(model_name="gpt-5.6-terra")._build_thread_options(tier)
-    assert opts is not None
     assert opts.model_reasoning_effort == "high"
-    dumped = opts.model_dump(by_alias=True, exclude_none=True)
-    assert dumped["modelReasoningEffort"] == "high"
 
 
 @pytest.mark.parametrize("tier", ["low", None])
 def test_low_and_untiered_leave_reasoning_effort_unset(tier: str | None) -> None:
     opts = CodexAgentRunner(model_name="gpt-5.6-luna")._build_thread_options(tier)
-    assert opts is not None
     assert opts.model_reasoning_effort is None
-    assert "modelReasoningEffort" not in opts.model_dump(
-        by_alias=True, exclude_none=True)

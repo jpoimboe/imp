@@ -60,6 +60,7 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
+from imp.providers.codex_exec import Codex, CodexOptions, ThreadOptions
 from imp.providers.codex_mcp import (
     CODEX_APPROVAL_POLICY,
     RunState,
@@ -88,7 +89,7 @@ _logger = logging.getLogger(__name__)
 
 
 class PreflightError(Exception):
-    """Raised before SDK options are built when the run cannot proceed safely."""
+    """Raised before thread options are built when the run cannot proceed safely."""
     def __init__(self, category: str, message: str) -> None:
         super().__init__(message)
         self.category = category
@@ -97,7 +98,7 @@ class PreflightError(Exception):
 def preflight(
     *, model: str, canonical_auth: Path, env: Mapping[str, str],
 ) -> AuthMode:
-    """Run fail-fast checks before building SDK options. Returns auth mode."""
+    """Run fail-fast checks before building thread options. Returns auth mode."""
     # 1. Refuse `*-codex` in BOTH auth modes (M1).
     if model.endswith("-codex"):
         raise PreflightError(
@@ -318,7 +319,7 @@ class CodexSession(ObserveSession):
             return
 
         # 5. Provision CODEX_HOME + config.toml + seed auth. web_search is
-        #    controlled via config.toml's top-level key (the deprecated SDK flag no
+        #    controlled via config.toml's top-level key (the deprecated CLI flag no
         #    longer disables it on codex >=0.137), so it must be decided here, at
         #    provision time, from the agent's declared tools.
         impty_bearer: str | None = None
@@ -369,7 +370,7 @@ class CodexSession(ObserveSession):
                 params={"env.CODEX_HOME": str(codex_home)},
                 max_tool_calls=invocation.max_tool_calls)
 
-        # 6. Build the SDK client + start/resume the persistent thread.
+        # 6. Build the codex client + start/resume the persistent thread.
         client = runner._build_client(
             codex_home=codex_home, bearer_token=bearer_token,
             impty_bearer_token=(impty_bearer if runner._impty_handle is not None
@@ -385,25 +386,12 @@ class CodexSession(ObserveSession):
                 codex_home=codex_home,
                 transcript_dir=invocation.transcript_dir)
             # Seed thread_id now so a subsequent pause persists the resumed thread
-            # even if the SDK does not re-emit thread.started on resume
+            # even if codex does not re-emit thread.started on resume
             # (process_event overwrites this with the same id if it does).
             proc_state["thread_id"] = thread_id
-            if thread_options is None:
-                thread = client.resume_thread(thread_id)
-            else:
-                try:
-                    thread = client.resume_thread(thread_id, thread_options)
-                except TypeError:
-                    thread = client.resume_thread(thread_id)
-        elif thread_options is None:
-            # SDK unavailable (test/fake path): start with no options.
-            thread = client.start_thread()
+            thread = client.resume_thread(thread_id, thread_options)
         else:
-            try:
-                thread = client.start_thread(thread_options)
-            except TypeError:
-                # Fakes ignore the options arg.
-                thread = client.start_thread()
+            thread = client.start_thread(thread_options)
         self._thread = thread
         # Build initial prompt with anti-native-tool instruction prepended.
         next_prompt = runner._build_prompt(invocation, elog, aid)
@@ -539,7 +527,7 @@ class CodexSession(ObserveSession):
                     if coordinator is not None:
                         coordinator.note_activity()
                     # Post-API-site analog (Decision 10): one sweep per streamed
-                    # SDK event.
+                    # codex event.
                     await _bg._sweep_bg(self.ctx)
                     yield event
                     if getattr(event, "type", None) == "turn.completed":
@@ -737,7 +725,7 @@ class CodexSession(ObserveSession):
 
 
 class CodexAgentRunner:
-    """Drives `codex` via `openai_codex_sdk` (run() filled in by later tasks)."""
+    """Drives `codex exec` through imp's own `codex_exec` driver."""
 
     def __init__(
         self, model_name: str, *,
@@ -801,7 +789,7 @@ class CodexAgentRunner:
                 tail = None
                 if self._stderr_sink is not None:
                     # Prefer what the streaming tee captured live. Only when it
-                    # captured nothing do we fall back to str(exc): the codex SDK
+                    # captured nothing do we fall back to str(exc): codex_exec
                     # surfaces subprocess stderr solely inside the CodexExecError
                     # message (no .stderr attribute), which also re-embeds any
                     # already-teed stderr and already lands in the event's
@@ -891,22 +879,10 @@ class CodexAgentRunner:
         self, *, codex_home: Path, bearer_token: str,
         impty_bearer_token: str | None = None,
     ) -> Any:
-        """Construct the SDK `Codex` client. Tests inject a `client_factory`
+        """Construct the `codex exec` client. Tests inject a `client_factory`
         callable that takes `options=` and returns a FakeCodex."""
         if self._client_factory is not None:
             return self._client_factory(options=None)
-        from openai_codex_sdk import Codex
-
-        from imp.providers.codex_sdk_patch import install_codex_sdk_patches
-        install_codex_sdk_patches()
-
-        # `CodexOptions` is not re-exported at the package top level in the
-        # pinned SDK (0.1.11) — only `openai_codex_sdk.types` (and .codex/.thread)
-        # expose it. Import from the submodule so client construction works
-        # against the pinned wheel. `Codex(...)` also accepts a plain dict, but
-        # the typed object keeps the kwarg contract explicit.
-        from openai_codex_sdk.types import CodexOptions
-
         from imp.engine.env import overlay_engine_env
         overrides = {
             "CODEX_HOME": str(codex_home),
@@ -917,43 +893,30 @@ class CodexAgentRunner:
         env = overlay_engine_env(os.environ, overrides)
         return Codex(CodexOptions(env=env))
 
-    def _build_thread_options(self, tier: str | None = None) -> Any:
-        """ThreadOptions with the design's exact production flags. Lives in its
-        own method so the test seam can replace it without touching
-        `CodexSession._enter`. Returns None when the SDK is unavailable
-        (test/fake path) so `_enter` starts the thread without options.
+    def _build_thread_options(self, tier: str | None = None) -> ThreadOptions:
+        """The design's exact production flags. Lives in its own method so the
+        test seam can replace it without touching `CodexSession._enter`.
 
-        `tier` sets `modelReasoningEffort` to match the claude providers'
+        `tier` sets `model_reasoning_effort` to match the claude providers'
         per-tier posture (see anthropic._anthropic_thinking_posture): medium and
         high both run at 'high', low and an untiered invocation leave it unset so
         codex keeps its own default. `tier` defaults to None so the arg-less test
-        seam keeps working. Note the SDK's effort ladder tops out at 'high' —
+        seam keeps working. Note codex's effort ladder tops out at 'high' —
         Sol's 'max' / ultra mode is not reachable through this field.
 
-        `webSearchEnabled` is deliberately NOT set: codex >=0.137 deprecated the
-        SDK-emitted `features.web_search_request` flag (it no longer disables and
-        emits a noisy `error` item every turn), so web_search is controlled via
+        There is deliberately no web-search field: codex >=0.137 deprecated the
+        `features.web_search_request` flag (it no longer disables and emits a
+        noisy `error` item every turn), so web_search is controlled via
         config.toml's top-level `web_search` key instead (see
         `render_config_toml`). web_search is model-hosted, so
-        `networkAccessEnabled` stays False regardless (the command sandbox cannot
-        reach the network)."""
-        try:
-            from openai_codex_sdk import (
-                ThreadOptions,
-            )
-        except ImportError:
-            return None
-        # Use the SDK's declared (alias) parameter names. ThreadOptions is a
-        # pydantic model with `populate_by_name=True`, so the snake_case field
-        # names work identically at runtime — but only these camelCase aliases
-        # match the typed `__init__` signature, so this is what mypy checks
-        # against. Verified: both forms model_dump() to the same payload.
+        `network_access_enabled` stays False regardless (the command sandbox
+        cannot reach the network)."""
         return ThreadOptions(
             model=self.model,
-            sandboxMode="read-only",
-            approvalPolicy=CODEX_APPROVAL_POLICY,
-            networkAccessEnabled=False,
-            modelReasoningEffort="high" if tier in ("medium", "high") else None,
+            sandbox_mode="read-only",
+            approval_policy=CODEX_APPROVAL_POLICY,
+            network_access_enabled=False,
+            model_reasoning_effort="high" if tier in ("medium", "high") else None,
         )
 
     def _build_prompt(self, invocation: AgentInvocation, elog: Any, aid: str) -> str:
