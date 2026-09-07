@@ -86,8 +86,15 @@ _DEFAULT_FONT_SIZE = 10
 # Supersample factor: the whole grid (font px, cell, pad) is multiplied by this,
 # so a "10pt" capture is actually rasterized at 30px — a crisp, high-DPI PNG
 # (true FreeType rendering at the larger size, not an upscale of a small image).
-# The layout is identical; only the pixel density changes.
+# The layout is identical; only the pixel density changes. It is also the CEILING
+# of the auto-fit search (see _fit_font_px), never exceeded.
 _DEFAULT_SCALE = 3
+
+# Longest side the auto-fit keeps a render within. Vision pipelines downscale above
+# ~2000 px, and resampling crisp terminal text into antialiased gradients is both
+# blurrier and BIGGER (PNG compresses gradients far worse) than rasterizing under
+# the ceiling to begin with.
+_MAX_DIM = 2000
 
 # Fallback fonts for codepoints the mono font lacks. Source Code Pro covers most
 # of imp's chrome (· → │ ▾ ✓ ─) but NOT some UI symbols (⏸, ⚠) or emoji (which
@@ -209,6 +216,30 @@ def _cell_metrics(size: int) -> tuple[int, int]:
     return max(1, math.ceil(f.getlength("0"))), max(1, asc + desc)
 
 
+def _layout(font_px: int, font_size: int, cell_w: int | None, cell_h: int | None,
+            pad: int) -> tuple[int, int, int]:
+    """The (cell_w, cell_h, pad) pixel grid at `font_px`. The single expression of
+    the layout, so the fit search and the render body cannot disagree."""
+    scale = font_px / font_size
+    derived_w, derived_h = _cell_metrics(font_px)
+    return (derived_w if cell_w is None else int(cell_w * scale),
+            derived_h if cell_h is None else int(cell_h * scale),
+            int(pad * scale))
+
+
+def _fit_font_px(cols: int, rows: int, font_size: int, cell_w: int | None,
+                 cell_h: int | None, pad: int) -> int:
+    """The largest font pixel size, at most `font_size * _DEFAULT_SCALE`, whose real
+    metrics keep the whole grid within _MAX_DIM. Searching integer sizes against
+    _cell_metrics rather than solving for a scale means the validated dimensions ARE
+    the produced ones — the glyph advance is ceil'd, so it is not linear in font_px."""
+    for font_px in range(font_size * _DEFAULT_SCALE, 1, -1):
+        w, h, p = _layout(font_px, font_size, cell_w, cell_h, pad)
+        if cols * w + 2 * p <= _MAX_DIM and rows * h + 2 * p <= _MAX_DIM:
+            return font_px
+    return 1  # _cell_metrics(0) raises, so a huge grid renders best-effort instead
+
+
 def _font_for(ch: str, size: int, bold: bool) -> ImageFont.FreeTypeFont:
     """The font to paint `ch` with: the mono font when it covers the glyph,
     otherwise the first fallback that does, else the mono font (a tofu box is
@@ -267,7 +298,7 @@ def render_screen(
     cell_h: int | None = None,
     font_size: int = _DEFAULT_FONT_SIZE,
     pad: int = 12,
-    scale: int = _DEFAULT_SCALE,
+    scale: float | None = None,
     bg: tuple[int, int, int] | None = None,
     fg: tuple[int, int, int] | None = None,
     palette: dict[str, tuple[int, int, int]] | None = None,
@@ -286,6 +317,10 @@ def render_screen(
 
     `scale` supersamples the whole render (font px, cells, pad) for a crisp,
     high-DPI PNG — the glyphs are rasterized at `font_size * scale`, not upscaled.
+    The default (None) picks the largest scale up to 3x whose grid — history rows
+    included — stays within `_MAX_DIM`, so a big terminal is rasterized small
+    instead of being downscaled afterwards. Pass an explicit `scale` to override:
+    a render for a human to open has no vision budget and wants a fixed 3.
 
     `bg`/`fg` override the default dark surface and `palette` the named-color map
     (pyte color name → RGB) — an app-aware caller passes its own theme so the PNG
@@ -293,12 +328,6 @@ def render_screen(
     surface_bg = bg if bg is not None else _BG
     surface_fg = fg if fg is not None else _FG
     colors = palette if palette is not None else _PALETTE
-    # Supersample: rasterize the font at scale*size and scale the grid to match.
-    font_px = font_size * scale
-    derived_w, derived_h = _cell_metrics(font_px)
-    cell_w = derived_w if cell_w is None else cell_w * scale
-    cell_h = derived_h if cell_h is None else cell_h * scale
-    pad *= scale
     cols = screen.columns
     # In scroll shape, full=True prepends scrolled-off history.top above the live
     # screen (a potentially very tall strip — up to history rows — hence opt-in).
@@ -311,6 +340,11 @@ def render_screen(
     history = list(screen.history.top) if (full and in_scroll) else []
     grid = history + live_rows
     rows = len(grid)
+    # Supersample: rasterize the font at font_px and scale the grid to match. An
+    # explicit scale floors at 1 px because _cell_metrics(0) raises.
+    font_px = (max(1, int(font_size * scale)) if scale is not None
+               else _fit_font_px(cols, rows, font_size, cell_w, cell_h, pad))
+    cell_w, cell_h, pad = _layout(font_px, font_size, cell_w, cell_h, pad)
     w = cols * cell_w + 2 * pad
     h = rows * cell_h + 2 * pad
     img = Image.new("RGB", (w, h), surface_bg)

@@ -9,8 +9,10 @@ import time
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from impty.driver import ImptyDriver, _decode_keys
+from impty.render import _MAX_DIM
 from impty.session import (
     DEFAULT_CHANGE_HARD,
     DEFAULT_SETTLE_HARD,
@@ -578,3 +580,23 @@ def test_resize_numeric_wait_is_clamped_and_reports_the_clamp(
         assert d.resize(30, 100, wait=False) == "[resized]"
     finally:
         d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_snapshot_of_a_large_terminal_stays_within_the_render_ceiling(
+    tmp_path: Path,
+) -> None:
+    # The driver passes no `scale`, so it inherits auto-fit with no call-site change:
+    # a 150x44 session is 2772 px wide at a fixed 3x, over the ceiling a vision
+    # pipeline downscales at.
+    out = tmp_path / "big.png"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"], cols=150, rows=44)
+    try:
+        d.snapshot(path=str(out))
+    finally:
+        d.stop()
+    with Image.open(out) as img:
+        img.load()
+        assert img.width <= _MAX_DIM
+        assert img.height <= _MAX_DIM

@@ -61,8 +61,10 @@ def main() -> None:
     screen = pyte.Screen(cols, rows)
     pyte.Stream(screen).feed(
         show_faint(ansi, th["faint"]).replace("\n", "\r\n"))
+    # A mockup is for a human to open, not for a vision budget: keep the full 3x
+    # density that render_screen would otherwise auto-fit away on a tall capture.
     render_screen(screen, out_png, bg=th["bg"], fg=th["fg"],
-                  palette=th["palette"], full=False)
+                  palette=th["palette"], full=False, scale=3)
     print(out_png)
 
 
