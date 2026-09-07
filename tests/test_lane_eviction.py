@@ -70,6 +70,14 @@ def test_evict_noop_when_not_holding(tmp_path: Path) -> None:
     assert _evict_if_holding(ch, state, JsonlEventLog(ch.events_path)) is False
 
 
+def _commit_workflow(root: Path, message: str) -> None:
+    """Disable the sandbox gate (deterministic across environments) and commit."""
+    cfg_path = project_state_dir(root) / "config.yaml"
+    cfg_path.write_text(cfg_path.read_text() + "sandbox:\n  enabled: false\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", message)
+
+
 def _write_serialize_workflow(root: Path, touch_cmd: str) -> None:
     wf = root / "imp" / "workflows" / "imp" / "workflow.yaml"
     wf.write_text(
@@ -87,11 +95,7 @@ def _write_serialize_workflow(root: Path, touch_cmd: str) -> None:
         "          - {if: {exit: 0}, continue: true}\n"
         "          - {else: true, pause: true}\n"
     )
-    # keep the script gate deterministic across environments
-    cfg_path = project_state_dir(root) / "config.yaml"
-    cfg_path.write_text(cfg_path.read_text() + "sandbox:\n  enabled: false\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-qm", "serialize workflow")
+    _commit_workflow(root, "serialize workflow")
 
 
 def test_pause_in_held_region_evicts_and_rewinds(tmp_path: Path, provider_registry) -> None:
@@ -274,4 +278,104 @@ def test_entry_guard_eviction_clears_restore_and_replays_the_phase(
     started = [(e.get("payload") or {}).get("step")
                for e in events if e.get("type") == "step_started"]
     assert started == ["lane", "touch-base"]         # replayed from the acquire step
+    assert State.load(ch.state_dir).lane_restore is None
+
+
+# `flip` fails on its first run and passes on every later one: the sentinel lives in
+# the quest home ($IMP_QUEST_DIR is injected by engine_env), which survives the pause.
+_FLIP_ONCE = 'test -f "$IMP_QUEST_DIR/flip" || { : > "$IMP_QUEST_DIR/flip"; exit 1; }'
+
+
+def _write_restore_workflow(root: Path) -> None:
+    """A five-step merge phase: the acquiring step, two steps that must not replay,
+    the step that pauses, and a tail step standing in for the merge."""
+    wf = root / "imp" / "workflows" / "imp" / "workflow.yaml"
+    wf.write_text(
+        "name: t\ndescription: \"\"\n"
+        "phases:\n"
+        "  - name: serialize\n"
+        "    steps:\n"
+        "      - name: lane\n"
+        "        acquire: merge-lane\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: alpha\n"
+        "        command: \"true\"\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: beta\n"
+        "        command: \"true\"\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: flip\n"
+        f"        command: '{_FLIP_ONCE}'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, pause: true}\n"
+        "      - name: gamma\n"
+        "        command: \"true\"\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _commit_workflow(root, "restore workflow")
+
+
+def _steps_started(quest: Quest) -> list[str]:
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)   # home reaped on done
+    return [(e.get("payload") or {}).get("step")
+            for e in JsonlEventLog(quest.events_path).read()
+            if e.get("type") == "step_started"]
+
+
+def test_resume_after_pause_restores_without_replaying_the_phase(
+        tmp_path: Path) -> None:
+    """Every step strictly between the acquiring step and the pause point runs
+    exactly once across the pause and the resume."""
+    _seed_control(tmp_path)
+    _write_restore_workflow(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+
+    assert anyio.run(run_quest, ch) is RunResult.PAUSED
+    paused = State.load(ch.state_dir)
+    assert paused.step == "lane"                 # the coarse rewind still happens
+    assert paused.lane_restore is not None
+    assert paused.lane_restore.step == "flip"
+
+    assert anyio.run(run_quest, ch) is RunResult.COMPLETED
+
+    started = _steps_started(ch)
+    # `lane` re-runs by design (the lane must be re-acquired); nothing else does.
+    assert started == ["lane", "alpha", "beta", "flip", "lane", "flip", "gamma"]
+    events = list(JsonlEventLog(ch.events_path).read())
+    restored = [e["payload"] for e in events if e["type"] == "lane_restored"]
+    assert restored == [{"base": "main", "step": "flip"}]
+    assert State.load(ch.state_dir).lane_restore is None
+    assert mq.read(tmp_path) == []               # lane released at completion
+
+
+def test_entry_guard_replays_the_whole_phase(tmp_path: Path) -> None:
+    """The negative control for the test above: on the crash path the same five-step
+    phase replays in full, so the exactly-once counts there are the restore's doing."""
+    _seed_control(tmp_path)
+    _write_restore_workflow(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    (ch.quest_dir / "flip").write_text("")       # `flip` passes on its first run
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    state = State.load(ch.state_dir)
+    state.held_lane = "main"
+    state.held_acquire_step = "lane"
+    state.step = "flip"
+    state.status = "running"                     # died mid-phase, still holding
+    state.lane_restore = LaneRestore(            # a still-matching crash leftover
+        step="flip",
+        base_head=worktree.head_of(tmp_path, "main"),
+        quest_head=_worktree_head(ch))
+    state.save(ch.state_dir)
+
+    assert anyio.run(run_quest, ch) is RunResult.COMPLETED
+
+    assert _steps_started(ch) == ["lane", "alpha", "beta", "flip", "gamma"]
+    events = list(JsonlEventLog(ch.events_path).read())
+    assert not any(e["type"] == "lane_restored" for e in events)
     assert State.load(ch.state_dir).lane_restore is None
