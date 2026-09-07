@@ -253,8 +253,9 @@ def _applicable_tokens(
 
 
 def refresh_canonical_token(
-    now_ms: int, *, env: Mapping[str, str] | None = None,
+    now_ms: int, *, env: Mapping[str, str] | None = None, force: bool = False,
 ) -> RefreshOutcome:
+    "`force` skips both `_needs_refresh` short-circuits; SKIPPED_FRESH is then unreachable."
     env = os.environ if env is None else env
     try:
         base = _canonical_dir(env)
@@ -267,7 +268,7 @@ def refresh_canonical_token(
     if data is None or applicable is None:
         return RefreshOutcome(NOT_APPLICABLE)
     tokens, _ = applicable
-    if not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
+    if not force and not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
         return RefreshOutcome(SKIPPED_FRESH)
 
     try:
@@ -277,7 +278,7 @@ def refresh_canonical_token(
             if data is None or applicable is None:
                 return RefreshOutcome(NOT_APPLICABLE)
             tokens, refresh_token = applicable
-            if not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
+            if not force and not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
                 return RefreshOutcome(SKIPPED_FRESH)
             try:
                 new_tokens = _request_refresh(refresh_token)

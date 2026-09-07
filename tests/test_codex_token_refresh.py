@@ -584,3 +584,47 @@ def test_refresh_agrees_with_detect_auth_mode_on_every_row(
     out = ctr.refresh_canonical_token(NOW, env=env)
     assert out.outcome == expected_outcome
     assert len(seen) == expected_calls
+
+
+def test_force_refreshes_a_fresh_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An hour out with a minutes-old last_refresh: reaching the endpoint proves
+    # both _needs_refresh short-circuits (pre-lock and under-lock) were skipped.
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600),
+                       refresh_token="old-refresh",
+                       last_refresh="2001-09-09T01:30:00Z")
+    new_access = _jwt(NOW // 1000 + 7200)
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": "new-id", "access_token": new_access,
+                "refresh_token": "new-refresh"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path), force=True)
+
+    assert out.outcome == ctr.REFRESHED
+    assert out.expires_at == (NOW // 1000 + 7200) * 1000
+    assert seen == ["old-refresh"]
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["access_token"] == new_access
+    assert tokens["refresh_token"] == "new-refresh"
+
+
+def test_force_still_reports_invalid_grant_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600),
+                       refresh_token="dead")
+    before = path.read_bytes()
+
+    def _dead(refresh_token: str) -> dict[str, object]:
+        raise ctr.RefreshInvalidGrant()
+
+    monkeypatch.setattr(ctr, "_request_refresh", _dead)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path), force=True)
+
+    assert out.outcome == ctr.FAILED_INVALID_GRANT
+    assert path.read_bytes() == before
