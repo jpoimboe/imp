@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from imp.providers.errors import ConfigError
 
 
 class _WireModel(BaseModel):
@@ -100,6 +102,10 @@ class UnknownThreadItem(_WireModel):
     type: str
 
 
+class _UnparsedThreadItem(UnknownThreadItem):
+    imp_parse_error: str
+
+
 ThreadItem = (
     AgentMessageItem
     | ReasoningItem
@@ -111,6 +117,18 @@ ThreadItem = (
     | ErrorItem
     | UnknownThreadItem
 )
+
+
+class CodexEventParseError(ConfigError):
+    """A codex item type imp consumes did not match imp's exec event models."""
+
+
+# The item types process_event dispatches on: their payloads carry imp's control
+# flow, so a parse failure there is fatal rather than skippable.
+_CONSUMED_ITEM_TYPES = frozenset(
+    {"mcp_tool_call", "agent_message", "reasoning", "web_search", "error"}
+)
+
 
 _ITEM_MODELS: dict[str, type[BaseModel]] = {
     "agent_message": AgentMessageItem,
@@ -131,4 +149,16 @@ def parse_thread_item(data: Any) -> ThreadItem:
     if not isinstance(item_type, str):
         raise ValueError(f"invalid codex item payload (missing type): {data!r}")
     model = _ITEM_MODELS.get(item_type, UnknownThreadItem)
-    return cast("ThreadItem", model.model_validate(data))
+    try:
+        return cast("ThreadItem", model.model_validate(data))
+    except ValidationError as exc:
+        if item_type in _CONSUMED_ITEM_TYPES:
+            raise CodexEventParseError(
+                f"codex event parse failure: item type {item_type!r} does not match imp's codex "
+                f"exec event model — update src/imp/providers/codex_events.py",
+                detail={"item_type": item_type, "validation_error": str(exc)},
+            ) from exc
+        item_id = data.get("id")
+        return _UnparsedThreadItem(
+            id=item_id if isinstance(item_id, str) else "", type=item_type, imp_parse_error=str(exc)
+        )
