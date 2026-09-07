@@ -260,6 +260,47 @@ def test_close_ends_the_drainer_with_no_error(caplog) -> None:
     assert [r for r in caplog.records if r.name == "impty.session"] == []
 
 
+_PRIVATE_QUERY_CHILD = (
+    "import sys, time\n"
+    "sys.stdout.write('\\x1b[?996n')\n"   # tmux 3.7's color-scheme query
+    "sys.stdout.write('QUERY-SURVIVED\\n')\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(5)\n"
+)
+
+
+def test_private_status_query_does_not_kill_the_session(caplog) -> None:
+    # The reported bug end to end: ESC[?996n reached pyte's parser and raised
+    # TypeError out of _read_step -> wait_idle -> start, killing the session.
+    with (
+        caplog.at_level("ERROR", logger="impty.session"),
+        TerminalSession([sys.executable, "-c", _PRIVATE_QUERY_CHILD]) as s,
+    ):
+        assert s.wait_idle(idle=0.2, hard=30.0) is True
+        assert "QUERY-SURVIVED" in "\n".join(s.lines())
+    # Not merely survived: the screen handler swallowed the query, so the
+    # _read_step guard never fired. Without this, the guard alone would pass.
+    assert "impty: unparseable output dropped" not in caplog.text
+
+
+_XTMODKEYS_CHILD = (
+    "import sys, time\n"
+    "sys.stdout.write('\\x1b[>4;2m')\n"   # XTMODKEYS, mis-parsed by pyte as SGR 4;2
+    "sys.stdout.write('MODKEYS-PROBE\\n')\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(5)\n"
+)
+
+
+def test_xtmodkeys_does_not_underline_later_output() -> None:
+    probe = "MODKEYS-PROBE"
+    with TerminalSession([sys.executable, "-c", _XTMODKEYS_CHILD]) as s:
+        s.wait_idle(idle=0.2, hard=30.0)
+        assert s.lines(limit=s.rows)[0].rstrip() == probe
+        underlined = [s.cell(x, 0).underscore for x in range(len(probe))]
+        assert underlined == [False] * len(probe)
+
+
 def test_cursor_parks_after_prompt_string() -> None:
     # "Waiting for input looks like": cursor sits immediately after the prompt
     # text, on the bottom non-blank row, with no further output. This is the

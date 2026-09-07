@@ -24,10 +24,9 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 
-import pyte
-
 from impty import view
 from impty.screen import Regime, TerminalScreen
+from impty.stream import TerminalStream
 from impty.view import Cell
 
 _log = logging.getLogger(__name__)
@@ -114,7 +113,7 @@ class TerminalSession:
         history: int = 2000,
     ) -> None:
         self._screen = TerminalScreen(cols, rows, history=history, ratio=0.5)
-        self._stream = pyte.ByteStream(self._screen)
+        self._stream = TerminalStream(self._screen)
         self._master, slave = pty.openpty()
         # Forward pyte's terminal-query replies (CPR, device attributes) to the
         # program's stdin, exactly as a real terminal does.
