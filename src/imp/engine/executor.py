@@ -999,7 +999,8 @@ async def _dispatch_step(
     if step.release is not None:
         _release_lane(step, quest, state, log)
     if step.acquire is not None and step.acquire != "test-lane":
-        return await _route_acquire(step, quest, state, log, wait_for_turn_fn)
+        return await _route_acquire(
+            step, workflow, quest, state, log, wait_for_turn_fn)
 
     sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, quest.project_root)
 
@@ -1297,7 +1298,7 @@ def _resolve_lane(value: str, quest: Quest) -> str:
 
 
 async def _route_acquire(
-    step: Step, quest: Quest, state: State, log: EventLog,
+    step: Step, workflow: Workflow, quest: Quest, state: State, log: EventLog,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Enqueue in lane; proceed as head, marking the hold; hibernate if unattended non-head."""
@@ -1339,6 +1340,21 @@ async def _route_acquire(
     state.held_acquire_step = step.name
     state.save(quest.state_dir)
     _emit(log, "lane_acquired", {"base": lane, "step": step.name, "glyph": step.glyph})
+    restore = state.lane_restore
+    if restore is not None:
+        state.lane_restore = None            # consumed exactly once, either way
+        state.save(quest.state_dir)
+        # The recorded step must still exist: neither fingerprinted ref covers
+        # imp's own packaged workflow, so an upgrade during the pause can drop it.
+        if (workflow.step_index(restore.step) is not None
+                and _lane_fingerprint(quest)
+                == (restore.base_head, restore.quest_head)):
+            _emit(log, "lane_restored", {"base": lane, "step": restore.step})
+            goto = Goto(target=restore.step)
+            _emit(log, "step_completed", {
+                "step": step.name, "kind": step.kind,
+                "action": _action_payload(goto), "var_mutations": {}})
+            return goto, None, {}
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
     return _finish(log, step, quest, match, state)
