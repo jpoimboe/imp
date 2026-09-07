@@ -24,6 +24,8 @@ import selectors
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,20 @@ INIT_FRAME_BUDGET = 30.0
 # network dial — so a spawn that yields no frame is retried, stall included.
 PROBE_ATTEMPTS = 3
 PROBE_RETRY_BACKOFF = 1.0
+
+
+class InitReadOutcome(Enum):
+    INIT = "init"
+    EOF = "eof"
+    PROCESS_EXITED = "process_exited"
+    BUDGET_EXPIRED = "budget_expired"
+
+
+@dataclass(frozen=True)
+class InitRead:
+    frame: dict[str, Any] | None
+    stdout_bytes: int
+    outcome: InitReadOutcome
 
 
 def invocation(tmp_path: Path, declared: frozenset[str] = frozenset()) -> AgentInvocation:
@@ -77,23 +93,26 @@ def resolve_cli(opts: ClaudeAgentOptions) -> str:
         pytest.skip("claude CLI not found")
 
 
-def read_init_frame(proc: subprocess.Popen[bytes], budget: float) -> dict[str, Any] | None:
+def read_init_frame(proc: subprocess.Popen[bytes], budget: float) -> InitRead:
     """Poll `proc`'s raw stdout fd for the CLI's `init` system message, giving up
     after `budget` seconds. Bytes are buffered and split on newlines, so a frame
     delivered across two writes still parses. Non-JSON and non-init lines are
-    skipped. Returns the parsed frame, or None on EOF or budget expiry."""
+    skipped. Returns an InitRead naming which exit was taken: INIT, EOF or
+    BUDGET_EXPIRED. `frame` is set exactly when the outcome is INIT."""
     assert proc.stdout is not None
     deadline = time.monotonic() + budget
     buf = b""
+    stdout_bytes = 0
     with selectors.DefaultSelector() as selector:
         selector.register(proc.stdout, selectors.EVENT_READ)
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not selector.select(remaining):
-                return None
+                return InitRead(None, stdout_bytes, InitReadOutcome.BUDGET_EXPIRED)
             chunk = os.read(proc.stdout.fileno(), 65536)
             if not chunk:               # EOF: stdout closed before an init message
-                return None
+                return InitRead(None, stdout_bytes, InitReadOutcome.EOF)
+            stdout_bytes += len(chunk)
             buf += chunk
             while b"\n" in buf:
                 raw, buf = buf.split(b"\n", 1)
@@ -105,7 +124,7 @@ def read_init_frame(proc: subprocess.Popen[bytes], budget: float) -> dict[str, A
                 except json.JSONDecodeError:
                     continue
                 if msg.get("type") == "system" and msg.get("subtype") == "init":
-                    return msg
+                    return InitRead(msg, stdout_bytes, InitReadOutcome.INIT)
 
 
 def _spawn_and_read_init(
@@ -160,7 +179,7 @@ def _spawn_and_read_init(
                 with contextlib.suppress(BrokenPipeError):
                     proc.stdin.close()
 
-            frame = read_init_frame(proc, INIT_FRAME_BUDGET)
+            frame = read_init_frame(proc, INIT_FRAME_BUDGET).frame
             if frame is None:
                 try:
                     # Settled before the reap: terminate() sets returncode to -15, so a

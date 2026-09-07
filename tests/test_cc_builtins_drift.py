@@ -28,7 +28,13 @@ import pytest
 
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from tests import cc_probe
-from tests.cc_probe import PROBE_ATTEMPTS, invocation, probe_advertised_tools, read_init_frame
+from tests.cc_probe import (
+    PROBE_ATTEMPTS,
+    InitReadOutcome,
+    invocation,
+    probe_advertised_tools,
+    read_init_frame,
+)
 
 
 def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) -> None:
@@ -75,20 +81,33 @@ def test_read_init_frame_returns_the_init_frame() -> None:
         "time.sleep(30)\n"
     )
     with _stub_proc(code) as proc:
-        frame = read_init_frame(proc, 10.0)
+        read = read_init_frame(proc, 10.0)
 
-    assert frame is not None
-    assert frame["tools"] == ["Bash", "ToolSearch"]
+    assert read.outcome is InitReadOutcome.INIT
+    assert read.stdout_bytes > 0
+    assert read.frame is not None
+    assert read.frame["tools"] == ["Bash", "ToolSearch"]
 
 
 def test_read_init_frame_honours_its_deadline_on_a_silent_process() -> None:
     with _stub_proc("import time; time.sleep(30)") as proc:
         start = time.monotonic()
-        frame = read_init_frame(proc, 1.0)
+        read = read_init_frame(proc, 1.0)
         elapsed = time.monotonic() - start
 
-    assert frame is None
+    assert read.outcome is InitReadOutcome.BUDGET_EXPIRED
+    assert read.frame is None
+    assert read.stdout_bytes == 0
     assert elapsed < 10.0, f"reader blocked past its 1s budget ({elapsed:.1f}s)"
+
+
+def test_read_init_frame_reports_eof_when_stdout_closes_first() -> None:
+    with _stub_proc("pass") as proc:
+        read = read_init_frame(proc, 10.0)
+
+    assert read.outcome is InitReadOutcome.EOF
+    assert read.frame is None
+    assert read.stdout_bytes == 0
 
 
 def test_read_init_frame_parses_a_frame_split_across_writes() -> None:
@@ -103,10 +122,12 @@ def test_read_init_frame_parses_a_frame_split_across_writes() -> None:
         "time.sleep(30)\n"
     )
     with _stub_proc(code) as proc:
-        frame = read_init_frame(proc, 10.0)
+        read = read_init_frame(proc, 10.0)
 
-    assert frame is not None
-    assert frame["tools"] == ["Bash", "ToolSearch"]
+    assert read.outcome is InitReadOutcome.INIT
+    assert read.stdout_bytes > 0
+    assert read.frame is not None
+    assert read.frame["tools"] == ["Bash", "ToolSearch"]
 
 
 def test_probe_raises_when_no_init_frame_arrives(
