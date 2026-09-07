@@ -198,9 +198,9 @@ def test_a_web_search_with_no_tokens_is_still_billable_work() -> None:
 
 def test_model_usage_sums_every_model_including_haiku() -> None:
     # AC 2(b): haiku is present only in model_usage — the background model never
-    # appears in the agent_message stream at all. The web-search count is NOT
-    # carried: claude_code renders the vendor's own cost, which already folds
-    # web search in, so pricing it again here would be dead arithmetic.
+    # appears in the agent_message stream at all. The web-search count rides
+    # along: when the vendor omits its own cost, the fallback prices it, and
+    # dropping it here would under-bill a search-heavy row by $0.01 a request.
     billing = billing_from_model_usage({
         "claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 50,
                               "cacheReadInputTokens": 1000,
@@ -211,7 +211,8 @@ def test_model_usage_sums_every_model_including_haiku() -> None:
                                       "cacheCreationInputTokens": 0,
                                       "webSearchRequests": 0, "costUSD": 0.02}})
     assert billing == BillingUsage(fresh_input=110, cached_input=1100,
-                                   cache_write=200, output=55)
+                                   cache_write=200, output=55,
+                                   web_search_requests=3)
 
 
 def test_an_empty_model_usage_rollup_bills_nothing() -> None:
@@ -232,14 +233,91 @@ def test_a_query_result_counts_when_either_half_is_present() -> None:
     assert cost_only is not None
     assert cost_only.dollars == pytest.approx(0.42)
     assert (cost_only.priced, cost_only.notional) == (1, 1)
-    # ...and so are tokens alone, which carry no dollars but are still real.
+    # ...and so are tokens alone, which the table now prices: sonnet, per
+    # million, 100*$3 + 5*$15 = $0.000375.
     tokens_only = vendor_contribution(
         {"claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 5}},
         None, metered=True)
     assert tokens_only is not None
     assert (tokens_only.fresh_input, tokens_only.output) == (100, 5)
-    assert tokens_only.dollars == 0.0
+    assert tokens_only.dollars == pytest.approx(0.000375)
     assert (tokens_only.priced, tokens_only.unpriced) == (1, 0)
+
+
+def test_a_vendor_less_rollup_prices_every_model_against_the_table() -> None:
+    # No total_cost_usd on the wire: each model id is priced separately. Per
+    # million — sonnet 1000*$3 + 1000*$15 = $0.018, haiku $1/$5 = $0.006,
+    # opus $5/$25 = $0.030.
+    usage = vendor_contribution({
+        "claude-sonnet-4-6": {"inputTokens": 1000, "outputTokens": 1000},
+        "claude-haiku-4-5-20251001": {"inputTokens": 1000, "outputTokens": 1000},
+        "claude-opus-5": {"inputTokens": 1000, "outputTokens": 1000},
+    }, None, metered=False)
+    assert usage is not None
+    assert usage.dollars == pytest.approx(0.054)
+    assert (usage.priced, usage.unpriced) == (3, 0)
+    assert (usage.fresh_input, usage.output) == (3000, 3000)
+
+
+def test_a_vendor_less_rollup_floors_on_a_model_absent_from_the_table() -> None:
+    usage = vendor_contribution({
+        "claude-sonnet-4-6": {"inputTokens": 5000, "outputTokens": 8000,
+                              "cacheReadInputTokens": 200_000},
+        "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000},
+    }, None, metered=False)
+    assert usage is not None
+    # 5,000*$3 + 200,000*$0.30 + 8,000*$15 per million; mythic adds no dollars.
+    assert usage.dollars == pytest.approx(0.195)
+    assert (usage.priced, usage.unpriced) == (1, 1)
+    assert usage.fresh_input == 7000       # the unpriced model's tokens are real
+
+
+def test_a_vendor_less_rollup_of_unknown_models_carries_no_dollars() -> None:
+    usage = vendor_contribution(
+        {"claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}},
+        None, metered=False)
+    assert usage is not None
+    assert (usage.priced, usage.unpriced) == (0, 1)
+    assert usage.dollars == 0.0
+
+
+def test_a_vendor_figure_wins_over_what_the_table_would_compute() -> None:
+    # The table would say $0.000375 for these tokens; the vendor says $0.99, and
+    # the two differing numbers prove the table was never consulted.
+    usage = vendor_contribution(
+        {"claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 5}},
+        0.99, metered=True)
+    assert usage is not None
+    assert usage.dollars == pytest.approx(0.99)
+
+
+def test_a_vendor_zero_is_a_vendor_figure_not_a_missing_one() -> None:
+    usage = vendor_contribution(
+        {"claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 5}},
+        0.0, metered=True)
+    assert usage is not None
+    assert usage.dollars == 0.0             # not the table's $0.000375
+    assert (usage.priced, usage.unpriced) == (1, 0)
+
+
+def test_a_vendor_figure_is_unmoved_by_the_web_search_count() -> None:
+    # The vendor's dollars already fold web search in, so carrying the count
+    # into the quadruple must not add $0.07 on top of it.
+    usage = vendor_contribution(
+        {"claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 5,
+                               "webSearchRequests": 7}},
+        0.42, metered=True)
+    assert usage is not None
+    assert usage.dollars == pytest.approx(0.42)
+
+
+def test_an_all_zero_vendor_less_rollup_is_not_work() -> None:
+    assert vendor_contribution(
+        {"claude-sonnet-4-6": {"inputTokens": 0, "outputTokens": 0,
+                               "cacheReadInputTokens": 0,
+                               "cacheCreationInputTokens": 0,
+                               "webSearchRequests": 0}},
+        None, metered=False) is None
 
 
 def test_openai_cached_tokens_are_not_billed_at_the_fresh_rate() -> None:

@@ -663,6 +663,44 @@ def test_summary_markdown_shows_the_legend_lines_for_the_cells_it_rendered():
     assert floor not in out                      # no unpriced model here
 
 
+def _cc_fallback_events() -> list[dict]:
+    """A claude_code step whose query_result carries token counts but no
+    `total_cost_usd` — the shape the price-table fallback prices."""
+    return [
+        {"type": "step_started", "timestamp": "2024-01-01T00:00:00Z",
+         "payload": {"step": "reviewer", "phase": "build"}},
+        {"type": "agent_message", "agent_id": "a1",
+         "timestamp": "2024-01-01T00:00:01Z",
+         "payload": {"provider": "claude_code", "model": "claude-sonnet-4-6",
+                     "usage": {"input_tokens": 9999, "output_tokens": 8888}}},
+        {"type": "query_result", "agent_id": "a1",
+         "timestamp": "2024-01-01T00:00:02Z",
+         "payload": {"session_id": "s1", "usage": {},
+                     "model_usage": {"claude-sonnet-4-6": {
+                         "inputTokens": 5000, "outputTokens": 8000,
+                         "cacheReadInputTokens": 200000,
+                         "cacheCreationInputTokens": 0}}}},
+        {"type": "step_completed", "timestamp": "2024-01-01T00:01:00Z",
+         "payload": {"step": "reviewer", "action": {"verb": "continue"}}},
+    ]
+
+
+def test_summary_markdown_prices_a_vendor_less_claude_code_row():
+    # AC 10: the export calls the same cost_cell and legend_lines, so the
+    # fallback figure and its legend arrive with no work of its own.
+    rows = build_summary(_cc_fallback_events()).rows
+    header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
+                           total_seconds=60.0)
+    out = render_summary_markdown(rows, header=header)
+    lines = out.split("\n")
+    step_line = next(ln for ln in lines if ln.startswith("| reviewer |"))
+    total_line = next(ln for ln in lines if ln.startswith("| total |"))
+    assert step_line.endswith("| [$0.20] |")
+    assert total_line.endswith("| [$0.20] |")
+    assert ("[ ] list-price equivalent; subscription usage is not billed"
+            " per token") in out
+
+
 def test_summary_markdown_with_no_steps_keeps_the_time_and_drops_the_legend():
     # Same reachable window as the terminal view: no step rows, but a real span.
     header = SummaryHeader(workflow="imp", quest_id="c", status="running",

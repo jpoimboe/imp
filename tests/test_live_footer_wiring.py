@@ -142,6 +142,19 @@ def test_the_live_figure_is_the_vendor_total_the_summary_reports() -> None:
     assert _position_row(events).endswith(f" · ${total.dollars:.2f}")
 
 
+# AC 11
+def test_the_cost_field_prices_a_query_result_carrying_no_vendor_cost() -> None:
+    # The footer derives from the same RowUsage, so a fallback-priced row
+    # reaches it bare, with no sigil: 5,000*$3 + 200,000*$0.30 + 8,000*$15 per
+    # million = $0.195 on claude-sonnet-4-6.
+    events = _cc_events(ev("r1", "query_result", agent_id=_STEP,
+                           session_id="sess-1",
+                           model_usage={"claude-sonnet-4-6": {
+                               "inputTokens": 5000, "outputTokens": 8000,
+                               "cacheReadInputTokens": 200000}}))
+    assert _position_row(events).endswith(" · $0.20")
+
+
 # AC 16(b)
 def test_the_live_figure_sums_usage_patches_that_carry_no_id() -> None:
     events = _codex_events(_usage_patch(100000, 8000, 100000),
