@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from imp.paths import project_state_dir
+from imp.paths import imp_home, project_state_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +185,13 @@ def engine_env(
         IMP_QUEST_ID      — the stable, immutable quest identity; hook authors
                             MUST key on this.
         IMP_QUEST_TITLE   — human-readable title for the quest.
+        IMP_HOME          — imp's per-machine directory ($IMP_HOME, else ~/.imp),
+                            emitted unconditionally so the `imp` shim inside the
+                            sandbox resolves the engine's home rather than falling
+                            back. Deliberately NOT in ENGINE_ENV_VARS: membership
+                            would make overlay_engine_env strip an inherited custom
+                            home from the host-side spawns that overlay an empty
+                            engine env.
         IMP_QUEST_DIR     — absolute host path of the quest state directory;
                             injected only when quest_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/quests/
@@ -221,6 +228,7 @@ def engine_env(
         "IMP_PROJECT_ROOT": str(project_root),
         "IMP_QUEST_ID": quest_id,
         "IMP_QUEST_TITLE": quest_title,
+        "IMP_HOME": str(imp_home()),
         **HEADLESS_ENV,
     }
     if quest_dir is not None:

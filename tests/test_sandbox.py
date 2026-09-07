@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.env import engine_env
 from imp.engine.sandbox import (
     HomeLayer,
     OverlayRoot,
@@ -805,6 +806,35 @@ def test_child_env_pythonpath_puts_the_engine_prefix_ahead_of_the_ambient(tmp_pa
     )
     assert dict(pol.child_env)["PYTHONPATH"] == (
         f"{wt}/src{os.pathsep}{wt}/vendor{os.pathsep}/amb/lib")
+
+
+def test_sandboxed_child_gets_imp_home_from_the_engine_not_the_environment(tmp_path):
+    # AC 7(a): the child's `environ` carries no IMP_HOME (an active sandbox inherits
+    # nothing ambient), so the value can only come from engine_env's emission —
+    # without it the in-sandbox `imp` shim would fall back to ~/.imp and read another
+    # home's global config.
+    control, wt = _layout(tmp_path)
+    eng = engine_env(project_root=wt, quest_id="abc", quest_title="T")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result=eng, environ={"PATH": "/usr/bin"}, available=True)
+    spawn = build_sandbox_spawn("x", cwd=str(wt), policy=pol, engine_env=eng,
+                                environ={})
+    assert spawn.env["IMP_HOME"] == str(imp_home())
+
+
+def test_sandboxed_child_gets_a_custom_imp_home(tmp_path, monkeypatch):
+    # AC 7(b): a custom $IMP_HOME (not ~/.imp) reaches the sandboxed child by engine
+    # emission, so in-sandbox `imp` resolves the same home as the engine.
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "alt-home"))
+    control, wt = _layout(tmp_path)
+    eng = engine_env(project_root=wt, quest_id="abc", quest_title="T")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result=eng, environ={"PATH": "/usr/bin"}, available=True)
+    spawn = build_sandbox_spawn("x", cwd=str(wt), policy=pol, engine_env=eng,
+                                environ={})
+    assert spawn.env["IMP_HOME"] == str(tmp_path / "alt-home")
 
 
 def test_build_child_env_strips_provider_api_keys(tmp_path):
