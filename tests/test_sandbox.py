@@ -13,6 +13,7 @@ import pytest
 
 from imp.engine.env import engine_env
 from imp.engine.sandbox import (
+    KEEPER_PAYLOAD,
     HomeLayer,
     OverlayRoot,
     SandboxConfig,
@@ -299,9 +300,41 @@ def test_no_pythonpath_in_child_env_when_engine_env_lacks_it():
 def test_requires_pid_namespace_and_no_die_with_parent():
     argv = _argv("x", cwd="/wt", policy=_policy(), engine_env={})
     assert "--unshare-pid" in argv          # process-table isolation
-    assert "--die-with-parent" not in argv  # B.9.2 (H-A)
+    # B.9.2 (H-A): a PER-CALL spawn never carries it — it would collapse the
+    # runner's SIGTERM grace. Only the keeper does (see the keeper tests below).
+    assert "--die-with-parent" not in argv
     assert "--new-session" not in argv      # B.9.3 (F-8)
     assert "--unshare-user" in argv
+
+
+def test_keeper_spawn_carries_info_fd_and_die_with_parent():
+    spawn = build_sandbox_spawn(
+        KEEPER_PAYLOAD, cwd="/wt", policy=_policy(), engine_env={}, environ={},
+        keeper_info_fd=7)
+    assert spawn.argv[spawn.argv.index("--info-fd") + 1] == "7"
+    assert "--die-with-parent" in spawn.argv   # dead-man's switch, KEEPER only
+    assert spawn.argv[-1] == KEEPER_PAYLOAD
+    # the flag and the fd the child must inherit travel together
+    assert spawn.pass_fds == (7,)
+
+
+def test_keeper_flags_survive_the_overlay_unshare_wrapper():
+    # The overlay shape embeds the whole bwrap argv in an `sh -c` string, so the
+    # keeper flags have to be emitted BEFORE the wrap, not spliced in after it.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(
+        home="/home/u", merged="/ovl/merged", upper="/ovl/upper", work="/ovl/work"))
+    spawn = build_sandbox_spawn(
+        KEEPER_PAYLOAD, cwd="/wt", policy=pol, engine_env={}, environ={},
+        keeper_info_fd=9)
+    assert spawn.argv[0] == "unshare"
+    assert "--info-fd 9 --die-with-parent" in spawn.argv[-1]
+    assert spawn.pass_fds == (9,)
+
+
+def test_an_ordinary_spawn_passes_no_fds():
+    spawn = build_sandbox_spawn("x", cwd="/wt", policy=_policy(), engine_env={},
+                                environ={})
+    assert spawn.pass_fds == ()
 
 
 def test_network_off_adds_unshare_net():

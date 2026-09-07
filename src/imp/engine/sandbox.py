@@ -251,21 +251,27 @@ def sandbox_spawn_backoff_delay(attempt: int) -> float:
     return random.uniform(0.0, ceiling)
 
 
+KEEPER_PAYLOAD = "exec sleep infinity"   # the keeper's own command; it holds the namespaces open
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxSpawn:
     """One spawn's argv AND the environment to spawn it with. Produced by a single
     call so the two cannot be mismatched: the argv carries no environment flags, so
     the env field is the sole source of truth — pairing them prevents a caller from
     accidentally supplying os.environ and dumping the user's whole environment into
-    the sandbox."""
+    the sandbox. `pass_fds` are the fds the child must inherit for its argv to mean
+    anything (the keeper's --info-fd, a join's pinned namespace fds); they ride with
+    the argv for the same reason, and are () for an ordinary spawn."""
     argv: list[str]
     env: dict[str, str]
+    pass_fds: tuple[int, ...] = ()
 
 
 def build_sandbox_spawn(
     command: str, *, cwd: str, policy: SandboxPolicy | None,
     engine_env: Mapping[str, str], environ: Mapping[str, str],
-    shim_dir: str = "",
+    shim_dir: str = "", keeper_info_fd: int | None = None,
 ) -> SandboxSpawn:
     """Return the argv to spawn `command` AND the environment to spawn it with.
     When the policy is active, wrap with bwrap per spec §B.2 (fixed flag order) and
@@ -290,6 +296,14 @@ def build_sandbox_spawn(
     flows through with no edit here, and PYTHONPATH passes through as the single
     deliberate non-IMP_ exception — the imp-on-imp import shadow — matching
     `_build_child_env`.
+
+    `keeper_info_fd` makes this a KEEPER spawn: bwrap additionally gets
+    `--info-fd <fd>` (where it reports the ns-init's pid) and `--die-with-parent`
+    (the dead-man's switch for imp dying abnormally), and the fd comes back on
+    `SandboxSpawn.pass_fds` so the flag and the inherited fd cannot be separated.
+    Both flags belong to the keeper and only the keeper: on a per-call spawn
+    `--die-with-parent` would collapse the runner's SIGTERM grace (spec B.9).
+    `SandboxNamespace.open()` is the only caller and passes KEEPER_PAYLOAD.
 
     An ACTIVE policy carrying overlay_root with an un-minted home layer is a
     fail-open bug (it would bind the real $HOME rw) and raises; the INACTIVE
@@ -338,6 +352,10 @@ def build_sandbox_spawn(
     argv += ["--proc", "/proc", "--dev", "/dev"]
     # 12. chdir
     argv += ["--chdir", cwd]
+    # 12a. KEEPER only: bwrap reports the ns-init's pid on this fd, and
+    # --die-with-parent tears the whole namespace down if imp dies abnormally.
+    if keeper_info_fd is not None:
+        argv += ["--info-fd", str(keeper_info_fd), "--die-with-parent"]
     # 13. the child environment — delivered out-of-band on the spawn, NOT on argv
     # (argv is world-readable via /proc). The IMP_* slice comes authoritatively
     # from the live per-spawn engine_env (prefix allowlist) so a post-rename title
@@ -348,8 +366,8 @@ def build_sandbox_spawn(
     for k, v in engine_env.items():
         if _is_engine_passthrough(k):
             child_env[k] = v
-    # 14. namespaces — NO --die-with-parent / --new-session (B.9); --unshare-pid is
-    # safe (the group kill crosses the namespace)
+    # 14. namespaces — a PER-CALL spawn carries no --die-with-parent / --new-session
+    # (B.9); --unshare-pid is safe (the group kill crosses the namespace)
     argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-pid"]
     # 15. optional network isolation
     if not policy.network:
@@ -362,6 +380,7 @@ def build_sandbox_spawn(
              f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
              'exec sh -c "$0"',
              command]
+    pass_fds = () if keeper_info_fd is None else (keeper_info_fd,)
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
         # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner
@@ -378,8 +397,8 @@ def build_sandbox_spawn(
         )
         return SandboxSpawn(
             argv=["unshare", "--user", "--map-root-user", "--mount", "sh", "-c", mount],
-            env=child_env)
-    return SandboxSpawn(argv=argv, env=child_env)
+            env=child_env, pass_fds=pass_fds)
+    return SandboxSpawn(argv=argv, env=child_env, pass_fds=pass_fds)
 
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
