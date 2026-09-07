@@ -26,7 +26,8 @@ Read first, every entry:
   (highest N — glob for it). **Read it in full.** Its `## Task N` sections are your
   authoritative task list — exactly `{{ vars.task_total }}` of them — and its `— Part N`
   header names the spec slice this plan covers. Implement those tasks, and only those.
-- `{{ quest.home }}/progress.md` if it exists — **bounded** and **rewritable**: a
+- `{{ quest.home }}/progress.md` if it exists — `read_file` it, not `bash cat`
+  (only `read_file` discharges the read-before-write gate) — **bounded** and **rewritable**: a
   durable `## Completed plans` section (one line per plan: what landed + a
   representative commit) plus transient in-flight per-task entries. Deferred
   Followups and the `resolved-forward` / `NEEDS-REPLAN` forward notes live in the

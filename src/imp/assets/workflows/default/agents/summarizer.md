@@ -22,7 +22,7 @@ When the spec is thin on the *why* — always so on an express quest, whose spec
 
 ## Write
 
-Write `{{ quest.home }}/artifacts/summary/{{ quest.id }}.md`:
+Write `{{ quest.home }}/artifacts/summary/{{ quest.id }}.md` — `read_file` it first if it exists (you are being re-entered and revising your own earlier draft):
 
 - **Headline** — one tight paragraph: what this quest accomplishes and why, intent-level, ruthless signal/noise. No task-by-task enumeration (that lives in `progress.md`, commit messages, and `imp log`).
 - **Optional diagram** — text/ASCII only; include **only when the quest genuinely altered structure** (new component, changed data flow); must render in a terminal — no mermaid. Omit when structure did not change.
