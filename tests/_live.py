@@ -234,6 +234,51 @@ def stale_codex_oauth_skip_reason(events) -> str | None:
     return None
 
 
+_NATIVE_DENIAL_MARKERS = (
+    # Measured verbatim wording on 0.153.2: "patch rejected: writing is
+    # blocked by read-only sandbox; rejected by user approval settings"
+    # and "TypeError: tools.exec_command is not a function".
+    "read-only", "read only", "sandbox", "approval", "reject", "denied",
+    "not permitted", "permission", "not a function", "not defined",
+    # Natural-language paraphrase of the same denial.
+    "not available", "unavailable", "not accessible", "no access",
+    "not have access", "n't have access", "not exposed", "not bound",
+    "blocked", "refus", "forbidden", "not allowed", "not supported",
+)
+
+# Widening to "not available" alone would start accepting a report from a model
+# that never tried, so any of these vetoes a leg even when a denial marker also
+# matched — this is what keeps the widened check discriminating.
+_NEVER_ATTEMPTED_MARKERS = (
+    "no error — it succeeded", "no error - it succeeded",
+    "did not attempt", "didn't attempt", "did not try", "didn't try",
+    "skipped", "chose not to",
+)
+
+
+def _is_denial_evidence(report: str) -> bool:
+    return (any(m in report for m in _NATIVE_DENIAL_MARKERS)
+            and not any(m in report for m in _NEVER_ATTEMPTED_MARKERS))
+
+
+def native_denial_miss(patch_error: str, exec_error: str) -> str | None:
+    """Return None when both self-reported legs carry native-denial evidence,
+    else a one-line description of what is missing. Matching is
+    case-insensitive: callers pass the raw payload strings."""
+    patch_error = patch_error.lower()
+    exec_error = exec_error.lower()
+    misses: list[str] = []
+    if not _is_denial_evidence(patch_error):
+        misses.append(
+            f"patch_error={patch_error!r} carries no denial language (the model "
+            f"likely never attempted the native apply_patch)")
+    if not _is_denial_evidence(exec_error):
+        misses.append(
+            f"exec_error={exec_error!r} carries no denial language (the model "
+            f"likely never attempted the native shell write)")
+    return "; ".join(misses) or None
+
+
 def build_isolated_venv(
     project_root: Path,
     *,
