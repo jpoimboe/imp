@@ -9,6 +9,7 @@ asymmetry is what keeps codex schema drift visible instead of silently absorbed.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -119,6 +120,71 @@ ThreadItem = (
 )
 
 
+class Usage(_WireModel):
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    cache_write_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_output_tokens: int = 0
+
+
+class ThreadStartedEvent(_WireModel):
+    type: Literal["thread.started"]
+    thread_id: str
+
+
+class TurnStartedEvent(_WireModel):
+    type: Literal["turn.started"]
+
+
+class TurnCompletedEvent(_WireModel):
+    type: Literal["turn.completed"]
+    usage: Usage
+
+
+class TurnFailedEvent(_WireModel):
+    type: Literal["turn.failed"]
+    # Raw so categorize_turn_failed reads `status`/`kind`; codex's least stable payload.
+    error: dict[str, Any]
+
+
+class ItemStartedEvent(_WireModel):
+    type: Literal["item.started"]
+    item: ThreadItem
+
+
+class ItemUpdatedEvent(_WireModel):
+    type: Literal["item.updated"]
+    item: ThreadItem
+
+
+class ItemCompletedEvent(_WireModel):
+    type: Literal["item.completed"]
+    item: ThreadItem
+
+
+class ThreadErrorEvent(_WireModel):
+    type: Literal["error"]
+    message: str
+
+
+class UnknownThreadEvent(_WireModel):
+    type: str
+
+
+ThreadEvent = (
+    ThreadStartedEvent
+    | TurnStartedEvent
+    | TurnCompletedEvent
+    | TurnFailedEvent
+    | ItemStartedEvent
+    | ItemUpdatedEvent
+    | ItemCompletedEvent
+    | ThreadErrorEvent
+    | UnknownThreadEvent
+)
+
+
 class CodexEventParseError(ConfigError):
     """A codex item type imp consumes did not match imp's exec event models."""
 
@@ -139,6 +205,17 @@ _ITEM_MODELS: dict[str, type[BaseModel]] = {
     "web_search": WebSearchItem,
     "todo_list": TodoListItem,
     "error": ErrorItem,
+}
+
+_EVENT_MODELS: dict[str, type[BaseModel]] = {
+    "thread.started": ThreadStartedEvent,
+    "turn.started": TurnStartedEvent,
+    "turn.completed": TurnCompletedEvent,
+    "turn.failed": TurnFailedEvent,
+    "item.started": ItemStartedEvent,
+    "item.updated": ItemUpdatedEvent,
+    "item.completed": ItemCompletedEvent,
+    "error": ThreadErrorEvent,
 }
 
 
@@ -162,3 +239,34 @@ def parse_thread_item(data: Any) -> ThreadItem:
         return _UnparsedThreadItem(
             id=item_id if isinstance(item_id, str) else "", type=item_type, imp_parse_error=str(exc)
         )
+
+
+def parse_thread_event(data: Any) -> ThreadEvent:
+    if not isinstance(data, dict):
+        raise ValueError(f"invalid codex event payload (expected object): {data!r}")
+    event_type = data.get("type")
+    if not isinstance(event_type, str):
+        raise ValueError(f"invalid codex event payload (missing type): {data!r}")
+    model = _EVENT_MODELS.get(event_type)
+    if model is None:
+        return UnknownThreadEvent.model_validate(data)
+    if event_type.startswith("item."):
+        data = {**data, "item": parse_thread_item(data.get("item"))}
+    return cast("ThreadEvent", model.model_validate(data))
+
+
+def _first_key_wins(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    # codex flattens a second `id` into web_search items; the first is the item_N one.
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key not in out:
+            out[key] = value
+    return out
+
+
+def parse_thread_event_line(line: str) -> ThreadEvent:
+    try:
+        data = json.loads(line, object_pairs_hook=_first_key_wins)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid codex event line: {line!r}") from exc
+    return parse_thread_event(data)
