@@ -30,7 +30,7 @@ from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import build_continuation_fn
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
-from tests._live import stale_codex_oauth_skip_reason
+from tests._live import native_denial_miss, stale_codex_oauth_skip_reason
 
 pytestmark = pytest.mark.live("codex")
 
@@ -274,24 +274,6 @@ error text and `exec_error` set to step 2's verbatim error text. If a step
 somehow succeeded, set that field to the literal text `NO ERROR — IT SUCCEEDED`.
 """
 
-# Words that appear in a real codex sandbox refusal (measured on 0.153.2:
-# "patch rejected: writing is blocked by read-only sandbox; rejected by user
-# approval settings"). Matching any one of them tolerates upstream rewording
-# while still failing a report that says the model simply never tried.
-_SANDBOX_REFUSAL_MARKERS = (
-    "read-only", "read only", "sandbox", "approval", "reject", "denied",
-    "not permitted", "permission",
-)
-
-# The shell vector dies one layer earlier than the sandbox: 0.153.2 runs every
-# tool inside one native `exec` JS isolate, and `[features] shell_tool = false`
-# leaves `tools.exec_command` unbound in it (measured: "TypeError:
-# tools.exec_command is not a function"). Accept either denial — should the
-# binding ever return, read-only must refuse it.
-_EXEC_DENIAL_MARKERS = (
-    *_SANDBOX_REFUSAL_MARKERS, "not a function", "not defined",
-)
-
 _PROBE_ATTEMPTS = 5
 
 
@@ -341,6 +323,7 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
     `tools.exec_command` is not bound at all (`[features] shell_tool = false`).
     """
     last_events: list[Any] = []
+    notes: list[str] = []
     for attempt in range(_PROBE_ATTEMPTS):
         root = tmp_path / f"attempt{attempt}"
         root.mkdir()
@@ -369,6 +352,7 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
             reason = stale_codex_oauth_skip_reason(events)
             if reason is not None:
                 pytest.skip(reason)
+            notes.append(f"#{attempt + 1} parked awaiting input")
             continue
         last_events = events
         reason = stale_codex_oauth_skip_reason(events)
@@ -377,6 +361,7 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
         result = next(
             (e for e in events if e.get("type") == "agent_result"), None)
         if result is None:
+            notes.append(f"#{attempt + 1} no agent_result")
             continue
 
         # (a) the apply_patch target is byte-identical.
@@ -386,20 +371,21 @@ async def test_codex_live_refuses_native_writes_but_allows_mcp_writes(
         # (c) the MCP write landed, with its expected contents.
         assert (root / "mcp_written.txt").read_text().strip() == "MCP-OK"
         # Positive evidence that each native leg was ATTEMPTED and denied —
-        # without this, (a) and (b) also pass when the model never tried.
-        patch_error = str(result["payload"]["patch_error"]).lower()
-        assert any(m in patch_error for m in _SANDBOX_REFUSAL_MARKERS), (
-            f"patch_error={patch_error!r} carries no refusal language; the "
-            f"model likely never attempted the native apply_patch")
-        exec_error = str(result["payload"]["exec_error"]).lower()
-        assert any(m in exec_error for m in _EXEC_DENIAL_MARKERS), (
-            f"exec_error={exec_error!r} carries no denial language; the model "
-            f"likely never attempted the native shell write")
-        return
+        # without this, (a) and (b) also pass when the model never tried. A
+        # report the model paraphrased is a bad draw, not a regression: spend
+        # an attempt on it rather than aborting the whole test.
+        miss = native_denial_miss(
+            str(result["payload"]["patch_error"]),
+            str(result["payload"]["exec_error"]))
+        if miss is None:
+            return
+        notes.append(f"#{attempt + 1} {miss}")
 
     raise AssertionError(
-        f"codex never completed the probe in {_PROBE_ATTEMPTS} attempts "
-        f"(external codex/LLM nondeterminism). Last events: {last_events}")
+        f"codex never produced a completing probe run with native-denial "
+        f"evidence in {_PROBE_ATTEMPTS} attempts (external codex/LLM "
+        f"nondeterminism). Attempts: {'; '.join(notes)}. "
+        f"Last events: {last_events}")
 
 
 _OMITTED_MARKER = "BANANA-42"
