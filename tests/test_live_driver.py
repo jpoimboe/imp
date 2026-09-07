@@ -2004,6 +2004,43 @@ def test_mid_step_position_change_re_emits_a_header() -> None:
     assert "implementation phase · plan 1/1 · task 2/2" in body  # phase now prefixes the header
 
 
+def test_reemitted_header_marks_an_in_session_resume() -> None:
+    # awaiting_user renders no PauseNode, so the pause is invisible in the
+    # scrollback — and there is no workflow_resumed on this surface at all.
+    drv, out = _driver()
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                    model="m", provider="anthropic", label="task 1/2",
+                    phase_label="implementation phase · plan 1/1", position_label=True))
+    drv.on_event(ev("3", "workflow_paused", reason="awaiting_user"))
+    drv.on_event(ev("4", "step_started", step="task-lead", kind="agent", phase="code",
+                    model="m", provider="anthropic", label="task 1/2",
+                    phase_label="implementation phase · plan 1/1", position_label=True,
+                    resumed=True))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("5", "step_label_updated", agent_id="step:code/task-lead",
+                    label="task 2/2"))
+    body = "\n".join(_body(out))
+    assert "implementation phase · plan 1/1 · task 2/2 (resume)" in body
+
+
+def test_reemitted_header_does_not_mark_a_routed_reentry() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                    model="m", provider="anthropic", label="task 1/2",
+                    phase_label="implementation phase · plan 1/1", position_label=True,
+                    resumed=True, route_label="fixing test failures"))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("3", "step_label_updated", agent_id="step:code/task-lead",
+                    label="task 2/2"))
+    body = "\n".join(_body(out))
+    assert "task 2/2" in body               # the header WAS re-emitted
+    assert "(resume)" not in body
+
+
 def test_unchanged_position_push_emits_no_duplicate_header() -> None:
     drv, out = _driver()
     drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
