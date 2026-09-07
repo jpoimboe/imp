@@ -272,7 +272,8 @@ def build_sandbox_spawn(
     the env is the resolved child environment; otherwise the bare ["sh","-c",cmd]
     with the host environment (`environ` overlaid with `engine_env`, plus the
     `shim_dir` PATH prefix) — the `/sandbox off` path, deliberately unchanged. A
-    None policy is the same unsandboxed case.
+    None policy is the same unsandboxed case. `shim_dir` is ignored under an active
+    policy: the PATH shim is already baked into `policy.child_env` by `_build_child_env`.
 
     `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
