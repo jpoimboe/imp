@@ -172,13 +172,12 @@ def _journal_token_refresh(elog: Any, aid: str, outcome: RefreshOutcome) -> None
     elog.append(agent_id=aid, type="token_refresh", payload=payload)
 
 
-def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
-    """Refresh the canonical codex token before seed_auth; raise
-    AuthTerminalError on a dead token (only `codex login` can fix it)."""
+def _pre_spawn_token_refresh(elog: Any, aid: str) -> RefreshOutcome:
+    """Refresh the canonical codex token before seed_auth and journal the
+    outcome; the caller owns the dead-token policy."""
     outcome = refresh_canonical_token(int(time.time() * 1000))
     _journal_token_refresh(elog, aid, outcome)
-    if outcome.outcome == FAILED_INVALID_GRANT:
-        raise perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
+    return outcome
 
 
 # Internal sentinels _receive yields for the two mid-turn terminal pre-checks
@@ -340,9 +339,10 @@ class CodexSession(ObserveSession):
         )
         runner._codex_home = codex_home
         if auth_mode == "chatgpt":
-            # Refresh canonical auth.json before seed_auth; a dead token raises AuthTerminalError.
-            _pre_spawn_token_refresh(elog, aid)
+            outcome = _pre_spawn_token_refresh(elog, aid)
             runner._spawn_token_expiry = canonical_expires_at()
+            if outcome.outcome == FAILED_INVALID_GRANT:
+                raise perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
         seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                   codex_home=codex_home, env=os.environ)
 

@@ -7,7 +7,6 @@ import pytest
 from imp.engine.state import InMemoryEventLog
 from imp.providers import codex_runner
 from imp.providers import codex_token_refresh as ctr
-from imp.providers import errors as perr
 from imp.providers.codex_runner import CodexAgentRunner
 from tests.codex_fakes import FakeCodex
 from tests.test_codex_runner_happy_path import (
@@ -21,18 +20,19 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def test_helper_journals_outcome_and_raises_on_dead_token(
+def test_helper_journals_the_dead_outcome_and_returns_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The helper refreshes and journals; the dead-token policy is the caller's."""
     def _dead(now_ms: int, *, env: object = None) -> ctr.RefreshOutcome:
         return ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT)
 
     monkeypatch.setattr(codex_runner, "refresh_canonical_token", _dead)
     log = InMemoryEventLog()
-    with pytest.raises(perr.AuthTerminalError):
-        codex_runner._pre_spawn_token_refresh(log, "step:t")
 
-    # Journaled BEFORE the raise; payload carries only the outcome string.
+    outcome = codex_runner._pre_spawn_token_refresh(log, "step:t")
+
+    assert outcome.outcome == ctr.FAILED_INVALID_GRANT
     events = [e for e in log.read() if e["type"] == "token_refresh"]
     assert len(events) == 1
     assert events[0]["agent_id"] == "step:t"
@@ -47,7 +47,7 @@ def test_helper_journals_expires_at_when_refreshed(
 
     monkeypatch.setattr(codex_runner, "refresh_canonical_token", _ok)
     log = InMemoryEventLog()
-    codex_runner._pre_spawn_token_refresh(log, "step:t")  # must NOT raise
+    assert codex_runner._pre_spawn_token_refresh(log, "step:t").outcome == ctr.REFRESHED
     events = [e for e in log.read() if e["type"] == "token_refresh"]
     assert events[0]["payload"] == {
         "outcome": "refreshed", "expires_at": 1_700_000_000_000}
@@ -55,7 +55,7 @@ def test_helper_journals_expires_at_when_refreshed(
 
 @pytest.mark.parametrize(
     "outcome", [ctr.SKIPPED_FRESH, ctr.NOT_APPLICABLE, ctr.FAILED_TRANSIENT])
-def test_helper_does_not_raise_on_non_dead_outcomes(
+def test_helper_returns_every_other_outcome_unchanged(
     monkeypatch: pytest.MonkeyPatch, outcome: str,
 ) -> None:
     def _out(now_ms: int, *, env: object = None) -> ctr.RefreshOutcome:
@@ -63,7 +63,9 @@ def test_helper_does_not_raise_on_non_dead_outcomes(
 
     monkeypatch.setattr(codex_runner, "refresh_canonical_token", _out)
     log = InMemoryEventLog()
-    codex_runner._pre_spawn_token_refresh(log, "step:t")  # must NOT raise
+
+    assert codex_runner._pre_spawn_token_refresh(log, "step:t").outcome == outcome
+
     events = [e for e in log.read() if e["type"] == "token_refresh"]
     assert events[0]["payload"] == {"outcome": outcome}
 
@@ -74,6 +76,8 @@ async def test_dead_token_short_circuits_before_spawn(
 ) -> None:
     _seed_auth(tmp_path)  # writes a chatgpt-mode auth.json
     canonical = tmp_path / "auth.json"
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     def _dead(now_ms: int, *, env: object = None) -> ctr.RefreshOutcome:
         return ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT)
