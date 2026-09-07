@@ -1989,3 +1989,28 @@ def test_sandboxed_shell_cannot_see_or_signal_a_host_process() -> None:
         host.kill()
         host.wait()
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_real_child_env_is_exactly_the_paired_env(monkeypatch) -> None:
+    """AC 3: with --clearenv gone, the child's own `env` output must be exactly the
+    environment paired with the argv — no ambient var from the parent leaks in."""
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    root = _make_root()
+    try:
+        pol = _active_policy(root)
+        spawn = build_sandbox_spawn("env", cwd=str(root), policy=pol,
+                                    engine_env={"IMP_QUEST_ID": "abc123"},
+                                    environ={})
+        result = subprocess.run(spawn.argv, env=spawn.env,
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        observed = dict(
+            line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        assert observed["IMP_QUEST_ID"] == "abc123"
+        for k, v in spawn.env.items():
+            assert observed[k] == v, f"{k} did not reach the child intact"
+        # Only the shell's own additions may appear beyond the paired env.
+        assert set(observed) - set(spawn.env) <= {"PWD", "SHLVL", "_"}
+        assert "IMP_TELEGRAM_TOKEN" not in observed
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
