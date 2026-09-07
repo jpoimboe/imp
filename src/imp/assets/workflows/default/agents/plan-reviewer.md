@@ -152,9 +152,10 @@ Report `findings` as classified prose, grouped by severity. If there are no issu
 state so explicitly (e.g., "No findings. Plan is complete and ready for
 implementation.").
 
-End `findings` with `Verified at <sha>:` (the current HEAD) and the tree facts you checked this
-lap — paths, signatures, what existing code does — each with its `file:line`. The next lap reads
-this instead of re-opening those files; a check you don't record is a check it pays for again.
+End `findings` with `Verified at <sha>:` — the sha from `git -C "$IMP_PROJECT_ROOT" rev-parse HEAD`
+— and the tree facts you checked this lap: paths, signatures, what existing code does, each with
+its `file:line`. The next lap reads this instead of re-opening those files; a check you don't
+record is a check it pays for again.
 
 Set `blocking = true` if any Critical or Major findings exist; `false` otherwise.
 

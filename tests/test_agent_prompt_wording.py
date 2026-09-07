@@ -606,6 +606,9 @@ def test_plan_reviewer_first_lap_names_lap_one_and_omits_recovery(tmp_path) -> N
     assert "imp events abc --step plan-reviewer" not in out
     assert "refs/imp/artifacts/abc" not in out
     assert "floor, not a ceiling" not in out
+    # the sha instruction reaches lap 1 from `## Severity & output`, not from
+    # the collapsed earlier-laps body — an unstamped lap-1 report is ignored by lap 2
+    assert 'git -C "$IMP_PROJECT_ROOT" rev-parse HEAD' in out
 
 
 def test_plan_reviewer_later_lap_carries_the_recovery_protocol(tmp_path) -> None:
@@ -661,10 +664,10 @@ def test_plan_reviewer_later_lap_renders_without_a_head_key(tmp_path) -> None:
 
 
 _VERIFIED_TAIL = (
-    "End `findings` with `Verified at <sha>:` (the current HEAD) and the tree facts you "
-    "checked this\nlap — paths, signatures, what existing code does — each with its "
-    "`file:line`. The next lap reads\nthis instead of re-opening those files; a check you "
-    "don't record is a check it pays for again."
+    "End `findings` with `Verified at <sha>:` — the sha from `git -C \"$IMP_PROJECT_ROOT\" rev-parse HEAD`\n"
+    "— and the tree facts you checked this lap: paths, signatures, what existing code does, each with\n"
+    "its `file:line`. The next lap reads this instead of re-opening those files; a check you don't\n"
+    "record is a check it pays for again."
 )
 
 
