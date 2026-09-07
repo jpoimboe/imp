@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import sys
 from collections.abc import Iterator
@@ -365,3 +366,21 @@ def test_install_registers_each_item_model_exactly_once(
     assert parsing._ITEM_MODELS["mcp_tool_call"] is _McpToolCallItem
     assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
     assert not isinstance(codex_exec.asyncio._real, _SubprocessPatchingAsyncio)
+
+
+def test_unpatched_sdk_models_still_reject_the_real_wire_payloads() -> None:
+    """Obsolescence guard: if upstream ever fixes these models, this test fails
+    and tells us imp's widened subclasses are dead code."""
+    import pydantic
+    from openai_codex_sdk.types import (
+        CommandExecutionItem,
+        FileChangeItem,
+        McpToolCallResult,
+    )
+
+    with pytest.raises(pydantic.ValidationError):
+        FileChangeItem.model_validate(json.loads(_WIRE_FILE_CHANGE_STARTED)["item"])
+    with pytest.raises(pydantic.ValidationError):
+        CommandExecutionItem.model_validate(json.loads(_WIRE_COMMAND_DECLINED)["item"])
+    with pytest.raises(pydantic.ValidationError):
+        McpToolCallResult.model_validate(json.loads(_WIRE_MCP_STRING_CONTENT)["item"]["result"])
