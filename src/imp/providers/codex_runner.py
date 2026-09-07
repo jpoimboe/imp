@@ -1081,9 +1081,9 @@ def _attach_usage_to_last_agent_message(
 
 
 def _serialize_mcp_result(result: Any) -> str:
-    """Render an SDK ``McpToolCallResult`` to text for the tool_result event.
+    """Render a codex ``McpToolCallResult`` to text for the tool_result event.
 
-    The SDK shape is ``.content`` (a list of MCP content-block dicts) plus
+    The wire shape is ``.content`` (a list of MCP content-block dicts) plus
     ``.structured_content``; a plain ``str``/``None`` (older or duck-typed
     shapes) is passed through. Previously the runner did ``str(result)`` on the
     whole object, which serialized a pydantic repr instead of the tool output.
@@ -1130,11 +1130,11 @@ def _flush_codex_prose(
 
 def close_open_task_folds(elog: Any, state: dict[str, Any]) -> None:
     """Emit closing tool_result for any sub_agent fold whose item.completed never arrived."""
-    for sdk_id, agent_id in state.pop("open_task_ids", {}).items():
+    for item_id, agent_id in state.pop("open_task_ids", {}).items():
         elog.append_tool_result(
             agent_id=agent_id,
             block=ToolResultBlock(
-                tool_use_id=sdk_id,
+                tool_use_id=item_id,
                 content=_synthetic_tool_result_content("sub_agent"),
                 is_error=True),
             id_ns="block", kind="interrupted")
@@ -1152,21 +1152,21 @@ def process_event(
     reading, captured complete_step args, etc.
 
     The default arm (unknown item type) logs a runner_warning and returns; so
-    does an item the pinned SDK could not parse (see the parse-boundary bullet
-    under Layering invariants in docs/internals/invariants.md). Only
+    does an item imp's own event models could not parse (see the parse-boundary
+    bullet under Layering invariants in docs/internals/invariants.md). Only
     security-relevant types get special handling.
     """
     etype = getattr(event, "type", None)
 
-    # A payload codex_sdk_patch could not validate arrives degraded, carrying only
+    # A payload codex_events could not validate arrives degraded, carrying only
     # its id/type. Ahead of the etype dispatch so item.started/updated/completed
     # are covered alike; one warning per event, no seen-id state.
     degraded = getattr(event, "item", None)
     parse_error = getattr(degraded, "imp_parse_error", None)
     if parse_error is not None:
         elog.append(agent_id=agent_id, type="runner_warning", payload={
-            "message": f"codex {getattr(degraded, 'type', '')} item did not match the "
-                       f"pinned openai-codex-sdk model and was skipped",
+            "message": f"codex {getattr(degraded, 'type', '')} item did not match imp's codex "
+                       f"exec event model and was skipped",
             "codex_parse_error": parse_error})
         return
 
@@ -1175,8 +1175,8 @@ def process_event(
         state["thread_id"] = getattr(event, "thread_id", None)
         return
 
-    # `item.started` — open the task fold keyed on the SDK item id (quest 2).
-    # The codex SDK emits item.started (status="in_progress") for an mcp_tool_call
+    # `item.started` — open the task fold keyed on the codex item id (quest 2).
+    # codex emits item.started (status="in_progress") for an mcp_tool_call
     # before item.completed, carrying the SAME id; opening the task tool_call here
     # lets out-of-order sibling completion pair by id with no re-key. Non-task
     # item.started carries no final content and is intentionally ignored.
@@ -1184,7 +1184,7 @@ def process_event(
         item = getattr(event, "item", None)
         name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
         if getattr(item, "type", None) == "mcp_tool_call" and name == "sub_agent":
-            sdk_id = getattr(item, "id", "") or ""
+            item_id = getattr(item, "id", "") or ""
             args = getattr(item, "arguments", None) or {}
             # `arguments` may be a JSON string; mirror the item.completed guard.
             if isinstance(args, str):
@@ -1208,9 +1208,9 @@ def process_event(
                                model=model, state=state)
             elog.append_tool_call(
                 agent_id=agent_id,
-                block=ToolUseBlock(id=sdk_id, name="sub_agent", input=args),
+                block=ToolUseBlock(id=item_id, name="sub_agent", input=args),
                 label=label, id_ns="block")
-            state.setdefault("open_task_ids", {})[sdk_id] = agent_id
+            state.setdefault("open_task_ids", {})[item_id] = agent_id
         return
 
     # `item.completed` — dispatch on the item's own type.
@@ -1244,13 +1244,13 @@ def process_event(
             # item.started the buffer is already empty here (no-op).
             _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
                                model=model, state=state)
-            # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
-            # `name` silently recorded "" for every call (and made the
+            # codex's `McpToolCallItem` exposes `tool` + `server`, NOT `name`;
+            # reading `name` silently recorded "" for every call (and made the
             # complete_step capture below dead). Fall back to `name` only for
-            # older/duck-typed shapes.
+            # duck-typed test shapes.
             name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
             args = getattr(item, "arguments", None) or {}
-            sdk_id = getattr(item, "id", "") or ""
+            item_id = getattr(item, "id", "") or ""
             # Parse a string-shaped `arguments` to a dict for ToolOutcome.input
             # recording and complete_step fallback capture. Unparseable strings
             # degrade gracefully (no exception).
@@ -1272,17 +1272,17 @@ def process_event(
                 content = getattr(err, "message", "") or str(err)
             else:
                 content = _serialize_mcp_result(getattr(item, "result", None))
-            call_id = sdk_id
+            call_id = item_id
             task_id_ns: str | None
             if name == "sub_agent":
                 # quest 2: the task tool_call was opened at item.started keyed on
-                # this same SDK id and stamped id_ns="block"; close the fold here
+                # this same codex id and stamped id_ns="block"; close the fold here
                 # with the matching result. A task item with no prior item.started
                 # (the no-pair path) still emits a lone keyed result.
                 task_id_ns = "block"
-                state.get("open_task_ids", {}).pop(sdk_id, None)
+                state.get("open_task_ids", {}).pop(item_id, None)
             else:
-                # Non-task tool: emit the tool_call/result pair keyed on the SDK id.
+                # Non-task tool: emit the tool_call/result pair keyed on the codex id.
                 task_id_ns = None
                 elog.append_tool_call(
                     agent_id=agent_id,
@@ -1296,7 +1296,7 @@ def process_event(
                 id_ns=task_id_ns,
             )
             if name == "complete_step":
-                # Fallback capture from the RAW SDK item args. When the
+                # Fallback capture from the RAW codex item args. When the
                 # in-process wrapper's RunState capture ran, the consume loop's
                 # mirror overwrites proc_state with those args; this write is
                 # the fallback for when that path didn't run.
@@ -1314,7 +1314,7 @@ def process_event(
         if itype == "web_search":
             query = getattr(item, "query", "") or ""
             if state.get("web_search_enabled"):
-                # Expected: the agent declared `web_search` and the SDK ran the
+                # Expected: the agent declared `web_search` and codex ran the
                 # model-hosted search. Surface it as a tool_call so it shows in
                 # the narrative/`imp log`. codex's WebSearchItem exposes only the
                 # query (no results/citations), so the result is informational.
@@ -1334,9 +1334,9 @@ def process_event(
                         tool_use_id=call_id, content="", is_error=False),
                 )
                 return
-            # Disabled (`webSearchEnabled=False`): the tool should be gone.
-            # Seeing one is a soft tripwire (not fail-closed by itself; the
-            # SDK-form disable is verified live in the e2e test).
+            # Disabled in config.toml: the tool should be gone. Seeing one is
+            # a soft tripwire (not fail-closed by itself; the disable is
+            # verified live in the e2e test).
             elog.append(agent_id=agent_id, type="runner_warning",
                         payload={"message":
                                  f"unexpected codex web_search item "
@@ -1384,8 +1384,8 @@ def process_event(
         # without this mapping cache would silently record as zero.
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
         cached = int(getattr(usage, "cached_input_tokens", 0) or 0)
-        # Undeclared on the SDK Usage, so it arrives via model_extra; like
-        # `cached` it nests inside input_tokens, so both subtract from fresh.
+        # Like `cached`, cache-write nests inside input_tokens, so both
+        # subtract from fresh.
         cache_write = int(getattr(usage, "cache_write_input_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
         reasoning_tokens = int(getattr(usage, "reasoning_output_tokens", 0) or 0)

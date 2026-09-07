@@ -1,31 +1,21 @@
-"""Contract tests: feed REAL `openai_codex_sdk` item models through
+"""Contract tests: feed imp's own `codex_events` item models through
 `process_event` (not hand-rolled fakes).
 
 Why this file exists: the duck-typed fakes in `codex_fakes.py` previously
-modeled `McpToolCallItem.name` and `FileChangeItem.path`, but the real SDK uses
-`tool`/`server` and `changes:[{path,kind}]`. The runner read the fake field
-names, so unit tests and runner agreed on a fiction and every live codex
-`tool_call` was recorded with an empty name (and native-edit details showed "?").
-These tests construct the actual SDK pydantic models so any future field drift
+modeled `McpToolCallItem.name` and `FileChangeItem.path`, but the codex wire
+schema uses `tool`/`server` and `changes:[{path,kind}]`. The runner read the
+fake field names, so unit tests and runner agreed on a fiction and every live
+codex `tool_call` was recorded with an empty name (and native-edit details
+showed "?"). These tests construct the real models so any future field drift
 fails here instead of surfacing in a live dogfood.
 """
 
 from __future__ import annotations
 
-import importlib.util
 from typing import Any
 
-import pytest
-
 from imp.engine.state import InMemoryEventLog
-from imp.providers.codex_runner import process_event
-
-pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("openai_codex_sdk") is None,
-    reason="openai_codex_sdk not importable",
-)
-
-from openai_codex_sdk.types import (  # noqa: E402
+from imp.providers.codex_events import (
     AgentMessageItem,
     ErrorItem,
     ItemCompletedEvent,
@@ -36,6 +26,7 @@ from openai_codex_sdk.types import (  # noqa: E402
     TurnCompletedEvent,
     Usage,
 )
+from imp.providers.codex_runner import process_event
 
 
 def _feed(item: Any, state: dict[str, Any] | None = None) -> tuple[InMemoryEventLog, dict]:
@@ -85,7 +76,7 @@ def test_real_mcp_tool_call_complete_step_capture_fires() -> None:
 
 
 def test_real_mcp_tool_call_error_marks_is_error() -> None:
-    from openai_codex_sdk.types import McpToolCallError
+    from imp.providers.codex_events import McpToolCallError
     item = McpToolCallItem(
         id="c3", type="mcp_tool_call", server="imp", tool="edit_file",
         arguments={}, error=McpToolCallError(message="boom"), status="failed",
@@ -160,11 +151,11 @@ def test_real_error_item_is_diagnostic_not_unhandled() -> None:
 def test_degraded_item_warns_once_per_event_and_emits_no_error() -> None:
     """A file_change codex emitted with an unmodelled status reaches process_event
     as the degraded item; every event carrying it warns and is skipped."""
-    from imp.providers.codex_sdk_patch import _UnparsedThreadItem
+    from imp.providers.codex_events import _UnparsedThreadItem
 
     item = _UnparsedThreadItem(
         id="i9", type="file_change",
-        imp_parse_error="1 validation error for _FileChangeItem\nstatus\n  Input should be ...")
+        imp_parse_error="1 validation error for FileChangeItem\nstatus\n  Input should be ...")
     elog = InMemoryEventLog()
     state: dict[str, Any] = {}
     for event in (ItemStartedEvent(type="item.started", item=item),
@@ -178,8 +169,8 @@ def test_degraded_item_warns_once_per_event_and_emits_no_error() -> None:
     assert len(warns) == 3, events
     for warn in warns:
         assert warn["payload"]["message"] == (
-            "codex file_change item did not match the pinned openai-codex-sdk "
-            "model and was skipped")
+            "codex file_change item did not match imp's codex exec event model "
+            "and was skipped")
         assert warn["payload"]["codex_parse_error"].startswith("1 validation error")
     # Skipped, not mapped: no error event and no "unhandled codex item type".
     assert [e["type"] for e in events] == ["runner_warning"] * 3
