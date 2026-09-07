@@ -29,6 +29,7 @@ _DAY_MS = 24 * 60 * 60 * 1000
 
 REFRESHED = "refreshed"
 SKIPPED_FRESH = "skipped_fresh"
+SKIPPED_ROTATED = "skipped_rotated"
 NOT_APPLICABLE = "not_applicable"
 FAILED_TRANSIENT = "failed_transient"
 FAILED_INVALID_GRANT = "failed_invalid_grant"
@@ -254,8 +255,9 @@ def _applicable_tokens(
 
 def refresh_canonical_token(
     now_ms: int, *, env: Mapping[str, str] | None = None, force: bool = False,
+    spawn_expires_at: int | None = None,
 ) -> RefreshOutcome:
-    "`force` skips both `_needs_refresh` short-circuits; SKIPPED_FRESH is then unreachable."
+    """`force` ignores expiry; `spawn_expires_at` still skips a peer's rotation."""
     env = os.environ if env is None else env
     try:
         base = _canonical_dir(env)
@@ -280,6 +282,10 @@ def refresh_canonical_token(
             tokens, refresh_token = applicable
             if not force and not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
                 return RefreshOutcome(SKIPPED_FRESH)
+            current_expires_at = _jwt_exp_ms(tokens.get("access_token"))
+            if (spawn_expires_at is not None and current_expires_at is not None
+                    and current_expires_at != spawn_expires_at):
+                return RefreshOutcome(SKIPPED_ROTATED)
             try:
                 new_tokens = _request_refresh(refresh_token)
             except RefreshInvalidGrant:

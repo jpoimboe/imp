@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import stat
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -628,3 +630,99 @@ def test_force_still_reports_invalid_grant_without_writing(
 
     assert out.outcome == ctr.FAILED_INVALID_GRANT
     assert path.read_bytes() == before
+
+
+def test_a_moved_expiry_skips_the_forced_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+    before = path.read_bytes()
+
+    def _no_http(refresh_token: str) -> dict[str, object]:
+        raise AssertionError("a peer already rotated; no HTTP expected")
+
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True,
+        spawn_expires_at=(NOW // 1000 + 1800) * 1000)
+
+    assert out.outcome == ctr.SKIPPED_ROTATED
+    assert out.expires_at is None
+    assert path.read_bytes() == before
+
+
+def test_a_peer_rotating_while_we_wait_for_the_lock_is_caught(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rotation landing while we wait for the lock is invisible pre-lock."""
+    spawn_expiry = (NOW // 1000 + 3600) * 1000
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+
+    @contextlib.contextmanager
+    def _lock_that_rotates(lock_path: Path, *, timeout: float) -> Iterator[None]:
+        _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 7200),
+                    refresh_token="peer-refresh")
+        yield
+
+    def _no_http(refresh_token: str) -> dict[str, object]:
+        raise AssertionError("the peer's rotation must be seen under the lock")
+
+    monkeypatch.setattr(ctr, "_token_lock", _lock_that_rotates)
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=spawn_expiry)
+
+    assert out.outcome == ctr.SKIPPED_ROTATED
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["refresh_token"] == "peer-refresh"   # the peer's, unspent
+
+
+def test_a_matching_expiry_still_refreshes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawn_expiry = (NOW // 1000 + 3600) * 1000
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": None, "access_token": _jwt(NOW // 1000 + 7200),
+                "refresh_token": "probe-refresh"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=spawn_expiry)
+
+    assert out.outcome == ctr.REFRESHED
+    assert seen == ["old-refresh"]
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["refresh_token"] == "probe-refresh"
+
+
+@pytest.mark.parametrize("access_token,spawn_expires_at", [
+    pytest.param("opaque-access", (NOW // 1000 + 3600) * 1000,
+                 id="on-disk-expiry-unreadable"),
+    pytest.param(_jwt(NOW // 1000 + 3600), None,
+                 id="spawn-expiry-unknown"),
+])
+def test_an_unreadable_expiry_refreshes_instead_of_skipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    access_token: str, spawn_expires_at: int | None,
+) -> None:
+    path = _write_auth(tmp_path, access_token=access_token)
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": None, "access_token": _jwt(NOW // 1000 + 7200),
+                "refresh_token": "probe-refresh"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True,
+        spawn_expires_at=spawn_expires_at)
+
+    assert out.outcome == ctr.REFRESHED
+    assert seen == ["old-refresh"]
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["refresh_token"] == "probe-refresh"
