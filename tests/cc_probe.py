@@ -62,6 +62,16 @@ class InitRead:
     outcome: InitReadOutcome
 
 
+@dataclass(frozen=True)
+class ProbeAttempt:
+    frame: dict[str, Any] | None
+    exit_status: int | None      # None => still running at budget expiry
+    stdout_bytes: int
+    stderr_text: str
+    elapsed: float
+    pipe_holders: str | None     # set only when the CLI exited without our pipe reaching EOF
+
+
 def invocation(tmp_path: Path, declared: frozenset[str] = frozenset()) -> AgentInvocation:
     """A real AgentInvocation for _build_options; `declared` rides on top of complete_step."""
     loc = SourceLoc(file=Path("a.md"), line=1)
@@ -166,11 +176,43 @@ def read_init_frame(proc: subprocess.Popen[bytes], budget: float) -> InitRead:
             return InitRead(None, stdout_bytes, InitReadOutcome.PROCESS_EXITED)
 
 
-def _spawn_and_read_init(
-    cli: str, deny: list[str], cwd: Path
-) -> tuple[dict[str, Any] | None, int | None, str]:
-    """One probe spawn. Returns (init frame or None, exit status or None, stderr text).
-    The status is None when the CLI is still running at budget expiry."""
+def _pipe_holders(fd: int) -> str:
+    """Processes still holding `fd`'s pipe, as `pid N (comm)` joined by ', ', or the
+    literal `unknown`. Our own pid is excluded: we hold that same pipe, so every scan
+    would otherwise name itself."""
+    try:
+        pipe_st = os.stat(fd)
+        ident = (pipe_st.st_dev, pipe_st.st_ino)
+        pids = [name for name in os.listdir("/proc") if name.isdigit()]
+    except OSError:
+        return "unknown"
+    me = str(os.getpid())
+    holders: list[str] = []
+    for pid in pids:
+        if pid == me:
+            continue
+        try:
+            entries = os.listdir(f"/proc/{pid}/fd")
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                entry_st = os.stat(f"/proc/{pid}/fd/{entry}")
+                if (entry_st.st_dev, entry_st.st_ino) != ident:
+                    continue
+                comm = Path(f"/proc/{pid}/comm").read_text().strip()
+            except OSError:
+                continue
+            holders.append(f"pid {pid} ({comm})")
+            break
+    return ", ".join(holders) or "unknown"
+
+
+def _spawn_and_read_init(cli: str, deny: list[str], cwd: Path) -> ProbeAttempt:
+    """One probe spawn, as a ProbeAttempt: what was read, how the CLI ended, how long it
+    took, and — only when the CLI exited while our stdout pipe stayed open — which
+    processes still hold that pipe. exit_status is None when the CLI outlived the budget."""
+    started = time.monotonic()
     user_msg = json.dumps({
         "type": "user",
         "message": {"role": "user", "content": "say ok"},
@@ -189,7 +231,6 @@ def _spawn_and_read_init(
                 "--verbose",
                 "--setting-sources", "",
                 "--no-session-persistence",
-                "--max-turns", "1",
                 "--strict-mcp-config",
                 "--disallowedTools", ",".join(deny),
             ],
@@ -207,6 +248,7 @@ def _spawn_and_read_init(
         )
 
         state: int | None = None
+        holders: str | None = None
         try:
             assert proc.stdin is not None and proc.stdout is not None
             try:
@@ -218,8 +260,12 @@ def _spawn_and_read_init(
                 with contextlib.suppress(BrokenPipeError):
                     proc.stdin.close()
 
-            frame = read_init_frame(proc, INIT_FRAME_BUDGET).frame
-            if frame is None:
+            read = read_init_frame(proc, INIT_FRAME_BUDGET)
+            if read.outcome is InitReadOutcome.PROCESS_EXITED:
+                # Before the reap, while the pipe is still open: its inode is what
+                # identifies the descendant that outlived the CLI.
+                holders = _pipe_holders(proc.stdout.fileno())
+            if read.frame is None:
                 try:
                     # Settled before the reap: terminate() sets returncode to -15, so a
                     # read afterwards would report every budget expiry as an exit. A CLI
@@ -242,7 +288,19 @@ def _spawn_and_read_init(
                 proc.stdout.close()
 
         stderr_file.seek(0)
-        return frame, state, stderr_file.read()
+        return ProbeAttempt(
+            frame=read.frame,
+            exit_status=state,
+            stdout_bytes=read.stdout_bytes,
+            stderr_text=stderr_file.read(),
+            elapsed=time.monotonic() - started,
+            pipe_holders=holders,
+        )
+
+
+def _state_text(attempt: ProbeAttempt) -> str:
+    return ("process still running" if attempt.exit_status is None
+            else f"process exited {attempt.exit_status}")
 
 
 def probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[str], str]:
@@ -256,17 +314,19 @@ def probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[st
     t0 = time.monotonic()
     notes: list[str] = []
     attempt_stderrs: list[tuple[int, str]] = []
-    for attempt in range(1, PROBE_ATTEMPTS + 1):
-        start = time.monotonic()
-        frame, state, stderr_text = _spawn_and_read_init(cli, deny, cwd)
-        if frame is not None:
+    attempts: list[ProbeAttempt] = []
+    for n in range(1, PROBE_ATTEMPTS + 1):
+        probe = _spawn_and_read_init(cli, deny, cwd)
+        attempts.append(probe)
+        if probe.frame is not None:
             break
-        state_text = "process still running" if state is None else f"process exited {state}"
-        notes.append(f"#{attempt} {state_text} after {time.monotonic() - start:.1f}s")
-        attempt_stderrs.append((attempt, stderr_text))
-        if attempt < PROBE_ATTEMPTS:
+        notes.append(f"#{n} {_state_text(probe)} after {probe.elapsed:.1f}s")
+        attempt_stderrs.append((n, probe.stderr_text))
+        if n < PROBE_ATTEMPTS:
             time.sleep(PROBE_RETRY_BACKOFF)
 
+    last = attempts[-1]
+    frame = last.frame
     if frame is None:
         total_elapsed = time.monotonic() - t0
         stderr_sections = "\n".join(
@@ -274,7 +334,7 @@ def probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[st
         )
         raise AssertionError(
             f"No init frame from the claude CLI after {PROBE_ATTEMPTS} attempts"
-            f" in {total_elapsed:.1f}s ({state_text}).\n"
+            f" in {total_elapsed:.1f}s ({_state_text(last)}).\n"
             "Node startup, an rg --files scan, a ps aux, and a deferred git config precede init,\n"
             "so a stall here is the CLI's environment, not imp's deny posture.\n"
             f"Attempts: {', '.join(notes)}\n"
@@ -290,4 +350,4 @@ def probe_advertised_tools(cli: str, deny: list[str], cwd: Path) -> tuple[set[st
         elif isinstance(t, dict) and "name" in t:
             advertised.add(t["name"])
 
-    return advertised, stderr_text
+    return advertised, last.stderr_text

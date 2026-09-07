@@ -18,6 +18,8 @@ WebSearch / WebFetch note (§5.2):
 from __future__ import annotations
 
 import contextlib
+import os
+import re
 import subprocess
 import sys
 import time
@@ -223,3 +225,37 @@ def test_probe_retries_when_the_cli_dies_before_init(
     assert "CLI stderr (attempt 1):" in message
     assert f"CLI stderr (attempt {PROBE_ATTEMPTS}):" in message
     assert len(spawns.read_text().splitlines()) == PROBE_ATTEMPTS
+
+
+def test_spawn_attempt_names_the_process_holding_the_stdout_pipe(tmp_path: Path) -> None:
+    """The evidence missing from the original report: the CLI exited yet a descendant kept
+    our stdout pipe open, so the attempt records who holds it — never the prober itself."""
+    stub = _sh_stub(tmp_path / "backgrounding-cli", "#!/bin/sh\n(sleep 30) &\nexit 0\n")
+
+    attempt = cc_probe._spawn_and_read_init(str(stub), ["Bash"], tmp_path)
+
+    assert attempt.frame is None
+    assert attempt.exit_status == 0
+    assert attempt.stdout_bytes == 0
+    assert attempt.elapsed < 15.0
+    assert attempt.pipe_holders is not None
+    assert f"pid {os.getpid()} (" not in attempt.pipe_holders
+    if Path("/proc/self/fd").is_dir():
+        assert re.fullmatch(
+            r"pid \d+ \([^()]*\)(, pid \d+ \([^()]*\))*", attempt.pipe_holders
+        ), attempt.pipe_holders
+    else:
+        assert attempt.pipe_holders == "unknown"
+
+
+def test_spawn_attempt_has_no_pipe_holders_when_stdout_reaches_eof(tmp_path: Path) -> None:
+    """A plain exit whose pipe closes with it is not anomalous: no scan, no clause."""
+    stub = _sh_stub(tmp_path / "quiet-cli", "#!/bin/sh\nexit 0\n")
+
+    attempt = cc_probe._spawn_and_read_init(str(stub), ["Bash"], tmp_path)
+
+    assert attempt.pipe_holders is None
+    assert attempt.frame is None
+    assert attempt.exit_status == 0
+    assert attempt.stdout_bytes == 0
+    assert attempt.elapsed < 15.0
