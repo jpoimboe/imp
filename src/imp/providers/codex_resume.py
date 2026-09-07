@@ -36,6 +36,15 @@ def _read_agent_records(events_path: Path, agent_id: str) -> list[dict[str, Any]
     return records
 
 
+def _last_gate_index(records: list[dict[str, Any]]) -> int | None:
+    """Index of the LAST awaiting_user_input record, or None if there is none."""
+    last = None
+    for i, rec in enumerate(records):
+        if rec.get("type") == "awaiting_user_input":
+            last = i
+    return last
+
+
 def derive_codex_resume_state(
     events_path: Path, agent_id: str, *, subagent_depth: int = 0,
 ) -> tuple[ResumeState, str]:
@@ -71,8 +80,12 @@ def derive_codex_resume_state(
             last_prose_msg = rec
     if has_complete_step or last_prose_msg is None:
         return ResumeState.SEND_TO_LLM, ""
-    has_awaiting = any(
-        rec.get("type") == "awaiting_user_input" for rec in records)
+    # Anchored on the LAST gate, unlike the presence-based checks above: a
+    # tool_call after it means the agent took the reply and went back to work,
+    # so the turn was interrupted mid-work rather than yielding.
+    last_gate = _last_gate_index(records)
+    has_awaiting = last_gate is not None and not any(
+        rec.get("type") == "tool_call" for rec in records[last_gate + 1:])
     last_text = _text_of(last_prose_msg)
     if has_awaiting:
         return ResumeState.AWAITING_USER, last_text
@@ -108,10 +121,7 @@ def pending_human_reply(events_path: Path, agent_id: str) -> str | None:
     if not events_path.exists():
         return None
     records = _read_agent_records(events_path, agent_id)
-    last_gate = None
-    for i, rec in enumerate(records):
-        if rec.get("type") == "awaiting_user_input":
-            last_gate = i
+    last_gate = _last_gate_index(records)
     if last_gate is None:
         return None
     candidate: str | None = None

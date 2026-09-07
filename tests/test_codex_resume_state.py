@@ -256,3 +256,60 @@ def test_pending_reply_recognizes_interject_subtype(tmp_path: Path) -> None:
                      "content": [{"type": "text", "text": "actually, use db.py"}]}},
     ])
     assert pending_human_reply(ev, "step:t") == "actually, use db.py"
+
+
+def test_awaiting_falls_through_when_a_tool_call_follows_the_gate(tmp_path: Path) -> None:
+    # Interrupted mid-dispatch: the human already answered and the agent had
+    # resumed working, so this must NOT re-solicit — it replays and continues.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _agent_msg("which file should I look at?"),
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file should I look at?"}},
+        _reply("look at src/foo.py"),
+        _agent_msg("on it, dispatching an explorer"),
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"id": "sub-1", "name": "sub_agent",
+                     "input": {"subagent_name": "explorer"}, "id_ns": "block"}},
+    ])
+    state, last = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.MISSING_COMPLETE_STEP
+    assert last == "on it, dispatching an explorer"
+
+
+def test_awaiting_holds_when_no_tool_call_follows_the_gate(tmp_path: Path) -> None:
+    # A tool_call EARLIER in the history must not defeat the anchor: the gate is
+    # still the last thing that happened, so this is a genuine yield.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"id": "r1", "name": "read_file", "input": {}}},
+        {"agent_id": "step:t", "type": "tool_result",
+         "payload": {"id": "r1", "content": "ok"}},
+        _agent_msg("which file should I look at?"),
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file should I look at?"}},
+    ])
+    state, last = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.AWAITING_USER
+    assert last == "which file should I look at?"
+
+
+def test_a_teardown_closer_after_the_gate_still_awaits(tmp_path: Path) -> None:
+    # Plan 1's closer appends a tool_RESULT at teardown, which can land after the
+    # gate. Only a tool_call means "went back to work", so this still awaits.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"id": "sub-1", "name": "sub_agent",
+                     "input": {"subagent_name": "explorer"}, "id_ns": "block"}},
+        _agent_msg("which file should I look at?"),
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file should I look at?"}},
+        {"agent_id": "step:t", "type": "tool_result",
+         "payload": {"id": "sub-1", "content": "[interrupted] ...",
+                     "error": True, "kind": "interrupted", "id_ns": "block"}},
+    ])
+    state, last = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.AWAITING_USER
+    assert last == "which file should I look at?"
