@@ -36,6 +36,12 @@ def test_hub_indexes_every_corpus_doc_by_name() -> None:
     assert not missing, f"corpus docs absent from the {HUB} index: {missing}"
 
 
+def test_hub_index_names_the_dead_login_runbook() -> None:
+    body = _hub()
+    line = next(ln for ln in body.splitlines() if "guide/operator-notes.md" in ln)
+    assert "recovering a dead provider login" in line
+
+
 def test_hub_index_names_no_doc_that_does_not_exist() -> None:
     body = _hub()
     live = set(_corpus_rel())

@@ -26,6 +26,25 @@ Runbook for operating a running imp quest.
   backstop. Recognize it when a quest loops on "removing/restoring its own
   plan/workflow file"; unblock by editing the snapshot.
 
+## Recovering a dead provider login
+
+- A ChatGPT login (codex) and a Claude login refresh through **single-use**
+  refresh tokens: every refresh rotates the pair and invalidates the old one.
+  imp refreshes them itself before each spawn and writes the new pair back to
+  the canonical file — `~/.codex/auth.json` / `~/.claude/.credentials.json`.
+- **Never copy a credential file between machines.** The second machine's first
+  refresh — imp's or the vendor CLI's — rotates the token server-side, and the
+  first machine's copy is dead from that moment. Log in separately on each host.
+- A dead credential pauses the quest as `reauth_needed`. Re-login on this host
+  (`codex login` / `claude login`), then `imp resume <id>` — the quest resumes in
+  place and nothing is lost.
+- If the file is shared and another host still holds a live copy, copying that
+  current file back also works — until the next refresh on either host rotates
+  it again.
+- **codex only:** with `OPENAI_API_KEY` exported, a dead ChatGPT credential falls
+  through to API-key auth on the next spawn and the run continues, with a
+  warning. That bills the OpenAI API, not your ChatGPT subscription.
+
 ## Moving or renaming a checkout
 
 A project's state directory is claimed by the checkout's directory **name** —

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import stat
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +13,7 @@ import httpx
 import pytest
 
 from imp.providers import codex_token_refresh as ctr
+from imp.providers.codex_config import detect_auth_mode
 
 NOW = 1_000_000_000_000  # ms
 
@@ -539,3 +542,227 @@ def test_unresolvable_home_is_not_applicable(
     monkeypatch.setattr(ctr.Path, "home", staticmethod(_boom))
     out = ctr.refresh_canonical_token(NOW, env={})
     assert out.outcome == ctr.NOT_APPLICABLE
+
+
+# Every row of the refresh/spawn agreement table: the file's explicit auth_mode
+# is authoritative in both directions, key-presence only fills a missing field.
+_AGREEMENT_ROWS = [
+    pytest.param({"auth_mode": "chatgpt"}, {}, "chatgpt", ctr.REFRESHED, 1,
+                 id="chatgpt-file-no-env-key"),
+    pytest.param({"auth_mode": "chatgpt"}, {"OPENAI_API_KEY": "sk-x"}, "chatgpt",
+                 ctr.REFRESHED, 1, id="chatgpt-file-env-key-set"),
+    pytest.param({}, {"OPENAI_API_KEY": "sk-x"}, "apikey", ctr.NOT_APPLICABLE, 0,
+                 id="no-auth-mode-field-env-key-set"),
+    pytest.param({"auth_mode": "apikey"}, {}, "apikey", ctr.NOT_APPLICABLE, 0,
+                 id="apikey-file-no-env-key"),
+]
+
+
+@pytest.mark.parametrize(
+    "extra_top,extra_env,spawn_mode,expected_outcome,expected_calls",
+    _AGREEMENT_ROWS)
+def test_refresh_agrees_with_detect_auth_mode_on_every_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra_top: dict[str, object],
+    extra_env: dict[str, str],
+    spawn_mode: str,
+    expected_outcome: str,
+    expected_calls: int,
+) -> None:
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 - 1),
+                       extra_top=extra_top)
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": None, "access_token": _jwt(NOW // 1000 + 7200),
+                "refresh_token": "rot"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    env = _env(tmp_path, **extra_env)
+
+    assert detect_auth_mode(canonical_path=path, env=env) == spawn_mode
+    out = ctr.refresh_canonical_token(NOW, env=env)
+    assert out.outcome == expected_outcome
+    assert len(seen) == expected_calls
+
+
+def test_force_refreshes_a_fresh_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An hour out with a minutes-old last_refresh: reaching the endpoint proves
+    # both _needs_refresh short-circuits (pre-lock and under-lock) were skipped.
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600),
+                       refresh_token="old-refresh",
+                       last_refresh="2001-09-09T01:30:00Z")
+    new_access = _jwt(NOW // 1000 + 7200)
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": "new-id", "access_token": new_access,
+                "refresh_token": "new-refresh"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path), force=True)
+
+    assert out.outcome == ctr.REFRESHED
+    assert out.expires_at == (NOW // 1000 + 7200) * 1000
+    assert seen == ["old-refresh"]
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["access_token"] == new_access
+    assert tokens["refresh_token"] == "new-refresh"
+
+
+def test_force_still_reports_invalid_grant_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600),
+                       refresh_token="dead")
+    before = path.read_bytes()
+
+    def _dead(refresh_token: str) -> dict[str, object]:
+        raise ctr.RefreshInvalidGrant()
+
+    monkeypatch.setattr(ctr, "_request_refresh", _dead)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path), force=True)
+
+    assert out.outcome == ctr.FAILED_INVALID_GRANT
+    assert path.read_bytes() == before
+
+
+def test_a_moved_expiry_skips_the_forced_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+    before = path.read_bytes()
+
+    def _no_http(refresh_token: str) -> dict[str, object]:
+        raise AssertionError("a peer already rotated; no HTTP expected")
+
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True,
+        spawn_expires_at=(NOW // 1000 + 1800) * 1000)
+
+    assert out.outcome == ctr.SKIPPED_ROTATED
+    assert out.expires_at is None
+    assert path.read_bytes() == before
+
+
+def test_a_peer_rotating_while_we_wait_for_the_lock_is_caught(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rotation landing while we wait for the lock is invisible pre-lock."""
+    spawn_expiry = (NOW // 1000 + 3600) * 1000
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+
+    @contextlib.contextmanager
+    def _lock_that_rotates(lock_path: Path, *, timeout: float) -> Iterator[None]:
+        _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 7200),
+                    refresh_token="peer-refresh")
+        yield
+
+    def _no_http(refresh_token: str) -> dict[str, object]:
+        raise AssertionError("the peer's rotation must be seen under the lock")
+
+    monkeypatch.setattr(ctr, "_token_lock", _lock_that_rotates)
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=spawn_expiry)
+
+    assert out.outcome == ctr.SKIPPED_ROTATED
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["refresh_token"] == "peer-refresh"   # the peer's, unspent
+
+
+def test_a_matching_expiry_still_refreshes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spawn_expiry = (NOW // 1000 + 3600) * 1000
+    path = _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": None, "access_token": _jwt(NOW // 1000 + 7200),
+                "refresh_token": "probe-refresh"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True, spawn_expires_at=spawn_expiry)
+
+    assert out.outcome == ctr.REFRESHED
+    assert seen == ["old-refresh"]
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["refresh_token"] == "probe-refresh"
+
+
+@pytest.mark.parametrize("access_token,spawn_expires_at", [
+    pytest.param("opaque-access", (NOW // 1000 + 3600) * 1000,
+                 id="on-disk-expiry-unreadable"),
+    pytest.param(_jwt(NOW // 1000 + 3600), None,
+                 id="spawn-expiry-unknown"),
+])
+def test_an_unreadable_expiry_refreshes_instead_of_skipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    access_token: str, spawn_expires_at: int | None,
+) -> None:
+    path = _write_auth(tmp_path, access_token=access_token)
+    seen: list[str] = []
+
+    def _fake(refresh_token: str) -> dict[str, object]:
+        seen.append(refresh_token)
+        return {"id_token": None, "access_token": _jwt(NOW // 1000 + 7200),
+                "refresh_token": "probe-refresh"}
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake)
+    out = ctr.refresh_canonical_token(
+        NOW, env=_env(tmp_path), force=True,
+        spawn_expires_at=spawn_expires_at)
+
+    assert out.outcome == ctr.REFRESHED
+    assert seen == ["old-refresh"]
+    tokens = json.loads(path.read_text(encoding="utf-8"))["tokens"]
+    assert tokens["refresh_token"] == "probe-refresh"
+
+
+def test_canonical_expires_at_reads_the_access_token_jwt(tmp_path: Path) -> None:
+    _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600))
+    assert ctr.canonical_expires_at(env=_env(tmp_path)) == (NOW // 1000 + 3600) * 1000
+
+
+def test_canonical_expires_at_still_reads_with_an_api_key_exported(
+    tmp_path: Path,
+) -> None:
+    # Rotation detection must not go blind for a chatgpt file with a key exported.
+    _write_auth(tmp_path, access_token=_jwt(NOW // 1000 + 3600),
+                extra_top={"auth_mode": "chatgpt"})
+    env = _env(tmp_path, OPENAI_API_KEY="sk-x")
+    assert ctr.canonical_expires_at(env=env) == (NOW // 1000 + 3600) * 1000
+
+
+@pytest.mark.parametrize("payload", [
+    pytest.param(None, id="no-file"),
+    pytest.param({"auth_mode": "apikey", "OPENAI_API_KEY": "sk-x"}, id="apikey-body"),
+    pytest.param({"tokens": {"access_token": "opaque", "refresh_token": "r"}},
+                 id="opaque-access-token"),
+    pytest.param({"tokens": "not-an-object"}, id="tokens-not-an-object"),
+])
+def test_canonical_expires_at_is_none_when_unreadable(
+    tmp_path: Path, payload: dict[str, object] | None,
+) -> None:
+    if payload is not None:
+        (tmp_path / "auth.json").write_text(json.dumps(payload), encoding="utf-8")
+    assert ctr.canonical_expires_at(env=_env(tmp_path)) is None
+
+
+def test_canonical_expires_at_is_none_when_home_is_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(ctr.Path, "home", staticmethod(_boom))
+    assert ctr.canonical_expires_at(env={}) is None

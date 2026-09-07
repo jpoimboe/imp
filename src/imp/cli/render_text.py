@@ -40,7 +40,7 @@ _ENGINE_LABELS = {
 _PAUSE_REASON_COPY: dict[str, str] = {
     "reauth_needed":
         "authentication failed; the quest is paused and resumable; "
-        "re-authenticate to Claude (e.g. re-login), then resume",
+        "re-login to the provider (codex login / claude login), then resume",
     "sandbox_spawn_failed":
         "the OS sandbox could not start the step (a sandbox-setup failure, not "
         "a gate result); the quest is paused and resumable — the warnings above "

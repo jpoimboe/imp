@@ -3,8 +3,8 @@
 """Best-effort refresh of the canonical codex OAuth access token.
 
 Keeps <CODEX_HOME|~/.codex>/auth.json fresh so imp-spawned codex subprocesses
-always copy a live access token. Never raises: every failure is reported as a
-RefreshOutcome. No token material is ever returned or logged.
+always copy a live access token. Never raises: every failure is reported
+structurally in the return value. No token material is ever returned or logged.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ _DAY_MS = 24 * 60 * 60 * 1000
 
 REFRESHED = "refreshed"
 SKIPPED_FRESH = "skipped_fresh"
+SKIPPED_ROTATED = "skipped_rotated"
 NOT_APPLICABLE = "not_applicable"
 FAILED_TRANSIENT = "failed_transient"
 FAILED_INVALID_GRANT = "failed_invalid_grant"
@@ -192,8 +193,10 @@ def _load_auth(auth_path: Path) -> dict[str, Any] | None:
 
 
 def _is_apikey(data: dict[str, Any], env: Mapping[str, str]) -> bool:
-    if data.get("auth_mode") == "apikey":
-        return True
+    """`detect_auth_mode`'s precedence: an explicit auth_mode wins both ways."""
+    mode: object = data.get("auth_mode")
+    if mode in ("chatgpt", "apikey"):
+        return mode == "apikey"
     return bool(data.get("OPENAI_API_KEY") or env.get("OPENAI_API_KEY"))
 
 
@@ -251,8 +254,10 @@ def _applicable_tokens(
 
 
 def refresh_canonical_token(
-    now_ms: int, *, env: Mapping[str, str] | None = None,
+    now_ms: int, *, env: Mapping[str, str] | None = None, force: bool = False,
+    spawn_expires_at: int | None = None,
 ) -> RefreshOutcome:
+    """`force` ignores expiry; `spawn_expires_at` still skips a peer's rotation."""
     env = os.environ if env is None else env
     try:
         base = _canonical_dir(env)
@@ -265,7 +270,7 @@ def refresh_canonical_token(
     if data is None or applicable is None:
         return RefreshOutcome(NOT_APPLICABLE)
     tokens, _ = applicable
-    if not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
+    if not force and not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
         return RefreshOutcome(SKIPPED_FRESH)
 
     try:
@@ -275,8 +280,12 @@ def refresh_canonical_token(
             if data is None or applicable is None:
                 return RefreshOutcome(NOT_APPLICABLE)
             tokens, refresh_token = applicable
-            if not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
+            if not force and not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
                 return RefreshOutcome(SKIPPED_FRESH)
+            current_expires_at = _jwt_exp_ms(tokens.get("access_token"))
+            if (spawn_expires_at is not None and current_expires_at is not None
+                    and current_expires_at != spawn_expires_at):
+                return RefreshOutcome(SKIPPED_ROTATED)
             try:
                 new_tokens = _request_refresh(refresh_token)
             except RefreshInvalidGrant:
@@ -297,3 +306,19 @@ def refresh_canonical_token(
         return RefreshOutcome(FAILED_TRANSIENT)
     except OSError:
         return RefreshOutcome(FAILED_TRANSIENT)
+
+
+def canonical_expires_at(*, env: Mapping[str, str] | None = None) -> int | None:
+    """The canonical access token's expiry — the value a rotation race moves."""
+    env = os.environ if env is None else env
+    try:
+        base = _canonical_dir(env)
+    except RuntimeError:
+        return None
+    data = _load_auth(base / "auth.json")
+    if data is None:
+        return None
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    return _jwt_exp_ms(tokens.get("access_token"))

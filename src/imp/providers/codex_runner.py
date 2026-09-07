@@ -69,6 +69,9 @@ from imp.providers.codex_mcp import (
 from imp.providers.codex_rollout import RolloutReadings, compaction_seen, latest_readings
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
+    SKIPPED_ROTATED,
+    RefreshOutcome,
+    canonical_expires_at,
     refresh_canonical_token,
 )
 from imp.providers.observe_classify import (
@@ -156,17 +159,29 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     return out
 
 
-def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
-    """Refresh the canonical codex token before seed_auth; raise
-    AuthTerminalError on a dead token (only `codex login` can fix it)."""
-    outcome = refresh_canonical_token(int(time.time() * 1000))
+_DEAD_GRANT_MESSAGE = (
+    "codex: ChatGPT OAuth refresh token is dead; run `codex login`. Sharing "
+    "~/.codex/auth.json across machines kills it — each refresh rotates a "
+    "single-use token.")
+
+_APIKEY_FALLBACK_MESSAGE = (
+    "codex: ChatGPT credential is dead; continuing with OPENAI_API_KEY — this "
+    "bills the OpenAI API, not your ChatGPT subscription")
+
+
+def _journal_token_refresh(elog: Any, aid: str, outcome: RefreshOutcome) -> None:
     payload: dict[str, Any] = {"outcome": outcome.outcome}
     if outcome.expires_at is not None:
         payload["expires_at"] = outcome.expires_at
     elog.append(agent_id=aid, type="token_refresh", payload=payload)
-    if outcome.outcome == FAILED_INVALID_GRANT:
-        raise perr.AuthTerminalError(
-            "codex: OAuth refresh token is dead; re-authentication required")
+
+
+def _pre_spawn_token_refresh(elog: Any, aid: str) -> RefreshOutcome:
+    """Refresh the canonical codex token before seed_auth and journal the
+    outcome; the caller owns the dead-token policy."""
+    outcome = refresh_canonical_token(int(time.time() * 1000))
+    _journal_token_refresh(elog, aid, outcome)
+    return outcome
 
 
 # Internal sentinels _receive yields for the two mid-turn terminal pre-checks
@@ -328,8 +343,18 @@ class CodexSession(ObserveSession):
         )
         runner._codex_home = codex_home
         if auth_mode == "chatgpt":
-            # Refresh canonical auth.json before seed_auth; a dead token raises AuthTerminalError.
-            _pre_spawn_token_refresh(elog, aid)
+            outcome = _pre_spawn_token_refresh(elog, aid)
+            runner._spawn_token_expiry = canonical_expires_at()
+            if outcome.outcome == FAILED_INVALID_GRANT:
+                if not os.environ.get("OPENAI_API_KEY"):
+                    raise perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
+                elog.append(agent_id=aid, type="warning", payload={
+                    "source": "codex_auth_fallback",
+                    "message": _APIKEY_FALLBACK_MESSAGE, "detail": {}})
+                # One flip: seed_auth, metered spend, and Rule A's probe gate.
+                auth_mode = "apikey"
+                runner._auth_mode = auth_mode
+                proc_state["auth_mode"] = auth_mode
         seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                   codex_home=codex_home, env=os.environ)
 
@@ -526,6 +551,32 @@ class CodexSession(ObserveSession):
                 continue
             return
 
+    async def _settle_auth_terminality(
+        self, err: perr.ProviderError,
+    ) -> perr.ProviderError:
+        """Probe the canonical token on a codex auth error and upgrade to
+        AuthTerminalError when the grant is dead. Gated on the spawn's own auth
+        mode: the canonical file is not the credential an apikey spawn runs on."""
+        if err.category != "auth":
+            return err
+        if self._proc_state.get("auth_mode") != "chatgpt":
+            return err
+        outcome = await asyncio.to_thread(
+            refresh_canonical_token, int(time.time() * 1000), force=True,
+            spawn_expires_at=self.runner._spawn_token_expiry,
+        )
+        _journal_token_refresh(self.elog, self.aid, outcome)
+        if outcome.outcome == SKIPPED_ROTATED:
+            # peer already rotated; retry re-enters _enter() and re-seeds
+            err.kind = "token_rotated"  # type: ignore[attr-defined]
+            return err
+        if outcome.outcome != FAILED_INVALID_GRANT:
+            return err
+        upgraded = perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
+        upgraded.detail.update(err.detail)
+        upgraded.detail["provider_message"] = str(err)
+        return upgraded
+
     async def _message_to_items(self, raw: Any) -> Any:
         if raw is _SERVER_DIED:
             sh = self.runner._server_handle
@@ -569,10 +620,12 @@ class CodexSession(ObserveSession):
                     f"codex tool dispatch cap ({state.cap}) exceeded"})
             return
 
-        # turn.failed → categorize + bail.
+        # turn.failed → categorize + settle terminality + bail.
         if getattr(raw, "type", None) == "turn.failed":
+            err = await self._settle_auth_terminality(
+                categorize_turn_failed(getattr(raw, "error", {}) or {}))
             yield Error(payload=cast(dict[str, Any], perr.make_error_event(
-                categorize_turn_failed(getattr(raw, "error", {}) or {}))["payload"]))
+                err, kind=getattr(err, "kind", ""))["payload"]))
             return
 
     def _drain_kills(self) -> list[dict[str, Any]]:
@@ -715,6 +768,8 @@ class CodexAgentRunner:
         self._impty_driver: Any = None
         self._stderr_token: Any = None
         self._auth_mode: AuthMode | None = None
+        # Canonical token expiry this spawn seeded from; handed to the probe as spawn_expires_at.
+        self._spawn_token_expiry: int | None = None
         self._canonical_auth: Path | None = None
         self._proc_state: dict[str, Any] = {}
 
@@ -1394,12 +1449,16 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
       - model context overflow → ``ContextWindowError`` (Tier B reincarnation)
       - subprocess network/timeout → ``NetworkError``
       - any other → ``ApiError`` (terminal; maps to Pause).
+
+    A non-dict body is normalized to ``str(error)`` and runs the same chain, so no
+    error shape can bypass classification.
     """
-    if not isinstance(error, dict):
-        return perr.ApiError(str(error))
-    status = error.get("status")
-    message = str(error.get("message", "") or "")
-    kind = str(error.get("kind", "") or "")
+    if isinstance(error, dict):
+        status = error.get("status")
+        message = str(error.get("message", "") or "")
+        kind = str(error.get("kind", "") or "")
+    else:
+        status, message, kind = None, str(error), ""
 
     if status == 401 or "unauthorized" in message.lower():
         return perr.AuthError(f"codex: {message[:200]}")

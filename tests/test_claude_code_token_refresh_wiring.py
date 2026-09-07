@@ -227,7 +227,7 @@ async def test_dead_grant_probe_upgrades_the_auth_error_to_terminal(
     assert [e["payload"]["category"] for e in errs] == ["auth_terminal"]
     assert errs[0]["payload"]["kind"] == "AuthTerminalError"
     assert errs[0]["payload"]["message"] == (
-        "claude: OAuth refresh token is dead; re-authentication required")
+        "claude: OAuth refresh token is dead; run `claude login`")
     # The upgrade inherits the classified error's detail verbatim.
     assert errs[0]["payload"]["detail"]["last_agent_text"] == PROSE_401
     refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
