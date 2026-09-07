@@ -1101,6 +1101,18 @@ def process_event(
     """
     etype = getattr(event, "type", None)
 
+    # A payload codex_sdk_patch could not validate arrives degraded, carrying only
+    # its id/type. Ahead of the etype dispatch so item.started/updated/completed
+    # are covered alike; one warning per event, no seen-id state.
+    degraded = getattr(event, "item", None)
+    parse_error = getattr(degraded, "imp_parse_error", None)
+    if parse_error is not None:
+        elog.append(agent_id=agent_id, type="runner_warning", payload={
+            "message": f"codex {getattr(degraded, 'type', '')} item did not match the "
+                       f"pinned openai-codex-sdk model and was skipped",
+            "codex_parse_error": parse_error})
+        return
+
     # `thread.started` — capture thread_id for resume / re-query.
     if etype == "thread.started":
         state["thread_id"] = getattr(event, "thread_id", None)
