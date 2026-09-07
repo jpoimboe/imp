@@ -660,6 +660,44 @@ def test_plan_reviewer_later_lap_renders_without_a_head_key(tmp_path) -> None:
     assert " (at " not in line        # unstamped legacy entries degrade, never raise
 
 
+_VERIFIED_TAIL = (
+    "End `findings` with `Verified at <sha>:` (the current HEAD) and the tree facts you "
+    "checked this\nlap — paths, signatures, what existing code does — each with its "
+    "`file:line`. The next lap reads\nthis instead of re-opening those files; a check you "
+    "don't record is a check it pays for again."
+)
+
+
+def test_plan_reviewer_findings_must_end_with_a_verified_facts_tail() -> None:
+    body = _agent_prompt("plan-reviewer")
+    assert _VERIFIED_TAIL in body
+    # It sits in `## Severity & output`, right after the findings-format sentence
+    # and before the blocking rule — so it is part of the output contract.
+    assert body.index("## Severity & output") < body.index(_VERIFIED_TAIL)
+    assert body.index("Report `findings` as classified prose") < body.index(_VERIFIED_TAIL)
+    assert body.index(_VERIFIED_TAIL) < body.index("Set `blocking = true`")
+
+
+def test_plan_reviewer_finish_exemplars_carry_the_verified_tail() -> None:
+    body = _agent_prompt("plan-reviewer")
+    # The clean exemplars are the copy a reviewer imitates last; leaving them
+    # tail-less would undercut the instruction on exactly the clean lap whose
+    # facts the following verification round needs.
+    exemplars = body[body.index("Finish with one of:"):]
+    assert (
+        'complete_step(findings="No Critical/Major findings. Minor: … '
+        'Verified at <sha>: …", blocking=false, has_minor_findings=true)'
+    ) in exemplars
+    assert (
+        'complete_step(findings="No findings. Plan is complete and ready for '
+        'implementation. Verified at <sha>: …", blocking=false, has_minor_findings=false)'
+    ) in exemplars
+    assert (
+        'complete_step(findings="Critical: … / Major: … Verified at <sha>: …", '
+        'blocking=true, has_minor_findings=false)'
+    ) in exemplars
+
+
 def test_plan_reviewer_orient_stays_intact_above_earlier_laps(tmp_path) -> None:
     out = _render_plan_reviewer(tmp_path, prior_laps=[
         {"lap": 1, "outcome": "reworked", "head": "aaaa1111bbbb2222"},

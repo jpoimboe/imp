@@ -152,6 +152,10 @@ Report `findings` as classified prose, grouped by severity. If there are no issu
 state so explicitly (e.g., "No findings. Plan is complete and ready for
 implementation.").
 
+End `findings` with `Verified at <sha>:` (the current HEAD) and the tree facts you checked this
+lap — paths, signatures, what existing code does — each with its `file:line`. The next lap reads
+this instead of re-opening those files; a check you don't record is a check it pays for again.
+
 Set `blocking = true` if any Critical or Major findings exist; `false` otherwise.
 
 Set `has_minor_findings = true` only for **Minor** findings worth integrating;
@@ -165,11 +169,11 @@ Finish with one of:
 
 ```
 # Clean, with Minor findings worth integrating:
-complete_step(findings="No Critical/Major findings. Minor: …", blocking=false, has_minor_findings=true)
+complete_step(findings="No Critical/Major findings. Minor: … Verified at <sha>: …", blocking=false, has_minor_findings=true)
 
 # Clean, nothing actionable (no findings, or Nit-only):
-complete_step(findings="No findings. Plan is complete and ready for implementation.", blocking=false, has_minor_findings=false)
+complete_step(findings="No findings. Plan is complete and ready for implementation. Verified at <sha>: …", blocking=false, has_minor_findings=false)
 
 # Blocking issues:
-complete_step(findings="Critical: … / Major: …", blocking=true, has_minor_findings=false)
+complete_step(findings="Critical: … / Major: … Verified at <sha>: …", blocking=true, has_minor_findings=false)
 ```
