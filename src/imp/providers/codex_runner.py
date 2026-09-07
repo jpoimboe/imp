@@ -1394,12 +1394,16 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
       - model context overflow → ``ContextWindowError`` (Tier B reincarnation)
       - subprocess network/timeout → ``NetworkError``
       - any other → ``ApiError`` (terminal; maps to Pause).
+
+    A non-dict body is normalized to ``str(error)`` and runs the same chain, so no
+    error shape can bypass classification.
     """
-    if not isinstance(error, dict):
-        return perr.ApiError(str(error))
-    status = error.get("status")
-    message = str(error.get("message", "") or "")
-    kind = str(error.get("kind", "") or "")
+    if isinstance(error, dict):
+        status = error.get("status")
+        message = str(error.get("message", "") or "")
+        kind = str(error.get("kind", "") or "")
+    else:
+        status, message, kind = None, str(error), ""
 
     if status == 401 or "unauthorized" in message.lower():
         return perr.AuthError(f"codex: {message[:200]}")

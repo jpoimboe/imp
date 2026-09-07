@@ -84,3 +84,23 @@ def test_chatgpt_account_400_still_beats_the_context_window_branch() -> None:
                    "context window mismatch",
     })
     assert err.category == "config"
+
+
+class _OpaqueError:
+    """The shape where codex hands `turn.failed.error` an object, not a dict."""
+
+    def __str__(self) -> str:
+        return ("Your access token could not be refreshed because your refresh "
+                "token was already used. Please log out and sign in again.")
+
+
+def test_a_non_dict_reuse_error_is_still_classified_auth() -> None:
+    err = categorize_turn_failed(_OpaqueError())
+    assert err.category == "auth"
+    assert "already used" in str(err)
+
+
+def test_a_non_dict_error_with_no_signature_falls_back_to_api_with_the_prefix() -> None:
+    err = categorize_turn_failed("something went wrong")
+    assert isinstance(err, perr.ApiError)
+    assert str(err) == "codex: something went wrong"
