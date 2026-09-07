@@ -89,6 +89,7 @@ from imp.engine.state import (
     CurrentStep,
     EventLog,
     JsonlEventLog,
+    LaneRestore,
     State,
     classify_pause_halt,
 )
@@ -541,7 +542,9 @@ async def run_quest(
                 state.lane_retained = False
                 state.save(quest.state_dir)
             else:
-                _evict_if_holding(quest, state, log)
+                # Fires at resume, an unknown interval after the crash, so a
+                # fingerprint taken here would gate nothing — decline and clear.
+                _evict_if_holding(quest, state, log, record_restore=False)
                 state.save(quest.state_dir)
 
         # In-memory, never persisted: last step this run dispatched (a resume never wipes).
@@ -996,7 +999,8 @@ async def _dispatch_step(
     if step.release is not None:
         _release_lane(step, quest, state, log)
     if step.acquire is not None and step.acquire != "test-lane":
-        return await _route_acquire(step, quest, state, log, wait_for_turn_fn)
+        return await _route_acquire(
+            step, workflow, quest, state, log, wait_for_turn_fn)
 
     sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, quest.project_root)
 
@@ -1294,7 +1298,7 @@ def _resolve_lane(value: str, quest: Quest) -> str:
 
 
 async def _route_acquire(
-    step: Step, quest: Quest, state: State, log: EventLog,
+    step: Step, workflow: Workflow, quest: Quest, state: State, log: EventLog,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Enqueue in lane; proceed as head, marking the hold; hibernate if unattended non-head."""
@@ -1336,6 +1340,21 @@ async def _route_acquire(
     state.held_acquire_step = step.name
     state.save(quest.state_dir)
     _emit(log, "lane_acquired", {"base": lane, "step": step.name, "glyph": step.glyph})
+    restore = state.lane_restore
+    if restore is not None:
+        state.lane_restore = None            # consumed exactly once, either way
+        state.save(quest.state_dir)
+        # The recorded step must still exist: neither fingerprinted ref covers
+        # imp's own packaged workflow, so an upgrade during the pause can drop it.
+        if (workflow.step_index(restore.step) is not None
+                and _lane_fingerprint(quest)
+                == (restore.base_head, restore.quest_head)):
+            _emit(log, "lane_restored", {"base": lane, "step": restore.step})
+            goto = Goto(target=restore.step)
+            _emit(log, "step_completed", {
+                "step": step.name, "kind": step.kind,
+                "action": _action_payload(goto), "var_mutations": {}})
+            return goto, None, {}
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
     return _finish(log, step, quest, match, state)
@@ -1360,13 +1379,42 @@ def _release_lane(step: Step, quest: Quest, state: State, log: EventLog) -> None
     _release_held_lane(step.release, quest, state, log, step_name=step.name)
 
 
-def _evict_if_holding(quest: Quest, state: State, log: EventLog) -> bool:
+def _lane_fingerprint(quest: Quest) -> tuple[str, str] | None:
+    """(base branch tip, quest worktree HEAD), or None when either is unresolvable."""
+    from imp.engine import worktree
+    try:
+        base_head = worktree.head_of(quest.control_root, quest.base_branch)
+    except RuntimeError:
+        return None
+    quest_head = _worktree_head(quest)
+    if not quest_head:
+        return None
+    return base_head, quest_head
+
+
+def _capture_lane_restore(quest: Quest, state: State) -> LaneRestore | None:
+    """All-or-nothing restore point for the cursor about to be rewound."""
+    if state.step is None or state.step == state.held_acquire_step:
+        return None
+    fingerprint = _lane_fingerprint(quest)
+    if fingerprint is None:
+        return None
+    return LaneRestore(
+        step=state.step, base_head=fingerprint[0], quest_head=fingerprint[1])
+
+
+def _evict_if_holding(quest: Quest, state: State, log: EventLog, *,
+                      record_restore: bool = True) -> bool:
     """Release a held lane on pause/crash and rewind the resume cursor to the acquiring step."""
     if state.held_lane is None:
         return False
     from imp.engine import merge_queue
     lane = state.held_lane
     acquire_step = state.held_acquire_step
+    # Capture before the pop: a quest woken by it could otherwise advance the
+    # base into the record. record_restore=False also clears a crash leftover.
+    state.lane_restore = (
+        _capture_lane_restore(quest, state) if record_restore else None)
     merge_queue.pop_and_wake(quest.control_root, quest.id, lane)
     state.held_lane = None
     state.held_acquire_step = None

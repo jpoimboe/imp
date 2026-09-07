@@ -112,6 +112,24 @@ class CurrentStep:
         return cls(transcript_dir=Path(raw["transcript_dir"]))
 
 
+@dataclass(frozen=True)
+class LaneRestore:
+    """Cursor abandoned by a pause-time lane eviction, plus its safety fingerprint."""
+
+    step: str
+    base_head: str
+    quest_head: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"step": self.step, "base_head": self.base_head,
+                "quest_head": self.quest_head}
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> LaneRestore:
+        return cls(step=raw["step"], base_head=raw["base_head"],
+                   quest_head=raw["quest_head"])
+
+
 @dataclass
 class State:
     id: str
@@ -143,6 +161,8 @@ class State:
     held_acquire_step: str | None = None  # the acquiring step to rewind to on eviction
     # Consume-once: last pause kept the held merge lane; entry guard honors it once.
     lane_retained: bool = False
+    # Recorded by a pause-time eviction; consumed once at re-acquisition.
+    lane_restore: LaneRestore | None = None
     unsandboxed: bool = False  # step-scoped /sandbox off override; durable truth
     # here (restored into the coordinator on resume, cleared at step advance).
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
@@ -173,6 +193,7 @@ class State:
             # Transient read-path fault, not corruption — see imp.engine.readfault.
             data = _recover_or_raise(state_path, raw, e)
         cur = data.pop("current_step", None)
+        lane_restore = data.pop("lane_restore", None)
         raw_rt = data.pop("resolved_tiers", None)
         # Preserve None (not yet resolved) vs a dict (resolved). A `... or {}`
         # would map null→{}, defeating the executor's `is None` compute-if-absent
@@ -198,6 +219,8 @@ class State:
             current_step=CurrentStep.from_dict(cur) if cur else None,
             resolved_tiers=resolved_tiers,
             resolved_steps=resolved_steps,
+            lane_restore=(
+                LaneRestore.from_dict(lane_restore) if lane_restore else None),
         )
 
     def save(self, state_dir: Path) -> None:
@@ -246,6 +269,8 @@ class State:
             "held_lane": self.held_lane,
             "held_acquire_step": self.held_acquire_step,
             "lane_retained": self.lane_retained,
+            "lane_restore": (
+                self.lane_restore.to_dict() if self.lane_restore else None),
             "unsandboxed": self.unsandboxed,
             "completion_pending": self.completion_pending,
             "reincarnations": self.reincarnations,

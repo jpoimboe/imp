@@ -658,3 +658,40 @@ def test_state_load_forward_compatible_without_halt_condition(tmp_path: Path) ->
         "retry_feedback": None,
     }))
     assert State.load(tmp_path).halt_condition is None
+
+
+def test_state_round_trips_lane_restore(tmp_path: Path) -> None:
+    from imp.engine.state import LaneRestore
+    sd = tmp_path / "state"
+    s = State(id="feat", step="lane", step_attempt=0, status="new")
+    s.lane_restore = LaneRestore(
+        step="summarizer", base_head="a" * 40, quest_head="b" * 40)
+    s.save(sd)
+    loaded = State.load(sd)
+    # Reconstructed as the dataclass, not left as the raw dict from json.
+    assert loaded.lane_restore == LaneRestore(
+        step="summarizer", base_head="a" * 40, quest_head="b" * 40)
+    assert isinstance(loaded.lane_restore, LaneRestore)
+
+
+def test_state_lane_restore_defaults_none_on_json_without_the_key(
+        tmp_path: Path) -> None:
+    (tmp_path / "state.json").write_text(json.dumps({
+        "id": "feat", "step": "s", "step_attempt": 0, "status": "paused",
+        "vars": {}, "loop_counts": {}, "current_step": None,
+        "retry_feedback": None, "held_lane": None, "held_acquire_step": None,
+    }))
+    loaded = State.load(tmp_path)
+    assert loaded.lane_restore is None
+    assert loaded.step == "s"          # the rest of the record still loads
+
+
+def test_state_lane_restore_is_frozen() -> None:
+    import dataclasses
+
+    import pytest
+
+    from imp.engine.state import LaneRestore
+    lr = LaneRestore(step="summarizer", base_head="a" * 40, quest_head="b" * 40)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        lr.step = "finalize"           # type: ignore[misc]

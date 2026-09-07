@@ -270,10 +270,10 @@ flowchart TD
 
 ### Phase integrate
 
-The FIFO merge queue. `wait-for-head` acquires the merge lane and holds it for the rest
-of the phase. `integrate-rebase` routes on four outcomes: base unmoved with the tree
-already cleared skips straight to `summarizer` with no re-review; a clean rebase or an
-uncleared tree goes to `validate-memory`; a conflict hands off to `reconciler`; a bad
+The FIFO merge queue. `wait-for-head` acquires the merge lane and normally holds it for
+the rest of the phase. `integrate-rebase` routes on four outcomes: base unmoved with the
+tree already cleared skips straight to `summarizer` with no re-review; a clean rebase or
+an uncleared tree goes to `validate-memory`; a conflict hands off to `reconciler`; a bad
 base ref or dirty tree pauses. `validate-memory` re-runs imp's own load-time memory
 validation over the merged tree. `integration-verify` routes to `integration-reviewer` on
 **both** pass and failure — a failure asks the reviewer to adjudicate fix-vs-tolerate
@@ -282,6 +282,18 @@ merge door: a tree the slow gate never passed — an environmental failure the r
 repaired, say — routes back to `integration-verify` instead of reaching the human.
 `finalize` is the human gate; a rework releases the merge lane on its way back to
 `plan-writer`.
+
+A failure pause inside the phase evicts the merge lane rather than leaving a stalled
+quest holding it — another quest's merge must never wait on a paused one — and rewinds
+the resume cursor to `wait-for-head`. The eviction first records a restore point: the
+step the cursor was on, the base branch tip, and the quest worktree HEAD. When the lane
+is re-acquired and both SHAs are unchanged, the phase resumes at that step, so
+`summarizer` and `finalize` never re-run; if either moved, the restore point is dropped
+and the phase continues into `integrate-rebase` for a rebase and a re-verify. A clean
+interrupt retains the lane instead of evicting it. A run that died holding the lane —
+SIGKILL, reboot — records no restore point, because a fingerprint taken at the next
+process entry describes the world at resume rather than at the crash; that path
+replays the phase from `wait-for-head`.
 
 ```mermaid
 flowchart TD

@@ -644,3 +644,22 @@ def test_architecture_names_no_retired_agent() -> None:
 
 def test_architecture_carries_no_circled_numerals() -> None:
     assert [c for c in "①②③④⑤⑥" if c in ARCH.read_text()] == []
+
+
+def _phase_section(text: str, phase: str) -> str:
+    return text.split(f"### Phase {phase}", 1)[1].split("\n### ", 1)[0]
+
+
+def test_architecture_documents_lane_eviction_and_restore() -> None:
+    # the phase prose is hard-wrapped; compare against a whitespace-flattened copy.
+    # Flatten AFTER _phase_section, which bounds the section on "\n### ".
+    low = " ".join(_phase_section(ARCH.read_text(), "integrate").lower().split())
+    # eviction on a failure pause, and the two SHAs that gate the restore
+    assert "evicts the merge lane" in low
+    assert "restore point" in low
+    assert "base branch tip" in low
+    assert "quest worktree head" in low
+    # the flat "holds it for the rest of the phase" claim is qualified
+    assert "normally holds it" in low
+    # a run that died holding the lane replays instead of restoring
+    assert "replays the phase" in low

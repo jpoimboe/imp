@@ -26,6 +26,7 @@ has_started
 held_acquire_step
 held_lane
 id
+lane_restore
 lane_retained
 loop_counts
 max_clean_tree_bounces

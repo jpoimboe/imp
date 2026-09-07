@@ -138,6 +138,7 @@ async def test_agent_interrupt_in_held_region_keeps_lane_and_resumes_in_place(
     assert st.step == "held"                          # cursor on the interrupted step
     assert st.resume_pending == "held"               # armed for in-place resume
     assert st.lane_retained is True
+    assert st.lane_restore is None                  # nothing evicted, nothing recorded
     assert mq.is_head(tmp_path, "feat", "main")      # still queue head
 
 
