@@ -69,6 +69,7 @@ from imp.providers.codex_mcp import (
 from imp.providers.codex_rollout import RolloutReadings, compaction_seen, latest_readings
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
+    RefreshOutcome,
     canonical_expires_at,
     refresh_canonical_token,
 )
@@ -157,17 +158,26 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     return out
 
 
-def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
-    """Refresh the canonical codex token before seed_auth; raise
-    AuthTerminalError on a dead token (only `codex login` can fix it)."""
-    outcome = refresh_canonical_token(int(time.time() * 1000))
+_DEAD_GRANT_MESSAGE = (
+    "codex: ChatGPT OAuth refresh token is dead; run `codex login`. Sharing "
+    "~/.codex/auth.json across machines kills it — each refresh rotates a "
+    "single-use token.")
+
+
+def _journal_token_refresh(elog: Any, aid: str, outcome: RefreshOutcome) -> None:
     payload: dict[str, Any] = {"outcome": outcome.outcome}
     if outcome.expires_at is not None:
         payload["expires_at"] = outcome.expires_at
     elog.append(agent_id=aid, type="token_refresh", payload=payload)
+
+
+def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
+    """Refresh the canonical codex token before seed_auth; raise
+    AuthTerminalError on a dead token (only `codex login` can fix it)."""
+    outcome = refresh_canonical_token(int(time.time() * 1000))
+    _journal_token_refresh(elog, aid, outcome)
     if outcome.outcome == FAILED_INVALID_GRANT:
-        raise perr.AuthTerminalError(
-            "codex: OAuth refresh token is dead; re-authentication required")
+        raise perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
 
 
 # Internal sentinels _receive yields for the two mid-turn terminal pre-checks
@@ -528,6 +538,28 @@ class CodexSession(ObserveSession):
                 continue
             return
 
+    async def _settle_auth_terminality(
+        self, err: perr.ProviderError,
+    ) -> perr.ProviderError:
+        """Probe the canonical token on a codex auth error and upgrade to
+        AuthTerminalError when the grant is dead. Gated on the spawn's own auth
+        mode: the canonical file is not the credential an apikey spawn runs on."""
+        if err.category != "auth":
+            return err
+        if self._proc_state.get("auth_mode") != "chatgpt":
+            return err
+        outcome = await asyncio.to_thread(
+            refresh_canonical_token, int(time.time() * 1000), force=True,
+            spawn_expires_at=self.runner._spawn_token_expiry,
+        )
+        _journal_token_refresh(self.elog, self.aid, outcome)
+        if outcome.outcome != FAILED_INVALID_GRANT:
+            return err
+        upgraded = perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
+        upgraded.detail.update(err.detail)
+        upgraded.detail["provider_message"] = str(err)
+        return upgraded
+
     async def _message_to_items(self, raw: Any) -> Any:
         if raw is _SERVER_DIED:
             sh = self.runner._server_handle
@@ -571,10 +603,12 @@ class CodexSession(ObserveSession):
                     f"codex tool dispatch cap ({state.cap}) exceeded"})
             return
 
-        # turn.failed → categorize + bail.
+        # turn.failed → categorize + settle terminality + bail.
         if getattr(raw, "type", None) == "turn.failed":
+            err = await self._settle_auth_terminality(
+                categorize_turn_failed(getattr(raw, "error", {}) or {}))
             yield Error(payload=cast(dict[str, Any], perr.make_error_event(
-                categorize_turn_failed(getattr(raw, "error", {}) or {}))["payload"]))
+                err)["payload"]))
             return
 
     def _drain_kills(self) -> list[dict[str, Any]]:

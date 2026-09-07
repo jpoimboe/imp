@@ -12,12 +12,25 @@ from typing import Any, NamedTuple
 import pytest
 
 from imp.agents.runner import AgentInvocation, QuestContext
+from imp.engine import error_policy as ep
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers import codex_runner
-from imp.providers.codex_runner import CodexAgentRunner
-from imp.providers.codex_token_refresh import SKIPPED_FRESH, RefreshOutcome
-from tests.codex_fakes import FakeCodex, mcp_call, thread_started, turn_completed
+from imp.providers import errors as perr
+from imp.providers.codex_runner import CodexAgentRunner, CodexSession
+from imp.providers.codex_token_refresh import (
+    FAILED_INVALID_GRANT,
+    FAILED_TRANSIENT,
+    SKIPPED_FRESH,
+    RefreshOutcome,
+)
+from tests.codex_fakes import (
+    FakeCodex,
+    FakeTurnFailedEvent,
+    mcp_call,
+    thread_started,
+    turn_completed,
+)
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 
@@ -102,6 +115,22 @@ def completing_turn() -> list[Any]:
             turn_completed(input_tokens=1, output_tokens=1)]
 
 
+# The codex server's own wording for a consumed refresh token.
+REUSE_MESSAGE = (
+    "Your access token could not be refreshed because your refresh token was "
+    "already used. Please log out and sign in again.")
+
+
+def failing_turn(error: Any) -> list[Any]:
+    return [thread_started("thr-1"), FakeTurnFailedEvent(error=error)]
+
+
+def error_payload(ran: Ran) -> dict[str, Any]:
+    errs = [e["payload"] for e in ran.events if e.get("type") == "error"]
+    assert len(errs) == 1, ran.events
+    return errs[0]
+
+
 class Ran(NamedTuple):
     events: list[dict[str, Any]]
     refresh: FakeRefresh
@@ -143,3 +172,113 @@ async def test_a_chatgpt_spawn_records_the_canonical_token_expiry(
 
     assert [e.get("type") for e in ran.events].count("agent_result") == 1
     assert ran.runner._spawn_token_expiry == EXPIRY_MS
+
+
+@pytest.mark.anyio
+async def test_a_dead_grant_upgrades_the_turn_failure_to_auth_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rule B: the emitted message is imp's own determination; the codex server's
+    prose survives only under detail["provider_message"]."""
+    ran = await run_codex_turn(
+        tmp_path, monkeypatch, turn=failing_turn({"message": REUSE_MESSAGE}),
+        probe=FAILED_INVALID_GRANT)
+    payload = error_payload(ran)
+
+    assert payload["category"] == "auth_terminal"
+    assert payload["kind"] == "AuthTerminalError"
+    assert payload["message"] == (
+        "codex: ChatGPT OAuth refresh token is dead; run `codex login`. Sharing "
+        "~/.codex/auth.json across machines kills it — each refresh rotates a "
+        "single-use token.")
+    assert payload["detail"]["provider_message"] == f"codex: {REUSE_MESSAGE}"
+    # Pre-spawn refresh, then the probe — both journaled as token_refresh.
+    assert refresh_outcomes(ran) == ["skipped_fresh", "failed_invalid_grant"]
+    # No backoff is attempted for the emitted category: it pauses at once.
+    assert ep.decide(payload["category"], prior_backoff_attempts=0) == ep.Pause()
+    assert ep.budget_for(payload["category"]) is None
+
+
+@pytest.mark.anyio
+async def test_the_non_dict_error_shape_reaches_the_same_upgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An object whose str() carries the reuse message, rather than a dict."""
+
+    class _OpaqueError:
+        def __str__(self) -> str:
+            return REUSE_MESSAGE
+
+    ran = await run_codex_turn(
+        tmp_path, monkeypatch, turn=failing_turn(_OpaqueError()),
+        probe=FAILED_INVALID_GRANT)
+    payload = error_payload(ran)
+
+    assert payload["category"] == "auth_terminal"
+    assert payload["detail"]["provider_message"] == f"codex: {REUSE_MESSAGE}"
+
+
+@pytest.mark.anyio
+async def test_a_transient_probe_leaves_the_401_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = await run_codex_turn(
+        tmp_path, monkeypatch,
+        turn=failing_turn({"status": 401, "message": "Unauthorized"}),
+        probe=FAILED_TRANSIENT)
+    payload = error_payload(ran)
+
+    assert payload["category"] == "auth"
+    assert payload["kind"] == "AuthError"
+    assert payload["message"] == "codex: Unauthorized"
+    assert ep.is_retry_with_backoff(payload["category"]) is True
+
+
+@pytest.mark.anyio
+async def test_the_probe_hands_back_the_expiry_the_spawn_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = await run_codex_turn(
+        tmp_path, monkeypatch,
+        turn=failing_turn({"status": 401, "message": "Unauthorized"}),
+        probe=FAILED_TRANSIENT)
+
+    assert ran.refresh.calls == [
+        {"force": False, "spawn_expires_at": None},
+        {"force": True, "spawn_expires_at": EXPIRY_MS},
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("auth_mode,err", [
+    pytest.param("apikey", perr.AuthError("codex: Unauthorized"),
+                 id="rule-a-apikey-spawn"),
+    pytest.param("chatgpt", perr.NetworkError("codex: connection reset"),
+                 id="not-an-auth-error"),
+])
+async def test_the_probe_stays_out_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    auth_mode: str, err: perr.ProviderError,
+) -> None:
+    """Rule A: after the later API-key fallback the canonical file still declares a
+    dead chatgpt credential, so a probe that ignored the spawn's mode would pause
+    the run over a credential it stopped using. The stub returns the dead-grant
+    outcome for both call sites, so only the mode guard can keep this an
+    AuthError — a stub returning NOT_APPLICABLE would pass without one."""
+    seed_canonical_chatgpt(tmp_path, monkeypatch)
+    refresh = FakeRefresh(pre=FAILED_INVALID_GRANT, probe=FAILED_INVALID_GRANT)
+    monkeypatch.setattr(codex_runner, "refresh_canonical_token", refresh)
+    elog = InMemoryEventLog()
+    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner._spawn_token_expiry = EXPIRY_MS
+    session = CodexSession(_invocation(tmp_path, elog), runner)
+    session.elog = elog
+    session.aid = "step:t"
+    session._proc_state = {"auth_mode": auth_mode}
+
+    settled = await session._settle_auth_terminality(err)
+
+    assert settled is err
+    assert settled.category == err.category
+    assert refresh.calls == []
+    assert list(elog.read()) == []
