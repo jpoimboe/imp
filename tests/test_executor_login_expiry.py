@@ -69,7 +69,7 @@ async def test_near_expiry_login_warns_once_at_run_start(
 
 @pytest.mark.anyio
 @pytest.mark.bare_sandbox
-async def test_second_run_quest_entry_in_the_same_process_stays_silent(
+async def test_login_advisory_silent_on_second_entry(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The daemon hold loop re-enters run_quest after every user reply; the per-process
     gate ensures the advisory is emitted at most once per process."""
