@@ -20,11 +20,26 @@ Both are fixed by proxying the `asyncio` reference the SDK's exec module uses an
 injecting defaults into `create_subprocess_exec`: a large `limit` and
 `start_new_session=True` (the child becomes its own session leader, pgid == pid,
 outside imp's group, so a group Ctrl-C reaches imp alone).
+
+Item models — the pinned models contradict the codex CLI's real wire contract.
+`openai_codex_sdk.types` declares narrower `status` literals than codex-rs emits
+and models MCP result content as objects when rust sends arbitrary JSON, so a
+real event line raises `pydantic.ValidationError` out of the SDK's parser. imp
+registers widened subclasses into `openai_codex_sdk.parsing._ITEM_MODELS`; each
+widening mirrors the exact rust variant set, so genuinely new upstream drift
+still fails loudly.
 """
 from __future__ import annotations
 
 import codecs
-from typing import Any
+from typing import Any, Literal
+
+from openai_codex_sdk.types import (
+    CommandExecutionItem,
+    FileChangeItem,
+    McpToolCallItem,
+    McpToolCallResult,
+)
 
 CODEX_STREAM_LIMIT = 64 * 1024 * 1024  # 64 MiB: bounded ceiling for one JSONL line
 
@@ -76,12 +91,37 @@ class _SubprocessPatchingAsyncio:
         return proc
 
 
+class _FileChangeItem(FileChangeItem):
+    # rust PatchApplyStatus, plus the InProgress the exec mapper emits at item.started
+    status: Literal["in_progress", "completed", "failed"]  # type: ignore[assignment]
+
+
+class _CommandExecutionItem(CommandExecutionItem):
+    # rust CommandExecutionStatus
+    status: Literal["in_progress", "completed", "failed", "declined"]  # type: ignore[assignment]
+
+
+class _McpToolCallResult(McpToolCallResult):
+    # rust sends Vec<JsonValue>: a content entry need not be an object
+    content: list[Any]
+
+
+class _McpToolCallItem(McpToolCallItem):
+    result: _McpToolCallResult | None = None
+
+
 def install_codex_sdk_patches() -> None:
-    """Idempotently install imp's patches against the pinned codex SDK: its exec
-    module's `create_subprocess_exec` gets CODEX_STREAM_LIMIT and
-    start_new_session=True. Call before driving a real codex thread. No-op if
-    already installed."""
+    """Idempotently install imp's patches against the pinned codex SDK: widened
+    item models registered into its parser, and its exec module's
+    `create_subprocess_exec` given CODEX_STREAM_LIMIT and start_new_session=True.
+    Call before driving a real codex thread."""
     import openai_codex_sdk.exec as codex_exec
+    from openai_codex_sdk import parsing
+
+    # Ahead of the proxy guard below: an already-proxied SDK must not skip this.
+    parsing._ITEM_MODELS["file_change"] = _FileChangeItem
+    parsing._ITEM_MODELS["command_execution"] = _CommandExecutionItem
+    parsing._ITEM_MODELS["mcp_tool_call"] = _McpToolCallItem
 
     if isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio):  # type: ignore[attr-defined]
         return

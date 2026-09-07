@@ -1,4 +1,4 @@
-"""Tests for imp's patches against the pinned codex SDK (read-limit + session isolation).
+"""Tests for imp's patches against the pinned codex SDK (subprocess spawn + item models).
 
 Covers:
 - Behavioral regression: a line > 64 KiB raises ValueError at asyncio's default limit.
@@ -8,6 +8,8 @@ Covers:
 - _SubprocessPatchingAsyncio proxy: injects default limit AND start_new_session,
   respects explicit values for each, forwards other attrs.
 - install_codex_sdk_patches: idempotent, replaces the SDK module ref, forwards real attrs.
+- Widened item models: the three real codex wire payloads parse; each model is
+  registered exactly once.
 - Real grouping: a child spawned through the proxy lands in its own process group.
 """
 from __future__ import annotations
@@ -16,6 +18,7 @@ import asyncio
 import contextlib
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +26,9 @@ import pytest
 
 from imp.providers.codex_sdk_patch import (
     CODEX_STREAM_LIMIT,
+    _CommandExecutionItem,
+    _FileChangeItem,
+    _McpToolCallItem,
     _SubprocessPatchingAsyncio,
     install_codex_sdk_patches,
 )
@@ -150,19 +156,15 @@ async def test_proxy_injects_limit_and_session_isolation() -> None:
 # Installer: idempotency + real attr forwarding
 # ---------------------------------------------------------------------------
 
-def test_install_is_idempotent_and_forwards() -> None:
+def test_install_is_idempotent_and_forwards(sdk_patch_sandbox: dict[str, Any]) -> None:
     """install_codex_sdk_patches() is idempotent; the proxy forwards real asyncio attrs."""
     from openai_codex_sdk import exec as codex_exec  # type: ignore[import-untyped]
 
-    original = codex_exec.asyncio
-    try:
-        install_codex_sdk_patches()
-        install_codex_sdk_patches()  # second call must be a no-op
-        assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
-        assert codex_exec.asyncio.FIRST_COMPLETED is asyncio.FIRST_COMPLETED
-        assert codex_exec.asyncio.create_subprocess_exec is not None
-    finally:
-        codex_exec.asyncio = original  # restore so the patch doesn't leak
+    install_codex_sdk_patches()
+    install_codex_sdk_patches()  # second call must be a no-op
+    assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
+    assert codex_exec.asyncio.FIRST_COMPLETED is asyncio.FIRST_COMPLETED
+    assert codex_exec.asyncio.create_subprocess_exec is not None
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +285,83 @@ async def test_tee_decodes_multibyte_char_split_across_reads(tmp_path: Path) -> 
     assert out == b"caf\xc3\xa9\n"
     # ...and the sink decodes the split 'é' correctly (no U+FFFD replacement).
     assert sink.tail() == "café\n"
+
+
+# ---------------------------------------------------------------------------
+# Item models: the pinned SDK's models vs. the codex CLI's real wire contract
+# ---------------------------------------------------------------------------
+
+# Real codex 0.153 wire lines (codex-rs exec/src/exec_events.rs at rust-v0.153.2).
+_WIRE_FILE_CHANGE_STARTED = (
+    '{"type":"item.started","item":{"id":"i1","type":"file_change",'
+    '"changes":[{"path":"a","kind":"add"}],"status":"in_progress"}}'
+)
+_WIRE_COMMAND_DECLINED = (
+    '{"type":"item.completed","item":{"id":"i2","type":"command_execution",'
+    '"command":"ls","aggregated_output":"","exit_code":null,"status":"declined"}}'
+)
+_WIRE_MCP_STRING_CONTENT = (
+    '{"type":"item.completed","item":{"id":"i3","type":"mcp_tool_call",'
+    '"server":"imp","tool":"bash","arguments":{},'
+    '"result":{"content":["plain string"],"structured_content":null},'
+    '"status":"completed"}}'
+)
+
+
+@pytest.fixture
+def sdk_patch_sandbox() -> Iterator[dict[str, Any]]:
+    """Install the patches inside one test only: snapshot the SDK's item-model
+    registry and its exec-module asyncio ref and restore both afterwards. Yields
+    the pre-install registry snapshot."""
+    from openai_codex_sdk import exec as codex_exec
+    from openai_codex_sdk import parsing
+
+    saved_models = dict(parsing._ITEM_MODELS)
+    saved_asyncio = codex_exec.asyncio
+    try:
+        yield saved_models
+    finally:
+        parsing._ITEM_MODELS.clear()
+        parsing._ITEM_MODELS.update(saved_models)
+        codex_exec.asyncio = saved_asyncio
+
+
+def test_patched_parser_accepts_the_real_wire_lines(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """The three payloads codex actually emits parse, with their real values."""
+    from openai_codex_sdk.parsing import parse_thread_event_line
+
+    from imp.providers.codex_runner import _serialize_mcp_result
+
+    install_codex_sdk_patches()
+
+    started = parse_thread_event_line(_WIRE_FILE_CHANGE_STARTED)
+    assert started.item.status == "in_progress"
+    assert [c.path for c in started.item.changes] == ["a"]
+
+    declined = parse_thread_event_line(_WIRE_COMMAND_DECLINED)
+    assert declined.item.status == "declined"
+    assert declined.item.command == "ls"
+
+    mcp = parse_thread_event_line(_WIRE_MCP_STRING_CONTENT)
+    assert mcp.item.result.content == ["plain string"]
+    assert _serialize_mcp_result(mcp.item.result) == "plain string"
+
+
+def test_install_registers_each_item_model_exactly_once(
+    sdk_patch_sandbox: dict[str, Any],
+) -> None:
+    """Two calls leave one registration per key and one subprocess proxy."""
+    from openai_codex_sdk import exec as codex_exec
+    from openai_codex_sdk import parsing
+
+    install_codex_sdk_patches()
+    install_codex_sdk_patches()
+
+    assert set(parsing._ITEM_MODELS) == set(sdk_patch_sandbox)
+    assert parsing._ITEM_MODELS["file_change"] is _FileChangeItem
+    assert parsing._ITEM_MODELS["command_execution"] is _CommandExecutionItem
+    assert parsing._ITEM_MODELS["mcp_tool_call"] is _McpToolCallItem
+    assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
+    assert not isinstance(codex_exec.asyncio._real, _SubprocessPatchingAsyncio)
