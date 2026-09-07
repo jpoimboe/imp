@@ -82,6 +82,7 @@ from imp.agents.tools.context import (
     suspend_inactivity_watchdog,
 )
 from imp.agents.tools.errors import FatalToolError
+from imp.agents.tools.image import BASE64_TARGET_BYTES
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
@@ -139,6 +140,11 @@ from imp.providers.web_native import (
 
 if TYPE_CHECKING:
     from claude_agent_sdk import EffortLevel, ThinkingConfig
+
+
+# The CLI echoes an image tool result twice on one stream-json line (the content
+# block plus a `tool_use_result` copy); 4x is that doubling plus 2x headroom.
+_CLI_LINE_BUFFER_BYTES = 4 * BASE64_TARGET_BYTES
 
 
 def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object]:
@@ -2102,6 +2108,7 @@ class ClaudeCodeAgentRunner:
             model=info.cli_model or self.model,
             betas=cast(list[SdkBeta], list(info.betas)),
             include_partial_messages=True,
+            max_buffer_size=_CLI_LINE_BUFFER_BYTES,
             stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
             env=env,
             # Pin the `claude` subprocess to the quest's project_root. Without
