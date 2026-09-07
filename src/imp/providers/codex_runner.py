@@ -1096,8 +1096,10 @@ def process_event(
     `state` is a shared dict carrying in-flight thread_id, the latest context
     reading, captured complete_step args, etc.
 
-    The default arm (unknown item type) logs a runner_warning and returns
-    (L3 invariant); only security-relevant types get special handling.
+    The default arm (unknown item type) logs a runner_warning and returns; so
+    does an item the pinned SDK could not parse (see the parse-boundary bullet
+    under Layering invariants in docs/internals/invariants.md). Only
+    security-relevant types get special handling.
     """
     etype = getattr(event, "type", None)
 
