@@ -49,7 +49,6 @@ def anyio_backend():
 
 @pytest.fixture(autouse=True)
 def _providers():
-    resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic", env_check=lambda: True,
         factory=lambda m: _RecordingProvider("anthropic", m))
@@ -57,7 +56,6 @@ def _providers():
         "openai", env_check=lambda: True,
         factory=lambda m: _RecordingProvider("openai", m))
     yield
-    resolve.reset_providers_for_tests()
 
 
 def _inv(provider, model, tmp_path):

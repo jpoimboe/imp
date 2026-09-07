@@ -295,7 +295,7 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
     # child runner with the same shared fake client (not a real network client).
     # Without this, the registry path resolves "openai" to the real factory,
     # which builds an OpenAI client with a stub key and makes a real network
-    # call that returns 401. The shared provider_registry fixture owns teardown.
+    # call that returns 401. conftest's _reset_provider_registry owns teardown.
     provider_registry(
         "openai", env_check=lambda: True,
         factory=lambda m: OpenAIProvider(

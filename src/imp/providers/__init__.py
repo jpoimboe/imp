@@ -9,8 +9,8 @@ rich/click/pygments behind httpx's CLI extra). A provider module loads only when
 its env_check or factory is actually called.
 
 Registration is idempotent — re-running it is a no-op for already-registered
-names (resolve.register_provider rebinds, which is harmless in practice, but
-tests that need isolation should call resolve.reset_providers_for_tests()).
+names (resolve.register_provider rebinds, which is harmless in practice; test
+isolation is owned by conftest's autouse _reset_provider_registry fixture).
 """
 
 from __future__ import annotations

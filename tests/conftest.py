@@ -265,6 +265,16 @@ def _reset_theme() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _reset_provider_registry() -> Generator[None, None, None]:
+    """Clear the module-global provider registry after every test. Many tests
+    reset-and-register a fake with no teardown; this net makes those call sites
+    harmless, and _ensure_builtins() reloads the real providers on demand."""
+    yield
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_global_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -573,26 +583,14 @@ def _pid_gone_or_zombie(pid: int) -> bool:
 
 @pytest.fixture
 def provider_registry():
-    """Reset the provider registry before AND after the test, yielding a thin
-    register(...) wrapper over resolve.register_provider so tests keep their
-    bespoke factories while the fixture owns teardown.
-
-    Opt-in: name `provider_registry` as a test argument. Mirrors the
-    reset-on-both-sides shape of test_subagent_spawn.py's autouse `_providers`
-    fixture, but NON-autouse so only requesting tests are affected. The
-    before-yield reset means a converted test no longer detects a registry
-    polluted by a prior test (intentional parity with test_subagent_spawn.py);
-    the after-yield reset still prevents leakage onto the next test.
-    """
+    """A thin register(...) wrapper over resolve.register_provider; the autouse
+    _reset_provider_registry fixture owns teardown."""
     from imp.providers import resolve
-
-    resolve.reset_providers_for_tests()
 
     def register(name, env_check, factory):
         resolve.register_provider(name, env_check=env_check, factory=factory)
 
-    yield register
-    resolve.reset_providers_for_tests()
+    return register
 
 
 def _spin_hold_lock(lock_path: str, release_flag: str, ready_flag: str) -> None:
