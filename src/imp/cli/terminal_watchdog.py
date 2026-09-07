@@ -3,11 +3,16 @@
 """Bound the pause latency when the terminal driving a leased session goes away."""
 from __future__ import annotations
 
+import contextlib
 import errno
+import os
 import threading
 import time
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from imp.remote.session.client import SessionClient
 
 WRITE_WEDGE_SECONDS = 20.0
 POLL_SECONDS = 1.0
@@ -89,3 +94,27 @@ class WriteWatchdog:
             if started is not None and time.monotonic() - started >= self._threshold:
                 self._on_trip()
                 return
+
+
+def terminal_gone(client: SessionClient) -> None:
+    """Drop the lease so the daemon pauses; hard exit — unwinding writes to the dead terminal."""
+    client.shutdown_socket()
+    os._exit(1)
+
+
+@contextlib.contextmanager
+def watch_terminal(
+    stream: WatchedStream | None, on_gone: Callable[[], None],
+) -> Iterator[None]:
+    """Arm the wedge watchdog and the EIO hook for the life of a leased attach."""
+    if stream is None:
+        yield
+        return
+    watchdog = WriteWatchdog(stream, on_gone)
+    stream.on_terminal_gone = on_gone
+    watchdog.start()
+    try:
+        yield
+    finally:
+        stream.on_terminal_gone = None
+        watchdog.stop()

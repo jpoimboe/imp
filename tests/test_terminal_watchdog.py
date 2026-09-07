@@ -22,6 +22,7 @@ from imp.cli.terminal_watchdog import (
     WRITE_WEDGE_SECONDS,
     WatchedStream,
     WriteWatchdog,
+    watch_terminal,
 )
 from imp.remote.session.client import SessionClient
 from tests.async_wait import HANG_BACKSTOP, wait_until
@@ -395,3 +396,26 @@ async def test_shutdown_socket_from_a_thread_delivers_eof_while_the_loop_is_wedg
         watched.close()
     os.close(master)
     assert eof == [True]
+
+
+def test_watch_terminal_arms_both_triggers_and_joins_the_thread_on_exit() -> None:
+    watched = WatchedStream(_TTY())
+    calls: list[str] = []
+
+    def _gone() -> None:
+        calls.append("gone")
+
+    before = _watchdog_threads()
+    with watch_terminal(watched, _gone):
+        spawned = _watchdog_threads() - before
+        assert len(spawned) == 1
+        assert watched.on_terminal_gone is _gone
+    assert watched.on_terminal_gone is None
+    assert not any(t.is_alive() for t in spawned)
+    assert calls == []
+
+
+def test_watch_terminal_is_inert_without_a_watched_stream() -> None:
+    before = _watchdog_threads()
+    with watch_terminal(None, lambda: None):
+        assert not (_watchdog_threads() - before)
