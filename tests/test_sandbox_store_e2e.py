@@ -30,7 +30,7 @@ from imp.engine import archive
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.sandbox import (
     SandboxConfig,
-    build_sandbox_argv,
+    build_sandbox_spawn,
     prepare_spawn_policy,
     resolve_policy,
     sandbox_available,
@@ -247,8 +247,9 @@ async def _serve_and_run(
     # setup. The masks under test (events.jsonl, archive blobs, index.db) all exist
     # and survive the prune, so the asserted behavior is unchanged.
     policy = prepare_spawn_policy(policy)
-    argv = build_sandbox_argv(
-        command, cwd=str(control), policy=policy, engine_env=engine_env)
+    sandbox_spawn = build_sandbox_spawn(
+        command, cwd=str(control), policy=policy, engine_env=engine_env,
+        environ=dict(os.environ))
 
     sock_path = session_socket_path(CUR)
     socket = SessionSocket(str(sock_path), on_query=build_session_handler(control))
@@ -262,7 +263,9 @@ async def _serve_and_run(
     async def spawn() -> None:
         # `async with` so a deadlock-path cancellation (move_on_after) terminates the
         # bwrap child instead of leaking it.
-        async with await anyio.open_process(argv, stdout=PIPE, stderr=PIPE) as proc:
+        async with await anyio.open_process(
+                sandbox_spawn.argv, env=sandbox_spawn.env,
+                stdout=PIPE, stderr=PIPE) as proc:
             oc: list[bytes] = []
             ec: list[bytes] = []
 

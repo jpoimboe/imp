@@ -37,7 +37,7 @@ from imp.engine import worktree as wt
 from imp.engine.sandbox import (
     SandboxConfig,
     SandboxPolicy,
-    build_sandbox_argv,
+    build_sandbox_spawn,
     make_home_layer,
     overlay_mode,
     resolve_policy,
@@ -72,7 +72,7 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
     Uses PATH from the real environment so git, cat, echo, etc. resolve.
     HOME is set to a dir under the worktree root (or the provided `home`).
     This hand-built policy sets no /tmp source, so /tmp is bound rw by identity in
-    build_sandbox_argv — no per-test tmp dir setup is needed.
+    build_sandbox_spawn — no per-test tmp dir setup is needed.
     """
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
@@ -128,7 +128,7 @@ def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
 
 
 # The overlay home under test must live at a path covered by NO later bind_plan
-# bind — NOT under /tmp (build_sandbox_argv emits --bind /tmp /tmp, which re-mounts
+# bind — NOT under /tmp (build_sandbox_spawn emits --bind /tmp /tmp, which re-mounts
 # the host /tmp OVER an overlay home placed under /tmp, defeating it) and NOT under
 # the sandbox worktree (its rw bind does the same). The home-layer rw bind is
 # emitted FIRST (sandbox.py:91), so it can never be the last-covering bind for a
@@ -438,7 +438,7 @@ def test_secret_dir_masked() -> None:
 # ---------------------------------------------------------------------------
 
 def test_network_off_adds_unshare_net() -> None:
-    """build_sandbox_argv with network=False must include --unshare-net (spec B.2 step 15)."""
+    """build_sandbox_spawn with network=False must include --unshare-net (spec B.2 step 15)."""
     pol = SandboxPolicy(
         active=True,
         worktree="/tmp/fake-wt",
@@ -453,8 +453,8 @@ def test_network_off_adds_unshare_net() -> None:
         network=False,  # <-- network isolation
         note="",
     )
-    argv = build_sandbox_argv("curl example.com", cwd="/tmp/fake-wt", policy=pol,
-                              engine_env={})
+    argv = build_sandbox_spawn("curl example.com", cwd="/tmp/fake-wt", policy=pol,
+                               engine_env={}, environ={}).argv
     assert "--unshare-net" in argv, (
         f"--unshare-net missing from argv when network=False: {argv}"
     )
@@ -733,11 +733,12 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
         worktree_imp.mkdir(parents=True)
         (worktree_imp / "__init__.py").write_text("")
         pol = _active_policy(root)
-        argv = build_sandbox_argv(
+        spawn = build_sandbox_spawn(
             "python3 -c 'import imp; print(imp.__file__)'",
             cwd=str(root), policy=pol,
-            engine_env={"PYTHONPATH": str(root / "src")})
-        result = subprocess.run(argv, capture_output=True, text=True)
+            engine_env={"PYTHONPATH": str(root / "src")}, environ={})
+        result = subprocess.run(spawn.argv, env=spawn.env,
+                                capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         assert str(worktree_imp) in result.stdout
     finally:
@@ -775,10 +776,10 @@ def test_sandboxed_imp_resolves_outer_imp_over_worktree_shadow() -> None:
         engine_env = {"PYTHONPATH": str(root / "src")}
 
         def _run(cmd: str) -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
-                build_sandbox_argv(cmd, cwd=str(root), policy=pol,
-                                   engine_env=engine_env),
-                capture_output=True, text=True)
+            spawn = build_sandbox_spawn(cmd, cwd=str(root), policy=pol,
+                                        engine_env=engine_env, environ={})
+            return subprocess.run(spawn.argv, env=spawn.env,
+                                  capture_output=True, text=True)
 
         version = _run("imp --version")
         assert version.returncode == 0, (

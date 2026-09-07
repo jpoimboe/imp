@@ -4,9 +4,9 @@
 
 Two spawn points consume this: the `bash` tool (agents/tools/bash.py) and script
 gates (engine/gates.py). `resolve_policy` does the one-time stat I/O and bakes a
-frozen `SandboxPolicy`; `build_sandbox_argv` is pure given that policy.
+frozen `SandboxPolicy`; `build_sandbox_spawn` is pure given that policy.
 
-The flag ORDER in build_sandbox_argv is load-bearing: bwrap is last-wins, so the
+The flag ORDER in build_sandbox_spawn is load-bearing: bwrap is last-wins, so the
 writable-home bind (when a home_layer is present) and then the /tmp bind are
 emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
 secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
@@ -34,7 +34,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import HEADLESS_ENV, quest_var_tmp_root
+from imp.engine.env import HEADLESS_ENV, overlay_engine_env, quest_var_tmp_root
 from imp.engine.shim import imp_shim_dir
 from imp.paths import imp_home, project_state_dir
 from imp.remote.session.discover import session_socket_path
@@ -98,7 +98,7 @@ class SandboxPolicy:
 
     def bind_plan(self) -> list[tuple[str, str]]:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
-        source of truth shared by build_sandbox_argv (which formats each entry to
+        source of truth shared by build_sandbox_spawn (which formats each entry to
         argv), allows_write, and allows_read (both evaluate last-covering-wins).
         kind is one of rw / ro / mask_dir / mask_file; rw grants write. The order is
         load-bearing: the ro overlays (git_ro_remask, readonly_overlays, extra_readable)
@@ -198,7 +198,7 @@ def _is_engine_passthrough(key: str) -> bool:
     var, PYTHONPATH (the imp-on-imp import shadow), and the four headless
     overrides (GIT_EDITOR / GIT_TERMINAL_PROMPT / EDITOR / VISUAL) that keep a
     sandboxed git/tool invocation non-interactive. Shared by both allowlist
-    sites (the per-spawn loop in build_sandbox_argv and the policy bake in
+    sites (the per-spawn loop in build_sandbox_spawn and the policy bake in
     _build_child_env) so they cannot drift."""
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
@@ -246,12 +246,27 @@ def sandbox_spawn_backoff_delay(attempt: int) -> float:
     return random.uniform(0.0, ceiling)
 
 
-def build_sandbox_argv(
-    command: str, *, cwd: str, policy: SandboxPolicy,
-    engine_env: Mapping[str, str],
-) -> list[str]:
-    """Return the argv to spawn `command`. When the policy is active, wrap with
-    bwrap per spec §B.2 (fixed flag order); otherwise the bare ["sh","-c",cmd].
+@dataclass(frozen=True, slots=True)
+class SandboxSpawn:
+    """One spawn's argv AND the environment to spawn it with. Produced by a single
+    call so the two cannot be mismatched: a bwrap argv carrying no --clearenv is
+    unsafe paired with os.environ, which would dump the user's whole environment
+    into the sandbox."""
+    argv: list[str]
+    env: dict[str, str]
+
+
+def build_sandbox_spawn(
+    command: str, *, cwd: str, policy: SandboxPolicy | None,
+    engine_env: Mapping[str, str], environ: Mapping[str, str],
+    shim_dir: str = "",
+) -> SandboxSpawn:
+    """Return the argv to spawn `command` AND the environment to spawn it with.
+    When the policy is active, wrap with bwrap per spec §B.2 (fixed flag order) and
+    the env is the resolved child environment; otherwise the bare ["sh","-c",cmd]
+    with the host environment (`environ` overlaid with `engine_env`, plus the
+    `shim_dir` PATH prefix) — the `/sandbox off` path, deliberately unchanged. A
+    None policy is the same unsandboxed case.
 
     `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
@@ -272,8 +287,11 @@ def build_sandbox_argv(
     An ACTIVE policy carrying overlay_root with an un-minted home layer is a
     fail-open bug (it would bind the real $HOME rw) and raises; the INACTIVE
     variant of that same shape is the reachable `/sandbox off` case and is fine."""
-    if not policy.active:
-        return ["sh", "-c", command]
+    if policy is None or not policy.active:
+        env = overlay_engine_env(environ, engine_env)
+        if shim_dir:
+            env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
+        return SandboxSpawn(argv=["sh", "-c", command], env=env)
 
     if (policy.overlay_root is not None and policy.home_layer is not None
             and not policy.home_layer.is_overlay):
@@ -353,9 +371,10 @@ def build_sandbox_argv(
             f"|| exit 1; "
             f"exec {shlex.join(argv)}"
         )
-        return ["unshare", "--user", "--map-root-user", "--mount",
-                "sh", "-c", mount]
-    return argv
+        return SandboxSpawn(
+            argv=["unshare", "--user", "--map-root-user", "--mount", "sh", "-c", mount],
+            env=child_env)
+    return SandboxSpawn(argv=argv, env=child_env)
 
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
@@ -522,7 +541,7 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
     real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
     tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
-    build_sandbox_argv uses — so the probe exercises the overlapping-layers
+    build_sandbox_spawn uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
     nothing. Cached like sandbox_available(); the answer is carried to the
     per-command mount (via make_home_layer), so probe and spawn always agree.

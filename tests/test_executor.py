@@ -4546,15 +4546,15 @@ def test_sandbox_off_shape_with_overlay_root_builds_bare_argv(tmp_path, monkeypa
     import dataclasses
 
     from imp.engine import executor as ex
-    from imp.engine.sandbox import build_sandbox_argv
+    from imp.engine.sandbox import build_sandbox_spawn
     monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
     assert pol.overlay_root and not pol.home_layer.is_overlay   # the decorated shape
     off = dataclasses.replace(pol, active=False)
-    assert build_sandbox_argv("echo hi", cwd="/wt", policy=off,
-                              engine_env={}) == ["sh", "-c", "echo hi"]
+    assert build_sandbox_spawn("echo hi", cwd="/wt", policy=off,
+                               engine_env={}, environ={}).argv == ["sh", "-c", "echo hi"]
     cleanup()
 
 

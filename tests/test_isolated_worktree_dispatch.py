@@ -515,7 +515,7 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
     # bash argv carries --unshare-net.
     from types import SimpleNamespace
 
-    from imp.engine.sandbox import build_sandbox_argv
+    from imp.engine.sandbox import build_sandbox_spawn
 
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: None)
@@ -537,8 +537,8 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
 
     pol = capture["inv"].sandbox_policy
     assert pol.network is False
-    argv = build_sandbox_argv("curl example.com", cwd=pol.worktree, policy=pol,
-                              engine_env={})
+    argv = build_sandbox_spawn("curl example.com", cwd=pol.worktree, policy=pol,
+                               engine_env={}, environ={}).argv
     assert "--unshare-net" in argv
 
 

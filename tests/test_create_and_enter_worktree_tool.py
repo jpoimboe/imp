@@ -11,7 +11,7 @@ from imp.engine.sandbox import (
     OverlayRoot,
     SandboxConfig,
     SandboxPolicy,
-    build_sandbox_argv,
+    build_sandbox_spawn,
     prepare_spawn_policy,
     resolve_policy,
 )
@@ -174,9 +174,10 @@ async def test_bash_argv_chdirs_and_reexposes_new_worktree(tmp_path: Path) -> No
         available=True, quest_dir=ch.quest_dir)
     await get_registry()["create_and_enter_worktree"].async_invoke(ctx, {})
     wt = project_state_dir(tmp_path) / "worktrees" / "t8"
-    argv = build_sandbox_argv(
+    argv = build_sandbox_spawn(
         "cat app.py", cwd=str(ctx.project_root),
-        policy=prepare_spawn_policy(ctx.sandbox_policy), engine_env={})
+        policy=prepare_spawn_policy(ctx.sandbox_policy), engine_env={},
+        environ={}).argv
     # The shell cwd (ctx.project_root) is the new worktree...
     ci = argv.index("--chdir")
     assert argv[ci + 1] == str(wt)
