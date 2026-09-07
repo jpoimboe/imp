@@ -58,7 +58,7 @@ def _fixed_settle(wait: float) -> tuple[float, str]:
 
 
 class ImptyDriver:
-    """One lazy `TerminalSession` at a time. `start` replaces any existing one."""
+    """One lazy `TerminalSession` at a time. `start` refuses to replace a live one."""
 
     def __init__(self) -> None:
         self._session: TerminalSession | None = None
@@ -93,7 +93,8 @@ class ImptyDriver:
     ) -> str:
         """Spawn an interactive program on a fresh pty and return its first screen.
 
-        Replaces any existing session. `argv` is the command + args, e.g.
+        Refuses while a program is still running — call stop() first. A session whose
+        program has exited is replaced. `argv` is the command + args, e.g.
         ["imp", "new", "my-quest"] — spawned directly, so the program is the
         foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shell
         wrapper is needed; pass `env` to set variables (e.g. API keys) instead of a
@@ -105,6 +106,8 @@ class ImptyDriver:
         settle before returning, so the returned screen is the first thing to react to.
         """
         if self._session is not None:
+            if self._session.is_alive():
+                raise RuntimeError("session already running — call stop() first")
             self._session.close()
             self._session = None
         session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)

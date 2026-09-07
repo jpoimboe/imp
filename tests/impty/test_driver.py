@@ -114,16 +114,57 @@ def test_close_kills_the_running_session() -> None:
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
-def test_start_replaces_existing_session() -> None:
+def test_start_refuses_to_replace_a_live_session() -> None:
     d = ImptyDriver()
-    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
-    first_pid = d._require().pid
-    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
-    assert d._require().pid != first_pid
-    time.sleep(0.3)
-    with pytest.raises(ProcessLookupError):
+    d.start([sys.executable, "-c", "import time; print('FIRST'); time.sleep(30)"])
+    try:
+        # start()'s internal settle caps at 3s and returns whatever pyte holds, so a
+        # saturated runner can push interpreter startup past it. Settle on a generous
+        # explicit hard before reading screen text — same reason as the comment at
+        # test_wait_clamped_for_change_reports_no_change_with_the_resume_clause.
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "FIRST" in d.view()
+        first_pid = d._require().pid
+        with pytest.raises(RuntimeError) as excinfo:
+            d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+        assert str(excinfo.value) == "session already running — call stop() first"
+        # The refused call killed nothing: same session, same live process, same screen.
+        assert d._require().pid == first_pid
         os.kill(first_pid, 0)
-    d.stop()
+        assert "FIRST" in d.view()
+        # stop() is the documented recovery path, so the next start() must succeed.
+        d.stop()
+        screen = d.start(
+            [sys.executable, "-c", "import time; print('SECOND'); time.sleep(30)"])
+        assert screen.splitlines()[0].startswith("[alive=True")
+        assert d._require().pid != first_pid
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "SECOND" in d.view()
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_replaces_a_session_whose_program_exited() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "print('FIRST')"])
+    first_pid = d._require().pid
+    try:
+        # Poll for the exit rather than sleeping a fixed interval: under a saturated
+        # parallel run the reap can lag the settled screen by a while.
+        deadline = time.monotonic() + 20.0
+        while d._require().is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not d._require().is_alive()
+        screen = d.start(
+            [sys.executable, "-c", "import time; print('SECOND'); time.sleep(30)"])
+        assert screen.splitlines()[0].startswith("[alive=True")
+        assert d._require().pid != first_pid
+        # Same 3s-cap hazard: settle explicitly, then read the marker off view().
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "SECOND" in d.view()
+    finally:
+        d.stop()
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
