@@ -125,7 +125,8 @@ def _model_row_billing(row: dict[str, Any]) -> BillingUsage:
         fresh_input=int(row.get("inputTokens", 0) or 0),
         cached_input=int(row.get("cacheReadInputTokens", 0) or 0),
         cache_write=int(row.get("cacheCreationInputTokens", 0) or 0),
-        output=int(row.get("outputTokens", 0) or 0))
+        output=int(row.get("outputTokens", 0) or 0),
+        web_search_requests=web_search_request_count(row))
 
 
 def _model_rows(model_usage: dict[str, Any]) -> list[tuple[str, BillingUsage]]:
@@ -137,7 +138,12 @@ def _model_rows(model_usage: dict[str, Any]) -> list[tuple[str, BillingUsage]]:
 
 def billing_from_model_usage(model_usage: dict[str, Any]) -> BillingUsage:
     """A claude_code `query_result.model_usage` rollup -> one quadruple over
-    every model in it, the background haiku included."""
+    every model in it, the background haiku included.
+
+    The web-search count rides along on both paths, so "billable" means the same
+    thing either way; it is priced only where the vendor's own cost is missing,
+    since that figure already folds web search in.
+    """
     total = BillingUsage()
     for _model, row in _model_rows(model_usage):
         total = BillingUsage(

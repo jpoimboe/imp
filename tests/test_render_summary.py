@@ -742,6 +742,29 @@ def test_a_vendor_less_row_with_no_billable_usage_renders_dashes():
     assert out[3].split() == ["reviewer", "1m", "0s", "—", "—", "—"]
 
 
+def test_web_search_requests_are_priced_when_the_vendor_cost_is_absent():
+    # AC 9(a): $10 per 1,000 requests — 12 requests are $0.12 on top of the
+    # tokens' $0.195.
+    searched = build_summary(_fallback_events({
+        "claude-sonnet-4-6": {**_FALLBACK_USAGE["claude-sonnet-4-6"],
+                              "webSearchRequests": 12}})).rows
+    plain = build_summary(_fallback_events(_FALLBACK_USAGE)).rows
+    assert (searched[0].usage.dollars
+            - plain[0].usage.dollars) == pytest.approx(0.12)
+
+
+def test_a_search_only_row_with_no_vendor_cost_is_billable_work():
+    # AC 9(b): a flat charge does not need a token to exist, so this row is
+    # work — not the "did no model work" dash.
+    rows = build_summary(_fallback_events({
+        "claude-sonnet-4-6": {"inputTokens": 0, "outputTokens": 0,
+                              "cacheReadInputTokens": 0,
+                              "cacheCreationInputTokens": 0,
+                              "webSearchRequests": 5}})).rows
+    assert rows[0].usage.dollars == pytest.approx(0.05)
+    assert cost_cell(rows[0].totals) == "[$0.05]"
+
+
 def test_a_model_absent_from_the_price_table_counts_as_unpriced():
     rows = build_summary([
         _started("coder", "build", "2026-01-01T00:00:00+00:00"),

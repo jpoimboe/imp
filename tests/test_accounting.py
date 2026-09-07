@@ -198,9 +198,9 @@ def test_a_web_search_with_no_tokens_is_still_billable_work() -> None:
 
 def test_model_usage_sums_every_model_including_haiku() -> None:
     # AC 2(b): haiku is present only in model_usage — the background model never
-    # appears in the agent_message stream at all. The web-search count is NOT
-    # carried yet: this rollup feeds the vendor-figure path, whose dollars
-    # already fold web search in.
+    # appears in the agent_message stream at all. The web-search count rides
+    # along: when the vendor omits its own cost, the fallback prices it, and
+    # dropping it here would under-bill a search-heavy row by $0.01 a request.
     billing = billing_from_model_usage({
         "claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 50,
                               "cacheReadInputTokens": 1000,
@@ -211,7 +211,8 @@ def test_model_usage_sums_every_model_including_haiku() -> None:
                                       "cacheCreationInputTokens": 0,
                                       "webSearchRequests": 0, "costUSD": 0.02}})
     assert billing == BillingUsage(fresh_input=110, cached_input=1100,
-                                   cache_write=200, output=55)
+                                   cache_write=200, output=55,
+                                   web_search_requests=3)
 
 
 def test_an_empty_model_usage_rollup_bills_nothing() -> None:
@@ -297,6 +298,17 @@ def test_a_vendor_zero_is_a_vendor_figure_not_a_missing_one() -> None:
     assert usage is not None
     assert usage.dollars == 0.0             # not the table's $0.000375
     assert (usage.priced, usage.unpriced) == (1, 0)
+
+
+def test_a_vendor_figure_is_unmoved_by_the_web_search_count() -> None:
+    # The vendor's dollars already fold web search in, so carrying the count
+    # into the quadruple must not add $0.07 on top of it.
+    usage = vendor_contribution(
+        {"claude-sonnet-4-6": {"inputTokens": 100, "outputTokens": 5,
+                               "webSearchRequests": 7}},
+        0.42, metered=True)
+    assert usage is not None
+    assert usage.dollars == pytest.approx(0.42)
 
 
 def test_an_all_zero_vendor_less_rollup_is_not_work() -> None:
