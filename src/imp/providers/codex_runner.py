@@ -69,6 +69,7 @@ from imp.providers.codex_mcp import (
 from imp.providers.codex_rollout import RolloutReadings, compaction_seen, latest_readings
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
+    SKIPPED_ROTATED,
     RefreshOutcome,
     canonical_expires_at,
     refresh_canonical_token,
@@ -553,6 +554,10 @@ class CodexSession(ObserveSession):
             spawn_expires_at=self.runner._spawn_token_expiry,
         )
         _journal_token_refresh(self.elog, self.aid, outcome)
+        if outcome.outcome == SKIPPED_ROTATED:
+            # peer already rotated; retry re-enters _enter() and re-seeds
+            err.kind = "token_rotated"  # type: ignore[attr-defined]
+            return err
         if outcome.outcome != FAILED_INVALID_GRANT:
             return err
         upgraded = perr.AuthTerminalError(_DEAD_GRANT_MESSAGE)
@@ -608,7 +613,7 @@ class CodexSession(ObserveSession):
             err = await self._settle_auth_terminality(
                 categorize_turn_failed(getattr(raw, "error", {}) or {}))
             yield Error(payload=cast(dict[str, Any], perr.make_error_event(
-                err)["payload"]))
+                err, kind=getattr(err, "kind", ""))["payload"]))
             return
 
     def _drain_kills(self) -> list[dict[str, Any]]:

@@ -13,6 +13,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine import error_policy as ep
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers import codex_runner
@@ -22,6 +23,7 @@ from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     FAILED_TRANSIENT,
     SKIPPED_FRESH,
+    SKIPPED_ROTATED,
     RefreshOutcome,
 )
 from tests.codex_fakes import (
@@ -31,6 +33,8 @@ from tests.codex_fakes import (
     thread_started,
     turn_completed,
 )
+from tests.test_executor_retry_continue import _SINGLE_WF, _WRITER, _make_quest
+from tests.test_executor_rotation_race import _no_sleep, _retries, _ScriptProvider
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 
@@ -282,3 +286,47 @@ async def test_the_probe_stays_out_of_it(
     assert settled.category == err.category
     assert refresh.calls == []
     assert list(elog.read()) == []
+
+
+@pytest.mark.anyio
+async def test_a_peer_rotation_is_stamped_on_the_emitted_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Asserted on the payload the arm yields, never on the exception: a payload
+    that lost the stamp still disables the cheap retry while the object looks fine."""
+    ran = await run_codex_turn(
+        tmp_path, monkeypatch,
+        turn=failing_turn({"status": 401, "message": "Unauthorized"}),
+        probe=SKIPPED_ROTATED)
+    payload = error_payload(ran)
+
+    assert payload["category"] == "auth"
+    assert payload["kind"] == "token_rotated"
+    assert payload["message"] == "codex: Unauthorized"
+    assert refresh_outcomes(ran) == ["skipped_fresh", "skipped_rotated"]
+
+
+@pytest.mark.anyio
+async def test_the_emitted_rotation_payload_takes_the_ladders_bottom_rung(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider_registry: Any,
+) -> None:
+    """The executor is shared with Claude and untouched here; what this pins is
+    that codex's own emitted payload reaches its `raced` branch."""
+    ran = await run_codex_turn(
+        tmp_path / "spawn", monkeypatch,
+        turn=failing_turn({"status": 401, "message": "Unauthorized"}),
+        probe=SKIPPED_ROTATED)
+    payload = error_payload(ran)
+
+    quest = _make_quest(tmp_path / "proj", agents={"writer.md": _WRITER},
+                        workflow_yaml=_SINGLE_WF)
+    provider = _ScriptProvider([payload])
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    events: list[dict[str, Any]] = []
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    retries = _retries(events)
+    assert [p["backoff_seconds"] for p in retries] == [1.0]
+    assert retries[0]["kind"] == "token_rotated"
