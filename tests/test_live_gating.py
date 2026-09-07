@@ -107,11 +107,19 @@ def test_provider_available_claude_code_missing_everywhere(monkeypatch, tmp_path
     )
 
 
-def test_provider_available_codex_missing_sdk(monkeypatch):
+def test_provider_available_codex_binary_only(monkeypatch):
+    """Gating mirrors imp's binary-only `_env_check`: `codex` on PATH is the whole
+    check. The find_spec blank pins that no python package can gate the provider."""
     import tests._live as live
     monkeypatch.setattr(live.shutil, "which", lambda _name: "/usr/bin/codex")
-    monkeypatch.setattr(live.importlib.util, "find_spec", lambda _name: None)
-    assert live.provider_available("codex") == "openai_codex_sdk not importable"
+    monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)
+    assert live.provider_available("codex") is None
+
+
+def test_provider_available_codex_missing_binary(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live.shutil, "which", lambda _name: None)
+    assert live.provider_available("codex") == "codex CLI not on PATH"
 
 
 def test_provider_available_anthropic_missing_key(monkeypatch):
