@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import errno
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
+
+WRITE_WEDGE_SECONDS = 20.0
+POLL_SECONDS = 1.0
+WATCHDOG_THREAD_NAME = "imp-write-watchdog"
 
 
 class WatchedStream:
@@ -50,3 +55,37 @@ class WatchedStream:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._stream, name)
+
+
+class WriteWatchdog:
+    """Polls the write stamp from a plain thread — the event loop is what freezes."""
+
+    def __init__(
+        self,
+        stream: WatchedStream,
+        on_trip: Callable[[], None],
+        *,
+        threshold: float = WRITE_WEDGE_SECONDS,
+        interval: float = POLL_SECONDS,
+    ) -> None:
+        self._stream = stream
+        self._on_trip = on_trip
+        self._threshold = threshold
+        self._interval = interval
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._poll, name=WATCHDOG_THREAD_NAME, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join()
+
+    def _poll(self) -> None:
+        while not self._stop.wait(self._interval):
+            started = self._stream.write_started_at
+            if started is not None and time.monotonic() - started >= self._threshold:
+                self._on_trip()
+                return

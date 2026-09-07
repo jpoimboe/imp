@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import inspect
 import io
 import os
 import pty
 import threading
+import time
 from collections.abc import Callable
 
 import pytest
@@ -13,7 +15,12 @@ import pytest
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.terminal_title import TerminalTitle
-from imp.cli.terminal_watchdog import WatchedStream
+from imp.cli.terminal_watchdog import (
+    WATCHDOG_THREAD_NAME,
+    WRITE_WEDGE_SECONDS,
+    WatchedStream,
+    WriteWatchdog,
+)
 from tests.async_wait import HANG_BACKSTOP
 
 
@@ -64,6 +71,22 @@ class _WriteBrokenPipe:
         raise OSError(errno.EPIPE, "Broken pipe")
 
     def flush(self) -> None: ...
+
+
+def _watchdog_threads() -> set[threading.Thread]:
+    return {t for t in threading.enumerate() if t.name == WATCHDOG_THREAD_NAME}
+
+
+def _drain_until(master: int, start: threading.Event, done: threading.Event) -> None:
+    """Read the pty master once `start` fires so the wedged writer can proceed."""
+    start.wait()
+    os.set_blocking(master, False)
+    while not done.is_set():
+        try:
+            if not os.read(master, 65536):
+                return
+        except BlockingIOError:
+            time.sleep(0.005)
 
 
 def _assert_stamped_while_blocked(
@@ -185,3 +208,116 @@ def test_eio_propagates_when_no_hook_is_armed() -> None:
     with pytest.raises(OSError) as err:
         watched.flush()
     assert err.value.errno == errno.EIO
+
+
+def test_default_threshold_is_twenty_seconds() -> None:
+    assert WRITE_WEDGE_SECONDS == 20.0
+    assert inspect.signature(WriteWatchdog).parameters["threshold"].default == WRITE_WEDGE_SECONDS
+
+
+def test_watchdog_trips_when_one_write_stays_in_flight_past_the_threshold() -> None:
+    sink = _Blocking()
+    watched = WatchedStream(sink)
+    tripped = threading.Event()
+    watchdog = WriteWatchdog(watched, tripped.set, threshold=0.2, interval=0.02)
+    watchdog.start()
+    writer = threading.Thread(target=lambda: watched.write("footer"), daemon=True)
+    writer.start()
+    try:
+        assert sink.entered.wait(HANG_BACKSTOP)
+        assert tripped.wait(HANG_BACKSTOP)
+    finally:
+        sink.release.set()
+        writer.join(HANG_BACKSTOP)
+        watchdog.stop()
+
+
+def test_watchdog_does_not_trip_while_writes_complete_normally() -> None:
+    watched = WatchedStream(_TTY())
+    tripped = threading.Event()
+    # Threshold far above anything a StringIO write can hold, so a saturated box
+    # cannot false-fire; the drive window may stretch without changing the verdict.
+    watchdog = WriteWatchdog(watched, tripped.set, threshold=5.0, interval=0.01)
+    watchdog.start()
+    try:
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:
+            watched.write("tick")
+    finally:
+        watchdog.stop()
+    assert not tripped.is_set()
+
+
+def test_watchdog_does_not_trip_with_no_write_in_flight() -> None:
+    # AC 4(b): a loop stalled for any other reason sets no stamp, and the stamp is the
+    # watchdog's only input — so no stall duration can trip it.
+    watched = WatchedStream(_TTY())
+    tripped = threading.Event()
+    watchdog = WriteWatchdog(watched, tripped.set, threshold=0.05, interval=0.01)
+    watchdog.start()
+    try:
+        assert not tripped.wait(0.5)
+    finally:
+        watchdog.stop()
+    assert not tripped.is_set()
+
+
+def test_stop_joins_the_poller_thread() -> None:
+    watched = WatchedStream(_TTY())
+    before = _watchdog_threads()
+    watchdog = WriteWatchdog(watched, lambda: None, threshold=5.0, interval=0.01)
+    watchdog.start()
+    spawned = _watchdog_threads() - before
+    assert len(spawned) == 1
+    watchdog.stop()
+    assert not any(t.is_alive() for t in spawned)
+
+
+def test_watchdog_trips_on_a_real_live_status_footer_wedged_against_a_pty() -> None:
+    master, slave = pty.openpty()
+    watched = WatchedStream(os.fdopen(slave, "w", buffering=1, errors="replace"))
+    status = LiveStatus(watched)
+    status._width_fn = lambda: 120
+    trips: list[str] = []
+    tripped = threading.Event()
+    done = threading.Event()
+
+    # `trips` records the watchdog specifically; the teardown below sets `tripped`
+    # unconditionally, so only `trips` can distinguish a real trip from cleanup.
+    def _on_trip() -> None:
+        trips.append("wedged")
+        tripped.set()
+
+    drainer = threading.Thread(
+        target=_drain_until, args=(master, tripped, done), daemon=True)
+    drainer.start()
+    watchdog = WriteWatchdog(watched, _on_trip, threshold=1.0, interval=0.02)
+    watchdog.start()
+
+    def _drive() -> None:
+        # Nobody reads the master: the slave's buffer fills and _draw wedges inside
+        # write(2). Only the watchdog's trip (which releases the drainer) ends this loop.
+        status.update(lambda _frame: ["x" * 100, "y" * 100, "z" * 100])
+        while not tripped.is_set():
+            status._frame += 1
+            status._draw()
+
+    # The wedge runs off the main thread on purpose: a restarted write(2) ignores
+    # SIGALRM, so a main-thread wedge would outlast pytest-timeout and hang the worker.
+    driver = threading.Thread(target=_drive, daemon=True)
+    driver.start()
+    try:
+        assert tripped.wait(HANG_BACKSTOP)
+    finally:
+        # Order matters: `tripped` releases the drainer, which unwedges the driver;
+        # `done` may only stop the drainer once the driver is out of write(2).
+        tripped.set()
+        driver.join(HANG_BACKSTOP)
+        done.set()
+        drainer.join(HANG_BACKSTOP)
+        watchdog.stop()
+        with contextlib.suppress(OSError):
+            watched.close()
+        os.close(master)
+    assert trips == ["wedged"]     # tripped exactly once, by the watchdog
+    assert watched.write_started_at is None
