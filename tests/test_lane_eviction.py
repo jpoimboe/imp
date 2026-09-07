@@ -329,9 +329,11 @@ def _steps_started(quest: Quest) -> list[str]:
 
 
 def test_resume_after_pause_restores_without_replaying_the_phase(
-        tmp_path: Path) -> None:
+        tmp_path: Path, provider_registry) -> None:
     """Every step strictly between the acquiring step and the pause point runs
     exactly once across the pause and the resume."""
+    from tests.test_executor_rename import _FakeProvider
+    provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_control(tmp_path)
     _write_restore_workflow(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
@@ -354,9 +356,11 @@ def test_resume_after_pause_restores_without_replaying_the_phase(
     assert mq.read(tmp_path) == []               # lane released at completion
 
 
-def test_entry_guard_replays_the_whole_phase(tmp_path: Path) -> None:
+def test_entry_guard_replays_the_whole_phase(tmp_path: Path, provider_registry) -> None:
     """The negative control for the test above: on the crash path the same five-step
     phase replays in full, so the exactly-once counts there are the restore's doing."""
+    from tests.test_executor_rename import _FakeProvider
+    provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_control(tmp_path)
     _write_restore_workflow(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")

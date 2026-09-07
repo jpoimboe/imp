@@ -107,7 +107,7 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
     ])
 
     # Register openai as a RECORDING provider; anthropic as the real provider over
-    # the parent fake. Teardown is owned by the provider_registry fixture.
+    # the parent fake. Teardown is owned by conftest's _reset_provider_registry.
     provider_registry(
         "openai", env_check=lambda: True,
         factory=lambda m: _RecordingProvider("openai", m))

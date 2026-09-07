@@ -448,7 +448,7 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
 
     # Register a fake anthropic provider so spawn_subagent_via_registry builds
     # the child runner with the same client fake (not a real network client).
-    # The shared provider_registry fixture owns reset/teardown.
+    # conftest's autouse _reset_provider_registry fixture owns teardown.
     from imp.providers.anthropic import AnthropicProvider
     provider_registry(
         "anthropic", env_check=lambda: True,
