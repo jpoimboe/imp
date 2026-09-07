@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import pytest
+
+from impty.screen import Regime, TerminalScreen
+from impty.stream import TerminalStream
+
+# Real sequences modern programs emit that pyte mis-parses. Each must vanish
+# whole: no text drawn, no reply sent, no attribute left behind.
+DROPPED = [
+    b"\x1b[>c",       # secondary DA — tmux's startup burst
+    b"\x1b[>0q",      # XTVERSION
+    b"\x1b[>4;2m",    # XTMODKEYS — the source of the underline corruption
+    b"\x1b[>1u",      # kitty keyboard protocol: push flags
+    b"\x1b[<u",       # kitty keyboard protocol: pop flags
+    b"\x1b[=5u",      # kitty keyboard protocol: set flags
+]
+
+# Every internal split of b"a" + seq + b"b", as its own case, so a boundary
+# failure names the offending index instead of hiding inside a loop.
+SPLITS = [(seq, split) for seq in DROPPED for split in range(1, len(seq) + 2)]
+
+
+def _stream(cols: int = 20, rows: int = 6):
+    screen = TerminalScreen(cols, rows, history=100, ratio=0.5)
+    # A reply callback is required for the "no reply" assertion to mean
+    # anything: with reply unset, write_process_input silently no-ops.
+    replies: list[str] = []
+    screen.reply = replies.append
+    return screen, TerminalStream(screen), replies
+
+
+def _assert_dropped(screen: TerminalScreen, replies: list[str]) -> None:
+    assert screen.display[0].rstrip() == "ab"
+    assert replies == []
+    cell = screen.buffer[0][1]
+    assert cell.data == "b"
+    assert not cell.underscore
+    assert not cell.bold
+    assert not cell.reverse
+    assert cell.fg == "default"
+    assert cell.bg == "default"
+
+
+@pytest.mark.parametrize("seq", DROPPED, ids=repr)
+def test_sequence_is_dropped_whole(seq: bytes) -> None:
+    screen, stream, replies = _stream()
+    stream.feed(b"a" + seq + b"b")
+    _assert_dropped(screen, replies)
+
+
+@pytest.mark.parametrize("seq", DROPPED, ids=repr)
+def test_sequence_is_dropped_one_byte_at_a_time(seq: bytes) -> None:
+    screen, stream, replies = _stream()
+    payload = b"a" + seq + b"b"
+    for i in range(len(payload)):
+        stream.feed(payload[i : i + 1])
+    _assert_dropped(screen, replies)
+
+
+@pytest.mark.parametrize(("seq", "split"), SPLITS, ids=repr)
+def test_sequence_is_dropped_across_a_chunk_boundary(seq: bytes, split: int) -> None:
+    screen, stream, replies = _stream()
+    payload = b"a" + seq + b"b"
+    stream.feed(payload[:split])
+    stream.feed(payload[split:])
+    _assert_dropped(screen, replies)
+
+
+def test_osc_title_still_passes_through() -> None:
+    screen, stream, _ = _stream()
+    stream.feed(b"\x1b]0;hello\x07")
+    assert screen.title == "hello"
+
+
+def test_question_prefixed_csi_still_reaches_pyte() -> None:
+    screen, stream, _ = _stream()
+    stream.feed(b"\x1b[?1049h")
+    assert screen.regime is Regime.SCREEN
+
+
+def test_plain_sgr_still_applies() -> None:
+    screen, stream, _ = _stream()
+    stream.feed(b"\x1b[1mX")
+    assert screen.buffer[0][0].bold is True
