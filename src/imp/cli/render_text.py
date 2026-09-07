@@ -668,18 +668,13 @@ def header_line(node: Any, *, depth: int, color: bool,
     route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
                       enabled=color)
              if node.route_label and node.route_label != own_label else "")
-    if not node.resumed:
-        head = pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
-        if node.model:
-            # Gray to match the footer's model segment.
-            head += pal.ansi(f" · {node.model}", "gray", enabled=color)
-        return _gutter_indent(depth, gutters, color) + head + route
-    indent = _gutter_indent(depth, gutters, color)
-    parts = [pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color),
-             pal.ansi(" (resume)", "gray", enabled=color)]
+    head = pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
+    if node.resumed:
+        head += pal.ansi(" (resume)", "gray", enabled=color)
     if node.model:
-        parts.append(pal.ansi(f" · {node.model}", "gray", enabled=color))
-    return indent + "".join(parts) + route
+        # Gray to match the footer's model segment.
+        head += pal.ansi(f" · {node.model}", "gray", enabled=color)
+    return _gutter_indent(depth, gutters, color) + head + route
 
 
 def _subagent_field(sub: nv.SubagentFold, field: str) -> str | None:
