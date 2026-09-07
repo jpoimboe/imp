@@ -169,7 +169,7 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
     at its throwaway worktree and drawn from the universal home/caches/masks. No
     network force and no bespoke home — network follows the run-level config, and
     the writable COW home is attached separately by _attach_isolated_home."""
-    from imp.engine.env import engine_env, overlay_engine_env
+    from imp.engine.env import engine_env
     from imp.engine.sandbox import (
         resolve_policy,
         sandbox_available,
@@ -179,13 +179,10 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
 
     config = load_effective_config(control_root=quest.control_root).config
     cfg = sandbox_config_from_raw(config.sandbox or {})
-    eng = overlay_engine_env(
-        os.environ,
-        engine_env(project_root=worktree_path, quest_id=quest.id,
-                   quest_title=quest.title, quest_dir=quest.quest_dir,
-                   control_root=quest.control_root,
-                   test_gates=test_gates, pythonpath=config.pythonpath or ()),
-    )
+    eng = engine_env(project_root=worktree_path, quest_id=quest.id,
+                     quest_title=quest.title, quest_dir=quest.quest_dir,
+                     control_root=quest.control_root,
+                     test_gates=test_gates, pythonpath=config.pythonpath or ())
     policy = resolve_policy(
         worktree=worktree_path, control_root=quest.control_root,
         quest_id=quest.id, cfg=cfg, engine_env_result=eng,

@@ -10,7 +10,7 @@ def _policy(*, active: bool, note: str = "") -> SandboxPolicy:
     return SandboxPolicy(
         active=active, worktree="/wt", git_common_dir="/wt/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), child_env=(),
         network=True, note=note)
 
 
@@ -23,7 +23,6 @@ def _hermetic(monkeypatch, resolved: SandboxPolicy) -> None:
     monkeypatch.setattr("imp.engine.sandbox.sandbox_config_from_raw",
                         lambda raw: object())
     monkeypatch.setattr("imp.engine.env.engine_env", lambda **k: {})
-    monkeypatch.setattr("imp.engine.env.overlay_engine_env", lambda *a, **k: {})
     monkeypatch.setattr("imp.providers.effective.load_effective_config",
                         lambda **k: SimpleNamespace(
                             config=SimpleNamespace(sandbox={}, pythonpath=())))

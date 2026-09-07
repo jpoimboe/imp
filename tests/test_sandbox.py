@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.env import engine_env
 from imp.engine.sandbox import (
     HomeLayer,
     OverlayRoot,
@@ -18,13 +19,15 @@ from imp.engine.sandbox import (
     SandboxPolicy,
     SandboxUnavailable,
     _force_rmtree,
-    build_sandbox_argv,
+    build_sandbox_spawn,
     make_home_layer,
     prepare_spawn_policy,
     resolve_policy,
     sandbox_available,
+    sandbox_config_from_raw,
 )
 from imp.paths import imp_home, project_state_dir
+from imp.providers.config import parse_config_layer
 
 
 def _policy(**over) -> SandboxPolicy:
@@ -38,7 +41,7 @@ def _policy(**over) -> SandboxPolicy:
         extra_writable=(),
         secret_dirs=("/home/u/.ssh", "/run/user/1000"),
         secret_files=("/home/u/.netrc",),
-        setenv=(("PATH", "/usr/bin"), ("HOME", "/home/u"),
+        child_env=(("PATH", "/usr/bin"), ("HOME", "/home/u"),
                 ("IMP_PROJECT_ROOT", "/state/worktrees/abc"),
                 ("TMPDIR", "/tmp/imp-1000/abc")),
         network=True,
@@ -48,24 +51,30 @@ def _policy(**over) -> SandboxPolicy:
     return SandboxPolicy(**base)
 
 
+def _argv(command: str, **kw) -> list[str]:
+    """The spawn argv alone, for the pure argv-shape tests (the child env is
+    asserted separately, by the tests that own it)."""
+    return build_sandbox_spawn(command, environ={}, **kw).argv
+
+
 def wrapper_argv(command: str) -> list[str]:
-    """The trailing `sh -c <sentinel script> <command>` argv build_sandbox_argv
+    """The trailing `sh -c <sentinel script> <command>` argv build_sandbox_spawn
     emits, with the bwrap prefix sliced off — lets a test run the REAL wrapper
     text on the host, so wrapper semantics are pinned without needing bwrap."""
-    return build_sandbox_argv(
-        command, cwd="/", policy=_policy(), engine_env={})[-4:]
+    return build_sandbox_spawn(
+        command, cwd="/", policy=_policy(), engine_env={}, environ={}).argv[-4:]
 
 
 def test_inactive_policy_returns_bare_argv():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
+    argv = _argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(active=False), engine_env={})
     assert argv == ["sh", "-c", "echo hi"]
     assert SANDBOX_ENTERED_MARKER not in argv[-1]
 
 
 def test_active_policy_wraps_with_bwrap():
-    argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
+    argv = _argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[0] == "bwrap"
     assert argv[-4:-2] == ["sh", "-c"]
@@ -78,7 +87,7 @@ def test_active_policy_emits_entry_sentinel_in_tail():
     import shlex
 
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    argv = build_sandbox_argv("echo hi", cwd="/state/worktrees/abc",
+    argv = _argv("echo hi", cwd="/state/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[-4:-2] == ["sh", "-c"]
     expected_script = (
@@ -134,13 +143,13 @@ def test_wrapper_survives_quotes_backslashes_and_dollars():
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
+    argv = " ".join(_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--bind /state/worktrees/abc /state/worktrees/abc" in argv
     assert "--bind /ctl/.git /ctl/.git" in argv
 
 
 def test_git_escape_vectors_are_remasked_ro():
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
+    argv = " ".join(_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--ro-bind /ctl/.git/hooks /ctl/.git/hooks" in argv
     assert "--ro-bind /ctl/.git/config /ctl/.git/config" in argv
 
@@ -171,7 +180,7 @@ def test_prepare_spawn_policy_drops_vanished_sibling_paths(tmp_path):
     assert pruned.secret_files == (str(live_events),)
     assert pruned.git_ro_remask == (str(live_cfg),)
     # The resulting argv references none of the vanished paths.
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pruned, engine_env={}))
+    argv = " ".join(_argv("x", cwd="/wt", policy=pruned, engine_env={}))
     for gone in (gone_steps, gone_events, gone_cfg):
         assert str(gone) not in argv
     # Live paths still masked.
@@ -194,7 +203,7 @@ def test_prepare_spawn_policy_recreates_vanished_ref_reexpose_dir(tmp_path):
 
     assert imp_refs.is_dir()
     assert prepared.git_ref_reexpose == (str(imp_refs),)
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=prepared, engine_env={}))
+    argv = " ".join(_argv("x", cwd="/wt", policy=prepared, engine_env={}))
     assert f"--bind {imp_refs} {imp_refs}" in argv
 
 
@@ -208,14 +217,14 @@ def test_prepare_spawn_policy_noop_on_inactive_policy(tmp_path):
 def test_secret_masks_emitted_after_every_bind_even_overlapping_extra_writable():
     # L1-r5: a mask placed BEFORE an overlapping extra_writable would be clobbered.
     p = _policy(extra_writable=("/home/u",), secret_dirs=("/home/u/.ssh",))
-    flat = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    flat = _argv("x", cwd="/wt", policy=p, engine_env={})
     i_writable = flat.index("/home/u")                      # the extra_writable bind dest
     i_tmpfs = flat.index("--tmpfs")
     assert i_tmpfs > i_writable, "secret --tmpfs must come AFTER extra_writable bind"
 
 
 def test_real_tmp_is_bound_rw_early():
-    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={})
+    argv = _argv("x", cwd="/wt", policy=_policy(), engine_env={})
     flat = " ".join(argv)
     # Real /tmp is bound rw (identity bind).
     assert "--bind /tmp /tmp" in flat
@@ -235,61 +244,60 @@ def test_real_tmp_is_bound_rw_early():
     assert i_tmp_bind < i_first_remask, "/tmp bind must come BEFORE the git RO-remask"
 
 
-def test_clearenv_and_setenv_allowlist():
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
-    assert "--clearenv" in argv
-    assert "--setenv IMP_PROJECT_ROOT /state/worktrees/abc" in argv
-    assert "--setenv TMPDIR /tmp" in argv
+def test_child_env_carries_the_allowlist():
+    spawn = build_sandbox_spawn("x", cwd="/wt", policy=_policy(), engine_env={},
+                                environ={})
+    assert spawn.env["IMP_PROJECT_ROOT"] == "/state/worktrees/abc"
+    assert spawn.env["TMPDIR"] == "/tmp/imp-1000/abc"
 
 
 def test_live_engine_env_supersedes_frozen_imp_vars():
     # Regression (name-on-intent + sandbox): a Quest is created with an empty
     # title, so the policy is frozen with IMP_QUEST_TITLE="" at run start. After
     # rename_quest the live per-spawn engine_env carries the real title;
-    # build_sandbox_argv sources IMP_* from it authoritatively, so a title-dependent
+    # build_sandbox_spawn sources IMP_* from it authoritatively, so a title-dependent
     # gate never sees the frozen "".
-    pol = _policy(setenv=(("PATH", "/usr/bin"),
-                          ("IMP_QUEST_TITLE", ""),
-                          ("TMPDIR", "/tmp")))
-    argv = build_sandbox_argv(
+    pol = _policy(child_env=(("PATH", "/usr/bin"),
+                             ("IMP_QUEST_TITLE", ""),
+                             ("TMPDIR", "/tmp")))
+    spawn = build_sandbox_spawn(
         "x", cwd="/wt", policy=pol,
         engine_env={"IMP_QUEST_TITLE": "Live mode log polish",
-                    "PYTHONPATH": "/wt/src"})
-    assert argv.count("IMP_QUEST_TITLE") == 1       # not duplicated
-    i = argv.index("IMP_QUEST_TITLE")
-    assert argv[i + 1] == "Live mode log polish"   # fresh value wins
+                    "PYTHONPATH": "/wt/src"}, environ={})
+    assert spawn.env["IMP_QUEST_TITLE"] == "Live mode log polish"   # fresh value wins
+    assert "Live mode log polish" not in " ".join(spawn.argv)
     # the single deliberate non-IMP_ passthrough
-    assert "--setenv PYTHONPATH /wt/src" in " ".join(argv)
+    assert spawn.env["PYTHONPATH"] == "/wt/src"
 
 
 def test_new_imp_var_flows_through_without_code_change():
     # Future-proofing: the IMP_ prefix is the allowlist, so a brand-new engine var
-    # reaches the sandbox with no edit to build_sandbox_argv.
-    argv = build_sandbox_argv(
+    # reaches the sandbox with no edit to build_sandbox_spawn.
+    spawn = build_sandbox_spawn(
         "x", cwd="/wt", policy=_policy(),
-        engine_env={"IMP_FUTURE_VAR": "v", "SOME_OTHER": "no"})
-    assert "--setenv IMP_FUTURE_VAR v" in " ".join(argv)
-    assert "SOME_OTHER" not in argv
+        engine_env={"IMP_FUTURE_VAR": "v", "SOME_OTHER": "no"}, environ={})
+    assert spawn.env["IMP_FUTURE_VAR"] == "v"
+    assert "SOME_OTHER" not in spawn.env
 
 
-def test_pythonpath_flows_through_build_sandbox_argv():
+def test_pythonpath_flows_through_build_sandbox_spawn():
     # PYTHONPATH is the single deliberate non-IMP_ key the allowlist passes
-    # through (the imp-on-imp import shadow): when the live engine_env carries it,
-    # the sandboxed spawn must see it via --setenv.
-    argv = build_sandbox_argv(
+    # through (the imp-on-imp import shadow).
+    spawn = build_sandbox_spawn(
         "x", cwd="/wt", policy=_policy(),
-        engine_env={"PYTHONPATH": "/state/worktrees/abc/src"})
-    assert "--setenv PYTHONPATH /state/worktrees/abc/src" in " ".join(argv)
+        engine_env={"PYTHONPATH": "/state/worktrees/abc/src"}, environ={})
+    assert spawn.env["PYTHONPATH"] == "/state/worktrees/abc/src"
 
 
-def test_no_pythonpath_setenv_when_engine_env_lacks_it():
-    # A non-imp project's engine_env carries no PYTHONPATH, so none is emitted.
-    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={})
-    assert "PYTHONPATH" not in argv
+def test_no_pythonpath_in_child_env_when_engine_env_lacks_it():
+    # A non-imp project's engine_env carries no PYTHONPATH, so none is delivered.
+    spawn = build_sandbox_spawn("x", cwd="/wt", policy=_policy(), engine_env={},
+                                environ={})
+    assert "PYTHONPATH" not in spawn.env
 
 
 def test_requires_pid_namespace_and_no_die_with_parent():
-    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={})
+    argv = _argv("x", cwd="/wt", policy=_policy(), engine_env={})
     assert "--unshare-pid" in argv          # process-table isolation
     assert "--die-with-parent" not in argv  # B.9.2 (H-A)
     assert "--new-session" not in argv      # B.9.3 (F-8)
@@ -297,14 +305,14 @@ def test_requires_pid_namespace_and_no_die_with_parent():
 
 
 def test_network_off_adds_unshare_net():
-    on = build_sandbox_argv("x", cwd="/wt", policy=_policy(network=True), engine_env={})
-    off = build_sandbox_argv("x", cwd="/wt", policy=_policy(network=False), engine_env={})
+    on = _argv("x", cwd="/wt", policy=_policy(network=True), engine_env={})
+    off = _argv("x", cwd="/wt", policy=_policy(network=False), engine_env={})
     assert "--unshare-net" not in on
     assert "--unshare-net" in off
 
 
 def test_chdir_is_cwd():
-    argv = " ".join(build_sandbox_argv("x", cwd="/state/worktrees/abc/sub",
+    argv = " ".join(_argv("x", cwd="/state/worktrees/abc/sub",
                                        policy=_policy(), engine_env={}))
     assert "--chdir /state/worktrees/abc/sub" in argv
 
@@ -334,9 +342,9 @@ def test_resolve_policy_active_when_enabled_and_available(tmp_path):
     assert pol.active is True
     assert pol.worktree == str(wt)
     assert pol.git_common_dir == str(control / ".git")
-    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.child_env
     assert ("TMPDIR",
-            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.setenv
+            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.child_env
 
 
 def test_resolve_policy_masks_worktrees_not_sibling_config(tmp_path):
@@ -431,7 +439,7 @@ def test_prepare_spawn_policy_drops_a_vanished_repo_marker(tmp_path):
     p = _policy(state_mask=str(state), state_repo_ro=str(marker))
     prepared = prepare_spawn_policy(p)
     assert prepared.state_repo_ro == ""
-    assert str(marker) not in build_sandbox_argv(
+    assert str(marker) not in _argv(
         "x", cwd="/wt", policy=prepared, engine_env={})
 
 
@@ -447,7 +455,7 @@ def test_prepare_spawn_policy_keeps_a_present_repo_marker(tmp_path):
     assert prepared.state_repo_ro == str(marker)
     assert (str(marker), "ro") in prepared.bind_plan()
     assert f"--ro-bind {marker} {marker}" in " ".join(
-        build_sandbox_argv("x", cwd="/wt", policy=prepared, engine_env={}))
+        _argv("x", cwd="/wt", policy=prepared, engine_env={}))
 
 
 def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):
@@ -484,7 +492,7 @@ def test_resolve_policy_env_drops_secrets_keeps_imp_and_lc(tmp_path):
                  "LC_ALL": "C", "ANTHROPIC_API_KEY": "k"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "PATH" in keys and "LC_ALL" in keys and "IMP_TEST_CMD_FAST" in keys
     assert "AWS_SECRET_ACCESS_KEY" not in keys
     assert "ANTHROPIC_API_KEY" not in keys
@@ -675,7 +683,7 @@ def test_overlay_mode_probes_with_real_home_as_lowerdir(tmp_path, monkeypatch):
     assert sb.overlay_mode(tmp_path, home) is True
     mount_cmd = calls["argv"][-1]
     # probes with the REAL home as lowerdir — the same shape the per-command mount
-    # in build_sandbox_argv uses — not a synthetic empty lower under the probe dir.
+    # in build_sandbox_spawn uses — not a synthetic empty lower under the probe dir.
     assert f"lowerdir={home}" in mount_cmd
     assert str(tmp_path / ".overlay-probe" / "lower") not in mount_cmd
 
@@ -720,7 +728,7 @@ def test_resolve_policy_extra_readable_writable_plumbed(tmp_path):
     assert "/opt/rw" in pol.extra_writable
 
 
-def test_build_setenv_dedups_overlapping_env_passthrough(tmp_path):
+def test_build_child_env_dedups_overlapping_env_passthrough(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -731,13 +739,13 @@ def test_build_setenv_dedups_overlapping_env_passthrough(tmp_path):
     )
     # The per-quest scratch dir override must win over the env_passthrough TMPDIR.
     assert ("TMPDIR",
-            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.setenv
+            str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")) in pol.child_env
     # No key appears more than once.
-    keys = [k for k, _ in pol.setenv]
+    keys = [k for k, _ in pol.child_env]
     assert len(keys) == len(set(keys))
 
 
-def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
+def test_build_child_env_passes_pythonpath_from_engine_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -747,11 +755,11 @@ def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
         environ={"PATH": "/usr/bin"},
         available=True,
     )
-    assert ("PYTHONPATH", str(wt / "src")) in pol.setenv
-    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+    assert ("PYTHONPATH", str(wt / "src")) in pol.child_env
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.child_env
 
 
-def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
+def test_build_child_env_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -760,32 +768,106 @@ def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
         environ={"PATH": "/usr/bin"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "PYTHONPATH" not in keys
 
 
-def test_build_setenv_drops_ambient_imp_vars(tmp_path):
-    # AC 1-3: a non-engine IMP_* var set in the launching environment must NOT
-    # reach the sandboxed agent; an engine-managed var still arrives
-    # authoritatively from engine_env_result; a var named in env_passthrough and
-    # present in the environment does pass through.
+@pytest.mark.real_sandbox_policy
+def test_build_sandbox_policy_drops_ambient_imp_vars(tmp_path, monkeypatch):
+    # AC 4(a, d): through the PRODUCTION bake — this is the re-pointed
+    # test_build_child_env_drops_ambient_imp_vars. An ambient IMP_* var must not reach
+    # the sandboxed agent; an engine-authored var still arrives authoritatively; a var
+    # named in env_passthrough still passes through from the environment. It formerly
+    # called resolve_policy with a hand-built engine_env_result and a synthetic
+    # environ — an input production never supplied — so it passed while production
+    # handed the whole ambient IMP_* set to every agent and gate.
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: True)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    monkeypatch.setenv("IMP_DEBUG", "verbose")
+    monkeypatch.setenv("IMP_ALLOWED", "yes")
+
+    quest = _fake_quest(tmp_path)
+    pol = ex._build_sandbox_policy(
+        quest, _fake_config(sandbox={"env_passthrough": ["IMP_ALLOWED"]}),
+        _CaptureLog())
+
+    child = dict(pol.child_env)
+    assert "IMP_TELEGRAM_TOKEN" not in child
+    assert "IMP_DEBUG" not in child
+    assert child["IMP_PROJECT_ROOT"] == str(quest.project_root)
+    assert child["IMP_ALLOWED"] == "yes"
+
+
+def test_child_env_pythonpath_puts_the_engine_prefix_ahead_of_the_ambient(tmp_path):
+    # AC 9(a): the bake merges the engine's worktree prefix with the ambient
+    # PYTHONPATH exactly as overlay_engine_env does — prefix entries first, empty
+    # and prefix-duplicating inherited entries dropped, the rest in order.
     control, wt = _layout(tmp_path)
+    prefix = f"{wt}/src{os.pathsep}{wt}/vendor"
     pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(env_passthrough=("IMP_ALLOWED",)),
-        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
-        environ={"PATH": "/usr/bin", "IMP_SPIKE_LOG": "1", "IMP_DEBUG": "verbose",
-                 "IMP_ALLOWED": "yes"},
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result={"PYTHONPATH": prefix},
+        environ={"PATH": "/usr/bin",
+                 "PYTHONPATH": f"{wt}/vendor{os.pathsep}{os.pathsep}/amb/lib"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
-    assert "IMP_SPIKE_LOG" not in keys
-    assert "IMP_DEBUG" not in keys
-    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
-    assert ("IMP_ALLOWED", "yes") in pol.setenv
+    assert dict(pol.child_env)["PYTHONPATH"] == (
+        f"{wt}/src{os.pathsep}{wt}/vendor{os.pathsep}/amb/lib")
 
 
-def test_build_setenv_strips_provider_api_keys(tmp_path):
+def test_sandboxed_child_gets_imp_home_from_the_engine_not_the_environment(tmp_path):
+    # AC 7(a): the child's `environ` carries no IMP_HOME (an active sandbox inherits
+    # nothing ambient), so the value can only come from engine_env's emission —
+    # without it the in-sandbox `imp` shim would fall back to ~/.imp and read another
+    # home's global config.
+    control, wt = _layout(tmp_path)
+    eng = engine_env(project_root=wt, quest_id="abc", quest_title="T")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result=eng, environ={"PATH": "/usr/bin"}, available=True)
+    spawn = build_sandbox_spawn("x", cwd=str(wt), policy=pol, engine_env=eng,
+                                environ={})
+    assert spawn.env["IMP_HOME"] == str(imp_home())
+
+
+def test_sandboxed_child_gets_a_custom_imp_home(tmp_path, monkeypatch):
+    # AC 7(b): a custom $IMP_HOME (not ~/.imp) reaches the sandboxed child by engine
+    # emission, so in-sandbox `imp` resolves the same home as the engine.
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "alt-home"))
+    control, wt = _layout(tmp_path)
+    eng = engine_env(project_root=wt, quest_id="abc", quest_title="T")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result=eng, environ={"PATH": "/usr/bin"}, available=True)
+    spawn = build_sandbox_spawn("x", cwd=str(wt), policy=pol, engine_env=eng,
+                                environ={})
+    assert spawn.env["IMP_HOME"] == str(tmp_path / "alt-home")
+
+
+def test_repo_config_names_the_e2e_poll_timeout_passthrough(tmp_path, monkeypatch):
+    # AC 10: with engine_env the sole IMP_* authority, the one ambient IMP_* var the
+    # in-sandbox test run wants reaches the child only because THIS repo's config
+    # names it; with no such entry it does not. Read through parse_config_layer, imp's
+    # OWN project-layer parser (it routes `sandbox:` to _parse_sandbox), so a block
+    # imp would reject fails here rather than passing a raw yaml.safe_load.
+    monkeypatch.setenv("IMP_E2E_POLL_TIMEOUT", "180")
+    layer, _src = parse_config_layer(
+        Path(__file__).resolve().parents[1] / "imp" / "config.yaml")
+    control, wt = _layout(tmp_path)
+
+    def _bake(cfg):
+        return dict(resolve_policy(
+            worktree=wt, control_root=control, quest_id="abc", cfg=cfg,
+            engine_env_result={}, environ=os.environ, available=True).child_env)
+
+    assert _bake(sandbox_config_from_raw(layer["sandbox"]))["IMP_E2E_POLL_TIMEOUT"] == "180"
+    assert "IMP_E2E_POLL_TIMEOUT" not in _bake(SandboxConfig())
+
+
+def test_build_child_env_strips_provider_api_keys(tmp_path):
     # AC 5: provider key env vars are never on the allowlist (not IMP_-prefixed,
     # not generic/LC_/env_passthrough), so they never reach the agent.
     control, wt = _layout(tmp_path)
@@ -797,12 +879,12 @@ def test_build_setenv_strips_provider_api_keys(tmp_path):
                  "OPENAI_API_KEY": "sk-oai"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "ANTHROPIC_API_KEY" not in keys
     assert "OPENAI_API_KEY" not in keys
 
 
-def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
+def test_build_child_env_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
     # AC 1-2: an ambient IMP_TEST_CMD_FAST that engine_env_result does NOT provide
     # must NOT leak in — ambient IMP_* is never passed through, so the engine's
     # "absent => no fast gate" contract holds.
@@ -814,11 +896,11 @@ def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
         environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
         available=True,
     )
-    keys = {k for k, _ in pol.setenv}
+    keys = {k for k, _ in pol.child_env}
     assert "IMP_TEST_CMD_FAST" not in keys
 
 
-def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
+def test_build_child_env_engine_imp_var_wins_over_ambient(tmp_path):
     # AC 2: when both ambient and engine provide IMP_TEST_CMD_FAST, only the engine
     # value reaches the agent (ambient IMP_* is never passed through; the engine
     # loop is the sole IMP_* source).
@@ -830,8 +912,8 @@ def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
         environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
         available=True,
     )
-    assert ("IMP_TEST_CMD_FAST", "real-gate") in pol.setenv
-    assert ("IMP_TEST_CMD_FAST", "stale-gate") not in pol.setenv
+    assert ("IMP_TEST_CMD_FAST", "real-gate") in pol.child_env
+    assert ("IMP_TEST_CMD_FAST", "stale-gate") not in pol.child_env
 
 
 def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
@@ -938,7 +1020,7 @@ def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch)
 def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monkeypatch):
     """The active (happy) path: available+enabled → active policy, no posture
     event (active is the silent common case), and the engine_env overlay reaches
-    setenv as IMP_PROJECT_ROOT."""
+    the policy's child_env as IMP_PROJECT_ROOT."""
     import imp.engine.executor as ex
     monkeypatch.setattr(ex, "sandbox_available", lambda: True)
     from imp.engine import sandbox as _sb
@@ -950,16 +1032,17 @@ def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monke
     pol = ex._build_sandbox_policy(quest, config, log)
     assert pol.active is True and pol.note == ""
     assert pol.worktree == str(quest.project_root)
-    assert ("IMP_PROJECT_ROOT", str(quest.project_root)) in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(quest.project_root)) in pol.child_env
     # active is the silent common case — no posture event is emitted.
     assert not any(e["type"] in ("sandbox_inactive", "sandbox_unavailable")
                    for e in log.events)
 
 
 @pytest.mark.real_sandbox_policy
-def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch):
-    """config.pythonpath reaches the sandbox policy's setenv as a worktree-resolved
-    PYTHONPATH (imp-on-imp shadow through the general path)."""
+def test_build_sandbox_policy_threads_pythonpath_to_child_env(tmp_path, monkeypatch):
+    """AC 9(a): config.pythonpath reaches the policy's child_env as the
+    worktree-resolved prefix merged ahead of the ambient PYTHONPATH — prefix first,
+    empty entries dropped, surviving ambient entries in order."""
     import imp.engine.executor as ex
     monkeypatch.setattr(ex, "sandbox_available", lambda: True)
     from imp.engine import sandbox as _sb
@@ -967,16 +1050,29 @@ def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch
 
     quest = _fake_quest(tmp_path)
     config = _fake_config(pythonpath=("src",))
+    monkeypatch.setenv("PYTHONPATH", f"/amb/lib{os.pathsep}{os.pathsep}/amb/two")
     log = _CaptureLog()
     pol = ex._build_sandbox_policy(quest, config, log)
-    # `_build_sandbox_policy` overlays engine_env onto the real `os.environ`, and
-    # overlay_engine_env APPENDS any ambient PYTHONPATH after the prefix.
-    # tests/conftest.py pins PYTHONPATH for every pytest run, so setenv's
-    # PYTHONPATH is a joined string, not the bare prefix — assert the prefix is
-    # FIRST (the robust idiom the isolated test below also uses), not an exact
-    # (key, value) pair.
-    assert dict(pol.setenv)["PYTHONPATH"].startswith(
-        str(quest.project_root / "src"))
+
+    assert dict(pol.child_env)["PYTHONPATH"] == (
+        f"{quest.project_root / 'src'}{os.pathsep}/amb/lib{os.pathsep}/amb/two")
+
+
+@pytest.mark.real_sandbox_policy
+def test_build_sandbox_policy_bakes_no_pythonpath_when_none_configured(
+        tmp_path, monkeypatch):
+    # AC 9(b): PYTHONPATH reaches the sandbox because engine_env EMITS it, never by
+    # inheritance — with no configured pythonpath, an ambient one is not baked.
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: True)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+    monkeypatch.setenv("PYTHONPATH", "/amb/lib")
+
+    pol = ex._build_sandbox_policy(
+        _fake_quest(tmp_path), _fake_config(), _CaptureLog())
+
+    assert "PYTHONPATH" not in dict(pol.child_env)
 
 
 @pytest.mark.real_sandbox_policy
@@ -1068,8 +1164,8 @@ def test_allows_read_masks_secrets_allows_rest():
 
 
 def _parse_argv_binds(argv: list[str]) -> list[tuple[str, str]]:
-    """Recover the dest-keyed (path, kind) path-covering binds from a real build_sandbox_argv
-    emission — the inverse of build_sandbox_argv's kind→flag map. Scans the bind
+    """Recover the dest-keyed (path, kind) path-covering binds from a real build_sandbox_spawn
+    emission — the inverse of build_sandbox_spawn's kind→flag map. Scans the bind
     block between the step-1 ro-floor (--ro-bind / /) and step-11 (--proc),
     classifying each flag back to a bind_plan kind."""
     i = argv.index("--ro-bind") + 3        # skip "bwrap" + the "--ro-bind / /" floor
@@ -1095,13 +1191,13 @@ def _parse_argv_binds(argv: list[str]) -> list[tuple[str, str]]:
 
 
 def test_argv_binds_match_bind_plan():
-    # Drift guard: the two consumers of the bind order — build_sandbox_argv's argv
+    # Drift guard: the two consumers of the bind order — build_sandbox_spawn's argv
     # and policy.bind_plan() (which allows_write evaluates) — must agree exactly.
     # Parsing the emitted argv back to (path, kind) and comparing to bind_plan()
     # means a new bind added to the plan MUST surface in argv (and vice-versa), or
     # this fails. _mirror_policy exercises every kind: rw / ro / mask_dir / mask_file.
     p = _mirror_policy()
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
 
 
@@ -1110,7 +1206,7 @@ def test_home_layer_rw_binds_real_home_first():
     # home, ordered BEFORE the worktree / cache / secret binds so later binds win
     # (caches write through, worktree stays real, secrets still mask).
     pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
-    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     assert argv[0] == "bwrap"                      # no unshare wrapper for rw fallback
     flat = " ".join(argv)
     assert "--bind /home/u /home/u" in flat
@@ -1132,7 +1228,7 @@ def test_no_home_layer_leaves_home_read_only():
     # Without a home layer (script gates / pre-attach) home stays read-through the
     # ro floor: no rw home bind, and the mirror denies home writes.
     pol = _policy(home="/home/u")
-    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    flat = " ".join(_argv("x", cwd="/wt", policy=pol, engine_env={}))
     assert "--bind /home/u /home/u" not in flat
     assert not pol.allows_write(Path("/home/u/newfile"))
 
@@ -1141,7 +1237,7 @@ def test_argv_binds_match_bind_plan_with_home_layer():
     # Drift guard extended to the home bind: the rw fallback's source == dest, so
     # the parse-back still equals bind_plan() (which is dest-keyed).
     pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
-    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     assert _parse_argv_binds(argv) == pol.bind_plan()
 
 
@@ -1159,7 +1255,7 @@ def test_overlay_home_wraps_bwrap_with_unshare_mount():
     hl = HomeLayer(home="/home/u", merged="/up/merged",
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
-    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("echo hi", cwd="/wt", policy=pol, engine_env={})
     script = _unshare_script(argv)
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
@@ -1178,7 +1274,7 @@ def test_overlay_home_shell_quotes_paths_with_spaces():
     hl = HomeLayer(home="/ho me", merged="/a b/merged",
                    upper="/a b/upper", work="/a b/work")
     pol = _policy(home="/ho me", home_layer=hl)
-    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     script = _unshare_script(argv)
     assert "lowerdir='/ho me'" in script          # lower (real home) quoted
     assert "upperdir='/a b/upper'" in script       # upper quoted
@@ -1192,7 +1288,7 @@ def test_overlay_home_userxattr_appends_mount_option():
     hl = HomeLayer(home="/home/u", merged="/up/merged",
                    upper="/up/upper", work="/up/work", userxattr=True)
     pol = _policy(home="/home/u", home_layer=hl)
-    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("echo hi", cwd="/wt", policy=pol, engine_env={})
     script = _unshare_script(argv)
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work,userxattr "
@@ -1209,7 +1305,7 @@ def test_overlay_home_without_userxattr_emits_no_userxattr_option():
     hl = HomeLayer(home="/home/u", merged="/up/merged",
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
-    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("echo hi", cwd="/wt", policy=pol, engine_env={})
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
             "/up/merged") in _unshare_script(argv)
@@ -1229,7 +1325,7 @@ def test_overlay_home_write_mirror_is_dest_keyed():
 def test_rw_fallback_home_layer_is_not_wrapped():
     # is_overlay is False when there is no upper → plain bwrap, no unshare wrapper.
     pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
-    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     assert argv[0] == "bwrap"
 
 
@@ -1304,7 +1400,7 @@ def test_overlay_wrapper_omits_sentinel_on_mount_failure():
     hl = HomeLayer(home="/home/u", merged="/up/merged",
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
-    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("echo hi", cwd="/wt", policy=pol, engine_env={})
     script = _unshare_script(argv)
     assert " && exec" not in script
     assert "|| exit" in script
@@ -1325,7 +1421,7 @@ def test_overlay_wrapper_passes_the_command_through_shlex_join():
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
     cmd = 'echo "hi there"; false'
-    argv = build_sandbox_argv(cmd, cwd="/wt", policy=pol, engine_env={})
+    argv = _argv(cmd, cwd="/wt", policy=pol, engine_env={})
     script = _unshare_script(argv)
     inner = shlex.split(script.split("exec ", 1)[1])
     assert inner[0] == "bwrap"
@@ -1430,7 +1526,7 @@ def test_each_minted_layer_reaches_its_own_mount_command(tmp_path):
     a, b = prepare_spawn_policy(step_pol), prepare_spawn_policy(step_pol)
     scripts = {
         p: _unshare_script(
-            build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={}))
+            _argv("x", cwd="/wt", policy=p, engine_env={}))
         for p in (a, b)}
     for pol, other in ((a, b), (b, a)):
         script, hl = scripts[pol], pol.home_layer
@@ -1461,7 +1557,7 @@ def test_prepare_spawn_policy_mints_nothing_without_an_overlay_root():
     out = prepare_spawn_policy(pol)
     assert out.home_layer == HomeLayer(home="/home/u")
     assert out.overlay_root is None
-    argv = build_sandbox_argv("x", cwd="/wt", policy=out, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=out, engine_env={})
     assert argv[0] == "bwrap"          # no unshare/mount wrapper
 
 
@@ -1473,7 +1569,7 @@ def test_active_overlay_root_without_a_minted_layer_is_fatal(tmp_path):
                   overlay_root=OverlayRoot(path=str(tmp_path / "coder.overlay"),
                                            userxattr=True))
     with pytest.raises(AssertionError, match="overlay_root"):
-        build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+        _argv("echo hi", cwd="/wt", policy=pol, engine_env={})
 
 
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
@@ -1488,7 +1584,7 @@ def test_resolve_policy_binds_quest_home_rw(tmp_path):
     # An artifact write under the home is permitted by the in-process mirror...
     assert pol.allows_write(home / "artifacts" / "spec" / "x.md")
     # ...and the bwrap argv carries the matching rw bind.
-    argv = " ".join(build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={}))
+    argv = " ".join(_argv("x", cwd=str(wt), policy=pol, engine_env={}))
     assert f"--bind {home} {home}" in argv
 
 
@@ -1643,7 +1739,7 @@ def test_argv_binds_match_bind_plan_with_readonly_overlay():
         secret_dirs=(), secret_files=(),
         readonly_overlays=("/wt/vendored",),
     )
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()           # no drift
     assert ("/wt/vendored", "ro") in p.bind_plan()
 
@@ -1687,7 +1783,7 @@ def test_ref_reexpose_keeps_imp_and_imp_own_git_writes_writable():
 
 def test_ref_reexpose_argv_after_refs_heads_mask_before_secrets():
     p = _refprot_policy()
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=p, engine_env={})
     flat = " ".join(argv)
     assert "--ro-bind /ctl/.git/refs/heads /ctl/.git/refs/heads" in flat
     assert "--ro-bind /ctl/.git/refs/stash /ctl/.git/refs/stash" in flat
@@ -1705,29 +1801,25 @@ def test_ref_reexpose_argv_after_refs_heads_mask_before_secrets():
 def test_argv_binds_match_bind_plan_with_ref_protection():
     # Drift guard: the new rw category must round-trip through the argv parser.
     p = _refprot_policy()
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
     assert ("/ctl/.git/refs/heads/imp", "rw") in p.bind_plan()
 
 
-def test_headless_vars_flow_through_build_sandbox_argv():
+def test_headless_vars_flow_through_build_sandbox_spawn():
     # The four headless vars ride the live per-spawn engine_env; the allowlist
-    # (_is_engine_passthrough) admits them so they survive --clearenv.
-    argv = build_sandbox_argv(
+    # (_is_engine_passthrough) admits them into the child environment.
+    spawn = build_sandbox_spawn(
         "x", cwd="/wt", policy=_policy(),
         engine_env={"GIT_EDITOR": "true", "GIT_TERMINAL_PROMPT": "0",
-                    "EDITOR": "true", "VISUAL": "true"})
-    joined = " ".join(argv)
-    assert "--clearenv" in argv
-    assert "--setenv GIT_EDITOR true" in joined
-    assert "--setenv GIT_TERMINAL_PROMPT 0" in joined
-    assert "--setenv EDITOR true" in joined
-    assert "--setenv VISUAL true" in joined
-    # after --clearenv, not before it
-    assert argv.index("--clearenv") < argv.index("GIT_EDITOR")
+                    "EDITOR": "true", "VISUAL": "true"}, environ={})
+    assert spawn.env["GIT_EDITOR"] == "true"
+    assert spawn.env["GIT_TERMINAL_PROMPT"] == "0"
+    assert spawn.env["EDITOR"] == "true"
+    assert spawn.env["VISUAL"] == "true"
 
 
-def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
+def test_build_child_env_bakes_headless_vars_from_engine_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1738,10 +1830,10 @@ def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
         environ={"PATH": "/usr/bin"},
         available=True,
     )
-    assert ("GIT_EDITOR", "true") in pol.setenv
-    assert ("GIT_TERMINAL_PROMPT", "0") in pol.setenv
-    assert ("EDITOR", "true") in pol.setenv
-    assert ("VISUAL", "true") in pol.setenv
+    assert ("GIT_EDITOR", "true") in pol.child_env
+    assert ("GIT_TERMINAL_PROMPT", "0") in pol.child_env
+    assert ("EDITOR", "true") in pol.child_env
+    assert ("VISUAL", "true") in pol.child_env
 
 
 def test_resolve_policy_masks_git_refs_and_reexposes_imp(tmp_path):
@@ -1814,7 +1906,7 @@ def test_resolve_policy_draft_change_masks_git_refs_and_reexposes_imp(tmp_path):
 def test_draft_ref_mask_emitted_in_bwrap_argv(tmp_path):
     # The draft ref-mask survives all the way into the
     # emitted bwrap argv, not just the resolved-policy verdict, so a future
-    # bind_plan/build_sandbox_argv refactor that drops it is caught.
+    # bind_plan/build_sandbox_spawn refactor that drops it is caught.
     control, _wt = _layout(tmp_path)
     git = control / ".git"
     (git / "refs" / "heads").mkdir(parents=True)
@@ -1823,7 +1915,7 @@ def test_draft_ref_mask_emitted_in_bwrap_argv(tmp_path):
     pol = resolve_policy(worktree=control, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True)
-    argv = build_sandbox_argv(
+    argv = _argv(
         "git status", cwd=str(control), policy=pol, engine_env={}
     )
     flat = " ".join(argv)
@@ -1933,7 +2025,7 @@ def test_resolve_policy_workflow_ro_bind_emitted_after_quest_home(tmp_path):
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, quest_dir=quest_dir,
     )
-    argv = " ".join(build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={}))
+    argv = " ".join(_argv("x", cwd=str(wt), policy=pol, engine_env={}))
     quest_home_bind = f"--bind {quest_dir} {quest_dir}"
     snapshot_bind = f"--ro-bind {snapshot} {snapshot}"
     assert quest_home_bind in argv
@@ -1996,14 +2088,14 @@ def test_resolve_policy_sibling_appearance_and_removal_are_noop(tmp_path):
         )
 
     pol1 = _resolve()
-    argv1 = build_sandbox_argv("x", cwd=str(wt), policy=pol1, engine_env={})
+    argv1 = _argv("x", cwd=str(wt), policy=pol1, engine_env={})
 
     # Sibling APPEARS with its own steps/ + events.jsonl.
     sib = project_state_dir(control) / "quests" / "other"
     (sib / "steps").mkdir(parents=True)
     (sib / "events.jsonl").write_text('{"e":1}\n')
     pol2 = _resolve()
-    argv2 = build_sandbox_argv("x", cwd=str(wt), policy=pol2, engine_env={})
+    argv2 = _argv("x", cwd=str(wt), policy=pol2, engine_env={})
     assert pol2 == pol1
     assert argv2 == argv1
 
@@ -2046,13 +2138,13 @@ def test_argv_binds_match_bind_plan_with_imp_tmpfs():
     # Drift guard: the new tmpfs round-trips through the argv parser for BOTH the
     # nested and draft orderings.
     p = _policy(state_mask="/state", quest_home="/state/quests/abc")
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
     assert ("/state", "mask_dir") in p.bind_plan()
 
     pd = _policy(state_mask="/state", worktree="/ctl",
                  quest_home="/state/quests/abc")
-    argvd = build_sandbox_argv("x", cwd="/ctl", policy=pd, engine_env={})
+    argvd = _argv("x", cwd="/ctl", policy=pd, engine_env={})
     assert _parse_argv_binds(argvd) == pd.bind_plan()
 
 
@@ -2106,7 +2198,7 @@ def test_resolve_policy_injects_session_socket_marker(tmp_path):
     )
     # No rewriting: the in-sandbox value is the real host socket path.
     assert ("IMP_SESSION_SOCKET",
-            str(session_socket_path("abc"))) in pol.setenv
+            str(session_socket_path("abc"))) in pol.child_env
 
 
 def test_session_socket_marker_absent_when_inactive(tmp_path):
@@ -2116,48 +2208,47 @@ def test_session_socket_marker_absent_when_inactive(tmp_path):
         cfg=SandboxConfig(enabled=False), engine_env_result={},
         environ={}, available=True,
     )
-    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.child_env}
 
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(allow_unsandboxed=True), engine_env_result={},
         environ={}, available=False,
     )
-    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.child_env}
 
 
-def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
+def test_session_socket_marker_reaches_the_child_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={"PATH": "/usr/bin"},
         available=True,
     )
-    argv = build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={})
+    spawn = build_sandbox_spawn("x", cwd=str(wt), policy=pol, engine_env={},
+                                environ={})
     from imp.remote.session.discover import session_socket_path
-    i = argv.index("IMP_SESSION_SOCKET")
-    assert argv[i - 1] == "--setenv"
-    assert argv[i + 1] == str(session_socket_path("abc"))
+    assert spawn.env["IMP_SESSION_SOCKET"] == str(session_socket_path("abc"))
 
 
-def test_build_setenv_prepends_shim_dir_to_path():
+def test_build_child_env_prepends_shim_dir_to_path():
     import os
 
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, (), shim_dir="/q/imp-shim"))
-    assert setenv["PATH"] == "/q/imp-shim" + os.pathsep + "/usr/bin"
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env({}, {"PATH": "/usr/bin"}, (), shim_dir="/q/imp-shim"))
+    assert child_env["PATH"] == "/q/imp-shim" + os.pathsep + "/usr/bin"
 
 
-def test_build_setenv_no_shim_dir_leaves_path_untouched():
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, ()))
-    assert setenv["PATH"] == "/usr/bin"
+def test_build_child_env_no_shim_dir_leaves_path_untouched():
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env({}, {"PATH": "/usr/bin"}, ()))
+    assert child_env["PATH"] == "/usr/bin"
 
 
-def test_build_setenv_prepends_shim_dir_no_existing_path():
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv({}, {}, (), shim_dir="/q/imp-shim"))
-    assert setenv["PATH"] == "/q/imp-shim"
+def test_build_child_env_prepends_shim_dir_no_existing_path():
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env({}, {}, (), shim_dir="/q/imp-shim"))
+    assert child_env["PATH"] == "/q/imp-shim"
 
 
 def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
@@ -2169,7 +2260,7 @@ def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
         engine_env_result={}, environ={"PATH": "/usr/bin"}, available=True,
         quest_dir=qd,
     )
-    path = dict(pol.setenv)["PATH"]
+    path = dict(pol.child_env)["PATH"]
     assert path.startswith(str(qd / "imp-shim") + os.pathsep)
     assert path.endswith("/usr/bin")
 
@@ -2201,31 +2292,30 @@ def test_worktree_swap_flips_exposure_to_new_worktree(tmp_path):
     assert live.allows_read(sibling) is False
 
 
-def test_build_setenv_session_socket_passes_through():
-    from imp.engine.sandbox import _build_setenv
-    setenv = dict(_build_setenv(
+def test_build_child_env_session_socket_passes_through():
+    from imp.engine.sandbox import _build_child_env
+    child_env = dict(_build_child_env(
         {}, {"PATH": "/usr/bin"}, (),
         session_socket="/tmp/imp-1000/abc.sock"))
-    assert setenv["IMP_SESSION_SOCKET"] == "/tmp/imp-1000/abc.sock"
+    assert child_env["IMP_SESSION_SOCKET"] == "/tmp/imp-1000/abc.sock"
 
 
 def test_imp_output_env_passes_through_unrewritten():
-    pol = _policy()
-    flat = " ".join(build_sandbox_argv(
-        "x", cwd="/wt", policy=pol,
+    spawn = build_sandbox_spawn(
+        "x", cwd="/wt", policy=_policy(),
         engine_env={"IMP_OUTPUT": "/t/imp-1000/abc/imp-output-XY.json",
-                    "IMP_PROJECT_ROOT": "/state/worktrees/abc"}))
-    assert "--setenv IMP_OUTPUT /t/imp-1000/abc/imp-output-XY.json" in flat
-    assert "--setenv IMP_PROJECT_ROOT /state/worktrees/abc" in flat
+                    "IMP_PROJECT_ROOT": "/state/worktrees/abc"}, environ={})
+    assert spawn.env["IMP_OUTPUT"] == "/t/imp-1000/abc/imp-output-XY.json"
+    assert spawn.env["IMP_PROJECT_ROOT"] == "/state/worktrees/abc"
 
 
 def test_var_tmp_bind_source_and_position():
     # Set case: the per-quest source is bound onto /var/tmp, positioned in
     # bind_plan immediately AFTER the /tmp scratch entry and before the worktree.
     pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
-    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    flat = " ".join(_argv("x", cwd="/wt", policy=pol, engine_env={}))
     assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # per-quest source → /var/tmp
-    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     i_tmp = argv.index("/tmp")                    # first "/tmp" is the /tmp bind source
     i_vt = argv.index("/vt/imp-1000/abc")         # the /var/tmp bind source
     i_wt = argv.index("/state/worktrees/abc")  # worktree src (default _policy worktree)
@@ -2239,7 +2329,7 @@ def test_no_var_tmp_bind_when_unset():
     # Negative: empty quest_var_tmp_dir emits NO /var/tmp bind — host /var/tmp
     # stays on the read-only floor (no identity fallback). Drift guard still holds.
     pol = _policy()   # quest_var_tmp_dir defaults to ""
-    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     assert "/var/tmp" not in argv                       # no bind dest emitted at all
     assert ("/var/tmp", "rw") not in pol.bind_plan()
     assert pol.allows_write(Path("/var/tmp/x")) is False # uncovered → read-only floor
@@ -2251,7 +2341,7 @@ def test_argv_binds_match_bind_plan_with_var_tmp_source():
     # /tmp is now an identity bind; /var/tmp still binds a per-quest host SOURCE
     # onto its namespace DEST. Parse-back is dest-keyed, so it equals bind_plan().
     pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
-    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     flat = " ".join(argv)
     assert "--bind /tmp /tmp" in flat                   # identity /tmp source
     assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # non-identity /var/tmp source
@@ -2265,13 +2355,13 @@ def test_resolve_policy_tmpdir_is_per_quest_scratch(tmp_path):
         cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
     expected = str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")
-    assert ("TMPDIR", expected) in pol.setenv
+    assert ("TMPDIR", expected) in pol.child_env
 
 
 def test_var_tmp_source_not_identity_fallback():
     # An empty quest_var_tmp_dir must NEVER degrade to --bind /var/tmp /var/tmp
     # (which would expose the host's real /var/tmp read-write).
-    flat = " ".join(build_sandbox_argv(
+    flat = " ".join(_argv(
         "x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--bind /var/tmp /var/tmp" not in flat
 
@@ -2377,12 +2467,12 @@ def test_worktrees_mask_only_masks_self_too():
 
 def test_argv_binds_match_bind_plan_with_worktrees_mask():
     # Drift guard: the new mask_dir + rw binds round-trip through the argv parser,
-    # so build_sandbox_argv picks them up with no edit to build_sandbox_argv.
+    # so build_sandbox_spawn picks them up with no edit to build_sandbox_spawn.
     p = _policy(
         git_worktrees_mask="/ctl/.git/worktrees",
         git_worktree_self="/ctl/.git/worktrees/abc",
     )
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    argv = _argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
     assert ("/ctl/.git/worktrees", "mask_dir") in p.bind_plan()
     assert ("/ctl/.git/worktrees/abc", "rw") in p.bind_plan()
@@ -2459,7 +2549,7 @@ def test_argv_binds_match_bind_plan_with_projects_ro():
     # through the argv parser means allows_read/allows_write lie about bwrap.
     for worktree in ("/home/u/.imp/projects/mine/worktrees/abc", "/ctl", "/home/u"):
         p = _cross_project_policy(worktree=worktree)
-        argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+        argv = _argv("x", cwd="/wt", policy=p, engine_env={})
         assert _parse_argv_binds(argv) == p.bind_plan()
         assert ("/home/u/.imp/projects", "ro") in p.bind_plan()
 
@@ -2513,7 +2603,7 @@ def test_argv_binds_match_bind_plan_with_the_repo_re_expose():
     for worktree in ("/home/u/.imp/projects/mine/worktrees/abc", "/ctl", "/home/u"):
         p = _cross_project_policy(worktree=worktree,
                                   state_repo_ro="/home/u/.imp/projects/mine/repo")
-        argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+        argv = _argv("x", cwd="/wt", policy=p, engine_env={})
         assert _parse_argv_binds(argv) == p.bind_plan()
         assert ("--ro-bind /home/u/.imp/projects/mine/repo "
                 "/home/u/.imp/projects/mine/repo") in " ".join(argv)
@@ -2534,16 +2624,14 @@ def test_retired_overlay_symbols_are_gone():
         assert not hasattr(sb, name), f"{name} should be deleted"
 
 
-def test_setenv_carries_the_state_dir_when_the_spawn_supplies_none():
+def test_child_env_carries_the_state_dir_when_the_spawn_supplies_none():
     # The bash tool passes no control root, so its live engine_env has no
-    # IMP_STATE_DIR — the value baked into policy.setenv at run start must still
-    # reach the sandbox argv.
-    p = _policy(setenv=(("PATH", "/usr/bin"),
-                        ("IMP_STATE_DIR", "/home/u/.imp/projects/widget")))
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
-    i = argv.index("IMP_STATE_DIR")
-    assert argv[i - 1] == "--setenv"
-    assert argv[i + 1] == "/home/u/.imp/projects/widget"
+    # IMP_STATE_DIR — the value baked into policy.child_env at run start must still
+    # reach the sandboxed child.
+    p = _policy(child_env=(("PATH", "/usr/bin"),
+                           ("IMP_STATE_DIR", "/home/u/.imp/projects/widget")))
+    spawn = build_sandbox_spawn("x", cwd="/wt", policy=p, engine_env={}, environ={})
+    assert spawn.env["IMP_STATE_DIR"] == "/home/u/.imp/projects/widget"
 
 
 def test_resolve_policy_masks_only_this_projects_state_dir(tmp_path):
@@ -2586,7 +2674,7 @@ def test_bind_plan_re_exposes_the_chdir_target_after_the_state_mask(tmp_path):
     assert (plan.index((pol.state_mask, "mask_dir"))
             < plan.index((pol.worktree, "rw")))
 
-    argv = build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={})
+    argv = _argv("x", cwd=str(wt), policy=pol, engine_env={})
     chdir = argv[argv.index("--chdir") + 1]
     assert chdir == str(wt)
     assert pol.allows_read(Path(chdir)) is True
@@ -2736,7 +2824,7 @@ def test_resolve_policy_re_exposes_this_projects_repo_marker(tmp_path):
 
 def test_an_inactive_policy_carries_no_repo_re_expose(tmp_path):
     # AC 20's second half: the inactive policy binds nothing, so it must not claim a
-    # path either — build_sandbox_argv would never emit it, and the mirror must agree.
+    # path either — build_sandbox_spawn would never emit it, and the mirror must agree.
     control, _wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=control, control_root=control, quest_id="abc",
@@ -2747,5 +2835,76 @@ def test_an_inactive_policy_carries_no_repo_re_expose(tmp_path):
     assert pol.note == "unsandboxed_by_config"
     assert pol.state_repo_ro == ""
     assert not [b for b, _ in pol.bind_plan() if b.endswith("/repo")]
-    assert build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}) == [
+    assert _argv("x", cwd="/wt", policy=pol, engine_env={}) == [
         "sh", "-c", "x"]
+
+
+def test_spawn_env_is_the_bake_refreshed_by_the_live_engine_env():
+    # AC 2: the returned child env is the bake (policy.child_env) refreshed by the
+    # live per-spawn engine env —
+    # (a) IMP_QUEST_TITLE refreshed from the live per-spawn engine env (name-on-intent),
+    # (b) the shim-prefixed PATH from the bake, (c) IMP_STATE_DIR retained from the bake
+    # when the spawn's own engine env carries none. `environ` reaches an ACTIVE policy's
+    # child not at all.
+    from imp.engine.sandbox import _build_child_env
+    baked = _build_child_env(
+        {"IMP_QUEST_TITLE": "", "IMP_STATE_DIR": "/home/u/.imp/projects/widget"},
+        {"PATH": "/usr/bin"}, (), shim_dir="/q/imp-shim")
+    spawn = build_sandbox_spawn(
+        "x", cwd="/wt", policy=_policy(child_env=baked),
+        engine_env={"IMP_QUEST_TITLE": "Renamed quest",
+                    "IMP_PROJECT_ROOT": "/state/worktrees/abc"},
+        environ={"AMBIENT_SECRET": "hunter2"})
+    assert spawn.env == {
+        "PATH": "/q/imp-shim" + os.pathsep + "/usr/bin",
+        "IMP_QUEST_TITLE": "Renamed quest",
+        "IMP_STATE_DIR": "/home/u/.imp/projects/widget",
+        "IMP_PROJECT_ROOT": "/state/worktrees/abc",
+    }
+
+
+def test_inactive_policy_spawn_keeps_the_host_environment():
+    # AC 8: /sandbox off is deliberately unchanged — bare argv, the overlay_engine_env
+    # result (ambient kept, engine-managed vars stripped then re-supplied) and the shim
+    # PATH prefix.
+    spawn = build_sandbox_spawn(
+        "echo hi", cwd="/wt", policy=_policy(active=False),
+        engine_env={"IMP_QUEST_ID": "abc"},
+        environ={"PATH": "/usr/bin", "HOME": "/home/u",
+                 "IMP_TEST_CMD_FAST": "stale-gate"},
+        shim_dir="/q/imp-shim")
+    assert spawn.argv == ["sh", "-c", "echo hi"]
+    assert spawn.env == {
+        "PATH": "/q/imp-shim" + os.pathsep + "/usr/bin",
+        "HOME": "/home/u",
+        "IMP_QUEST_ID": "abc",
+    }
+
+
+def test_active_argv_carries_no_environment():
+    # AC 1(a): argv is world-readable via /proc, so no --clearenv, no --setenv, and no
+    # secret VALUE in any argv element — while the env is still delivered to the child.
+    pol = _policy(child_env=(("PATH", "/usr/bin"),
+                             ("IMP_TELEGRAM_TOKEN", "canary-42:secret")))
+    spawn = build_sandbox_spawn("x", cwd="/wt", policy=pol,
+                                engine_env={"IMP_MCP_TOKEN": "canary-mcp"},
+                                environ={})
+    assert "--clearenv" not in spawn.argv
+    assert "--setenv" not in spawn.argv
+    assert [a for a in spawn.argv if "canary" in a] == []
+    assert spawn.env["IMP_TELEGRAM_TOKEN"] == "canary-42:secret"
+    assert spawn.env["IMP_MCP_TOKEN"] == "canary-mcp"
+
+
+def test_overlay_home_shell_string_carries_no_environment():
+    # AC 1(b): the overlay-home shape re-joins the WHOLE argv into an
+    # `unshare … sh -c <string>`; a secret on argv would leak through that string too.
+    layer = HomeLayer(home="/home/u", merged="/ovl/merged", upper="/ovl/upper",
+                      work="/ovl/work")
+    pol = _policy(home="/home/u", home_layer=layer,
+                  child_env=(("PATH", "/usr/bin"),
+                             ("IMP_TELEGRAM_TOKEN", "canary-42:secret")))
+    spawn = build_sandbox_spawn("x", cwd="/wt", policy=pol, engine_env={}, environ={})
+    assert spawn.argv[0] == "unshare"
+    assert "canary-42:secret" not in " ".join(spawn.argv)
+    assert spawn.env["IMP_TELEGRAM_TOKEN"] == "canary-42:secret"

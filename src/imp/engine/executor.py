@@ -49,7 +49,7 @@ from imp.engine.agent_run import (
 from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
-from imp.engine.env import ALL_DECIDED, TestGates, Undecided, engine_env, overlay_engine_env
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided, engine_env
 from imp.engine.error_policy import budget_for
 from imp.engine.errors import LoadError, summarize_exception
 from imp.engine.feedback import (
@@ -2015,15 +2015,12 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     run stops rather than silently running bare."""
     write_imp_shim(quest.quest_dir)
     cfg = sandbox_config_from_raw(config.sandbox or {})
-    eng = overlay_engine_env(
-        os.environ,
-        engine_env(project_root=quest.project_root, quest_id=quest.id,
-                   quest_title=quest.title,
-                   quest_dir=quest.quest_dir,
-                   control_root=quest.control_root,
-                   test_gates=TestGates.from_config(config),
-                   pythonpath=config.pythonpath or ()),
-    )
+    eng = engine_env(project_root=quest.project_root, quest_id=quest.id,
+                     quest_title=quest.title,
+                     quest_dir=quest.quest_dir,
+                     control_root=quest.control_root,
+                     test_gates=TestGates.from_config(config),
+                     pythonpath=config.pythonpath or ())
     try:
         policy = resolve_policy(
             worktree=quest.project_root, control_root=quest.control_root,

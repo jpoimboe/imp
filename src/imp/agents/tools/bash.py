@@ -34,11 +34,11 @@ from imp.agents.tools.limits import (
 )
 from imp.agents.tools.lines import clip_long_lines
 from imp.agents.tools.spill import spill_tool_output
-from imp.engine.env import engine_env, overlay_engine_env
+from imp.engine.env import engine_env
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_FAILED_MESSAGE,
     SANDBOX_SPAWN_MAX_ATTEMPTS,
-    build_sandbox_argv,
+    build_sandbox_spawn,
     prepare_spawn_policy,
     sandbox_failure_detail,
     sandbox_spawn_backoff_delay,
@@ -189,13 +189,13 @@ async def bash(
         test_gates=ctx.test_gates,
         pythonpath=ctx.pythonpath,
     )
-    env = overlay_engine_env(os.environ, eng)
-    if qdir is not None:
-        env["PATH"] = f"{imp_shim_dir(qdir)}{os.pathsep}{env.get('PATH', '')}"
     policy = ctx.sandbox_policy
-    argv = (build_sandbox_argv(command, cwd=cwd_path,
-                               policy=prepare_spawn_policy(policy), engine_env=eng)
-            if policy is not None else ["sh", "-c", command])
+    spawn = build_sandbox_spawn(
+        command, cwd=cwd_path,
+        policy=prepare_spawn_policy(policy) if policy is not None else None,
+        engine_env=eng, environ=os.environ,
+        shim_dir=str(imp_shim_dir(qdir)) if qdir is not None else "")
+    argv, env = spawn.argv, spawn.env
     if run_in_background:
         if not ctx.background_enabled:
             # Future-provider defense: a provider exposing registry bash without

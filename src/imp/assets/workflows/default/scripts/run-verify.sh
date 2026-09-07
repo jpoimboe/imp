@@ -42,7 +42,7 @@
 #
 # IMP_TEST_CMD_* are surfaced from the test_cmd_fast / test_cmd_slow /
 # test_cmd_fast_timeout / test_cmd_slow_timeout project config keys by
-# overlay_engine_env and injected into script-gate env by the engine (all
+# engine_env and injected into script-gate env by the engine (all
 # IMP_-prefixed, so the sandbox allowlist passes them through unchanged).
 #
 # Script gates run with cwd set to the quest's tracked workflow dir; cd into the

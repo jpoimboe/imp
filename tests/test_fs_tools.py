@@ -91,7 +91,7 @@ def test_write_file_denied_under_readonly_worktree(tmp_path: Path) -> None:
     ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="",
         readonly_overlays=(str(tmp_path),),
     )
     with pytest.raises(PermissionDenied):
@@ -138,7 +138,7 @@ def test_write_out_of_worktree_denied_when_sandboxed_and_uncovered(tmp_path: Pat
     ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="",
     )
     with pytest.raises(PermissionDenied):
         _write_file(ctx, path="/usr/lib/imp_should_not_write.txt", content="x")
@@ -425,7 +425,7 @@ def test_image_read_denied_under_secret_dir(tmp_path: Path) -> None:
     ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(str(secret),), secret_files=(), setenv=(), network=True, note="",
+        secret_dirs=(str(secret),), secret_files=(), child_env=(), network=True, note="",
     )
     with pytest.raises(PermissionDenied):
         _read_file(ctx, path="secret/shot.png")

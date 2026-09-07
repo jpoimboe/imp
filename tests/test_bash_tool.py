@@ -14,6 +14,7 @@ from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES, ToolAborted
+from imp.engine.sandbox import SandboxSpawn
 from imp.paths import project_state_dir
 
 
@@ -100,7 +101,7 @@ def _active_policy(tmp_path: Path):
         active=True, worktree=str(tmp_path),
         git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note="")
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="")
 
 
 _SANDBOX_NOTE_TEXT = (
@@ -126,13 +127,15 @@ _DENIED_WRITE_STDERR = (
 
 def _sandboxed_sh(monkeypatch: pytest.MonkeyPatch, script: str) -> None:
     """Run `script` through the REAL wrapper minus bwrap: the trailing
-    `sh -c <sentinel script> <script>` argv build_sandbox_argv emits. The tool
+    `sh -c <sentinel script> <script>` argv build_sandbox_spawn emits. The tool
     believes the sandbox is active, the entry marker is emitted by the outer
     shell, and these tests move with the wrapper instead of re-encoding it."""
     import imp.agents.tools.bash as bashmod
     from tests.test_sandbox import wrapper_argv
-    monkeypatch.setattr(bashmod, "build_sandbox_argv",
-                        lambda command, **kw: wrapper_argv(script))
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_spawn",
+        lambda command, **kw: SandboxSpawn(argv=wrapper_argv(script),
+                                           env=dict(os.environ)))
 
 
 @pytest.mark.parametrize("message", _DENIED_WRITE_STDERR)
@@ -254,8 +257,10 @@ def test_bash_reports_sandbox_spawn_failure_distinctly(
     # Simulate a sandboxed spawn that failed to ENTER: an argv that exits nonzero
     # and never emits the entry sentinel (no real bwrap). Every attempt fails, so
     # the tool retries to exhaustion and returns the setup-failure result.
-    monkeypatch.setattr(bashmod, "build_sandbox_argv",
-                        lambda command, **kw: ["sh", "-c", "exit 3"])
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_spawn",
+        lambda command, **kw: SandboxSpawn(argv=["sh", "-c", "exit 3"],
+                                           env=dict(os.environ)))
     monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
@@ -300,8 +305,10 @@ def test_bash_sandbox_spawn_failure_emits_event(
 ) -> None:
     import imp.agents.tools.bash as bashmod
     script = f"printf '%s\\n' {shlex.quote(_BWRAP_ERR)} >&2; exit 3"
-    monkeypatch.setattr(bashmod, "build_sandbox_argv",
-                        lambda command, **kw: ["sh", "-c", script])
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_spawn",
+        lambda command, **kw: SandboxSpawn(argv=["sh", "-c", script],
+                                           env=dict(os.environ)))
     monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
@@ -323,7 +330,7 @@ def test_bash_retries_then_succeeds(
     # `bash()` builds `argv` ONCE (above the retry region) and the
     # loop re-spawns that same argv on each attempt — exactly as production absorbs
     # a transient bwrap userns failure. So the retry variation must be driven
-    # through the seam the loop re-invokes (the spawn itself), NOT build_sandbox_argv
+    # through the seam the loop re-invokes (the spawn itself), NOT build_sandbox_spawn
     # (off the retry path — called once). A stateful counter-file argv makes the
     # fixed command fail (no marker, exit 3) on the first two spawns and enter the
     # sandbox (emit the marker) on the 3rd.
@@ -339,8 +346,10 @@ def test_bash_retries_then_succeeds(
         f'if [ "$n" -ge 3 ]; then '
         f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo done; "
         f"else exit 3; fi")
-    monkeypatch.setattr(bashmod, "build_sandbox_argv",
-                        lambda command, **kw: ["sh", "-c", script])
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_spawn",
+        lambda command, **kw: SandboxSpawn(argv=["sh", "-c", script],
+                                           env=dict(os.environ)))
     monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
@@ -362,9 +371,12 @@ def test_bash_healthy_sandboxed_command_strips_marker(
     import imp.agents.tools.bash as bashmod
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     monkeypatch.setattr(
-        bashmod, "build_sandbox_argv",
-        lambda command, **kw: ["sh", "-c",
-            f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo real >&2; echo out"])
+        bashmod, "build_sandbox_spawn",
+        lambda command, **kw: SandboxSpawn(
+            argv=["sh", "-c",
+                  f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo real >&2; "
+                  "echo out"],
+            env=dict(os.environ)))
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "x"}))
@@ -635,7 +647,7 @@ def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.Monke
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(),
-        setenv=(("PATH", "/usr/bin"),), network=True, note="",
+        child_env=(("PATH", "/usr/bin"),), network=True, note="",
     )
     # _run_bash propagates the RuntimeError out via anyio.run
     with pytest.raises(RuntimeError):
@@ -1191,8 +1203,11 @@ def test_bash_sandbox_setup_failure_clips_and_discloses(
     # without disclosing it. AC 5c: the four RETRIED attempts (whose output is
     # discarded) write no spill file, so exactly one file exists.
     import imp.agents.tools.bash as bashmod
-    monkeypatch.setattr(bashmod, "build_sandbox_argv", lambda command, **kw: [
-        "sh", "-c", "python3 -c 'print(\"L\" * 28000)'; exit 3"])
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_spawn",
+        lambda command, **kw: SandboxSpawn(
+            argv=["sh", "-c", "python3 -c 'print(\"L\" * 28000)'; exit 3"],
+            env=dict(os.environ)))
     monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
@@ -1360,3 +1375,62 @@ def test_subagent_quest_dir_makes_imp_quest_dir_absolute(tmp_path: Path) -> None
     )
     out = json.loads(_run_bash(ctx, {"command": 'printf %s "$IMP_QUEST_DIR"'}))
     assert out["stdout"] == str(home)
+
+
+def _secret_policy(tmp_path: Path):
+    from imp.engine.sandbox import SandboxPolicy
+    return SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(),
+        child_env=(("PATH", "/usr/bin"),), network=True, note="")
+
+
+def test_bash_foreground_spawns_with_the_sandbox_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 6(a): `echo $IMP_TELEGRAM_TOKEN` inside the sandbox was the demonstrated leak;
+    # the foreground spawn must use the env paired with the argv, not a locally
+    # composed overlay of os.environ.
+    import imp.agents.tools.bash as bashmod
+
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    captured: dict[str, object] = {}
+
+    async def fake_open_process(argv: list[str], **kw: object) -> object:
+        captured["env"] = kw.get("env")
+        raise RuntimeError("stop after capture")
+
+    monkeypatch.setattr(bashmod.anyio, "open_process", fake_open_process)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _secret_policy(tmp_path)
+    with pytest.raises(RuntimeError):
+        _run_bash(ctx, {"command": "echo hi"})
+    env = captured["env"]
+    assert "IMP_TELEGRAM_TOKEN" not in env
+    assert env["PATH"] == "/usr/bin"
+    assert env["IMP_QUEST_ID"] == "test01"
+
+
+def test_bash_background_spawns_with_the_sandbox_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 6(b): the background path takes the same paired env.
+    import imp.agents.tools.bg as bgmod
+
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    captured: dict[str, object] = {}
+
+    async def fake_spawn_background(ctx, *, command, argv, cwd, env):
+        captured["env"] = env
+        return "bg1"
+
+    monkeypatch.setattr(bgmod, "spawn_background", fake_spawn_background)
+    ctx = _ctx(tmp_path)
+    ctx.background_enabled = True
+    ctx.base_sandbox_policy = _secret_policy(tmp_path)
+    assert _run_bash(ctx, {"command": "echo hi", "run_in_background": True}) == "bg1"
+    env = captured["env"]
+    assert "IMP_TELEGRAM_TOKEN" not in env
+    assert env["PATH"] == "/usr/bin"
+    assert env["IMP_QUEST_ID"] == "test01"

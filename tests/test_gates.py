@@ -145,7 +145,7 @@ def test_run_script_wraps_with_active_policy(tmp_path, monkeypatch) -> None:
                         git_common_dir=str(tmp_path), git_ro_remask=(),
                         writable_caches=(), extra_readable=(), extra_writable=(),
                         secret_dirs=(), secret_files=(),
-                        setenv=(), network=True, note="")
+                        child_env=(), network=True, note="")
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol)
     assert captured["argv"][0] == "bwrap"
@@ -164,6 +164,7 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
     class FakePopen:
         def __init__(self, argv, **kw):
             captured["argv"] = argv
+            captured["env"] = kw.get("env")
             self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
                                                   if k in ("cwd", "env", "start_new_session",
                                                            "stdout", "stderr")})
@@ -195,13 +196,12 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
                         git_common_dir=str(tmp_path), git_ro_remask=(),
                         writable_caches=(), extra_readable=(), extra_writable=(),
                         secret_dirs=(), secret_files=(),
-                        setenv=(("IMP_QUEST_ID", ""),), network=True, note="")
+                        child_env=(("IMP_QUEST_ID", ""),), network=True, note="")
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol,
                env_extra={"IMP_QUEST_ID": "realid01"})
-    argv = captured["argv"]
-    assert argv.count("IMP_QUEST_ID") == 1
-    assert argv[argv.index("IMP_QUEST_ID") + 1] == "realid01"
+    assert captured["env"]["IMP_QUEST_ID"] == "realid01"
+    assert "realid01" not in " ".join(captured["argv"])
 
 
 def test_run_script_timeout_kills_group(tmp_path) -> None:
@@ -1294,3 +1294,54 @@ def test_run_script_delegates_unpacked_step_fields(tmp_path, monkeypatch) -> Non
     # step.cwd wins over the caller's cwd; the command override wins over step.command
     assert seen[-1]["cwd"] == "/tmp/step-cwd"
     assert seen[-1]["command"] == "echo override"
+
+
+def test_run_script_spawns_with_the_sandbox_child_env(tmp_path, monkeypatch) -> None:
+    # AC 5: an ambient secret in the gate process must not reach the gate's child.
+    import imp.engine.gates as gatesmod
+    from imp.engine.sandbox import SandboxPolicy
+
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    captured: dict[str, object] = {}
+    real_popen = gatesmod.subprocess.Popen
+
+    class FakePopen:
+        def __init__(self, argv, **kw):
+            captured["argv"] = argv
+            captured["env"] = kw.get("env")
+            self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
+                                                  if k in ("cwd", "env", "start_new_session",
+                                                           "stdout", "stderr")})
+
+        @property
+        def stdout(self):
+            return self._inner.stdout
+
+        @property
+        def stderr(self):
+            return self._inner.stderr
+
+        def poll(self):
+            return self._inner.poll()
+
+        def wait(self, timeout=None):
+            return self._inner.wait(timeout)
+
+        @property
+        def returncode(self):
+            return self._inner.returncode
+
+        @property
+        def pid(self):
+            return self._inner.pid
+
+    monkeypatch.setattr(gatesmod.subprocess, "Popen", FakePopen)
+    pol = SandboxPolicy(active=True, worktree=str(tmp_path),
+                        git_common_dir=str(tmp_path), git_ro_remask=(),
+                        writable_caches=(), extra_readable=(), extra_writable=(),
+                        secret_dirs=(), secret_files=(),
+                        child_env=(("PATH", "/usr/bin"), ("IMP_QUEST_ID", "")),
+                        network=True, note="")
+    run_script(_script_step("echo hi"), cwd=tmp_path, policy=pol,
+               env_extra={"IMP_QUEST_ID": "realid01"})
+    assert captured["env"] == {"PATH": "/usr/bin", "IMP_QUEST_ID": "realid01"}

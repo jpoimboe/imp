@@ -4419,7 +4419,7 @@ def _active_home_policy(home: str = "/home/u"):
     return SandboxPolicy(
         active=True, worktree="/wt", git_common_dir="/ctl/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), child_env=(),
         network=True, home=home,
     )
 
@@ -4528,7 +4528,7 @@ def test_attach_home_layer_noop_for_inactive(tmp_path, monkeypatch):
     inactive = SandboxPolicy(
         active=False, worktree="", git_common_dir="", git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True)
+        secret_dirs=(), secret_files=(), child_env=(), network=True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="p", name="n")
     pol, cleanup = ex._attach_home_layer(inactive, step, quest)
@@ -4546,15 +4546,15 @@ def test_sandbox_off_shape_with_overlay_root_builds_bare_argv(tmp_path, monkeypa
     import dataclasses
 
     from imp.engine import executor as ex
-    from imp.engine.sandbox import build_sandbox_argv
+    from imp.engine.sandbox import build_sandbox_spawn
     monkeypatch.setattr(ex, "overlay_mode", lambda _base, _home: True)
     quest = types.SimpleNamespace(quest_dir=tmp_path)
     step = types.SimpleNamespace(phase="build", name="coder")
     pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
     assert pol.overlay_root and not pol.home_layer.is_overlay   # the decorated shape
     off = dataclasses.replace(pol, active=False)
-    assert build_sandbox_argv("echo hi", cwd="/wt", policy=off,
-                              engine_env={}) == ["sh", "-c", "echo hi"]
+    assert build_sandbox_spawn("echo hi", cwd="/wt", policy=off,
+                               engine_env={}, environ={}).argv == ["sh", "-c", "echo hi"]
     cleanup()
 
 

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""Shell sandbox (bubblewrap) — pure policy core + argv builder (spec Part B).
+"""Shell sandbox (bubblewrap) — pure policy core + spawn builder (spec Part B).
 
 Two spawn points consume this: the `bash` tool (agents/tools/bash.py) and script
 gates (engine/gates.py). `resolve_policy` does the one-time stat I/O and bakes a
-frozen `SandboxPolicy`; `build_sandbox_argv` is pure given that policy.
+frozen `SandboxPolicy`; `build_sandbox_spawn` is pure given that policy.
 
-The flag ORDER in build_sandbox_argv is load-bearing: bwrap is last-wins, so the
+The flag ORDER in build_sandbox_spawn is load-bearing: bwrap is last-wins, so the
 writable-home bind (when a home_layer is present) and then the /tmp bind are
 emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
 secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
@@ -34,7 +34,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import HEADLESS_ENV, quest_var_tmp_root
+from imp.engine.env import (
+    HEADLESS_ENV,
+    merge_pythonpath_prefix,
+    overlay_engine_env,
+    quest_var_tmp_root,
+)
 from imp.engine.shim import imp_shim_dir
 from imp.paths import imp_home, project_state_dir
 from imp.remote.session.discover import session_socket_path
@@ -79,7 +84,7 @@ class SandboxPolicy:
     extra_writable: tuple[str, ...]           # config extra_writable (rw)
     secret_dirs: tuple[str, ...]              # --tmpfs masks (existing only) incl. /run/user/$UID
     secret_files: tuple[str, ...]             # --ro-bind /dev/null masks (existing only)
-    setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
+    child_env: tuple[tuple[str, str], ...]     # resolved child environment key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
     quest_home: str = ""                     # <state dir>/quests/<id> rw bind ("" → none)
@@ -98,7 +103,7 @@ class SandboxPolicy:
 
     def bind_plan(self) -> list[tuple[str, str]]:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
-        source of truth shared by build_sandbox_argv (which formats each entry to
+        source of truth shared by build_sandbox_spawn (which formats each entry to
         argv), allows_write, and allows_read (both evaluate last-covering-wins).
         kind is one of rw / ro / mask_dir / mask_file; rw grants write. The order is
         load-bearing: the ro overlays (git_ro_remask, readonly_overlays, extra_readable)
@@ -198,8 +203,8 @@ def _is_engine_passthrough(key: str) -> bool:
     var, PYTHONPATH (the imp-on-imp import shadow), and the four headless
     overrides (GIT_EDITOR / GIT_TERMINAL_PROMPT / EDITOR / VISUAL) that keep a
     sandboxed git/tool invocation non-interactive. Shared by both allowlist
-    sites (the per-spawn loop in build_sandbox_argv and the policy bake in
-    _build_setenv) so they cannot drift."""
+    sites (the per-spawn overlay in build_sandbox_spawn and the policy bake in
+    _build_child_env) so they cannot drift."""
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
@@ -246,19 +251,36 @@ def sandbox_spawn_backoff_delay(attempt: int) -> float:
     return random.uniform(0.0, ceiling)
 
 
-def build_sandbox_argv(
-    command: str, *, cwd: str, policy: SandboxPolicy,
-    engine_env: Mapping[str, str],
-) -> list[str]:
-    """Return the argv to spawn `command`. When the policy is active, wrap with
-    bwrap per spec §B.2 (fixed flag order); otherwise the bare ["sh","-c",cmd].
+@dataclass(frozen=True, slots=True)
+class SandboxSpawn:
+    """One spawn's argv AND the environment to spawn it with. Produced by a single
+    call so the two cannot be mismatched: the argv carries no environment flags, so
+    the env field is the sole source of truth — pairing them prevents a caller from
+    accidentally supplying os.environ and dumping the user's whole environment into
+    the sandbox."""
+    argv: list[str]
+    env: dict[str, str]
+
+
+def build_sandbox_spawn(
+    command: str, *, cwd: str, policy: SandboxPolicy | None,
+    engine_env: Mapping[str, str], environ: Mapping[str, str],
+    shim_dir: str = "",
+) -> SandboxSpawn:
+    """Return the argv to spawn `command` AND the environment to spawn it with.
+    When the policy is active, wrap with bwrap per spec §B.2 (fixed flag order) and
+    the env is the resolved child environment; otherwise the bare ["sh","-c",cmd]
+    with the host environment (`environ` overlaid with `engine_env`, plus the
+    `shim_dir` PATH prefix) — the `/sandbox off` path, deliberately unchanged. A
+    None policy is the same unsandboxed case. `shim_dir` is ignored under an active
+    policy: the PATH shim is already baked into `policy.child_env` by `_build_child_env`.
 
     `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
-    prefixed key it carries is emitted via --setenv, authoritatively superseding
-    whatever was baked into `policy.setenv` at run start. The policy is resolved
-    once per run (the stat-once design), but name-on-intent makes IMP_QUEST_TITLE
-    mutate mid-run on a rename — so a gate or tool spawned after
+    prefixed key it carries enters the returned child environment, authoritatively
+    superseding whatever was baked into `policy.child_env` at run start. The policy
+    is resolved once per run (the stat-once design), but name-on-intent makes
+    IMP_QUEST_TITLE mutate mid-run on a rename — so a gate or tool spawned after
     the rename MUST see the live values, not the empty ones frozen at run start.
 
     Required (not optional) on purpose: a sandboxed spawn without its live engine
@@ -267,13 +289,16 @@ def build_sandbox_argv(
     the IMP_ prefix plus PYTHONPATH (`_is_engine_passthrough`): any new IMP_* var
     flows through with no edit here, and PYTHONPATH passes through as the single
     deliberate non-IMP_ exception — the imp-on-imp import shadow — matching
-    `_build_setenv`.
+    `_build_child_env`.
 
     An ACTIVE policy carrying overlay_root with an un-minted home layer is a
     fail-open bug (it would bind the real $HOME rw) and raises; the INACTIVE
     variant of that same shape is the reachable `/sandbox off` case and is fine."""
-    if not policy.active:
-        return ["sh", "-c", command]
+    if policy is None or not policy.active:
+        env = overlay_engine_env(environ, engine_env)
+        if shim_dir:
+            env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
+        return SandboxSpawn(argv=["sh", "-c", command], env=env)
 
     if (policy.overlay_root is not None and policy.home_layer is not None
             and not policy.home_layer.is_overlay):
@@ -313,18 +338,16 @@ def build_sandbox_argv(
     argv += ["--proc", "/proc", "--dev", "/dev"]
     # 12. chdir
     argv += ["--chdir", cwd]
-    # 13. env allowlist. The IMP_* slice comes authoritatively from the live
-    # per-spawn engine_env (prefix allowlist) so a post-rename title wins over
-    # the value frozen into policy.setenv at run start (name-on-intent). Dict
-    # preserves first-seen order; reassigning a key updates in place, so no
-    # duplicate --setenv is emitted.
-    setenv = dict(policy.setenv)
+    # 13. the child environment — delivered out-of-band on the spawn, NOT on argv
+    # (argv is world-readable via /proc). The IMP_* slice comes authoritatively
+    # from the live per-spawn engine_env (prefix allowlist) so a post-rename title
+    # wins over the value frozen into policy.child_env at run start
+    # (name-on-intent). Dict preserves first-seen order; reassigning a key updates
+    # in place.
+    child_env = dict(policy.child_env)
     for k, v in engine_env.items():
         if _is_engine_passthrough(k):
-            setenv[k] = v
-    argv += ["--clearenv"]
-    for k, v in setenv.items():
-        argv += ["--setenv", k, v]
+            child_env[k] = v
     # 14. namespaces — NO --die-with-parent / --new-session (B.9); --unshare-pid is
     # safe (the group kill crosses the namespace)
     argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-pid"]
@@ -353,9 +376,10 @@ def build_sandbox_argv(
             f"|| exit 1; "
             f"exec {shlex.join(argv)}"
         )
-        return ["unshare", "--user", "--map-root-user", "--mount",
-                "sh", "-c", mount]
-    return argv
+        return SandboxSpawn(
+            argv=["unshare", "--user", "--map-root-user", "--mount", "sh", "-c", mount],
+            env=child_env)
+    return SandboxSpawn(argv=argv, env=child_env)
 
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
@@ -522,7 +546,7 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
     real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
     tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
-    build_sandbox_argv uses — so the probe exercises the overlapping-layers
+    build_sandbox_spawn uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
     nothing. Cached like sandbox_available(); the answer is carried to the
     per-command mount (via make_home_layer), so probe and spawn always agree.
@@ -743,7 +767,7 @@ def resolve_policy(
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
         quest_var_tmp_dir=quest_var_tmp_dir,
-        setenv=_build_setenv(
+        child_env=_build_child_env(
             engine_env_result, environ, cfg.env_passthrough,
             session_socket=str(session_sock), tmpdir=str(quest_tmp),
             shim_dir=str(imp_shim_dir(quest_dir)) if quest_dir is not None else ""),
@@ -756,20 +780,22 @@ def _inactive(*, note: str) -> SandboxPolicy:
     return SandboxPolicy(
         active=False, worktree="", git_common_dir="", git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(), setenv=(), network=True, note=note,
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note=note,
     )
 
 
-def _build_setenv(
+def _build_child_env(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     env_passthrough: tuple[str, ...], session_socket: str = "",
     shim_dir: str = "", tmpdir: str = "",
 ) -> tuple[tuple[str, str], ...]:
-    """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
+    """The child environment (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative; PYTHONPATH is the single deliberate non-IMP_ exception — the
-    imp-on-imp import shadow); generic + LC_* + env_passthrough pass through from
-    `environ`. With the socket and every IMP_* path now identical inside and outside
-    the sandbox, nothing is rewritten — real host paths pass through verbatim.
+    imp-on-imp import shadow, a bare worktree prefix merged ahead of any ambient
+    PYTHONPATH by the same helper overlay_engine_env uses); generic + LC_* +
+    env_passthrough pass through from `environ`. With the socket and every IMP_* path
+    now identical inside and outside the sandbox, nothing is rewritten — real host
+    paths pass through verbatim.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
     its value in place (first-seen position, last value wins). TMPDIR (the per-quest
@@ -788,6 +814,10 @@ def _build_setenv(
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
             d[k] = v
+    pythonpath_prefix = engine_env_result.get("PYTHONPATH")
+    if pythonpath_prefix:
+        d["PYTHONPATH"] = merge_pythonpath_prefix(
+            pythonpath_prefix, environ.get("PYTHONPATH", ""))
     if session_socket:
         d["IMP_SESSION_SOCKET"] = session_socket
     if shim_dir:

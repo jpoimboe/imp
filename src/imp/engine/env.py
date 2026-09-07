@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from imp.paths import project_state_dir
+from imp.paths import imp_home, project_state_dir
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +112,15 @@ ENGINE_ENV_VARS = frozenset({
 })
 
 
+def merge_pythonpath_prefix(prefix: str, inherited: str) -> str:
+    """`prefix` (the engine's worktree import roots) ahead of `inherited`, dropping
+    empty inherited entries and any that duplicate a prefix entry."""
+    prefix_entries = prefix.split(os.pathsep)
+    rest = [p for p in inherited.split(os.pathsep)
+            if p and p not in prefix_entries]
+    return os.pathsep.join([*prefix_entries, *rest])
+
+
 def overlay_engine_env(
     parent: Mapping[str, str], overlay: Mapping[str, str],
 ) -> dict[str, str]:
@@ -135,13 +144,8 @@ def overlay_engine_env(
     pythonpath_prefix = overlay.pop("PYTHONPATH", None)
     env.update(overlay)
     if pythonpath_prefix:
-        prefix_entries = pythonpath_prefix.split(os.pathsep)
-        inherited = parent.get("PYTHONPATH", "")
-        # Drop any inherited entry equal to one of the prefix entries (and any
-        # empty entry) so a multi-root prefix doesn't grow a redundant copy.
-        rest = [p for p in inherited.split(os.pathsep)
-                if p and p not in prefix_entries]
-        env["PYTHONPATH"] = os.pathsep.join([*prefix_entries, *rest])
+        env["PYTHONPATH"] = merge_pythonpath_prefix(
+            pythonpath_prefix, parent.get("PYTHONPATH", ""))
     return env
 
 
@@ -181,6 +185,13 @@ def engine_env(
         IMP_QUEST_ID      — the stable, immutable quest identity; hook authors
                             MUST key on this.
         IMP_QUEST_TITLE   — human-readable title for the quest.
+        IMP_HOME          — imp's per-machine directory ($IMP_HOME, else ~/.imp),
+                            emitted unconditionally so the `imp` shim inside the
+                            sandbox resolves the engine's home rather than falling
+                            back. Deliberately NOT in ENGINE_ENV_VARS: membership
+                            would make overlay_engine_env strip an inherited custom
+                            home from the host-side spawns that overlay an empty
+                            engine env.
         IMP_QUEST_DIR     — absolute host path of the quest state directory;
                             injected only when quest_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/quests/
@@ -205,8 +216,9 @@ def engine_env(
                             by os.pathsep in listed order; e.g. `src` =>
                             <worktree>/src, `.` => <worktree>. Empty pythonpath =>
                             no PYTHONPATH key (unchanged when off). Emitted as a
-                            bare prefix here; overlay_engine_env prepends it to any
-                            inherited PYTHONPATH. The shadow relies on PYTHONPATH
+                            bare prefix here; merge_pythonpath_prefix prepends it to
+                            any inherited PYTHONPATH, for both the host-side overlay
+                            and the sandbox bake. The shadow relies on PYTHONPATH
                             preceding site-packages on sys.path — true for
                             path-style editable installs; a strict PEP 660 editable
                             that registers a sys.meta_path finder resolves first
@@ -216,6 +228,7 @@ def engine_env(
         "IMP_PROJECT_ROOT": str(project_root),
         "IMP_QUEST_ID": quest_id,
         "IMP_QUEST_TITLE": quest_title,
+        "IMP_HOME": str(imp_home()),
         **HEADLESS_ENV,
     }
     if quest_dir is not None:

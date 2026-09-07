@@ -14,9 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import overlay_engine_env
 from imp.engine.expr import EvalEnv, evaluate
-from imp.engine.sandbox import SandboxPolicy, build_sandbox_argv, prepare_spawn_policy
+from imp.engine.sandbox import SandboxPolicy, build_sandbox_spawn, prepare_spawn_policy
 from imp.engine.types import Action, Continue, Rule, Step
 
 GATE_KILL_GRACE_S = 2.0  # SIGTERM-to-SIGKILL grace window for a gate subprocess group
@@ -115,7 +114,7 @@ def run_command(
     The command string is an explicit shell expression read live from the
     quest's own worktree (principal-based trust: the quest author and workflow
     author are the same V0 principal). When `policy` is active it is wrapped with
-    bwrap (build_sandbox_argv appends `sh -c <sentinel script> <command>`, the
+    bwrap (build_sandbox_spawn appends `sh -c <sentinel script> <command>`, the
     command its own argv element); otherwise the bare `sh -c` runs.
 
     Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a
@@ -125,22 +124,18 @@ def run_command(
     on the timeout, abort, and output-cap paths. `cwd` must lie inside the
     writable set (worktree/`/tmp`); a command pointed at the RO floor fails.
 
-    `env_extra` (an engine_env result) is overlaid authoritatively so engine vars
-    are visible while a stale inherited engine var cannot leak (engine_env's
-    "absent => no gate" contract).
+    `env_extra` (an engine_env result) is the live per-spawn engine env: it refreshes
+    the sandbox child environment's IMP_* slice, and on the unsandboxed path it is
+    overlaid authoritatively so a stale inherited engine var cannot leak
+    (engine_env's "absent => no gate" contract).
     """
-    env = overlay_engine_env(os.environ, env_extra or {})
-    if shim_dir:
-        env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
-    # The policy's setenv was frozen at run start (possibly with an empty
-    # name-on-intent slug), so the live engine_env (env_extra) is the authoritative
-    # source that refreshes IMP_* inside the bwrap --clearenv jail.
-    argv = (build_sandbox_argv(command, cwd=cwd, policy=prepare_spawn_policy(policy),
-                               engine_env=env_extra or {})
-            if policy is not None else ["sh", "-c", command])
+    spawn = build_sandbox_spawn(
+        command, cwd=cwd,
+        policy=prepare_spawn_policy(policy) if policy is not None else None,
+        engine_env=env_extra or {}, environ=os.environ, shim_dir=shim_dir)
     proc = subprocess.Popen(
-        argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        env=env, start_new_session=True,
+        spawn.argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=spawn.env, start_new_session=True,
     )
     # Owned selector drain: os.read chunks off stdout/stderr as they arrive (so a
     # chatty child never deadlocks on a full pipe) into per-stream bytearrays with

@@ -58,7 +58,7 @@ def _active_policy(worktree: Path) -> SandboxPolicy:
         extra_writable=(),
         secret_dirs=(),
         secret_files=(),
-        setenv=(("PATH", "/usr/bin:/bin"),),
+        child_env=(("PATH", "/usr/bin:/bin"),),
         network=True,
         note="",
     )
@@ -134,7 +134,7 @@ def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
         extra_writable=(),
         secret_dirs=(),
         secret_files=(),
-        setenv=(("PATH", "/usr/bin:/bin"), ("HOME", str(home))),
+        child_env=(("PATH", "/usr/bin:/bin"), ("HOME", str(home))),
         network=True,
         note="",
         home=str(home),

@@ -11,7 +11,7 @@ def _active_policy() -> SandboxPolicy:
     return SandboxPolicy(
         active=True, worktree="/wt", git_common_dir="/wt/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), child_env=(),
         network=True)
 
 

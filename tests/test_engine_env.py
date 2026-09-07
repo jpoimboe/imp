@@ -13,6 +13,7 @@ def test_engine_env_exposes_id_and_title_no_artifacts() -> None:
         "IMP_PROJECT_ROOT": "/wt",
         "IMP_QUEST_ID": "eee555",
         "IMP_QUEST_TITLE": "Add OAuth",
+        "IMP_HOME": str(imp_home()),
         "GIT_EDITOR": "true",
         "GIT_TERMINAL_PROMPT": "0",
         "EDITOR": "true",
@@ -263,13 +264,13 @@ def test_engine_env_omits_the_state_dir_without_a_control_root(tmp_path: Path) -
 
 
 def test_state_dir_survives_the_policy_env_bake(tmp_path: Path) -> None:
-    from imp.engine.sandbox import _build_setenv
+    from imp.engine.sandbox import _build_child_env
 
     root = tmp_path / "widget"
     root.mkdir()
     eng = engine_env(project_root=root / "wt", quest_id="abc123",
                      quest_title="T", control_root=root)
-    baked = dict(_build_setenv(eng, {}, ()))
+    baked = dict(_build_child_env(eng, {}, ()))
     assert baked["IMP_STATE_DIR"] == str(imp_home() / "projects" / "widget")
 
 
@@ -278,6 +279,28 @@ def test_overlay_preserves_an_inherited_state_dir() -> None:
     # dict, and membership would strip the migration's deferral pin.
     merged = overlay_engine_env({"IMP_STATE_DIR": "/pinned/old"}, {})
     assert merged["IMP_STATE_DIR"] == "/pinned/old"
+
+
+def test_engine_env_emits_the_engine_imp_home(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMP_HOME", str(tmp_path / "alt"))
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
+    assert env["IMP_HOME"] == str(tmp_path / "alt")
+
+
+def test_engine_env_imp_home_defaults_to_dot_imp_when_unset(monkeypatch) -> None:
+    # No control_root on purpose: with the ambient home unset, project_state_dir
+    # would claim a slug directory under the developer's real ~/.imp.
+    monkeypatch.delenv("IMP_HOME", raising=False)
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
+    assert env["IMP_HOME"] == str(Path.home() / ".imp")
+
+
+def test_overlay_preserves_an_inherited_imp_home() -> None:
+    # AC 7(c): IMP_HOME must stay OUT of ENGINE_ENV_VARS — remote/daemon/spawn.py and
+    # remote/session/attach.py overlay an empty engine env, and membership would strip
+    # a custom home from those host-side children.
+    merged = overlay_engine_env({"IMP_HOME": "/pinned/home"}, {})
+    assert merged["IMP_HOME"] == "/pinned/home"
 
 
 def test_from_config_reads_a_false_gate_as_no_command() -> None:

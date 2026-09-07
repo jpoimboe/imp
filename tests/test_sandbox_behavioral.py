@@ -37,7 +37,7 @@ from imp.engine import worktree as wt
 from imp.engine.sandbox import (
     SandboxConfig,
     SandboxPolicy,
-    build_sandbox_argv,
+    build_sandbox_spawn,
     make_home_layer,
     overlay_mode,
     resolve_policy,
@@ -72,7 +72,7 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
     Uses PATH from the real environment so git, cat, echo, etc. resolve.
     HOME is set to a dir under the worktree root (or the provided `home`).
     This hand-built policy sets no /tmp source, so /tmp is bound rw by identity in
-    build_sandbox_argv — no per-test tmp dir setup is needed.
+    build_sandbox_spawn — no per-test tmp dir setup is needed.
     """
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
@@ -89,7 +89,7 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
         extra_writable=(),
         secret_dirs=secret_dirs,
         secret_files=(),
-        setenv=(
+        child_env=(
             ("PATH", os.pathsep.join(
                 p for p in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
                 if "imp-shim" not in p) or "/usr/bin:/bin"),
@@ -128,7 +128,7 @@ def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
 
 
 # The overlay home under test must live at a path covered by NO later bind_plan
-# bind — NOT under /tmp (build_sandbox_argv emits --bind /tmp /tmp, which re-mounts
+# bind — NOT under /tmp (build_sandbox_spawn emits --bind /tmp /tmp, which re-mounts
 # the host /tmp OVER an overlay home placed under /tmp, defeating it) and NOT under
 # the sandbox worktree (its rw bind does the same). The home-layer rw bind is
 # emitted FIRST (sandbox.py:91), so it can never be the last-covering bind for a
@@ -351,16 +351,18 @@ def test_secret_env_dropped() -> None:
 
     AWS_SECRET_ACCESS_KEY is not in the allowlist and must NOT be visible inside
     the sandbox even when set in the ambient environment. We use a hand-built
-    policy with setenv that explicitly excludes AWS_* (matching what _build_setenv
-    produces — this is the same allowlist resolve_policy bakes via _build_setenv).
+    policy whose child_env explicitly excludes AWS_* (matching what _build_child_env
+    produces — the same allowlist resolve_policy bakes).
     """
     root = _make_root()
     old = os.environ.get("AWS_SECRET_ACCESS_KEY")
     os.environ["AWS_SECRET_ACCESS_KEY"] = "supersecret"
     try:
-        # Hand-built policy: setenv does NOT include AWS_SECRET_ACCESS_KEY.
-        # This directly tests the bwrap --clearenv + --setenv mechanism.
-        # (resolve_policy produces the same setenv via _build_setenv, which only
+        # Hand-built policy: child_env does NOT include AWS_SECRET_ACCESS_KEY.
+        # This directly tests the out-of-band child environment: the spawn env is
+        # the whole of what the child gets, so an ambient var absent from it cannot
+        # appear inside the sandbox.
+        # (resolve_policy produces the same child_env via _build_child_env, which only
         # allows PATH/HOME/USER/LOGNAME/LANG/TERM/TZ/LC_*/engine-managed IMP_* + env_passthrough.)
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
@@ -438,7 +440,7 @@ def test_secret_dir_masked() -> None:
 # ---------------------------------------------------------------------------
 
 def test_network_off_adds_unshare_net() -> None:
-    """build_sandbox_argv with network=False must include --unshare-net (spec B.2 step 15)."""
+    """build_sandbox_spawn with network=False must include --unshare-net (spec B.2 step 15)."""
     pol = SandboxPolicy(
         active=True,
         worktree="/tmp/fake-wt",
@@ -449,12 +451,12 @@ def test_network_off_adds_unshare_net() -> None:
         extra_writable=(),
         secret_dirs=(),
         secret_files=(),
-        setenv=(("PATH", "/usr/bin:/bin"),),
+        child_env=(("PATH", "/usr/bin:/bin"),),
         network=False,  # <-- network isolation
         note="",
     )
-    argv = build_sandbox_argv("curl example.com", cwd="/tmp/fake-wt", policy=pol,
-                              engine_env={})
+    argv = build_sandbox_spawn("curl example.com", cwd="/tmp/fake-wt", policy=pol,
+                               engine_env={}, environ={}).argv
     assert "--unshare-net" in argv, (
         f"--unshare-net missing from argv when network=False: {argv}"
     )
@@ -500,7 +502,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
     """Regression: name-on-intent freezes the policy with IMP_QUEST_TITLE="" at run
     start; after rename_quest the gate's fresh env_extra carries the real title.
     Reproduces the dogfood failure where a `${IMP_QUEST_*:?not set by engine}`
-    guard fired inside the bwrap --clearenv jail.
+    guard fired inside the sandbox's engine-supplied environment.
     """
     import dataclasses
 
@@ -510,7 +512,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
     root = _make_root("imp-test-title-")
     try:
         pol = _active_policy(root)
-        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_QUEST_TITLE", "")))
+        pol = dataclasses.replace(pol, child_env=(*pol.child_env, ("IMP_QUEST_TITLE", "")))
         step = Step(
             name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
             max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
@@ -733,11 +735,12 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
         worktree_imp.mkdir(parents=True)
         (worktree_imp / "__init__.py").write_text("")
         pol = _active_policy(root)
-        argv = build_sandbox_argv(
+        spawn = build_sandbox_spawn(
             "python3 -c 'import imp; print(imp.__file__)'",
             cwd=str(root), policy=pol,
-            engine_env={"PYTHONPATH": str(root / "src")})
-        result = subprocess.run(argv, capture_output=True, text=True)
+            engine_env={"PYTHONPATH": str(root / "src")}, environ={})
+        result = subprocess.run(spawn.argv, env=spawn.env,
+                                capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         assert str(worktree_imp) in result.stdout
     finally:
@@ -747,7 +750,7 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
 # ---------------------------------------------------------------------------
 # PATH resolution: inside a sandboxed step a bare `imp` runs the OUTER (running)
 # imp, NOT the worktree's shadowed code. src/imp/engine/shim.py writes a per-run
-# shim that sandbox._build_setenv prepends to PATH; the shim puts the outer src
+# shim that sandbox._build_child_env prepends to PATH; the shim puts the outer src
 # root at sys.path[0], so it beats the injected worktree PYTHONPATH shadow.
 # ---------------------------------------------------------------------------
 
@@ -766,19 +769,19 @@ def test_sandboxed_imp_resolves_outer_imp_over_worktree_shadow() -> None:
 
         shim_dir = write_imp_shim(root / "qd")
         base = _active_policy(root)
-        # PATH exactly as _build_setenv composes it: shim dir first, ambient behind.
+        # PATH exactly as _build_child_env composes it: shim dir first, ambient behind.
         path = os.pathsep.join(
-            [str(shim_dir), *(v for k, v in base.setenv if k == "PATH")])
+            [str(shim_dir), *(v for k, v in base.child_env if k == "PATH")])
         pol = dataclasses.replace(
             base,
-            setenv=tuple((k, path if k == "PATH" else v) for k, v in base.setenv))
+            child_env=tuple((k, path if k == "PATH" else v) for k, v in base.child_env))
         engine_env = {"PYTHONPATH": str(root / "src")}
 
         def _run(cmd: str) -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
-                build_sandbox_argv(cmd, cwd=str(root), policy=pol,
-                                   engine_env=engine_env),
-                capture_output=True, text=True)
+            spawn = build_sandbox_spawn(cmd, cwd=str(root), policy=pol,
+                                        engine_env=engine_env, environ={})
+            return subprocess.run(spawn.argv, env=spawn.env,
+                                  capture_output=True, text=True)
 
         version = _run("imp --version")
         assert version.returncode == 0, (
@@ -984,7 +987,7 @@ def test_change_and_spike_branch_writes_succeed() -> None:
 
         # Quest branch: two commits then an autosquash rebase onto main. The
         # inline GIT_SEQUENCE_EDITOR/GIT_EDITOR=: keep rebase -i non-interactive
-        # (they are shell-assignment prefixes, independent of the --clearenv jail).
+        # (they are shell-assignment prefixes, independent of the spawn environment).
         r1 = _bash(
             ctx,
             "echo a > f.txt && git add f.txt && "
@@ -1985,4 +1988,29 @@ def test_sandboxed_shell_cannot_see_or_signal_a_host_process() -> None:
     finally:
         host.kill()
         host.wait()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_real_child_env_is_exactly_the_paired_env(monkeypatch) -> None:
+    """AC 3: with --clearenv gone, the child's own `env` output must be exactly the
+    environment paired with the argv — no ambient var from the parent leaks in."""
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    root = _make_root()
+    try:
+        pol = _active_policy(root)
+        spawn = build_sandbox_spawn("env", cwd=str(root), policy=pol,
+                                    engine_env={"IMP_QUEST_ID": "abc123"},
+                                    environ={})
+        result = subprocess.run(spawn.argv, env=spawn.env,
+                                capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        observed = dict(
+            line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        assert observed["IMP_QUEST_ID"] == "abc123"
+        for k, v in spawn.env.items():
+            assert observed[k] == v, f"{k} did not reach the child intact"
+        # Only the shell's own additions may appear beyond the paired env.
+        assert set(observed) - set(spawn.env) <= {"PWD", "SHLVL", "_"}
+        assert "IMP_TELEGRAM_TOKEN" not in observed
+    finally:
         shutil.rmtree(root, ignore_errors=True)

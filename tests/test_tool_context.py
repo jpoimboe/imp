@@ -415,7 +415,7 @@ def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = ()) -
         quest_home=str(home),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=("/home/u/.ssh",), secret_files=("/home/u/.netrc",),
-        setenv=(), network=True, note="", readonly_overlays=readonly_overlays,
+        child_env=(), network=True, note="", readonly_overlays=readonly_overlays,
     )
 
 

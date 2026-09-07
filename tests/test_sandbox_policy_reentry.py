@@ -187,7 +187,7 @@ def test_draft_quest_reconcile_clears_git_worktree_self(tmp_path: Path) -> None:
         extra_writable=(),
         secret_dirs=(),
         secret_files=(),
-        setenv=(),
+        child_env=(),
         network=False,
         git_worktree_self=str(tmp_path / ".git" / "worktrees" / "dr1"),
     )

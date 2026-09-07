@@ -23,7 +23,7 @@ def inactive_policy_for(root: Path) -> SandboxPolicy:
     return SandboxPolicy(
         active=False, worktree=str(root), git_common_dir=str(root / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), child_env=(),
         network=True, note="test")
 
 

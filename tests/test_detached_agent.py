@@ -214,3 +214,32 @@ async def test_auth_terminal_error_is_environment_failure(
     assert isinstance(result, DetachedEnvironmentFailure)
     assert result.category == "auth_terminal"
     assert result.detail == "AuthTerminalError"
+
+
+@pytest.mark.anyio
+async def test_detached_bake_keeps_ambient_imp_vars_out_of_the_child_env(
+        tmp_path, monkeypatch, provider_registry):
+    # AC 4(c): run_detached_agent feeds resolve_policy the PURE engine_env, so an
+    # ambient IMP_* secret never reaches a detached agent. resolve_policy runs for
+    # real; the wrapper only captures what it produced.
+    import imp.agents.detached as detached
+
+    monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
+    monkeypatch.setattr(detached, "sandbox_available", lambda: True)
+    real_resolve_policy = detached.resolve_policy
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        policy = real_resolve_policy(**kwargs)
+        captured["policy"] = policy
+        return policy
+
+    monkeypatch.setattr(detached, "resolve_policy", _capture)
+    (tmp_path / ".git").mkdir()
+    _register(provider_registry, _SUCCESS_EVENTS)
+
+    await _run(tmp_path, cfg=SandboxConfig())
+
+    child = dict(captured["policy"].child_env)
+    assert "IMP_TELEGRAM_TOKEN" not in child
+    assert child["IMP_PROJECT_ROOT"] == str(tmp_path)

@@ -295,7 +295,7 @@ def _policy(
         extra_writable=(),
         secret_dirs=secret_dirs,
         secret_files=secret_files,
-        setenv=(),
+        child_env=(),
         network=True,
         note="",
     )

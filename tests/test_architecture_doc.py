@@ -151,6 +151,15 @@ def test_architecture_documents_the_out_of_checkout_state_directory() -> None:
         assert stale not in text, stale
 
 
+def test_architecture_names_imp_home_as_engine_injected() -> None:
+    # AC 11(b): IMP_HOME is engine-emitted, not inherited — a sandboxed agent gets it
+    # from engine_env or not at all, so the doc must name it beside IMP_STATE_DIR.
+    text = ARCH.read_text()
+    assert ("`engine_env()` injects `$IMP_HOME` unconditionally and `$IMP_STATE_DIR` "
+            "wherever it is given a control root — every policy bake — so both reach "
+            "every agent subprocess") in text
+
+
 def test_operator_notes_document_the_moved_checkout_limitation() -> None:
     text = Path("docs/guide/operator-notes.md").read_text()
     flat = " ".join(text.split())
