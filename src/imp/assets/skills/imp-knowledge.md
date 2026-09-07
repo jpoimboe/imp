@@ -122,7 +122,7 @@ Using imp — relevant in any project:
 - `guide/features.md` — the capability catalog, one section per capability.
 - `guide/introspection.md` — answering a live-state question from ground truth: the workflow snapshot, event timelines, keeping output bounded.
 - `guide/memory.md` — what imp remembers, where it lives, how to inspect it.
-- `guide/operator-notes.md` — runbook for a running quest: unblocking a pause, snapshot and archive version skew.
+- `guide/operator-notes.md` — runbook for a running quest: unblocking a pause, recovering a dead provider login, snapshot and archive version skew.
 - `guide/remote-control.md` — driving a run from a chat surface.
 - `guide/embedding.md` — the `imp.api` surface for driving quests from another process.
 

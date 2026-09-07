@@ -178,6 +178,33 @@ def test_operator_notes_document_the_moved_checkout_limitation() -> None:
     assert "Finish or abandon in-flight quests before moving a checkout" in text
 
 
+def test_operator_notes_document_dead_provider_login_recovery() -> None:
+    text = Path("docs/guide/operator-notes.md").read_text()
+    assert "## Recovering a dead provider login" in text
+    # Placed between the pause runbook and the checkout-move section.
+    assert (text.index("## Unblocking a paused quest")
+            < text.index("## Recovering a dead provider login")
+            < text.index("## Moving or renaming a checkout"))
+    section = " ".join(
+        text.split("## Recovering a dead provider login", 1)[1]
+            .split("## Moving or renaming a checkout", 1)[0].split())
+    # single-use rotation, refreshed by imp itself, written back to both canonical files
+    assert "single-use" in section
+    assert "~/.codex/auth.json" in section
+    assert "~/.claude/.credentials.json" in section
+    # never copy a credential file between machines
+    assert "Never copy a credential file between machines" in section
+    assert "Log in separately on each host" in section
+    # the pause and its remedy
+    assert "reauth_needed" in section
+    assert "`codex login`" in section and "`claude login`" in section
+    assert "imp resume <id>" in section
+    # copying a still-live shared file back, and the codex-only API-key fallthrough
+    assert "another host still holds a live copy" in section
+    assert "OPENAI_API_KEY" in section
+    assert "bills the OpenAI API, not your ChatGPT subscription" in section
+
+
 def test_operator_notes_document_archive_version_skew() -> None:
     from imp.engine.archive import _DATA_VERSION
     from imp.engine.errors import ArchiveMismatch
