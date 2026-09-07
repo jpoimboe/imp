@@ -202,9 +202,9 @@ def _is_engine_passthrough(key: str) -> bool:
     """Engine-env keys allowed through the sandbox env allowlist: every IMP_*
     var, PYTHONPATH (the imp-on-imp import shadow), and the four headless
     overrides (GIT_EDITOR / GIT_TERMINAL_PROMPT / EDITOR / VISUAL) that keep a
-    sandboxed git/tool invocation non-interactive. Shared by both allowlist
-    sites (the per-spawn overlay in build_sandbox_spawn and the policy bake in
-    _build_child_env) so they cannot drift."""
+    sandboxed git/tool invocation non-interactive. Shared by the per-spawn overlay
+    (_spawn_child_env, used by build_sandbox_spawn and SandboxNamespace.join) and
+    the policy bake in _build_child_env, so they cannot drift."""
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
@@ -266,6 +266,20 @@ class SandboxSpawn:
     argv: list[str]
     env: dict[str, str]
     pass_fds: tuple[int, ...] = ()
+
+
+def _spawn_child_env(policy: SandboxPolicy,
+                     engine_env: Mapping[str, str]) -> dict[str, str]:
+    """The child environment for ONE spawn: policy.child_env overlaid with the
+    engine-passthrough slice of the LIVE engine_env, which authoritatively
+    supersedes the values frozen into the policy at run start (name-on-intent: a
+    post-rename IMP_QUEST_TITLE must beat the empty one baked at run start). Dict
+    preserves first-seen order; reassigning a key updates it in place."""
+    env = dict(policy.child_env)
+    for k, v in engine_env.items():
+        if _is_engine_passthrough(k):
+            env[k] = v
+    return env
 
 
 def build_sandbox_spawn(
@@ -362,10 +376,7 @@ def build_sandbox_spawn(
     # wins over the value frozen into policy.child_env at run start
     # (name-on-intent). Dict preserves first-seen order; reassigning a key updates
     # in place.
-    child_env = dict(policy.child_env)
-    for k, v in engine_env.items():
-        if _is_engine_passthrough(k):
-            child_env[k] = v
+    child_env = _spawn_child_env(policy, engine_env)
     # 14. namespaces — a PER-CALL spawn carries no --die-with-parent / --new-session
     # (B.9); --unshare-pid is safe (the group kill crosses the namespace)
     argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-pid"]
@@ -399,6 +410,65 @@ def build_sandbox_spawn(
             argv=["unshare", "--user", "--map-root-user", "--mount", "sh", "-c", mount],
             env=child_env, pass_fds=pass_fds)
     return SandboxSpawn(argv=argv, env=child_env, pass_fds=pass_fds)
+
+
+_NSENTER_FLAG = {"user": "user", "mnt": "mount", "pid": "pid", "uts": "uts",
+                 "ipc": "ipc", "net": "net"}
+_KEEPER_NS_KINDS = ("user", "mnt", "pid", "uts", "ipc")   # + net iff policy isolates it
+
+_JOIN_SCRIPT = (
+    'cd "$IMP_CWD" || exit 1\n'
+    'cmd=$IMP_COMMAND\n'
+    'unset IMP_COMMAND IMP_CWD\n'
+    'eval "$cmd"\n'
+)
+
+
+@dataclass(slots=True)
+class SandboxNamespace:
+    """One keeper namespace: a bwrap sandbox whose payload is `sleep infinity`,
+    held open so every command joins it instead of building its own. Processes
+    persist and stay killable across joins, and close() ends all of them at once.
+
+    `policy` is the PREPARED policy the keeper argv was built from (its home
+    overlay layer is minted once, here, not per join). `base_policy` is the value
+    open() was handed — the namespace is a frozen picture of that bind plan, so it
+    stays valid exactly as long as that value does.
+
+    `ns_fds` pins /proc/<ns-init>/ns/* as open fds and the join names them as
+    /proc/self/fd/N rather than `--target <pid>`: no pid-reuse window, and it fails
+    CLOSED once the ns-init dies (`nsenter: fork failed: Cannot allocate memory`),
+    where a recycled --target pid would fail open."""
+    policy: SandboxPolicy
+    base_policy: SandboxPolicy
+    ns_fds: tuple[tuple[str, int], ...]
+    ns_init_pid: int     # pid 1 of the keeper's pid namespace, as seen from imp
+    err_fd: int          # read end of the keeper's stderr; the keeper holds the write end for life
+    proc: subprocess.Popen[bytes]
+    closed: bool = False
+
+    def join(self, command: str, *, cwd: str,
+             engine_env: Mapping[str, str]) -> SandboxSpawn:
+        """The argv and env to run ONE command inside this namespace.
+
+        The command travels in $IMP_COMMAND and the cwd in $IMP_CWD, off argv, so
+        an agent's `pkill -f` cannot match the shell running it; both are unset
+        before the eval, so children see the same environment as before. This is
+        NOT secrecy — /proc/<pid>/environ and `ps e` inside the sandbox still show
+        the command. The cwd must be set by the inner `cd`, never --wd or Popen's
+        cwd=: both resolve in the CALLER's mount namespace and would hand the shell
+        the host's view of a masked path. The env is rebuilt on every call, never
+        captured at open(), so a mid-run IMP_* change reaches the next command."""
+        if self.closed:
+            raise AssertionError("join on a closed SandboxNamespace")
+        argv = ["nsenter"]
+        argv += [f"--{_NSENTER_FLAG[kind]}=/proc/self/fd/{fd}" for kind, fd in self.ns_fds]
+        argv += ["--preserve-credentials", "--", "sh", "-c", _JOIN_SCRIPT]
+        env = _spawn_child_env(self.policy, engine_env)
+        env["IMP_COMMAND"] = command
+        env["IMP_CWD"] = cwd
+        return SandboxSpawn(argv=argv, env=env,
+                            pass_fds=tuple(fd for _kind, fd in self.ns_fds))
 
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:

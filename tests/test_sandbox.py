@@ -17,6 +17,7 @@ from imp.engine.sandbox import (
     HomeLayer,
     OverlayRoot,
     SandboxConfig,
+    SandboxNamespace,
     SandboxPolicy,
     SandboxUnavailable,
     _force_rmtree,
@@ -2941,3 +2942,77 @@ def test_overlay_home_shell_string_carries_no_environment():
     assert spawn.argv[0] == "unshare"
     assert "canary-42:secret" not in " ".join(spawn.argv)
     assert spawn.env["IMP_TELEGRAM_TOKEN"] == "canary-42:secret"
+
+
+def _ns(*, network: bool = True) -> SandboxNamespace:
+    """A namespace with DUMMY fd numbers: join() is pure given the pins, so its
+    argv/env shape needs no real keeper. fds are 10.. in pin order."""
+    kinds = ["user", "mnt", "pid", "uts", "ipc"] + ([] if network else ["net"])
+    pol = _policy(network=network)
+    return SandboxNamespace(
+        policy=pol, base_policy=pol,
+        ns_fds=tuple((k, 10 + i) for i, k in enumerate(kinds)),
+        ns_init_pid=4242, err_fd=98, proc=None)
+
+
+def test_join_enumerates_the_namespace_flags_by_pinned_fd():
+    argv = _ns().join("echo hi", cwd="/wt", engine_env={}).argv
+    assert argv[0] == "nsenter"
+    assert argv[1:6] == ["--user=/proc/self/fd/10", "--mount=/proc/self/fd/11",
+                         "--pid=/proc/self/fd/12", "--uts=/proc/self/fd/13",
+                         "--ipc=/proc/self/fd/14"]
+    # mandatory: bwrap writes `deny` to setgroups, so without it nsenter dies
+    assert "--preserve-credentials" in argv
+    assert "--all" not in argv                                  # EPERM on net/cgroup/time
+    assert not any(a.startswith("--target") for a in argv)      # pins, not a pid
+
+
+def test_join_enters_the_net_namespace_iff_the_policy_isolates_it():
+    # Fails OPEN if dropped: an omitted --net against an --unshare-net keeper
+    # silently leaves the command in the HOST network namespace.
+    isolated = _ns(network=False).join("x", cwd="/wt", engine_env={}).argv
+    assert "--net=/proc/self/fd/15" in isolated
+    networked = _ns(network=True).join("x", cwd="/wt", engine_env={}).argv
+    assert not any(a.startswith("--net") for a in networked)
+
+
+def test_join_passes_every_pinned_fd_to_the_child():
+    spawn = _ns(network=False).join("x", cwd="/wt", engine_env={})
+    assert spawn.pass_fds == (10, 11, 12, 13, 14, 15)
+
+
+def test_join_keeps_command_and_cwd_off_argv():
+    spawn = _ns().join('pkill -f "needle"', cwd="/masked/dir", engine_env={})
+    joined = " ".join(spawn.argv)
+    assert "pkill" not in joined and "needle" not in joined
+    assert "/masked/dir" not in joined
+    assert spawn.env["IMP_COMMAND"] == 'pkill -f "needle"'
+    assert spawn.env["IMP_CWD"] == "/masked/dir"
+
+
+def test_join_sets_the_cwd_with_an_inner_cd_and_never_die_with_parent():
+    spawn = _ns().join("x", cwd="/masked/dir", engine_env={})
+    # --wd resolves in the CALLER's mount namespace; the join must not use it,
+    # and --die-with-parent here would collapse the runner's SIGTERM grace.
+    assert "--wd" not in " ".join(spawn.argv)
+    assert "--die-with-parent" not in spawn.argv
+    assert spawn.argv[-2] == "-c"
+    assert spawn.argv[-1].splitlines()[0] == 'cd "$IMP_CWD" || exit 1'
+    assert 'unset IMP_COMMAND IMP_CWD' in spawn.argv[-1]
+
+
+def test_join_env_overlays_the_live_engine_slice_on_the_policy_env():
+    spawn = _ns().join("x", cwd="/wt", engine_env={
+        "IMP_QUEST_TITLE": "renamed", "NOT_ENGINE": "1"})
+    assert spawn.env["IMP_QUEST_TITLE"] == "renamed"   # name-on-intent override
+    assert spawn.env["HOME"] == "/home/u"              # from policy.child_env
+    assert "NOT_ENGINE" not in spawn.env
+
+
+def test_join_on_a_closed_namespace_is_refused():
+    # The pinned fd numbers are recycled after close(); an argv naming them would
+    # silently enter WHATEVER now holds those numbers.
+    ns = _ns()
+    ns.closed = True
+    with pytest.raises(AssertionError):
+        ns.join("x", cwd="/wt", engine_env={})
