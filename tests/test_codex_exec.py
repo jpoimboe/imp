@@ -2,6 +2,7 @@
 stderr drain, and group-reaping teardown."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import signal
@@ -15,9 +16,11 @@ from imp.providers.codex_exec import (
     CODEX_STREAM_LIMIT,
     CodexExecError,
     ThreadOptions,
+    _drain_stderr,
     _run_exec,
     build_command_args,
 )
+from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 from tests.conftest import _pid_gone_or_zombie
 
 
@@ -235,3 +238,70 @@ async def test_teardown_returns_when_a_descendant_escapes_the_group(tmp_path: Pa
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.kill(escapee, signal.SIGKILL)
+
+
+# --- stderr tee -------------------------------------------------------------
+
+_STDERR_THEN_BLOCK = """\
+import sys, time
+sys.stdin.read()
+sys.stderr.write("warmup: talking to the model\\n")
+sys.stderr.flush()
+sys.stdout.write("first line\\n")
+sys.stdout.flush()
+time.sleep(300)
+"""
+
+
+class _ChunkedStream:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    async def read(self, n: int = -1) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+@pytest.mark.anyio
+async def test_a_multibyte_char_split_across_reads_survives_the_tee(
+        tmp_path: Path) -> None:
+    sink = StderrSink(tmp_path / "stderr.log")
+    text = await _drain_stderr(_ChunkedStream([b"caf\xc3", b"\xa9\n"]), sink)  # type: ignore[arg-type]
+    assert text == "café\n"
+    assert sink.tail() == "café\n"
+    assert "�" not in (sink.tail() or "")
+
+
+@pytest.mark.anyio
+async def test_child_stderr_reaches_the_active_sink(tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _FAILING)
+    sink = StderrSink(tmp_path / "stderr.log")
+    token = current_stderr_sink.set(sink)
+    try:
+        with pytest.raises(CodexExecError):
+            await _collect(exe, "go")
+    finally:
+        current_stderr_sink.reset(token)
+    assert sink.tail() == "boom: codex could not start\n"
+
+
+@pytest.mark.anyio
+async def test_stderr_reaches_the_sink_while_the_child_is_still_running(
+        tmp_path: Path) -> None:
+    """The drain runs from spawn, not after the stdout loop: a child that writes
+    stderr and then blocks holding both streams open still feeds the sink."""
+    exe = _fake_codex(tmp_path, _STDERR_THEN_BLOCK)
+    sink = StderrSink(tmp_path / "stderr.log")
+    token = current_stderr_sink.set(sink)
+    try:
+        gen = _run_exec(str(exe), [], dict(os.environ), "go")
+        async with contextlib.aclosing(gen):
+            async for line in gen:
+                assert line == "first line"
+                break
+            deadline = time.monotonic() + 20.0
+            while "warmup: talking to the model" not in (sink.tail() or ""):
+                if time.monotonic() > deadline:
+                    pytest.fail("stderr never reached the sink while the child ran")
+                await asyncio.sleep(0.05)
+    finally:
+        current_stderr_sink.reset(token)

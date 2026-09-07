@@ -19,6 +19,7 @@ from typing import Literal
 
 from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.context import kill_process_group
+from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 
 # 64 MiB ceiling for one JSONL line: asyncio's 64 KiB default makes
 # StreamReader.readline() raise on a larger codex event line.
@@ -68,9 +69,9 @@ def build_command_args(options: ThreadOptions, thread_id: str | None) -> list[st
     return args
 
 
-async def _drain_stderr(stream: asyncio.StreamReader) -> str:
-    """Read stderr to EOF. Must run concurrently with the stdout loop: a full
-    stderr pipe blocks the child, which stops stdout, which hangs the read loop."""
+async def _drain_stderr(stream: asyncio.StreamReader, sink: StderrSink | None) -> str:
+    """Read stderr to EOF, teeing into the active sink. Must run concurrently with
+    the stdout loop: a full stderr pipe blocks the child, which stops stdout."""
     # Incremental so a multi-byte char split across two reads decodes correctly
     # instead of becoming U+FFFD on the boundary.
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
@@ -80,6 +81,8 @@ async def _drain_stderr(stream: asyncio.StreamReader) -> str:
         text = decoder.decode(chunk, final=not chunk)
         if text:
             parts.append(text)
+            if sink is not None:
+                sink.feed(text)
         if not chunk:
             return "".join(parts)
 
@@ -98,7 +101,7 @@ async def _run_exec(
     )
     stdin, stdout, stderr = proc.stdin, proc.stdout, proc.stderr
     assert stdin is not None and stdout is not None and stderr is not None
-    stderr_task = asyncio.create_task(_drain_stderr(stderr))
+    stderr_task = asyncio.create_task(_drain_stderr(stderr, current_stderr_sink.get()))
     try:
         stdin.write(prompt.encode("utf-8"))
         await stdin.drain()
