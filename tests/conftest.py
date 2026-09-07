@@ -555,10 +555,11 @@ def _pid_gone_or_zombie(pid: int) -> bool:
     """True once `pid` has exited or is an unreaped zombie (state Z). Every pid
     must be captured HOST-side (proc.pid / descendant_pids), never read from inside
     the sandbox — the sandbox has its own pid namespace. A zombie counts as
-    terminated, tolerating the window before an orphan is reaped."""
+    terminated, tolerating the window before an orphan is reaped. ENOENT means
+    the pid vanished before open; ESRCH means it was reaped between open and read."""
     try:
         data = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return True
     return data.rpartition(")")[2].split()[0] == "Z"
 
