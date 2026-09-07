@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from impty import Regime, TerminalSession
-from tests.impty.e2e_support import can_pty
+from tests.impty.e2e_support import E2E_POLL_TIMEOUT, _poll, can_pty
 
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
@@ -238,9 +238,26 @@ def test_drainer_survives_a_feed_error_and_keeps_draining(caplog) -> None:
             time.sleep(1.2)
         out = "\n".join(s.lines())
         assert s._drainer.is_alive()        # daemon survived the bad feed
-        assert "draining pty" in caplog.text  # and logged it (observable, not silent)
+        # and logged it (observable, not silent)
+        assert "impty: unparseable output dropped; continuing" in caplog.text
         assert "BOOM" not in out            # the bad chunk was dropped
         assert "GOOD" in out                # later output still drained
+
+
+def test_close_ends_the_drainer_with_no_error(caplog) -> None:
+    # Removing the drainer's broad catch must not make ordinary teardown noisy:
+    # close() sets _stop and joins BEFORE closing the master, so the drainer
+    # exits via _stop and nothing is logged.
+    prog = "import time; print('READY', flush=True); time.sleep(30)"
+    with caplog.at_level("ERROR", logger="impty.session"):
+        s = TerminalSession([sys.executable, "-c", prog])
+        try:
+            s.wait_idle(idle=0.2, hard=30.0)
+        finally:
+            s.close()
+        assert _poll(lambda: not s._drainer.is_alive(),
+                     timeout=E2E_POLL_TIMEOUT), "drainer outlived close()"
+    assert [r for r in caplog.records if r.name == "impty.session"] == []
 
 
 def test_cursor_parks_after_prompt_string() -> None:

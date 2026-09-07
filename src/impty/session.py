@@ -168,13 +168,6 @@ class TerminalSession:
                     result = self._read_step(_POLL)
                 except (OSError, ValueError):
                     return  # master closed under us (close() races the read)
-                except Exception:
-                    # A permanent reliability daemon must not be killable by one
-                    # bad feed (a pathological escape sequence, a pyte parse bug):
-                    # if it dies, the CPR-in-the-gap degradation this thread exists
-                    # to prevent silently returns. Drop the chunk, log, stay alive.
-                    _log.exception("impty drainer: error draining pty; continuing")
-                    result = _StepResult.QUIET
                 if result is _StepResult.EOF:
                     return  # slave fully closed — nothing more will ever arrive
             time.sleep(_DRAIN_YIELD)  # leave the lock free for a waiting tool call
@@ -275,7 +268,10 @@ class TerminalSession:
     def _read_step(self, timeout: float) -> _StepResult:
         """One select→read→feed step, classified tri-state.
 
-        DATA  — bytes were read and fed to pyte.
+        DATA  — bytes were read and fed to pyte. A feed that raises is logged
+                and the chunk dropped (still DATA, so settle timing is
+                unchanged): an unanticipated parse failure must degrade a
+                screen, not kill a tool call.
         EOF   — the slave is fully closed: os.read returned b'', or raised
                 OSError with errno == EIO (the Linux master-EOF surface; macOS
                 yields b''); or close() pulled the master out from under us
@@ -307,7 +303,13 @@ class TerminalSession:
             raise
         if not chunk:
             return _StepResult.EOF
-        self._stream.feed(chunk)
+        try:
+            self._stream.feed(chunk)
+        except Exception:
+            # Deliberately broad: an unanticipated parse failure must degrade a
+            # screen, not kill a tool call (nor the permanent drainer daemon).
+            # BaseException still propagates, so timeouts/^C are unaffected.
+            _log.exception("impty: unparseable output dropped; continuing")
         self._last_data_t = time.monotonic()
         return _StepResult.DATA
 
