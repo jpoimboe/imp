@@ -167,11 +167,12 @@ def test_the_bare_shape_hides_the_command_from_its_own_pkill():
     # needle occurs only inside the command's own text, so a correct build matches
     # nothing; with the command on argv, pkill kills the shell running it (rc -15).
     needle = f"imp-needle-{uuid.uuid4().hex}"
-    done = _run_bare(f'pkill -f "{needle}"; echo pkill-rc=$?')
+    done = _run_bare(f'pkill -f "{needle}"; echo pkill-rc=$?; ps auxww')
     assert done.returncode == 0
-    assert done.stdout.strip() == "pkill-rc=1"       # pkill: no process matched
-    listing = subprocess.run(["ps", "auxww"], capture_output=True, text=True).stdout
-    assert needle not in listing                     # on no process's argv, host-side
+    assert done.stdout.splitlines()[0] == "pkill-rc=1"   # pkill: no process matched
+    # Sampled host-wide from inside, WHILE the shell running the command is alive:
+    # a sample taken after it exits cannot tell "never on argv" from "gone".
+    assert needle not in done.stdout
 
 
 def test_the_bare_shape_matches_a_plain_sh_c():

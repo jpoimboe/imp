@@ -438,12 +438,13 @@ def test_a_joined_command_cannot_pkill_the_shell_running_it():
         ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
                                    environ=os.environ)
         try:
-            done = _join(ns, f'pkill -f "{needle}"; echo pkill-rc=$?', cwd=str(root))
+            done = _join(ns, f'pkill -f "{needle}"; echo pkill-rc=$?; ps auxww',
+                         cwd=str(root))
             assert done.returncode == 0                    # not 143/137
-            assert done.stdout.strip() == "pkill-rc=1"     # no process matched
-            listing = subprocess.run(["ps", "auxww"], capture_output=True,
-                                     text=True).stdout
-            assert needle not in listing
+            assert done.stdout.splitlines()[0] == "pkill-rc=1"   # no process matched
+            # Sampled from inside, WHILE the shell running the command is alive: a
+            # sample taken after it exits cannot tell "never on argv" from "gone".
+            assert needle not in done.stdout
         finally:
             ns.close()
     finally:
