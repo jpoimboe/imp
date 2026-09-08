@@ -383,3 +383,40 @@ def test_a_keeper_opened_from_an_overlay_policy_owns_the_pid_namespace():
     finally:
         cleanup()
         shutil.rmtree(root, ignore_errors=True)
+
+
+@requires_overlay
+def test_a_joined_command_cannot_unmask_a_secret_dir():
+    # An overlay policy is what makes this test honest, not incidental: it runs
+    # bwrap under `unshare --map-root-user`, so bwrap needs only ONE user namespace
+    # and the join lands as uid 0 in it with full capabilities — the production
+    # shape, and the only one where the bypass exists. The outer_user_fd assertion
+    # holds the test to that shape: with two levels the caps are already empty and
+    # this would pass vacuously.
+    root = Path(tempfile.mkdtemp(prefix="imp-test-nsmask-", dir=_OVERLAY_BASE))
+    home = root / "home"
+    home.mkdir()
+    worktree = root / "wt"
+    worktree.mkdir()
+    masked = root / "secrets"
+    masked.mkdir()
+    (masked / "creds").write_text("SUPER_SECRET_KEY\n")
+    layer, overlay_root, cleanup = make_home_layer(
+        str(home), root=root / "ovl", userxattr=overlay_mode(root / "probe", home))
+    policy = dataclasses.replace(
+        _policy_for(worktree, home=home, secret_dirs=(str(masked),)),
+        home=str(home), home_layer=layer, overlay_root=overlay_root)
+    try:
+        ns = SandboxNamespace.open(policy=policy, engine_env={}, environ=os.environ)
+        try:
+            assert ns.outer_user_fd is None      # the one-userns shape, or nothing is proven
+            done = _join(ns, f"umount {masked}; cat {masked}/creds", cwd=str(worktree))
+            assert done.returncode != 0
+            assert "SUPER_SECRET_KEY" not in done.stdout
+            # and the mask is still a mask for the next command in the same keeper
+            assert _join(ns, f"ls -A {masked}", cwd=str(worktree)).stdout == ""
+        finally:
+            ns.close()
+    finally:
+        cleanup()
+        shutil.rmtree(root, ignore_errors=True)

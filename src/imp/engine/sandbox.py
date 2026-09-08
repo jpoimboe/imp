@@ -561,7 +561,15 @@ class SandboxNamespace:
         the command. The cwd must be set by the inner `cd`, never --wd or Popen's
         cwd=: both resolve in the CALLER's mount namespace and would hand the shell
         the host's view of a masked path. The env is rebuilt on every call, never
-        captured at open(), so a mid-run IMP_* change reaches the next command."""
+        captured at open(), so a mid-run IMP_* change reaches the next command.
+
+        The command runs in a CHILD user namespace: entering the keeper's own
+        hands it CAP_FULL_SET there whenever bwrap built a single userns level
+        (the production shape — the home overlay runs bwrap as root), which is
+        enough to `umount` a secret_dirs mask and read what it hid. The child
+        namespace owns no mount, and --map-current-user keeps the uid identical,
+        so nothing else changes; with two levels the caps are already empty and
+        the stage is a no-op."""
         if self.closed:
             raise AssertionError("join on a closed SandboxNamespace")
         argv: list[str] = []
@@ -572,7 +580,9 @@ class SandboxNamespace:
             pass_fds += (self.outer_user_fd,)
         argv += ["nsenter"]
         argv += [f"--{_NSENTER_FLAG[kind]}=/proc/self/fd/{fd}" for kind, fd in self.ns_fds]
-        argv += ["--preserve-credentials", "--", "sh", "-c", _JOIN_SCRIPT]
+        argv += ["--preserve-credentials", "--",
+                 "unshare", "--user", "--map-current-user", "--",
+                 "sh", "-c", _JOIN_SCRIPT]
         env = _spawn_child_env(self.policy, engine_env)
         env["IMP_COMMAND"] = command
         env["IMP_CWD"] = cwd

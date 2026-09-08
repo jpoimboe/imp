@@ -3061,6 +3061,28 @@ def test_join_sets_the_cwd_with_an_inner_cd_and_never_die_with_parent():
     assert 'unset IMP_COMMAND IMP_CWD' in spawn.argv[-1]
 
 
+def test_join_drops_into_a_child_userns_before_running_the_command():
+    # Entering the keeper's own user namespace grants CAP_FULL_SET there whenever
+    # bwrap built one userns level, which is enough to umount a secret mask. The
+    # child namespace owns nothing, so the stage must sit INSIDE the nsenter, right
+    # ahead of the shell — anywhere earlier and the caps are regained on entry.
+    argv = _ns().join("x", cwd="/wt", engine_env={}).argv
+    assert argv[argv.index("--") + 1] == "unshare"
+    assert argv[-7:-1] == ["unshare", "--user", "--map-current-user", "--",
+                           "sh", "-c"]
+    # --map-root-user would change the uid the command runs as; this one must not.
+    assert "--map-root-user" not in argv
+    # Two-stage shape: the placement requirement is SHARPER here, because between
+    # the stages is a plausible-looking spot where the inner nsenter would hand the
+    # caps straight back. Slicing past the outer `--` first is what makes the
+    # assertion name the inner nsenter's `--` rather than the outer's.
+    two_stage = _ns(outer_user_fd=77).join("x", cwd="/wt", engine_env={}).argv
+    inner = two_stage[two_stage.index("--") + 1:]
+    assert inner[inner.index("--") + 1] == "unshare"
+    assert two_stage[-7:-1] == ["unshare", "--user", "--map-current-user", "--",
+                                "sh", "-c"]
+
+
 def test_join_env_overlays_the_live_engine_slice_on_the_policy_env():
     spawn = _ns().join("x", cwd="/wt", engine_env={
         "IMP_QUEST_TITLE": "renamed", "NOT_ENGINE": "1"})
