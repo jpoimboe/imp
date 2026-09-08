@@ -2,10 +2,12 @@
 # Copyright 2026 Josh Poimboeuf
 """Codex backend provider (spec: `2026-06-05-add-codex-provider`).
 
-Drives the OpenAI Codex CLI via `openai-codex-sdk` as a brain that calls imp's
-tools over an in-process streamable-HTTP MCP server. Mirrors `claude_code.py`'s
-runner shape; the differences are in this module's siblings:
+Drives the OpenAI Codex CLI as a brain that calls imp's tools over an
+in-process streamable-HTTP MCP server. Mirrors `claude_code.py`'s runner shape;
+the differences are in this module's siblings:
 
+  - `codex_exec.py`    — the `codex exec --json` spawn, read loop, and teardown.
+  - `codex_events.py`  — the wire event models and the parse boundary.
   - `codex_mcp.py`     — the MCP server + tool wrappers + cap counter.
   - `codex_config.py`  — per-run CODEX_HOME, config.toml, auth seed + reconcile.
 
@@ -16,15 +18,12 @@ binding absent before the sandbox is consulted. imp's own MCP tools run in
 imp's process, outside that sandbox, and are auto-approved per server via
 config.toml.
 
-`_env_check` requires BOTH `codex` on PATH AND `openai_codex_sdk` importable —
-stricter than `claude_code._env_check` (binary-only). Deliberate asymmetry.
+`_env_check` requires only `codex` on PATH, matching `claude_code._env_check`.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import shutil
-import sys
 from typing import Any
 
 from imp.agents.runner import AgentInvocation, AgentRunner
@@ -32,16 +31,8 @@ from imp.providers.base import Provider
 
 
 def _env_check() -> bool:
-    """True iff both the codex CLI and the Python SDK are present."""
-    if shutil.which("codex") is None:
-        return False
-    # find_spec raises ValueError when the module is already in sys.modules but
-    # its __spec__ is None (e.g. a bare ModuleType stub inserted during tests).
-    # Fall back to a sys.modules membership check in that case.
-    try:
-        return importlib.util.find_spec("openai_codex_sdk") is not None
-    except ValueError:
-        return "openai_codex_sdk" in sys.modules
+    """True iff the codex CLI is on PATH."""
+    return shutil.which("codex") is not None
 
 
 class CodexProvider:

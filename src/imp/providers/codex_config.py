@@ -3,15 +3,15 @@
 """Per-run CODEX_HOME provisioning + auth handling (spec §3, design "run() flow"
 step 3, "Lifecycle / teardown", and "Auth copy-in").
 
-Implements what the SDK can't express (or can't express correctly): the MCP
+Implements what CLI options can't express (or can't express correctly): the MCP
 server URL + bearer-token env-var name, the per-server
 `default_tools_approval_mode` that keeps imp's tools auto-approved under the
 read-only sandbox, the [features] toggles, the top-level `web_search` control,
 the `model_auto_compact_token_limit` pin that stops codex compacting its own
-history, and the auth.json seed. `web_search` lives here because the
-SDK's `features.web_search_request` flag is deprecated/ineffective on codex
->=0.137 (see `render_config_toml`). The rest (model, sandbox_mode,
-approval_policy, network_access_enabled) still goes through SDK options.
+history, and the auth.json seed. `web_search` lives here because codex >=0.137
+deprecated the `features.web_search_request` flag and it no longer disables (see
+`render_config_toml`). The rest (model, sandbox_mode, approval_policy,
+network_access_enabled) still goes through `codex_exec.ThreadOptions`.
 
 Filesystem invariants:
   - CODEX_HOME dir is mode 0700 under TMPDIR, with the owner pid encoded in
@@ -62,9 +62,9 @@ def render_config_toml(
     runs read-only with `approval_policy = "never"`, and without this per-server key
     codex stops auto-approving MCP calls and every imp tool fails on approval.
 
-    `web_search` lives here (not in SDK options) because codex >=0.137 deprecated
-    the SDK-emitted `features.web_search_request` key. A top-level key must precede
-    every `[table]` in TOML, so `web_search` is emitted first.
+    `web_search` lives here (not in `codex_exec.ThreadOptions`) because codex
+    >=0.137 deprecated the `features.web_search_request` key. A top-level key must
+    precede every `[table]` in TOML, so `web_search` is emitted first.
 
     `model_auto_compact_token_limit` is pinned above any real context window
     (codex reads <= 0 as "compact on every request"): codex's auto-compaction
@@ -158,7 +158,7 @@ def detect_auth_mode(
     write). Caller routes:
       - "chatgpt" → copy the canonical auth.json into CODEX_HOME.
       - "apikey"  → write a fresh 0600 auth.json into CODEX_HOME from the key.
-      - None      → raise an `auth` ProviderError before SDK options are built.
+      - None      → raise an `auth` ProviderError before thread options are built.
     """
     payload: dict[str, object] | None = None
     if canonical_path.exists():

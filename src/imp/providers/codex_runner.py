@@ -2,7 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 """CodexAgentRunner — the heavy lifting for the `codex` provider.
 
-Implements: interrupt() with four effects, fail-fast preflight(), and
+Implements: interrupt() with three effects, fail-fast preflight(), and
 process_event() for basic event types. Native writes need no runner-side guard:
 codex's own `read-only` sandbox refuses them.
 """
@@ -60,6 +60,7 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
+from imp.providers.codex_exec import Codex, CodexOptions, ThreadOptions
 from imp.providers.codex_mcp import (
     CODEX_APPROVAL_POLICY,
     RunState,
@@ -88,7 +89,7 @@ _logger = logging.getLogger(__name__)
 
 
 class PreflightError(Exception):
-    """Raised before SDK options are built when the run cannot proceed safely."""
+    """Raised before thread options are built when the run cannot proceed safely."""
     def __init__(self, category: str, message: str) -> None:
         super().__init__(message)
         self.category = category
@@ -97,7 +98,7 @@ class PreflightError(Exception):
 def preflight(
     *, model: str, canonical_auth: Path, env: Mapping[str, str],
 ) -> AuthMode:
-    """Run fail-fast checks before building SDK options. Returns auth mode."""
+    """Run fail-fast checks before building thread options. Returns auth mode."""
     # 1. Refuse `*-codex` in BOTH auth modes (M1).
     if model.endswith("-codex"):
         raise PreflightError(
@@ -318,7 +319,7 @@ class CodexSession(ObserveSession):
             return
 
         # 5. Provision CODEX_HOME + config.toml + seed auth. web_search is
-        #    controlled via config.toml's top-level key (the deprecated SDK flag no
+        #    controlled via config.toml's top-level key (the deprecated CLI flag no
         #    longer disables it on codex >=0.137), so it must be decided here, at
         #    provision time, from the agent's declared tools.
         impty_bearer: str | None = None
@@ -369,7 +370,7 @@ class CodexSession(ObserveSession):
                 params={"env.CODEX_HOME": str(codex_home)},
                 max_tool_calls=invocation.max_tool_calls)
 
-        # 6. Build the SDK client + start/resume the persistent thread.
+        # 6. Build the codex client + start/resume the persistent thread.
         client = runner._build_client(
             codex_home=codex_home, bearer_token=bearer_token,
             impty_bearer_token=(impty_bearer if runner._impty_handle is not None
@@ -385,25 +386,12 @@ class CodexSession(ObserveSession):
                 codex_home=codex_home,
                 transcript_dir=invocation.transcript_dir)
             # Seed thread_id now so a subsequent pause persists the resumed thread
-            # even if the SDK does not re-emit thread.started on resume
+            # even if codex does not re-emit thread.started on resume
             # (process_event overwrites this with the same id if it does).
             proc_state["thread_id"] = thread_id
-            if thread_options is None:
-                thread = client.resume_thread(thread_id)
-            else:
-                try:
-                    thread = client.resume_thread(thread_id, thread_options)
-                except TypeError:
-                    thread = client.resume_thread(thread_id)
-        elif thread_options is None:
-            # SDK unavailable (test/fake path): start with no options.
-            thread = client.start_thread()
+            thread = client.resume_thread(thread_id, thread_options)
         else:
-            try:
-                thread = client.start_thread(thread_options)
-            except TypeError:
-                # Fakes ignore the options arg.
-                thread = client.start_thread()
+            thread = client.start_thread(thread_options)
         self._thread = thread
         # Build initial prompt with anti-native-tool instruction prepended.
         next_prompt = runner._build_prompt(invocation, elog, aid)
@@ -491,16 +479,6 @@ class CodexSession(ObserveSession):
                 if parts:
                     next_prompt = next_prompt + "\n\n" + "\n".join(parts)
         self._next_prompt = next_prompt
-        # AbortController for interrupt() — tolerate a fake/SDK without one.
-        try:
-            from openai_codex_sdk import (
-                AbortController,
-            )
-            abort_controller: Any = AbortController()
-        except ImportError:
-            abort_controller = None
-        self._abort_controller = abort_controller
-        runner._abort_controller = abort_controller
 
         self.guard = LoopGuard(interactive=invocation.interactive)
         self.ceiling = invocation.max_tool_calls  # inert: codex trips mid-stream
@@ -539,7 +517,7 @@ class CodexSession(ObserveSession):
                     if coordinator is not None:
                         coordinator.note_activity()
                     # Post-API-site analog (Decision 10): one sweep per streamed
-                    # SDK event.
+                    # codex event.
                     await _bg._sweep_bg(self.ctx)
                     yield event
                     if getattr(event, "type", None) == "turn.completed":
@@ -606,11 +584,8 @@ class CodexSession(ObserveSession):
             self._proc_state["complete_step_called"] = True
             self._proc_state["complete_step_args"] = dict(state.complete_step_args)
 
-        # Cap trip from inside the MCP wrapper → abort the SDK + bail.
+        # Cap trip from inside the MCP wrapper → tear the turn down + bail.
         if state.abort_requested:
-            if self._abort_controller is not None:
-                with contextlib.suppress(Exception):
-                    self._abort_controller.abort()
             await terminate_running_processes(self.ctx)
             yield Error(payload={
                 "category": "config",
@@ -638,9 +613,6 @@ class CodexSession(ObserveSession):
     def _fatal_error(self) -> dict[str, Any] | None:
         state = self._state
         if state.fatal_tool_error is not None:
-            if self._abort_controller is not None:
-                with contextlib.suppress(Exception):
-                    self._abort_controller.abort()
             tool_name, msg = state.fatal_tool_error
             return {
                 "category": "config", "kind": "fatal_tool_error",
@@ -737,7 +709,7 @@ class CodexSession(ObserveSession):
 
 
 class CodexAgentRunner:
-    """Drives `codex` via `openai_codex_sdk` (run() filled in by later tasks)."""
+    """Drives `codex exec` through imp's own `codex_exec` driver."""
 
     def __init__(
         self, model_name: str, *,
@@ -749,14 +721,13 @@ class CodexAgentRunner:
         self._user_input_fn = user_input_fn
         self._cancel = False
         self._ctx: ToolContext | None = None
-        self._abort_controller: Any = None
         # Test seam: overrides the canonical codex auth.json path. Read by
         # `_canonical_auth_path()`; declared here so the attribute the tests set
         # is part of the class contract.
         self._canonical_auth_override: Path | None = None
         # Per-step capture of the nested `codex` CLI's stderr. Built in
-        # CodexSession._enter and published to current_stderr_sink for the
-        # subprocess-patch tee. None until built (the stubbed-loop outer-except
+        # CodexSession._enter and published to current_stderr_sink for
+        # `codex_exec`'s tee. None until built (the stubbed-loop outer-except
         # tests never build it).
         self._stderr_sink: Any = None
         # Teardown handles stashed by CodexSession._enter so run()'s finally can
@@ -801,7 +772,7 @@ class CodexAgentRunner:
                 tail = None
                 if self._stderr_sink is not None:
                     # Prefer what the streaming tee captured live. Only when it
-                    # captured nothing do we fall back to str(exc): the codex SDK
+                    # captured nothing do we fall back to str(exc): codex_exec
                     # surfaces subprocess stderr solely inside the CodexExecError
                     # message (no .stderr attribute), which also re-embeds any
                     # already-teed stderr and already lands in the event's
@@ -891,22 +862,10 @@ class CodexAgentRunner:
         self, *, codex_home: Path, bearer_token: str,
         impty_bearer_token: str | None = None,
     ) -> Any:
-        """Construct the SDK `Codex` client. Tests inject a `client_factory`
+        """Construct the `codex exec` client. Tests inject a `client_factory`
         callable that takes `options=` and returns a FakeCodex."""
         if self._client_factory is not None:
             return self._client_factory(options=None)
-        from openai_codex_sdk import Codex
-
-        from imp.providers.codex_sdk_patch import install_codex_sdk_patches
-        install_codex_sdk_patches()
-
-        # `CodexOptions` is not re-exported at the package top level in the
-        # pinned SDK (0.1.11) — only `openai_codex_sdk.types` (and .codex/.thread)
-        # expose it. Import from the submodule so client construction works
-        # against the pinned wheel. `Codex(...)` also accepts a plain dict, but
-        # the typed object keeps the kwarg contract explicit.
-        from openai_codex_sdk.types import CodexOptions
-
         from imp.engine.env import overlay_engine_env
         overrides = {
             "CODEX_HOME": str(codex_home),
@@ -917,43 +876,30 @@ class CodexAgentRunner:
         env = overlay_engine_env(os.environ, overrides)
         return Codex(CodexOptions(env=env))
 
-    def _build_thread_options(self, tier: str | None = None) -> Any:
-        """ThreadOptions with the design's exact production flags. Lives in its
-        own method so the test seam can replace it without touching
-        `CodexSession._enter`. Returns None when the SDK is unavailable
-        (test/fake path) so `_enter` starts the thread without options.
+    def _build_thread_options(self, tier: str | None = None) -> ThreadOptions:
+        """The design's exact production flags. Lives in its own method so the
+        test seam can replace it without touching `CodexSession._enter`.
 
-        `tier` sets `modelReasoningEffort` to match the claude providers'
+        `tier` sets `model_reasoning_effort` to match the claude providers'
         per-tier posture (see anthropic._anthropic_thinking_posture): medium and
         high both run at 'high', low and an untiered invocation leave it unset so
         codex keeps its own default. `tier` defaults to None so the arg-less test
-        seam keeps working. Note the SDK's effort ladder tops out at 'high' —
+        seam keeps working. Note codex's effort ladder tops out at 'high' —
         Sol's 'max' / ultra mode is not reachable through this field.
 
-        `webSearchEnabled` is deliberately NOT set: codex >=0.137 deprecated the
-        SDK-emitted `features.web_search_request` flag (it no longer disables and
-        emits a noisy `error` item every turn), so web_search is controlled via
+        There is deliberately no web-search field: codex >=0.137 deprecated the
+        `features.web_search_request` flag (it no longer disables and emits a
+        noisy `error` item every turn), so web_search is controlled via
         config.toml's top-level `web_search` key instead (see
         `render_config_toml`). web_search is model-hosted, so
-        `networkAccessEnabled` stays False regardless (the command sandbox cannot
-        reach the network)."""
-        try:
-            from openai_codex_sdk import (
-                ThreadOptions,
-            )
-        except ImportError:
-            return None
-        # Use the SDK's declared (alias) parameter names. ThreadOptions is a
-        # pydantic model with `populate_by_name=True`, so the snake_case field
-        # names work identically at runtime — but only these camelCase aliases
-        # match the typed `__init__` signature, so this is what mypy checks
-        # against. Verified: both forms model_dump() to the same payload.
+        `network_access_enabled` stays False regardless (the command sandbox
+        cannot reach the network)."""
         return ThreadOptions(
             model=self.model,
-            sandboxMode="read-only",
-            approvalPolicy=CODEX_APPROVAL_POLICY,
-            networkAccessEnabled=False,
-            modelReasoningEffort="high" if tier in ("medium", "high") else None,
+            sandbox_mode="read-only",
+            approval_policy=CODEX_APPROVAL_POLICY,
+            network_access_enabled=False,
+            model_reasoning_effort="high" if tier in ("medium", "high") else None,
         )
 
     def _build_prompt(self, invocation: AgentInvocation, elog: Any, aid: str) -> str:
@@ -1018,38 +964,21 @@ class CodexAgentRunner:
         return prompt
 
     async def interrupt(self) -> None:
-        """Cancel the run — four effects:
+        """Cancel the run — three effects:
           1. set `self._cancel = True`.
           2. `terminate_running_processes(ctx)`.
           3. `terminate_background_processes(ctx)` (Decision 7: pause kills
              bg processes; persisted tombstones explain it on resume).
-          4. SDK `AbortController.abort()`.
-        Idempotent."""
+        Idempotent. The `codex exec` child needs no fourth effect: closing the
+        event stream group-kills its whole session in codex_exec's teardown."""
         from imp.agents.tools.bg import terminate_background_processes
         self._cancel = True
-        try:
-            if self._ctx is not None:
-                await terminate_running_processes(self._ctx)
-                # Decision 7: pause kills background processes too (leak
-                # resistance); the persisted tombstones give the resumed agent an
-                # explanation. Idempotent vs the run() finally (both fire on pause).
-                await terminate_background_processes(self._ctx)
-        finally:
-            # abort() must fire even if a teardown raises (disk-full tombstone
-            # write): it is the only effect that stops a stalled SDK stream.
-            #
-            # KNOWN LIMITATION (codex grandchild-reaping gap): unlike claude_code,
-            # imp does NOT group-reap the `codex exec` child on pause. The codex
-            # SDK keeps that child's pid local to CodexExec.run() and never exposes
-            # it, so there is no handle to killpg. Session isolation
-            # (codex_sdk_patch) still makes the child its own session leader
-            # so a terminal Ctrl-C reaches imp alone; teardown then relies on the
-            # SDK's cooperative AbortSignal -> single proc.kill(), which can orphan
-            # the child's own grandchildren. Reaching deeper into SDK internals to
-            # expose that pid is deliberately out of scope.
-            if self._abort_controller is not None:
-                with contextlib.suppress(Exception):
-                    self._abort_controller.abort()
+        if self._ctx is not None:
+            await terminate_running_processes(self._ctx)
+            # Decision 7: pause kills background processes too (leak
+            # resistance); the persisted tombstones give the resumed agent an
+            # explanation. Idempotent vs the run() finally (both fire on pause).
+            await terminate_background_processes(self._ctx)
 
 
 # ── Event mapping ─────────────────────────────────────────────────────────────
@@ -1081,9 +1010,9 @@ def _attach_usage_to_last_agent_message(
 
 
 def _serialize_mcp_result(result: Any) -> str:
-    """Render an SDK ``McpToolCallResult`` to text for the tool_result event.
+    """Render a codex ``McpToolCallResult`` to text for the tool_result event.
 
-    The SDK shape is ``.content`` (a list of MCP content-block dicts) plus
+    The wire shape is ``.content`` (a list of MCP content-block dicts) plus
     ``.structured_content``; a plain ``str``/``None`` (older or duck-typed
     shapes) is passed through. Previously the runner did ``str(result)`` on the
     whole object, which serialized a pydantic repr instead of the tool output.
@@ -1130,11 +1059,11 @@ def _flush_codex_prose(
 
 def close_open_task_folds(elog: Any, state: dict[str, Any]) -> None:
     """Emit closing tool_result for any sub_agent fold whose item.completed never arrived."""
-    for sdk_id, agent_id in state.pop("open_task_ids", {}).items():
+    for item_id, agent_id in state.pop("open_task_ids", {}).items():
         elog.append_tool_result(
             agent_id=agent_id,
             block=ToolResultBlock(
-                tool_use_id=sdk_id,
+                tool_use_id=item_id,
                 content=_synthetic_tool_result_content("sub_agent"),
                 is_error=True),
             id_ns="block", kind="interrupted")
@@ -1152,21 +1081,21 @@ def process_event(
     reading, captured complete_step args, etc.
 
     The default arm (unknown item type) logs a runner_warning and returns; so
-    does an item the pinned SDK could not parse (see the parse-boundary bullet
-    under Layering invariants in docs/internals/invariants.md). Only
+    does an item imp's own event models could not parse (see the parse-boundary
+    bullet under Layering invariants in docs/internals/invariants.md). Only
     security-relevant types get special handling.
     """
     etype = getattr(event, "type", None)
 
-    # A payload codex_sdk_patch could not validate arrives degraded, carrying only
+    # A payload codex_events could not validate arrives degraded, carrying only
     # its id/type. Ahead of the etype dispatch so item.started/updated/completed
     # are covered alike; one warning per event, no seen-id state.
     degraded = getattr(event, "item", None)
     parse_error = getattr(degraded, "imp_parse_error", None)
     if parse_error is not None:
         elog.append(agent_id=agent_id, type="runner_warning", payload={
-            "message": f"codex {getattr(degraded, 'type', '')} item did not match the "
-                       f"pinned openai-codex-sdk model and was skipped",
+            "message": f"codex {getattr(degraded, 'type', '')} item did not match imp's codex "
+                       f"exec event model and was skipped",
             "codex_parse_error": parse_error})
         return
 
@@ -1175,8 +1104,8 @@ def process_event(
         state["thread_id"] = getattr(event, "thread_id", None)
         return
 
-    # `item.started` — open the task fold keyed on the SDK item id (quest 2).
-    # The codex SDK emits item.started (status="in_progress") for an mcp_tool_call
+    # `item.started` — open the task fold keyed on the codex item id (quest 2).
+    # codex emits item.started (status="in_progress") for an mcp_tool_call
     # before item.completed, carrying the SAME id; opening the task tool_call here
     # lets out-of-order sibling completion pair by id with no re-key. Non-task
     # item.started carries no final content and is intentionally ignored.
@@ -1184,7 +1113,7 @@ def process_event(
         item = getattr(event, "item", None)
         name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
         if getattr(item, "type", None) == "mcp_tool_call" and name == "sub_agent":
-            sdk_id = getattr(item, "id", "") or ""
+            item_id = getattr(item, "id", "") or ""
             args = getattr(item, "arguments", None) or {}
             # `arguments` may be a JSON string; mirror the item.completed guard.
             if isinstance(args, str):
@@ -1208,9 +1137,9 @@ def process_event(
                                model=model, state=state)
             elog.append_tool_call(
                 agent_id=agent_id,
-                block=ToolUseBlock(id=sdk_id, name="sub_agent", input=args),
+                block=ToolUseBlock(id=item_id, name="sub_agent", input=args),
                 label=label, id_ns="block")
-            state.setdefault("open_task_ids", {})[sdk_id] = agent_id
+            state.setdefault("open_task_ids", {})[item_id] = agent_id
         return
 
     # `item.completed` — dispatch on the item's own type.
@@ -1244,13 +1173,13 @@ def process_event(
             # item.started the buffer is already empty here (no-op).
             _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
                                model=model, state=state)
-            # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
-            # `name` silently recorded "" for every call (and made the
+            # codex's `McpToolCallItem` exposes `tool` + `server`, NOT `name`;
+            # reading `name` silently recorded "" for every call (and made the
             # complete_step capture below dead). Fall back to `name` only for
-            # older/duck-typed shapes.
+            # duck-typed test shapes.
             name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
             args = getattr(item, "arguments", None) or {}
-            sdk_id = getattr(item, "id", "") or ""
+            item_id = getattr(item, "id", "") or ""
             # Parse a string-shaped `arguments` to a dict for ToolOutcome.input
             # recording and complete_step fallback capture. Unparseable strings
             # degrade gracefully (no exception).
@@ -1272,17 +1201,17 @@ def process_event(
                 content = getattr(err, "message", "") or str(err)
             else:
                 content = _serialize_mcp_result(getattr(item, "result", None))
-            call_id = sdk_id
+            call_id = item_id
             task_id_ns: str | None
             if name == "sub_agent":
                 # quest 2: the task tool_call was opened at item.started keyed on
-                # this same SDK id and stamped id_ns="block"; close the fold here
+                # this same codex id and stamped id_ns="block"; close the fold here
                 # with the matching result. A task item with no prior item.started
                 # (the no-pair path) still emits a lone keyed result.
                 task_id_ns = "block"
-                state.get("open_task_ids", {}).pop(sdk_id, None)
+                state.get("open_task_ids", {}).pop(item_id, None)
             else:
-                # Non-task tool: emit the tool_call/result pair keyed on the SDK id.
+                # Non-task tool: emit the tool_call/result pair keyed on the codex id.
                 task_id_ns = None
                 elog.append_tool_call(
                     agent_id=agent_id,
@@ -1296,7 +1225,7 @@ def process_event(
                 id_ns=task_id_ns,
             )
             if name == "complete_step":
-                # Fallback capture from the RAW SDK item args. When the
+                # Fallback capture from the RAW codex item args. When the
                 # in-process wrapper's RunState capture ran, the consume loop's
                 # mirror overwrites proc_state with those args; this write is
                 # the fallback for when that path didn't run.
@@ -1314,7 +1243,7 @@ def process_event(
         if itype == "web_search":
             query = getattr(item, "query", "") or ""
             if state.get("web_search_enabled"):
-                # Expected: the agent declared `web_search` and the SDK ran the
+                # Expected: the agent declared `web_search` and codex ran the
                 # model-hosted search. Surface it as a tool_call so it shows in
                 # the narrative/`imp log`. codex's WebSearchItem exposes only the
                 # query (no results/citations), so the result is informational.
@@ -1334,9 +1263,9 @@ def process_event(
                         tool_use_id=call_id, content="", is_error=False),
                 )
                 return
-            # Disabled (`webSearchEnabled=False`): the tool should be gone.
-            # Seeing one is a soft tripwire (not fail-closed by itself; the
-            # SDK-form disable is verified live in the e2e test).
+            # Disabled in config.toml: the tool should be gone. Seeing one is
+            # a soft tripwire (not fail-closed by itself; the disable is
+            # verified live in the e2e test).
             elog.append(agent_id=agent_id, type="runner_warning",
                         payload={"message":
                                  f"unexpected codex web_search item "
@@ -1384,8 +1313,8 @@ def process_event(
         # without this mapping cache would silently record as zero.
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
         cached = int(getattr(usage, "cached_input_tokens", 0) or 0)
-        # Undeclared on the SDK Usage, so it arrives via model_extra; like
-        # `cached` it nests inside input_tokens, so both subtract from fresh.
+        # Like `cached`, cache-write nests inside input_tokens, so both
+        # subtract from fresh.
         cache_write = int(getattr(usage, "cache_write_input_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
         reasoning_tokens = int(getattr(usage, "reasoning_output_tokens", 0) or 0)

@@ -7,11 +7,11 @@ combination the unit tests can't validate.
 Assertions:
   - >= 1 `mcp_tool_call` (server=imp) item completes (proves codex->server
     round-trip works with the flag explicitly False -- M-1 / m-2).
-  - Zero `web_search` items appear (L1 SDK-form disable confirmation).
+  - Zero `web_search` items appear (confirms the config.toml disable holds).
   - Cap-abort: forcing a cap trip terminates within the bounded retry budget.
 
-Skipped unless `--run-live` selects codex and its `codex` CLI + openai_codex_sdk
-are detected on this machine (capability detection at collection).
+Skipped unless `--run-live` selects codex and its `codex` CLI is detected on
+this machine (capability detection at collection).
 """
 
 from __future__ import annotations

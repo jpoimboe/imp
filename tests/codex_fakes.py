@@ -2,8 +2,8 @@
 CodexAgentRunner (mirrors `tests/cc_fakes.py`).
 
 The runner only introspects `event.type` and a few attributes on each event,
-so the fakes don't need to round-trip through openai_codex_sdk's Pydantic
-models — they only need to walk like a duck.
+so the fakes don't need to round-trip through `codex_events`' pydantic models —
+they only need to walk like a duck.
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ class FakeAgentMessageItem:
 
 @dataclass
 class FakeMcpToolCallItem:
-    # Mirrors openai_codex_sdk McpToolCallItem: the tool name is `tool` (+`server`),
-    # NOT `name`. Keeping this aligned with the SDK is what catches runner drift.
+    # Mirrors codex_events.McpToolCallItem: the tool name is `tool` (+`server`),
+    # NOT `name`. Keeping this aligned with the wire schema catches runner drift.
     type: str = "mcp_tool_call"
     server: str = "imp"
     tool: str = ""
@@ -56,7 +56,7 @@ class FakeCommandExecutionItem:
 
 @dataclass
 class FakeFileChangeItem:
-    # Mirrors openai_codex_sdk FileChangeItem: edits live in `changes:[{path,kind}]`,
+    # Mirrors codex_events.FileChangeItem: edits live in `changes:[{path,kind}]`,
     # NOT a top-level `path`.
     type: str = "file_change"
     changes: list[dict[str, Any]] = field(default_factory=list)
@@ -141,15 +141,6 @@ class FakeThread:
         if not self._scripted:
             return FakeStreamedTurn([])
         return FakeStreamedTurn(self._scripted.pop(0))
-
-
-class FakeAbortController:
-    def __init__(self) -> None:
-        self.aborted = False
-        self.signal = self  # the SDK uses `.signal` on the AbortController
-
-    def abort(self) -> None:
-        self.aborted = True
 
 
 class FakeCodex:

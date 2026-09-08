@@ -60,11 +60,11 @@ async def test_codex_event_parse_error_yields_a_config_error_event(
 ) -> None:
     """CodexEventParseError is a ProviderError, so the existing catch classifies it
     with no new plumbing."""
-    from imp.providers.codex_sdk_patch import CodexEventParseError
+    from imp.providers.codex_events import CodexEventParseError
 
     message = (
-        "codex event parse failure: item type 'mcp_tool_call' does not match the "
-        "pinned openai-codex-sdk model — update src/imp/providers/codex_sdk_patch.py")
+        "codex event parse failure: item type 'mcp_tool_call' does not match imp's "
+        "codex exec event model — update src/imp/providers/codex_events.py")
     runner = _runner_with_failing_loop(monkeypatch, CodexEventParseError(
         message, detail={"item_type": "mcp_tool_call", "validation_error": "boom"}))
 

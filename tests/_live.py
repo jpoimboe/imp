@@ -19,7 +19,6 @@ network degraded against 0.68-0.79s idle.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
@@ -102,8 +101,6 @@ def provider_available(provider: str) -> str | None:
     if provider == "codex":
         if shutil.which("codex") is None:
             return "codex CLI not on PATH"
-        if importlib.util.find_spec("openai_codex_sdk") is None:
-            return "openai_codex_sdk not importable"
         return None
     if provider == "anthropic":
         return None if anthropic_key() else (

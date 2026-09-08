@@ -35,7 +35,7 @@ from imp.agents.tools.context import ToolContext, suspend_inactivity_watchdog
 from imp.agents.tools.errors import FatalToolError
 
 # Bypass posture for the codex provider. This is the SAME value the ThreadOptions
-# builder feeds to approvalPolicy (codex_runner._build_thread_options); the task
+# builder feeds to `approval_policy` (codex_runner._build_thread_options); the task
 # readOnlyHint below is DERIVED from it so a future approval mode that flips this
 # constant drops the hint automatically (design §2 honesty note). codex_runner
 # imports this name to keep the two sites in lockstep.
@@ -145,7 +145,7 @@ async def dispatch_tool(
         # TaskMustBeAwaited by design). Run the subagent and return its structured
         # output JSON. dispatch_tool does NOT touch the event log for the task
         # tool_call/result pair — process_event owns that lifecycle, keyed on the
-        # SDK item id (item.started opens the fold, item.completed closes it). Any
+        # codex item id (item.started opens the fold, item.completed closes it). Any
         # exception propagates out of this handler; FastMCP wraps it as an isError
         # tool result, so a batched child cannot pause the run. A suspend/interrupt
         # arrives as a RuntimeError whose body already carries the bracketed
