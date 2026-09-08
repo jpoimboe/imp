@@ -2,7 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 """CodexAgentRunner — the heavy lifting for the `codex` provider.
 
-Implements: interrupt() with three effects, fail-fast preflight(), and
+Implements: interrupt() with two effects, fail-fast preflight(), and
 process_event() for basic event types. Native writes need no runner-side guard:
 codex's own `read-only` sandbox refuses them.
 """
