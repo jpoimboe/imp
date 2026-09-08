@@ -2558,7 +2558,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
                                status=status, total_seconds=summary_total(events))
         summary = build_summary(events)
         lines = render_summary(summary.rows, header=header,
-                               color=color, width=width, quota=summary.quota)
+                               color=color, width=width)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 
@@ -2588,8 +2588,7 @@ def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         summary = build_summary(events)
-        document = render_summary_markdown(summary.rows, header=header,
-                                           quota=summary.quota)
+        document = render_summary_markdown(summary.rows, header=header)
     else:
         from imp.cli import narrative
         from imp.cli.render_markdown import render_markdown

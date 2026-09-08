@@ -1622,3 +1622,26 @@ def test_an_unpriced_step_floors_the_total_and_adds_the_third_legend_line():
         "  ~ estimated at API list price",
         "  ≥ excludes steps run on a model absent from the price table",
     ]
+
+
+def _quota_reading(ts: str = "2026-01-01T00:00:30+00:00") -> dict:
+    return {"type": "quota_reading", "timestamp": ts,
+            "payload": {"provider": "claude_code", "plan": None,
+                        "windows": [{"label": "5h", "used_pct": 44.0,
+                                     "resets_at": 100},
+                                    {"label": "7d", "used_pct": 7.0,
+                                     "resets_at": 900}],
+                        "raw": {}}}
+
+
+def test_the_summary_has_no_quota_input_and_renders_no_quota_output():
+    events = _fallback_events(_FALLBACK_USAGE)
+    events.append(_quota_reading())
+    lines = render_summary(build_summary(events).rows, header=_HDR,
+                           color=False, width=80)
+    assert not any("quota" in ln or "5h" in ln or "7d" in ln for ln in lines)
+    assert lines[-2].startswith("  total")
+    assert lines[-1] == ("  [ ] list-price equivalent; subscription usage is"
+                         " not billed per token")
+    with pytest.raises(TypeError):
+        render_summary([], header=_HDR, color=False, width=80, quota=())

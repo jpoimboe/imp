@@ -1,6 +1,8 @@
 # tests/test_render_markdown.py
 from __future__ import annotations
 
+import pytest
+
 from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
 from imp.cli.render_markdown import (
@@ -805,3 +807,30 @@ def test_agent_prose_all_codes_span_exports_as_its_literal_text() -> None:
     ])
     assert text in out          # both codes present, as two separate code spans
     assert "``" not in out      # no collapsed / empty backtick pair anywhere
+
+
+def _quota_events() -> list[dict]:
+    return [
+        _tev("1", "step_started", timestamp="2024-01-01T00:00:00Z",
+             step="spec", kind="agent", phase="design"),
+        _tev("2", "quota_reading", timestamp="2024-01-01T00:00:30Z",
+             provider="claude_code", plan=None,
+             windows=[{"label": "5h", "used_pct": 44.0, "resets_at": 100}],
+             raw={}),
+        _tev("3", "step_completed", timestamp="2024-01-01T00:01:00Z",
+             step="spec", kind="agent", action={"verb": "continue"},
+             var_mutations={}),
+    ]
+
+
+def test_summary_markdown_has_no_quota_input_and_carries_no_quota_block() -> None:
+    header = SummaryHeader(workflow="imp", quest_id="gumu81",
+                           status="merged", total_seconds=60.0)
+    out = render_summary_markdown(build_summary(_quota_events()).rows,
+                                  header=header)
+    assert "**quota**" not in out
+    assert "claude_code" not in out
+    assert "5h" not in out
+    assert "| total | 1m 0s |" in out
+    with pytest.raises(TypeError):
+        render_summary_markdown([], header=header, quota=())
