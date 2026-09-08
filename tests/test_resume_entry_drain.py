@@ -919,7 +919,7 @@ def test_script_step_route_does_not_drain_interjects(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = _types.SimpleNamespace(vars={}, route_label=None)
+        state = _types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, _feedback, _ = await _executor._route_script(
             step, quest, state, log, coordinator=coord)

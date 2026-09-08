@@ -33,7 +33,7 @@ def _step(action) -> Step:
 
 def _run(step, quest, policy, log):
     async def main():
-        state = SimpleNamespace(vars={}, route_label=None)
+        state = SimpleNamespace(vars={}, route_label=None, loop_counts={})
         return await _executor._route_script(
             step, quest, state, log, sandbox_policy=policy)
     return anyio.run(main)

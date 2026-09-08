@@ -96,7 +96,7 @@ def test_failing_spec_gate_routes_instead_of_pausing(
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(
             step, _script_quest(tmp_path, spec_body),
-            types.SimpleNamespace(vars={}, route_label=None), log)
+            types.SimpleNamespace(vars={}, route_label=None, loop_counts={}), log)
         assert isinstance(action, Goto)
         assert action.target == "spec-finalizer" and action.resume is True
         assert "script_blocked" not in [e["type"] for e in log.read()]

@@ -231,7 +231,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         step = _script_step("sleep 0.5")
 
@@ -287,7 +287,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
@@ -320,7 +320,7 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
@@ -357,7 +357,7 @@ def test_route_script_goto_exit0_forwards_configured_feedback(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
@@ -394,7 +394,7 @@ def test_route_script_nonzero_synthesizes_despite_configured_feedback(tmp_path) 
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
@@ -454,7 +454,8 @@ def test_route_script_renders_command_template(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={"review_base": "abc123"}, route_label=None)
+        state = types.SimpleNamespace(
+            vars={"review_base": "abc123"}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         await _route_script(step, quest, state, log)
 
@@ -492,7 +493,8 @@ def test_route_script_merges_declared_output_into_rules(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={"n": 0}, route_label=None)
+        state = types.SimpleNamespace(
+            vars={"n": 0}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, _feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
@@ -530,7 +532,7 @@ def test_route_script_pauses_on_malformed_output(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Pause)
@@ -568,7 +570,7 @@ def test_route_script_pauses_on_type_mismatch(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Pause)
@@ -604,7 +606,7 @@ def test_route_script_without_output_schema_unchanged(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
@@ -650,7 +652,7 @@ def test_route_script_cleans_up_output_path_on_run_script_error(tmp_path) -> Non
         return fd, name
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         with (
             mock.patch("imp.engine.executor.run_script", side_effect=RuntimeError("timeout")),
@@ -684,7 +686,7 @@ def test_route_script_emits_script_output_on_show_output_success(tmp_path) -> No
         command='printf "hi there"', show_output=True)
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, _, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
@@ -715,7 +717,7 @@ def test_route_script_no_script_output_on_nonzero_exit(tmp_path) -> None:
         command="echo boom; exit 1", show_output=True)
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         action, _, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
@@ -933,7 +935,7 @@ def test_route_script_interrupt_returns_pause_no_script_blocked(tmp_path) -> Non
     coordinator = types.SimpleNamespace(should_pause=True)
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         with mock.patch("imp.engine.executor.run_script",
                         side_effect=ScriptInterrupted):
@@ -982,7 +984,7 @@ def test_route_script_builds_abort_for_interruptible_step(tmp_path) -> None:
         return {"exit": 0, "stdout": "hi", "stderr": ""}
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
             action, _feedback, _ = await _route_script(
@@ -1029,7 +1031,7 @@ def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
         return {"exit": 0, "stdout": "hi", "stderr": ""}
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         log = InMemoryEventLog()
         with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
             action, _feedback, _ = await _route_script(
@@ -1195,7 +1197,8 @@ def test_route_script_output_tempfile_created_under_quest_tmp_dir(tmp_path, monk
     monkeypatch.setattr(executor.tempfile, "mkstemp", spy)
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={"n": 0}, route_label=None)
+        state = types.SimpleNamespace(
+            vars={"n": 0}, route_label=None, loop_counts={})
         await _route_script(step, quest, state, InMemoryEventLog())
 
     anyio.run(main)
@@ -1231,7 +1234,7 @@ def test_route_script_renders_base_and_checkout_branch(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, route_label=None)
+        state = types.SimpleNamespace(vars={}, route_label=None, loop_counts={})
         await _route_script(step, quest, state, InMemoryEventLog())
 
     anyio.run(main)

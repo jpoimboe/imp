@@ -17,7 +17,8 @@ def _step(*, label: str | None = None, interactive: bool = False,
 
 
 def _payload(step: Step) -> dict:
-    return _step_started_payload(step, types.SimpleNamespace(route_label=None))
+    return _step_started_payload(
+        step, types.SimpleNamespace(route_label=None, loop_counts={}))
 
 
 def test_explicit_rotate_phrase_true_sets_flag_and_keeps_the_literal_label() -> None:
