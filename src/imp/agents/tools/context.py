@@ -585,6 +585,10 @@ async def ensure_tool_namespace(
     return ctx.sandbox_ns
 
 
+# generous: worst case is ~10s (terminate grace + pty close) — must not false-fire under load
+NAMESPACE_ACQUIRE_TIMEOUT_S = 120.0
+
+
 def _namespace_from_worker(ctx: ToolContext, loop: asyncio.AbstractEventLoop,
                            eng: Mapping[str, str], command: str) -> SandboxNamespace:
     """Acquire the run's keeper FROM a worker thread: the coroutine runs on the
@@ -609,7 +613,12 @@ def _namespace_from_worker(ctx: ToolContext, loop: asyncio.AbstractEventLoop,
         ctx, engine_env=eng,
         on_retry=lambda n, detail: emit_spawn_retry_warning(ctx, command, n, detail))
     try:
-        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+        return asyncio.run_coroutine_threadsafe(coro, loop).result(
+            timeout=NAMESPACE_ACQUIRE_TIMEOUT_S)
+    except TimeoutError as exc:
+        raise RuntimeError(
+            "sandbox could not start the terminal session: timed out acquiring the "
+            f"run's namespace after {NAMESPACE_ACQUIRE_TIMEOUT_S:g}s") from exc
     except SandboxOpenFailed as exc:
         raise RuntimeError(
             f"sandbox could not start the terminal session: {exc.detail}") from exc

@@ -961,6 +961,45 @@ def test_a_failed_namespace_open_surfaces_as_the_terminal_diagnostic(
     assert spawns == []
 
 
+def test_a_timed_out_namespace_acquire_surfaces_as_the_terminal_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A stalled loop (loop stopped before the future resolves) must not park the
+    # worker thread forever — the bounded wait must surface the same diagnostic.
+    from imp.agents.tools.context import _namespace_from_worker
+
+    monkeypatch.setattr(ctx_mod, "NAMESPACE_ACQUIRE_TIMEOUT_S", 0.1)
+
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    # A loop that is created but never run: coroutines scheduled on it never
+    # execute, so .result(timeout=...) will always time out.
+    idle_loop = asyncio.new_event_loop()
+    try:
+        eng: dict[str, str] = {}
+        error: list[Exception] = []
+
+        def _worker():
+            try:
+                _namespace_from_worker(ctx, idle_loop, eng, "true")
+            except Exception as exc:
+                error.append(exc)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        # Poll until the worker finishes; generous outer budget to avoid flakes.
+        deadline = time.monotonic() + 10.0
+        while t.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not t.is_alive(), "worker thread did not finish within budget"
+    finally:
+        idle_loop.close()
+
+    assert len(error) == 1
+    assert str(error[0]).startswith("sandbox could not start the terminal session:")
+
+
 def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
