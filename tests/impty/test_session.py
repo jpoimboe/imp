@@ -835,6 +835,30 @@ _GROUP_GRANDCHILD = (
 )
 
 
+def test_pass_fds_keeps_a_host_fd_open_across_the_spawn() -> None:
+    # The pinned namespace fds a sandboxing host hands the spawn must survive the
+    # fork, or a join's /proc/self/fd/N arguments name nothing. Popen closes every
+    # other inherited fd, so the child's write is the whole proof.
+    prog = (
+        "import os, sys\n"
+        "try:\n"
+        "    os.write(int(sys.argv[1]), b'FD-OK')\n"
+        "except OSError as exc:\n"
+        "    print('FD-FAIL', exc.errno, flush=True)\n"
+    )
+    r, w = os.pipe()
+    try:
+        with TerminalSession([sys.executable, "-c", prog, str(w)], pass_fds=(w,)) as s:
+            assert s.run_to_completion(hard=30.0) == 0
+            # Asserted BEFORE the read: a failed write would leave the read below
+            # blocking on a pipe nobody will ever fill.
+            assert "FD-FAIL" not in "\n".join(s.lines())
+        assert os.read(r, 5) == b"FD-OK"
+    finally:
+        os.close(r)
+        os.close(w)
+
+
 def test_close_terminates_the_whole_process_group(tmp_path: Path) -> None:
     pidfile = tmp_path / "gc.pid"
     gc_pid: int | None = None

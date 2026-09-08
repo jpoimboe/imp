@@ -121,6 +121,7 @@ class TerminalSession:
         rows: int = 24,
         cwd: str | None = None,
         env: Mapping[str, str] | None = None,
+        pass_fds: tuple[int, ...] = (),
         history: int = 2000,
     ) -> None:
         self._screen = TerminalScreen(cols, rows, history=history, ratio=0.5)
@@ -143,6 +144,9 @@ class TerminalSession:
             stdout=slave,
             stderr=slave,
             start_new_session=True,
+            # An embedding host's fds (e.g. pinned namespace fds a join names as
+            # /proc/self/fd/N) must survive the fork; Popen closes all others.
+            pass_fds=pass_fds,
             preexec_fn=_make_controlling_tty,
         )
         os.close(slave)
