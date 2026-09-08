@@ -3,6 +3,7 @@ import re
 
 from imp.engine.event_migrations import (
     backfill_query_result_session_ids,
+    backfill_step_round,
     migrate_events,
     migrate_id_ns_event_to_block,
 )
@@ -441,11 +442,13 @@ def _qr(cost, agent_id=_A, **payload):
             "payload": {"total_cost_usd": cost, **payload}}
 
 
-def _step_started(phase="build", step="coder"):
-    return {"id": "s1", "parent_id": None, "agent_id": None, "timestamp": "T",
-            "type": "step_started",
-            "payload": {"phase": phase, "step": step, "model": "m",
-                        "provider": "claude_code"}}
+def _step_started(phase="build", step="coder", round_=None, eid="s1"):
+    payload = {"phase": phase, "step": step, "model": "m",
+               "provider": "claude_code"}
+    if round_ is not None:
+        payload["round"] = round_
+    return {"id": eid, "parent_id": None, "agent_id": None, "timestamp": "T",
+            "type": "step_started", "payload": payload}
 
 
 def _last_per_session(events):
@@ -547,3 +550,35 @@ def test_passes_other_events_through_and_does_not_mutate_the_input():
     assert set(out[2]["payload"]) == {"session_id", "total_cost_usd"}
     assert out[2]["payload"]["total_cost_usd"] == 1.00
     assert out[2]["payload"]["session_id"]
+
+
+def test_every_unstamped_step_started_including_loop_repeats_gets_round_one():
+    # A looping step's repeat entries are separate rows; each one is stamped.
+    out = backfill_step_round([_step_started(step="reviewer", eid="s1"), _qr(1.00),
+                               _step_started(step="reviewer", eid="s2")])
+    assert [e["payload"]["round"]
+            for e in out if e["type"] == "step_started"] == [1, 1]
+
+
+def test_other_payload_keys_and_other_events_are_left_alone():
+    # Load-bearing: both callers detect "changed" with `migrated != events`, which
+    # an in-place mutation would defeat.
+    events = [_step_started(), _qr(2.00, session_id="s1")]
+    snapshot = copy.deepcopy(events)
+    out = backfill_step_round(events)
+    assert events == snapshot
+    assert out[1] == snapshot[1]
+    assert out[0]["payload"] == {**snapshot[0]["payload"], "round": 1}
+
+
+def test_an_already_stamped_round_is_passed_through_not_reset():
+    # The chain re-runs over post-change blobs; an unconditional stamp would erase
+    # the real rounds the live engine wrote.
+    events = [_step_started(round_=3)]
+    assert backfill_step_round(events) == events
+
+
+def test_a_second_run_over_a_mixed_stream_yields_the_first_run():
+    once = backfill_step_round(
+        [_step_started(round_=3, eid="s1"), _step_started(eid="s2"), _qr(1.00)])
+    assert backfill_step_round(copy.deepcopy(once)) == once
