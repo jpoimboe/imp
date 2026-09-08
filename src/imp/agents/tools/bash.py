@@ -158,9 +158,9 @@ def _cap_combined(out: str, err: str) -> tuple[str, str, bool]:
         "`bash_output` after. A foreground command that exceeds its deadline "
         "(default 120 s; pass `timeout`, positive seconds, max 600, to extend) "
         "is promoted to a background task readable via `bash_output`/killable "
-        "via `bash_kill`. No "
-        "permission gate. Each call gets its own pid namespace, so pids never "
-        "carry across calls. "
+        "via `bash_kill`. No permission gate. All your calls share one pid "
+        "namespace: a process left running is visible to `ps` and killable by "
+        "pid in a later call, and everything in it dies when you finish. "
         "See `imp-tool-reference` for buffering and path details."
     ),
 )

@@ -73,9 +73,16 @@ def test_explorer_toolset_description_word_budget() -> None:
     assert total <= 500, f"explorer toolset description budget exceeded: {total} words"
 
 
-def test_bash_description_warns_pids_do_not_carry_across_calls() -> None:
-    assert ("Each call gets its own pid namespace, so pids never carry across calls."
-            in _desc("bash"))
+def test_bash_description_states_calls_share_one_pid_namespace() -> None:
+    # Spec §8's pinned closing. The old per-call promise must be GONE, not
+    # merely supplemented: an agent that still reads it will not try to kill
+    # a process it left running in an earlier call.
+    desc = _desc("bash")
+    assert ("No permission gate. All your calls share one pid namespace: a process "
+            "left running is visible to `ps` and killable by pid in a later call, "
+            "and everything in it dies when you finish. See `imp-tool-reference` "
+            "for buffering and path details.") in desc
+    assert "pids never carry across calls" not in desc
 
 
 def test_write_file_description_states_the_read_before_write_gate() -> None:
