@@ -106,10 +106,11 @@ def context_bar(provider: str | None, model: str | None,
 
 def _coarse_left(seconds: float) -> str:
     """Most-significant unit only, nearest, never below a minute: the countdown sits
-    beside a percentage, where a second unit of precision reads as noise."""
-    if seconds >= 86400:
+    beside a percentage, where a second unit of precision reads as noise. The unit is
+    promoted when the smaller unit's rounded value saturates (e.g. 60m → 1h)."""
+    if round(seconds / 3600) >= 24:
         return f"{round(seconds / 86400)}d"
-    if seconds >= 3600:
+    if round(seconds / 60) >= 60:
         return f"{round(seconds / 3600)}h"
     return f"{max(1, round(seconds / 60))}m"
 

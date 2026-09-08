@@ -131,3 +131,5 @@ def test_the_countdown_rounds_to_one_nearest_unit() -> None:
     assert left(253800) == "session 92% (3d left)"     # 2d23h -> nearest day
     assert left(2340) == "session 92% (39m left)"      # under an hour: minutes
     assert left(20) == "session 92% (1m left)"         # never rounds down to 0m
+    assert left(3570) == "session 92% (1h left)"       # 59m30s promotes, not 60m
+    assert left(86340) == "session 92% (1d left)"      # 23h59m promotes, not 24h
