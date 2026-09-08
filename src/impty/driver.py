@@ -87,12 +87,17 @@ class ImptyDriver:
         CURRENT screen window (lines(limit=rows)) — NOT the whole strip — since
         these tools are called constantly while driving. full=True returns the
         whole history+screen strip. The cursor is screen-local and bounded, so a
-        small y near the bottom is the cheap 'parked = waiting for input' tell."""
+        small y near the bottom is the cheap 'parked = waiting for input' tell.
+        Once the child is gone the header carries its exit status in an `exit=`
+        field right after `alive=False`; while it runs there is no such field."""
         with session.paused():
             cx, cy = session.cursor()
+            # One poll, two fields: alive= and exit= can never disagree.
+            code = session.returncode
+            exit_field = "" if code is None else f" exit={_format_exit(code)}"
             status = (
-                f"[alive={session.is_alive()} regime={session.regime().value} "
-                f"cursor=({cx},{cy})]"
+                f"[alive={code is None}{exit_field} "
+                f"regime={session.regime().value} cursor=({cx},{cy})]"
             )
             body = session.lines() if full else session.lines(limit=session.rows)
         return f"{status}\n" + "\n".join(body)

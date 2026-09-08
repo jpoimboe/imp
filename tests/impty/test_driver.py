@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import signal
 import sys
 import threading
@@ -624,3 +625,75 @@ def test_format_exit_names_the_signal_for_a_signal_death() -> None:
 def test_format_exit_falls_back_to_sig_n_for_an_unnamed_signal() -> None:
     n = _unnamed_signal_number()
     assert _format_exit(-n) == f"SIG{n}"
+
+
+_DEFAULT_SIGINT_CHILD = (
+    "import os, signal, sys, time, tty\n"
+    "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"  # die on SIGINT, no KeyboardInterrupt
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+
+def _dead_header(d: ImptyDriver) -> str:
+    """The view header once the child is gone. Polls the real signal — the reap can
+    lag the settled screen by a lot under a saturated -n auto run — with a budget
+    that stays inside the 60s per-test timeout."""
+    deadline = time.monotonic() + 30.0
+    header = d.view().splitlines()[0]
+    while "alive=False" not in header and time.monotonic() < deadline:
+        time.sleep(0.02)
+        header = d.view().splitlines()[0]
+    return header
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_header_reports_a_clean_exit_right_after_alive() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "print('BYE')"])
+    try:
+        header = _dead_header(d)
+        assert re.fullmatch(
+            r"\[alive=False exit=0 regime=(scroll|screen) cursor=\(\d+,\d+\)\]", header,
+        ), header
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_header_reports_a_nonzero_exit_status() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import sys; sys.exit(3)"])
+    try:
+        assert "alive=False exit=3 " in _dead_header(d)
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_header_names_the_signal_that_killed_the_child() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _DEFAULT_SIGINT_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # wait for READY
+        d.send_signal(signal.SIGINT)
+        header = _dead_header(d)
+        assert "alive=False exit=SIGINT " in header
+        assert "exit=-" not in header  # never the bare negative Popen code
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_header_carries_no_exit_field_while_the_child_is_alive() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        header = d.view().splitlines()[0]
+        assert "exit=" not in header
+        assert re.fullmatch(
+            r"\[alive=True regime=(scroll|screen) cursor=\(\d+,\d+\)\]", header,
+        ), header
+    finally:
+        d.stop()
