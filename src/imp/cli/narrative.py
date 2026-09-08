@@ -1659,7 +1659,7 @@ def _last_narration_index(children: list[Any]) -> int | None:
     return None
 
 
-_TALLY_FIELDS = ("critical", "major", "minor")
+TALLY_FIELDS = ("critical", "major", "minor")
 
 
 def severity_counts(args: Any) -> tuple[int, int, int] | None:
@@ -1668,7 +1668,7 @@ def severity_counts(args: Any) -> tuple[int, int, int] | None:
     honest rendering."""
     if not isinstance(args, dict):
         return None
-    critical, major, minor = (args.get(k) for k in _TALLY_FIELDS)
+    critical, major, minor = (args.get(k) for k in TALLY_FIELDS)
     if isinstance(critical, int) and isinstance(major, int) and isinstance(minor, int):
         return critical, major, minor
     return None
@@ -1683,7 +1683,7 @@ def _breadcrumb_extras(args: Any) -> list[str]:
         return []
     out: list[str] = []
     for k, v in args.items():
-        if k in _TALLY_FIELDS or is_prose_field(k, v):
+        if k in TALLY_FIELDS or is_prose_field(k, v):
             continue
         if isinstance(v, (str, int, float, bool)):
             out.append(f"{k}={v}")

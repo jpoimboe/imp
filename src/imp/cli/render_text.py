@@ -604,7 +604,7 @@ def round_and_tally_parts(round_: int, counts: tuple[int, int, int] | None) -> l
         parts.append(f"round {round_}")
     if counts is not None:
         named = [f"{n} {label}"
-                 for n, label in zip(counts, nv._TALLY_FIELDS, strict=True) if n]
+                 for n, label in zip(counts, nv.TALLY_FIELDS, strict=True) if n]
         parts.append(", ".join(named) or "clean")
     return parts
 
