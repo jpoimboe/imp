@@ -68,7 +68,8 @@ def _home_from_wire(d: dict[str, Any]) -> HomeDigest:
 def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:
     if c is None:
         return None
-    return {"quest_id": c.quest_id, "status": c.status, "step": c.step,
+    return {"quest_id": c.quest_id, "status": c.status,
+            "pause_reason": c.pause_reason, "step": c.step,
             "last": c.last, "title": c.title, "created": c.created,
             "step_label": c.step_label, "phase_label": c.phase_label,
             "base_branch": c.base_branch, "merge_commit": c.merge_commit,
@@ -81,7 +82,8 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
     if d is None:
         return None
     return QuestCard(
-        quest_id=d["quest_id"], status=d["status"], step=d["step"],
+        quest_id=d["quest_id"], status=d["status"],
+        pause_reason=d["pause_reason"], step=d["step"],
         last=d["last"], title=d["title"], created=d["created"],
         step_label=d["step_label"], phase_label=d["phase_label"],
         base_branch=d["base_branch"], merge_commit=d["merge_commit"],
