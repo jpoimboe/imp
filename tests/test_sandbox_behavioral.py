@@ -11,6 +11,7 @@ sandbox.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import json
@@ -22,7 +23,9 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -32,7 +35,11 @@ from imp import __version__
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.bg import terminate_background_processes
-from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.agents.tools.context import (
+    ToolContext,
+    make_impty_sandbox_hook,
+    terminate_running_processes,
+)
 from imp.engine import worktree as wt
 from imp.engine.sandbox import (
     SandboxConfig,
@@ -47,8 +54,10 @@ from imp.engine.sandbox import (
 from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
 from impty import TerminalSession
+from impty.driver import ImptyDriver
 from tests.conftest import assert_all_tool_contexts_owned, own_tool_context
 from tests.impty.e2e_support import can_pty
+from tests.test_sandbox_namespace import _poll
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -2252,5 +2261,201 @@ def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
                     assert s.run_to_completion(hard=30.0) == expected, prog
         finally:
             ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# The pty session, joined: a driven program is confined exactly as bash is
+# ---------------------------------------------------------------------------
+
+_SECRET = "REAL-SECRET-CONTENTS-12345"
+
+
+def _joined_driver(ctx: ToolContext) -> ImptyDriver:
+    """A driver wired to ctx's sandbox, with the hook's verdict CHECKED. Every arm
+    below either compares a joined session against an unjoined one or asserts a
+    denial; a hook that silently declined would turn the joined side into a second
+    bare run and BOTH shapes would then pass vacuously."""
+    hook = make_impty_sandbox_hook(ctx)
+
+    def checked(argv, cwd, env):
+        plan = hook(argv, cwd, env)
+        assert plan is not None and plan.argv[0] == "nsenter", plan
+        return plan
+
+    return ImptyDriver(sandbox=checked)
+
+
+def _drive_joined(ctx: ToolContext, body: Callable[[ImptyDriver], str]) -> str:
+    """Run `body` against a joined driver the way a provider does: the hook is
+    built ON the run's loop (it captures it) and every driver call is offloaded to
+    a worker thread, which is the only shape the loop-affine acquisition supports."""
+    async def _main() -> str:
+        driver = _joined_driver(ctx)
+        try:
+            return await asyncio.to_thread(lambda: body(driver))
+        finally:
+            await asyncio.to_thread(driver.close)
+
+    return asyncio.run(_main())
+
+
+def _drive_bare(body: Callable[[ImptyDriver], str]) -> str:
+    """The same program with NO hook — the unjoined baseline the joined arms are
+    measured against, and the control that proves confinement rather than a spawn
+    so broken it fails at everything."""
+    driver = ImptyDriver()
+    try:
+        return body(driver)
+    finally:
+        driver.close()
+
+
+def _await_screen(driver: ImptyDriver, text: str) -> None:
+    """Poll the rendered screen for `text` — the actual signal rather than a fixed
+    sleep, on the shared generous budget that cannot false-fire under a saturated
+    -n auto run; the per-test outer mark stays the single hang-catcher."""
+    _poll(lambda: text in driver.view(), what=f"{text!r} on the screen")
+
+
+_PEEK = (
+    "import os, sys\n"
+    "d = sys.argv[1]\n"
+    "print('LEFT=' + repr(sorted(os.listdir(d))))\n"
+    "try:\n"
+    "    print('READ=' + open(os.path.join(d, 'flag.txt')).read().strip())\n"
+    "except OSError as exc:\n"
+    "    print('READ-DENIED', exc.errno)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_session_cannot_read_a_masked_secret() -> None:
+    """AC 1(a)/(c): a program driven on a pty is confined exactly as a bash call
+    is — the --tmpfs mask is in ITS mount view, not the host's. The hook-less arm
+    is the control: it reads the real contents, so a green joined arm cannot be a
+    broken spawn wearing confinement's clothes."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text(_SECRET + "\n")
+    argv = [sys.executable, "-c", _PEEK, str(masked)]
+    try:
+        ctx = _ctx(root, _active_policy(root, secret_dirs=(str(masked),)))
+        joined = _drive_joined(ctx, lambda d: d.start(argv))
+        assert "LEFT=[]" in joined, joined              # the empty tmpfs mask
+        assert "READ-DENIED 2" in joined, joined        # ENOENT, not a stray error
+        assert _SECRET not in joined
+        bare = _drive_bare(lambda d: d.start(argv))
+        assert "LEFT=['flag.txt']" in bare, bare
+        assert f"READ={_SECRET}" in bare, bare
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_WRITE_PROBE = (
+    "import sys\n"
+    "try:\n"
+    "    open(sys.argv[1], 'w').write('WROTE')\n"
+    "    print('WRITE-OK')\n"
+    "except OSError as exc:\n"
+    "    print('WRITE-DENIED', exc.errno)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_session_cannot_write_outside_the_writable_set() -> None:
+    """AC 1(b), on the spec's own motivating example: today `start(["git",
+    "commit", ...])` in the main checkout is not stopped by the read-only
+    .git/index bind the policy applies to every bash call. The target is
+    host-WRITABLE, so the unjoined control really does land the write — a /etc
+    probe would fail unsandboxed too and prove nothing."""
+    root = _make_root()
+    try:
+        policy = _active_policy(root)
+        index = root / ".git" / "index"          # _active_policy created .git
+        index.write_text("IDX")
+        policy = dataclasses.replace(policy, git_ro_remask=(str(index),))
+        argv = [sys.executable, "-c", _WRITE_PROBE, str(index)]
+        ctx = _ctx(root, policy)
+        joined = _drive_joined(ctx, lambda d: d.start(argv))
+        assert "WRITE-DENIED 30" in joined, joined      # EROFS
+        assert index.read_text() == "IDX"               # untouched on the host
+        bare = _drive_bare(lambda d: d.start(argv))
+        assert "WRITE-OK" in bare, bare
+        assert index.read_text() == "WROTE"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_sandbox_off_spawns_the_pty_bare_and_unconfined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 5(a): with the coordinator unsandboxed the adapter declines and the
+    driver spawns the caller's own argv — asserted on the argv the session was
+    actually built with, not merely on the hook's return, plus the masked path
+    being readable, which is what /sandbox off is FOR."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text(_SECRET + "\n")
+    argv = [sys.executable, "-c", _PEEK, str(masked)]
+    seen: list[list[str]] = []
+    real_init = TerminalSession.__init__
+
+    def spy(self, spawn_argv, **kwargs):
+        seen.append(list(spawn_argv))
+        real_init(self, spawn_argv, **kwargs)
+
+    monkeypatch.setattr(TerminalSession, "__init__", spy)
+    try:
+        ctx = _ctx(root, _active_policy(root, secret_dirs=(str(masked),)))
+        ctx.coordinator = SimpleNamespace(unsandboxed=True, should_pause=False)
+
+        async def _main() -> str:
+            driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+            try:
+                return await asyncio.to_thread(lambda: driver.start(argv))
+            finally:
+                await asyncio.to_thread(driver.close)
+
+        screen = asyncio.run(_main())
+        assert seen == [argv], seen             # the caller's argv, verbatim
+        assert "nsenter" not in " ".join(seen[0])
+        assert f"READ={_SECRET}" in screen, screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_toggling_the_sandbox_back_on_rejoins_the_very_same_namespace() -> None:
+    """AC 5(b): /sandbox off changes the EFFECTIVE policy, never
+    ctx.base_sandbox_policy, and the rebuild rule keys on that base value — so
+    toggling back on must find the same keeper object rather than build a second
+    one, stranding every process the first still holds."""
+    root = _make_root()
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        ctx.coordinator = SimpleNamespace(unsandboxed=False, should_pause=False)
+        hook = make_impty_sandbox_hook(ctx)
+        assert await asyncio.to_thread(lambda: hook(["true"], None, None)) is not None
+        before = ctx.sandbox_ns
+        assert before is not None
+        ctx.coordinator.unsandboxed = True
+        assert await asyncio.to_thread(lambda: hook(["true"], None, None)) is None
+        assert ctx.sandbox_ns is before      # declining tears down nothing
+        ctx.coordinator.unsandboxed = False
+        assert await asyncio.to_thread(lambda: hook(["true"], None, None)) is not None
+        assert ctx.sandbox_ns is before      # rejoined, not rebuilt
+
+    try:
+        asyncio.run(_main())
     finally:
         shutil.rmtree(root, ignore_errors=True)

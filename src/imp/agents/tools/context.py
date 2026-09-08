@@ -12,22 +12,25 @@ worktree-relative. No virtual `/project`/`/scratch` namespace; system paths are
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import os
+import shlex
 import signal as _signal
-from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.errors import PermissionDenied
-from imp.engine.env import ALL_DECIDED, TestGates, Undecided
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided, engine_env
 from imp.engine.types import AgentDef
 
 if TYPE_CHECKING:
     from imp.engine.sandbox import SandboxNamespace
+    from impty.driver import PtySpawn, SandboxHook
 
 _KILL_POLL_INTERVAL_S = 0.05  # group-liveness probe cadence inside the kill grace
 
@@ -479,6 +482,52 @@ async def teardown_tool_context(ctx: ToolContext) -> None:
         close_sandbox_namespace(ctx)
 
 
+EVENT_COMMAND_PREVIEW_LEN = 200
+
+
+def emit_spawn_retry_warning(ctx: ToolContext, command: str, next_attempt: int,
+                             detail: str) -> None:
+    """Best-effort per-retry breadcrumb; never crashes the tool call."""
+    from imp.engine.sandbox import SANDBOX_SPAWN_MAX_ATTEMPTS
+
+    if ctx.event_log is None:
+        return
+    with contextlib.suppress(Exception):
+        ctx.event_log.append(
+            agent_id=ctx.agent_id, type="runner_warning",
+            payload={
+                "message": ("sandbox could not start the command; retrying "
+                            f"({next_attempt}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
+                "command": command[:EVENT_COMMAND_PREVIEW_LEN],
+                "reason": "sandbox-spawn-failed", "detail": detail,
+            })
+
+
+def tool_quest_dir(ctx: ToolContext) -> Path | None:
+    """This run's quest state directory, or None. Read from the LIVE quest when
+    available (top-level steps); subagents have no live quest and fall back to the
+    frozen quest_context snapshot."""
+    src = ctx.quest or ctx.quest_context
+    return (getattr(src, "quest_dir", None)
+            or (Path(h) if (h := getattr(src, "quest_home", None)) else None))
+
+
+def tool_engine_env(ctx: ToolContext) -> dict[str, str]:
+    """The IMP_* variables this run's spawns carry. Engine vars come from the LIVE
+    quest when available, so a mid-run rename_quest is reflected immediately.
+    Shared by `bash` and the pty path so both present the namespace identical
+    inputs."""
+    src = ctx.quest or ctx.quest_context
+    return engine_env(
+        project_root=ctx.project_root,
+        quest_id=src.id if src else "",
+        quest_title=src.title if src else "",
+        quest_dir=tool_quest_dir(ctx),
+        test_gates=ctx.test_gates,
+        pythonpath=ctx.pythonpath,
+    )
+
+
 async def ensure_tool_namespace(
     ctx: ToolContext, *, engine_env: Mapping[str, str],
     on_retry: Callable[[int, str], None],
@@ -511,3 +560,65 @@ async def ensure_tool_namespace(
             policy=ctx.base_sandbox_policy, engine_env=engine_env,
             environ=os.environ, on_retry=on_retry)
     return ctx.sandbox_ns
+
+
+def _namespace_from_worker(ctx: ToolContext, loop: asyncio.AbstractEventLoop,
+                           eng: Mapping[str, str], command: str) -> SandboxNamespace:
+    """Acquire the run's keeper FROM a worker thread: the coroutine runs on the
+    run's own loop and this thread blocks for its result.
+
+    Not a convenience. open() passes --die-with-parent, a PR_SET_PDEATHSIG the
+    kernel fires when the CREATING THREAD exits, so a keeper opened on a pool
+    worker would take the whole run's sandbox down the moment that worker retired.
+    Called ON the loop this would instead deadlock permanently — the coroutine
+    cannot start until we return — so that is refused rather than hung."""
+    from imp.engine.sandbox import SandboxOpenFailed
+
+    try:
+        on_loop = asyncio.get_running_loop() is loop
+    except RuntimeError:
+        on_loop = False
+    if on_loop:
+        raise AssertionError(
+            "the impty sandbox hook must be called from a worker thread, not the "
+            "run's own event loop")
+    coro = ensure_tool_namespace(
+        ctx, engine_env=eng,
+        on_retry=lambda n, detail: emit_spawn_retry_warning(ctx, command, n, detail))
+    try:
+        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+    except SandboxOpenFailed as exc:
+        raise RuntimeError(
+            f"sandbox could not start the terminal session: {exc.detail}") from exc
+
+
+def make_impty_sandbox_hook(ctx: ToolContext) -> SandboxHook:
+    """The `SandboxHook` an ImptyDriver spawns through: it puts a driven program in
+    the SAME keeper namespace this run's bash calls join, so the two share one
+    process table, one set of masks and one teardown.
+
+    Build it ON the run's event loop — it captures that loop, and the driver's
+    calls arrive on worker threads (see _namespace_from_worker).
+
+    The EFFECTIVE policy is read per call, so /sandbox off is just this returning
+    None and the driver spawning bare: no flag, no driver state, and a mid-run
+    toggle needs nothing to remember it. The caller's env is overlaid ON the
+    sandbox's curated child env rather than replacing it, and the cwd rides on the
+    join's --wdns, which is the only place it resolves in the right mount
+    namespace."""
+    loop = asyncio.get_running_loop()
+
+    def hook(argv: Sequence[str], cwd: str | None,
+             env: Mapping[str, str] | None) -> PtySpawn | None:
+        from impty.driver import PtySpawn
+
+        policy = ctx.sandbox_policy
+        if policy is None or not policy.active:
+            return None
+        eng = tool_engine_env(ctx)
+        ns = _namespace_from_worker(ctx, loop, eng, shlex.join(argv))
+        spawn = ns.join_exec(argv, cwd=cwd or str(ctx.project_root), engine_env=eng)
+        return PtySpawn(argv=spawn.argv, env={**spawn.env, **(env or {})},
+                        pass_fds=spawn.pass_fds)
+
+    return hook

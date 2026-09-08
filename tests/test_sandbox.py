@@ -2722,7 +2722,7 @@ def test_retired_per_call_sentinel_machinery_is_gone():
     # AC 14b's bash.py and executor.py halves. Named individually rather than
     # checked wholesale because both modules KEEP importing sandbox symbols that
     # are not part of the sentinel path: SANDBOX_SPAWN_MAX_ATTEMPTS (the retry
-    # wording) in both, and SANDBOX_SPAWN_FAILED_MESSAGE in bash.py.
+    # wording) in executor.py, and SANDBOX_SPAWN_FAILED_MESSAGE in bash.py.
     import imp.agents.tools.bash as bash
     import imp.engine.executor as ex
     for mod in (bash, ex):
