@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from impty.driver import ImptyDriver, _decode_keys
+from impty.driver import ImptyDriver, _decode_keys, _format_exit
 from impty.render import _MAX_DIM
 from impty.session import (
     DEFAULT_CHANGE_HARD,
@@ -600,3 +600,27 @@ def test_snapshot_of_a_large_terminal_stays_within_the_render_ceiling(
         img.load()
         assert img.width <= _MAX_DIM
         assert img.height <= _MAX_DIM
+
+
+def _unnamed_signal_number() -> int:
+    """A signal number this platform has no `signal.Signals` name for (one past the
+    highest it does), so the fallback branch is exercised without hardcoding a number
+    that is SIGRTMIN on Linux and out of range on macOS."""
+    return max(int(s) for s in signal.Signals) + 1
+
+
+def test_format_exit_renders_a_normal_status_as_its_number() -> None:
+    assert _format_exit(0) == "0"
+    assert _format_exit(3) == "3"
+    assert _format_exit(130) == "130"  # a program that HANDLED SIGINT and exited 130
+
+
+def test_format_exit_names_the_signal_for_a_signal_death() -> None:
+    assert _format_exit(-signal.SIGINT) == "SIGINT"
+    assert _format_exit(-signal.SIGTERM) == "SIGTERM"
+    assert _format_exit(-signal.SIGKILL) == "SIGKILL"
+
+
+def test_format_exit_falls_back_to_sig_n_for_an_unnamed_signal() -> None:
+    n = _unnamed_signal_number()
+    assert _format_exit(-n) == f"SIG{n}"

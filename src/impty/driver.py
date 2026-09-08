@@ -47,6 +47,20 @@ def _decode_keys(data: str) -> str:
     return _ESCAPE_RE.sub(lambda m: codecs.decode(m.group(0), "unicode_escape"), data)
 
 
+def _format_exit(code: int) -> str:
+    """The agent-facing spelling of a raw `Popen` returncode: a plain number for a
+    normal exit, the signal's NAME for a signal death — never a bare negative. A
+    program that handles SIGINT and exits 130 therefore reads `130`, and only a real
+    signal death reads `SIGINT`. The single formatter behind both the `view` header
+    and `stop()`'s status line, so the two can never diverge."""
+    if code >= 0:
+        return str(code)
+    try:
+        return signal.Signals(-code).name
+    except ValueError:
+        return f"SIG{-code}"
+
+
 def _fixed_settle(wait: float) -> tuple[float, str]:
     """Clamped fixed-settle seconds, plus the one line a clamped call prefixes to
     the screen (empty when the request already fit inside the ceiling)."""
