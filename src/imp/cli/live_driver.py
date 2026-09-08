@@ -46,10 +46,14 @@ _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
 _AMBER_AT = 0.75          # of the cutoff
+_GAUGE_CELLS = 10
 
 # The events that can move the quest-total dollars; everything else leaves it.
 _COST_BEARING = frozenset({"agent_message", "agent_message_usage_patch",
                            "query_result"})
+
+# The two windows both subscription carriers report; anything else renders verbatim.
+_WINDOW_WORDS = {"5h": "session", "7d": "week"}
 
 
 def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
@@ -90,8 +94,25 @@ def context_bar(provider: str | None, model: str | None,
     hue = ("red" if frac >= warn
            else "wordmark" if frac >= _AMBER_AT * warn
            else "green")
-    label = _paint("context", "gray", color=color, over_bg=over_bg)
-    return f"{label} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
+    filled = max(0, min(_GAUGE_CELLS, round(frac * _GAUGE_CELLS)))
+    gauge = ""
+    if filled:
+        gauge += _paint("█" * filled, hue, color=color, over_bg=over_bg)
+    if filled < _GAUGE_CELLS:
+        gauge += _paint("░" * (_GAUGE_CELLS - filled), "gray",
+                        color=color, over_bg=over_bg)
+    return f"{gauge} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
+
+
+def _coarse_left(seconds: float) -> str:
+    """Most-significant unit only, nearest, never below a minute: the countdown sits
+    beside a percentage, where a second unit of precision reads as noise. The unit is
+    promoted when the smaller unit's rounded value saturates (e.g. 60m → 1h)."""
+    if round(seconds / 3600) >= 24:
+        return f"{round(seconds / 86400)}d"
+    if round(seconds / 60) >= 60:
+        return f"{round(seconds / 3600)}h"
+    return f"{max(1, round(seconds / 60))}m"
 
 
 def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | None:
@@ -102,26 +123,26 @@ def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | No
     remaining = resets_at - (time.time() if now_epoch is None else now_epoch)
     if remaining <= 0:
         return None
-    return nv._fmt_hm(remaining)
+    return _coarse_left(remaining)
 
 
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
                 color: bool, over_bg: bool) -> str:
-    """`quota 5h 62% (40m), 7d 7%` — the account-wide levels, ordered by window
-    duration. Only the percentage carries color, and the bands are evaluated on
-    the displayed integer so a number can never disagree with its own hue."""
+    """`session 62% (3h left) · week 7%` — the account-wide levels, ordered by window
+    duration. Only the percentage carries color, and the bands are evaluated on the
+    displayed integer so a number can never disagree with its own hue."""
     windows: list[str] = []
     for w in reading.windows:
         pct = pal.quota_pct(w.used_pct)
-        seg = (_paint(w.label, "gray", color=color, over_bg=over_bg) + " "
+        label = _WINDOW_WORDS.get(w.label, w.label)
+        seg = (_paint(label, "gray", color=color, over_bg=over_bg) + " "
                + _paint(f"{pct}%", pal.quota_hue(pct), color=color, over_bg=over_bg))
         left = (_reset_countdown(w.resets_at, now_epoch)
                 if pct >= pal.QUOTA_GOLD_AT else None)
         if left is not None:
-            seg += " " + _paint(f"({left})", "gray", color=color, over_bg=over_bg)
+            seg += " " + _paint(f"({left} left)", "gray", color=color, over_bg=over_bg)
         windows.append(seg)
-    return (_paint("quota", "gray", color=color, over_bg=over_bg)
-            + " " + ", ".join(windows))
+    return " · ".join(windows)
 
 
 def cost_field(usage: RowUsage | None) -> str | None:
@@ -169,6 +190,22 @@ def _band_wrap(body: str, bg: str, width: int) -> str:
     return f"{bg}{body}{_RESET}"
 
 
+def _split_pad(left: str, gauged: str, right: str | None, *, width: int) -> str:
+    """`gauged` with `right` anchored flush to the band's right edge, degrading
+    right-first: drop the right group, then the gauge, then clip the left group."""
+    target = width - 2
+    gauged_w = pal.display_width(gauged)
+    if right:
+        gap = target - gauged_w - pal.display_width(right)
+        if gap >= 1:
+            return f"{gauged}{' ' * gap}{right}"
+    if gauged_w <= target:
+        return gauged
+    if pal.display_width(left) <= target:
+        return left
+    return pal.clip_display(left, target)
+
+
 def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
                              width: int, unsandboxed: bool = False,
                              project: str = "") -> str | None:
@@ -199,8 +236,9 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          cost: RowUsage | None = None,
                          now_epoch: float | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
-    """Row 3 of the live footer: one flat, left-aligned line ordered
-    project · id · title · phase · plan · counter · model · context · quota-or-cost."""
+    """Row 3 of the live footer: the left group — project · id · title ·
+    unsandboxed · phase · plan · counter · model · context gauge — with the
+    quota-or-cost group anchored flush to the band's right edge."""
     # Lazy import keeps `import live_driver` free of the providers package.
     from imp.cli.accounting import is_metered
 
@@ -230,9 +268,10 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
     else:
         tail = (quota_field(quota, now_epoch=now_epoch, color=color, over_bg=over)
                 if quota is not None else None)
-    body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
-                             phase_seg, plan_seg, counter_seg,
-                             model_seg, bar, tail])
+    left_segs = [project_seg, id_seg, title_seg, unsandboxed_seg,
+                 phase_seg, plan_seg, counter_seg, model_seg]
+    body = _split_pad(rt.compose_label(left_segs),
+                      rt.compose_label([*left_segs, bar]), tail, width=width)
     return _band_wrap(body, bg, width)
 
 

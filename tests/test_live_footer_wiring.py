@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from imp.cli import palette as pal
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_summary import build_summary, summary_totals
@@ -19,6 +20,14 @@ _STEP = "step:implement phase/coder"
 class _Pipe(io.StringIO):
     def isatty(self) -> bool:
         return False
+
+
+@pytest.fixture(autouse=True)
+def _wide_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """compose_status takes its width from term_width(), not the driver's `width`.
+    Pin it wide so the fit ladder admits the right group instead of dropping it at
+    CI's ~80 columns."""
+    monkeypatch.setenv("COLUMNS", "200")
 
 
 def _drive(events: list[dict[str, Any]]) -> LiveDriver:
@@ -116,7 +125,10 @@ def _usage_patch(fresh: int, out: int, context_tokens: int) -> dict[str, Any]:
 # AC 15
 def test_the_cost_field_reaches_the_row_from_the_streamed_events() -> None:
     events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000))
-    assert _position_row(events).endswith(" · $4.21")
+    row = _position_row(events)
+    # 34 + 159 + 5 = 198 = width - 2: the dollars sit at the band's right edge.
+    assert row == "t · claude-opus-5 · ██████░░░░ 60%" + " " * 159 + "$4.21"
+    assert pal.display_width(row) == 198
 
 
 # AC 15
@@ -129,7 +141,7 @@ def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
                         auth_mode="subscription")
     row = _position_row(events)
     # The same priced sequence: the auth mode alone decides which field shows.
-    assert row.endswith(" · quota 5h 34%, 7d 7%")
+    assert row == "t · claude-opus-5 · ██████░░░░ 60%" + " " * 143 + "session 34% · week 7%"
     assert "$" not in row
 
 
@@ -139,7 +151,7 @@ def test_the_live_figure_is_the_vendor_total_the_summary_reports() -> None:
     total = summary_totals(build_summary(events).rows, None)[1]
     # Not $0.00, and not a price-table figure derived from the agent_message.
     assert total.dollars == pytest.approx(4.21)
-    assert _position_row(events).endswith(f" · ${total.dollars:.2f}")
+    assert _position_row(events).endswith(f"${total.dollars:.2f}")
 
 
 # AC 11
@@ -152,7 +164,7 @@ def test_the_cost_field_prices_a_query_result_carrying_no_vendor_cost() -> None:
                            model_usage={"claude-sonnet-4-6": {
                                "inputTokens": 5000, "outputTokens": 8000,
                                "cacheReadInputTokens": 200000}}))
-    assert _position_row(events).endswith(" · $0.20")
+    assert _position_row(events).endswith("$0.20")
 
 
 # AC 16(b)
@@ -161,7 +173,7 @@ def test_the_live_figure_sums_usage_patches_that_carry_no_id() -> None:
                            _usage_patch(50000, 4000, 150000))
     total = summary_totals(build_summary(events).rows, None)[1]
     assert total.priced == 2 and total.dollars > 0     # both rows counted, once each
-    assert _position_row(events).endswith(f" · ${total.dollars:.2f}")
+    assert _position_row(events).endswith(f"${total.dollars:.2f}")
 
 
 # AC 16(c)
@@ -172,7 +184,7 @@ def test_the_live_figure_collapses_cumulative_rows_per_session() -> None:
     total = summary_totals(build_summary(events).rows, None)[1]
     # sess-1 is cumulative — only its last row counts — and sess-2 adds.
     assert total.dollars == pytest.approx(6.25)
-    assert _position_row(events).endswith(f" · ${total.dollars:.2f}")
+    assert _position_row(events).endswith(f"${total.dollars:.2f}")
 
 
 # AC 16(d)
@@ -184,7 +196,7 @@ def test_a_contribution_for_an_unrelated_agent_leaves_the_field_absent() -> None
     assert total.priced == 0                  # attributed to nothing, priced as nothing
     row = _position_row(events)
     assert "$" not in row and "n/a" not in row
-    assert row.endswith("claude-opus-5 · context 60%")
+    assert row.endswith("claude-opus-5 · ██████░░░░ 60%")
 
 
 # AC 14
@@ -197,7 +209,7 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
         ev("q1", "quota_reading", agent_id="step:p1/a",
            **codex_reading.to_payload()),
     ]
-    assert _position_row(started).endswith(" · quota 5h 12%")
+    assert _position_row(started).endswith("session 12%")
 
     crossed = [
         *started,
@@ -214,9 +226,9 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
 def test_a_subagent_row_carries_the_gauge_and_never_the_quota() -> None:
     rows = _drive(_subagent_events(auth_mode=None, usage={})).compose_status(0)
     assert rows is not None and len(rows) == 4
-    assert rows[2].endswith(" · quota 5h 12%")          # position row: quota
-    assert "context 42%" in rows[3]                     # subagent row: same gauge
-    assert "quota" not in rows[3]                       # and never the account level
+    assert rows[2].endswith("session 12%")             # position row: quota, flush right
+    assert "████░░░░░░ 42%" in rows[3]                 # subagent row: same gauge
+    assert "session" not in rows[3] and "week" not in rows[3]   # never the account level
 
 
 # AC 12 (metered half)
@@ -226,6 +238,6 @@ def test_a_subagent_row_carries_no_cost_field_on_a_metered_backend() -> None:
         usage={"input_tokens": 100000, "output_tokens": 8000})).compose_status(0)
     assert rows is not None and len(rows) == 4
     # The position row takes the metered branch; the recorded reading stays off it.
-    assert "$" in rows[2] and "quota" not in rows[2]
-    assert "context 42%" in rows[3]                     # same gauge, same grammar
-    assert "quota" not in rows[3] and "$" not in rows[3]
+    assert "$" in rows[2] and "session" not in rows[2]
+    assert "████░░░░░░ 42%" in rows[3]                 # same gauge, same grammar
+    assert "session" not in rows[3] and "$" not in rows[3]
