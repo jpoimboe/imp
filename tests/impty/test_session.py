@@ -672,6 +672,46 @@ def test_resize_pads_and_clips_live_screen() -> None:
         s.cell(19, 4)                            # bottom-right corner addressable
 
 
+_DEFAULT_SIGINT_CHILD = (
+    "import os, signal, sys, time, tty\n"
+    "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"  # die on SIGINT, no KeyboardInterrupt
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+
+def test_returncode_is_none_while_alive() -> None:
+    s = TerminalSession([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert s.returncode is None
+    finally:
+        s.close()
+
+
+def test_returncode_reports_the_childs_exit_status() -> None:
+    s = TerminalSession([sys.executable, "-c", "import sys; sys.exit(3)"])
+    try:
+        assert _poll(lambda: s.returncode is not None, timeout=E2E_POLL_TIMEOUT), \
+            "child never exited"
+        assert s.returncode == 3
+    finally:
+        s.close()
+
+
+def test_returncode_stays_raw_and_negative_on_a_signal_death() -> None:
+    # The session layer never names signals — that is the driver's presentation job.
+    s = TerminalSession([sys.executable, "-c", _DEFAULT_SIGINT_CHILD])
+    try:
+        s.wait_idle(idle=0.2, hard=30.0)  # wait for READY
+        s.send_signal(signal.SIGINT)
+        assert _poll(lambda: s.returncode is not None, timeout=E2E_POLL_TIMEOUT), \
+            "child never exited"
+        assert s.returncode == -signal.SIGINT
+    finally:
+        s.close()
+
+
 def test_last_output_at_is_none_until_first_output_then_stamps(tmp_path: Path) -> None:
     # The child stays silent until the flag file appears, so "no output yet" is a
     # real invariant here rather than a race against interpreter startup.

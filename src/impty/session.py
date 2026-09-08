@@ -449,6 +449,13 @@ class TerminalSession:
             self._screen.resize(lines=rows, columns=cols)
 
     # --- lifecycle -------------------------------------------------------
+    @property
+    def returncode(self) -> int | None:
+        """The child's exit status once it has exited (and been reaped), else None.
+        Raw `Popen` semantics — negative for a signal death (`-SIGINT`); naming a
+        signal is the driver's presentation concern, not this layer's."""
+        return self._proc.poll()
+
     def is_alive(self) -> bool:
         return self._proc.poll() is None
 
