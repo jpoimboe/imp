@@ -483,14 +483,13 @@ def _splice_lifted_spans(rendered: str, lifted: list[tuple[str, str]]) -> str | 
     return "".join(out)
 
 
-def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80) -> str:
+def _render_with_rich(text: str, width: int, color: bool, display_width: int) -> str:
     import io
 
     from rich.console import Console
     from rich.markdown import Markdown
     from rich.theme import Theme
     buf = io.StringIO()
-    text, lifted = _lift_colored_fences(text, color)
     md = Markdown(text)
     for token in md.parsed:
         if token.type == "inline" and token.children:
@@ -505,7 +504,29 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
             color_system="standard" if color else None,
             force_terminal=color, soft_wrap=False, highlight=False,
             theme=Theme(_MD_THEME)).print(md)
-    return _splice_lifted_fences(buf.getvalue(), lifted)
+    return buf.getvalue()
+
+
+def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80,
+                      arm_spans: bool = True) -> str:
+    """Lift order is spans then fences: the span lift only rewrites WITHIN lines, so the
+    fence scan still sees the same fences. Splice order is spans then fences: a lifted
+    fence body bypassed rich and must never be rewritten by the span splice. When rich
+    defeats the span lift the render is discarded and redone with the lift off, so output
+    carrying an unspliced placeholder is never emitted. `arm_spans` follows the caller's
+    choice of escape function — prose-escaped text gets fence AND span color, absolutely
+    escaped text (hook-script stdout) gets neither."""
+    if arm_spans:
+        span_text, samples = _lift_colored_spans(text, color)
+        if samples:
+            fence_text, fences = _lift_colored_fences(span_text, color)
+            spliced = _splice_lifted_spans(
+                _render_with_rich(fence_text, width, color, display_width), samples)
+            if spliced is not None:
+                return _splice_lifted_fences(spliced, fences)
+    fence_text, fences = _lift_colored_fences(text, color)
+    return _splice_lifted_fences(
+        _render_with_rich(fence_text, width, color, display_width), fences)
 
 
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,

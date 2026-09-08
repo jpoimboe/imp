@@ -3400,6 +3400,127 @@ def test_splice_lifted_spans_refuses_a_folded_welded_or_lost_run() -> None:
     assert rt._splice_lifted_spans("a b", lifted) is None                     # lost
 
 
+def test_inline_span_renders_the_sample_in_real_color() -> None:
+    out = rt._markdown_to_ansi("The gauge reads `[1;33m78%[0m` amber.", 40, True)
+    assert "\x1b[1;33m78%\x1b[0m" in out            # a real sequence around the text
+    assert "[1;33m" not in _visible(out)            # nothing literal left on screen
+
+
+def test_inline_span_leading_text_keeps_richs_cyan() -> None:
+    # The placeholder covers only from the first code onward, so "load " is still real
+    # text: rich styles it `markdown.code` cyan and can break after it.
+    out = rt._markdown_to_ansi("Shows `load [1;33m78%[0m` now.", 40, True)
+    assert "\x1b[36mload \x1b[1;33m78%\x1b[0m" in out
+    # And it keeps its break opportunity: at width 32 rich breaks between "load" and
+    # the sample. Were "load " swallowed into the placeholder, the run would offer no
+    # internal break and the whole "load 78%" would move to the second line — so this
+    # discriminates, where the same check at width 40 renders identically either way.
+    wrapped = rt._markdown_to_ansi(
+        "A sentence long enough that `load [1;33m78%[0m` lands here.", 32, True)
+    assert [_visible(ln).rstrip() for ln in wrapped.rstrip("\n").split("\n")] == [
+        "A sentence long enough that load",
+        "78% lands here."]
+
+
+def test_text_after_the_last_code_rides_inside_the_sample() -> None:
+    out = rt._markdown_to_ansi("Shows `[1;33m78%[0m done` now.", 40, True)
+    assert "\x1b[1;33m78%\x1b[0m done\x1b[0m" in out
+    assert "\x1b[36mdone" not in out                # not rich's cyan — the sample owns it
+    # Inside the placeholder, so unlike "load " above it never breaks away.
+    wrapped = rt._markdown_to_ansi("A sentence long enough that `[1;33m78%[0m done`"
+                                   " lands at the edge.", 40, True)
+    assert any("78% done" in _visible(ln) for ln in wrapped.split("\n"))
+    assert max(len(_visible(ln)) for ln in wrapped.split("\n")) <= 40
+
+
+def test_a_paragraph_mixing_spans_wraps_at_visible_width() -> None:
+    src = "Use `--full` to see `[1;33m78%[0m` and more text here to wrap the line nicely."
+    out = rt._markdown_to_ansi(src, 40, True)
+    assert "\x1b[36m--full\x1b[0m" in out           # the plain span is still cyan
+    assert max(len(_visible(ln)) for ln in out.split("\n")) <= 40
+
+
+def test_color_off_wrapping_is_byte_identical_to_the_codes_removed() -> None:
+    src = "The gauge reads `[1;33m78%[0m` amber and then more words to force a wrap."
+    assert (rt._markdown_to_ansi(src, 40, False)
+            == rt._markdown_to_ansi(src.replace("[1;33m", "").replace("[0m", ""),
+                                    40, False))
+
+
+def test_a_sample_with_a_space_is_never_split_across_lines() -> None:
+    # A placeholder run offers rich no internal break opportunity, so a colored sample
+    # is kept whole rather than wrapped mid-sequence.
+    src = "The state `[1;33mWARN: high[0m` matters a lot here and wraps somewhere later."
+    out = rt._markdown_to_ansi(src, 40, True)
+    assert any("WARN: high" in _visible(ln) for ln in out.split("\n"))
+    assert max(len(_visible(ln)) for ln in out.split("\n")) <= 40
+
+
+def test_multiple_spans_splice_back_in_source_order_each_ending_with_a_reset() -> None:
+    out = rt._markdown_to_ansi("A `[31mone[0m` and B `[32mtwo[0m` end.", 60, True)
+    assert _re.findall(r"\x1b\[3([12])m([a-z]+)\x1b\[0m", out) == [("1", "one"),
+                                                                   ("2", "two")]
+
+
+def test_color_off_renders_the_visible_sample_with_no_escape() -> None:
+    out = rt._markdown_to_ansi("The gauge reads `[1;33m78%[0m` amber.", 40, False)
+    assert "78%" in out
+    assert "\x1b" not in out and "1;33" not in out
+
+
+def test_an_oversize_sample_falls_back_to_a_literal_render() -> None:
+    # Wider than the render width: rich folds the run, the splice finds no anchor, and
+    # the whole render is redone with the lift off.
+    out = rt._markdown_to_ansi("x `[1;33m" + "W" * 60 + "[0m` y", 40, True)
+    assert "[1;33m" in _visible(out)
+    assert max(len(_visible(ln)) for ln in out.split("\n")) <= 40
+    assert rt._SPAN_UNIT not in out and rt._SLOT_UNIT not in out
+
+
+def test_a_short_sample_welded_into_a_long_token_falls_back() -> None:
+    # A genuinely distinct mechanism from the oversize case: this sample is only 4 cells
+    # at width 40, but it sits inside an unbreakable 80-column token, so rich folds the
+    # run 3+1 and the splice loses its anchor. (Punctuation alone does not weld — rich
+    # breaks before a `(`, so `see (`…`), ok` splices fine until the sample itself
+    # exceeds the width, which is just the oversize case again.)
+    out = rt._markdown_to_ansi(
+        "see " + "x" * 36 + "(`[1;33mWWWW[0m`)" + "y" * 36 + " ok", 40, True)
+    assert "\x1b[1;33m" not in out                  # not colored
+    # The fallback render breaks the literal code across the fold too, so compare
+    # against the lines rejoined.
+    assert "[1;33mWWWW[0m" in "".join(_visible(ln).strip() for ln in out.split("\n"))
+    assert max(len(_visible(ln)) for ln in out.split("\n")) <= 40
+    assert rt._SPAN_UNIT not in out and rt._SLOT_UNIT not in out
+
+
+def test_a_slot_unit_in_a_span_never_forges_a_fence_slot_key() -> None:
+    # End-to-end guard for the Task 2 skip: without it the spliced sample reproduces the
+    # fence slot key, `_splice_lifted_fences` matches it on the prose line, and the prose
+    # line is REPLACED by the fence body — which is then emitted a second time at the
+    # real slot. Silent content loss plus duplicated output.
+    src = ("a `[31m" + rt._SLOT_UNIT + "0" + rt._SLOT_UNIT + "[0m` b\n\n"
+           "```\n[32mmock[0m\n```\n")
+    out = rt._markdown_to_ansi(rt._caret_escape_prose(src), 60, True)
+    assert out.count("\x1b[32mmock\x1b[0m") == 1    # fence body emitted exactly once
+    assert rt._SLOT_UNIT in _visible(out)           # the prose line survives, verbatim
+    assert "\x1b[31m" not in out                    # that span stays literal
+
+
+def test_an_indented_code_block_is_prose_for_the_span_lift() -> None:
+    # `_caret_escape_prose` already treats a four-space indented block as prose, not a
+    # fence (`test_caret_escape_prose_treats_an_indented_code_block_as_prose`), so an
+    # eligible span on such a line is armed like any other prose span. `_fence_spans`
+    # stays the one definition of "inside a fence" and models fences only.
+    out = rt._markdown_to_ansi("text:\n\n    inline `[1;33m78%[0m` here\n", 60, True)
+    assert "`\x1b[1;33m78%\x1b[0m" in out           # backticks literal, sample colored
+
+
+def test_agent_prose_inline_span_reaches_the_screen_in_color() -> None:
+    out = "\n".join(_agent_lines("The gauge reads `[1;33m78%[0m` amber.", color=True))
+    assert "\x1b[1;33m78%\x1b[0m" in out
+    assert "^[[1;33m" not in out                    # nor caret noise
+
+
 def _agent_lines(text: str, *, color: bool, width: int = 80) -> list[str]:
     tree = nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
