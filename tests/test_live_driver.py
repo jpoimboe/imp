@@ -1650,10 +1650,40 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
     assert out2.getvalue().split("\n")[0] == "> do the thing"
 
 
-def test_context_bar_renders_a_gray_label_and_the_percentage() -> None:
+def test_context_bar_renders_a_ten_cell_block_gauge_and_the_percentage() -> None:
     from imp.cli.live_driver import context_bar
     bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
-    assert bar == "context 13%"        # 26000/200000 = 0.13
+    assert bar == "█░░░░░░░░░ 13%"      # 26000/200000 = 0.13 -> one filled cell
+
+
+def test_context_bar_gauge_spans_empty_to_full() -> None:
+    from imp.cli.live_driver import context_bar
+
+    def gauge(pct: float) -> str | None:
+        return context_bar("anthropic", "sonnet", None, context_pct=pct,
+                           color=False, over_bg=False)
+
+    assert gauge(0.0) == "░░░░░░░░░░ 0%"
+    assert gauge(44.0) == "████░░░░░░ 44%"
+    assert gauge(100.0) == "██████████ 100%"   # full: no track cells at all
+
+
+def test_context_gauge_fill_and_percentage_share_one_hue_over_a_gray_track() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import context_bar
+    # sonnet: 200k window, 0.8 cutoff -> wordmark from 0.60, red from 0.80. Both
+    # 119000 and 121000 label "60%" and differ only in hue, straddling the amber
+    # boundary; 160000 sits exactly on the red one.
+    try:
+        pal.set_theme("ansi")
+        green = context_bar("anthropic", "sonnet", 119000, color=True, over_bg=False)
+        amber = context_bar("anthropic", "sonnet", 121000, color=True, over_bg=False)
+        red = context_bar("anthropic", "sonnet", 160000, color=True, over_bg=False)
+    finally:
+        pal.set_theme("ansi")
+    assert green == "\x1b[32m██████\x1b[0m\x1b[90m░░░░\x1b[0m \x1b[32m60%\x1b[0m"
+    assert amber == "\x1b[33m██████\x1b[0m\x1b[90m░░░░\x1b[0m \x1b[33m60%\x1b[0m"
+    assert red == "\x1b[31m████████\x1b[0m\x1b[90m░░\x1b[0m \x1b[31m80%\x1b[0m"
 
 
 def test_context_bar_bands_are_relative_to_the_cutoff() -> None:
@@ -1735,7 +1765,7 @@ def test_context_bar_resolves_a_dated_id_through_limits_for() -> None:
     assert dated is not None
     assert dated.window == 200_000                 # longest-prefix, not substring
     assert context_bar("anthropic", "claude-opus-5-20260315", 40000,
-                       color=False, over_bg=False) == "context 20%"
+                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
 
 
 def test_context_bar_prefers_sdk_percentage_over_tokens() -> None:
@@ -1744,7 +1774,7 @@ def test_context_bar_prefers_sdk_percentage_over_tokens() -> None:
     # ~100% is ignored when the SDK percentage is present.
     bar = context_bar("claude_code", "claude-opus-4-8[1m]", 999_999,
                       context_pct=42.0, color=False, over_bg=False)
-    assert bar == "context 42%"
+    assert bar == "████░░░░░░ 42%"
 
 
 def test_live_driver_has_no_context_windows_symbol() -> None:
@@ -2562,6 +2592,30 @@ def test_compose_subagent_rows_carry_the_slate_and_align_under_dark_theme() -> N
     assert rows[0].startswith("\x1b[48;2;43;47;58m")   # the position row's cool blue-gray band open
     assert rows[0].endswith("\x1b[0m")
     assert pal.display_width(rows[0]) == 118           # padded to width-2, aligned with parent
+
+
+def test_compose_subagent_rows_pad_to_the_band_width_with_a_gauge() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_subagent_rows
+    reading = ev("r1", "agent_message", agent_id="sub:t1", provider="anthropic",
+                 model="m", stop_reason="end_turn",
+                 usage={"input_tokens": 60000, "output_tokens": 5},
+                 context_pct=42.0, context_window=200_000)
+    b = _sub_builder(("t1", "coder"), readings=[reading],
+                     start_ts="2026-01-01T00:00:00+00:00")
+    try:
+        pal.set_theme("dark")
+        banded = compose_subagent_rows(b, color=True, width=120,
+                                       now_iso="2026-01-01T00:00:05+00:00")
+    finally:
+        pal.set_theme("ansi")
+    assert len(banded) == 1
+    assert banded[0].startswith("\x1b[48;2;43;47;58m")   # band survives the wider gauge
+    assert banded[0].endswith("\x1b[0m")
+    assert pal.display_width(banded[0]) == 118           # still padded to width - 2
+    plain = compose_subagent_rows(b, color=False, width=120,
+                                  now_iso="2026-01-01T00:00:05+00:00")
+    assert plain[0].endswith("████░░░░░░ 42%")           # gauge replaces "context 42%"
 
 
 def test_compose_subagent_rows_prefix_child_arrow() -> None:
@@ -3598,7 +3652,7 @@ def test_context_bar_without_a_reported_window_falls_back_to_the_catalog() -> No
     from imp.cli.live_driver import context_bar
     # Same call, no reading: unchanged behavior — 206720/1_050_000 = 20%.
     assert context_bar("codex", "gpt-5.6-sol", 206_720,
-                       color=False, over_bg=False) == "context 20%"
+                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
 
 
 # AC 8

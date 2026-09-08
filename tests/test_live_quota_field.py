@@ -35,17 +35,17 @@ def _row(**kw: Any) -> str:
 def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
     assert _row(auth_mode="subscription", quota=calm) == (
-        "implement phase · claude-opus-5 · context 44% · quota 5h 34%, 7d 7%")
+        "implement phase · claude-opus-5 · ████░░░░░░ 44% · quota 5h 34%, 7d 7%")
 
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
                       QuotaWindow("7d", 7.0, int(_NOW) + 600000))
     assert _row(auth_mode="subscription", quota=one_up).endswith(
-        "context 44% · quota 5h 62% (40m), 7d 7%")
+        "████░░░░░░ 44% · quota 5h 62% (40m), 7d 7%")
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
     assert _row(auth_mode="subscription", quota=both).endswith(
-        "context 44% · quota 5h 92% (40m), 7d 96% (2d 4h)")
+        "████░░░░░░ 44% · quota 5h 92% (40m), 7d 96% (2d 4h)")
 
 
 # AC 9
@@ -82,7 +82,7 @@ def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
 def test_a_metered_backend_renders_the_bare_quest_total() -> None:
     priced = RowUsage(dollars=4.21, priced=1)
     assert _row(auth_mode="apikey", cost=priced).endswith(
-        "context 44% · $4.21")                       # no label, no color, no ~
+        "████░░░░░░ 44% · $4.21")                    # no label, no color, no ~
     # A step on a model the price table lacks still renders the figure, no ≥.
     with_unpriced = RowUsage(dollars=4.21, priced=1, unpriced=1)
     assert _row(auth_mode="apikey", cost=with_unpriced).endswith(" · $4.21")
@@ -96,7 +96,7 @@ def test_a_metered_backend_renders_the_bare_quest_total() -> None:
 def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None:
     row = _row(auth_mode="apikey", cost=RowUsage(),
                quota=_reading(QuotaWindow("5h", 34.0, None)))
-    assert row.endswith("claude-opus-5 · context 44%")
+    assert row.endswith("claude-opus-5 · ████░░░░░░ 44%")
     assert "n/a" not in row and "—" not in row
     # The metered choice is exclusive: a stale reading never leaks onto this row.
     assert "quota" not in row
@@ -105,4 +105,4 @@ def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None
 # AC 11
 def test_a_subscription_backend_with_no_reading_renders_no_field() -> None:
     row = _row(auth_mode="subscription")
-    assert row == "implement phase · claude-opus-5 · context 44%"
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 44%"

@@ -184,7 +184,7 @@ def test_a_contribution_for_an_unrelated_agent_leaves_the_field_absent() -> None
     assert total.priced == 0                  # attributed to nothing, priced as nothing
     row = _position_row(events)
     assert "$" not in row and "n/a" not in row
-    assert row.endswith("claude-opus-5 · context 60%")
+    assert row.endswith("claude-opus-5 · ██████░░░░ 60%")
 
 
 # AC 14
@@ -215,7 +215,7 @@ def test_a_subagent_row_carries_the_gauge_and_never_the_quota() -> None:
     rows = _drive(_subagent_events(auth_mode=None, usage={})).compose_status(0)
     assert rows is not None and len(rows) == 4
     assert rows[2].endswith(" · quota 5h 12%")          # position row: quota
-    assert "context 42%" in rows[3]                     # subagent row: same gauge
+    assert "████░░░░░░ 42%" in rows[3]                  # subagent row: same gauge
     assert "quota" not in rows[3]                       # and never the account level
 
 
@@ -227,5 +227,5 @@ def test_a_subagent_row_carries_no_cost_field_on_a_metered_backend() -> None:
     assert rows is not None and len(rows) == 4
     # The position row takes the metered branch; the recorded reading stays off it.
     assert "$" in rows[2] and "quota" not in rows[2]
-    assert "context 42%" in rows[3]                     # same gauge, same grammar
+    assert "████░░░░░░ 42%" in rows[3]                  # same gauge, same grammar
     assert "quota" not in rows[3] and "$" not in rows[3]

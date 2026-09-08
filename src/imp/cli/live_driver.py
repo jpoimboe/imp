@@ -46,6 +46,7 @@ _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
 _AMBER_AT = 0.75          # of the cutoff
+_GAUGE_CELLS = 10
 
 # The events that can move the quest-total dollars; everything else leaves it.
 _COST_BEARING = frozenset({"agent_message", "agent_message_usage_patch",
@@ -90,8 +91,14 @@ def context_bar(provider: str | None, model: str | None,
     hue = ("red" if frac >= warn
            else "wordmark" if frac >= _AMBER_AT * warn
            else "green")
-    label = _paint("context", "gray", color=color, over_bg=over_bg)
-    return f"{label} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
+    filled = max(0, min(_GAUGE_CELLS, round(frac * _GAUGE_CELLS)))
+    gauge = ""
+    if filled:
+        gauge += _paint("█" * filled, hue, color=color, over_bg=over_bg)
+    if filled < _GAUGE_CELLS:
+        gauge += _paint("░" * (_GAUGE_CELLS - filled), "gray",
+                        color=color, over_bg=over_bg)
+    return f"{gauge} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
 
 
 def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | None:
