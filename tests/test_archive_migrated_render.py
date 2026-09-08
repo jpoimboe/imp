@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -43,10 +44,11 @@ _OLD = [
 ]
 
 
-def _seed_old_archived_quest(control: Path, cid: str) -> None:
+def _seed_old_archived_quest(control: Path, cid: str,
+                             events: list[dict] = _OLD) -> None:
     store = LocalBlobStore(archive.blobs_root(control))
     events_hash = store.put(
-        "".join(json.dumps(e) + "\n" for e in _OLD).encode("utf-8"))
+        "".join(json.dumps(e) + "\n" for e in events).encode("utf-8"))
     rec = record.build_record(
         {"id": cid, "title": "", "base_branch": "main",
          "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
@@ -85,3 +87,78 @@ def test_imp_log_archived_migrated_quest_renders(
     assert reply_lines and reply_lines[0].lstrip().startswith(">")
     # ...while the framework prompt is NOT a `>` human turn (the reported symptom).
     assert f"> {_FRAMEWORK}" not in out_s
+
+
+# Two entries of one looping step, exactly as the engine wrote them before this
+# quest: no `round` key on either payload.
+_PRE_CHANGE_ROUNDS = [
+    {"id": "s1", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-10T00:00:00+00:00", "type": "step_started",
+     "payload": {"step": "plan-reviewer", "kind": "agent", "phase": "planning",
+                 "label": "reviewing plan"}},
+    {"id": "c1", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-10T00:00:05+00:00", "type": "step_completed",
+     "payload": {"step": "plan-reviewer", "kind": "agent",
+                 "action": {"verb": "continue"}}},
+    {"id": "s2", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-10T00:00:05+00:00", "type": "step_started",
+     "payload": {"step": "plan-reviewer", "kind": "agent", "phase": "planning",
+                 "label": "reviewing plan"}},
+    {"id": "c2", "parent_id": None, "agent_id": None,
+     "timestamp": "2026-06-10T00:00:10+00:00", "type": "step_completed",
+     "payload": {"step": "plan-reviewer", "kind": "agent",
+                 "action": {"verb": "continue"}}},
+]
+
+_UNMARKED = ["reviewing plan",
+             "reviewing plan · complete · 5s",
+             "reviewing plan",
+             "reviewing plan · complete · 5s"]
+
+
+def _log_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cid: str,
+               needle: str) -> list[str]:
+    import imp.cli.main as m
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        rc = main(["log", "--no-pager", cid])
+    assert rc == 0, err.getvalue()
+    return [ln.strip() for ln in out.getvalue().splitlines() if needle in ln]
+
+
+def test_a_migrated_pre_change_quest_renders_no_round_and_no_tally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The backfill stamps round 1, which renders no segment — so the quest reads
+    # exactly as it did before this change, repeat entries included.
+    _seed_control(tmp_path)
+    _seed_old_archived_quest(tmp_path, "rnd10", _PRE_CHANGE_ROUNDS)
+
+    archive.ensure_current(tmp_path)
+
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)                       # the chain ran over the blob
+    assert _log_lines(tmp_path, monkeypatch, "rnd10", "reviewing plan") == _UNMARKED
+
+
+def test_an_unmigrated_blob_on_a_read_only_archive_renders_the_same(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A read-only archive root makes ensure_current a no-op, so these payloads
+    # reach the renderer un-stamped; the seam's default is what carries them.
+    _seed_control(tmp_path)
+    _seed_old_archived_quest(tmp_path, "rnd11", _PRE_CHANGE_ROUNDS)
+    # The runner may be root, where mode bits do not deny a write — deny the probe.
+    real_access = os.access
+    root = archive.archive_root(tmp_path)
+    monkeypatch.setattr(
+        archive.os, "access",
+        lambda p, mode: False if (mode == os.W_OK and str(p) == str(root))
+        else real_access(p, mode))
+
+    archive.ensure_current(tmp_path)
+
+    assert not archive.data_version_path(tmp_path).exists()   # migration never ran
+    assert _log_lines(tmp_path, monkeypatch, "rnd11", "reviewing plan") == _UNMARKED
