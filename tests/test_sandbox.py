@@ -2722,7 +2722,7 @@ def test_retired_per_call_sentinel_machinery_is_gone():
     # AC 14b's bash.py and executor.py halves. Named individually rather than
     # checked wholesale because both modules KEEP importing sandbox symbols that
     # are not part of the sentinel path: SANDBOX_SPAWN_MAX_ATTEMPTS (the retry
-    # wording) in both, and SANDBOX_SPAWN_FAILED_MESSAGE in bash.py.
+    # wording) in executor.py, and SANDBOX_SPAWN_FAILED_MESSAGE in bash.py.
     import imp.agents.tools.bash as bash
     import imp.engine.executor as ex
     for mod in (bash, ex):
@@ -3228,3 +3228,29 @@ def test_open_on_an_inactive_policy_is_refused():
     # no namespaces to pin — fail closed rather than silently unsandbox the run.
     with pytest.raises(AssertionError):
         SandboxNamespace.open(policy=_policy(active=False), engine_env={}, environ={})
+
+
+def test_nothing_is_bound_between_dev_and_chdir():
+    # bwrap's --dev makes /dev/ptmx a SYMLINK into the devpts it mounts at
+    # /dev/pts, so ANY bind landing on /dev/pts silently repoints ptmx at a
+    # foreign instance. On a standard host that one is mounted ptmxmode=000 with
+    # a ptmx owned by real root — unmapped in the sandbox's userns, so a payload's
+    # CAP_DAC_OVERRIDE does not reach it and openpty() fails for EVERYTHING in the
+    # sandbox (script, tmux, ssh -t). This is pure argv shape, so unlike the
+    # behavioral guard it bites on a NESTED host too — i.e. in imp's own gates,
+    # where the enclosing /dev/pts is already bwrap's permissive instance.
+    dev_block = ["--proc", "/proc", "--dev", "/dev"]
+    percall = _argv("echo hi", cwd="/state/worktrees/abc", policy=_policy(),
+                    engine_env={})
+    nonet = _argv("echo hi", cwd="/state/worktrees/abc",
+                  policy=_policy(network=False), engine_env={})
+    keeper = build_sandbox_spawn(KEEPER_PAYLOAD, cwd="/", policy=_policy(),
+                                 engine_env={}, environ={}, keeper_info_fd=9).argv
+    for argv in (percall, nonet, keeper):
+        i = argv.index("--proc")
+        assert argv[i:i + len(dev_block)] == dev_block
+        assert argv[i + len(dev_block)] == "--chdir"
+        # The invariant itself, not just this one slot: a bind emitted from
+        # policy.bind_plan() (where every other bind in the argv comes from)
+        # lands nowhere near --dev and would slip past the adjacency check.
+        assert "/dev/pts" not in argv

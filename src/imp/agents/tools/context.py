@@ -12,22 +12,25 @@ worktree-relative. No virtual `/project`/`/scratch` namespace; system paths are
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import os
+import shlex
 import signal as _signal
-from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.errors import PermissionDenied
-from imp.engine.env import ALL_DECIDED, TestGates, Undecided
+from imp.engine.env import ALL_DECIDED, TestGates, Undecided, engine_env
 from imp.engine.types import AgentDef
 
 if TYPE_CHECKING:
     from imp.engine.sandbox import SandboxNamespace
+    from impty.driver import ImptyDriver, PtySpawn, SandboxHook
 
 _KILL_POLL_INTERVAL_S = 0.05  # group-liveness probe cadence inside the kill grace
 
@@ -131,6 +134,7 @@ class ToolContext:
     # This run's keeper namespace, opened lazily on the first sandboxed spawn by
     # ensure_tool_namespace; None => not open yet.
     sandbox_ns: SandboxNamespace | None = None
+    impty_driver: ImptyDriver | None = None
     # §10/§12: when True, the run is headless (no human at the keyboard). The
     # subagent backoff loop applies a wall-clock ceiling instead of retrying
     # forever. Copied from invocation.headless by each provider.
@@ -456,6 +460,19 @@ async def terminate_tool_processes(
     await terminate_background_processes(ctx, kill_reason=kill_reason)
 
 
+def close_impty_session(ctx: ToolContext) -> None:
+    """End the live pty session, if any, and leave the driver in place.
+
+    Called at BOTH sites that destroy a namespace: the rebuild branch of
+    ensure_tool_namespace does not route through close_sandbox_namespace, so a
+    single seam there would leave that path tearing a namespace down under a live
+    session — a corpse whose last screen still renders. ImptyDriver.close is
+    idempotent and clears only its session, so the driver stays usable and a later
+    start() opens one in whichever namespace is current."""
+    if ctx.impty_driver is not None:
+        ctx.impty_driver.close()
+
+
 def close_sandbox_namespace(ctx: ToolContext) -> None:
     """Close and drop this run's keeper namespace. Vacating the slot first is what
     makes the next sandboxed spawn open a fresh one rather than find a closed one.
@@ -463,10 +480,16 @@ def close_sandbox_namespace(ctx: ToolContext) -> None:
     it, so this alone reaps every joined command — the kills that precede it in
     teardown_tool_context are the courtesy grace, not the guarantee. It reaches
     nothing spawned during a /sandbox off window: that shape runs on the host, so
-    only terminate_tool_processes ends it."""
+    only terminate_tool_processes ends it. The pty session ends FIRST, in a try
+    whose finally is the keeper close: closing the namespace under a live session
+    would leave the driver holding a dead child, and a raise (or a cancellation)
+    on the way must still not leak the keeper."""
     ns, ctx.sandbox_ns = ctx.sandbox_ns, None
-    if ns is not None:
-        ns.close()
+    try:
+        close_impty_session(ctx)
+    finally:
+        if ns is not None:
+            ns.close()
 
 
 async def teardown_tool_context(ctx: ToolContext) -> None:
@@ -477,6 +500,52 @@ async def teardown_tool_context(ctx: ToolContext) -> None:
         await terminate_tool_processes(ctx)
     finally:
         close_sandbox_namespace(ctx)
+
+
+EVENT_COMMAND_PREVIEW_LEN = 200
+
+
+def emit_spawn_retry_warning(ctx: ToolContext, command: str, next_attempt: int,
+                             detail: str) -> None:
+    """Best-effort per-retry breadcrumb; never crashes the tool call."""
+    from imp.engine.sandbox import SANDBOX_SPAWN_MAX_ATTEMPTS
+
+    if ctx.event_log is None:
+        return
+    with contextlib.suppress(Exception):
+        ctx.event_log.append(
+            agent_id=ctx.agent_id, type="runner_warning",
+            payload={
+                "message": ("sandbox could not start the command; retrying "
+                            f"({next_attempt}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
+                "command": command[:EVENT_COMMAND_PREVIEW_LEN],
+                "reason": "sandbox-spawn-failed", "detail": detail,
+            })
+
+
+def tool_quest_dir(ctx: ToolContext) -> Path | None:
+    """This run's quest state directory, or None. Read from the LIVE quest when
+    available (top-level steps); subagents have no live quest and fall back to the
+    frozen quest_context snapshot."""
+    src = ctx.quest or ctx.quest_context
+    return (getattr(src, "quest_dir", None)
+            or (Path(h) if (h := getattr(src, "quest_home", None)) else None))
+
+
+def tool_engine_env(ctx: ToolContext) -> dict[str, str]:
+    """The IMP_* variables this run's spawns carry. Engine vars come from the LIVE
+    quest when available, so a mid-run rename_quest is reflected immediately.
+    Shared by `bash` and the pty path so both present the namespace identical
+    inputs."""
+    src = ctx.quest or ctx.quest_context
+    return engine_env(
+        project_root=ctx.project_root,
+        quest_id=src.id if src else "",
+        quest_title=src.title if src else "",
+        quest_dir=tool_quest_dir(ctx),
+        test_gates=ctx.test_gates,
+        pythonpath=ctx.pythonpath,
+    )
 
 
 async def ensure_tool_namespace(
@@ -497,12 +566,15 @@ async def ensure_tool_namespace(
 
     stale = ctx.sandbox_ns
     if stale is not None and stale.base_policy != ctx.base_sandbox_policy:
-        # Vacate the slot SYNCHRONOUSLY, before the only await here, and close the
-        # object we captured rather than whatever the slot holds afterwards: a
-        # concurrent call must not adopt a namespace being torn down, nor have the
-        # one it just opened closed out from under it.
-        ctx.sandbox_ns = None
         try:
+            # First, and before the slot is vacated: no concurrent start may drop a
+            # session into a namespace already condemned.
+            close_impty_session(ctx)
+            # Vacate the slot SYNCHRONOUSLY, before the only await here, and close
+            # the object we captured rather than whatever the slot holds
+            # afterwards: a concurrent call must not adopt a namespace being torn
+            # down, nor have the one it just opened closed out from under it.
+            ctx.sandbox_ns = None
             await terminate_tool_processes(ctx, kill_reason="sandbox-rebuilt")
         finally:
             stale.close()  # finally: a cancellation mid-kill must not leak the stale keeper
@@ -511,3 +583,86 @@ async def ensure_tool_namespace(
             policy=ctx.base_sandbox_policy, engine_env=engine_env,
             environ=os.environ, on_retry=on_retry)
     return ctx.sandbox_ns
+
+
+# generous: worst case is ~10s (terminate grace + pty close) — must not false-fire under load
+NAMESPACE_ACQUIRE_TIMEOUT_S = 120.0
+
+
+def _namespace_from_worker(ctx: ToolContext, loop: asyncio.AbstractEventLoop,
+                           eng: Mapping[str, str], command: str) -> SandboxNamespace:
+    """Acquire the run's keeper FROM a worker thread: the coroutine runs on the
+    run's own loop and this thread blocks for its result.
+
+    Not a convenience. open() passes --die-with-parent, a PR_SET_PDEATHSIG the
+    kernel fires when the CREATING THREAD exits, so a keeper opened on a pool
+    worker would take the whole run's sandbox down the moment that worker retired.
+    Called ON the loop this would instead deadlock permanently — the coroutine
+    cannot start until we return — so that is refused rather than hung."""
+    from imp.engine.sandbox import SandboxOpenFailed
+
+    try:
+        on_loop = asyncio.get_running_loop() is loop
+    except RuntimeError:
+        on_loop = False
+    if on_loop:
+        raise AssertionError(
+            "the impty sandbox hook must be called from a worker thread, not the "
+            "run's own event loop")
+    coro = ensure_tool_namespace(
+        ctx, engine_env=eng,
+        on_retry=lambda n, detail: emit_spawn_retry_warning(ctx, command, n, detail))
+    try:
+        return asyncio.run_coroutine_threadsafe(coro, loop).result(
+            timeout=NAMESPACE_ACQUIRE_TIMEOUT_S)
+    except TimeoutError as exc:
+        raise RuntimeError(
+            "sandbox could not start the terminal session: timed out acquiring the "
+            f"run's namespace after {NAMESPACE_ACQUIRE_TIMEOUT_S:g}s") from exc
+    except SandboxOpenFailed as exc:
+        raise RuntimeError(
+            f"sandbox could not start the terminal session: {exc.detail}") from exc
+
+
+def make_impty_sandbox_hook(ctx: ToolContext) -> SandboxHook:
+    """The `SandboxHook` an ImptyDriver spawns through: it puts a driven program in
+    the SAME keeper namespace this run's bash calls join, so the two share one
+    process table, one set of masks and one teardown.
+
+    Build it ON the run's event loop — it captures that loop, and the driver's
+    calls arrive on worker threads (see _namespace_from_worker).
+
+    The EFFECTIVE policy is read per call, so /sandbox off is just this returning
+    None and the driver spawning bare: no flag, no driver state, and a mid-run
+    toggle needs nothing to remember it. The caller's env is overlaid ON the
+    sandbox's curated child env rather than replacing it, and the cwd rides on the
+    join's --wdns, which is the only place it resolves in the right mount
+    namespace."""
+    loop = asyncio.get_running_loop()
+
+    def hook(argv: Sequence[str], cwd: str | None,
+             env: Mapping[str, str] | None) -> PtySpawn | None:
+        from impty.driver import PtySpawn
+
+        policy = ctx.sandbox_policy
+        if policy is None or not policy.active:
+            return None
+        eng = tool_engine_env(ctx)
+        ns = _namespace_from_worker(ctx, loop, eng, shlex.join(argv))
+        spawn = ns.join_exec(argv, cwd=cwd or str(ctx.project_root), engine_env=eng)
+        return PtySpawn(argv=spawn.argv, env={**spawn.env, **(env or {})},
+                        pass_fds=spawn.pass_fds)
+
+    return hook
+
+
+def attach_impty_driver(ctx: ToolContext) -> ImptyDriver:
+    """This run's ImptyDriver: spawning through ctx's sandbox AND registered on
+    ctx so both namespace-destroying sites can end its session. One call does
+    both — a driver hooked but unregistered would outlive its own namespace, and
+    one registered but unhooked would spawn on the host. Must be called on the
+    run's event loop (make_impty_sandbox_hook captures it)."""
+    from impty.driver import ImptyDriver
+
+    ctx.impty_driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+    return ctx.impty_driver

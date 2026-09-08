@@ -12,20 +12,21 @@ one: give the user the exact command to run in their own shell.
 
 ## When the sandbox blocks you
 
-imp's bash sandbox runs all your shell commands in one user and pid namespace of
-their own, so an agent cannot attach a debugger (`gdb`, `py-spy`, `strace`) to a
-live process outside it, cannot see or signal any process it did not start, and
-cannot read the masked paths (secrets, and this project's imp state outside this
-quest's own home). One escape hatch exists, plus one recipe that needs it.
+imp's sandbox runs all your shell commands — and any program you drive on a
+terminal — in one user and pid namespace of their own, so an agent cannot attach
+a debugger (`gdb`, `py-spy`, `strace`) to a live process outside it, cannot see
+or signal any process it did not start, and cannot read the masked paths
+(secrets, and this project's imp state outside this quest's own home). One
+escape hatch exists, plus one recipe that needs it.
 
 **`/sandbox off` — run this session unsandboxed.** Whenever the sandbox itself is what
 blocks the task — a debugger on a live host process, or a read of a masked path — tell
 the user to type `/sandbox off` at the prompt: it drops the sandbox for this
-interactive session and the subagents it dispatches, so shell **and** file tools run as
-the user, with secrets and every masked path readable and writes unconfined. It is
-human-only — only the user can type it, and no agent or tool path reaches it. It
-re-enables itself when the step ends; remind the user they can type `/sandbox on` to
-re-confine sooner.
+interactive session and the subagents it dispatches,
+so shell, file **and terminal** tools run as the user, with secrets and every masked
+path readable and writes unconfined. It is human-only — only the user can type it, and
+no agent or tool path reaches it. It re-enables itself when the step ends; remind the
+user they can type `/sandbox on` to re-confine sooner.
 
 **Stack-dumping a wedged imp process needs `/sandbox off`.** Introspecting imp's *own*
 long-lived processes — especially a session daemon whose event loop looks wedged —

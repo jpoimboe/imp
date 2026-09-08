@@ -7,13 +7,15 @@ import signal
 import sys
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
 
 from impty import TerminalSession
-from impty.driver import ImptyDriver, _decode_keys, _format_exit
+from impty.driver import ImptyDriver, PtySpawn, _decode_keys, _format_exit
 from impty.render import _MAX_DIM
 from impty.session import (
     DEFAULT_CHANGE_HARD,
@@ -827,3 +829,188 @@ def test_readme_documents_close_grace_and_its_return() -> None:
     assert "grace" in line
     assert "-> int" in line
     assert "SIGTERM" in line and "SIGKILL" in line
+
+
+def _spy_spawn(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Record the arguments `ImptyDriver.start` hands `TerminalSession`, then spawn
+    for real — so every assertion is about a session that actually ran."""
+    seen: dict[str, Any] = {}
+    real_init = TerminalSession.__init__
+
+    def spy(self: TerminalSession, argv: Sequence[str], **kwargs: Any) -> None:
+        seen["argv"] = list(argv)
+        seen.update(kwargs)
+        real_init(self, argv, **kwargs)
+
+    monkeypatch.setattr(TerminalSession, "__init__", spy)
+    return seen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_with_no_hook_spawns_the_callers_argv_bare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The shape `python -m impty.mcp` and every direct library user get: the caller's
+    # own argv, no pinned fds, and the caller's cwd handed straight to Popen.
+    seen = _spy_spawn(monkeypatch)
+    argv = [sys.executable, "-c", "import os; print(os.path.basename(os.getcwd()))"]
+    d = ImptyDriver()
+    try:
+        screen = d.start(argv, cwd=str(tmp_path))
+    finally:
+        d.stop()
+    assert seen["argv"] == argv
+    assert seen["cwd"] == str(tmp_path)
+    assert seen.get("pass_fds", ()) == ()
+    assert tmp_path.name in screen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_hook_returning_none_spawns_bare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # How `/sandbox off` is expressed: no flag, no driver state — the hook just
+    # declines, per call.
+    seen = _spy_spawn(monkeypatch)
+    calls: list[tuple[list[str], str | None, dict[str, str] | None]] = []
+
+    def hook(
+        argv: Sequence[str], cwd: str | None, env: Mapping[str, str] | None,
+    ) -> PtySpawn | None:
+        calls.append((list(argv), cwd, None if env is None else dict(env)))
+        return None
+
+    argv = [sys.executable, "-c", "print('BARE-RAN')"]
+    d = ImptyDriver(sandbox=hook)
+    try:
+        screen = d.start(argv, cwd=str(tmp_path))
+    finally:
+        d.stop()
+    assert calls == [(argv, str(tmp_path), None)]
+    assert seen["argv"] == argv
+    assert seen["cwd"] == str(tmp_path)
+    assert "BARE-RAN" in screen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_hook_plan_replaces_the_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _spy_spawn(monkeypatch)
+    plan_prog = (
+        "import os\n"
+        "print('PLANNED-RAN',\n"
+        "      'PLANNED=' + os.environ.get('PLANNED', '<none>'),\n"
+        "      'HOME=' + os.environ.get('HOME', '<none>'))\n"
+    )
+    plan_argv = [sys.executable, "-c", plan_prog]
+    # No HOME: the plan's env must reach the child AS GIVEN. A session that unioned
+    # os.environ under it would leak the host environment into a curated child env.
+    plan_env = {"PLANNED": "yes", "PATH": os.environ["PATH"]}
+    r, w = os.pipe()
+
+    def hook(
+        argv: Sequence[str], cwd: str | None, env: Mapping[str, str] | None,
+    ) -> PtySpawn | None:
+        return PtySpawn(argv=plan_argv, env=plan_env, pass_fds=(w,))
+
+    d = ImptyDriver(sandbox=hook)
+    try:
+        screen = d.start([sys.executable, "-c", "print('NEVER')"], cwd=str(tmp_path))
+    finally:
+        d.stop()
+        os.close(r)
+        os.close(w)
+    assert seen["argv"] == plan_argv
+    # Load-bearing: Popen's cwd= resolves in the CALLER's mount namespace, so a
+    # plan's cwd must ride inside its own argv, never here.
+    assert seen["cwd"] is None
+    assert seen["pass_fds"] == (w,)
+    assert "PLANNED-RAN PLANNED=yes HOME=<none>" in screen
+    assert "NEVER" not in screen
+
+
+def test_send_signal_copy_names_the_terminals_foreground_group() -> None:
+    from impty.mcp import THIN_DESCRIPTIONS
+
+    assert THIN_DESCRIPTIONS["send_signal"] == (
+        "Send a real signal (default SIGINT) to the terminal's foreground process group."
+    )
+    # Whitespace-normalized (the repo idiom, tests/test_impty_agent_surfaces.py:34):
+    # the pinned paragraph hard-wraps mid-phrase, so a raw substring test on __doc__
+    # would assert something the verbatim copy cannot contain.
+    doc = " ".join((ImptyDriver.send_signal.__doc__ or "").split())
+    assert "the group the terminal holds in the foreground" in doc
+    assert "in a shell it hits the running job rather than the shell" in doc
+    assert "child's process group" not in doc
+    # The OPENING sentence, not just the pinned paragraph: it says "the program's
+    # process group" today, and editing only the pinned block would leave the
+    # docstring contradicting itself with nothing to catch it.
+    assert "program's process group" not in doc
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    bullet = next(
+        (ln for ln in readme.splitlines() if ln.startswith("- `send_signal(")), None)
+    assert bullet is not None, "README has no line documenting send_signal()"
+    assert "terminal's FOREGROUND process group" in bullet
+    # Every stale mention, not just the bullet: the MCP tool list further down names
+    # send_signal's target too. close()'s bullet is exempt — its ladder really does
+    # keep the child's own group, which is the whole point of the split.
+    stale = [
+        ln for ln in readme.splitlines()
+        if "child's process group" in ln and not ln.startswith("- `close(")
+    ]
+    assert stale == [], stale
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_env_extends_the_base_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Under a sandbox a replacing env= is a footgun: one variable would drop PATH,
+    # HOME and the IMP_* variables the contract depends on. Both markers are set on
+    # the parent here, and TERM is deleted from it, so no assertion below depends on
+    # the runner's ambient environment (a runner with TERM=dumb would otherwise carry
+    # its own value through the overlay and past the session's setdefault).
+    monkeypatch.setenv("IMPTY_BASE_ONLY", "base")
+    monkeypatch.setenv("IMPTY_OVERRIDDEN", "base")
+    monkeypatch.delenv("TERM", raising=False)
+    prog = (
+        "import os\n"
+        "print('BASE=' + os.environ.get('IMPTY_BASE_ONLY', '<none>'),\n"
+        "      'OVER=' + os.environ.get('IMPTY_OVERRIDDEN', '<none>'),\n"
+        "      'TERM=' + os.environ.get('TERM', '<none>'))\n"
+    )
+    d = ImptyDriver()
+    try:
+        screen = d.start([sys.executable, "-c", prog],
+                         env={"IMPTY_OVERRIDDEN": "overlay"})
+    finally:
+        d.stop()
+    assert "BASE=base OVER=overlay TERM=xterm-256color" in screen
+
+
+def test_start_copy_states_the_env_overlay_and_the_hook() -> None:
+    doc = ImptyDriver.start.__doc__ or ""
+    assert (
+        "`env` entries are ADDED to the base environment, overriding same-named ones"
+        in doc
+    )
+    assert "with no hook it runs bare" in doc
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    # The playbook is agent-facing copy this change falsifies, and it is NOT one of
+    # the files spec §8 enumerates — so it is pinned here or nowhere.
+    playbook = (
+        Path(__file__).parents[2] / "tests" / "playbooks" / "imp-ux-playbook.md"
+    ).read_text()
+    texts = (readme, playbook,
+             *(m.__doc__ or "" for m in ImptyDriver().tool_methods()))
+    for text in texts:
+        # Normalized, like the assertion above: EVERY one of these sources wraps the
+        # claim mid-phrase today (`REPLACES the\n        inherited environment` in the
+        # docstring, `REPLACES the inherited\nenvironment` in the playbook), so a raw
+        # substring test would pass vacuously and pin nothing at all.
+        flat = " ".join(text.split())
+        assert "REPLACES the inherited environment" not in flat
+        assert "replaces the environment" not in flat

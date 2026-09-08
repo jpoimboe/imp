@@ -11,18 +11,22 @@ sandbox.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -32,10 +36,18 @@ from imp import __version__
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.bg import terminate_background_processes
-from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.agents.tools.context import (
+    ToolContext,
+    attach_impty_driver,
+    ensure_tool_namespace,
+    make_impty_sandbox_hook,
+    teardown_tool_context,
+    terminate_running_processes,
+)
 from imp.engine import worktree as wt
 from imp.engine.sandbox import (
     SandboxConfig,
+    SandboxNamespace,
     SandboxPolicy,
     build_sandbox_spawn,
     make_home_layer,
@@ -45,7 +57,11 @@ from imp.engine.sandbox import (
 )
 from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
+from impty import TerminalSession
+from impty.driver import ImptyDriver
 from tests.conftest import assert_all_tool_contexts_owned, own_tool_context
+from tests.impty.e2e_support import can_pty
+from tests.test_sandbox_namespace import _host_pids, _poll
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -2108,3 +2124,785 @@ def test_artifact_ref_history_readable_from_readonly_sandboxed_worktree() -> Non
 
 def test_every_tool_context_here_is_owned():
     assert_all_tool_contexts_owned(Path(__file__))
+
+
+# ---------------------------------------------------------------------------
+# join_exec — the exec-shaped join a pty session's argv payload rides on
+# ---------------------------------------------------------------------------
+
+_JOIN_RUN_TIMEOUT_S = 30.0   # generous vs the measured ~1ms join; never false-fires
+
+# Every test below opens a real keeper, so each carries its own outer timeout:
+# this file's module mark is skipif-only, leaving the project-wide 60s default
+# (pyproject.toml), which a keeper open plus a join can legitimately exceed under
+# a saturated -n auto run — SandboxNamespace.open retries its spawn up to
+# SANDBOX_SPAWN_MAX_ATTEMPTS times with backoffs before _JOIN_RUN_TIMEOUT_S even
+# starts. 180s is the single outer hang-catcher, sized generously against the
+# ~5ms measured open rather than as an arithmetic bound on the worst case.
+
+
+def _run_joined(ns: SandboxNamespace, argv: list[str],
+                *, cwd: str) -> subprocess.CompletedProcess[str]:
+    """Run one argv through `ns.join_exec` headlessly — the same shape a pty
+    caller spawns, minus the terminal."""
+    spawn = ns.join_exec(argv, cwd=cwd, engine_env={})
+    return subprocess.run(spawn.argv, env=spawn.env, pass_fds=spawn.pass_fds,
+                          capture_output=True, text=True,
+                          timeout=_JOIN_RUN_TIMEOUT_S)
+
+
+@pytest.mark.timeout(180)
+def test_join_exec_resolves_its_cwd_inside_the_namespaces_mount_view() -> None:
+    """AC 7(d): the cwd rides on --wdns, which resolves in the TARGET mount
+    namespace. --wd= and Popen's cwd= both resolve in the CALLER's, and were
+    measured handing the payload the host's view of a --tmpfs-masked directory."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text("REAL-SECRET-CONTENTS-12345\n")
+    try:
+        ns = SandboxNamespace.open(
+            policy=_active_policy(root, secret_dirs=(str(masked),)),
+            engine_env={}, environ=os.environ)
+        try:
+            done = _run_joined(ns, ["sh", "-c", "pwd; ls -A ."], cwd=str(masked))
+            assert done.returncode == 0, done.stderr
+            lines = done.stdout.splitlines()
+            assert lines[0] == str(masked)   # the requested cwd, not a fallback
+            assert lines[1:] == []           # the empty tmpfs mask, not flag.txt
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+def test_a_joined_payload_cannot_unmount_a_secret_mask() -> None:
+    """AC 7(c): entering the keeper's own user namespace hands the payload
+    CAP_FULL_SET whenever bwrap built a single userns level (the production
+    shape), which is enough to umount a secret_dirs tmpfs and read what it hid.
+    Dropping join()'s `unshare --user --map-current-user` stage from the exec
+    shape would give a driven program a capability `bash` does not have."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text("REAL-SECRET-CONTENTS-12345\n")
+    q = shlex.quote(str(masked))
+    probe = (
+        # Without this guard a missing umount(8) would make the whole test pass
+        # vacuously — it would "prove" confinement by never attempting the escape.
+        f"command -v umount >/dev/null || {{ echo NO-UMOUNT; exit 1; }}; "
+        f"umount {q} 2>&1 | head -1; "
+        f"cat {q}/flag.txt 2>&1 | head -1; "
+        # Positive, not merely absent: a missing secret proves nothing on its own
+        # (any unrelated `cat` failure reads the same). The mask must still BE there
+        # afterwards, which for a --tmpfs is an empty listing.
+        f'echo "LEFT=[$(ls -A {q})]"; '
+        f"echo PROBE-DONE"
+    )
+    try:
+        ns = SandboxNamespace.open(
+            policy=_active_policy(root, secret_dirs=(str(masked),)),
+            engine_env={}, environ=os.environ)
+        try:
+            done = _run_joined(ns, ["sh", "-c", probe], cwd=str(root))
+            assert "NO-UMOUNT" not in done.stdout, "umount(8) missing; probe was vacuous"
+            assert "PROBE-DONE" in done.stdout, done.stdout
+            assert "LEFT=[]" in done.stdout, done.stdout   # the mask survived the umount
+            assert "REAL-SECRET-CONTENTS-12345" not in done.stdout
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+def test_a_sandboxed_command_can_still_allocate_a_pty() -> None:
+    """The consequence test_nothing_is_bound_between_dev_and_chdir guards by
+    argv shape: bwrap's --dev mounts its OWN devpts at /dev/pts and makes
+    /dev/ptmx a SYMLINK into it, so anything bound over /dev/pts repoints ptmx.
+    On a standard host the host's devpts is ptmxmode=000 and its ptmx is owned by
+    real root, unmapped in the sandbox's userns, so openpty() fails for
+    everything inside — including imp's own pty tests, which are can_pty()-gated
+    and would SKIP rather than fail.
+
+    NESTED (inside imp's own sandbox, where the gates run) this test cannot see
+    that regression: the /dev/pts a nested bwrap binds is already bwrap's
+    permissive ptmxmode=666 instance, so ptmx stays openable and this stays
+    green. The argv assertion is what bites there."""
+    root = _make_root()
+    prog = "import pty, os\nm, s = pty.openpty()\nprint('PTY=' + os.ttyname(s))\n"
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        result = _bash(ctx, f"{shlex.quote(sys.executable)} -c {shlex.quote(prog)}")
+        assert result["returncode"] == 0, result
+        assert "PTY=/dev/pts/" in str(result["stdout"]), result
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
+    """AC 10: nsenter faithfully re-raises the child's terminating signal on
+    itself, so a joined session's returncode keeps the negative-signal shape the
+    providers' tool_killed detection reads — never 128+n, never nsenter's own."""
+    root = _make_root()
+    cases = [
+        ("import sys; sys.exit(7)", 7),
+        ("import os, signal; os.kill(os.getpid(), signal.SIGKILL)", -9),
+        ("import os, signal; os.kill(os.getpid(), signal.SIGTERM)", -15),
+    ]
+    try:
+        ns = SandboxNamespace.open(policy=_active_policy(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            for prog, expected in cases:
+                spawn = ns.join_exec([sys.executable, "-c", prog],
+                                     cwd=str(root), engine_env={})
+                with TerminalSession(spawn.argv, cwd=None, env=spawn.env,
+                                     pass_fds=spawn.pass_fds) as s:
+                    assert s.run_to_completion(hard=30.0) == expected, prog
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# The pty session, joined: a driven program is confined exactly as bash is
+# ---------------------------------------------------------------------------
+
+_SECRET = "REAL-SECRET-CONTENTS-12345"
+
+
+def _joined_driver(ctx: ToolContext) -> ImptyDriver:
+    """A driver wired to ctx's sandbox, with the hook's verdict CHECKED. Every arm
+    below either compares a joined session against an unjoined one or asserts a
+    denial; a hook that silently declined would turn the joined side into a second
+    bare run and BOTH shapes would then pass vacuously."""
+    hook = make_impty_sandbox_hook(ctx)
+
+    def checked(argv, cwd, env):
+        plan = hook(argv, cwd, env)
+        assert plan is not None and plan.argv[0] == "nsenter", plan
+        return plan
+
+    return ImptyDriver(sandbox=checked)
+
+
+def _drive_joined(ctx: ToolContext, body: Callable[[ImptyDriver], str]) -> str:
+    """Run `body` against a joined driver the way a provider does: the hook is
+    built ON the run's loop (it captures it) and every driver call is offloaded to
+    a worker thread, which is the only shape the loop-affine acquisition supports."""
+    async def _main() -> str:
+        driver = _joined_driver(ctx)
+        try:
+            return await asyncio.to_thread(lambda: body(driver))
+        finally:
+            await asyncio.to_thread(driver.close)
+
+    return asyncio.run(_main())
+
+
+def _drive_bare(body: Callable[[ImptyDriver], str]) -> str:
+    """The same program with NO hook — the unjoined baseline the joined arms are
+    measured against, and the control that proves confinement rather than a spawn
+    so broken it fails at everything."""
+    driver = ImptyDriver()
+    try:
+        return body(driver)
+    finally:
+        driver.close()
+
+
+def _await_screen(driver: ImptyDriver, text: str) -> None:
+    """Poll the rendered screen for `text` — the actual signal rather than a fixed
+    sleep, on the shared generous budget that cannot false-fire under a saturated
+    -n auto run; the per-test outer mark stays the single hang-catcher."""
+    _poll(lambda: text in driver.view(), what=f"{text!r} on the screen")
+
+
+_PEEK = (
+    "import os, sys\n"
+    "d = sys.argv[1]\n"
+    "print('LEFT=' + repr(sorted(os.listdir(d))))\n"
+    "try:\n"
+    "    print('READ=' + open(os.path.join(d, 'flag.txt')).read().strip())\n"
+    "except OSError as exc:\n"
+    "    print('READ-DENIED', exc.errno)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_session_cannot_read_a_masked_secret() -> None:
+    """AC 1(a)/(c): a program driven on a pty is confined exactly as a bash call
+    is — the --tmpfs mask is in ITS mount view, not the host's. The hook-less arm
+    is the control: it reads the real contents, so a green joined arm cannot be a
+    broken spawn wearing confinement's clothes."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text(_SECRET + "\n")
+    argv = [sys.executable, "-c", _PEEK, str(masked)]
+    try:
+        ctx = _ctx(root, _active_policy(root, secret_dirs=(str(masked),)))
+        joined = _drive_joined(ctx, lambda d: d.start(argv))
+        assert "LEFT=[]" in joined, joined              # the empty tmpfs mask
+        assert "READ-DENIED 2" in joined, joined        # ENOENT, not a stray error
+        assert _SECRET not in joined
+        bare = _drive_bare(lambda d: d.start(argv))
+        assert "LEFT=['flag.txt']" in bare, bare
+        assert f"READ={_SECRET}" in bare, bare
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_WRITE_PROBE = (
+    "import sys\n"
+    "try:\n"
+    "    open(sys.argv[1], 'w').write('WROTE')\n"
+    "    print('WRITE-OK')\n"
+    "except OSError as exc:\n"
+    "    print('WRITE-DENIED', exc.errno)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_session_cannot_write_outside_the_writable_set() -> None:
+    """AC 1(b), on the spec's own motivating example: today `start(["git",
+    "commit", ...])` in the main checkout is not stopped by the read-only
+    .git/index bind the policy applies to every bash call. The target is
+    host-WRITABLE, so the unjoined control really does land the write — a /etc
+    probe would fail unsandboxed too and prove nothing."""
+    root = _make_root()
+    try:
+        policy = _active_policy(root)
+        index = root / ".git" / "index"          # _active_policy created .git
+        index.write_text("IDX")
+        policy = dataclasses.replace(policy, git_ro_remask=(str(index),))
+        argv = [sys.executable, "-c", _WRITE_PROBE, str(index)]
+        ctx = _ctx(root, policy)
+        joined = _drive_joined(ctx, lambda d: d.start(argv))
+        assert "WRITE-DENIED 30" in joined, joined      # EROFS
+        assert index.read_text() == "IDX"               # untouched on the host
+        bare = _drive_bare(lambda d: d.start(argv))
+        assert "WRITE-OK" in bare, bare
+        assert index.read_text() == "WROTE"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_sandbox_off_spawns_the_pty_bare_and_unconfined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 5(a): with the coordinator unsandboxed the adapter declines and the
+    driver spawns the caller's own argv — asserted on the argv the session was
+    actually built with, not merely on the hook's return, plus the masked path
+    being readable, which is what /sandbox off is FOR."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text(_SECRET + "\n")
+    argv = [sys.executable, "-c", _PEEK, str(masked)]
+    seen: list[list[str]] = []
+    real_init = TerminalSession.__init__
+
+    def spy(self, spawn_argv, **kwargs):
+        seen.append(list(spawn_argv))
+        real_init(self, spawn_argv, **kwargs)
+
+    monkeypatch.setattr(TerminalSession, "__init__", spy)
+    try:
+        ctx = _ctx(root, _active_policy(root, secret_dirs=(str(masked),)))
+        ctx.coordinator = SimpleNamespace(unsandboxed=True, should_pause=False)
+
+        async def _main() -> str:
+            driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+            try:
+                return await asyncio.to_thread(lambda: driver.start(argv))
+            finally:
+                await asyncio.to_thread(driver.close)
+
+        screen = asyncio.run(_main())
+        assert seen == [argv], seen             # the caller's argv, verbatim
+        assert "nsenter" not in " ".join(seen[0])
+        assert f"READ={_SECRET}" in screen, screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_toggling_the_sandbox_back_on_rejoins_the_very_same_namespace() -> None:
+    """AC 5(b): /sandbox off changes the EFFECTIVE policy, never
+    ctx.base_sandbox_policy, and the rebuild rule keys on that base value — so
+    toggling back on must find the same keeper object rather than build a second
+    one, stranding every process the first still holds."""
+    root = _make_root()
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        ctx.coordinator = SimpleNamespace(unsandboxed=False, should_pause=False)
+        hook = make_impty_sandbox_hook(ctx)
+        assert await asyncio.to_thread(lambda: hook(["true"], None, None)) is not None
+        before = ctx.sandbox_ns
+        assert before is not None
+        ctx.coordinator.unsandboxed = True
+        assert await asyncio.to_thread(lambda: hook(["true"], None, None)) is None
+        assert ctx.sandbox_ns is before      # declining tears down nothing
+        ctx.coordinator.unsandboxed = False
+        assert await asyncio.to_thread(lambda: hook(["true"], None, None)) is not None
+        assert ctx.sandbox_ns is before      # rejoined, not rebuilt
+
+    try:
+        asyncio.run(_main())
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_SLEEPER = "import time\nprint('PTY-READY', flush=True)\ntime.sleep(300)\n"
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_teardown_closes_the_pty_session_before_the_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 8(b): ORDER, not end state. Killing pid 1 of the pid namespace first
+    would leave the driver holding a dead child and a corpse screen that still
+    renders — today claude_code tears down in exactly that order."""
+    root = _make_root()
+    order: list[str] = []
+    real_ns_close = SandboxNamespace.close
+
+    def spy_ns_close(self: SandboxNamespace) -> None:
+        order.append("namespace")
+        real_ns_close(self)
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        real_driver_close = driver.close
+
+        def spy_driver_close() -> None:
+            order.append("session")
+            real_driver_close()
+
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER]))
+        assert "PTY-READY" in screen, screen
+        # Spied AFTER the start, so only the teardown's closes are recorded.
+        monkeypatch.setattr(driver, "close", spy_driver_close)
+        monkeypatch.setattr(SandboxNamespace, "close", spy_ns_close)
+        await teardown_tool_context(ctx)
+
+    try:
+        asyncio.run(_main())
+        assert order == ["session", "namespace"], order
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_namespace_rebuild_closes_the_pty_session_before_the_stale_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 9(a): create_and_enter_worktree reassigns base_sandbox_policy, and the
+    rebuild branch deliberately does NOT route through close_sandbox_namespace —
+    it vacates the slot and closes the object it captured, inline. A single seam
+    at the end-of-run site would leave THIS path tearing a namespace down under a
+    live session."""
+    root = _make_root()
+    other = _make_root()
+    order: list[str] = []
+    real_ns_close = SandboxNamespace.close
+
+    def spy_ns_close(self: SandboxNamespace) -> None:
+        order.append("namespace")
+        real_ns_close(self)
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        real_driver_close = driver.close
+
+        def spy_driver_close() -> None:
+            order.append("session")
+            real_driver_close()
+
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER]))
+        assert "PTY-READY" in screen, screen
+        first = ctx.sandbox_ns
+        monkeypatch.setattr(driver, "close", spy_driver_close)
+        monkeypatch.setattr(SandboxNamespace, "close", spy_ns_close)
+        ctx.base_sandbox_policy = dataclasses.replace(
+            ctx.base_sandbox_policy, worktree=str(other))
+        second = await ensure_tool_namespace(ctx, engine_env={},
+                                             on_retry=lambda _n, _d: None)
+        assert second is not first          # the branch really was taken
+        # Deliberately NO trailing driver.close(): the rebuild branch already
+        # closed the session, so the only way "session" can reach `order` is if
+        # that branch put it there. A courtesy close would route through the same
+        # spy, append a third entry, AND hollow out the oracle.
+
+    try:
+        asyncio.run(_main())
+        assert order == ["session", "namespace"], order
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(other, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_after_a_rebuild_the_driver_reports_no_session_and_rejoins_the_new_one() -> None:
+    """AC 9(b): the agent gets the ordinary no-session answer rather than a screen
+    from a namespace that no longer exists, and a fresh start on the SAME driver
+    lands in the new namespace — proven by a bash call through the same context
+    seeing it, which is only true if both are in one pid namespace."""
+    root = _make_root()
+    other = _make_root()
+    marker = f"PTY-REBOUND-{uuid.uuid4().hex[:8]}"
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER]))
+        ctx.base_sandbox_policy = dataclasses.replace(
+            ctx.base_sandbox_policy, worktree=str(other))
+        await ensure_tool_namespace(ctx, engine_env={},
+                                    on_retry=lambda _n, _d: None)
+        with pytest.raises(RuntimeError, match="no session"):
+            await asyncio.to_thread(driver.view)
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER, marker]))
+        assert "PTY-READY" in screen, screen
+        found = json.loads(await get_registry()["bash"].async_invoke(
+            ctx, {"command": f"pgrep -f {marker}"}))
+        assert found["returncode"] == 0, found
+        await asyncio.to_thread(driver.close)
+
+    try:
+        asyncio.run(_main())
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(other, ignore_errors=True)
+
+
+_SPAWNS_A_GRANDCHILD = (
+    "import subprocess, sys, time\n"
+    "subprocess.Popen(['setsid', 'sh', '-c',\n"
+    "                  'while :; do sleep 5; done', sys.argv[1] + '-GC'])\n"
+    "print('PTY-READY', flush=True)\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_teardown_reaps_a_setsid_grandchild_of_a_pty_program() -> None:
+    """AC 8(a): TerminalSession.close() deliberately does not chase grandchildren
+    (that contract is unchanged), so today a setsid'd one leaks to the host for
+    good — the same stray class the keeper exists to prevent. It is the NAMESPACE
+    close that ends it, which is why the two closes must both happen and in this
+    order. The grandchild carries its own `-GC` marker so 'still alive after the
+    session close' names IT and not the dying pty program."""
+    root = _make_root()
+    marker = f"PTY-STRAY-{uuid.uuid4().hex[:8]}"
+    gc_marker = f"{marker}-GC"
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SPAWNS_A_GRANDCHILD, marker]))
+        assert "PTY-READY" in screen, screen
+        _poll(lambda: bool(_host_pids(gc_marker)), what="the setsid grandchild")
+        await asyncio.to_thread(driver.close)
+        # The session close alone leaves it — without this the test could pass on
+        # a teardown that never needed the namespace at all.
+        assert _host_pids(gc_marker), "the session close reaped it; nothing is proven"
+        await teardown_tool_context(ctx)
+        _poll(lambda: not _host_pids(gc_marker),
+              what="the setsid grandchild dying with the namespace")
+
+    try:
+        asyncio.run(_main())
+    finally:
+        for pid in _host_pids(gc_marker):
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid), signal.SIGKILL)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_COOKED = "import time\nprint('COOKED-READY', flush=True)\ntime.sleep(300)\n"
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_ctrl_c_terminates_a_joined_cooked_mode_program_by_sigint() -> None:
+    """AC 2(a): sessions and cttys are not namespaced, so the controlling terminal
+    is inherited across nsenter's fork and the preexec TIOCSCTTY still lands. A
+    \x03 through the line discipline is therefore a REAL SIGINT, with the same
+    status the unjoined baseline reports.
+
+    The death is POLLED, not given a fixed window: a fixed settle that overran
+    under a saturated -n auto run would let stop()'s graceful rung SIGTERM a still
+    live child, and the test would report `[stopped: exit=SIGTERM]` — a symptom
+    that reads like a send_signal regression rather than the timing miss it is."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _COOKED]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv)
+        _await_screen(d, "COOKED-READY")
+        d.send("\x03", wait=False)
+        _poll(lambda: "alive=False" in d.view(),
+              what="the cooked-mode program dying of the tty's SIGINT")
+        return d.stop()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        joined = _drive_joined(ctx, _drive)
+        bare = _drive_bare(_drive)
+        assert joined.splitlines()[0] == "[stopped: exit=SIGINT]", joined
+        assert bare.splitlines()[0] == "[stopped: exit=SIGINT]", bare
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_REPORTS_SIZE = (
+    "import os, signal, time\n"
+    "def show(*_):\n"
+    "    s = os.get_terminal_size(0)\n"
+    "    os.write(1, f'SIZE={s.columns}x{s.lines}\\r\\n'.encode())\n"
+    "signal.signal(signal.SIGWINCH, show)\n"
+    "show()\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_reflows_a_joined_program_on_sigwinch() -> None:
+    """AC 2(b): the pty is imp's, on the host, and the program holds it across the
+    join — so a TIOCSWINSZ reaches it as a real SIGWINCH and it reports the new
+    size, exactly as unjoined. Reflow is the whole point of cols/rows."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _REPORTS_SIZE]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv, cols=80, rows=24)
+        _await_screen(d, "SIZE=80x24")
+        d.resize(30, 100)
+        _await_screen(d, "SIZE=100x30")
+        screen = d.view()
+        d.stop()
+        return screen
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        for screen in (_drive_joined(ctx, _drive), _drive_bare(_drive)):
+            assert "SIZE=80x24" in screen, screen     # the pre-resize report
+            assert "SIZE=100x30" in screen, screen    # and the reflowed one
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_ALT_SCREEN = (
+    "import sys, time\n"
+    "sys.stdout.write('\\x1b[?1049h\\x1b[H\\x1b[2J')\n"
+    "sys.stdout.write('ALT-LINE-ONE\\r\\n  ALT-LINE-TWO')\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_an_alt_screen_program_renders_identically_joined_and_unjoined() -> None:
+    """AC 2(c): lines(), the alt-screen state and the regime — all three carried by
+    the driver's own header — must not shift because the program was joined, or a
+    joined session would be a different thing to look at than the one the agent's
+    skill describes. Measured byte-identical on this host."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _ALT_SCREEN]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv)
+        _await_screen(d, "ALT-LINE-TWO")
+        screen = d.view()
+        d.stop()
+        return screen
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        joined = _drive_joined(ctx, _drive)
+        bare = _drive_bare(_drive)
+        # Positive first: the program really is on the alt screen, so an equality
+        # between two SCROLL-regime screens cannot pass for this.
+        assert "regime=screen" in joined, joined
+        assert "ALT-LINE-ONE" in joined
+        assert joined == bare
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_FG_JOB = (
+    "import os, signal, sys, time\n"
+    "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+    "os.write(1, b'JOB-READY\\r\\n')\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not installed")
+def test_send_signal_hits_the_foreground_job_in_a_joined_shell() -> None:
+    """AC 3(a) joined: os.tcgetpgrp(master) names the inner program's REAL host
+    pgid, so the signal reaches the job rather than nsenter. Aimed at the child's
+    own group it would instead kill the ctty holder and the payload would die of
+    a collateral SIGHUP — which is why send_signal had to be retargeted at all."""
+    root = _make_root()
+    job = root / "job.py"
+    job.write_text(_FG_JOB)
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(["bash", "--norc", "--noprofile", "-i"])
+        d.wait(idle=0.2, hard=30.0)            # let bash paint a prompt first
+        d.send(f"{sys.executable} {job}\r")
+        _await_screen(d, "JOB-READY")
+        d.send_signal(signal.SIGINT)
+        # The marker must NOT be typeable, or bash's echo of the command line
+        # would satisfy the poll on its own: the shell computes STILL-42 from 6*7.
+        d.send("echo STILL-$((6*7))\r")
+        _await_screen(d, "STILL-42")
+        return d.view()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        for screen in (_drive_joined(ctx, _drive), _drive_bare(_drive)):
+            assert "alive=True" in screen, screen    # the shell survived the signal
+            assert "STILL-42" in screen, screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_IGNORES_SIGTERM_JOB = (
+    "import os, signal, time\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+    "os.write(1, b'JOB2-READY\\r\\n')\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not installed")
+def test_close_reaps_the_joined_direct_child_under_a_shells_job_control() -> None:
+    """AC 3(c) joined: the ladder stays aimed at the DIRECT child's group, which
+    joined is nsenter's — and nsenter is a session leader whose pgid is its pid, so
+    the group always contains _proc and close()'s unbounded wait() always returns.
+    Aimed at the terminal's foreground group both rungs would land on the job,
+    bash would stay alive, and this test would hang to its outer timeout instead of
+    reporting a status.
+
+    The status differs from the unjoined arm (plan 1 measured -SIGKILL there) and
+    that is inherent: unjoined the direct child IS the interactive bash, which
+    ignores SIGTERM, so only the hard rung reaps it; joined the direct child is
+    nsenter, which does not, so the GRACEFUL rung ends it. Measured: 0.0s to
+    return, exit=SIGTERM."""
+    root = _make_root()
+    job = root / "job2.py"
+    job.write_text(_IGNORES_SIGTERM_JOB)
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(["bash", "--norc", "--noprofile", "-i"])
+        d.wait(idle=0.2, hard=30.0)
+        d.send(f"{sys.executable} {job}\r")
+        _await_screen(d, "JOB2-READY")
+        return d.stop()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        stopped = _drive_joined(ctx, _drive)
+        assert stopped.splitlines()[0] == "[stopped: exit=SIGTERM]", stopped
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_program_shares_the_process_table_with_bash() -> None:
+    """AC 4: one namespace, one process table — the mental-model fix the shared
+    keeper exists to deliver. A program left running on the pty is visible to a
+    bash call in the SAME run and killable there by its namespace-local pid."""
+    root = _make_root()
+    marker = f"PTY-VISIBLE-{uuid.uuid4().hex[:8]}"
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = _joined_driver(ctx)
+        try:
+            screen = await asyncio.to_thread(
+                lambda: driver.start([sys.executable, "-c", _SLEEPER, marker]))
+            assert "PTY-READY" in screen, screen
+            found = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": f"pgrep -f {marker}"}))
+            assert found["returncode"] == 0, found
+            pid = found["stdout"].split()[0]
+            killed = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": f"kill -9 {pid}"}))
+            assert killed["returncode"] == 0, killed
+            # Poll the SESSION: the driver noticing its child died is the
+            # observable consequence a namespace-local kill is supposed to have.
+            _poll(lambda: "alive=False" in driver.view(),
+                  what="the pty program dying from a bash-side kill")
+        finally:
+            await asyncio.to_thread(driver.close)
+
+    try:
+        asyncio.run(_main())
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_env_overlays_the_joined_child_env() -> None:
+    """AC 11 joined: `env` ADDS to the sandbox's curated child env. Replacing it —
+    today's behavior at the driver — would drop PATH, HOME and the IMP_* the
+    sandbox contract depends on the moment an agent set one API key. HOME must be
+    the POLICY's, which is what proves the overlay sat on the child env rather
+    than on os.environ.
+
+    The CHILD compares HOME and prints a verdict, rather than the test matching
+    the path on the screen: the screen is 80 columns and the pty hard-wraps, so a
+    long TMPDIR (imp's own sandbox uses one — /tmp/imp-<uid>/<quest>/…) splits the
+    path mid-token and a substring assertion fails on exactly the host the gates
+    run on. The verdict line is short on every host, and it is a stronger check
+    besides — an equality, not a prefix match."""
+    root = _make_root()
+    prog = (
+        "import os, sys\n"
+        "print('FOO=' + os.environ.get('FOO', '<none>'),\n"
+        "      'PATH?' + str(bool(os.environ.get('PATH'))),\n"
+        "      'HOME-IS-POLICY?' + str(os.environ.get('HOME') == sys.argv[1]))\n"
+    )
+    argv = [sys.executable, "-c", prog, str(root / "home")]
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        screen = _drive_joined(ctx, lambda d: d.start(argv, env={"FOO": "1"}))
+        assert "FOO=1 PATH?True HOME-IS-POLICY?True" in screen, screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)

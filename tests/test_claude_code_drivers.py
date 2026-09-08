@@ -89,8 +89,11 @@ async def test_run_closes_the_impty_session_in_teardown(
     closed: list[bool] = []
 
     class _SpyDriver:
-        def __init__(self) -> None:
+        # Mirrors ImptyDriver's real signature: the provider builds it through
+        # attach_impty_driver, which passes the run's sandbox hook.
+        def __init__(self, sandbox: Any = None) -> None:
             self._closed = False
+            self._sandbox = sandbox
 
         def tool_methods(self) -> list[Any]:
             return []  # no impty tools needed for the teardown assertion
@@ -113,5 +116,8 @@ async def test_run_closes_the_impty_session_in_teardown(
     async for _ in runner.run(_inv(tmp_path, frozenset({"impty"}))):
         pass
     # The per-run driver session is closed in run()'s finally regardless of how
-    # the turn ended.
-    assert closed == [True]
+    # the turn ended. TWICE now, and both are wanted: teardown_tool_context ends
+    # the session before it kills the namespace the pty lives in, and run()'s own
+    # finally still closes the driver. The real ImptyDriver.close() clears only
+    # its session, so the second call is a no-op.
+    assert closed == [True, True]

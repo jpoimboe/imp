@@ -218,10 +218,16 @@ async def test_codex_teardown_closes_impty_session(
     with (
         patch("imp.providers.codex_runner.start_impty_server",
               new=_fake_start_impty),
+        # sandbox=: the provider builds the driver through attach_impty_driver,
+        # which passes the run's sandbox hook.
         patch("impty.driver.ImptyDriver",
-              new=lambda: fake_driver),
+              new=lambda sandbox=None: fake_driver),
     ):
         [ev async for ev in runner.run(inv)]
 
     assert shutdown_calls == [1], "impty_handle.shutdown() must be called in teardown"
-    assert close_calls == [1], "impty_driver.close() must be called in teardown"
+    # Twice, and both are wanted: run()'s own finally closes the driver, and
+    # teardown_tool_context ends the session before killing the namespace the pty
+    # lives in. The real ImptyDriver.close() clears only its session, so whichever
+    # lands second is a no-op.
+    assert close_calls == [1, 1], "impty_driver.close() must be called in teardown"

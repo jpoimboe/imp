@@ -14,10 +14,12 @@ reads); each in-process host offloads them to a thread, and this layer clamps
 from __future__ import annotations
 
 import codecs
+import os
 import re
 import signal
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 
 from impty import TerminalSession
 from impty.session import (
@@ -71,11 +73,33 @@ def _fixed_settle(wait: float) -> tuple[float, str]:
     return settle, f"[waited {settle:g}s call cap ({requested:g}s requested)]\n"
 
 
-class ImptyDriver:
-    """One lazy `TerminalSession` at a time. `start` refuses to replace a live one."""
+@dataclass(frozen=True, slots=True)
+class PtySpawn:
+    """An embedding host's replacement for the spawn `start()` would have made
+    itself: the argv to exec, the child environment as-is, and the fds that must
+    survive the fork. The cwd is the host's to resolve and rides inside `argv`."""
 
-    def __init__(self) -> None:
+    argv: list[str]
+    env: dict[str, str]
+    pass_fds: tuple[int, ...] = ()
+
+
+SandboxHook = Callable[
+    [Sequence[str], str | None, Mapping[str, str] | None], PtySpawn | None
+]
+
+
+class ImptyDriver:
+    """One lazy `TerminalSession` at a time. `start` refuses to replace a live one.
+
+    `sandbox`, when given, is consulted on every `start()` with the requested
+    (argv, cwd, env): a returned `PtySpawn` replaces the spawn wholesale, and `None`
+    spawns bare. impty imports nothing from the embedding host — the sandbox arrives
+    as this callable or not at all."""
+
+    def __init__(self, sandbox: SandboxHook | None = None) -> None:
         self._session: TerminalSession | None = None
+        self._sandbox = sandbox
 
     def _require(self) -> TerminalSession:
         if self._session is None:
@@ -118,18 +142,37 @@ class ImptyDriver:
         foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shell
         wrapper is needed; pass `env` to set variables (e.g. API keys) instead of a
         `bash -lc "export …; exec …"` wrapper, which would otherwise put bash — not
-        your program — in the foreground group. `env`, when given, REPLACES the
-        inherited environment (TERM is still defaulted); merge with the parent env
-        yourself if you want to extend it. `cols`/`rows` set the terminal size (a
-        real test parameter — programs reflow by width). Waits for the program to
-        settle before returning, so the returned screen is the first thing to react to.
+        your program — in the foreground group.
+
+        `env` entries are ADDED to the base environment, overriding same-named ones
+        (TERM is still defaulted). With a sandbox hook installed by the embedding
+        host the program is spawned inside that sandbox and `cwd` is resolved in ITS
+        mount namespace; with no hook it runs bare.
+
+        `cols`/`rows` set the terminal size (a real test parameter — programs reflow
+        by width). Waits for the program to settle before returning, so the returned
+        screen is the first thing to react to.
         """
         if self._session is not None:
             if self._session.is_alive():
                 raise RuntimeError("session already running — call stop() first")
             self._session.close()
             self._session = None
-        session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
+        plan = None if self._sandbox is None else self._sandbox(argv, cwd, env)
+        if plan is None:
+            # The merge belongs HERE, never inside TerminalSession: a session that
+            # unioned os.environ under whatever it was handed would pour the host
+            # environment into a sandboxing host's curated child env.
+            session = TerminalSession(
+                argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
+            )
+        else:
+            # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
+            # namespace, so a plan's cwd rides inside plan.argv instead.
+            session = TerminalSession(
+                plan.argv, cwd=None, cols=cols, rows=rows,
+                env=plan.env, pass_fds=plan.pass_fds,
+            )
         try:
             session.wait_idle()  # inherit the library settle policy
         except BaseException:
@@ -194,17 +237,18 @@ class ImptyDriver:
         return f"{note}{self._render(session)}"
 
     def send_signal(self, sig: int = signal.SIGINT) -> str:
-        """Deliver a real signal to the program's process group, then return the new
-        screen. The mode-INDEPENDENT interrupt: unlike `send("\\x03")` — which only
-        becomes a SIGINT when the tty's line discipline has ISIG on (cooked/cbreak)
-        and is just a raw byte at a prompt_toolkit prompt — this bypasses the tty
-        entirely. Use it when you want a deterministic Ctrl-C regardless of tty mode,
-        instead of scraping the pid and shelling out to `kill`.
+        """Deliver a real signal to the terminal's foreground process group, then
+        return the new screen. The mode-INDEPENDENT interrupt: unlike `send("\\x03")`
+        — which only becomes a SIGINT when the tty's line discipline has ISIG on
+        (cooked/cbreak) and is just a raw byte at a prompt_toolkit prompt — this
+        bypasses the tty entirely. Use it when you want a deterministic Ctrl-C
+        regardless of tty mode, instead of scraping the pid and shelling out to `kill`.
 
-        `sig` is the signal number: SIGINT=2 (Ctrl-C, default), SIGTERM=15. Reaches
-        only the child's process group — a grandchild that `setsid()`'d into its own
-        session is not signalled, exactly like a real Ctrl-C. A no-op once the child
-        has exited.
+        `sig` is the signal number: SIGINT=2 (Ctrl-C, default), SIGTERM=15. It reaches
+        exactly what a real Ctrl-C would — the group the terminal holds in the
+        foreground — so in a shell it hits the running job rather than the shell, and a
+        grandchild that `setsid()`'d into its own session is not signalled. A no-op
+        once the child has exited.
         """
         session = self._require()
         # Same type-then-look boundary as send(): settle on the signal's reaction
@@ -316,7 +360,6 @@ class ImptyDriver:
         near-white surface instead — use it to preview an app's *light* theme, which
         tunes its accents for a pale background and so reads wrong on the dark default.
         """
-        import os
         import tempfile
 
         from impty.render import light_surface, render_screen

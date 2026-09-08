@@ -1,21 +1,25 @@
 # tests/test_tool_context.py
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
 
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools import context as ctx_mod
+from imp.agents.tools.context import ToolContext, make_impty_sandbox_hook
 from imp.agents.tools.errors import PermissionDenied
-from imp.engine.sandbox import SandboxPolicy
+from imp.engine.sandbox import SandboxOpenFailed, SandboxPolicy, SandboxSpawn
 from imp.paths import project_state_dir
 from tests.conftest import _pid_gone_or_zombie
 
@@ -745,3 +749,336 @@ def test_the_conftest_owner_closes_a_registered_contexts_keeper(tmp_path: Path) 
     assert closed == ["closed"]
     assert ctx.sandbox_ns is None
     assert not gone.exists()                # no tombstone write, no resurrected tree
+
+
+# ---------------------------------------------------------------------------
+# The ToolContext -> SandboxHook adapter an ImptyDriver spawns through
+# ---------------------------------------------------------------------------
+
+
+class _FakeNamespace:
+    """Stands in for the run's keeper: join_exec's real signature and a
+    recognisable argv/env/pass_fds triple. No bwrap host, and no keeper to leak —
+    what is under test here is the adapter's composition, not the join's shape
+    (tests/test_sandbox_namespace.py owns that)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], str]] = []
+
+    def join_exec(self, argv, *, cwd, engine_env):
+        self.calls.append((list(argv), cwd))
+        return SandboxSpawn(
+            argv=["nsenter", f"--wdns={cwd}", "--", *argv],
+            env={"PATH": "/sandbox/bin", "HOME": "/sandbox/home", **dict(engine_env)},
+            pass_fds=(7, 9))
+
+
+def _stub_ensure_namespace(monkeypatch: pytest.MonkeyPatch, ns: object,
+                           *, fail: str | None = None) -> list[dict[str, object]]:
+    """Replace the real (keeper-opening) acquisition with a recorder, and return
+    the call list so a test can assert WHAT the adapter asked for and ON WHICH
+    THREAD it was answered."""
+    seen: list[dict[str, object]] = []
+
+    async def _fake(ctx, *, engine_env, on_retry):
+        seen.append({"engine_env": dict(engine_env),
+                     "thread": threading.current_thread()})
+        if fail is not None:
+            raise SandboxOpenFailed(fail)
+        return ns
+
+    monkeypatch.setattr(ctx_mod, "ensure_tool_namespace", _fake)
+    return seen
+
+
+def _hook_from_worker(ctx: ToolContext, argv: list[str], cwd: str | None = None,
+                      env: dict[str, str] | None = None):
+    """Production's shape: the hook is built ON the loop (both providers build it
+    in _enter) and called from a worker thread (both offload every driver call
+    through asyncio.to_thread)."""
+    async def _main():
+        hook = make_impty_sandbox_hook(ctx)
+        return await asyncio.to_thread(lambda: hook(argv, cwd, env))
+
+    return asyncio.run(_main())
+
+
+def test_the_impty_hook_declines_while_the_session_is_unsandboxed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # /sandbox off is expressed ONLY by the hook declining — no flag, no driver
+    # state — and the EFFECTIVE policy is read per call, so a mid-run toggle is
+    # honored by the next start() with nothing to remember.
+    ns = _FakeNamespace()
+    seen = _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    ctx.coordinator = SimpleNamespace(unsandboxed=True, should_pause=False)
+    assert _hook_from_worker(ctx, ["true"]) is None
+    # No policy at all (sandbox disabled by config) declines by the same branch.
+    ctx.coordinator = None
+    ctx.base_sandbox_policy = None
+    assert _hook_from_worker(ctx, ["true"]) is None
+    # Declining must cost NOTHING: a bare spawn opens no keeper. Asserted, because
+    # reading the policy after acquiring the namespace would look identical from
+    # the driver's side and pay a keeper open per /sandbox off call.
+    assert seen == []
+    assert ns.calls == []
+
+
+def test_the_impty_hook_plans_a_join_exec_with_the_cwd_and_an_env_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ns = _FakeNamespace()
+    _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    plan = _hook_from_worker(ctx, ["vim", "notes.txt"], None, {"API_KEY": "k"})
+    assert plan is not None
+    # The JOIN's argv, with the caller's exec'd at the tail — not the caller's
+    # argv with a cwd hung off it.
+    assert plan.argv[:2] == ["nsenter", f"--wdns={tmp_path}"]
+    assert plan.argv[-2:] == ["vim", "notes.txt"]
+    assert plan.pass_fds == (7, 9)
+    # An overlay ON the curated child env, never a replacement: one variable must
+    # not drop PATH, HOME and the IMP_* the sandbox contract depends on.
+    assert plan.env["API_KEY"] == "k"
+    assert plan.env["PATH"] == "/sandbox/bin"
+    assert plan.env["HOME"] == "/sandbox/home"
+    # cwd=None resolves to the project root, and it is join_exec that resolves it —
+    # in the namespace's mount view, where Popen's cwd= and --wd= do not.
+    assert ns.calls == [(["vim", "notes.txt"], str(tmp_path))]
+    _hook_from_worker(ctx, ["true"], str(tmp_path / "sub"))
+    assert ns.calls[-1] == (["true"], str(tmp_path / "sub"))
+
+
+def test_the_impty_hook_asks_for_the_same_engine_env_bash_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Both paths must present the namespace IDENTICAL inputs, or a pty program
+    # would land in a keeper built from a different picture than the run's shell
+    # commands. The LIVE quest wins over the frozen snapshot, exactly as in bash,
+    # so a mid-run rename_quest reaches the next pty spawn too.
+    from imp.agents.runner import QuestContext
+
+    ns = _FakeNamespace()
+    seen = _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    ctx.quest_context = QuestContext(id="frozen", title="Before the rename",
+                                     project_root=tmp_path,
+                                     workflow_dir=tmp_path / ".imp" / "wf")
+    ctx.quest = SimpleNamespace(id="live01", title="Renamed quest",
+                                quest_dir=tmp_path / ".imp" / "quests" / "live01")
+    plan = _hook_from_worker(ctx, ["true"])
+    eng = seen[0]["engine_env"]
+    assert eng["IMP_QUEST_ID"] == "live01"
+    assert eng["IMP_QUEST_TITLE"] == "Renamed quest"
+    assert eng["IMP_QUEST_DIR"] == str(tmp_path / ".imp" / "quests" / "live01")
+    assert eng["IMP_PROJECT_ROOT"] == str(tmp_path)
+    # The same live values are handed to join_exec, so the CHILD env carries them
+    # too — asking for one env and spawning with another would be silent.
+    assert plan is not None
+    assert plan.env["IMP_QUEST_TITLE"] == "Renamed quest"
+
+
+def test_the_impty_hook_opens_the_namespace_on_the_runs_own_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # open() passes --die-with-parent, a PR_SET_PDEATHSIG the kernel fires when
+    # the CREATING THREAD exits: a keeper opened on a pool worker dies the moment
+    # that worker retires, taking the run's shell commands with it. The driver's
+    # calls ARE on pool workers, so the acquisition has to cross back to the loop.
+    ns = _FakeNamespace()
+    seen = _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    threads: dict[str, object] = {}
+
+    async def _main():
+        threads["loop"] = threading.current_thread()
+        hook = make_impty_sandbox_hook(ctx)
+
+        def _call():
+            threads["worker"] = threading.current_thread()
+            return hook(["true"], None, None)
+
+        return await asyncio.to_thread(_call)
+
+    assert asyncio.run(_main()) is not None
+    assert threads["worker"] is not threads["loop"]   # really called off-loop
+    assert seen[0]["thread"] is threads["loop"]       # ...and answered back on it
+
+
+def test_the_impty_hook_refuses_to_block_the_loop_it_would_wait_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Called ON the loop, blocking for that loop's own result is a permanent
+    # deadlock: the coroutine cannot start until the caller returns, and the
+    # caller is waiting for the coroutine. Fail loudly rather than hang a whole
+    # run to its outer timeout with no clue why.
+    _stub_ensure_namespace(monkeypatch, _FakeNamespace())
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    async def _main() -> None:
+        hook = make_impty_sandbox_hook(ctx)
+        with pytest.raises(AssertionError, match="worker thread"):
+            hook(["true"], None, None)
+
+    asyncio.run(_main())
+
+
+def test_a_failed_namespace_open_surfaces_as_the_terminal_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 12: impty never learns the sandbox's exception types — the adapter
+    # translates, and ImptyDriver.start's existing error surface carries the text
+    # to the agent. Nothing is spawned: there is no pty and no exit status to
+    # report, only why the program did not run.
+    import impty.driver as impty_driver_mod
+    from impty.driver import ImptyDriver
+
+    _stub_ensure_namespace(monkeypatch, _FakeNamespace(),
+                           fail="bwrap: execvp sleep: No such file or directory")
+    spawns: list[object] = []
+    monkeypatch.setattr(impty_driver_mod, "TerminalSession",
+                        lambda *a, **k: spawns.append((a, k)))
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    async def _main() -> str:
+        driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+        try:
+            await asyncio.to_thread(lambda: driver.start(["true"]))
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+        return "no error raised"
+
+    assert asyncio.run(_main()) == (
+        "RuntimeError: sandbox could not start the terminal session: "
+        "bwrap: execvp sleep: No such file or directory")
+    assert spawns == []
+
+
+def test_a_timed_out_namespace_acquire_surfaces_as_the_terminal_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A stalled loop (loop stopped before the future resolves) must not park the
+    # worker thread forever — the bounded wait must surface the same diagnostic.
+    from imp.agents.tools.context import _namespace_from_worker
+
+    monkeypatch.setattr(ctx_mod, "NAMESPACE_ACQUIRE_TIMEOUT_S", 0.1)
+
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    # A loop that is created but never run: coroutines scheduled on it never
+    # execute, so .result(timeout=...) will always time out.
+    idle_loop = asyncio.new_event_loop()
+    try:
+        eng: dict[str, str] = {}
+        error: list[Exception] = []
+
+        def _worker():
+            try:
+                _namespace_from_worker(ctx, idle_loop, eng, "true")
+            except Exception as exc:
+                error.append(exc)
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        # Poll until the worker finishes; generous outer budget to avoid flakes.
+        deadline = time.monotonic() + 10.0
+        while t.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not t.is_alive(), "worker thread did not finish within budget"
+    finally:
+        idle_loop.close()
+
+    assert len(error) == 1
+    assert str(error[0]).startswith("sandbox could not start the terminal session:")
+
+
+def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One call does both, so the broken pairing is unrepresentable: a driver
+    # hooked but not registered would outlive the namespace it spawns into, and a
+    # driver registered but not hooked would be closed at teardown for nothing.
+    from imp.agents.tools.context import attach_impty_driver, close_impty_session
+
+    ns = _FakeNamespace()
+    _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    closed: list[str] = []
+
+    async def _main() -> object:
+        driver = attach_impty_driver(ctx)
+        assert ctx.impty_driver is driver
+        # The hook is live: it plans a join rather than declining.
+        plan = await asyncio.to_thread(lambda: driver._sandbox(["true"], None, None))
+        assert plan is not None and plan.argv[0] == "nsenter"
+        monkeypatch.setattr(driver, "close", lambda: closed.append("closed"))
+        return driver
+
+    driver = asyncio.run(_main())
+    close_impty_session(ctx)
+    assert closed == ["closed"]
+    # The DRIVER survives its session: close() clears only the session, so a later
+    # start() opens one in whichever namespace is current.
+    assert ctx.impty_driver is driver
+
+
+def test_a_failing_pty_close_still_reaps_the_keeper(tmp_path: Path) -> None:
+    # The session close runs FIRST (the namespace must not die under a live pty),
+    # so an exception there sits directly in front of the keeper close. Both
+    # existing ImptyDriver.close() call sites are already guarded, and the
+    # providers suppress what this raises — so an unguarded call here would leak
+    # a live keeper silently for the rest of the run.
+    from imp.agents.tools.context import close_sandbox_namespace
+
+    closed: list[str] = []
+
+    class _Boom:
+        def close(self) -> None:
+            closed.append("session")
+            raise RuntimeError("teardown blew up")
+
+    class _NS:
+        def close(self) -> None:
+            closed.append("namespace")
+
+    ctx = _ctx(tmp_path)
+    ctx.impty_driver = _Boom()
+    ctx.sandbox_ns = _NS()
+    with pytest.raises(RuntimeError, match="teardown blew up"):
+        close_sandbox_namespace(ctx)
+    # Ordering intact, keeper reaped anyway, and the failure is NOT swallowed —
+    # suppressing it here would hide a real teardown bug behind a silent leak.
+    assert closed == ["session", "namespace"]
+    assert ctx.sandbox_ns is None
+
+
+def test_close_impty_session_is_a_no_op_without_a_driver(tmp_path: Path) -> None:
+    # Every non-impty run reaches both call sites with impty_driver None, and the
+    # conftest owner reaches close_sandbox_namespace for every registered context.
+    from imp.agents.tools.context import close_impty_session
+
+    ctx = _ctx(tmp_path)
+    assert ctx.impty_driver is None
+    close_impty_session(ctx)
+
+
+def test_both_providers_attach_the_driver_through_the_context() -> None:
+    # The wiring is two one-line call sites and no test can drive a provider's
+    # _enter, so it is pinned at the source. A bare ImptyDriver() in either
+    # provider is the exact regression: it spawns on the host, unconfined.
+    from pathlib import Path as _Path
+
+    from imp.providers import claude_code, codex_runner
+    for mod in (claude_code, codex_runner):
+        src = _Path(mod.__file__).read_text()
+        assert "attach_impty_driver(ctx)" in src, mod.__name__
+        assert "ImptyDriver()" not in src, mod.__name__

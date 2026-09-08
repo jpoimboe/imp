@@ -48,7 +48,7 @@ import signal
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -611,6 +611,49 @@ class SandboxNamespace:
         env["IMP_COMMAND"] = command
         env["IMP_CWD"] = cwd
         return SandboxSpawn(argv=argv, env=env, pass_fds=pass_fds)
+
+    def join_exec(self, argv: Sequence[str], *, cwd: str,
+                  engine_env: Mapping[str, str]) -> SandboxSpawn:
+        """The argv and env to EXEC one program inside this namespace — `join`'s
+        shape for an argv payload instead of a shell command.
+
+        Two deliberate differences, both forced by the payload's shape. The argv
+        is exec'd DIRECTLY, with no `sh -c`: a pty session's payload is an argv,
+        and a shell between the terminal and the program would add a process and
+        reinterpret its arguments. And the cwd rides on `--wdns`, which resolves
+        in the TARGET mount namespace, replacing the script's inner `cd`; `--wd=`
+        and Popen's `cwd=` both resolve in the CALLER's and were measured handing
+        the payload the host's view of a masked path. There is consequently no
+        IMP_COMMAND/IMP_CWD in the env — no script reads them, and putting the
+        argv in an environment variable when it is already on argv buys nothing.
+        `--wdns` is util-linux 2.38 (2022) or newer; an older host fails this
+        spawn loudly, with an nsenter usage dump.
+
+        Everything else is `join`'s, verbatim: the same optional outer
+        user-namespace stage, the same pinned ns fds named as /proc/self/fd/N,
+        and the same `unshare --user --map-current-user` capability drop. That
+        last one is not optional here — entering the keeper's own user namespace
+        hands CAP_FULL_SET whenever bwrap built a single userns level (the
+        production shape), which is enough to `umount` a secret_dirs mask and
+        read what it hid, a capability the `bash` tool does not have. It is a
+        plain exec with no fork, so the controlling terminal and process group a
+        pty caller depends on are unaffected."""
+        if self.closed:
+            raise AssertionError("join_exec on a closed SandboxNamespace")
+        spawn_argv: list[str] = []
+        pass_fds = tuple(fd for _kind, fd in self.ns_fds)
+        if self.outer_user_fd is not None:
+            spawn_argv += ["nsenter", f"--user=/proc/self/fd/{self.outer_user_fd}",
+                           "--preserve-credentials", "--"]
+            pass_fds += (self.outer_user_fd,)
+        spawn_argv += ["nsenter"]
+        spawn_argv += [f"--{_NSENTER_FLAG[kind]}=/proc/self/fd/{fd}"
+                       for kind, fd in self.ns_fds]
+        spawn_argv += [f"--wdns={cwd}", "--preserve-credentials", "--",
+                       "unshare", "--user", "--map-current-user", "--", *argv]
+        return SandboxSpawn(argv=spawn_argv,
+                            env=_spawn_child_env(self.policy, engine_env),
+                            pass_fds=pass_fds)
 
     @classmethod
     def open(cls, *, policy: SandboxPolicy, engine_env: Mapping[str, str],

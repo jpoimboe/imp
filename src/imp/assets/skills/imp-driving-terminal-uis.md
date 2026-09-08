@@ -24,8 +24,8 @@ send/react loop for interactive programs.
 
 - **`start(argv, cwd=None, cols=80, rows=24, env=None)`** — spawn `argv` on a fresh
   pty; returns the first screen. `cols`/`rows` set the size real programs reflow to.
-  `env`, if given, *replaces* the environment (TERM still defaulted). Refuses while a
-  program is still running — stop() first.
+  `env` entries are ADDED to the environment, overriding same-named ones (TERM
+  still defaulted). Refuses while a program is still running — stop() first.
 - **`view(full=False)`** — read the current screen as text, sending nothing. A cursor
   parked after a prompt means it's waiting for input. `full=True` adds history. Once
   the program has exited the header carries its exit status: `exit=0`, `exit=2`, or a
@@ -43,8 +43,9 @@ send/react loop for interactive programs.
   a long command without polling. No call blocks past 240s: a bigger `hard` is clamped
   and the header says to call again — loop it to follow a program for hours.
 - **`resize(rows, cols, wait=True)`** — resize the terminal (SIGWINCH) to test reflow.
-- **`send_signal(sig=2)`** — deliver a real signal to the program's group (SIGINT=2,
-  SIGTERM=15), independent of tty mode.
+- **`send_signal(sig=2)`** — deliver a real signal to the terminal's foreground
+  process group (SIGINT=2, SIGTERM=15), independent of tty mode — in a shell it
+  reaches the running job, not the shell.
 - **`stop()`** — end the session: SIGTERM the program's group, allow it 1s to clean
   up, then SIGKILL. Returns its exit status and final screen. `send_signal(9)` first
   if you want it killed outright.
@@ -57,6 +58,11 @@ send/react loop for interactive programs.
 4. Repeat; `stop` when done.
 
 Snapshots work even where the worktree is read-only.
+
+The program runs in the same sandbox as your `bash` calls and shares their pid
+namespace: `ps` in a bash call sees it and can kill it, masked paths stay masked,
+and everything it spawns dies when you finish. `create_and_enter_worktree`
+rebuilds that sandbox and so ends the session — `start` again after it.
 
 ## Showing the human
 

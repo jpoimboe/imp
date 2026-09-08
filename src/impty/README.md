@@ -23,8 +23,8 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 
 - `wait_idle(idle=0.3, hard=3.0, *, since=0.0) -> bool` — read until quiet; `False` on hard timeout. `hard` is a max-patience ceiling (a settling program returns at `idle`) and is the whole wall-clock cap: every select slice is bounded by the remaining budget, so an `idle` window that cannot fit inside `hard` reports not settled at `hard` rather than settling after it. `since` is a monotonic stamp: only output read at or after it qualifies (the 0.0 default counts any output ever read), which is what the tool layer's `for_change` wait is built on. Defaults are `DEFAULT_SETTLE_IDLE`/`DEFAULT_SETTLE_HARD`, the single source of truth the MCP tools inherit for settling; `DEFAULT_CHANGE_HARD` (30.0) is the change-mode ceiling the tool layer also inherits. The tool layer adds one policy of its own: it clamps each `wait`/`send`/`resize` call to `MAX_CALL_HARD` (240s) so no single MCP call blocks longer than that.
 - `run_to_completion(hard=60.0) -> int` — drive the child to exit, draining ALL remaining output into pyte first; returns the exit code, raises `TimeoutExpired` on hard timeout (child still alive). Use this (not `wait()`) when the child floods after your last `send()`.
-- `send(bytes | str)` — raw keystrokes to the program. `\x03` (Ctrl-C) is faithful: a real `SIGINT` to the child's process group in cooked mode (the controlling terminal is set up at spawn), a raw byte in raw mode (the app makes its own `KeyboardInterrupt`), exactly like a real terminal.
-- `send_signal(sig=signal.SIGINT)` — deliver a real signal directly to the child's process group, regardless of tty mode (cooked or raw). The deterministic escape hatch when you don't want to depend on tty mode; a no-op once the child has exited. Reaches only the child's process group — a grandchild that `setsid()`'d into its own session is not signalled, exactly like a real Ctrl-C.
+- `send(bytes | str)` — raw keystrokes to the program. `\x03` (Ctrl-C) is faithful: a real `SIGINT` to the terminal's foreground process group in cooked mode (the controlling terminal is set up at spawn), a raw byte in raw mode (the app makes its own `KeyboardInterrupt`), exactly like a real terminal.
+- `send_signal(sig=signal.SIGINT)` — deliver a real signal to the terminal's FOREGROUND process group, regardless of tty mode (cooked or raw). The deterministic escape hatch when you don't want to depend on tty mode; a no-op once nothing holds the foreground. It is the aim a real Ctrl-C has, so under a shell doing its own job control it reaches the running job rather than the shell — and a grandchild that `setsid()`'d into its own session is not signalled. `close()` is deliberately separate: its SIGTERM→SIGKILL ladder always targets the direct child's own group, which always contains the child, so teardown can never be diverted by whoever holds the foreground.
 - `lines(limit=None) -> list[str]` — rendered text rows over scrollback + the live screen. `lines(limit=rows)` is exactly the current screen, aligned row-for-row with `cell()`/`cursor()`; no limit returns the whole strip. The current screen is the thing to act on each turn.
 - `cell(x, y) -> Cell` — glyph + style (`fg/bg/bold/...`) for appearance assertions.
 - `screen` (property) — the live pyte screen, for renderers that need the cell grid (see below).
@@ -33,7 +33,29 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 - `cursor() -> (x, y)`, `regime() -> Regime`, `is_alt_screen() -> bool`, `rows`/`cols` (properties), `resize(rows, cols)`, `is_alive()`, `wait(timeout)`.
 
 By default the child inherits your environment with `TERM=xterm-256color` so a real
-program's color emission (and thus `cell().fg`) is deterministic; pass `env=` to override.
+program's color emission (and thus `cell().fg`) is deterministic. At the
+`TerminalSession` layer an explicit `env=` IS the child environment (plus that `TERM`
+default) — composing it is the caller's job, deliberately, so an embedding host's
+curated child env can never be polluted with `os.environ`. `ImptyDriver.start` does
+that composition for you: its `env` entries are ADDED to the base environment,
+overriding same-named ones.
+
+## Embedding: the sandbox hook
+
+impty imports nothing from its host and never requires a sandbox. A host that wants
+the driven program confined injects one callable:
+
+```python
+ImptyDriver(sandbox=hook)   # hook(argv, cwd, env) -> PtySpawn | None
+```
+
+Returning `PtySpawn(argv, env, pass_fds)` replaces the spawn wholesale: the host's own
+argv (e.g. a namespace join that execs the caller's argv), the child environment it
+computed, and the fds that must survive the fork — which `TerminalSession(pass_fds=…)`
+forwards to `Popen`. The cwd is then the host's to resolve inside its own argv, so the
+session is spawned with `cwd=None` (`Popen`'s `cwd=` would resolve in the *caller's*
+mount namespace). Returning `None` — or passing no hook at all, as `python -m impty.mcp`
+does — spawns the program bare, exactly as it always did.
 
 ## Sequences pyte can't parse (the `TerminalStream` filter)
 
@@ -86,7 +108,7 @@ Two ready-made entry points:
   `scripts/snap_imp_ui.py {stream,prompt} [--out PATH] [--open]` directly.
 - **Drive a live program over MCP and screenshot it:** run the stdio MCP server
   (`python -m impty.mcp`, registered in `.mcp.json`). Tools: `start`, `send`,
-  `send_signal` (a real signal to the child's process group, e.g. `sig=2` for a
+  `send_signal` (a real signal to the terminal's foreground process group, e.g. `sig=2` for a
   mode-independent Ctrl-C), `resize` (`(rows, cols)` — resizes the live terminal,
   delivering a real `SIGWINCH`), `wait` (`for_change=True` blocks until NEW output
   arrives instead of counting what is already on screen), `view` (`full=True` for

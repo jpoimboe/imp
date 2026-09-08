@@ -81,8 +81,9 @@ mcp__impty__start(argv=["imp","new"],            cwd="<WT>", cols=100, rows=30)
 mcp__impty__start(argv=["imp","chat"],           cwd="<WT>", cols=100, rows=30)
 mcp__impty__start(argv=["imp","resume","<id>"],  cwd="<WT>", cols=100, rows=30)
 ```
-To set variables (theme, or a provider's API key), pass `env=`. **`env` REPLACES the inherited
-environment**, so include everything the run needs (e.g. `{**parent_env, "IMP_THEME":"light"}`).
+To set variables (theme, or a provider's API key), pass `env=`. **`env` entries are ADDED to the
+inherited environment**, overriding same-named ones — so pass just what you need (e.g.
+`{"IMP_THEME":"light"}`).
 - `send("your text\r")` → type a reply.
 - `send_signal(2)` → deterministic SIGINT (a real Ctrl-C) to pause a *running* agent. This
   leaves you **attached** at the steer prompt (see the interrupt model above); to get a

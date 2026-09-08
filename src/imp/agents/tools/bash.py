@@ -17,7 +17,6 @@ import contextlib
 import json
 import os
 import signal
-from pathlib import Path
 from uuid import uuid4
 
 import anyio
@@ -25,9 +24,13 @@ import anyio
 from imp.agents.tools import imp_tool
 from imp.agents.tools import limits as _limits
 from imp.agents.tools.context import (
+    EVENT_COMMAND_PREVIEW_LEN,
     ToolContext,
+    emit_spawn_retry_warning,
     ensure_tool_namespace,
     kill_process_tree,
+    tool_engine_env,
+    tool_quest_dir,
 )
 from imp.agents.tools.limits import (
     BASH_FOREGROUND_TIMEOUT_MAX_S,
@@ -37,10 +40,8 @@ from imp.agents.tools.limits import (
 )
 from imp.agents.tools.lines import clip_long_lines
 from imp.agents.tools.spill import spill_tool_output
-from imp.engine.env import engine_env
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_FAILED_MESSAGE,
-    SANDBOX_SPAWN_MAX_ATTEMPTS,
     SandboxOpenFailed,
     build_sandbox_spawn,
     normalize_returncode,
@@ -52,7 +53,6 @@ _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
 _FG_CAP_POLL_S = 1.0      # foreground own-cap stat cadence (~1 s, mirrors bg's
                           # _sweep_bg trigger; the file-size analogue of the old
                           # combined-byte kill ceiling)
-_EVENT_COMMAND_PREVIEW_LEN = 200
 _SANDBOX_DENIAL_MARKERS = (
     "read-only file system", "cannot lock ref", "new index file")
 _SANDBOX_DENIAL_NOTE = (
@@ -73,23 +73,7 @@ def _emit_overlay_setup_warning(ctx: ToolContext, command: str, detail: str) -> 
             payload={
                 "message": ("the OS sandbox could not start the command; it did "
                             "not run (sandbox-setup failure, not a command exit)"),
-                "command": command[:_EVENT_COMMAND_PREVIEW_LEN],
-                "reason": "sandbox-spawn-failed", "detail": detail,
-            })
-
-
-def _emit_spawn_retry_warning(ctx: ToolContext, command: str, next_attempt: int,
-                              detail: str) -> None:
-    """Best-effort per-retry breadcrumb; never crashes the tool call."""
-    if ctx.event_log is None:
-        return
-    with contextlib.suppress(Exception):
-        ctx.event_log.append(
-            agent_id=ctx.agent_id, type="runner_warning",
-            payload={
-                "message": ("sandbox could not start the command; retrying "
-                            f"({next_attempt}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
-                "command": command[:_EVENT_COMMAND_PREVIEW_LEN],
+                "command": command[:EVENT_COMMAND_PREVIEW_LEN],
                 "reason": "sandbox-spawn-failed", "detail": detail,
             })
 
@@ -169,20 +153,8 @@ async def bash(
     *, run_in_background: bool = False, timeout: float | None = None,
 ) -> str:
     cwd_path = cwd or str(ctx.project_root)
-    # Engine vars come from the LIVE quest when available (top-level steps), so a
-    # mid-run rename_quest is reflected immediately; subagents have no live quest
-    # (and no rename authority) and fall back to the frozen quest_context snapshot.
-    src = ctx.quest or ctx.quest_context
-    qdir = (getattr(src, "quest_dir", None)
-            or (Path(h) if (h := getattr(src, "quest_home", None)) else None))
-    eng = engine_env(
-        project_root=ctx.project_root,
-        quest_id=src.id if src else "",
-        quest_title=src.title if src else "",
-        quest_dir=qdir,
-        test_gates=ctx.test_gates,
-        pythonpath=ctx.pythonpath,
-    )
+    qdir = tool_quest_dir(ctx)
+    eng = tool_engine_env(ctx)
     policy = ctx.sandbox_policy
     coordinator = getattr(ctx, "coordinator", None)
     if run_in_background:
@@ -202,7 +174,7 @@ async def bash(
         try:
             ns = await ensure_tool_namespace(
                 ctx, engine_env=eng,
-                on_retry=lambda n, detail: _emit_spawn_retry_warning(
+                on_retry=lambda n, detail: emit_spawn_retry_warning(
                     ctx, command, n, detail))
         except SandboxOpenFailed as failure:
             # The budget is exhausted and NO command was spawned, so there is no

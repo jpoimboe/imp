@@ -50,13 +50,14 @@ recommend a Claude Max or ChatGPT Pro subscription.
 
 ## Try it
 
-imp needs Linux, Git, Python 3.11 or newer, `uv`, and
-[bubblewrap](https://github.com/containers/bubblewrap).  For model access, either
-install and sign in to the `claude` or `codex` CLI with an existing subscription,
-or export `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.  For web
-work, add a browser: imp renders and drives real pages for mockups and browser
-tests, and an agent that finds none will spend a few minutes downloading ~115 MB
-of Chromium into `~/.cache`.
+imp needs Linux, Git, Python 3.11 or newer, `uv`,
+[bubblewrap](https://github.com/containers/bubblewrap), and util-linux 2.38 or
+newer (`nsenter`, `unshare`).  For model access, either install and sign in to
+the `claude` or `codex` CLI with an existing subscription, or export
+`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for direct API access.  For web work,
+add a browser: imp renders and drives real pages for mockups and browser tests,
+and an agent that finds none will spend a few minutes downloading ~115 MB of
+Chromium into `~/.cache`.
 
 ```bash
 uv tool install git+https://github.com/jpoimboe/imp
