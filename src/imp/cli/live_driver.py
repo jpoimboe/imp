@@ -52,6 +52,9 @@ _GAUGE_CELLS = 10
 _COST_BEARING = frozenset({"agent_message", "agent_message_usage_patch",
                            "query_result"})
 
+# The two windows both subscription carriers report; anything else renders verbatim.
+_WINDOW_WORDS = {"5h": "session", "7d": "week"}
+
 
 def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
     if not color or not codes:
@@ -101,6 +104,16 @@ def context_bar(provider: str | None, model: str | None,
     return f"{gauge} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
 
 
+def _coarse_left(seconds: float) -> str:
+    """Most-significant unit only, nearest, never below a minute: the countdown sits
+    beside a percentage, where a second unit of precision reads as noise."""
+    if seconds >= 86400:
+        return f"{round(seconds / 86400)}d"
+    if seconds >= 3600:
+        return f"{round(seconds / 3600)}h"
+    return f"{max(1, round(seconds / 60))}m"
+
+
 def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | None:
     """Time until this window resets. None when the carrier stated none or it has
     already passed: the percentage is still true, only the countdown is unknown."""
@@ -109,26 +122,26 @@ def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | No
     remaining = resets_at - (time.time() if now_epoch is None else now_epoch)
     if remaining <= 0:
         return None
-    return nv._fmt_hm(remaining)
+    return _coarse_left(remaining)
 
 
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
                 color: bool, over_bg: bool) -> str:
-    """`quota 5h 62% (40m), 7d 7%` — the account-wide levels, ordered by window
-    duration. Only the percentage carries color, and the bands are evaluated on
-    the displayed integer so a number can never disagree with its own hue."""
+    """`session 62% (3h left) · week 7%` — the account-wide levels, ordered by window
+    duration. Only the percentage carries color, and the bands are evaluated on the
+    displayed integer so a number can never disagree with its own hue."""
     windows: list[str] = []
     for w in reading.windows:
         pct = pal.quota_pct(w.used_pct)
-        seg = (_paint(w.label, "gray", color=color, over_bg=over_bg) + " "
+        label = _WINDOW_WORDS.get(w.label, w.label)
+        seg = (_paint(label, "gray", color=color, over_bg=over_bg) + " "
                + _paint(f"{pct}%", pal.quota_hue(pct), color=color, over_bg=over_bg))
         left = (_reset_countdown(w.resets_at, now_epoch)
                 if pct >= pal.QUOTA_GOLD_AT else None)
         if left is not None:
-            seg += " " + _paint(f"({left})", "gray", color=color, over_bg=over_bg)
+            seg += " " + _paint(f"({left} left)", "gray", color=color, over_bg=over_bg)
         windows.append(seg)
-    return (_paint("quota", "gray", color=color, over_bg=over_bg)
-            + " " + ", ".join(windows))
+    return " · ".join(windows)
 
 
 def cost_field(usage: RowUsage | None) -> str | None:

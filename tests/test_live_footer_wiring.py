@@ -129,7 +129,7 @@ def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
                         auth_mode="subscription")
     row = _position_row(events)
     # The same priced sequence: the auth mode alone decides which field shows.
-    assert row.endswith(" · quota 5h 34%, 7d 7%")
+    assert row.endswith(" · session 34% · week 7%")
     assert "$" not in row
 
 
@@ -197,7 +197,7 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
         ev("q1", "quota_reading", agent_id="step:p1/a",
            **codex_reading.to_payload()),
     ]
-    assert _position_row(started).endswith(" · quota 5h 12%")
+    assert _position_row(started).endswith(" · session 12%")
 
     crossed = [
         *started,
@@ -214,9 +214,9 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
 def test_a_subagent_row_carries_the_gauge_and_never_the_quota() -> None:
     rows = _drive(_subagent_events(auth_mode=None, usage={})).compose_status(0)
     assert rows is not None and len(rows) == 4
-    assert rows[2].endswith(" · quota 5h 12%")          # position row: quota
-    assert "████░░░░░░ 42%" in rows[3]                  # subagent row: same gauge
-    assert "quota" not in rows[3]                       # and never the account level
+    assert rows[2].endswith(" · session 12%")          # position row: quota
+    assert "████░░░░░░ 42%" in rows[3]                 # subagent row: same gauge
+    assert "session" not in rows[3] and "week" not in rows[3]   # never the account level
 
 
 # AC 12 (metered half)
@@ -226,6 +226,6 @@ def test_a_subagent_row_carries_no_cost_field_on_a_metered_backend() -> None:
         usage={"input_tokens": 100000, "output_tokens": 8000})).compose_status(0)
     assert rows is not None and len(rows) == 4
     # The position row takes the metered branch; the recorded reading stays off it.
-    assert "$" in rows[2] and "quota" not in rows[2]
-    assert "████░░░░░░ 42%" in rows[3]                  # same gauge, same grammar
-    assert "quota" not in rows[3] and "$" not in rows[3]
+    assert "$" in rows[2] and "session" not in rows[2]
+    assert "████░░░░░░ 42%" in rows[3]                 # same gauge, same grammar
+    assert "session" not in rows[3] and "$" not in rows[3]

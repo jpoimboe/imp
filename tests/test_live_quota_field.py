@@ -6,7 +6,7 @@ from typing import Any
 
 from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
-from imp.cli.live_driver import compose_position_row
+from imp.cli.live_driver import compose_position_row, quota_field
 from imp.providers.quota import QuotaReading, QuotaWindow
 
 _NOW = 1_788_000_000.0        # fixed, so every countdown is deterministic
@@ -35,17 +35,17 @@ def _row(**kw: Any) -> str:
 def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
     assert _row(auth_mode="subscription", quota=calm) == (
-        "implement phase · claude-opus-5 · ████░░░░░░ 44% · quota 5h 34%, 7d 7%")
+        "implement phase · claude-opus-5 · ████░░░░░░ 44% · session 34% · week 7%")
 
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
                       QuotaWindow("7d", 7.0, int(_NOW) + 600000))
     assert _row(auth_mode="subscription", quota=one_up).endswith(
-        "████░░░░░░ 44% · quota 5h 62% (40m), 7d 7%")
+        "████░░░░░░ 44% · session 62% (40m left) · week 7%")
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
     assert _row(auth_mode="subscription", quota=both).endswith(
-        "████░░░░░░ 44% · quota 5h 92% (40m), 7d 96% (2d 4h)")
+        "████░░░░░░ 44% · session 92% (40m left) · week 96% (2d left)")
 
 
 # AC 9
@@ -62,20 +62,24 @@ def test_the_bands_are_evaluated_on_the_displayed_integer() -> None:
     assert "\x1b[33m50%" in field(49.5)      # rounded half-up, then banded
     assert "\x1b[31m85%" in field(84.5)      # banker's round() would say 84: gold
     # The countdown is a trouble marker: it appears with the gold band, not before.
-    assert "(40m)" not in field(49.0)
-    assert "(40m)" in field(50.0)
-    # quota, the label and the countdown are gray; only the percentage is hued.
-    assert field(50.0).startswith("\x1b[90mquota\x1b[0m \x1b[90m5h\x1b[0m ")
-    assert field(50.0).endswith("\x1b[90m(40m)\x1b[0m")
+    assert "(40m left)" not in field(49.0)
+    assert "(40m left)" in field(50.0)
+    # The label and the countdown are gray; only the percentage is hued.
+    assert field(50.0).startswith("\x1b[90msession\x1b[0m \x1b[33m50%")
+    assert field(50.0).endswith("\x1b[90m(40m left)\x1b[0m")
 
 
 # AC 13
 def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
     null_reset = _reading(QuotaWindow("5h", 92.0, None))
-    assert _row(auth_mode="subscription", quota=null_reset).endswith("quota 5h 92%")
+    assert _row(auth_mode="subscription", quota=null_reset).endswith("session 92%")
 
     already_past = _reading(QuotaWindow("5h", 92.0, int(_NOW) - 10))
-    assert _row(auth_mode="subscription", quota=already_past).endswith("quota 5h 92%")
+    assert _row(auth_mode="subscription", quota=already_past).endswith("session 92%")
+
+    # Below the gold band a future reset is still suppressed.
+    below_gold = _reading(QuotaWindow("7d", 7.0, int(_NOW) + 2400))
+    assert _row(auth_mode="subscription", quota=below_gold).endswith("week 7%")
 
 
 # AC 10
@@ -99,10 +103,26 @@ def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None
     assert row.endswith("claude-opus-5 · ████░░░░░░ 44%")
     assert "n/a" not in row and "—" not in row
     # The metered choice is exclusive: a stale reading never leaks onto this row.
-    assert "quota" not in row
+    assert "session" not in row and "week" not in row
 
 
 # AC 11
 def test_a_subscription_backend_with_no_reading_renders_no_field() -> None:
     row = _row(auth_mode="subscription")
     assert row == "implement phase · claude-opus-5 · ████░░░░░░ 44%"
+
+
+def test_an_unrecognized_window_label_renders_verbatim() -> None:
+    odd = _reading(QuotaWindow("30d", 12.0, None))
+    assert _row(auth_mode="subscription", quota=odd).endswith(" · 30d 12%")
+
+
+def test_the_countdown_rounds_to_one_nearest_unit() -> None:
+    def left(seconds: int) -> str:
+        return quota_field(_reading(QuotaWindow("5h", 92.0, int(_NOW) + seconds)),
+                           now_epoch=_NOW, color=False, over_bg=False)
+
+    assert left(9960) == "session 92% (3h left)"       # 2h46m -> nearest hour
+    assert left(253800) == "session 92% (3d left)"     # 2d23h -> nearest day
+    assert left(2340) == "session 92% (39m left)"      # under an hour: minutes
+    assert left(20) == "session 92% (1m left)"         # never rounds down to 0m
