@@ -107,10 +107,12 @@ def _policy_for(root: Path, *, network: bool = True, home: Path | None = None,
     )
 
 
-def _join(ns: SandboxNamespace, command: str, *, cwd: str) -> subprocess.CompletedProcess[str]:
-    spawn = ns.join(command, cwd=cwd, engine_env={})
+def _join(ns: SandboxNamespace, command: str, *, cwd: str, stdin: str | None = None,
+          engine_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    spawn = ns.join(command, cwd=cwd, engine_env=engine_env or {})
     return subprocess.run(spawn.argv, env=spawn.env, pass_fds=spawn.pass_fds,
-                          capture_output=True, text=True, timeout=_JOIN_TIMEOUT_S)
+                          input=stdin, capture_output=True, text=True,
+                          timeout=_JOIN_TIMEOUT_S)
 
 
 def _host_pids(marker: str) -> list[str]:
@@ -419,4 +421,75 @@ def test_a_joined_command_cannot_unmask_a_secret_dir():
             ns.close()
     finally:
         cleanup()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_joined_command_cannot_pkill_the_shell_running_it():
+    # AC 10a. This matters MORE under a shared namespace: a self-matching pattern
+    # can now reach a sibling call's shell and every background task in the run,
+    # not just the agent's own shell. The needle occurs only inside the command.
+    root = _make_root()
+    needle = f"imp-needle-{uuid.uuid4().hex}"
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            done = _join(ns, f'pkill -f "{needle}"; echo pkill-rc=$?', cwd=str(root))
+            assert done.returncode == 0                    # not 143/137
+            assert done.stdout.strip() == "pkill-rc=1"     # no process matched
+            listing = subprocess.run(["ps", "auxww"], capture_output=True,
+                                     text=True).stdout
+            assert needle not in listing
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_joined_shell_matches_a_plain_sh_c():
+    # AC 11a/b: the eval shape is semantically identical to `sh -c <command>` —
+    # status propagation, set -e, $0/$#/$@, and the command's own stdin, which
+    # `sh -s` would have consumed as the script pipe. As on the bare shape, the
+    # "/dev/null when nothing is piped" half belongs to the spawn site, not to
+    # the script, so it is not what this pins.
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            assert _join(ns, "exit 7", cwd=str(root)).returncode == 7
+            assert _join(ns, "true; false", cwd=str(root)).returncode == 1
+            aborted = _join(ns, "set -e; echo hello; false; echo unreachable",
+                            cwd=str(root))
+            assert (aborted.returncode, aborted.stdout) == (1, "hello\n")
+            assert _join(ns, 'echo "[$0] [$#] [$@]"',
+                         cwd=str(root)).stdout == "[sh] [0] []\n"
+            piped = _join(ns, "cat", cwd=str(root), stdin="piped-in\n")
+            assert (piped.returncode, piped.stdout) == (0, "piped-in\n")
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_later_join_sees_an_engine_value_that_changed_mid_run():
+    # AC 11d: the child env is rebuilt per join, never captured at open(), so a
+    # post-rename IMP_QUEST_TITLE beats the value frozen into policy.child_env at
+    # run start (name-on-intent). Reusing the open()-time env would regress it
+    # silently — the keeper would still work, just with a stale title.
+    root = _make_root()
+    show = "echo ${IMP_QUEST_TITLE:-unset}"
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            before = _join(ns, show, cwd=str(root),
+                           engine_env={"IMP_QUEST_TITLE": ""})
+            after = _join(ns, show, cwd=str(root),
+                          engine_env={"IMP_QUEST_TITLE": "Renamed quest"})
+            assert before.stdout.strip() == "unset"
+            assert after.stdout.strip() == "Renamed quest"
+        finally:
+            ns.close()
+    finally:
         shutil.rmtree(root, ignore_errors=True)
