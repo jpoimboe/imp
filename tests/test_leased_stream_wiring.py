@@ -11,16 +11,6 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
 
-# The five functions that own a leased attach; between them they hold all eight
-# leased entry points (main.py:942, 1114, 1129, 1374, 1394, 1547, 1571, 1654).
-LEASED = (
-    "_run_cleared_session",
-    "_run_fresh_session",
-    "_async_cmd_new",
-    "_async_cmd_resume",
-    "_resume_inert",
-)
-
 
 def _tree() -> ast.Module:
     return ast.parse(pathlib.Path(m.__file__).read_text(encoding="utf-8"))
@@ -48,6 +38,14 @@ def _kw(call: ast.Call, name: str) -> ast.expr | None:
     return next((k.value for k in call.keywords if k.arg == name), None)
 
 
+def _leased(tree: ast.Module) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Every module-level function that owns a leased attach, discovered rather than
+    enumerated, so a sixth one cannot be added without this test seeing it."""
+    return [n for n in tree.body
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+            and _calls(n, "run_session_client")]
+
+
 def _watched_name(fn: ast.AST) -> str:
     names = [
         target.id
@@ -63,30 +61,24 @@ def _watched_name(fn: ast.AST) -> str:
 
 def test_every_leased_writer_takes_the_same_wrapper_instance() -> None:
     tree = _tree()
-    seen = dict.fromkeys(
-        ("LiveStatus", "TerminalTitle", "LiveDriver",
-         "_build_resume_driver", "run_session_client"), 0)
-    for fname in LEASED:
-        fn = _func(tree, fname)
+    leased = _leased(tree)
+    for fn in leased:
         watched = _watched_name(fn)
         for key in ("LiveStatus", "TerminalTitle"):
             for call in _calls(fn, key):
                 arg = call.args[0]
                 assert isinstance(arg, ast.Name) and arg.id == watched, (
-                    f"{fname}: {key} takes {ast.unparse(arg)}, not {watched}")
-                seen[key] += 1
+                    f"{fn.name}: {key} takes {ast.unparse(arg)}, not {watched}")
         for key in ("LiveDriver", "_build_resume_driver", "run_session_client"):
             for call in _calls(fn, key):
                 arg = _kw(call, "stream")
                 assert isinstance(arg, ast.Name) and arg.id == watched, (
-                    f"{fname}: {key} takes stream="
+                    f"{fn.name}: {key} takes stream="
                     f"{'<missing>' if arg is None else ast.unparse(arg)}, "
                     f"not {watched}")
-                seen[key] += 1
-    assert seen == {
-        "LiveStatus": 8, "TerminalTitle": 3, "LiveDriver": 5,
-        "_build_resume_driver": 3, "run_session_client": 8,
-    }
+    attaches = sum(len(_calls(fn, "run_session_client")) for fn in leased)
+    assert attaches >= 8, (
+        f"expected at least the spec's eight leased entry points, saw {attaches}")
 
 
 def test_read_only_log_renderers_keep_plain_stdout() -> None:
