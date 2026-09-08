@@ -2204,6 +2204,31 @@ def test_a_joined_payload_cannot_unmount_a_secret_mask() -> None:
 
 
 @pytest.mark.timeout(180)
+def test_a_sandboxed_command_can_still_allocate_a_pty() -> None:
+    """The consequence test_nothing_is_bound_between_dev_and_chdir guards by
+    argv shape: bwrap's --dev mounts its OWN devpts at /dev/pts and makes
+    /dev/ptmx a SYMLINK into it, so anything bound over /dev/pts repoints ptmx.
+    On a standard host the host's devpts is ptmxmode=000 and its ptmx is owned by
+    real root, unmapped in the sandbox's userns, so openpty() fails for
+    everything inside — including imp's own pty tests, which are can_pty()-gated
+    and would SKIP rather than fail.
+
+    NESTED (inside imp's own sandbox, where the gates run) this test cannot see
+    that regression: the /dev/pts a nested bwrap binds is already bwrap's
+    permissive ptmxmode=666 instance, so ptmx stays openable and this stays
+    green. The argv assertion is what bites there."""
+    root = _make_root()
+    prog = "import pty, os\nm, s = pty.openpty()\nprint('PTY=' + os.ttyname(s))\n"
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        result = _bash(ctx, f"{shlex.quote(sys.executable)} -c {shlex.quote(prog)}")
+        assert result["returncode"] == 0, result
+        assert "PTY=/dev/pts/" in str(result["stdout"]), result
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
     """AC 10: nsenter faithfully re-raises the child's terminating signal on
