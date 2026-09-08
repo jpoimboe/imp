@@ -3324,6 +3324,19 @@ def test_colored_span_ranges_skips_multiline_and_backtick_interior_spans() -> No
     assert rt._colored_span_ranges(["a ``[1;33m78`%[0m`` b"]) == []
 
 
+def test_colored_span_ranges_skips_single_backtick_nested_in_double_backtick_span() -> None:
+    # A single-backtick pair that is interior to a double-backtick span must not be
+    # treated as an eligible span — the outer span's content is literal by the spec.
+    assert rt._colored_span_ranges(["a ``x `[31my[0m` z`` b"]) == []
+
+
+def test_nested_single_backtick_in_double_backtick_span_renders_codes_literally() -> None:
+    # End-to-end: the bare codes appear as visible text, no real ESC sequence emitted.
+    out = rt._markdown_to_ansi("a ``x `[31my[0m` z`` b", 60, True)
+    assert "[31m" in rt._strip_sgr(out)
+    assert "\x1b[31m" not in out
+
+
 def test_colored_span_ranges_skips_a_zero_visible_width_sample() -> None:
     # An all-codes interior would lift to an empty run: the code span collapses and no
     # post-render check can catch it, so it is ineligible up front.

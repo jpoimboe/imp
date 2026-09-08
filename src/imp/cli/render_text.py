@@ -393,10 +393,22 @@ def _splice_lifted_fences(rendered: str, lifted: dict[str, list[str]]) -> str:
 # codepoint, because U+FFFE is invalid in interchange and does not survive every editor.
 _SPAN_UNIT = "\ufffe"
 
-# A single-backtick code span, whole on one line. `[^`]+` excludes an interior backtick
-# and a span whose delimiters sit on different lines; the lookarounds exclude the
-# double-backtick form, whose interior MAY hold a backtick.
-_CODE_SPAN_RE = re.compile(r"(?<!`)`([^`]+)`(?!`)")
+
+def _single_backtick_span_interiors(line: str) -> Iterator[tuple[int, int]]:
+    # CommonMark: an opener run of length n pairs with the next run of exactly length n.
+    runs = list(re.finditer(r"`+", line))
+    i = 0
+    while i < len(runs):
+        opener = runs[i]
+        n = len(opener.group())
+        for j in range(i + 1, len(runs)):
+            if len(runs[j].group()) == n:
+                if n == 1:
+                    yield (opener.end(), runs[j].start())
+                i = j + 1
+                break
+        else:
+            i += 1
 
 
 class _ColoredSpan(NamedTuple):
@@ -424,11 +436,11 @@ def _colored_span_ranges(lines: list[str]) -> list[_ColoredSpan]:
     for i, ln in enumerate(lines):
         if i in fenced:
             continue
-        for m in _CODE_SPAN_RE.finditer(ln):
-            code = _BARE_SGR_RE.search(ln, m.start(1), m.end(1))
-            if code is None or _span_cells(ln[code.start():m.end(1)]) == 0:
+        for start, end in _single_backtick_span_interiors(ln):
+            code = _BARE_SGR_RE.search(ln, start, end)
+            if code is None or _span_cells(ln[code.start():end]) == 0:
                 continue
-            out.append(_ColoredSpan(i, code.start(), m.end(1)))
+            out.append(_ColoredSpan(i, code.start(), end))
     return out
 
 
