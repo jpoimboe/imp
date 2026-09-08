@@ -432,6 +432,22 @@ def _colored_span_ranges(lines: list[str]) -> list[_ColoredSpan]:
     return out
 
 
+def _restore_bare_sgr_in_spans(text: str) -> str:
+    """Give a model-typed `[1;33m` its ESC byte back inside an eligible inline code span,
+    so the export's SGR strip removes it instead of shipping it as literal text. The
+    screen path arms spans inside `_lift_colored_spans` instead — arming them this early
+    would defuse them before the lift runs. Same eligibility helper as the lift, so an
+    ineligible span exports as the literal text the screen shows."""
+    lines = text.split("\n")
+    for span in reversed(_colored_span_ranges(lines)):
+        ln = lines[span.line]
+        lines[span.line] = (
+            ln[:span.start]
+            + _BARE_SGR_RE.sub(lambda m: "\x1b" + m.group(0), ln[span.start:span.end])
+            + ln[span.end:])
+    return "\n".join(lines)
+
+
 def _lift_colored_spans(text: str, color: bool) -> tuple[str, list[tuple[str, str]]]:
     """Swap the colored tail of every eligible inline code span for a run of `_SPAN_UNIT`
     exactly as wide as the sample's visible cells, so rich lays the paragraph out as if

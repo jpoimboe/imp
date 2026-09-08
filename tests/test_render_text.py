@@ -3343,6 +3343,32 @@ def test_span_cells_measures_visible_cells_not_bytes() -> None:
     assert rt._span_cells("[0m") == 0
 
 
+def test_restore_bare_sgr_in_spans_arms_only_the_sample_region() -> None:
+    armed = rt._restore_bare_sgr_in_spans("The gauge reads `load [1;33m78%[0m` amber.")
+    # Arming starts at the FIRST bare code, so the leading `load ` stays plain text.
+    assert armed == "The gauge reads `load \x1b[1;33m78%\x1b[0m` amber."
+    # What the export does next: the codes vanish, the span keeps its visible text.
+    assert rt._strip_sgr(armed) == "The gauge reads `load 78%` amber."
+
+
+def test_restore_bare_sgr_in_spans_arms_every_span_on_one_line() -> None:
+    # Right-to-left rewriting: arming the first span must not shift the second's offsets.
+    assert rt._restore_bare_sgr_in_spans("a `[1;33m78%[0m` and `[32mok[0m` z") == (
+        "a `\x1b[1;33m78%\x1b[0m` and `\x1b[32mok\x1b[0m` z")
+
+
+def test_restore_bare_sgr_in_spans_leaves_every_ineligible_span_byte_for_byte() -> None:
+    # An armed all-codes span would strip to empty backticks, deleting the codes the
+    # sentence is about; a fence body is `_restore_bare_sgr`'s job; the rest are not
+    # spans this pass handles, and a model id is not a code at all.
+    for src in ("Write `[1;33m`, `[0m` — and imp restores it.",
+                "```\ninline `[1;33m78%[0m` here\n```",
+                "a `[1;33m78%\n[0m` b",
+                "a `\x1b[31mred\x1b[0m` b",
+                "high: `claude-opus-4-8[1m]` ok"):
+        assert rt._restore_bare_sgr_in_spans(src) == src
+
+
 def test_lift_colored_spans_swaps_the_sample_for_a_width_faithful_run() -> None:
     text, lifted = rt._lift_colored_spans("The gauge reads `[1;33m78%[0m` amber.", True)
     assert text == "The gauge reads `" + rt._SPAN_UNIT * 3 + "` amber."
