@@ -12,11 +12,11 @@ one: give the user the exact command to run in their own shell.
 
 ## When the sandbox blocks you
 
-imp's bash sandbox runs every shell command in a fresh user and pid namespace, so an
-agent cannot attach a debugger (`gdb`, `py-spy`, `strace`) to any live process, cannot
-see or signal any process outside its own command, and cannot read the masked paths
-(secrets, and this project's imp state outside this quest's own home). One escape hatch
-exists, plus one recipe that needs it.
+imp's bash sandbox runs all your shell commands in one user and pid namespace of
+their own, so an agent cannot attach a debugger (`gdb`, `py-spy`, `strace`) to a
+live process outside it, cannot see or signal any process it did not start, and
+cannot read the masked paths (secrets, and this project's imp state outside this
+quest's own home). One escape hatch exists, plus one recipe that needs it.
 
 **`/sandbox off` — run this session unsandboxed.** Whenever the sandbox itself is what
 blocks the task — a debugger on a live host process, or a read of a masked path — tell
