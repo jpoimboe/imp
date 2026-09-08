@@ -41,7 +41,7 @@ def test_phase_grouping_in_execution_order():
         _completed("spec-writer", "2026-01-01T00:01:30+00:00"),
         _started("plan-writer", "plan", "2026-01-01T00:01:35+00:00"),
         _completed("plan-writer", "2026-01-01T00:04:45+00:00"),
-    ]).rows
+    ])
     assert [(r.phase, r.step) for r in rows] == [
         ("spec", "spec-writer"), ("plan", "plan-writer")]
     assert rows[0].wall_seconds == 90.0
@@ -56,7 +56,7 @@ def test_loop_bounce_back_yields_second_occurrence():
         _completed("plan-review", "2026-01-01T00:02:00+00:00"),
         _started("plan-writer", "plan", "2026-01-01T00:02:00+00:00"),
         _completed("plan-writer", "2026-01-01T00:02:30+00:00"),
-    ]).rows
+    ])
     assert [r.step for r in rows] == ["plan-writer", "plan-review", "plan-writer"]
 
 
@@ -66,7 +66,7 @@ def test_resume_reentry_folds_gap_into_one_occurrence():
         _await("2026-01-01T00:01:00+00:00"),
         _started("verify", "implement", "2026-01-01T00:06:00+00:00"),  # resume
         _completed("verify", "2026-01-01T00:06:30+00:00"),
-    ]).rows
+    ])
     assert len(rows) == 1
     assert rows[0].wall_seconds == 390.0          # 00:00:00 → 00:06:30
     assert rows[0].wait_seconds == 300.0          # await 00:01:00 → resume 00:06:00
@@ -77,7 +77,7 @@ def test_wall_versus_wait_arithmetic():
         _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
         _await("2026-01-01T00:00:30+00:00"),
         _completed("verify", "2026-01-01T00:02:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].wall_seconds == 120.0          # start → complete
     assert rows[0].wait_seconds == 90.0           # await → next structural event
 
@@ -87,7 +87,7 @@ def test_open_trailing_step_has_no_wall():
         _started("spec-writer", "spec", "2026-01-01T00:00:00+00:00"),
         _completed("spec-writer", "2026-01-01T00:00:10+00:00"),
         _started("task-lead", "implement", "2026-01-01T00:00:10+00:00"),
-    ]).rows
+    ])
     assert rows[-1].step == "task-lead"
     assert rows[-1].end_ts is None
     assert rows[-1].wall_seconds is None
@@ -98,7 +98,7 @@ def test_terminal_error_marks_open_step_errored():
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         {"type": "error", "timestamp": "2026-01-01T00:00:05+00:00",
          "payload": {"message": "boom", "category": "runner"}},
-    ]).rows
+    ])
     assert rows[-1].errored is True
 
 
@@ -107,7 +107,7 @@ def test_interrupt_config_error_does_not_mark_errored():
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         {"type": "error", "timestamp": "2026-01-01T00:00:05+00:00",
          "payload": {"category": "config", "kind": "interrupted"}},
-    ]).rows
+    ])
     assert rows[-1].errored is False
 
 
@@ -116,7 +116,7 @@ def test_audit_error_does_not_mark_errored():
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         {"type": "error", "timestamp": "2026-01-01T00:00:05+00:00",
          "payload": {"audit": True, "category": "terminated", "kind": "budget_exhausted"}},
-    ]).rows
+    ])
     assert rows[-1].errored is False
 
 
@@ -374,7 +374,7 @@ def test_step_own_tokens_summed_from_matching_agent_id():
              input=100, output=20, cache_read=5, cache_creation=3),
         _llm("a1", "2026-01-01T00:00:10+00:00", input=10, output=2),
         _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
-    ]).rows
+    ])
     assert rows[0].agent_id == "a1"
     usage = rows[0].usage
     assert (usage.fresh_input, usage.output) == (110, 22)
@@ -393,7 +393,7 @@ def test_cumulative_query_results_in_one_session_take_the_last():
         _qr("a1", "2026-01-01T00:00:05+00:00", 0.34, session="s1"),
         _qr("a1", "2026-01-01T00:00:10+00:00", 0.40, session="s1"),
         _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.dollars == pytest.approx(0.40)
 
 
@@ -405,7 +405,7 @@ def test_query_results_from_two_sessions_add():
         _qr("a1", "2026-01-01T00:00:10+00:00", 0.40, session="s1"),
         _qr("a1", "2026-01-01T00:00:15+00:00", 0.06, session="s2"),
         _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.dollars == pytest.approx(0.46)
 
 
@@ -423,7 +423,7 @@ def test_the_hava67_shape_totals_28_11_not_45_01():
     events.append(_completed("coder", "2026-01-01T00:09:00+00:00"))
     # Both figures derive from `series`, so the contrast cannot go stale.
     assert sum(cost for _session, cost in series) == pytest.approx(45.01)
-    rows = build_summary(events).rows
+    rows = build_summary(events)
     assert rows[0].usage.dollars == pytest.approx(28.11)
 
 
@@ -434,7 +434,7 @@ def test_usage_from_other_agent_id_is_not_attributed():
         _llm("other", "2026-01-01T00:00:05+00:00", input=999),
         _qr("other", "2026-01-01T00:00:06+00:00", 5.0),
         _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage == RowUsage()
 
 
@@ -446,7 +446,7 @@ def test_step_tokens_accumulate_across_resume_reentry():
         _started("verify", "implement", "2026-01-01T00:06:00+00:00"),  # resume
         _llm("a1", "2026-01-01T00:06:05+00:00", input=30),
         _completed("verify", "2026-01-01T00:06:30+00:00"),
-    ]).rows
+    ])
     assert len(rows) == 1
     assert rows[0].agent_id == "a1"
     assert rows[0].usage.fresh_input == 80
@@ -458,7 +458,7 @@ def test_sub_prefixed_agent_does_not_establish_step_mapping_or_tokens():
         _llm("sub:ev1", "2026-01-01T00:00:05+00:00", input=999),
         _llm("a1", "2026-01-01T00:00:10+00:00", input=10),
         _completed("task-lead", "2026-01-01T00:00:20+00:00"),
-    ]).rows
+    ])
     assert rows[0].agent_id == "a1"
     assert rows[0].usage.fresh_input == 10
 
@@ -471,7 +471,7 @@ def test_subagent_captured_with_name_label_and_duration():
                  "explorer", label="map the repo"),
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert len(rows[0].subagents) == 1
     sub = rows[0].subagents[0]
     assert sub.name == "explorer"
@@ -492,7 +492,7 @@ def test_subagent_tokens_and_cost_keyed_by_sub_agent_id():
                                   "cacheCreationInputTokens": 0}}),
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     sub = rows[0].subagents[0]
     assert (sub.usage.fresh_input, sub.usage.output) == (200, 40)
     assert sub.usage.dollars == pytest.approx(0.12)
@@ -507,7 +507,7 @@ def test_subagent_errored_from_tool_result_error_flag():
         _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00", "reviewer"),
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00", error=True),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].subagents[0].errored is True
 
 
@@ -521,7 +521,7 @@ def test_parent_and_subagent_tokens_accrue_independently_while_sub_open():
         _llm("lead1", "2026-01-01T00:00:25+00:00", input=30),
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.fresh_input == 100
     assert rows[0].subagents[0].usage.fresh_input == 200
 
@@ -535,7 +535,7 @@ def test_codex_tokens_and_cost_come_from_the_usage_patch_row():
         _patch("a1", input=1000, output=200, cache_read=4000,
                cache_creation=500, context_tokens=5000),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     usage = rows[0].usage
     assert (usage.fresh_input, usage.cached_input, usage.cache_write,
             usage.output) == (1000, 4000, 500, 200)
@@ -553,7 +553,7 @@ def test_a_usage_patch_is_priced_against_the_preceding_message_model():
         _codex("a1", "2026-01-01T00:00:01+00:00", auth_mode="apikey"),
         _patch("a1", input=1000, output=1000, context_tokens=2000),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.dollars == pytest.approx(0.024)
     assert rows[0].usage.notional == 0          # apikey -> metered
     assert rows[0].usage.priced == 1            # the patch row, once
@@ -571,7 +571,7 @@ def test_a_codex_turn_is_surcharged_on_context_tokens_not_the_patch_sum():
             _patch("a1", input=200_000, cache_read=200_000, output=10_000,
                    **patch_kw),
             _completed("coder", "2026-01-01T00:01:00+00:00"),
-        ]).rows
+        ])
         return rows[0].usage.dollars
 
     assert _cost(context_tokens=100_000) == pytest.approx(1.08)
@@ -590,7 +590,7 @@ def test_codex_subagent_figures_routed_via_usage_patch():
         _patch("sub:ev9", input=500, output=200, context_tokens=1000),
         _subresult("blk9", "a1", "2026-01-01T00:00:55+00:00"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     sub = rows[0].subagents[0]
     assert (sub.usage.fresh_input, sub.usage.output) == (500, 200)
     # gpt-5.6-sol, per million: 500*$4 + 200*$20 = $0.006
@@ -612,7 +612,7 @@ def test_claude_code_tokens_come_solely_from_model_usage():
                                           "cacheReadInputTokens": 100,
                                           "cacheCreationInputTokens": 0}}),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     usage = rows[0].usage
     assert (usage.input_total, usage.output) == (1410, 55)
     assert usage.fresh_input == 110          # not 9999, and no partial sum of it
@@ -630,7 +630,7 @@ def test_claude_code_cost_is_the_vendor_figure_not_the_price_table():
                                   "cacheCreationInputTokens": 0,
                                   "costUSD": 0.99}}),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.dollars == pytest.approx(0.99)
     assert rows[0].usage.unpriced == 0       # a vendor figure is priced by definition
 
@@ -652,11 +652,11 @@ def _fallback_events(model_usage: dict, *, auth_mode: str | None = None,
 def test_a_claude_code_row_with_no_vendor_cost_is_priced_from_the_table():
     # AC 1: the SDK declares total_cost_usd as `float | None`; with none on the
     # wire the row is priced per model instead of being credited $0.00.
-    rows = build_summary(_fallback_events(_FALLBACK_USAGE)).rows
+    rows = build_summary(_fallback_events(_FALLBACK_USAGE))
     assert rows[0].usage.dollars == pytest.approx(0.195)
     assert cost_cell(rows[0].totals) == "[$0.20]"
     without = build_summary(
-        _fallback_events(_FALLBACK_USAGE, with_query_result=False)).rows
+        _fallback_events(_FALLBACK_USAGE, with_query_result=False))
     assert (summary_totals(rows, 60.0)[1].dollars
             - summary_totals(without, 60.0)[1].dollars) == pytest.approx(0.195)
 
@@ -665,7 +665,7 @@ def test_a_metered_claude_code_row_priced_from_the_table_renders_a_tilde():
     # AC 2: apikey auth is metered, so the same computed figure loses the
     # brackets and takes the tilde.
     rows = build_summary(
-        _fallback_events(_FALLBACK_USAGE, auth_mode="apikey")).rows
+        _fallback_events(_FALLBACK_USAGE, auth_mode="apikey"))
     assert cost_cell(rows[0].totals) == "~$0.20"
 
 
@@ -678,7 +678,7 @@ def test_a_vendor_zero_renders_as_the_vendors_own_zero():
         _qr("a1", "2026-01-01T00:00:02+00:00", 0.0,
             model_usage=_FALLBACK_USAGE),
         _completed("reviewer", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.dollars == 0.0
     assert cost_cell(rows[0].totals) == "[<$0.01]"
 
@@ -688,7 +688,7 @@ def test_a_vendor_less_row_floors_when_one_model_is_absent_from_the_table():
     # the one cause a ≥ has ever had.
     rows = build_summary(_fallback_events({
         **_FALLBACK_USAGE,
-        "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}})).rows
+        "claude-mythic-9": {"inputTokens": 2000, "outputTokens": 1000}}))
     assert cost_cell(rows[0].totals) == "≥[$0.20]"
     hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=60.0)
@@ -711,7 +711,7 @@ def test_a_vendor_less_row_of_unknown_models_renders_n_a_and_floors_the_total():
         _qr("a2", "2026-01-01T00:00:32+00:00", session="s2",
             model_usage=_FALLBACK_USAGE),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert cost_cell(rows[0].totals) == "n/a"
     assert cost_cell(summary_totals(rows, 60.0)[1]) == "≥[$0.20]"
 
@@ -722,7 +722,7 @@ def test_a_vendor_less_row_sums_three_priced_models_without_a_floor():
     rows = build_summary(_fallback_events({
         "claude-sonnet-4-6": {"inputTokens": 1000, "outputTokens": 1000},
         "claude-haiku-4-5-20251001": {"inputTokens": 1000, "outputTokens": 1000},
-        "claude-opus-5": {"inputTokens": 1000, "outputTokens": 1000}})).rows
+        "claude-opus-5": {"inputTokens": 1000, "outputTokens": 1000}}))
     assert rows[0].usage.dollars == pytest.approx(0.054)
     assert rows[0].usage.priced == 3
     assert cost_cell(rows[0].totals) == "[$0.05]"
@@ -734,7 +734,7 @@ def test_a_vendor_less_row_with_no_billable_usage_renders_dashes():
         "claude-sonnet-4-6": {"inputTokens": 0, "outputTokens": 0,
                               "cacheReadInputTokens": 0,
                               "cacheCreationInputTokens": 0,
-                              "webSearchRequests": 0}})).rows
+                              "webSearchRequests": 0}}))
     assert cost_cell(rows[0].totals) == "—"
     hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=60.0)
@@ -747,8 +747,8 @@ def test_web_search_requests_are_priced_when_the_vendor_cost_is_absent():
     # tokens' $0.195.
     searched = build_summary(_fallback_events({
         "claude-sonnet-4-6": {**_FALLBACK_USAGE["claude-sonnet-4-6"],
-                              "webSearchRequests": 12}})).rows
-    plain = build_summary(_fallback_events(_FALLBACK_USAGE)).rows
+                              "webSearchRequests": 12}}))
+    plain = build_summary(_fallback_events(_FALLBACK_USAGE))
     assert (searched[0].usage.dollars
             - plain[0].usage.dollars) == pytest.approx(0.12)
 
@@ -760,7 +760,7 @@ def test_a_search_only_row_with_no_vendor_cost_is_billable_work():
         "claude-sonnet-4-6": {"inputTokens": 0, "outputTokens": 0,
                               "cacheReadInputTokens": 0,
                               "cacheCreationInputTokens": 0,
-                              "webSearchRequests": 5}})).rows
+                              "webSearchRequests": 5}}))
     assert rows[0].usage.dollars == pytest.approx(0.05)
     assert cost_cell(rows[0].totals) == "[$0.05]"
 
@@ -771,7 +771,7 @@ def test_a_model_absent_from_the_price_table_counts_as_unpriced():
         _llm("a1", "2026-01-01T00:00:01+00:00", provider="openai",
              model="gpt-9-imaginary", input=1000, output=100),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     usage = rows[0].usage
     assert usage.fresh_input == 1000         # the tokens are still real
     assert (usage.priced, usage.unpriced) == (0, 1)
@@ -788,7 +788,7 @@ def test_anthropic_and_openai_rows_are_metered_without_an_auth_mode():
             _llm("a1", "2026-01-01T00:00:01+00:00", provider=provider,
                  model=model, input=100, output=10),
             _completed("coder", "2026-01-01T00:01:00+00:00"),
-        ]).rows
+        ])
         assert rows[0].usage.notional == 0, provider
         assert rows[0].usage.priced == 1, provider
 
@@ -800,7 +800,7 @@ def test_a_claude_code_row_with_no_auth_mode_is_notional():
         _cc("a1", "2026-01-01T00:00:01+00:00"),
         _qr("a1", "2026-01-01T00:00:02+00:00", 0.42),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.notional == 1
 
 
@@ -812,7 +812,7 @@ def test_a_claude_code_row_with_apikey_auth_is_metered():
         _cc("a1", "2026-01-01T00:00:01+00:00", auth_mode="apikey"),
         _qr("a1", "2026-01-01T00:00:02+00:00", 0.42),
         _completed("coder", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].usage.notional == 0
 
 
@@ -1090,7 +1090,7 @@ def test_plain_tool_result_cannot_close_a_stamped_subagent():
         # (codex block ids are short per-turn sequence numbers).
         _subresult("item_5", "lead1", "2026-01-01T00:00:30+00:00", stamped=False),
     ]
-    ignored = build_summary(prefix).rows[0].subagents[0]
+    ignored = build_summary(prefix)[0].subagents[0]
     assert ignored.end_ts is None
     assert ignored.wall_seconds is None
 
@@ -1098,7 +1098,7 @@ def test_plain_tool_result_cannot_close_a_stamped_subagent():
     closed = build_summary([
         *prefix,
         _subresult("item_5", "lead1", "2026-01-01T00:00:50+00:00"),
-    ]).rows[0].subagents[0]
+    ])[0].subagents[0]
     assert closed.end_ts == "2026-01-01T00:00:50+00:00"
     assert closed.wall_seconds == 40.0
 
@@ -1111,7 +1111,7 @@ def test_duplicate_stamped_result_does_not_move_end_ts():
         _subresult("item_5", "lead1", "2026-01-01T00:00:55+00:00"),
         _subresult("item_5", "lead1", "2026-01-01T00:02:00+00:00"),
         _completed("task-lead", "2026-01-01T00:03:00+00:00"),
-    ]).rows
+    ])
     sub = rows[0].subagents[0]
     assert sub.end_ts == "2026-01-01T00:00:55+00:00"
     assert sub.wall_seconds == 45.0
@@ -1125,7 +1125,7 @@ def test_legacy_unstamped_pair_still_closes():
                  stamped=False),
         _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00", stamped=False),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].subagents[0].wall_seconds == 45.0
 
 
@@ -1135,7 +1135,7 @@ def test_open_subagent_is_contained_at_its_step_end():
         _context("lead1", "2026-01-01T00:00:01+00:00"),
         _subcall("ev9", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     sub = rows[0].subagents[0]
     assert sub.end_ts == "2026-01-01T00:01:00+00:00"
     assert sub.wall_seconds == 50.0
@@ -1149,7 +1149,7 @@ def test_observed_close_is_not_marked_inferred():
         _subcall("ev9", "item_3", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
         _subresult("item_3", "lead1", "2026-01-01T00:00:55+00:00"),
         _completed("task-lead", "2026-01-01T00:01:00+00:00"),
-    ]).rows
+    ])
     sub = rows[0].subagents[0]
     assert sub.wall_seconds == 45.0
     assert sub.end_inferred is False
@@ -1167,7 +1167,7 @@ def test_second_subagent_reusing_an_open_block_id_is_still_contained():
         _subcall("ev2", "item_3", "lead1", "2026-01-01T00:00:40+00:00", "explorer"),
         _subresult("item_3", "lead1", "2026-01-01T00:01:00+00:00"),
         _completed("task-lead", "2026-01-01T00:02:00+00:00"),
-    ]).rows
+    ])
     first, second = rows[0].subagents
     assert second.name == "explorer"
     assert second.end_ts == "2026-01-01T00:01:00+00:00"    # its own stamped result
@@ -1188,7 +1188,7 @@ def test_repeated_block_id_in_a_later_step_cannot_reach_back():
         _started("verify", "implement", "2026-01-01T00:01:05+00:00"),
         _subresult("item_3", "v1", "2026-01-01T00:02:00+00:00"),
         _completed("verify", "2026-01-01T00:02:30+00:00"),
-    ]).rows
+    ])
     sub = rows[0].subagents[0]
     assert sub.end_ts == "2026-01-01T00:01:00+00:00"   # step A's end, not step B's result
     assert sub.wall_seconds == 50.0
@@ -1200,7 +1200,7 @@ def test_step_without_completion_closes_at_the_next_step_start():
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         _started("verify", "implement", "2026-01-01T00:05:00+00:00"),
         _completed("verify", "2026-01-01T00:06:00+00:00"),
-    ]).rows
+    ])
     assert rows[0].end_ts == "2026-01-01T00:05:00+00:00"
     assert rows[0].wall_seconds == 300.0
     assert rows[0].end_inferred is True
@@ -1211,7 +1211,7 @@ def test_trailing_open_step_stays_open_and_uninferred():
     rows = build_summary([
         _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
         _context("lead1", "2026-01-01T00:00:01+00:00"),
-    ]).rows
+    ])
     assert rows[0].end_ts is None
     assert rows[0].end_inferred is False
 
@@ -1222,7 +1222,7 @@ def test_resume_reentry_is_not_an_inferred_close():
         _await("2026-01-01T00:01:00+00:00"),
         _started("verify", "implement", "2026-01-01T00:06:00+00:00"),  # resume
         _completed("verify", "2026-01-01T00:06:30+00:00"),
-    ]).rows
+    ])
     assert len(rows) == 1
     assert rows[0].end_inferred is False
 
@@ -1243,7 +1243,7 @@ def test_every_subagent_is_contained_on_a_codex_shaped_log():
         _subresult("item_5", "rev1", "2026-01-01T00:06:00+00:00"),
         _started("verify", "implement", "2026-01-01T00:08:00+00:00"),  # review never completes
         _completed("verify", "2026-01-01T00:09:00+00:00"),
-    ]).rows
+    ])
     assert [r.step for r in rows] == ["task-lead", "code-review", "verify"]
     for row in rows:
         assert row.end_ts is not None
@@ -1394,7 +1394,7 @@ def test_f2_a_subagents_usage_folds_into_the_quest_total():
                 "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0}}),
         _subresult("blk1", "lead1", "2026-01-01T00:00:09+00:00"),
         _completed("task-lead", "2026-01-01T00:00:10+00:00"),
-    ]).rows
+    ])
     _work, total = summary_totals(rows, 10.0)
     assert rows[0].totals.fresh_input == 1000   # 100 parent + 900 subagent
     assert rows[0].totals.output == 12
@@ -1418,7 +1418,7 @@ def _one_step(*events: dict) -> StepRow:
         _started("s", "p", "2026-01-01T00:00:00+00:00"),
         *events,
         _completed("s", "2026-01-01T00:00:20+00:00"),
-    ]).rows
+    ])
     return rows[0]
 
 
@@ -1637,7 +1637,7 @@ def _quota_reading(ts: str = "2026-01-01T00:00:30+00:00") -> dict:
 def test_the_summary_has_no_quota_input_and_renders_no_quota_output():
     events = _fallback_events(_FALLBACK_USAGE)
     events.append(_quota_reading())
-    lines = render_summary(build_summary(events).rows, header=_HDR,
+    lines = render_summary(build_summary(events), header=_HDR,
                            color=False, width=80)
     assert not any("quota" in ln or "5h" in ln or "7d" in ln for ln in lines)
     assert lines[-2].startswith("  total")
@@ -1645,3 +1645,13 @@ def test_the_summary_has_no_quota_input_and_renders_no_quota_output():
                          " not billed per token")
     with pytest.raises(TypeError):
         render_summary([], header=_HDR, color=False, width=80, quota=())
+
+
+def test_build_summary_returns_the_step_rows_directly():
+    rows = build_summary([
+        _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
+        _completed("plan-writer", "2026-01-01T00:01:30+00:00"),
+    ])
+    assert isinstance(rows, list)
+    assert [(r.phase, r.step) for r in rows] == [("plan", "plan-writer")]
+    assert rows[0].wall_seconds == 90.0

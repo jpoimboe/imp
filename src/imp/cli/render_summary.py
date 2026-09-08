@@ -93,11 +93,6 @@ class StepRow:
         return _dur_text(self.work_seconds, open_label, inferred=self.end_inferred)
 
 
-@dataclass(frozen=True, slots=True)
-class Summary:
-    rows: list[StepRow]
-
-
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
     # Audit-only records are queryable but silent; interrupt marker is not a terminal failure.
     if p.get("audit"):
@@ -105,7 +100,7 @@ def _is_nonterminal_error(p: dict[str, Any]) -> bool:
     return p.get("category") == "config" and p.get("kind") == "interrupted"
 
 
-def build_summary(events: Iterable[dict[str, Any]]) -> Summary:
+def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     rows: list[StepRow] = []
     open_row: StepRow | None = None        # the currently-open occurrence
     pending_wait_start: str | None = None  # ts of an unresolved awaiting_user_input
@@ -240,7 +235,7 @@ def build_summary(events: Iterable[dict[str, Any]]) -> Summary:
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
-    return Summary(rows=rows)
+    return rows
 
 
 def _fmt_tokens(total: int) -> str:

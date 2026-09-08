@@ -394,7 +394,7 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
     ]
     header = SummaryHeader(workflow="imp", quest_id="gumu81",
                            status="merged", total_seconds=summary_total(events))
-    out = render_summary_markdown(build_summary(events).rows, header=header)
+    out = render_summary_markdown(build_summary(events), header=header)
     assert "# imp — gumu81" in out               # SummaryHeader workflow/id
     assert "merged" in out                        # status carried
     assert "## design" in out                     # phase grouping heading
@@ -690,7 +690,7 @@ def _cc_fallback_events() -> list[dict]:
 def test_summary_markdown_prices_a_vendor_less_claude_code_row():
     # AC 10: the export calls the same cost_cell and legend_lines, so the
     # fallback figure and its legend arrive with no work of its own.
-    rows = build_summary(_cc_fallback_events()).rows
+    rows = build_summary(_cc_fallback_events())
     header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
@@ -826,7 +826,7 @@ def _quota_events() -> list[dict]:
 def test_summary_markdown_has_no_quota_input_and_carries_no_quota_block() -> None:
     header = SummaryHeader(workflow="imp", quest_id="gumu81",
                            status="merged", total_seconds=60.0)
-    out = render_summary_markdown(build_summary(_quota_events()).rows,
+    out = render_summary_markdown(build_summary(_quota_events()),
                                   header=header)
     assert "**quota**" not in out
     assert "claude_code" not in out

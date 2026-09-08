@@ -580,7 +580,7 @@ class LiveDriver:
             # Lazily imported, like context_bar's catalog import.
             from imp.cli.render_summary import build_summary, summary_totals
             _work, self._cost = summary_totals(
-                build_summary(self._events).rows, None)
+                build_summary(self._events), None)
             self._cost_stale = False
         return self._cost
 
