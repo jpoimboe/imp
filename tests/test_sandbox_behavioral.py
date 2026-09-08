@@ -2641,3 +2641,116 @@ def test_teardown_reaps_a_setsid_grandchild_of_a_pty_program() -> None:
             with contextlib.suppress(ProcessLookupError, ValueError):
                 os.kill(int(pid), signal.SIGKILL)
         shutil.rmtree(root, ignore_errors=True)
+
+
+_COOKED = "import time\nprint('COOKED-READY', flush=True)\ntime.sleep(300)\n"
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_ctrl_c_terminates_a_joined_cooked_mode_program_by_sigint() -> None:
+    """AC 2(a): sessions and cttys are not namespaced, so the controlling terminal
+    is inherited across nsenter's fork and the preexec TIOCSCTTY still lands. A
+    \x03 through the line discipline is therefore a REAL SIGINT, with the same
+    status the unjoined baseline reports.
+
+    The death is POLLED, not given a fixed window: a fixed settle that overran
+    under a saturated -n auto run would let stop()'s graceful rung SIGTERM a still
+    live child, and the test would report `[stopped: exit=SIGTERM]` — a symptom
+    that reads like a send_signal regression rather than the timing miss it is."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _COOKED]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv)
+        _await_screen(d, "COOKED-READY")
+        d.send("\x03", wait=False)
+        _poll(lambda: "alive=False" in d.view(),
+              what="the cooked-mode program dying of the tty's SIGINT")
+        return d.stop()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        joined = _drive_joined(ctx, _drive)
+        bare = _drive_bare(_drive)
+        assert joined.splitlines()[0] == "[stopped: exit=SIGINT]", joined
+        assert bare.splitlines()[0] == "[stopped: exit=SIGINT]", bare
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_REPORTS_SIZE = (
+    "import os, signal, time\n"
+    "def show(*_):\n"
+    "    s = os.get_terminal_size(0)\n"
+    "    os.write(1, f'SIZE={s.columns}x{s.lines}\\r\\n'.encode())\n"
+    "signal.signal(signal.SIGWINCH, show)\n"
+    "show()\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_reflows_a_joined_program_on_sigwinch() -> None:
+    """AC 2(b): the pty is imp's, on the host, and the program holds it across the
+    join — so a TIOCSWINSZ reaches it as a real SIGWINCH and it reports the new
+    size, exactly as unjoined. Reflow is the whole point of cols/rows."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _REPORTS_SIZE]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv, cols=80, rows=24)
+        _await_screen(d, "SIZE=80x24")
+        d.resize(30, 100)
+        _await_screen(d, "SIZE=100x30")
+        screen = d.view()
+        d.stop()
+        return screen
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        for screen in (_drive_joined(ctx, _drive), _drive_bare(_drive)):
+            assert "SIZE=80x24" in screen, screen     # the pre-resize report
+            assert "SIZE=100x30" in screen, screen    # and the reflowed one
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_ALT_SCREEN = (
+    "import sys, time\n"
+    "sys.stdout.write('\\x1b[?1049h\\x1b[H\\x1b[2J')\n"
+    "sys.stdout.write('ALT-LINE-ONE\\r\\n  ALT-LINE-TWO')\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_an_alt_screen_program_renders_identically_joined_and_unjoined() -> None:
+    """AC 2(c): lines(), the alt-screen state and the regime — all three carried by
+    the driver's own header — must not shift because the program was joined, or a
+    joined session would be a different thing to look at than the one the agent's
+    skill describes. Measured byte-identical on this host."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _ALT_SCREEN]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv)
+        _await_screen(d, "ALT-LINE-TWO")
+        screen = d.view()
+        d.stop()
+        return screen
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        joined = _drive_joined(ctx, _drive)
+        bare = _drive_bare(_drive)
+        # Positive first: the program really is on the alt screen, so an equality
+        # between two SCROLL-regime screens cannot pass for this.
+        assert "regime=screen" in joined, joined
+        assert "ALT-LINE-ONE" in joined
+        assert joined == bare
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
