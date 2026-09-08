@@ -432,6 +432,57 @@ def _colored_span_ranges(lines: list[str]) -> list[_ColoredSpan]:
     return out
 
 
+def _lift_colored_spans(text: str, color: bool) -> tuple[str, list[tuple[str, str]]]:
+    """Swap the colored tail of every eligible inline code span for a run of `_SPAN_UNIT`
+    exactly as wide as the sample's visible cells, so rich lays the paragraph out as if
+    the codes were not there. Returns the rewritten text plus the (run, sample) pairs to
+    splice back, in source order. Arming happens HERE, not in the shared escape helper:
+    a bare code armed before `_caret_escape_prose` comes back as `^[[1;33m`, which the
+    lookbehinds refuse to re-arm. Each spliced sample ends with a reset, matching the
+    fence path; with color off the codes are stripped instead. Only lines are rewritten,
+    never line COUNT, so the later fence scan sees exactly the same fences."""
+    if _SPAN_UNIT in text:
+        return text, []
+    lines = text.split("\n")
+    lifted: list[tuple[str, str]] = []
+    for span in reversed(_colored_span_ranges(lines)):
+        ln = lines[span.line]
+        sample = ln[span.start:span.end]
+        # `_slot_prefix` runs on the text AFTER this lift, so a `_SLOT_UNIT` carried
+        # inside a sample would be invisible to it and the splice would forge a fence
+        # slot key. Leaving the span alone keeps the character in view of both scans.
+        if _SLOT_UNIT in sample:
+            continue
+        armed = _BARE_SGR_RE.sub(lambda m: "\x1b" + m.group(0), sample)
+        run = _SPAN_UNIT * _span_cells(sample)
+        lifted.append((run, _sgr_survives(armed) + "\x1b[0m" if color
+                       else _caret_escape(_strip_sgr(armed))))
+        lines[span.line] = ln[:span.start] + run + ln[span.end:]
+    lifted.reverse()
+    return "\n".join(lines), lifted
+
+
+def _splice_lifted_spans(rendered: str, lifted: list[tuple[str, str]]) -> str | None:
+    """Put each recorded sample back where its placeholder run landed. `None` means rich
+    defeated the lift — a run was folded across lines, welded into a wider run, or lost —
+    and the caller must redo the render with the lift off, so no sentinel ever reaches a
+    terminal. A run must be found whole, in order, and maximal: two abutting runs would
+    otherwise be split at the wrong offset."""
+    out: list[str] = []
+    pos = 0
+    for run, sample in lifted:
+        at = rendered.find(run, pos)
+        end = at + len(run)
+        if (at < 0 or rendered[at - 1:at] == _SPAN_UNIT
+                or rendered[end:end + 1] == _SPAN_UNIT):
+            return None
+        out.append(rendered[pos:at])
+        out.append(sample)
+        pos = end
+    out.append(rendered[pos:])
+    return "".join(out)
+
+
 def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80) -> str:
     import io
 

@@ -3343,6 +3343,63 @@ def test_span_cells_measures_visible_cells_not_bytes() -> None:
     assert rt._span_cells("[0m") == 0
 
 
+def test_lift_colored_spans_swaps_the_sample_for_a_width_faithful_run() -> None:
+    text, lifted = rt._lift_colored_spans("The gauge reads `[1;33m78%[0m` amber.", True)
+    assert text == "The gauge reads `" + rt._SPAN_UNIT * 3 + "` amber."
+    assert lifted == [(rt._SPAN_UNIT * 3, "\x1b[1;33m78%\x1b[0m\x1b[0m")]
+
+
+def test_lift_colored_spans_strips_the_codes_with_color_off() -> None:
+    text, lifted = rt._lift_colored_spans("g `[1;33m78%[0m` a", False)
+    assert text == "g `" + rt._SPAN_UNIT * 3 + "` a"
+    assert lifted == [(rt._SPAN_UNIT * 3, "78%")]      # no ESC, no bare residue
+
+
+def test_lift_colored_spans_is_skipped_when_content_carries_the_sentinel() -> None:
+    # An order-based splice cannot tell a content-origin run from ours, so the whole
+    # render gives up the lift rather than risk a wrong-but-intact match.
+    src = "Odd " + rt._SPAN_UNIT + " char and `[1;33m78%[0m` here."
+    assert rt._lift_colored_spans(src, True) == (src, [])
+
+
+def test_lift_colored_spans_records_multiple_samples_in_source_order() -> None:
+    text, lifted = rt._lift_colored_spans("A `[31mone[0m` and B `[32mtwo[0m` end.", True)
+    assert text == ("A `" + rt._SPAN_UNIT * 3 + "` and B `"
+                    + rt._SPAN_UNIT * 3 + "` end.")
+    assert [s for _, s in lifted] == ["\x1b[31mone\x1b[0m\x1b[0m",
+                                      "\x1b[32mtwo\x1b[0m\x1b[0m"]
+
+
+def test_lift_colored_spans_skips_a_sample_carrying_a_fence_slot_unit() -> None:
+    # `_slot_prefix` picks the shortest `_SLOT_UNIT` run absent from the text it is
+    # handed, and it is handed the POST-span-lift text — so a U+FFFF hidden inside a
+    # lifted sample would be invisible to it, and the spliced sample would FORGE a fence
+    # slot key. Leaving such a span alone keeps every U+FFFF in view of `_slot_prefix`.
+    src = "a `[31m" + rt._SLOT_UNIT + "0" + rt._SLOT_UNIT + "[0m` b"
+    assert rt._lift_colored_spans(src, True) == (src, [])
+    # Per-span, not per-render: a clean span beside it still lifts.
+    text, lifted = rt._lift_colored_spans(
+        "a `[31m" + rt._SLOT_UNIT + "[0m` and b `[32mok[0m` c", True)
+    assert [s for _, s in lifted] == ["\x1b[32mok\x1b[0m\x1b[0m"]
+    assert rt._SLOT_UNIT in text        # left in place, so `_slot_prefix` still sees it
+
+
+def test_splice_lifted_spans_restores_each_sample_at_its_run() -> None:
+    lifted = [(rt._SPAN_UNIT * 3, "\x1b[1;33m78%\x1b[0m"),
+              (rt._SPAN_UNIT * 2, "\x1b[32mok\x1b[0m")]
+    rendered = f"a {rt._SPAN_UNIT * 3} b {rt._SPAN_UNIT * 2} c"
+    assert rt._splice_lifted_spans(rendered, lifted) == \
+        "a \x1b[1;33m78%\x1b[0m b \x1b[32mok\x1b[0m c"
+
+
+def test_splice_lifted_spans_refuses_a_folded_welded_or_lost_run() -> None:
+    lifted = [(rt._SPAN_UNIT * 4, "\x1b[1;33mWARN\x1b[0m")]
+    u = rt._SPAN_UNIT
+    assert rt._splice_lifted_spans(f"a {u * 2}\n{u * 2} b", lifted) is None   # folded
+    assert rt._splice_lifted_spans(f"a {u * 5} b", lifted) is None            # welded
+    assert rt._splice_lifted_spans("a b", lifted) is None                     # lost
+
+
 def _agent_lines(text: str, *, color: bool, width: int = 80) -> list[str]:
     tree = nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
