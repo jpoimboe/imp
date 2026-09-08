@@ -7,6 +7,7 @@ import os
 import subprocess
 import tempfile
 import types as _types
+import uuid
 from pathlib import Path
 
 import pytest
@@ -72,10 +73,14 @@ def wrapper_argv(command: str) -> list[str]:
 
 def test_inactive_policy_returns_bare_argv():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    argv = _argv("echo hi", cwd="/state/worktrees/abc",
-                              policy=_policy(active=False), engine_env={})
-    assert argv == ["sh", "-c", "echo hi"]
-    assert SANDBOX_ENTERED_MARKER not in argv[-1]
+    spawn = build_sandbox_spawn("echo hi", cwd="/state/worktrees/abc",
+                                policy=_policy(active=False), engine_env={}, environ={})
+    assert spawn.argv[:2] == ["sh", "-c"]
+    assert "echo hi" not in spawn.argv[2]          # the command is not on argv
+    assert spawn.argv[2].splitlines() == [
+        "cmd=$IMP_COMMAND", "unset IMP_COMMAND", 'eval "$cmd"']
+    assert spawn.env["IMP_COMMAND"] == "echo hi"
+    assert SANDBOX_ENTERED_MARKER not in spawn.argv[2]
 
 
 def test_active_policy_wraps_with_bwrap():
@@ -106,6 +111,16 @@ def _run_wrapper(command: str, stdin: str | None = None) -> subprocess.Completed
     """Run the builder's real wrapper argv on the host (no bwrap needed)."""
     return subprocess.run(wrapper_argv(command), input=stdin, text=True,
                           capture_output=True)
+
+
+def _run_bare(command: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run the builder's real UNSANDBOXED spawn on the host — the `/sandbox off`
+    shape, whose command travels in the environment exactly as a join's does."""
+    spawn = build_sandbox_spawn(
+        command, cwd="/", policy=_policy(active=False), engine_env={},
+        environ={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+    return subprocess.run(spawn.argv, input=stdin, text=True, capture_output=True,
+                          env=spawn.env)
 
 
 def test_wrapper_emits_the_sentinel_before_a_syntax_error():
@@ -145,6 +160,18 @@ def test_wrapper_survives_quotes_backslashes_and_dollars():
     p = _run_wrapper(cmd)
     assert p.returncode == 0
     assert p.stdout.splitlines() == ["dq 2", "sq", "lit$eral", r"back\slash"]
+
+
+def test_the_bare_shape_hides_the_command_from_its_own_pkill():
+    # AC 10b: /sandbox off keeps the footgun unless the command leaves argv. The
+    # needle occurs only inside the command's own text, so a correct build matches
+    # nothing; with the command on argv, pkill kills the shell running it (rc -15).
+    needle = f"imp-needle-{uuid.uuid4().hex}"
+    done = _run_bare(f'pkill -f "{needle}"; echo pkill-rc=$?')
+    assert done.returncode == 0
+    assert done.stdout.strip() == "pkill-rc=1"       # pkill: no process matched
+    listing = subprocess.run(["ps", "auxww"], capture_output=True, text=True).stdout
+    assert needle not in listing                     # on no process's argv, host-side
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
@@ -2872,8 +2899,7 @@ def test_an_inactive_policy_carries_no_repo_re_expose(tmp_path):
     assert pol.note == "unsandboxed_by_config"
     assert pol.state_repo_ro == ""
     assert not [b for b, _ in pol.bind_plan() if b.endswith("/repo")]
-    assert _argv("x", cwd="/wt", policy=pol, engine_env={}) == [
-        "sh", "-c", "x"]
+    assert _argv("x", cwd="/wt", policy=pol, engine_env={})[:2] == ["sh", "-c"]
 
 
 def test_spawn_env_is_the_bake_refreshed_by_the_live_engine_env():
@@ -2910,11 +2936,12 @@ def test_inactive_policy_spawn_keeps_the_host_environment():
         environ={"PATH": "/usr/bin", "HOME": "/home/u",
                  "IMP_TEST_CMD_FAST": "stale-gate"},
         shim_dir="/q/imp-shim")
-    assert spawn.argv == ["sh", "-c", "echo hi"]
+    assert spawn.argv[:2] == ["sh", "-c"]
     assert spawn.env == {
         "PATH": "/q/imp-shim" + os.pathsep + "/usr/bin",
         "HOME": "/home/u",
         "IMP_QUEST_ID": "abc",
+        "IMP_COMMAND": "echo hi",
     }
 
 

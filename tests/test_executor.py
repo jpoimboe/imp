@@ -4625,7 +4625,7 @@ def test_sandbox_off_shape_with_overlay_root_builds_bare_argv(tmp_path, monkeypa
     assert pol.overlay_root and not pol.home_layer.is_overlay   # the decorated shape
     off = dataclasses.replace(pol, active=False)
     assert build_sandbox_spawn("echo hi", cwd="/wt", policy=off,
-                               engine_env={}, environ={}).argv == ["sh", "-c", "echo hi"]
+                               engine_env={}, environ={}).argv[:2] == ["sh", "-c"]
     cleanup()
 
 

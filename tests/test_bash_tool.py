@@ -664,13 +664,16 @@ def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     async def fake_open_process(argv: list[str], **kw: object) -> object:
         captured["argv"] = argv
+        captured["env"] = kw["env"]
         raise RuntimeError("stop")
 
     monkeypatch.setattr(bashmod.anyio, "open_process", fake_open_process)
     # no sandbox_policy set on ctx — should use bare sh -c
     with pytest.raises(RuntimeError):
         _run_bash(_ctx(tmp_path), {"command": "echo hi"})
-    assert captured["argv"] == ["sh", "-c", "echo hi"]
+    assert captured["argv"][:2] == ["sh", "-c"]
+    assert "echo hi" not in captured["argv"][2]
+    assert captured["env"]["IMP_COMMAND"] == "echo hi"
 
 
 def test_bash_pending_pause_never_spawns_child(tmp_path: Path) -> None:

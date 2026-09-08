@@ -287,6 +287,13 @@ def _spawn_child_env(policy: SandboxPolicy,
     return env
 
 
+_BARE_SCRIPT = (          # no `cd`: one mount namespace, so the spawn's own cwd= applies
+    'cmd=$IMP_COMMAND\n'
+    'unset IMP_COMMAND\n'
+    'eval "$cmd"\n'
+)
+
+
 def build_sandbox_spawn(
     command: str, *, cwd: str, policy: SandboxPolicy | None,
     engine_env: Mapping[str, str], environ: Mapping[str, str],
@@ -294,10 +301,11 @@ def build_sandbox_spawn(
 ) -> SandboxSpawn:
     """Return the argv to spawn `command` AND the environment to spawn it with.
     When the policy is active, wrap with bwrap per spec §B.2 (fixed flag order) and
-    the env is the resolved child environment; otherwise the bare ["sh","-c",cmd]
-    with the host environment (`environ` overlaid with `engine_env`, plus the
-    `shim_dir` PATH prefix) — the `/sandbox off` path, deliberately unchanged. A
-    None policy is the same unsandboxed case. `shim_dir` is ignored under an active
+    the env is the resolved child environment; otherwise a bare `sh -c` evaluates
+    the command out of `$IMP_COMMAND` — off argv like a join's, so `/sandbox off`
+    does not keep the self-`pkill` footgun — with the host environment (`environ`
+    overlaid with `engine_env`, plus the `shim_dir` PATH prefix). A None policy is
+    the same unsandboxed case. `shim_dir` is ignored under an active
     policy: the PATH shim is already baked into `policy.child_env` by `_build_child_env`.
 
     `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
@@ -331,7 +339,8 @@ def build_sandbox_spawn(
         env = overlay_engine_env(environ, engine_env)
         if shim_dir:
             env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
-        return SandboxSpawn(argv=["sh", "-c", command], env=env)
+        env["IMP_COMMAND"] = command
+        return SandboxSpawn(argv=["sh", "-c", _BARE_SCRIPT], env=env)
 
     if (policy.overlay_root is not None and policy.home_layer is not None
             and not policy.home_layer.is_overlay):
