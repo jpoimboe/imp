@@ -89,7 +89,7 @@ class FakeItemEvent:
 @dataclass
 class FakeTurnCompletedEvent:
     type: str = "turn.completed"
-    usage: FakeUsage = field(default_factory=FakeUsage)
+    usage: FakeUsage | None = field(default_factory=FakeUsage)
 
 
 @dataclass
@@ -226,6 +226,11 @@ def turn_completed(
         cached_input_tokens=cached_input_tokens,
         reasoning_output_tokens=reasoning_output_tokens,
         cache_write_input_tokens=cache_write_input_tokens))
+
+
+def turn_completed_without_usage() -> FakeTurnCompletedEvent:
+    """codex's usage-less `turn.completed` — the early-return arm."""
+    return FakeTurnCompletedEvent(usage=None)
 
 
 def turn_failed(error: dict[str, Any]) -> FakeTurnFailedEvent:
