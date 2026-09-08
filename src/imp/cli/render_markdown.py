@@ -214,6 +214,7 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
             parts = [f"{name} · complete"]
         else:
             parts = [name]
+        parts.extend(rt.round_and_tally_parts(node.round, node.counts))
         done = rt.fmt_seconds_done(node.elapsed_s)
         if done:
             parts.append(done)

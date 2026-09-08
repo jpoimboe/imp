@@ -2,12 +2,13 @@
 name: spec-reviewer
 deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: reviewing spec
-description: Review the spec against the captured intent; severity-classified findings; blocking iff any Critical/Major.
+description: Review the spec against the captured intent; severity-classified findings; any Critical/Major sends it back.
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
-  blocking: {type: bool}
-  has_minor_findings: {type: bool}
+  critical: {type: int}
+  major: {type: int}
+  minor: {type: int}
 ---
 
 You are reviewing the spec for this quest.
@@ -110,7 +111,7 @@ The Decisions summary may carry review markers — "*(decided during review)*" a
 format (the audit trail of decisions made during review), **not** placeholder or
 meta-commentary defects — do not flag them.
 
-An area that returns lap after lap means the design is unsettled, not the spec under-written: say so in `findings` — another Major buys another lap, not a decision — and don't manufacture minors to justify one more pass; on such a review `has_minor_findings = false` is the honest answer.
+An area that returns lap after lap means the design is unsettled, not the spec under-written: say so in `findings` — another Major buys another lap, not a decision — and don't manufacture minors to justify one more pass; on such a review `minor = 0` is the honest answer.
 
 ## Output
 
@@ -120,24 +121,19 @@ State your verified conclusion once — don't repeat the same "all claims verifi
 conclusion across a narration bullet, the findings body, and one-line summaries. A
 single statement inside `findings` is enough.
 
-Set `blocking = true` if any Critical or Major findings exist; `false` otherwise.
+Report `critical`, `major`, and `minor` as the number of findings you listed at each severity. **Nits are never counted** — a spec whose only findings are cosmetic Nits reports `minor = 0`.
 
-Set `has_minor_findings = true` only for **Minor** findings worth integrating;
-`false` otherwise. **Nit-only findings do not count** — a spec whose only findings
-are cosmetic Nits sets `has_minor_findings = false`. This field is consulted only on
-a clean (`blocking = false`) review, deciding whether the writer does one final
-minors-integration pass before the spec is accepted; it has no effect when
-`blocking = true`. Set it honestly regardless.
+Any Critical or Major sends the spec back for rework. `minor` is consulted only when `critical` and `major` are both `0`, deciding whether the writer does one final minors-integration pass before the spec is accepted; it has no effect otherwise. Count honestly regardless.
 
 Finish with one of:
 
 ```
 # Clean, with Minor findings worth integrating:
-complete_step(findings="No Critical/Major findings. Minor: …", blocking=false, has_minor_findings=true)
+complete_step(findings="No Critical/Major findings. Minor: …", critical=0, major=0, minor=2)
 
 # Clean, nothing actionable (no findings, or Nit-only):
-complete_step(findings="No findings. Spec is complete and ready for planning.", blocking=false, has_minor_findings=false)
+complete_step(findings="No findings. Spec is complete and ready for planning.", critical=0, major=0, minor=0)
 
 # Blocking issues:
-complete_step(findings="Critical: … / Major: …", blocking=true, has_minor_findings=false)
+complete_step(findings="Critical: … / Major: …", critical=1, major=2, minor=0)
 ```

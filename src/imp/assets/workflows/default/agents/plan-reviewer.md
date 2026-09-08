@@ -2,12 +2,13 @@
 name: plan-reviewer
 deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: reviewing plan
-description: Review the newest plan's prescribed code like a diff for correctness, with a short doc-integrity tail; severity-classified; blocking iff Critical/Major.
+description: Review the newest plan's prescribed code like a diff for correctness, with a short doc-integrity tail; severity-classified; any Critical/Major sends it back.
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
-  blocking: {type: bool}
-  has_minor_findings: {type: bool}
+  critical: {type: int}
+  major: {type: int}
+  minor: {type: int}
 ---
 
 You are reviewing the newest implementation plan before it is implemented. imp
@@ -157,24 +158,24 @@ End `findings` with `Verified at <sha>:` — the sha from `git -C "$IMP_PROJECT_
 its `file:line`. The next lap reads this instead of re-opening those files; a check you don't
 record is a check it pays for again.
 
-Set `blocking = true` if any Critical or Major findings exist; `false` otherwise.
+Report `critical`, `major`, and `minor` as the number of findings you listed at each
+severity. **Nits are never counted** — a plan whose only findings are cosmetic Nits
+reports `minor = 0`.
 
-Set `has_minor_findings = true` only for **Minor** findings worth integrating;
-`false` otherwise. **Nit-only findings do not count** — a plan whose only findings
-are cosmetic Nits sets `has_minor_findings = false`. This field is consulted only on
-a clean (`blocking = false`) review, deciding whether the writer does one final
-minors-integration pass before the plan is accepted; it has no effect when
-`blocking = true`. Set it honestly regardless.
+Any Critical or Major sends the plan back for rework. `minor` is consulted only when
+`critical` and `major` are both `0`, deciding whether the writer does one final
+minors-integration pass before the plan is accepted; it has no effect otherwise. Count
+honestly regardless.
 
 Finish with one of:
 
 ```
 # Clean, with Minor findings worth integrating:
-complete_step(findings="No Critical/Major findings. Minor: … Verified at <sha>: …", blocking=false, has_minor_findings=true)
+complete_step(findings="No Critical/Major findings. Minor: … Verified at <sha>: …", critical=0, major=0, minor=2)
 
 # Clean, nothing actionable (no findings, or Nit-only):
-complete_step(findings="No findings. Plan is complete and ready for implementation. Verified at <sha>: …", blocking=false, has_minor_findings=false)
+complete_step(findings="No findings. Plan is complete and ready for implementation. Verified at <sha>: …", critical=0, major=0, minor=0)
 
 # Blocking issues:
-complete_step(findings="Critical: … / Major: … Verified at <sha>: …", blocking=true, has_minor_findings=false)
+complete_step(findings="Critical: … / Major: … Verified at <sha>: …", critical=1, major=2, minor=0)
 ```

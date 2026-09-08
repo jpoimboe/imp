@@ -139,8 +139,8 @@ complete_step(phase="written", spec_path="{{ quest.home }}/artifacts/spec/{{ que
 ## Rework Resumption
 
 **Recognition is preamble-primary.** A resumed turn is identified first by its
-injected `feedback:` preamble; the structured `blocking:` field (rendered
-capitalized — match case-insensitively) is secondary confirmation only. Every
+injected `feedback:` preamble; the structured severity counts (`critical:` /
+`major:` / `minor:`) are secondary confirmation only. Every
 resume opens with a synthesized `is_error` tool_result carrying the rework
 feedback, framed
 "[revision required] Your previous complete_step output was recorded, then sent back for revision — this is NOT a system failure. Address the feedback below and re-run the step; call complete_step again when the work is done."
@@ -150,8 +150,8 @@ resume marker. The taxonomy below carries the full feedback strings:
 | Shape | Arrives as | Behavior |
 |---|---|---|
 | Script-gate failure | "Your previous attempt completed but was not accepted." + "Gate `…` failed (exit N)…" | Fix the mechanical failure and re-emit `phase: written`. |
-| Reviewer rework | "Here's review feedback to address:" + `findings:` / `blocking: True` | Rework protocol (verify findings, fix, amend; ask-vs-decide applies). |
-| Minors pass | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol, non-soliciting. |
+| Reviewer rework | "Here's review feedback to address:" + `findings:` / `critical:` or `major:` above `0` | Rework protocol (verify findings, fix, amend; ask-vs-decide applies). |
+| Minors pass | "No blocking issues — integrate these minor improvements; a final review follows:" + `critical: 0` and `major: 0` | One-pass minors protocol, non-soliciting. |
 
 **Verify each finding before acting on it.** A finding can rest on a false premise —
 a misread of the spec or an untrue claim about the code. Confirm it first: re-read
@@ -223,13 +223,13 @@ Decisions summary (see **Ask vs. decide**).
 ## Minors-integration pass (a review follows)
 
 A minors resume is recognized by its preamble — "No blocking issues — integrate
-these minor improvements; a final review follows:" — carrying `blocking: False`,
-with no script-gate "was not accepted" wrapper. It is **not** a rework: the spec
-already passed review (no Critical/Major findings). This is your one pass to fold in
-the reviewer's **Minor** improvements — a fresh verification review runs afterward
-to confirm the edit introduced nothing blocking, and it will **not** ask for
-further minors, so integrate what is worthwhile now. **Trust the
-`blocking:` line:** `blocking: false` means the spec already passed; the Minor/Nit
+these minor improvements; a final review follows:" — carrying `critical: 0` and
+`major: 0`, with no script-gate "was not accepted" wrapper. It is **not** a rework:
+the spec already passed review (no Critical/Major findings). This is your one pass to
+fold in the reviewer's **Minor** improvements — a fresh verification review runs
+afterward to confirm the edit introduced nothing blocking, and it will **not** ask for
+further minors, so integrate what is worthwhile now. **Trust the counts:**
+`critical: 0` with `major: 0` means the spec already passed; the Minor/Nit
 `findings:` are advisory, not a rejection.
 
 On this pass:

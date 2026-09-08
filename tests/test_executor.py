@@ -819,6 +819,52 @@ async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> N
     assert a_calls == [1, 1]                       # a ran twice: continue, then leap
 
 
+@pytest.mark.anyio
+@pytest.mark.bare_sandbox
+async def test_step_started_round_counts_on_the_step_issuing_the_backward_edge(
+    tmp_path: Path,
+) -> None:
+    """`gate` fails twice and gotos back to `probe`. loop_counts keys on the issuer,
+    so gate's rounds run 1,2,3 while the re-entered probe stays unmarked at 1."""
+    import subprocess
+
+    counter = tmp_path / "n.txt"
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: probe\n"
+        "        command: 'true'\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: gate\n"
+        f"        command: 'n=$(cat {counter} 2>/dev/null || echo 0); n=$((n+1)); "
+        f"echo $n > {counter}; test $n -ge 3'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, goto: probe}\n"
+    )
+    _write_fake_config(tmp_path)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    quest = _make_quest(tmp_path)
+    _register_fake({"status": "Success"})
+
+    seen: list[dict] = []
+    result = await run_quest(quest, on_event=lambda e: seen.append(e))
+
+    assert result is RunResult.COMPLETED
+    # Read from the live callback, not events.jsonl: the home is reaped into the
+    # archive the moment the run completes.
+    assert [(e["payload"]["step"], e["payload"]["round"])
+            for e in seen if e["type"] == "step_started"] == [
+        ("probe", 1), ("gate", 1), ("probe", 1), ("gate", 2), ("probe", 1),
+        ("gate", 3)]
+
+
 # ── goto into an empty trailing phase completes ─────────────────────────────
 
 

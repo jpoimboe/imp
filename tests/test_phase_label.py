@@ -83,8 +83,9 @@ def _step(*, phase_label: str | None) -> Step:
 
 
 def test_payload_carries_rendered_phase_label_when_set() -> None:
-    p = _step_started_payload(_step(phase_label="implementation phase"),
-                              _types.SimpleNamespace(route_label=None))
+    p = _step_started_payload(
+        _step(phase_label="implementation phase"),
+        _types.SimpleNamespace(route_label=None, loop_counts={}))
     assert p["phase_label"] == "implementation phase"
 
 
@@ -93,7 +94,8 @@ def test_payload_renders_templated_phase_label(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="t", quest_id="aaa111", base_branch="main")
     p = _step_started_payload(
         _step(phase_label="plan {{ vars.plan_index }}/{{ vars.plan_total }}"),
-        _types.SimpleNamespace(route_label=None, vars={"plan_index": 2, "plan_total": 5}),
+        _types.SimpleNamespace(route_label=None, loop_counts={},
+                               vars={"plan_index": 2, "plan_total": 5}),
         quest=ch, log=ch.event_log(),
     )
     assert p["phase_label"] == "plan 2/5"
@@ -101,5 +103,5 @@ def test_payload_renders_templated_phase_label(tmp_path: Path) -> None:
 
 def test_payload_omits_phase_label_when_unset() -> None:
     p = _step_started_payload(_step(phase_label=None),
-                              _types.SimpleNamespace(route_label=None))
+                              _types.SimpleNamespace(route_label=None, loop_counts={}))
     assert "phase_label" not in p

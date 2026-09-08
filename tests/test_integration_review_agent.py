@@ -9,8 +9,9 @@ def test_integration_review_agent_declares_review_envelope() -> None:
     fields = {f.name: f for f in agent.output_schema.fields}
     assert "verdict" not in fields
     assert set(fields["status"].values) == {"Success", "Error"}
-    assert fields["blocking"].type == "bool"
-    assert fields["has_minor_findings"].type == "bool"
+    assert fields["critical"].type == "int"
+    assert fields["major"].type == "int"
+    assert fields["minor"].type == "int"
     assert "findings" in fields
 
 
@@ -34,7 +35,8 @@ def test_integration_review_adjudicates_verify_failure_triage() -> None:
     # Not ours -> a needs-decision toleration recorded in deferred.md, source integration-verify.
     assert "DEFERRED integration-verify:" in body
     assert "needs-decision" in low
-    # The tolerated case returns both flags false and falls through to summarizer.
+    # The tolerated case returns all three counts at zero and falls through to summarizer.
+    assert "`critical: 0`, `major: 0`, `minor: 0`, `tolerated: true`" in body
     assert "summarizer" in low
 
 

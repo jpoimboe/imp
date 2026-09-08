@@ -67,6 +67,7 @@ def _canned_anthropic(**overrides):
         "converge_verify_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False, "tolerated": False,
+        "critical": 0, "major": 0, "minor": 0,
         "built": "stub", "verify_status": "ok",
         "open_items": "", "next_steps": "",
         "result": "DONE", "report": "ok",
@@ -131,6 +132,7 @@ def _openai_step_aware(**kwargs):
         "converge_verify_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False, "tolerated": False,
+        "critical": 0, "major": 0, "minor": 0,
         "built": "stub", "verify_status": "ok",
         "open_items": "", "next_steps": "",
         "result": "DONE", "report": "ok",
@@ -380,7 +382,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "stuck": False,
                     "converge_verify_tolerated": False, "summary": "ok",
                     "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
-                    "blocking": False, "has_minor_findings": False, "tolerated": False,
+                    "critical": 0, "major": 0, "minor": 0, "tolerated": False,
                     "built": "stub", "verify_status": "ok",
                     "open_items": "", "next_steps": "",
                     "result": "DONE", "report": "ok",
@@ -423,7 +425,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
     def _default_with_minors(**kwargs):
         if _prompt_carries_ir(**kwargs):
             return _canned_anthropic(verdict="ok")
-        return _canned_anthropic(has_minor_findings=True)
+        return _canned_anthropic(has_minor_findings=True, minor=2)
 
     fake = FakeAsyncAnthropic([], default_response=_default_with_minors)
 

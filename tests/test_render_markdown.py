@@ -749,3 +749,29 @@ def test_agent_prose_export_keeps_an_imp_model_id_intact() -> None:
                               "text": "```\nhigh: claude-opus-4-8[1m]\n```\n"}]}),
     ])
     assert "claude-opus-4-8[1m]" in out
+
+
+def test_markdown_breadcrumb_carries_the_round_then_the_tally() -> None:
+    out = _md([
+        _ev("1", "quest_created", title="t"),
+        _ev("2", "step_started", step="plan-reviewer", kind="agent", phase="planning",
+            label="reviewing plan", round=2),
+        _ev("3", "agent_result", agent_id="step:planning/plan-reviewer",
+            status="Success", critical=0, major=2, minor=1),
+        _ev("4", "step_completed", step="plan-reviewer", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    assert "_reviewing plan · complete · round 2 · 2 major, 1 minor_" in out
+
+
+def test_markdown_shows_a_body_less_step_round_through_its_breadcrumb() -> None:
+    # `verify` collapses to a single line in the text renderers; markdown has no
+    # collapsed form, so neither surface omits the round.
+    out = _md([
+        _ev("1", "quest_created", title="t"),
+        _ev("2", "step_started", step="verify", kind="script", phase="implement",
+            label="running tests", round=2),
+        _ev("3", "step_completed", step="verify", kind="script",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    assert "_running tests · complete · round 2_" in out

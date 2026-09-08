@@ -1032,6 +1032,50 @@ def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
     assert "plan_path=docs/plan.md" in bc.extras
 
 
+def test_step_node_takes_the_round_from_the_payload_defaulting_to_one() -> None:
+    # A pre-upgrade engine still appending un-stamped rows is the one state no
+    # migration reaches, so the seam's default is what keeps such a row renderable.
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="plan-reviewer", kind="agent",
+            phase="planning", round=3),
+        _ev("2", "step_completed", step="plan-reviewer", kind="agent",
+            action={"verb": "continue"}),
+        _ev("3", "step_started", step="plan-writer", kind="agent", phase="planning"),
+    ])
+    steps = [c for c in tree.root.children[0].children
+             if isinstance(c, nv.StepNode)]
+    assert [(s.name, s.round) for s in steps] == [
+        ("plan-reviewer", 3), ("plan-writer", 1)]
+
+
+def test_breadcrumb_carries_the_round_and_the_reviewer_counts() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("1", "step_started", step="plan-reviewer", kind="agent",
+              phase="planning", round=2))
+    b.add(_ev("2", "agent_result", agent_id="step:planning/plan-reviewer",
+              status="Success", critical=0, major=2, minor=1))
+    b.add(_ev("3", "step_completed", step="plan-reviewer", kind="agent",
+              action={"verb": "continue"}))
+    step = b.tree.root.children[0].children[0]
+    bc = next(c for c in step.children if isinstance(c, nv.BreadcrumbLine))
+    assert (bc.round, bc.counts) == (2, (0, 2, 1))
+    # The counts render as a tally, so they must not ALSO fold into the --full extras.
+    assert bc.extras == ["status=Success"]
+
+
+def test_a_step_reporting_no_full_triple_carries_no_tally() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
+    b.add(_ev("2", "agent_result", agent_id="step:build/coder",
+              status="Success", major=1))
+    b.add(_ev("3", "step_completed", step="coder", kind="agent",
+              action={"verb": "continue"}))
+    step = b.tree.root.children[0].children[0]
+    bc = next(c for c in step.children if isinstance(c, nv.BreadcrumbLine))
+    assert (bc.round, bc.counts) == (1, None)
+    assert bc.extras == ["status=Success"]     # suppression is unconditional
+
+
 def test_phase_change_closes_the_outgoing_phase() -> None:
     # A phase-name change must close the prior phase so the live cursor can pop
     # it; the new (current) phase stays open during the run.

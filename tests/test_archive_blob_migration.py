@@ -258,8 +258,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_eight() -> None:
-    assert archive._DATA_VERSION == 8
+def test_data_version_bumped_to_nine() -> None:
+    assert archive._DATA_VERSION == 9
 
 
 def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:
@@ -502,7 +502,7 @@ def test_migrate_backfills_query_result_session_ids_in_the_blob(
     # spec §4 leaves auth mode unrecoverable and deliberately unbackfilled.
     assert set(events[0]["payload"]) == {
         "session_id", "total_cost_usd", "usage", "model_usage"}
-    assert events[2] == _PRE_SESSION_ID[2]       # step_started passes through
+    assert events[2]["payload"] == {**_PRE_SESSION_ID[2]["payload"], "round": 1}
     assert archive.data_version_path(tmp_path).read_text().strip() == str(
         archive._DATA_VERSION)
 
@@ -521,3 +521,63 @@ def test_a_forced_second_pass_leaves_the_backfilled_blob_alone(
     assert again is not None
     assert again["events_hash"] == first["events_hash"]   # no second rewrite
     assert len(set(_session_costs(tmp_path, "qr002"))) == 2
+
+
+# 8, spelled out: the marker every existing install already carries. Deriving it as
+# _DATA_VERSION - 1 would sit below the constant whatever the constant is, so the
+# test would pass with the bump reverted — the literal is what pins it.
+_PREV_DATA_VERSION = 8
+
+
+def _started(round_: int | None = None, eid: str = "ss1") -> dict:
+    payload: dict[str, object] = {
+        "step": "plan-reviewer", "kind": "agent", "phase": "planning",
+        "label": "reviewing plan"}
+    if round_ is not None:
+        payload["round"] = round_
+    return {"id": eid, "parent_id": None, "agent_id": None,
+            "timestamp": "2026-06-02T04:00:00+00:00",
+            "type": "step_started", "payload": payload}
+
+
+def test_an_archive_at_the_previous_data_version_still_gets_rounds_stamped(
+    tmp_path: Path,
+) -> None:
+    # The steady state of every existing install: the marker is ALREADY stamped at
+    # the old version. Without the bump it equals _DATA_VERSION, ensure_current
+    # fast-paths, and every such archive silently skips the pass.
+    _seed_old_archived_quest(
+        tmp_path, "rnd01", [*_TRIAD, _started(eid="a1"), _started(eid="a2")])
+    archive.data_version_path(tmp_path).write_text(str(_PREV_DATA_VERSION))
+
+    archive.ensure_current(tmp_path)
+
+    assert [e["payload"]["round"] for e in _events_of(tmp_path, "rnd01")
+            if e["type"] == "step_started"] == [1, 1]
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_archiving_a_post_change_quest_keeps_its_real_rounds(tmp_path: Path) -> None:
+    # archive_quest writes the record BEFORE calling ensure_current, so on an install
+    # whose marker is stale the chain re-runs over the just-written blob. An
+    # unconditional stamp would flatten these to 1.
+    _seed_old_archived_quest(tmp_path, "rnd02", _TRIAD)
+    archive.data_version_path(tmp_path).write_text(str(_PREV_DATA_VERSION))
+    events = tmp_path / "live.jsonl"
+    events.write_text("".join(json.dumps(e) + "\n" for e in [
+        _started(1, "b1"), _started(2, "b2"), _started(3, "b3")]))
+    quest_json = tmp_path / "live-quest.json"
+    quest_json.write_text(json.dumps({
+        "id": "rnd03", "title": "Live", "base_branch": "main",
+        "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "live-state.json"
+    state_json.write_text(json.dumps({
+        "id": "rnd03", "status": "completed", "step": "finalize"}))
+
+    archive.archive_quest(
+        tmp_path, "rnd03", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+    assert [e["payload"]["round"] for e in _events_of(tmp_path, "rnd03")
+            if e["type"] == "step_started"] == [1, 2, 3]

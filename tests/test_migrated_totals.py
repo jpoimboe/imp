@@ -155,7 +155,8 @@ def test_re_running_the_migration_leaves_the_totals_unchanged(
     Quest.load(tmp_path, "mt003")            # already current: a no-op
 
     assert _totals(_home_events(quest_dir)) == first
-    # session_id must be the ONLY key the migration injected; all others unchanged.
+    # session_id and round are the ONLY keys the chain injects; all else unchanged.
     for pre, post in zip(_PRE_CHANGE, _home_events(quest_dir), strict=True):
-        extra = {"session_id"} if pre["type"] == "query_result" else set()
+        extra = {"query_result": {"session_id"},
+                 "step_started": {"round"}}.get(pre["type"], set())
         assert set(post["payload"]) == set(pre["payload"]) | extra

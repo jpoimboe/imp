@@ -833,3 +833,43 @@ def test_cmd_log_follow_archived_only_fills_the_project_from_the_control_root(
     rc = m.main(["log", "-f", "arch"])
     assert rc == 9
     assert seen["project"] == tmp_path.name
+
+
+def test_follow_renders_rows_a_pre_upgrade_engine_appends_mid_follow(
+    tmp_path: Path,
+) -> None:
+    # The migration cannot reach a home an OLD binary is still writing to, and the
+    # tail reads that file directly. Un-stamped rows must render as round 1; a
+    # stamped row in the same tail still shows its round.
+    from imp.cli.main import _EventTail
+    out = io.StringIO()
+    driver = LiveDriver(stream=out, color=False, width=100, status=LiveStatus(out))
+    path = tmp_path / "events.jsonl"
+    path.write_text(json.dumps(
+        {"id": "e0", "type": "quest_created", "payload": {"title": "t"}}) + "\n")
+    tail = _EventTail(path)
+    for event in tail.read_new():
+        driver.on_event(event)
+
+    rows: list[dict[str, object]] = []
+    for i, extra in enumerate([{}, {}, {"round": 2}], start=1):
+        rows.append({"id": f"s{i}", "type": "step_started",
+                     "timestamp": f"2026-06-10T00:00:0{i}+00:00",
+                     "payload": {"step": "plan-reviewer", "kind": "agent",
+                                 "phase": "planning", "label": "reviewing plan",
+                                 **extra}})
+        rows.append({"id": f"c{i}", "type": "step_completed",
+                     "timestamp": f"2026-06-10T00:00:0{i}+00:00",
+                     "payload": {"step": "plan-reviewer", "kind": "agent",
+                                 "action": {"verb": "continue"}}})
+    with path.open("a", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+    for event in tail.read_new():
+        driver.on_event(event)
+    driver.finish(exit_block=False)
+
+    body = out.getvalue()
+    assert body.count("reviewing plan · complete") == 3
+    assert body.count("round") == 1              # only the stamped row is marked
+    assert "reviewing plan · complete · round 2" in body

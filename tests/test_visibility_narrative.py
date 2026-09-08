@@ -54,7 +54,8 @@ def test_payload_carries_show_label_and_show_output() -> None:
         on_max_retries=Continue(), max_loops=1,
         source=SourceLoc(file=Path("workflow.yaml"), line=1),
         command="./x.sh", show_label=False, show_output=True)
-    p = _step_started_payload(step, types.SimpleNamespace(route_label=None))
+    p = _step_started_payload(
+        step, types.SimpleNamespace(route_label=None, loop_counts={}))
     assert p["show_label"] is False
     assert p["show_output"] is True
 
@@ -85,7 +86,8 @@ def test_payload_emits_phase_show_label_only_when_false() -> None:
             on_max_retries=Continue(), max_loops=1,
             source=SourceLoc(file=Path("workflow.yaml"), line=1),
             phase_show_label=psl)
-        return _step_started_payload(step, types.SimpleNamespace(route_label=None))
+        return _step_started_payload(
+            step, types.SimpleNamespace(route_label=None, loop_counts={}))
 
     assert _mk(False)["phase_show_label"] is False
     assert "phase_show_label" not in _mk(True)

@@ -61,7 +61,7 @@ def test_finalize_merge_leaves_counters_alone() -> None:
 def test_resume_reworks_do_not_touch_plan_index() -> None:
     steps = _steps()
     pr = evaluate_rules(steps["plan-reviewer"].rules, vars=_BASE,
-                        output={"blocking": True, "has_minor_findings": False})
+                        output={"critical": 1, "major": 0, "minor": 0})
     assert pr.action.target == "plan-writer" and pr.action.resume is True
     assert "plan_index" not in pr.var_mutations
     pv = evaluate_rules(steps["plan-verify-commit"].rules, vars=_BASE,
@@ -69,7 +69,7 @@ def test_resume_reworks_do_not_touch_plan_index() -> None:
     assert pv.action.target == "plan-writer" and pv.action.resume is True
     assert "plan_index" not in pv.var_mutations
     pr_minor = evaluate_rules(steps["plan-reviewer"].rules, vars=_BASE,
-                              output={"blocking": False, "has_minor_findings": True})
+                              output={"critical": 0, "major": 0, "minor": 2})
     assert pr_minor.action.target == "plan-writer" and pr_minor.action.resume is True
     assert "plan_index" not in pr_minor.var_mutations
 

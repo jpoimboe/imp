@@ -1038,6 +1038,7 @@ def _step_started_payload(
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "show_label": step.show_label,
                "show_output": step.show_output,
+               "round": state.loop_counts.get(step.name, 0) + 1,
                "label": state.route_label or render_label(step.label, quest, log, state)}
     rotate = step.rotate_phrase if step.rotate_phrase is not None else step.interactive
     if rotate:

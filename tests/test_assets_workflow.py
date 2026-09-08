@@ -175,7 +175,7 @@ def test_minors_integrated_vars_declared_default_false() -> None:
     assert defaults["plan_minors_integrated"] is False
 
 
-def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
+def test_spec_reviewer_critical_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["spec-reviewer"].rules
@@ -184,11 +184,20 @@ def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": True},
-        output={"blocking": True, "has_minor_findings": False},
+        output={"critical": 1, "major": 0, "minor": 0},
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "spec-finalizer" and m.action.resume is True
     assert m.var_mutations["spec_minors_integrated"] is False
+    # major-only also reworks: the `+ output.major` term is load-bearing
+    major_only = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True},
+        output={"critical": 0, "major": 1, "minor": 0},
+    )
+    assert isinstance(major_only.action, Goto)
+    assert major_only.action.target == "spec-finalizer" and major_only.action.resume is True
+    assert major_only.var_mutations["spec_minors_integrated"] is False
 
 
 def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
@@ -200,7 +209,7 @@ def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},
     )
     assert m.var_mutations["spec_minors_integrated"] is True
     assert isinstance(m.action, Goto)
@@ -216,7 +225,7 @@ def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": True},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},
     )
     assert m.var_mutations["spec_minors_integrated"] is False
     assert isinstance(m.action, Goto)
@@ -231,7 +240,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "spec_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": False},
+        output={"critical": 0, "major": 0, "minor": 0},
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is False
@@ -376,14 +385,14 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
         )
 
 
-def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
+def test_plan_reviewer_critical_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("default"))
     rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": True},
-        output={"blocking": True, "has_minor_findings": False},
+        output={"critical": 1, "major": 0, "minor": 0},   # critical -> rework
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is True
@@ -397,7 +406,7 @@ def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},   # clean with minors
     )
     assert m.var_mutations["plan_minors_integrated"] is True
     assert isinstance(m.action, Goto)
@@ -411,7 +420,7 @@ def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": True},
-        output={"blocking": False, "has_minor_findings": True},
+        output={"critical": 0, "major": 0, "minor": 2},   # verification pass
     )
     assert m.var_mutations["plan_minors_integrated"] is False
     assert isinstance(m.action, Goto)
@@ -425,28 +434,29 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": False},
-        output={"blocking": False, "has_minor_findings": False},
+        output={"critical": 0, "major": 0, "minor": 0},   # clean, nothing actionable
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-finalized" and m.action.resume is False
     assert m.var_mutations == {}
 
 
-def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
-    from imp.assets import bundled_workflow_dir
+def _flat_prompt(agent: str) -> str:
     wf = load_workflow(bundled_workflow_dir("default"))
-    body = wf.agents["spec-finalizer"].prompt_template_source
-    # The clean-review branch keys on the injected `blocking:` line and integrates minors.
-    assert "blocking: false" in body
+    return " ".join(wf.agents[agent].prompt_template_source.split())
+
+
+def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
+    body = _flat_prompt("spec-finalizer")
+    # The clean-review branch keys on the injected severity counts and integrates minors.
+    assert "`critical: 0` with `major: 0` means the spec already passed" in body
     assert "minors" in body.lower()
     assert "without changing the file" in body.lower()
 
 
 def test_plan_writer_prompt_has_minors_integration_branch() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("default"))
-    body = wf.agents["plan-writer"].prompt_template_source
-    assert "blocking: false" in body
+    body = _flat_prompt("plan-writer")
+    assert "`critical: 0` with `major: 0` means the plan already passed" in body
     assert "minors" in body.lower()
     assert "without changing the file" in body.lower()
 
@@ -1310,3 +1320,52 @@ def test_spec_finalizer_prompt_renders_clean_in_any_lap_context(tmp_path: Path) 
             workflow_dir=bundled_workflow_dir("default"))
         assert ".imp/quests/abc/artifacts/spike/" in out
         assert "{{" not in out
+
+
+_COUNT_BEARING_ASSETS = (
+    "agents/spec-reviewer.md",
+    "agents/plan-reviewer.md",
+    "agents/integration-review.md",
+    "agents/plan-writer.md",
+    "agents/spec-finalizer.md",
+    "workflow.yaml",
+)
+
+
+def test_has_minor_findings_is_gone_from_every_bundled_workflow() -> None:
+    workflows_root = bundled_workflow_dir("default").parent
+    for path in sorted(workflows_root.rglob("*")):
+        if path.suffix in (".md", ".yaml", ".yml"):
+            assert "has_minor_findings" not in path.read_text(), path
+
+
+def test_blocking_is_never_a_field_reference_in_the_edited_assets() -> None:
+    # `blocking:` / `blocking=` is the mechanical line between a field reference
+    # (schema, rule condition, complete_step example, prose citation) and the
+    # ordinary English adjective, which survives untouched.
+    wf_dir = bundled_workflow_dir("default")
+    for rel in _COUNT_BEARING_ASSETS:
+        text = (wf_dir / rel).read_text()
+        assert re.search(r"blocking\s*[:=]", text) is None, rel
+
+
+def test_plain_english_blocking_survives_the_field_removal() -> None:
+    wf_dir = bundled_workflow_dir("default")
+    assert ("a real but non-blocking improvement"
+            in (wf_dir / "partials" / "severity.md").read_text())
+    assert ("Flag either direction's gap as blocking."
+            in (wf_dir / "agents" / "spec-reviewer.md").read_text())
+    feedback = ("No blocking issues — integrate these minor improvements; "
+                "a final review follows:")
+    assert (wf_dir / "workflow.yaml").read_text().count(feedback) == 3
+
+
+def test_reviewer_descriptions_no_longer_name_the_blocking_field() -> None:
+    wf = load_workflow(bundled_workflow_dir("default"))
+    for name in ("spec-reviewer", "plan-reviewer", "integration-review"):
+        desc = wf.agents[name].description
+        assert "blocking" not in desc, name
+    assert wf.agents["spec-reviewer"].description.endswith(
+        "severity-classified findings; any Critical/Major sends it back.")
+    assert wf.agents["plan-reviewer"].description.endswith(
+        "severity-classified; any Critical/Major sends it back.")

@@ -195,3 +195,22 @@ def backfill_query_result_session_ids(
         new["payload"] = {"session_id": current[aid], **payload}
         out.append(new)
     return out
+
+
+def backfill_step_round(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One-shot: stamp `round: 1` on every step_started row written before the engine
+    emitted the field (mohi69). Historical rounds are not reconstructible from the
+    stream — a `progress: true` goto resets the counter and leaves no trace in any
+    payload — and 1 renders no round segment, so a migrated quest reads exactly as it
+    did. A row that already carries the key is passed through, so a second run is a
+    no-op, which both callers' `migrated != events` checks depend on."""
+    out: list[dict[str, Any]] = []
+    for event in events:
+        payload = event.get("payload") or {}
+        if event.get("type") != "step_started" or "round" in payload:
+            out.append(event)
+            continue
+        new = dict(event)
+        new["payload"] = {**payload, "round": 1}
+        out.append(new)
+    return out
