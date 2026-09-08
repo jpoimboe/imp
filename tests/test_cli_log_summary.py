@@ -208,21 +208,20 @@ def _append_quota(control: Path, slug: str) -> None:
                             "raw": {}}}) + "\n")
 
 
-def test_summary_renders_the_quota_block_under_total(tmp_path, monkeypatch, capsys):
+def test_summary_renders_no_quota_block_under_total(tmp_path, monkeypatch, capsys):
     slug = _setup(tmp_path, monkeypatch)
     _append_quota(tmp_path, slug)
     assert main(["log", "-s", slug]) == 0
     out = capsys.readouterr().out
-    assert "\n  quota   claude_code  ·  5h 44% → 58%\n" in out
+    assert "quota" not in out
+    assert "5h 44% → 58%" not in out
 
 
-@pytest.mark.parametrize("flag,expected", [
-    ("--md=-", "- claude_code · 5h 44% → 58%"),
-    ("--html=-", "claude_code"),
-], ids=["md", "html"])
-def test_summary_md_export_carries_the_quota_block(flag, expected, tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("flag", ["--md=-", "--html=-"], ids=["md", "html"])
+def test_summary_export_carries_no_quota_block(flag, tmp_path, monkeypatch, capsys):
     slug = _setup(tmp_path, monkeypatch)
     _append_quota(tmp_path, slug)
     assert main(["log", "-s", slug, flag]) == 0
     out = capsys.readouterr().out
-    assert expected in out
+    assert "quota" not in out
+    assert "claude_code" not in out

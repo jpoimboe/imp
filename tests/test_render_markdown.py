@@ -1,6 +1,8 @@
 # tests/test_render_markdown.py
 from __future__ import annotations
 
+import pytest
+
 from imp.cli import narrative as nv
 from imp.cli.accounting import RowUsage
 from imp.cli.render_markdown import (
@@ -392,7 +394,7 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
     ]
     header = SummaryHeader(workflow="imp", quest_id="gumu81",
                            status="merged", total_seconds=summary_total(events))
-    out = render_summary_markdown(build_summary(events).rows, header=header)
+    out = render_summary_markdown(build_summary(events), header=header)
     assert "# imp — gumu81" in out               # SummaryHeader workflow/id
     assert "merged" in out                        # status carried
     assert "## design" in out                     # phase grouping heading
@@ -688,7 +690,7 @@ def _cc_fallback_events() -> list[dict]:
 def test_summary_markdown_prices_a_vendor_less_claude_code_row():
     # AC 10: the export calls the same cost_cell and legend_lines, so the
     # fallback figure and its legend arrive with no work of its own.
-    rows = build_summary(_cc_fallback_events()).rows
+    rows = build_summary(_cc_fallback_events())
     header = SummaryHeader(workflow="imp", quest_id="c", status="merged",
                            total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
@@ -805,3 +807,30 @@ def test_agent_prose_all_codes_span_exports_as_its_literal_text() -> None:
     ])
     assert text in out          # both codes present, as two separate code spans
     assert "``" not in out      # no collapsed / empty backtick pair anywhere
+
+
+def _quota_events() -> list[dict]:
+    return [
+        _tev("1", "step_started", timestamp="2024-01-01T00:00:00Z",
+             step="spec", kind="agent", phase="design"),
+        _tev("2", "quota_reading", timestamp="2024-01-01T00:00:30Z",
+             provider="claude_code", plan=None,
+             windows=[{"label": "5h", "used_pct": 44.0, "resets_at": 100}],
+             raw={}),
+        _tev("3", "step_completed", timestamp="2024-01-01T00:01:00Z",
+             step="spec", kind="agent", action={"verb": "continue"},
+             var_mutations={}),
+    ]
+
+
+def test_summary_markdown_has_no_quota_input_and_carries_no_quota_block() -> None:
+    header = SummaryHeader(workflow="imp", quest_id="gumu81",
+                           status="merged", total_seconds=60.0)
+    out = render_summary_markdown(build_summary(_quota_events()),
+                                  header=header)
+    assert "**quota**" not in out
+    assert "claude_code" not in out
+    assert "5h" not in out
+    assert "| total | 1m 0s |" in out
+    with pytest.raises(TypeError):
+        render_summary_markdown([], header=header, quota=())

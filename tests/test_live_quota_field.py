@@ -44,7 +44,7 @@ def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
                       QuotaWindow("7d", 7.0, int(_NOW) + 600000))
     assert _row(auth_mode="subscription", quota=one_up).endswith(
-        "session 62% (40m left) · week 7%")
+        "session 62% (40m left) · week 7% (7d left)")
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
@@ -64,25 +64,23 @@ def test_the_bands_are_evaluated_on_the_displayed_integer() -> None:
     assert "\x1b[31m85%" in field(85.0)      # red from 85
     assert "\x1b[33m50%" in field(49.5)      # rounded half-up, then banded
     assert "\x1b[31m85%" in field(84.5)      # banker's round() would say 84: gold
-    # The countdown is a trouble marker: it appears with the gold band, not before.
-    assert "(40m left)" not in field(49.0)
+    # The countdown is always on: a known future reset shows at any percentage.
+    assert "(40m left)" in field(49.0)
     assert "(40m left)" in field(50.0)
-    # The label and the countdown are gray; only the percentage is hued.
-    assert field(50.0).startswith("\x1b[90msession\x1b[0m \x1b[33m50%")
+    # The label is uncolored and the countdown gray; only the percentage is hued.
+    assert field(50.0).startswith("session \x1b[33m50%")
     assert field(50.0).endswith("\x1b[90m(40m left)\x1b[0m")
 
 
 # AC 13
 def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
-    null_reset = _reading(QuotaWindow("5h", 92.0, None))
-    assert _row(auth_mode="subscription", quota=null_reset).endswith("session 92%")
+    # Percentage-independent, now that the band gates nothing: calm and red alike.
+    for pct, shown in ((92.0, "session 92%"), (34.0, "session 34%")):
+        null_reset = _reading(QuotaWindow("5h", pct, None))
+        assert _row(auth_mode="subscription", quota=null_reset).endswith(shown)
 
-    already_past = _reading(QuotaWindow("5h", 92.0, int(_NOW) - 10))
-    assert _row(auth_mode="subscription", quota=already_past).endswith("session 92%")
-
-    # Below the gold band a future reset is still suppressed.
-    below_gold = _reading(QuotaWindow("7d", 7.0, int(_NOW) + 2400))
-    assert _row(auth_mode="subscription", quota=below_gold).endswith("week 7%")
+        already_past = _reading(QuotaWindow("5h", pct, int(_NOW) - 10))
+        assert _row(auth_mode="subscription", quota=already_past).endswith(shown)
 
 
 # AC 10
@@ -133,3 +131,14 @@ def test_the_countdown_rounds_to_one_nearest_unit() -> None:
     assert left(20) == "session 92% (1m left)"         # never rounds down to 0m
     assert left(3570) == "session 92% (1h left)"       # 59m30s promotes, not 60m
     assert left(86340) == "session 92% (1d left)"      # 23h59m promotes, not 24h
+
+
+def test_a_calm_window_with_a_known_reset_still_shows_its_countdown() -> None:
+    calm_future = _reading(QuotaWindow("5h", 34.0, int(_NOW) + 9960),
+                           QuotaWindow("7d", 7.0, int(_NOW) + 430000))
+    assert quota_field(calm_future, now_epoch=_NOW, color=False, over_bg=False) == (
+        "session 34% (3h left) · week 7% (5d left)")
+    # The label carries no SGR sequence of its own, not even a reset.
+    assert quota_field(calm_future, now_epoch=_NOW, color=True, over_bg=False) == (
+        "session \x1b[32m34%\x1b[0m \x1b[90m(3h left)\x1b[0m"
+        " · week \x1b[32m7%\x1b[0m \x1b[90m(5d left)\x1b[0m")

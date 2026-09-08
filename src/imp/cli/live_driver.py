@@ -128,17 +128,16 @@ def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | No
 
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
                 color: bool, over_bg: bool) -> str:
-    """`session 62% (3h left) · week 7%` — the account-wide levels, ordered by window
-    duration. Only the percentage carries color, and the bands are evaluated on the
-    displayed integer so a number can never disagree with its own hue."""
+    """`session 62% (3h left) · week 7% (5d left)` — the account-wide levels, ordered by window
+    duration. The label is uncolored and the countdown gray; only the percentage is hued,
+    banded on the displayed integer so a number can never disagree with its own hue."""
     windows: list[str] = []
     for w in reading.windows:
         pct = pal.quota_pct(w.used_pct)
         label = _WINDOW_WORDS.get(w.label, w.label)
-        seg = (_paint(label, "gray", color=color, over_bg=over_bg) + " "
+        seg = (label + " "
                + _paint(f"{pct}%", pal.quota_hue(pct), color=color, over_bg=over_bg))
-        left = (_reset_countdown(w.resets_at, now_epoch)
-                if pct >= pal.QUOTA_GOLD_AT else None)
+        left = _reset_countdown(w.resets_at, now_epoch)
         if left is not None:
             seg += " " + _paint(f"({left} left)", "gray", color=color, over_bg=over_bg)
         windows.append(seg)
@@ -581,7 +580,7 @@ class LiveDriver:
             # Lazily imported, like context_bar's catalog import.
             from imp.cli.render_summary import build_summary, summary_totals
             _work, self._cost = summary_totals(
-                build_summary(self._events).rows, None)
+                build_summary(self._events), None)
             self._cost_stale = False
         return self._cost
 
