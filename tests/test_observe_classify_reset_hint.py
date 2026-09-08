@@ -99,27 +99,29 @@ def test_a_wait_exactly_at_the_ceiling_is_trusted() -> None:
 
 def test_the_session_limit_branch_attaches_the_derived_hint() -> None:
     exc = ocls._classify_agent_text(
-        _SESSION_LIMIT, reading=_reading(("5h", 96.0, int(time.time()) + 3600)))
+        _SESSION_LIMIT, output_tokens=0,
+        reading=_reading(("5h", 96.0, int(time.time()) + 3600)))
     assert isinstance(exc, perr.RateLimitError)
     assert 3600 < exc.detail["retry_after_seconds"] <= 3721
 
 
 def test_the_429_branch_attaches_the_derived_hint() -> None:
     exc = ocls._classify_agent_text(
-        "API Error: 429 rate limited",
+        "API Error: 429 rate limited", output_tokens=0,
         reading=_reading(("5h", 96.0, int(time.time()) + 3600)))
     assert isinstance(exc, perr.RateLimitError)
     assert 3600 < exc.detail["retry_after_seconds"] <= 3721
 
 
 def test_without_a_reading_no_hint_is_attached() -> None:
-    exc = ocls._classify_agent_text(_LIMIT_NO_RESET)
+    exc = ocls._classify_agent_text(_LIMIT_NO_RESET, output_tokens=0)
     assert isinstance(exc, perr.RateLimitError)
     assert "retry_after_seconds" not in exc.detail
 
 
 def test_weekly_text_only_still_classifies_as_rate_limit() -> None:
-    assert isinstance(ocls._classify_agent_text(_WEEKLY_LIMIT), perr.RateLimitError)
+    assert isinstance(
+        ocls._classify_agent_text(_WEEKLY_LIMIT, output_tokens=0), perr.RateLimitError)
 
 
 def test_weekly_429_classifies_as_rate_limit_not_terminated() -> None:
@@ -137,7 +139,7 @@ def test_the_wall_clock_parse_is_gone() -> None:
     assert ocls._MAX_WEEKLY_WAIT_SECONDS == 8 * 24 * 3600.0
     assert ocls._RESET_MARGIN_SECONDS == 120.0
     # The wall-clock time in the prose is no longer a hint source.
-    exc = ocls._classify_agent_text(_SESSION_LIMIT)
+    exc = ocls._classify_agent_text(_SESSION_LIMIT, output_tokens=0)
     assert isinstance(exc, perr.RateLimitError)
     assert "retry_after_seconds" not in exc.detail
 
@@ -182,8 +184,11 @@ async def test_a_streamed_rate_limit_event_feeds_the_retry_hint(
 @pytest.mark.anyio
 async def test_codex_derives_the_hint_from_its_recorded_reading() -> None:
     session = CodexSession(None, None)
-    session._proc_state = {"quota_reading": _reading(
-        ("5h", 96.0, int(time.time()) + 3600), provider="codex")}
+    session._proc_state = {
+        "quota_reading": _reading(
+            ("5h", 96.0, int(time.time()) + 3600), provider="codex"),
+        "turn_output_tokens": 0,
+    }
 
     payload = await session._terminal_error(_WEEKLY_LIMIT)
 
@@ -195,7 +200,7 @@ async def test_codex_derives_the_hint_from_its_recorded_reading() -> None:
 @pytest.mark.anyio
 async def test_codex_without_a_reading_falls_to_ordinary_backoff() -> None:
     session = CodexSession(None, None)
-    session._proc_state = {"quota_reading": None}
+    session._proc_state = {"quota_reading": None, "turn_output_tokens": 0}
 
     payload = await session._terminal_error(_WEEKLY_LIMIT)
 

@@ -18,7 +18,7 @@ from imp.paths import project_state_dir
 from imp.providers import claude_code
 from imp.providers import claude_token_refresh as ctr
 from imp.providers.claude_code import ClaudeCodeAgentRunner
-from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 from tests.golive_fakes import GoLiveOnce, patch_policy_builder
 
 
@@ -126,7 +126,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
     quest = _seed_single_agent(tmp_path)
 
     scripts = [
-        [assistant(text("API Error: 401 rejected by gateway")),
+        [chrome("API Error: 401 rejected by gateway"),
          result(is_error=True, api_error_status=401)],
         [assistant(text("done"),
                    tool_use("c1", "complete_step",
@@ -278,9 +278,8 @@ async def test_dead_grant_probe_pauses_on_the_first_401(
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 
     script = [
-        assistant(text(
-            "Failed to authenticate. API Error: 401 "
-            "OAuth access token has been revoked.")),
+        chrome("Failed to authenticate. API Error: 401 "
+               "OAuth access token has been revoked."),
         result(),
     ]
 

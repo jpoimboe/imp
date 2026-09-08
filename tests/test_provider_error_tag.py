@@ -11,8 +11,8 @@ import pytest
 from imp.engine.state import JsonlEventLog
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
-from imp.providers.observe_classify import classifies_as_provider_error
-from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+from imp.providers.observe_classify import matches_error_prose
+from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 from tests.codex_fakes import (
     FakeCodex,
     agent_message,
@@ -36,11 +36,11 @@ def _rows(tmp_path: Path) -> list[dict[str, Any]]:
     return list(JsonlEventLog(tmp_path / "e.jsonl").read())
 
 
-def test_predicate_is_anchored_and_matches_the_error_path() -> None:
-    assert classifies_as_provider_error(AUTH_PROSE) is True
-    assert classifies_as_provider_error(ORDINARY) is False
+def test_the_grouping_predicate_is_wording_only_and_anchored() -> None:
+    assert matches_error_prose(AUTH_PROSE) is True
+    assert matches_error_prose(ORDINARY) is False
     # Anchored: prose that merely quotes the pattern mid-document is not an error.
-    assert classifies_as_provider_error(f"Here is my review of auth.\n{AUTH_PROSE}") is False
+    assert matches_error_prose(f"Here is my review of auth.\n{AUTH_PROSE}") is False
 
 
 @pytest.mark.anyio
@@ -49,7 +49,7 @@ async def test_claude_code_tags_the_failing_turn_and_pins_the_row_order(
 ) -> None:
     (tmp_path / "art").mkdir()
     elog = JsonlEventLog(tmp_path / "e.jsonl")
-    scripted = [assistant(text(AUTH_PROSE)), result(is_error=False)]
+    scripted = [chrome(AUTH_PROSE), result(is_error=False)]
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
@@ -75,7 +75,7 @@ async def test_claude_code_splits_the_group_at_the_error_fragment(
     # the preceding ordinary fragment must keep its own untagged node.
     (tmp_path / "art").mkdir()
     elog = JsonlEventLog(tmp_path / "e.jsonl")
-    scripted = [assistant(text(ORDINARY)), assistant(text(AUTH_PROSE)),
+    scripted = [assistant(text(ORDINARY)), chrome(AUTH_PROSE),
                 result(is_error=False)]
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
@@ -120,7 +120,7 @@ async def test_codex_tags_the_failing_turn_and_pins_the_row_order(tmp_path: Path
     auth = _seed_git_and_auth(tmp_path)
     elog = JsonlEventLog(tmp_path / "e.jsonl")
     scripted = [[thread_started("t"), agent_message(AUTH_PROSE),
-                 turn_completed(output_tokens=1)]]
+                 turn_completed(output_tokens=0)]]
     fake = FakeCodex(scripted_turns=scripted)
     runner = CodexAgentRunner(model_name="gpt-5.5",
                               client_factory=lambda options=None: fake)
@@ -147,7 +147,7 @@ async def test_codex_splits_the_flush_so_ordinary_prose_keeps_its_own_node(
     auth = _seed_git_and_auth(tmp_path)
     elog = JsonlEventLog(tmp_path / "e.jsonl")
     scripted = [[thread_started("t"), agent_message(ORDINARY), agent_message(AUTH_PROSE),
-                 turn_completed(output_tokens=1)]]
+                 turn_completed(output_tokens=0)]]
     fake = FakeCodex(scripted_turns=scripted)
     runner = CodexAgentRunner(model_name="gpt-5.5",
                               client_factory=lambda options=None: fake)

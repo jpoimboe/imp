@@ -19,7 +19,7 @@ from imp.providers.claude_code_session_store import (
     session_key,
     session_store_for,
 )
-from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 
 
 def test_roll_back_removes_trailing_assistant_turn(tmp_path: Path) -> None:
@@ -153,7 +153,7 @@ async def test_classified_text_branch_rolls_back(tmp_path: Path) -> None:
     # No is_error / api_error_status -> _termination_from_result returns None,
     # so the auth-prose turn is caught by the _classify_agent_text branch.
     scripted = [
-        assistant(text("Invalid authentication credentials")),
+        chrome("Invalid authentication credentials"),
         result(),
     ]
 
@@ -180,7 +180,7 @@ async def test_terminal_prose_error_event_carries_the_full_text(tmp_path: Path) 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, log)
 
-    scripted = [assistant(text("Not logged in · Please run /login")), result()]
+    scripted = [chrome("Not logged in · Please run /login"), result()]
 
     def factory(_opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
@@ -204,7 +204,7 @@ async def test_quota_pause_still_errors_and_rollback_is_harmless(
     inv = _inv(tmp_path, log)
 
     scripted = [
-        assistant(text("Credit balance is too low")),
+        chrome("Credit balance is too low"),
         result(),
     ]
 
