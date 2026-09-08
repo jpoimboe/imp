@@ -793,14 +793,16 @@ def test_close_is_idempotent_and_does_not_repeat_teardown(monkeypatch) -> None:
     signalled: list[int] = []
     reaped: list[float | None] = []
 
-    def spy(sig: int = signal.SIGINT) -> None:
+    def spy(sig: int) -> None:
         signalled.append(sig)
 
     def spy_wait(timeout: float | None = None) -> int:
         reaped.append(timeout)
         return first
 
-    monkeypatch.setattr(s, "send_signal", spy)
+    # The ladder's own entry point, not send_signal: close() no longer routes through
+    # the tty-aimed method, so spying on that one would assert nothing.
+    monkeypatch.setattr(s, "_signal_child_group", spy)
     # The reap is the discriminating oracle: every other rung is a no-op for an
     # already-dead child, so a second close() that ran the teardown body would still
     # return the cached code and signal nothing. Only the stored-code early return
@@ -878,3 +880,118 @@ def test_close_terminates_the_whole_process_group(tmp_path: Path) -> None:
         if gc_pid is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(gc_pid, signal.SIGKILL)
+
+
+# A foreground job under a shell: it records its pid, announces itself, and dies of
+# SIGINT under the DEFAULT disposition. It sits in the SHELL's job process group, not
+# the shell's own — which is exactly what makes it invisible to killpg(getpgid(child)).
+_FG_JOB = (
+    "import os, signal, sys, time\n"
+    "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+    "with open(sys.argv[1], 'w') as f:\n"
+    "    f.write(str(os.getpid()))\n"
+    "os.write(1, b'JOB-READY\\r\\n')\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not installed")
+def test_send_signal_hits_the_foreground_job_not_the_shell(tmp_path: Path) -> None:
+    # bash -i does its own job control and IGNORES SIGINT, so aiming at the child's
+    # own group (the shell's) leaves the job running. The tty's aim is the job's group.
+    job = tmp_path / "job.py"
+    job.write_text(_FG_JOB)
+    pidfile = tmp_path / "job.pid"
+    s = TerminalSession(["bash", "--norc", "--noprofile", "-i"])
+    job_pid: int | None = None
+    try:
+        s.wait_idle(idle=0.2, hard=30.0)  # let bash paint a prompt before typing
+        s.send(f"{sys.executable} {job} {pidfile}\r")
+        assert _poll(lambda: "JOB-READY" in "\n".join(s.lines()),
+                     timeout=E2E_POLL_TIMEOUT), "the foreground job never started"
+        job_pid = int(pidfile.read_text())
+        s.send_signal(signal.SIGINT)
+        assert _poll(lambda: _pid_gone(job_pid), timeout=E2E_POLL_TIMEOUT), \
+            "the signal missed the terminal's foreground group"
+        assert s.is_alive()
+        # The marker must NOT be typeable, or bash's echo of the command line would
+        # satisfy the poll on its own: the shell computes STILL-42 from 6*7.
+        s.send("echo STILL-$((6*7))\r")
+        assert _poll(lambda: "STILL-42" in "\n".join(s.lines()),
+                     timeout=E2E_POLL_TIMEOUT), "the shell did not survive the signal"
+    finally:
+        s.close()
+        if job_pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(job_pid, signal.SIGKILL)
+
+
+def test_send_signal_signals_nothing_once_the_child_has_exited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # tcgetpgrp() returns 0 once nothing holds the foreground, and killpg(0, sig)
+    # signals OUR OWN process group — the whole test runner. The `> 0` guard is what
+    # this pins; close() below signals nothing either (the child is already reaped,
+    # so neither ladder rung fires).
+    calls: list[tuple[int, int]] = []
+    s = TerminalSession([sys.executable, "-c", "import sys; sys.exit(0)"])
+    try:
+        assert _poll(lambda: s.returncode is not None, timeout=E2E_POLL_TIMEOUT), \
+            "child never exited"
+        monkeypatch.setattr(os, "killpg", lambda pgid, sig: calls.append((pgid, sig)))
+        s.send_signal(signal.SIGINT)
+        assert calls == []
+    finally:
+        s.close()
+    # A stale fd NUMBER is worse than a closed one: pty masters are handed out
+    # lowest-free-first, so the next session reclaims the number and tcgetpgrp would
+    # name ITS foreground group — this session signalling a stranger's job. close()
+    # invalidates the attribute, which is what keeps the documented no-op honest.
+    assert s._master == -1
+    s.send_signal(signal.SIGINT)
+    assert calls == []
+
+
+# A foreground job that ignores BOTH ladder rungs' graceful signal and the tty's own
+# interrupt, so only a signal aimed at its group's SIGKILL could ever reap it.
+_IGNORES_SIGTERM_JOB = (
+    "import os, signal, sys, time\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+    "with open(sys.argv[1], 'w') as f:\n"
+    "    f.write(str(os.getpid()))\n"
+    "os.write(1, b'JOB-READY\\r\\n')\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not installed")
+def test_close_reaps_the_direct_child_under_a_shells_job_control(
+    tmp_path: Path,
+) -> None:
+    # The ladder must stay aimed at the DIRECT child's group. Aimed at the terminal's
+    # foreground group, both rungs land on the job, bash (which ignores SIGTERM) stays
+    # alive, and close()'s unbounded _proc.wait() never returns — this test then hangs
+    # to the suite's outer timeout rather than reporting a status.
+    job = tmp_path / "job.py"
+    job.write_text(_IGNORES_SIGTERM_JOB)
+    pidfile = tmp_path / "job.pid"
+    s = TerminalSession(["bash", "--norc", "--noprofile", "-i"])
+    job_pid: int | None = None
+    try:
+        s.wait_idle(idle=0.2, hard=30.0)
+        s.send(f"{sys.executable} {job} {pidfile}\r")
+        assert _poll(lambda: "JOB-READY" in "\n".join(s.lines()),
+                     timeout=E2E_POLL_TIMEOUT), "the foreground job never started"
+        job_pid = int(pidfile.read_text())
+        shell_pid = s.pid
+        # -SIGKILL, not -SIGTERM: an interactive bash ignores SIGTERM, so the hard rung
+        # is what reaps it — and it reaped the SHELL, which is the point.
+        assert s.close() == -signal.SIGKILL
+        assert _poll(lambda: _pid_gone(shell_pid), timeout=E2E_POLL_TIMEOUT), \
+            "close() returned without reaping the direct child"
+    finally:
+        s.close()
+        if job_pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(job_pid, signal.SIGKILL)

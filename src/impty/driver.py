@@ -194,17 +194,18 @@ class ImptyDriver:
         return f"{note}{self._render(session)}"
 
     def send_signal(self, sig: int = signal.SIGINT) -> str:
-        """Deliver a real signal to the program's process group, then return the new
-        screen. The mode-INDEPENDENT interrupt: unlike `send("\\x03")` — which only
-        becomes a SIGINT when the tty's line discipline has ISIG on (cooked/cbreak)
-        and is just a raw byte at a prompt_toolkit prompt — this bypasses the tty
-        entirely. Use it when you want a deterministic Ctrl-C regardless of tty mode,
-        instead of scraping the pid and shelling out to `kill`.
+        """Deliver a real signal to the terminal's foreground process group, then
+        return the new screen. The mode-INDEPENDENT interrupt: unlike `send("\\x03")`
+        — which only becomes a SIGINT when the tty's line discipline has ISIG on
+        (cooked/cbreak) and is just a raw byte at a prompt_toolkit prompt — this
+        bypasses the tty entirely. Use it when you want a deterministic Ctrl-C
+        regardless of tty mode, instead of scraping the pid and shelling out to `kill`.
 
-        `sig` is the signal number: SIGINT=2 (Ctrl-C, default), SIGTERM=15. Reaches
-        only the child's process group — a grandchild that `setsid()`'d into its own
-        session is not signalled, exactly like a real Ctrl-C. A no-op once the child
-        has exited.
+        `sig` is the signal number: SIGINT=2 (Ctrl-C, default), SIGTERM=15. It reaches
+        exactly what a real Ctrl-C would — the group the terminal holds in the
+        foreground — so in a shell it hits the running job rather than the shell, and a
+        grandchild that `setsid()`'d into its own session is not signalled. A no-op
+        once the child has exited.
         """
         session = self._require()
         # Same type-then-look boundary as send(): settle on the signal's reaction

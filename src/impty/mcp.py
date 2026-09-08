@@ -41,7 +41,9 @@ THIN_DESCRIPTIONS: dict[str, str] = {
     "start": "Spawn a program on a fresh pseudo-terminal and return its first screen.",
     "view": "Read the current terminal screen as text without sending anything.",
     "send": "Send raw keystrokes to the program, then return the new screen.",
-    "send_signal": "Send a real signal (default SIGINT) to the program's process group.",
+    "send_signal": (
+        "Send a real signal (default SIGINT) to the terminal's foreground process group."
+    ),
     "resize": "Resize the terminal (SIGWINCH) and return the reflowed screen.",
     "wait": (
         "Wait for a still-working program to settle, or for new output "

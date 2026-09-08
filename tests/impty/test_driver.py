@@ -827,3 +827,36 @@ def test_readme_documents_close_grace_and_its_return() -> None:
     assert "grace" in line
     assert "-> int" in line
     assert "SIGTERM" in line and "SIGKILL" in line
+
+
+def test_send_signal_copy_names_the_terminals_foreground_group() -> None:
+    from impty.mcp import THIN_DESCRIPTIONS
+
+    assert THIN_DESCRIPTIONS["send_signal"] == (
+        "Send a real signal (default SIGINT) to the terminal's foreground process group."
+    )
+    # Whitespace-normalized (the repo idiom, tests/test_impty_agent_surfaces.py:34):
+    # the pinned paragraph hard-wraps mid-phrase, so a raw substring test on __doc__
+    # would assert something the verbatim copy cannot contain.
+    doc = " ".join((ImptyDriver.send_signal.__doc__ or "").split())
+    assert "the group the terminal holds in the foreground" in doc
+    assert "in a shell it hits the running job rather than the shell" in doc
+    assert "child's process group" not in doc
+    # The OPENING sentence, not just the pinned paragraph: it says "the program's
+    # process group" today, and editing only the pinned block would leave the
+    # docstring contradicting itself with nothing to catch it.
+    assert "program's process group" not in doc
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    bullet = next(
+        (ln for ln in readme.splitlines() if ln.startswith("- `send_signal(")), None)
+    assert bullet is not None, "README has no line documenting send_signal()"
+    assert "terminal's FOREGROUND process group" in bullet
+    # Every stale mention, not just the bullet: the MCP tool list further down names
+    # send_signal's target too. close()'s bullet is exempt — its ladder really does
+    # keep the child's own group, which is the whole point of the split.
+    stale = [
+        ln for ln in readme.splitlines()
+        if "child's process group" in ln and not ln.startswith("- `close(")
+    ]
+    assert stale == [], stale

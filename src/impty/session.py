@@ -262,23 +262,43 @@ class TerminalSession:
             os.write(self._master, data)
 
     def send_signal(self, sig: int = signal.SIGINT) -> None:
-        """Deliver a real signal to the child's foreground process group, bypassing
-        the tty line discipline (works regardless of cooked/raw mode). Mirrors what
-        the tty would do on ^C by signalling the whole process group, not just the
-        immediate child. A no-op if the child has already exited (and been reaped).
+        """Deliver a real signal to the TERMINAL'S FOREGROUND process group, bypassing
+        the tty line discipline (works regardless of cooked/raw mode). Mirrors what the
+        tty would do on ^C, so under a shell doing its own job control it reaches the
+        running job rather than the shell. A no-op once nothing holds the foreground.
 
-        Reaches only the child's process group: a grandchild that has setsid()'d
-        into its own session is deliberately NOT signalled, exactly like a real
-        Ctrl-C (which hits only the controlling terminal's foreground pgrp). Do not
-        "fix" this to walk descendants.
+        Reaches only the foreground group: a grandchild that has setsid()'d into its
+        own session is deliberately NOT signalled, exactly like a real Ctrl-C (which
+        hits only the controlling terminal's foreground pgrp). Do not "fix" this to
+        walk descendants.
+
+        os.tcgetpgrp(master) is what makes the aim right: it names the group the tty
+        itself would signal — the child's own group at a bare prompt, the job's group
+        under a shell, and the payload's real group when the child is a namespace
+        joiner that never setsid()s. It returns 0 once the foreground is vacant, so
+        the `> 0` guard is load-bearing: killpg(0, sig) would signal OUR OWN process
+        group. Suppressing OSError covers both calls and both no-op contracts:
+        ProcessLookupError (a subclass) for a reaped group, EBADF for a send_signal()
+        after close() has shut the master."""
+        with contextlib.suppress(OSError):
+            pgid = os.tcgetpgrp(self._master)
+            if pgid > 0:
+                os.killpg(pgid, sig)
+
+    def _signal_child_group(self, sig: int) -> None:
+        """Signal the DIRECT CHILD's process group — close()'s ladder, deliberately
+        NOT the tty's aim. start_new_session=True makes the child a session leader
+        whose pgid equals its pid, so this group always contains _proc itself: the
+        SIGKILL rung therefore always reaps _proc and close()'s unbounded wait()
+        always returns. Aimed at the foreground group instead, a shell driving a
+        job that ignores SIGTERM would take both rungs on the JOB's group and leave
+        the shell alive forever.
 
         We pass os.getpgid(pid) (not pid) to killpg so the argument is self-
         documenting as a pgid and stays correct if start_new_session is ever
-        reconsidered. start_new_session=True isolates the child in its own
-        session/pgrp (pgid == pid), so killpg can only ever hit the child's group,
-        never the test runner. The getpgid->killpg TOCTOU is a microsecond window
-        on a not-aggressively-recycled pgid; ProcessLookupError suppression covers
-        both calls (dead-child contract: a reaped child makes both raise ESRCH)."""
+        reconsidered. The getpgid->killpg TOCTOU is a microsecond window on a
+        not-aggressively-recycled pgid; ProcessLookupError suppression covers both
+        calls (dead-child contract: a reaped child makes both raise ESRCH)."""
         with contextlib.suppress(ProcessLookupError):
             os.killpg(os.getpgid(self._proc.pid), sig)
 
@@ -497,12 +517,14 @@ class TerminalSession:
 
         A live child is stopped by a ladder, so a TUI gets to restore the terminal
         and save its state instead of dying under -9:
-          1. SIGTERM its process group — skipped entirely when `grace <= 0`, since
-             sending it and escalating at once would race a default-disposition
-             child to death by SIGTERM where a hard stop promises SIGKILL.
+          1. SIGTERM the DIRECT CHILD's process group (never the terminal's
+             foreground group — see _signal_child_group) — skipped entirely when
+             `grace <= 0`, since sending it and escalating at once would race a
+             default-disposition child to death by SIGTERM where a hard stop
+             promises SIGKILL.
           2. Poll for exit until `grace` elapses, holding NO lock and leaving `_stop`
              unset, so the running drainer keeps feeding the cleanup output to pyte.
-          3. Still alive: SIGKILL the group.
+          3. Still alive: SIGKILL that same group.
           4. Drain what the child left buffered in the pty. The drainer stops the
              instant `_stop` is set, so without this rung the tail of a multi-KB
              goodbye dies with os.close(self._master).
@@ -512,12 +534,12 @@ class TerminalSession:
         if self._exit_code is not None:
             return self._exit_code
         if grace > 0 and self._proc.poll() is None:
-            self.send_signal(signal.SIGTERM)
+            self._signal_child_group(signal.SIGTERM)
             deadline = time.monotonic() + grace
             while self._proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(_POLL)
         if self._proc.poll() is None:
-            self.send_signal(signal.SIGKILL)
+            self._signal_child_group(signal.SIGKILL)
         # Bound the WAIT for the io lock (not the drain itself, which is bounded by
         # bytes): a tool call parked in wait_idle holds the lock for its whole budget,
         # up to MAX_CALL_HARD, and teardown runs on the provider's event loop. Giving
@@ -537,6 +559,11 @@ class TerminalSession:
             drainer.join(timeout=2.0)
         with contextlib.suppress(OSError):
             os.close(self._master)
+        # Not merely tidy: a closed fd NUMBER gets reused (pty masters are handed out
+        # lowest-free-first), and send_signal reads tcgetpgrp(_master) — a stale
+        # number would signal the NEXT session's foreground group. -1 keeps every
+        # master-touching method on its documented post-close no-op / EBADF path.
+        self._master = -1
         self._exit_code = self._proc.wait()
         return self._exit_code
 
