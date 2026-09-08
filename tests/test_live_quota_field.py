@@ -67,8 +67,8 @@ def test_the_bands_are_evaluated_on_the_displayed_integer() -> None:
     # The countdown is always on: a known future reset shows at any percentage.
     assert "(40m left)" in field(49.0)
     assert "(40m left)" in field(50.0)
-    # The label and the countdown are gray; only the percentage is hued.
-    assert field(50.0).startswith("\x1b[90msession\x1b[0m \x1b[33m50%")
+    # The label is uncolored and the countdown gray; only the percentage is hued.
+    assert field(50.0).startswith("session \x1b[33m50%")
     assert field(50.0).endswith("\x1b[90m(40m left)\x1b[0m")
 
 
@@ -138,3 +138,7 @@ def test_a_calm_window_with_a_known_reset_still_shows_its_countdown() -> None:
                            QuotaWindow("7d", 7.0, int(_NOW) + 430000))
     assert quota_field(calm_future, now_epoch=_NOW, color=False, over_bg=False) == (
         "session 34% (3h left) · week 7% (5d left)")
+    # The label carries no SGR sequence of its own, not even a reset.
+    assert quota_field(calm_future, now_epoch=_NOW, color=True, over_bg=False) == (
+        "session \x1b[32m34%\x1b[0m \x1b[90m(3h left)\x1b[0m"
+        " · week \x1b[32m7%\x1b[0m \x1b[90m(5d left)\x1b[0m")

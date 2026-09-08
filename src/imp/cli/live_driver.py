@@ -129,13 +129,13 @@ def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | No
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
                 color: bool, over_bg: bool) -> str:
     """`session 62% (3h left) · week 7% (5d left)` — the account-wide levels, ordered by window
-    duration. Only the percentage carries color, and the bands are evaluated on the
-    displayed integer so a number can never disagree with its own hue."""
+    duration. The label is uncolored and the countdown gray; only the percentage is hued,
+    banded on the displayed integer so a number can never disagree with its own hue."""
     windows: list[str] = []
     for w in reading.windows:
         pct = pal.quota_pct(w.used_pct)
         label = _WINDOW_WORDS.get(w.label, w.label)
-        seg = (_paint(label, "gray", color=color, over_bg=over_bg) + " "
+        seg = (label + " "
                + _paint(f"{pct}%", pal.quota_hue(pct), color=color, over_bg=over_bg))
         left = _reset_countdown(w.resets_at, now_epoch)
         if left is not None:
