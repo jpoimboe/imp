@@ -593,16 +593,6 @@ def provider_registry():
     return register
 
 
-@pytest.fixture(autouse=True)
-def _clean_provider_registry():
-    """Clear the import-time provider registry after every test: a leftover fake
-    makes resolve._ensure_builtins() a no-op, so the next test on this worker
-    resolves a real vendor into UnknownProvider."""
-    yield
-    from imp.providers import resolve
-    resolve.reset_providers_for_tests()
-
-
 def _spin_hold_lock(lock_path: str, release_flag: str, ready_flag: str) -> None:
     from imp.engine.state import ProjectLock
     with ProjectLock(Path(lock_path)).acquire():
