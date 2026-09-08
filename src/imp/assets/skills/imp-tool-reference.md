@@ -102,9 +102,8 @@ anyway.
   `…[truncated]` marker, then the two streams are cut to a combined 30 KB
   head. When either fired, the full unmodified output spills to a file and a
   `notice` says which happened and carries a `read_file`-able path; no
-  `notice` means the output is byte-exact — bar two standing exceptions: an
-  `errors="replace"` decode, and the sandbox entry marker stripped from
-  stderr. Runaway output is killed at 5 MB.
+  `notice` means the output is byte-exact — bar one standing exception, an
+  `errors="replace"` decode. Runaway output is killed at 5 MB.
   Foreground commands are interruptible (SIGTERM to the process group, 4 s
   grace, then SIGKILL). A foreground command that exceeds its deadline (120 s by
   default — pass `timeout`, positive seconds, capped at 600, to extend) is
@@ -124,10 +123,11 @@ anyway.
   under `.imp/`). Background output is file-redirected, so most programs
   block-buffer (~4 KB): early lines (e.g. a server's 'listening' banner) may lag
   until a flush.
-- Each call gets its own pid namespace, so `ps` shows only that call's own processes
-  and a pid recorded in one call means nothing in the next. The `pid` in a background
-  descriptor is a host-side handle — a shell command cannot signal it; stop a
-  background task with `bash_kill(id)`.
+- All your calls share one pid namespace, so `ps` sees every process you left
+  running and a pid from an earlier call is still valid. Everything in it is
+  killed when you finish, so nothing you detach outlives your run. The `pid` in
+  a background descriptor is a host-side handle a shell command cannot signal —
+  use `bash_kill(id)`, or `ps` and its namespace-local pid.
 
 ## bash_output
 
