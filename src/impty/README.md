@@ -28,7 +28,9 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 - `lines(limit=None) -> list[str]` — rendered text rows over scrollback + the live screen. `lines(limit=rows)` is exactly the current screen, aligned row-for-row with `cell()`/`cursor()`; no limit returns the whole strip. The current screen is the thing to act on each turn.
 - `cell(x, y) -> Cell` — glyph + style (`fg/bg/bold/...`) for appearance assertions.
 - `screen` (property) — the live pyte screen, for renderers that need the cell grid (see below).
-- `cursor() -> (x, y)`, `regime() -> Regime`, `is_alt_screen() -> bool`, `rows`/`cols` (properties), `resize(rows, cols)`, `is_alive()`, `wait(timeout)`, `close()`.
+- `returncode -> int | None` (property) — the child's exit status once it has exited, else `None`. Raw `Popen` semantics: negative for a signal death (`-2` for SIGINT). The tool layer names the signal; this one stays raw.
+- `close(grace=1.0) -> int` — end the session and return the child's raw exit code (negative for a signal death). SIGTERMs the child's process group, polls up to `grace` seconds for it to exit — draining its cleanup output into pyte meanwhile — then SIGKILLs, and drains whatever it left buffered before closing the master. `grace=0.0` skips SIGTERM entirely. Idempotent: a second call re-returns the same code.
+- `cursor() -> (x, y)`, `regime() -> Regime`, `is_alt_screen() -> bool`, `rows`/`cols` (properties), `resize(rows, cols)`, `is_alive()`, `wait(timeout)`.
 
 By default the child inherits your environment with `TERM=xterm-256color` so a real
 program's color emission (and thus `cell().fg`) is deterministic; pass `env=` to override.
@@ -88,5 +90,8 @@ Two ready-made entry points:
   mode-independent Ctrl-C), `resize` (`(rows, cols)` — resizes the live terminal,
   delivering a real `SIGWINCH`), `wait` (`for_change=True` blocks until NEW output
   arrives instead of counting what is already on screen), `view` (`full=True` for
-  the whole strip), `snapshot` (renders the live screen to a PNG and returns its
-  path), `stop`. Adding/removing a tool needs a server restart.
+  the whole strip; once the child is gone its header carries the
+  exit status — `exit=0`, `exit=3`, or a signal name like `exit=SIGINT`),
+  `snapshot` (renders the live screen to a PNG and returns its
+  path), `stop` (SIGTERM, a 1s grace, then SIGKILL; returns the program's exit status
+  and its final screen). Adding/removing a tool needs a server restart.

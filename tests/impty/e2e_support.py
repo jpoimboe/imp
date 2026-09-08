@@ -38,6 +38,15 @@ def _poll(predicate, timeout: float) -> bool:
     return False
 
 
+def _pid_gone(pid: int) -> bool:
+    """True once `pid` is unreachable — the liveness probe teardown tests poll on."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
 def _flock_free(lock_path: Path) -> bool:
     try:
         with ProjectLock(lock_path).acquire(timeout=0):

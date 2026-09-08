@@ -47,6 +47,20 @@ def _decode_keys(data: str) -> str:
     return _ESCAPE_RE.sub(lambda m: codecs.decode(m.group(0), "unicode_escape"), data)
 
 
+def _format_exit(code: int) -> str:
+    """The agent-facing spelling of a raw `Popen` returncode: a plain number for a
+    normal exit, the signal's NAME for a signal death — never a bare negative. A
+    program that handles SIGINT and exits 130 therefore reads `130`, and only a real
+    signal death reads `SIGINT`. The single formatter behind both the `view` header
+    and `stop()`'s status line, so the two can never diverge."""
+    if code >= 0:
+        return str(code)
+    try:
+        return signal.Signals(-code).name
+    except ValueError:
+        return f"SIG{-code}"
+
+
 def _fixed_settle(wait: float) -> tuple[float, str]:
     """Clamped fixed-settle seconds, plus the one line a clamped call prefixes to
     the screen (empty when the request already fit inside the ceiling)."""
@@ -73,12 +87,17 @@ class ImptyDriver:
         CURRENT screen window (lines(limit=rows)) — NOT the whole strip — since
         these tools are called constantly while driving. full=True returns the
         whole history+screen strip. The cursor is screen-local and bounded, so a
-        small y near the bottom is the cheap 'parked = waiting for input' tell."""
+        small y near the bottom is the cheap 'parked = waiting for input' tell.
+        Once the child is gone the header carries its exit status in an `exit=`
+        field right after `alive=False`; while it runs there is no such field."""
         with session.paused():
             cx, cy = session.cursor()
+            # One poll, two fields: alive= and exit= can never disagree.
+            code = session.returncode
+            exit_field = "" if code is None else f" exit={_format_exit(code)}"
             status = (
-                f"[alive={session.is_alive()} regime={session.regime().value} "
-                f"cursor=({cx},{cy})]"
+                f"[alive={code is None}{exit_field} "
+                f"regime={session.regime().value} cursor=({cx},{cy})]"
             )
             body = session.lines() if full else session.lines(limit=session.rows)
         return f"{status}\n" + "\n".join(body)
@@ -114,7 +133,9 @@ class ImptyDriver:
         try:
             session.wait_idle()  # inherit the library settle policy
         except BaseException:
-            session.close()
+            # It never reached a usable state (and this path may itself be a
+            # cancellation) — no SIGTERM courtesy, no second of waiting.
+            session.close(grace=0.0)
             raise
         self._session = session
         return self._render(session)
@@ -124,7 +145,10 @@ class ImptyDriver:
 
         By default returns the CURRENT screen (what a human sees right now); the
         status header reports liveness, regime (scroll|screen), and cursor position
-        (a cursor parked just after a prompt = waiting for input). Set full=True to
+        (a cursor parked just after a prompt = waiting for input). Once the program
+        has exited the header adds its exit status right after `alive=False` —
+        `exit=0`, `exit=2`, or a signal name like `exit=SIGINT` for a program killed
+        by one; while it is still running there is no `exit=` field. Set full=True to
         get the whole run so far (scrolled-off history + the current screen) — a
         potentially long dump, so it is opt-in.
         """
@@ -307,12 +331,24 @@ class ImptyDriver:
         return f"[wrote {path}]"
 
     def stop(self) -> str:
-        """Kill the current program and end the session."""
-        if self._session is None:
+        """End the session and return the program's exit status plus its final screen.
+
+        SIGTERMs the program's process group, gives it a second to clean up (restore
+        the terminal, save state, flush) and then SIGKILLs it, so whatever it prints
+        on the way out is captured. The first line is `[stopped: exit=…]` — a number
+        for a normal exit, a signal name for a signal death, so
+        `[stopped: exit=SIGKILL]` is the tell that it ignored SIGTERM. The rest is the
+        last screen it painted; there is no liveness header, the session is gone.
+        Call `send_signal(9)` first if you want it killed outright. `[no session]`
+        when nothing is running.
+        """
+        session = self._session
+        if session is None:
             return "[no session]"
-        self._session.close()
+        code = session.close()
         self._session = None
-        return "[stopped]"
+        body = "\n".join(session.lines(limit=session.rows))
+        return f"[stopped: exit={_format_exit(code)}]\n{body}"
 
     def close(self) -> None:
         """Teardown entry point for the runner: end the session if one is live.

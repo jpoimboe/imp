@@ -42,3 +42,25 @@ def test_terminal_ui_skill_closes_by_telling_the_agent_to_paste_the_screen() -> 
     assert "write each SGR code without it — `[1;33m`" in section
     assert "any control byte that isn't SGR arrives as literal `^[[33m`" in section
     assert " ".join(body.split()).endswith("give the snapshot PNG path too.")
+
+
+def test_terminal_ui_skill_view_bullet_describes_the_exit_status() -> None:
+    body = load_internal_skill(bundled_skills_dir(), "imp-driving-terminal-uis")
+    bullet = next((b for b in body.split("\n- ") if b.startswith("**`view(")), None)
+    assert bullet is not None, "the skill has no `view(` bullet"
+    assert "exit=0" in bullet
+    assert "exit=SIGINT" in bullet
+
+
+def test_stop_one_liner_states_the_graceful_ladder() -> None:
+    desc = THIN_DESCRIPTIONS["stop"]
+    assert "gracefully" in desc
+    assert "SIGTERM" in desc and "SIGKILL" in desc
+
+
+def test_terminal_ui_skill_stop_bullet_describes_the_ladder_and_the_return() -> None:
+    body = load_internal_skill(bundled_skills_dir(), "imp-driving-terminal-uis")
+    bullet = next((b for b in body.split("\n- ") if b.startswith("**`stop(")), None)
+    assert bullet is not None, "the skill has no `stop(` bullet"
+    assert "SIGTERM" in bullet and "SIGKILL" in bullet
+    assert "exit status and final screen" in bullet

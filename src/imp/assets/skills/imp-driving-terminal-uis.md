@@ -27,7 +27,9 @@ send/react loop for interactive programs.
   `env`, if given, *replaces* the environment (TERM still defaulted). Refuses while a
   program is still running — stop() first.
 - **`view(full=False)`** — read the current screen as text, sending nothing. A cursor
-  parked after a prompt means it's waiting for input. `full=True` adds history.
+  parked after a prompt means it's waiting for input. `full=True` adds history. Once
+  the program has exited the header carries its exit status: `exit=0`, `exit=2`, or a
+  signal name like `exit=SIGINT`.
 - **`send(data, wait=True)`** — raw keystrokes: Enter=`\r`, Tab=`\t`, Ctrl-C=`\x03`,
   Backspace=`\x7f`, arrows=`\x1b[A`/`B`/`C`/`D`. `wait=True` settles then returns the
   screen; `wait=<seconds>` settles a fixed time (for an always-animating TUI);
@@ -43,7 +45,9 @@ send/react loop for interactive programs.
 - **`resize(rows, cols, wait=True)`** — resize the terminal (SIGWINCH) to test reflow.
 - **`send_signal(sig=2)`** — deliver a real signal to the program's group (SIGINT=2,
   SIGTERM=15), independent of tty mode.
-- **`stop()`** — kill the current program and end the session.
+- **`stop()`** — end the session: SIGTERM the program's group, allow it 1s to clean
+  up, then SIGKILL. Returns its exit status and final screen. `send_signal(9)` first
+  if you want it killed outright.
 
 ## The loop
 
