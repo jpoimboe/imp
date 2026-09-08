@@ -80,12 +80,13 @@ mechanism.
 ## Color in agent prose
 
 Content-origin text is caret-escaped (`render_text._caret_escape`) so it cannot
-alter terminal state. The one exception: SGR color inside a fenced code block in
-agent prose survives verbatim, so a design mockup keeps its colors. An agent
-cannot emit the ESC byte, so a bare `[1;33m` in a fenced body has the escape
-restored first — never after a `^[`, which is a defused code being shown as
-itself. Every other control byte, and any escape outside a fence, still renders
-as `^[`. Color-off output and the `--md`/`--html` exports strip SGR entirely.
+alter terminal state. The one exception: SGR color in agent prose survives
+verbatim inside a fenced code block and inside a single-line inline code span,
+so a mockup keeps its colors and a short sample can sit inline. An agent cannot
+emit the ESC byte, so a bare `[1;33m` in either place has the escape restored
+first — never after a `^[`, which is a defused code being shown as itself.
+Every other control byte, and any real escape outside a fence, still renders as
+`^[`. Color-off output and the `--md`/`--html` exports strip SGR entirely.
 
 ## See also
 

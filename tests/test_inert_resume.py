@@ -58,6 +58,21 @@ def test_render_inert_question_keeps_fence_color_and_visible_width() -> None:
     assert hits[0].endswith("\x1b[0m")
 
 
+def test_render_inert_question_caret_escapes_agent_authored_control_bytes() -> None:
+    out = render_inert_question("Ready? \x1b]0;pwned\x07 now", width=80, color=True)
+    assert "\x1b]" not in out
+    assert "^[]0;pwned^G" in out
+
+
+def test_render_inert_question_keeps_a_colored_inline_sample() -> None:
+    from imp.cli.render_text import _strip_sgr
+
+    out = render_inert_question("The gauge reads `[1;33m78%[0m` — ok?",
+                                width=80, color=True)
+    assert "\x1b[1;33m78%" in out
+    assert "[1;33m" not in _strip_sgr(out)
+
+
 def _seed_quest_with_events(
     tmp_path: Path, events: list[dict], *, status: str = "new",
 ) -> Quest:

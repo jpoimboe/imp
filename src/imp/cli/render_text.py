@@ -387,14 +387,139 @@ def _splice_lifted_fences(rendered: str, lifted: dict[str, list[str]]) -> str:
     return "\n".join(out)
 
 
-def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80) -> str:
+# A second permanent noncharacter, DISJOINT from `_SLOT_UNIT`. Fence slot keys are
+# `_SLOT_UNIT` runs that survive rich verbatim, so one shared sentinel would let the span
+# splice land a sample inside a fence slot key. Written as an escape, not the literal
+# codepoint, because U+FFFE is invalid in interchange and does not survive every editor.
+_SPAN_UNIT = "\ufffe"
+
+
+def _single_backtick_span_interiors(line: str) -> Iterator[tuple[int, int]]:
+    # CommonMark: an opener run of length n pairs with the next run of exactly length n.
+    runs = list(re.finditer(r"`+", line))
+    i = 0
+    while i < len(runs):
+        opener = runs[i]
+        n = len(opener.group())
+        for j in range(i + 1, len(runs)):
+            if len(runs[j].group()) == n:
+                if n == 1:
+                    yield (opener.end(), runs[j].start())
+                i = j + 1
+                break
+        else:
+            i += 1
+
+
+class _ColoredSpan(NamedTuple):
+    line: int    # line index
+    start: int   # index of the span's FIRST bare SGR code — where the sample begins
+    end: int     # exclusive end of the span's interior (the closing backtick)
+
+
+def _span_cells(sample: str) -> int:
+    """Visible cell width of a span sample — the width its placeholder run must match so
+    rich wraps the paragraph exactly as it would with the codes absent."""
+    from rich.cells import cell_len
+    return cell_len(_strip_sgr(_BARE_SGR_RE.sub("", sample)))
+
+
+def _colored_span_ranges(lines: list[str]) -> list[_ColoredSpan]:
+    """Every inline code span eligible to carry color, in source order. Eligible means:
+    single-line, no interior backtick, not a fence body (`_fence_spans` stays the one
+    definition of "inside a fence"), carrying a bare SGR code, and leaving a sample of
+    non-zero visible width — an all-codes interior would lift to empty backticks, which
+    rich re-parses and no post-render check can catch. One definition of eligibility, so
+    every pass that arms a span interior agrees on what is eligible."""
+    fenced = _fence_body_indices(lines)
+    out: list[_ColoredSpan] = []
+    for i, ln in enumerate(lines):
+        if i in fenced:
+            continue
+        for start, end in _single_backtick_span_interiors(ln):
+            code = _BARE_SGR_RE.search(ln, start, end)
+            if code is None or _span_cells(ln[code.start():end]) == 0:
+                continue
+            out.append(_ColoredSpan(i, code.start(), end))
+    return out
+
+
+def _restore_bare_sgr_in_spans(text: str) -> str:
+    """Give a model-typed `[1;33m` its ESC byte back inside an eligible inline code span,
+    so the export's SGR strip removes it instead of shipping it as literal text. The
+    screen path arms spans inside `_lift_colored_spans` instead — arming them this early
+    would defuse them before the lift runs. Same eligibility helper as the lift, so an
+    ineligible span exports as the literal text the screen shows."""
+    lines = text.split("\n")
+    for span in reversed(_colored_span_ranges(lines)):
+        ln = lines[span.line]
+        lines[span.line] = (
+            ln[:span.start]
+            + _BARE_SGR_RE.sub(lambda m: "\x1b" + m.group(0), ln[span.start:span.end])
+            + ln[span.end:])
+    return "\n".join(lines)
+
+
+def _lift_colored_spans(text: str, color: bool) -> tuple[str, list[tuple[str, str]]]:
+    """Swap the colored tail of every eligible inline code span for a run of `_SPAN_UNIT`
+    exactly as wide as the sample's visible cells, so rich lays the paragraph out as if
+    the codes were not there. Returns the rewritten text plus the (run, sample) pairs to
+    splice back, in source order. Arming happens HERE, not in the shared escape helper:
+    a bare code armed before `_caret_escape_prose` comes back as `^[[1;33m`, which the
+    lookbehinds refuse to re-arm. Each spliced sample ends with a reset, matching the
+    fence path; with color off the codes are stripped instead. Only lines are rewritten,
+    never line COUNT, so the later fence scan sees exactly the same fences.
+    Input must arrive caret-escaped: a raw C0 byte in a sample measures narrower here
+    than the caret notation it is re-emitted as, overflowing the placeholder run."""
+    if _SPAN_UNIT in text:
+        return text, []
+    lines = text.split("\n")
+    lifted: list[tuple[str, str]] = []
+    for span in reversed(_colored_span_ranges(lines)):
+        ln = lines[span.line]
+        sample = ln[span.start:span.end]
+        # `_slot_prefix` runs on the text AFTER this lift, so a `_SLOT_UNIT` carried
+        # inside a sample would be invisible to it and the splice would forge a fence
+        # slot key. Leaving the span alone keeps the character in view of both scans.
+        if _SLOT_UNIT in sample:
+            continue
+        armed = _BARE_SGR_RE.sub(lambda m: "\x1b" + m.group(0), sample)
+        run = _SPAN_UNIT * _span_cells(sample)
+        lifted.append((run, _sgr_survives(armed) + "\x1b[0m" if color
+                       else _caret_escape(_strip_sgr(armed))))
+        lines[span.line] = ln[:span.start] + run + ln[span.end:]
+    lifted.reverse()
+    return "\n".join(lines), lifted
+
+
+def _splice_lifted_spans(rendered: str, lifted: list[tuple[str, str]]) -> str | None:
+    """Put each recorded sample back where its placeholder run landed. `None` means rich
+    defeated the lift — a run was folded across lines, welded into a wider run, or lost —
+    and the caller must redo the render with the lift off, so no sentinel ever reaches a
+    terminal. A run must be found whole, in order, and maximal: two abutting runs would
+    otherwise be split at the wrong offset."""
+    out: list[str] = []
+    pos = 0
+    for run, sample in lifted:
+        at = rendered.find(run, pos)
+        end = at + len(run)
+        if (at < 0 or rendered[at - 1:at] == _SPAN_UNIT
+                or rendered[end:end + 1] == _SPAN_UNIT):
+            return None
+        out.append(rendered[pos:at])
+        out.append(sample)
+        pos = end
+    out.append(rendered[pos:])
+    return "".join(out)
+
+
+def _render_with_rich(text: str, width: int, color: bool, display_width: int) -> str:
     import io
 
     from rich.console import Console
     from rich.markdown import Markdown
     from rich.theme import Theme
     buf = io.StringIO()
-    text, lifted = _lift_colored_fences(text, color)
     md = Markdown(text)
     for token in md.parsed:
         if token.type == "inline" and token.children:
@@ -409,12 +534,35 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
             color_system="standard" if color else None,
             force_terminal=color, soft_wrap=False, highlight=False,
             theme=Theme(_MD_THEME)).print(md)
-    return _splice_lifted_fences(buf.getvalue(), lifted)
+    return buf.getvalue()
+
+
+def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80,
+                      arm_spans: bool = True) -> str:
+    """Lift order is spans then fences: the span lift only rewrites WITHIN lines, so the
+    fence scan still sees the same fences. Splice order is spans then fences: a lifted
+    fence body bypassed rich and must never be rewritten by the span splice. When rich
+    defeats the span lift the render is discarded and redone with the lift off, so output
+    carrying an unspliced placeholder is never emitted. `arm_spans` follows the caller's
+    choice of escape function — prose-escaped text gets fence AND span color, absolutely
+    escaped text (hook-script stdout) gets neither."""
+    if arm_spans:
+        span_text, samples = _lift_colored_spans(text, color)
+        if samples:
+            fence_text, fences = _lift_colored_fences(span_text, color)
+            spliced = _splice_lifted_spans(
+                _render_with_rich(fence_text, width, color, display_width), samples)
+            if spliced is not None:
+                return _splice_lifted_fences(spliced, fences)
+    fence_text, fences = _lift_colored_fences(text, color)
+    return _splice_lifted_fences(
+        _render_with_rich(fence_text, width, color, display_width), fences)
 
 
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,
                            display_width: int = 80,
-                           gutters: tuple[int, ...] = ()) -> list[str]:
+                           gutters: tuple[int, ...] = (),
+                           arm_spans: bool = True) -> list[str]:
     """Render one finalized prose block as markdown→ANSI at inner width, then
     prefix the depth gutter/indent. rich owns bold/heading/list/fence formatting;
     we own the magenta gutter. We never slice rich's output, so no escape is ever
@@ -435,7 +583,7 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     bullet = pal.ansi("• ", "bold", enabled=color)   # bold dot marks the turn
     out: list[str] = []
     first = True
-    for raw in _markdown_to_ansi(text, inner, color, display_width).splitlines():
+    for raw in _markdown_to_ansi(text, inner, color, display_width, arm_spans).splitlines():
         stripped = raw.rstrip()
         if not stripped:
             # Blank line inside the prose block — emit the bare gutter-indent
@@ -452,10 +600,14 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
 def render_question_block(text: str, width: int, depth: int, color: bool,
                           display_width: int = 80,
                           gutters: tuple[int, ...] = ()) -> list[str]:
+    """The question is agent-authored, so it is prose-escaped here rather than by the
+    caller — the escape is part of what this surface guarantees, not a precondition on
+    the caller."""
     inner = max(8, width - _INDENT_W * depth)
     indent = _gutter_indent(depth, gutters, color)
     out: list[str] = []
-    for raw in _markdown_to_ansi(text, inner, color, display_width).splitlines():
+    for raw in _markdown_to_ansi(_caret_escape_prose(text), inner, color,
+                                 display_width).splitlines():
         stripped = raw.rstrip()
         out.append(indent + stripped if stripped else indent)
     return out or [indent]
@@ -882,7 +1034,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
                              *pal.NODE_COLORS[node.color_role], gutters=gutters)
             return
         yield from _render_markdown_block(_caret_escape(node.text), width, depth,
-                                          color, display_width, gutters)
+                                          color, display_width, gutters, arm_spans=False)
         return
 
     if isinstance(node, nv.EngineMessageNode):

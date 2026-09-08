@@ -16,9 +16,10 @@ def render_inert_question(text: str, *, width: int, color: bool) -> str:
     through `_render_markdown_block` — the same renderer every other agent turn
     uses — so the preview shows the bold `• ` turn bullet and a 2-column
     hang-indent, and reads as prose (markdown→ANSI) rather than raw markdown
-    source. Called at depth 0, so the gutter is empty."""
-    from imp.cli.render_text import _render_markdown_block
-    return "\n".join(_render_markdown_block(text, width, 0, color))
+    source. Called at depth 0, so the gutter is empty. The text is agent-authored,
+    so it is prose-escaped here, exactly as the scrollback escapes an agent turn."""
+    from imp.cli.render_text import _caret_escape_prose, _render_markdown_block
+    return "\n".join(_render_markdown_block(_caret_escape_prose(text), width, 0, color))
 
 
 _ANSWER_TRANSITIONS = frozenset({"step_started", "step_completed"})

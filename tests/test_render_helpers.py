@@ -76,6 +76,40 @@ def test_question_block_respects_depth_indent() -> None:
         assert len(line) <= 40
 
 
+def test_question_block_caret_escapes_agent_authored_control_bytes() -> None:
+    from imp.cli.render_text import render_question_block
+
+    # An OSC window-title sequence in agent text must never reach the terminal.
+    text = "\n".join(render_question_block(
+        "Ready? \x1b]0;pwned\x07 now", 60, 0, color=True))
+    assert "\x1b]" not in text
+    assert "^[]0;pwned^G" in text
+
+
+def test_question_block_keeps_a_colored_inline_sample() -> None:
+    from imp.cli.render_text import _strip_sgr, render_question_block
+
+    # The escape pass must leave a bare code armable, so the prompt shows the same
+    # colored sample the scrollback does — arming it first would print `^[[1;33m`.
+    text = "\n".join(render_question_block(
+        "The gauge reads `[1;33m78%[0m` — ok?", 60, 0, color=True))
+    assert "\x1b[1;33m78%" in text
+    assert "[1;33m" not in _strip_sgr(text)
+
+
+def test_question_block_keeps_fence_color_like_the_scrollback() -> None:
+    from imp.cli.render_text import _strip_sgr, render_question_block
+
+    # A model cannot type ESC, so a mockup's codes arrive bare and only the PROSE
+    # escape restores them; the absolute one leaves the fence body literal.
+    text = "\n".join(render_question_block(
+        "Here it is:\n\n```\n[1;33m▌ imp[0m [36mplanning[0m\n```\n",
+        70, 0, color=True))
+    assert "\x1b[1;33m▌ imp\x1b[0m" in text
+    assert "[1;33m" not in _strip_sgr(text)
+    assert "^[[" not in text
+
+
 def test_prompt_message_caps_hr_at_display_width() -> None:
     from imp.cli import palette as pal
     from imp.cli.prompt import _prompt_message_text
