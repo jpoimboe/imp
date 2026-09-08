@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -367,6 +368,60 @@ def _sandbox_fallback_without_bwrap(
         ex, "_build_sandbox_policy",
         lambda quest, config, log: _inactive(note=note),
     )
+
+
+_OWNED_TOOL_CONTEXTS: list[Any] = []
+
+
+def own_tool_context(ctx: Any) -> Any:
+    """Register a directly-constructed ToolContext given an ACTIVE sandbox policy,
+    so its lazily-opened keeper is torn down at the end of the test. Returns the
+    context, so a helper can `return own_tool_context(ctx)`."""
+    _OWNED_TOOL_CONTEXTS.append(ctx)
+    return ctx
+
+
+def close_owned_tool_contexts() -> None:
+    """Close every registered context's keeper. The namespace close ALONE is the
+    right operation here, not the full teardown_tool_context: killing pid 1 of the
+    pid namespace takes every process inside with it, and skipping the process
+    kills skips their tombstone write — which would otherwise re-create the run dir
+    under the temp root the test just rmtree'd in its own finally, leaving a stray
+    tree per test per run. The bound: a command a test ran through a /sandbox off
+    window is a HOST process the close cannot reach; no test here does that, and
+    one that did would own its own cleanup. A failure is NOT swallowed — a
+    silently-failing close leaks a live keeper per test for the rest of the
+    worker's life, which is the one outcome this exists to prevent — but every
+    context is closed before the first failure is re-raised, so a raise is loud
+    AND strands nothing."""
+    from imp.agents.tools.context import close_sandbox_namespace
+    owned = list(reversed(_OWNED_TOOL_CONTEXTS))
+    _OWNED_TOOL_CONTEXTS.clear()
+    failures: list[Exception] = []
+    for ctx in owned:
+        try:
+            close_sandbox_namespace(ctx)
+        except Exception as exc:      # collected, then re-raised below
+            failures.append(exc)
+    if failures:
+        raise failures[0]
+
+
+def assert_all_tool_contexts_owned(path: Path) -> None:
+    """AC 5b: every directly-constructed ToolContext in `path` registers with the
+    owner. Source-level because an un-adopted construction is invisible at
+    runtime — it leaks a live keeper for the rest of the -n auto worker's life and
+    no assertion in the leaking test can see it. A BALANCE check, not a coverage
+    one: it catches the likely mistake (a new context added without an owner) but
+    would pass if one site were double-wrapped and another missed."""
+    src = path.read_text(encoding="utf-8")
+    assert src.count("ToolContext(") == src.count("own_tool_context(")
+
+
+@pytest.fixture(autouse=True)
+def _close_owned_tool_contexts() -> Generator[None, None, None]:
+    yield
+    close_owned_tool_contexts()
 
 
 @pytest.fixture(autouse=True)

@@ -45,6 +45,7 @@ from imp.engine.sandbox import (
 )
 from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
+from tests.conftest import assert_all_tool_contexts_owned, own_tool_context
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -111,7 +112,7 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
         workflow_dir=worktree / ".imp" / "wf",
     )
     ctx.base_sandbox_policy = policy
-    return ctx
+    return own_tool_context(ctx)
 
 
 def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
@@ -609,6 +610,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             workflow_dir=wt_path / ".imp" / "wf",
         )
         ctx.base_sandbox_policy = pol
+        own_tool_context(ctx)
 
         # ------------------------------------------------------------------
         # 1. git commit SUCCEEDS and commit is visible on the host
@@ -843,7 +845,7 @@ def _refprot_ctx(control: Path, worktree: Path) -> tuple[ToolContext, SandboxPol
         title="Ref Test", project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf")
     ctx.base_sandbox_policy = pol
-    return ctx, pol
+    return own_tool_context(ctx), pol
 
 
 def _seed_stash(control: Path) -> str:
@@ -1473,6 +1475,7 @@ def test_quest_steps_masked_but_artifacts_readable() -> None:
             workflow_dir=wt_path / ".imp" / "wf",
         )
         ctx.base_sandbox_policy = pol
+        own_tool_context(ctx)
 
         # steps/ sentinel must NOT be visible (tmpfs masks it, dir appears empty)
         r1 = _bash(ctx, f"cat {steps_phase}/SECRET.txt 2>&1; echo rc=$?")
@@ -1845,6 +1848,7 @@ def test_worktrees_mask_sibling_survives_in_sandbox_prune() -> None:
             title="Prune Test", project_root=wt_a,
             workflow_dir=wt_a / ".imp" / "wf")
         ctx.base_sandbox_policy = pol
+        own_tool_context(ctx)
 
         # (a) an in-sandbox prune must NOT reap sibling B (it is hidden, not orphaned).
         r_prune = _bash(ctx, "git worktree prune 2>&1; echo rc=$?")
@@ -1904,6 +1908,7 @@ def test_worktrees_mask_draft_concierge_prune_spares_siblings() -> None:
             title="Draft Prune", project_root=control,
             workflow_dir=control / ".imp" / "wf")
         ctx.base_sandbox_policy = pol
+        own_tool_context(ctx)
 
         r_prune = _bash(ctx, "git worktree prune 2>&1; echo rc=$?")
         assert "rc=0" in str(r_prune["stdout"]), r_prune
@@ -2090,3 +2095,7 @@ def test_artifact_ref_history_readable_from_readonly_sandboxed_worktree() -> Non
             wt.remove_worktree(control, "esc1", force=True)
         shutil.rmtree(control, ignore_errors=True)
         shutil.rmtree(srcdir, ignore_errors=True)
+
+
+def test_every_tool_context_here_is_owned():
+    assert_all_tool_contexts_owned(Path(__file__))

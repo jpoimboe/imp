@@ -710,3 +710,38 @@ def test_no_provider_still_calls_the_unsplit_pair() -> None:
         src = _Path(mod.__file__).read_text()
         assert "terminate_running_processes" not in src, mod.__name__
         assert "terminate_background_processes" not in src, mod.__name__
+
+
+def test_the_conftest_owner_closes_a_registered_contexts_keeper(tmp_path: Path) -> None:
+    # A directly-constructed ToolContext reaches no provider run-generator
+    # finally, so the suite itself has to own the keeper. Driven through the
+    # fixture's own body so the assertion does not have to outlive the test.
+    from types import SimpleNamespace
+
+    from imp.agents.tools.bg import BgProc
+    from tests.conftest import close_owned_tool_contexts, own_tool_context
+
+    closed: list[str] = []
+
+    class _NS:
+        def close(self) -> None:
+            closed.append("closed")
+
+    # The run dir does NOT exist: an adopted test rmtrees its root in its own
+    # finally, before this fixture runs. A background teardown here would
+    # mkdir(parents=True) it back to write tombstones — the stray-tree
+    # regression — so the owner must close the namespace and nothing else.
+    gone = tmp_path / "gone"
+    ctx = ToolContext(project_root=tmp_path, events_path=gone / "e.jsonl")
+    ctx.agent_id = "step:build/coder"
+    ctx.sandbox_ns = _NS()
+    ctx.background_processes["bg1"] = BgProc(
+        id="bg1", proc=SimpleNamespace(pid=None, returncode=0),
+        out_path=gone / "bg1.out", err_path=gone / "bg1.err", command="x")
+
+    assert own_tool_context(ctx) is ctx      # returns it, so `ctx = own(...)` reads well
+    close_owned_tool_contexts()
+
+    assert closed == ["closed"]
+    assert ctx.sandbox_ns is None
+    assert not gone.exists()                # no tombstone write, no resurrected tree

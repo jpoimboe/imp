@@ -27,7 +27,11 @@ from imp.engine.sandbox import (
     sandbox_available,
 )
 from imp.engine.types import Pause, SourceLoc, Step
-from tests.conftest import _pid_gone_or_zombie
+from tests.conftest import (
+    _pid_gone_or_zombie,
+    assert_all_tool_contexts_owned,
+    own_tool_context,
+)
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -75,7 +79,7 @@ def _ctx(worktree: Path) -> ToolContext:
         workflow_dir=worktree / ".imp" / "wf",
     )
     ctx.base_sandbox_policy = _active_policy(worktree)
-    return ctx
+    return own_tool_context(ctx)
 
 
 # This file defines its own overlay skip rather than importing a shared one (its
@@ -264,6 +268,7 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
         ctx.quest_context = QuestContext(
             title="t", project_root=wt, workflow_dir=wt / ".imp" / "wf")
         ctx.base_sandbox_policy = pol
+        ctx = own_tool_context(ctx)
 
         ready = wt / "inner.up"
         out_holder: dict[str, object] = {}
@@ -434,3 +439,7 @@ def test_gate_teardown_lets_sigterm_trap_finish_before_sigkill(
             time.sleep(0.02)
     finally:
         shutil.rmtree(worktree, ignore_errors=True)
+
+
+def test_every_tool_context_here_is_owned():
+    assert_all_tool_contexts_owned(Path(__file__))
