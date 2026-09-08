@@ -16,7 +16,7 @@ from imp.paths import project_state_dir
 from imp.providers import claude_code
 from imp.providers import claude_token_refresh as ctr
 from imp.providers.claude_code import ClaudeCodeAgentRunner
-from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+from tests.cc_fakes import FakeClaudeSDKClient, assistant, chrome, result, text, tool_use
 
 NOW = 1_000_000_000_000
 
@@ -219,7 +219,7 @@ async def test_dead_grant_probe_upgrades_the_auth_error_to_terminal(
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
-        tmp_path, log, [assistant(text(PROSE_401)), result()])]
+        tmp_path, log, [chrome(PROSE_401), result()])]
 
     # Pre-spawn refresh unforced and with no spawn token; the terminality probe forced.
     assert calls == [(False, None), (True, None)]
@@ -246,7 +246,7 @@ async def test_successful_probe_leaves_the_auth_error_retryable(
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
-        tmp_path, log, [assistant(text(PROSE_401)), result()])]
+        tmp_path, log, [chrome(PROSE_401), result()])]
 
     assert calls == [(False, None), (True, None)]
     errs = [e for e in events if e["type"] == "error"]
@@ -294,7 +294,7 @@ async def test_a_non_auth_error_triggers_no_probe(
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
-        tmp_path, log, [assistant(text("API Error: 500 upstream is down")),
+        tmp_path, log, [chrome("API Error: 500 upstream is down"),
                         result()])]
 
     # Only the unforced pre-spawn refresh ran: no probe, no extra journal row.
@@ -479,7 +479,7 @@ async def test_rotation_race_on_native_resume_stays_retryable(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=lambda o: FakeClaudeSDKClient(
-            o, scripted_messages=[assistant(text(PROSE_401)), result()]))
+            o, scripted_messages=[chrome(PROSE_401), result()]))
     events = [ev async for ev in runner.run(inv)]
 
     assert materialized == []                      # native path: config_dir stays None
@@ -506,7 +506,7 @@ async def test_rotation_race_on_the_text_classified_401(
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
-        tmp_path, log, [assistant(text(PROSE_401)), result()])]
+        tmp_path, log, [chrome(PROSE_401), result()])]
 
     assert calls == [(False, None), (True, NOW + 3600 * 1000)]
     errs = [e for e in events if e["type"] == "error"]
@@ -558,7 +558,7 @@ async def test_the_probe_gets_the_spawn_expiry_and_still_upgrades_a_dead_grant(
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
-        tmp_path, log, [assistant(text(PROSE_401)), result()])]
+        tmp_path, log, [chrome(PROSE_401), result()])]
 
     assert calls == [(False, None), (True, NOW + 3600 * 1000)]
     errs = [e for e in events if e["type"] == "error"]
@@ -583,7 +583,7 @@ async def test_terminal_auth_prose_never_reaches_the_probe(
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(tmp_path, log, [
-        assistant(text("Invalid API key · Please run `/login`")), result()])]
+        chrome("Invalid API key · Please run `/login`"), result()])]
 
     assert calls == [(False, None)]            # category gate: no probe either way
     errs = [e for e in events if e["type"] == "error"]
@@ -607,7 +607,7 @@ async def test_an_unreadable_spawn_expiry_passes_none_and_probes(
 
     log = InMemoryEventLog()
     events = [ev async for ev in _run_scripted(
-        tmp_path, log, [assistant(text(PROSE_401)), result()])]
+        tmp_path, log, [chrome(PROSE_401), result()])]
 
     assert calls == [(False, None), (True, None)]
     errs = [e for e in events if e["type"] == "error"]

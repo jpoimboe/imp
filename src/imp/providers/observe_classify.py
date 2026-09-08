@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import time
+from typing import Any
 
 from imp.providers import errors as perr
 from imp.providers.quota import QuotaReading
@@ -159,7 +160,17 @@ def _match_error_prose(
 
 def _classify_agent_text(
     text: str, *, anchored: bool = True, reading: QuotaReading | None = None,
+    output_tokens: int | None = None, stop_reason: Any = None,
 ) -> perr.ProviderError | None:
+    """Anchored: classify prose as provider chrome only with recorded evidence the
+    model did not write it — it billed no output tokens, or the CLI closed a
+    message it synthesized with a stop sequence imp never configures. Absent
+    evidence is NOT zero: a false positive rolls back a good turn and pauses the
+    run, a miss only leaves the agent to be nudged on. `anchored=False` callers
+    already hold an out-of-band failure signal, so the gate does not apply.
+    """
+    if anchored and output_tokens != 0 and stop_reason != "stop_sequence":
+        return None
     return _match_error_prose(text, anchored=anchored, reading=reading)
 
 
@@ -169,6 +180,10 @@ def matches_error_prose(text: str) -> bool:
     return _match_error_prose(text) is not None
 
 
-def classifies_as_provider_error(text: str) -> bool:
-    """Anchored classification as a predicate: is this prose provider chrome?"""
-    return _classify_agent_text(text) is not None
+def classifies_as_provider_error(
+    text: str, *, output_tokens: int | None, stop_reason: Any,
+) -> bool:
+    """Anchored, evidence-gated classification as a predicate. Both keywords are
+    required so a display site cannot silently fall back to guessing."""
+    return _classify_agent_text(
+        text, output_tokens=output_tokens, stop_reason=stop_reason) is not None

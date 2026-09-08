@@ -244,6 +244,13 @@ def text(t: str) -> FakeTextBlock:
     return FakeTextBlock(text=t)
 
 
+def chrome(prose: str) -> FakeAssistantMessage:
+    """CLI chrome: it bills no output tokens and closes the message it synthesized
+    itself with a stop sequence imp never configures."""
+    return assistant(text(prose), usage={"output_tokens": 0},
+                     stop_reason="stop_sequence")
+
+
 def tool_use(id_: str, name: str, args: dict[str, Any]) -> FakeToolUseBlock:
     return FakeToolUseBlock(id=id_, name=name, input=args)
 

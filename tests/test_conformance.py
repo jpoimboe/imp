@@ -15,6 +15,7 @@ from tests.anthropic_fakes import response as a_response
 from tests.anthropic_fakes import text as a_text
 from tests.anthropic_fakes import tool_use as a_tool_use
 from tests.cc_fakes import assistant as cc_assistant
+from tests.cc_fakes import chrome as cc_chrome
 from tests.cc_fakes import result as cc_result
 from tests.cc_fakes import text as cc_text
 from tests.cc_fakes import tool_result as cc_tool_result
@@ -240,7 +241,7 @@ async def test_ceiling_trip(pair: str, tmp_path: Path) -> None:
 
 def _classify_script(pair: str):
     if pair == "claude_code":
-        return [cc_assistant(cc_text("Invalid API key — got 401. Cannot continue.")),
+        return [cc_chrome("Invalid API key — got 401. Cannot continue."),
                 cc_result()]
     return [[cx_start("thr-1"),
              cx_msg("Invalid API key — got 401. Cannot continue."),

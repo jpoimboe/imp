@@ -27,6 +27,7 @@ from imp.providers.claude_code_session_store import (
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
+    chrome,
     message_delta,
     message_start,
     message_stop,
@@ -645,7 +646,7 @@ def test_classify_agent_text_invalid_api_key() -> None:
     from imp.providers import claude_code as cc
     from imp.providers import errors as perr
 
-    out = cc._classify_agent_text("Some preamble. Invalid API key, sorry.")
+    out = cc._classify_agent_text("Some preamble. Invalid API key, sorry.", output_tokens=0)
     assert isinstance(out, perr.AuthTerminalError)
 
 
@@ -653,7 +654,7 @@ def test_classify_agent_text_login_required() -> None:
     from imp.providers import claude_code as cc
     from imp.providers import errors as perr
 
-    out = cc._classify_agent_text("Please run `/login` first.")
+    out = cc._classify_agent_text("Please run `/login` first.", output_tokens=0)
     assert isinstance(out, perr.AuthTerminalError)
 
 
@@ -663,7 +664,7 @@ def test_classify_agent_text_login_required_unbackticked_anchored() -> None:
 
     # The mona44 mid-run logout message carries no backticks; anchored
     # (default) mode must still classify it as auth_terminal.
-    out = cc._classify_agent_text("Not logged in · Please run /login")
+    out = cc._classify_agent_text("Not logged in · Please run /login", output_tokens=0)
     assert isinstance(out, perr.AuthTerminalError)
 
 
@@ -675,7 +676,7 @@ def test_classify_agent_text_login_required_unbackticked_unanchored() -> None:
     # must match the unbackticked string even buried below the first line.
     out = cc._classify_agent_text(
         "Session ended abnormally.\nNot logged in · Please run /login",
-        anchored=False,
+        anchored=False, output_tokens=0,
     )
     assert isinstance(out, perr.AuthTerminalError)
 
@@ -685,7 +686,7 @@ def test_classify_agent_text_login_required_backticked_still_terminal_auth() -> 
     from imp.providers import errors as perr
 
     # Regression: the backticked variant must still classify as auth_terminal.
-    out = cc._classify_agent_text("Please run `/login` first.")
+    out = cc._classify_agent_text("Please run `/login` first.", output_tokens=0)
     assert isinstance(out, perr.AuthTerminalError)
 
 
@@ -693,7 +694,8 @@ def test_classify_agent_text_quota_usage_limit() -> None:
     from imp.providers import claude_code as cc
     from imp.providers import errors as perr
 
-    out = cc._classify_agent_text("You have reached your usage limit for today.")
+    out = cc._classify_agent_text(
+        "You have reached your usage limit for today.", output_tokens=0)
     assert isinstance(out, perr.QuotaError)
 
 
@@ -701,17 +703,19 @@ def test_classify_agent_text_credit_balance() -> None:
     from imp.providers import claude_code as cc
     from imp.providers import errors as perr
 
-    out = cc._classify_agent_text("Sorry — Credit balance is too low to continue.")
+    out = cc._classify_agent_text(
+        "Sorry — Credit balance is too low to continue.", output_tokens=0)
     assert isinstance(out, perr.QuotaError)
 
 
 def test_classify_agent_text_benign_returns_none() -> None:
     from imp.providers import claude_code as cc
-    assert cc._classify_agent_text("I'm working on the task. One moment.") is None
+    assert cc._classify_agent_text(
+        "I'm working on the task. One moment.", output_tokens=0) is None
     # Pattern conservatism: a tool result that *mentions* auth errors must
     # NOT trip the classifier.
     assert cc._classify_agent_text(
-        "git push reported: Authentication failed for repo X",
+        "git push reported: Authentication failed for repo X", output_tokens=0,
     ) is None
 
 
@@ -742,7 +746,7 @@ async def test_runner_reclassifies_invalid_api_key_text_to_auth_terminal_event(
     # then ResultMessage. The runner should reclassify the assistant text
     # via _classify_agent_text and emit a category=auth_terminal event.
     fake_messages = [
-        assistant(text("Invalid API key — got 401. Cannot continue.")),
+        chrome("Invalid API key — got 401. Cannot continue."),
         result(),
     ]
 
@@ -813,7 +817,7 @@ async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
     AuthTerminalError; continuation_fn is never consulted."""
     (tmp_path / "art").mkdir()
 
-    scripted = [assistant(text("Invalid API key")), result()]
+    scripted = [chrome("Invalid API key"), result()]
 
     def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
@@ -4757,7 +4761,7 @@ async def test_reclassified_auth_error_carries_last_agent_text_detail(
 ) -> None:
     """Substring/API-error reclassification attaches the prose to detail.last_agent_text."""
     prose = "Failed to authenticate. API Error: 401 Invalid authentication credentials"
-    fake_messages = [assistant(text(prose)), result()]
+    fake_messages = [chrome(prose), result()]
 
     def client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=fake_messages)

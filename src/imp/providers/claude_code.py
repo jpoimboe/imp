@@ -1470,6 +1470,11 @@ class ClaudeCodeSession(ObserveSession):
         self._llm_model: str | None = None
         self._llm_stop_reason: Any = None
         self._llm_usage: dict[str, Any] = {}
+        # The last flushed group's chrome evidence: _terminal_error runs after the
+        # flush cleared the backing fields. Every emitting flush overwrites both,
+        # so they always describe the message _trailing_text() returns.
+        self._flushed_output_tokens: int | None = None
+        self._flushed_stop_reason: Any = None
         self._auth_mode: str | None = None
         self._quota_reading: QuotaReading | None = None
         self._stream_usage_by_msg: dict[str, tuple[dict[str, Any], Any]] = {}
@@ -1523,6 +1528,9 @@ class ClaudeCodeSession(ObserveSession):
                 usage = self._llm_usage
                 stop = self._llm_stop_reason if self._llm_stop_reason is not None \
                     else backstop_stop_reason
+            out_tok = usage.get("output_tokens")
+            self._flushed_output_tokens = out_tok if isinstance(out_tok, int) else None
+            self._flushed_stop_reason = stop
             self.elog.append_agent_message(
                 agent_id=self.aid, provider=self.invocation.provider_name,
                 model=self._llm_model or self.runner.model,
@@ -1530,7 +1538,10 @@ class ClaudeCodeSession(ObserveSession):
                      "usage": usage},
                 usage=usage, stop_reason=stop,
                 auth_mode=self._auth_mode,
-                provider_error=classifies_as_provider_error(self._llm_tail_text),
+                provider_error=classifies_as_provider_error(
+                    self._llm_tail_text,
+                    output_tokens=self._flushed_output_tokens,
+                    stop_reason=self._flushed_stop_reason),
                 message_id=self._llm_group_key,
                 context_window=cu_fields.get("context_window"),
                 context_pct=cu_fields.get("context_pct"),
@@ -1921,7 +1932,10 @@ class ClaudeCodeSession(ObserveSession):
             config_dir=self.runner._config_dir,
             reading=self._quota_reading)
         if err is None:
-            err = _classify_agent_text(last_text, reading=self._quota_reading)
+            err = _classify_agent_text(
+                last_text, reading=self._quota_reading,
+                output_tokens=self._flushed_output_tokens,
+                stop_reason=self._flushed_stop_reason)
             if err is None:
                 return None
             err.detail["last_agent_text"] = last_text[:500]

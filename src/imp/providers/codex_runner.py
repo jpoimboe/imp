@@ -274,6 +274,7 @@ class CodexSession(ObserveSession):
             "complete_step_called": False, "auth_mode": auth_mode,
             "context_reading": None, "context_canary_emitted": False,
             "quota_reading": None,
+            "turn_output_tokens": None,
             "compaction_canary_emitted": False,
             "turn_tool_outcomes": [], "last_agent_text": "",
         }
@@ -665,7 +666,9 @@ class CodexSession(ObserveSession):
 
     async def _terminal_error(self, last_text: str) -> dict[str, Any] | None:
         classified = _classify_agent_text(
-            last_text, reading=self._proc_state.get("quota_reading"))
+            last_text, reading=self._proc_state.get("quota_reading"),
+            output_tokens=self._proc_state.get("turn_output_tokens"),
+            stop_reason=None)
         if classified is not None:
             classified.detail["last_agent_text"] = last_text[:500]
             return cast(dict[str, Any], perr.make_error_event(
@@ -1041,7 +1044,7 @@ def _serialize_mcp_result(result: Any) -> str:
 
 def _flush_codex_prose(
     elog: Any, *, agent_id: str, provider: str, model: str,
-    state: dict[str, Any],
+    state: dict[str, Any], output_tokens: int | None,
 ) -> None:
     """Emit the turn's buffered prose as a prose-only `agent_message` and
     clear the buffer. No-op when the buffer is empty.
@@ -1054,7 +1057,8 @@ def _flush_codex_prose(
         agent_id=agent_id, provider=provider, model=model,
         raw={"content": [{"type": "text", "text": t} for t in parts]},
         usage={}, stop_reason=None, auth_mode=state.get("auth_mode"),
-        provider_error=classifies_as_provider_error(parts[-1]))
+        provider_error=classifies_as_provider_error(
+            parts[-1], output_tokens=output_tokens, stop_reason=None))
     state["turn_had_llm"] = True
 
 
@@ -1135,7 +1139,7 @@ def process_event(
             # lead its tool_call, and the task tool_call opens HERE (not at
             # item.completed), so flush the prose buffer now.
             _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
-                               model=model, state=state)
+                               model=model, state=state, output_tokens=None)
             elog.append_tool_call(
                 agent_id=agent_id,
                 block=ToolUseBlock(id=item_id, name="sub_agent", input=args),
@@ -1165,7 +1169,7 @@ def process_event(
                 # Split at the classifying boundary so error prose gets its own node.
                 if matches_error_prose(text) and state.get("prose_buffer"):
                     _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
-                                       model=model, state=state)
+                                       model=model, state=state, output_tokens=None)
                 state.setdefault("prose_buffer", []).append(text)
             return
         if itype == "mcp_tool_call":
@@ -1173,7 +1177,7 @@ def process_event(
             # tool_call. For a task (sub_agent) whose call already opened at
             # item.started the buffer is already empty here (no-op).
             _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
-                               model=model, state=state)
+                               model=model, state=state, output_tokens=None)
             # codex's `McpToolCallItem` exposes `tool` + `server`, NOT `name`;
             # reading `name` silently recorded "" for every call (and made the
             # complete_step capture below dead). Fall back to `name` only for
@@ -1251,7 +1255,7 @@ def process_event(
                 call_id = getattr(item, "id", "") or ""
                 # text->tool transition: lead the tool_call with any buffered prose.
                 _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
-                                   model=model, state=state)
+                                   model=model, state=state, output_tokens=None)
                 elog.append_tool_call(
                     agent_id=agent_id,
                     block=ToolUseBlock(
@@ -1289,6 +1293,12 @@ def process_event(
         return
 
     if etype == "turn.completed":
+        # Read usage FIRST: the trailing flush needs this turn's token count, and a
+        # usage-less turn must not leave the previous turn's count readable below.
+        usage = getattr(event, "usage", None)
+        output_tokens = (None if usage is None
+                         else int(getattr(usage, "output_tokens", 0) or 0))
+        state["turn_output_tokens"] = output_tokens
         # Flush any trailing prose (a post-tool summary, or a text-only turn) as
         # a prose-only agent_message BEFORE usage attaches. A prose-less tool-only
         # turn emitted no agent_message this turn, so synthesize an empty-prose
@@ -1297,9 +1307,8 @@ def process_event(
         # tool_use never rides in a codex agent_message now; it lives only in the
         # standalone tool_call events.
         _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
-                           model=model, state=state)
+                           model=model, state=state, output_tokens=output_tokens)
         turn_had_llm = state.pop("turn_had_llm", False)
-        usage = getattr(event, "usage", None)
         if usage is None:
             return
         if not turn_had_llm:
@@ -1317,7 +1326,6 @@ def process_event(
         # Like `cached`, cache-write nests inside input_tokens, so both
         # subtract from fresh.
         cache_write = int(getattr(usage, "cache_write_input_tokens", 0) or 0)
-        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
         reasoning_tokens = int(getattr(usage, "reasoning_output_tokens", 0) or 0)
         normalized = {
             # `input_tokens` here means FRESH input (anthropic-style) so the
