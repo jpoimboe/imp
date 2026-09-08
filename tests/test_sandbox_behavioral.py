@@ -2754,3 +2754,155 @@ def test_an_alt_screen_program_renders_identically_joined_and_unjoined() -> None
         assert joined == bare
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+_FG_JOB = (
+    "import os, signal, sys, time\n"
+    "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+    "os.write(1, b'JOB-READY\\r\\n')\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not installed")
+def test_send_signal_hits_the_foreground_job_in_a_joined_shell() -> None:
+    """AC 3(a) joined: os.tcgetpgrp(master) names the inner program's REAL host
+    pgid, so the signal reaches the job rather than nsenter. Aimed at the child's
+    own group it would instead kill the ctty holder and the payload would die of
+    a collateral SIGHUP — which is why send_signal had to be retargeted at all."""
+    root = _make_root()
+    job = root / "job.py"
+    job.write_text(_FG_JOB)
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(["bash", "--norc", "--noprofile", "-i"])
+        d.wait(idle=0.2, hard=30.0)            # let bash paint a prompt first
+        d.send(f"{sys.executable} {job}\r")
+        _await_screen(d, "JOB-READY")
+        d.send_signal(signal.SIGINT)
+        # The marker must NOT be typeable, or bash's echo of the command line
+        # would satisfy the poll on its own: the shell computes STILL-42 from 6*7.
+        d.send("echo STILL-$((6*7))\r")
+        _await_screen(d, "STILL-42")
+        return d.view()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        for screen in (_drive_joined(ctx, _drive), _drive_bare(_drive)):
+            assert "alive=True" in screen, screen    # the shell survived the signal
+            assert "STILL-42" in screen, screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_IGNORES_SIGTERM_JOB = (
+    "import os, signal, time\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+    "os.write(1, b'JOB2-READY\\r\\n')\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not installed")
+def test_close_reaps_the_joined_direct_child_under_a_shells_job_control() -> None:
+    """AC 3(c) joined: the ladder stays aimed at the DIRECT child's group, which
+    joined is nsenter's — and nsenter is a session leader whose pgid is its pid, so
+    the group always contains _proc and close()'s unbounded wait() always returns.
+    Aimed at the terminal's foreground group both rungs would land on the job,
+    bash would stay alive, and this test would hang to its outer timeout instead of
+    reporting a status.
+
+    The status differs from the unjoined arm (plan 1 measured -SIGKILL there) and
+    that is inherent: unjoined the direct child IS the interactive bash, which
+    ignores SIGTERM, so only the hard rung reaps it; joined the direct child is
+    nsenter, which does not, so the GRACEFUL rung ends it. Measured: 0.0s to
+    return, exit=SIGTERM."""
+    root = _make_root()
+    job = root / "job2.py"
+    job.write_text(_IGNORES_SIGTERM_JOB)
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(["bash", "--norc", "--noprofile", "-i"])
+        d.wait(idle=0.2, hard=30.0)
+        d.send(f"{sys.executable} {job}\r")
+        _await_screen(d, "JOB2-READY")
+        return d.stop()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        stopped = _drive_joined(ctx, _drive)
+        assert stopped.splitlines()[0] == "[stopped: exit=SIGTERM]", stopped
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_program_shares_the_process_table_with_bash() -> None:
+    """AC 4: one namespace, one process table — the mental-model fix the shared
+    keeper exists to deliver. A program left running on the pty is visible to a
+    bash call in the SAME run and killable there by its namespace-local pid."""
+    root = _make_root()
+    marker = f"PTY-VISIBLE-{uuid.uuid4().hex[:8]}"
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = _joined_driver(ctx)
+        try:
+            screen = await asyncio.to_thread(
+                lambda: driver.start([sys.executable, "-c", _SLEEPER, marker]))
+            assert "PTY-READY" in screen, screen
+            found = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": f"pgrep -f {marker}"}))
+            assert found["returncode"] == 0, found
+            pid = found["stdout"].split()[0]
+            killed = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": f"kill -9 {pid}"}))
+            assert killed["returncode"] == 0, killed
+            # Poll the SESSION: the driver noticing its child died is the
+            # observable consequence a namespace-local kill is supposed to have.
+            _poll(lambda: "alive=False" in driver.view(),
+                  what="the pty program dying from a bash-side kill")
+        finally:
+            await asyncio.to_thread(driver.close)
+
+    try:
+        asyncio.run(_main())
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_env_overlays_the_joined_child_env() -> None:
+    """AC 11 joined: `env` ADDS to the sandbox's curated child env. Replacing it —
+    today's behavior at the driver — would drop PATH, HOME and the IMP_* the
+    sandbox contract depends on the moment an agent set one API key. HOME must be
+    the POLICY's, which is what proves the overlay sat on the child env rather
+    than on os.environ.
+
+    The CHILD compares HOME and prints a verdict, rather than the test matching
+    the path on the screen: the screen is 80 columns and the pty hard-wraps, so a
+    long TMPDIR (imp's own sandbox uses one — /tmp/imp-<uid>/<quest>/…) splits the
+    path mid-token and a substring assertion fails on exactly the host the gates
+    run on. The verdict line is short on every host, and it is a stronger check
+    besides — an equality, not a prefix match."""
+    root = _make_root()
+    prog = (
+        "import os, sys\n"
+        "print('FOO=' + os.environ.get('FOO', '<none>'),\n"
+        "      'PATH?' + str(bool(os.environ.get('PATH'))),\n"
+        "      'HOME-IS-POLICY?' + str(os.environ.get('HOME') == sys.argv[1]))\n"
+    )
+    argv = [sys.executable, "-c", prog, str(root / "home")]
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        screen = _drive_joined(ctx, lambda d: d.start(argv, env={"FOO": "1"}))
+        assert "FOO=1 PATH?True HOME-IS-POLICY?True" in screen, screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
