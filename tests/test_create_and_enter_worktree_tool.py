@@ -418,6 +418,31 @@ async def test_setup_output_cap_raises_fatal(
 
 
 @pytest.mark.anyio
+async def test_setup_sandbox_open_failure_raises_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Setup runs inside a keeper namespace; a namespace open that never succeeds must reach
+    # the agent as a tool error, not an uncaught exception.
+    import imp.agents.tools.create_and_enter_worktree as cew
+    from imp.agents.tools.errors import FatalToolError
+    from imp.engine.sandbox import SandboxOpenFailed
+
+    def _fake_run(**kw: object) -> dict:
+        raise SandboxOpenFailed("bwrap: Can't mount overlay")
+
+    monkeypatch.setattr(cew, "run_command", _fake_run)
+    _seed_control(tmp_path)
+    _set_worktree_setup(tmp_path, "uv sync")
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="s10", base_branch="main")
+    with pytest.raises(FatalToolError) as ei:
+        await get_registry()["create_and_enter_worktree"].async_invoke(
+            _ctx(ch, State.load(ch.state_dir)), {})
+    msg = str(ei.value)
+    assert "worktree_setup failed" in msg
+    assert "Can't mount overlay" in msg
+
+
+@pytest.mark.anyio
 async def test_no_setup_command_runs_when_worktree_setup_is_false(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
