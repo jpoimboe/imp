@@ -135,3 +135,21 @@ def test_agent_prose_bare_sgr_fence_html_export_is_clean() -> None:
     assert "\x1b" not in out
     assert "^[[" not in out
     assert "warning: [auth] retry 2 (1.0s)" in out
+
+
+def test_agent_prose_colored_inline_span_html_export_is_plain_code() -> None:
+    tree = nv.build_tree([
+        {"id": "2", "agent_id": None, "type": "step_started",
+         "payload": {"step": "s", "kind": "agent", "phase": "p",
+                     "model": "m", "provider": "anthropic"}},
+        {"id": "3", "agent_id": "step:p/s", "type": "agent_message",
+         "payload": {"provider": "anthropic", "model": "m",
+                     "stop_reason": "end_turn", "usage": {},
+                     "raw": {"content": [
+                         {"type": "text",
+                          "text": "The gauge reads `[1;33m78%[0m` amber.\n"}]}}},
+    ])
+    out = render_html(render_markdown(tree, full=False))
+    assert "<code>78%</code>" in out     # a real <code> element, not literal codes
+    assert "[1;33m" not in out
+    assert "\x1b" not in out

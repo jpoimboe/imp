@@ -775,3 +775,33 @@ def test_markdown_shows_a_body_less_step_round_through_its_breadcrumb() -> None:
             action={"verb": "continue"}, var_mutations={}),
     ])
     assert "_running tests · complete · round 2_" in out
+
+
+def test_agent_prose_colored_inline_span_exports_as_a_plain_code_span() -> None:
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text",
+                              "text": "The gauge reads `[1;33m78%[0m` amber.\n"}]}),
+    ])
+    assert "The gauge reads `78%` amber." in out   # the visible sample, still a span
+    assert "[1;33m" not in out                     # the documented "exports strip SGR"
+    assert "\x1b" not in out                       # nor an escape byte
+    assert "^[[" not in out                        # nor caret noise
+
+
+def test_agent_prose_all_codes_span_exports_as_its_literal_text() -> None:
+    # Arming an all-codes span would strip it to empty backticks, deleting the very
+    # codes the sentence is about.
+    text = "Write each SGR code without it — `[1;33m`, `[0m` — and imp restores it."
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": text + "\n"}]}),
+    ])
+    assert text in out          # both codes present, as two separate code spans
+    assert "``" not in out      # no collapsed / empty backtick pair anywhere
