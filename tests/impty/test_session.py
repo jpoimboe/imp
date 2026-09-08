@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from impty import Regime, TerminalSession
-from tests.impty.e2e_support import E2E_POLL_TIMEOUT, _poll, can_pty
+from tests.impty.e2e_support import E2E_POLL_TIMEOUT, _pid_gone, _poll, can_pty
 
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
@@ -733,3 +733,113 @@ def test_last_output_at_is_none_until_first_output_then_stamps(tmp_path: Path) -
         assert stamp is not None
         assert stamp >= before
         assert "PROGRESS" in "\n".join(s.lines())
+
+
+# A child that installs a SIGTERM handler, says goodbye and exits 0 — the whole point
+# of the graceful rung. The handler uses os.write (async-signal-safe); print() plus
+# os._exit() would drop the marker.
+_SIGTERM_CLEANUP_CHILD = (
+    "import os, signal, sys, time, tty\n"
+    "def _handler(signum, frame):\n"
+    "    os.write(1, b'CLEANING-UP\\r\\n')\n"
+    "    os._exit(0)\n"
+    "signal.signal(signal.SIGTERM, _handler)\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+
+def _wait_ready(s: TerminalSession) -> None:
+    """Poll until READY reaches the screen. Load-bearing, not hygiene: a close()
+    landing before the child has installed its SIGTERM handler kills it under the
+    DEFAULT disposition, so the exit status under test would be -SIGTERM by accident."""
+    assert _poll(lambda: "READY" in "\n".join(s.lines()), timeout=E2E_POLL_TIMEOUT), \
+        "child never reached READY"
+
+
+def test_close_lets_the_child_clean_up_and_returns_its_exit_code() -> None:
+    s = TerminalSession([sys.executable, "-c", _SIGTERM_CLEANUP_CHILD])
+    try:
+        _wait_ready(s)
+        # 0, not -SIGKILL: the child ran its own handler and chose its exit status.
+        assert s.close() == 0
+        assert "CLEANING-UP" in "\n".join(s.lines())
+    finally:
+        s.close()
+
+
+def test_close_with_no_grace_skips_sigterm_and_kills_outright() -> None:
+    s = TerminalSession([sys.executable, "-c", _SIGTERM_CLEANUP_CHILD])
+    try:
+        _wait_ready(s)
+        pid = s.pid
+        # Raw negative code at this layer — naming the signal is the driver's job.
+        assert s.close(grace=0.0) == -signal.SIGKILL
+        # The handler never ran, so SIGTERM was genuinely never sent.
+        assert "CLEANING-UP" not in "\n".join(s.lines())
+        assert _poll(lambda: _pid_gone(pid), timeout=E2E_POLL_TIMEOUT), \
+            "child survived close(grace=0.0)"
+    finally:
+        s.close()
+
+
+def test_close_is_idempotent_and_does_not_signal_twice(monkeypatch) -> None:
+    s = TerminalSession([sys.executable, "-c", "import time; time.sleep(30)"])
+    # -SIGTERM proves the graceful rung fired: a default-disposition child dies of
+    # the signal it was actually sent, so the old unconditional kill() reads -SIGKILL.
+    first = s.close()
+    assert first == -signal.SIGTERM
+    signalled: list[int] = []
+
+    def spy(sig: int = signal.SIGINT) -> None:
+        signalled.append(sig)
+
+    monkeypatch.setattr(s, "send_signal", spy)
+    assert s.close() == first          # same stored code, no second teardown
+    assert signalled == []             # and nothing re-signalled (pids get recycled)
+    # Polled, not sampled: close()'s drainer.join can expire under a saturated run.
+    assert _poll(lambda: not s._drainer.is_alive(),
+                 timeout=E2E_POLL_TIMEOUT), "drainer outlived close()"
+
+
+# A child that forks a grandchild into the SAME process group (no setsid), so only a
+# group-targeted signal reaches it. The grandchild ignores SIGHUP so it cannot die of
+# the hangup the child's own exit sends — without that, a close() that signalled only
+# the immediate child would still see the grandchild disappear and pass falsely. Its
+# sleep must likewise outlast the liveness poll below, or the same false pass returns
+# via the grandchild simply timing out on its own.
+_GROUP_GRANDCHILD = (
+    "import os, signal, sys, time\n"
+    "pidfile = sys.argv[1]\n"
+    "pid = os.fork()\n"
+    "if pid == 0:\n"
+    "    signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+    "    time.sleep(3000)\n"
+    "    os._exit(0)\n"
+    "with open(pidfile, 'w') as f:\n"
+    "    f.write(str(pid))\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+
+def test_close_terminates_the_whole_process_group(tmp_path: Path) -> None:
+    pidfile = tmp_path / "gc.pid"
+    gc_pid: int | None = None
+    s = TerminalSession([sys.executable, "-c", _GROUP_GRANDCHILD, str(pidfile)])
+    try:
+        assert _poll(
+            lambda: pidfile.exists() and pidfile.read_text().strip().isdigit(),
+            timeout=E2E_POLL_TIMEOUT), "grandchild pid never recorded"
+        gc_pid = int(pidfile.read_text())
+        child_pid = s.pid
+        s.close()
+        assert _poll(lambda: _pid_gone(gc_pid), timeout=E2E_POLL_TIMEOUT), \
+            "grandchild survived close() — the ladder missed the process group"
+        assert _pid_gone(child_pid)
+    finally:
+        s.close()
+        if gc_pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(gc_pid, signal.SIGKILL)

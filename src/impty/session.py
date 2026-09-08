@@ -62,6 +62,11 @@ DEFAULT_CHANGE_HARD = 30.0
 # a call queued behind a full-budget one can still exceed this in wall clock.
 MAX_CALL_HARD = 240.0
 
+# SIGTERM-to-SIGKILL grace inside close(). Deliberately below imp's house 2.0s
+# (GATE_KILL_GRACE_S): close() runs synchronously on the provider runner's event loop at
+# teardown, so a program that ignores SIGTERM must not cost more than a second there.
+STOP_GRACE = 1.0
+
 
 def _select_slice(remaining: float) -> float:
     """A small, strictly-positive select() slice: poll at most every _POLL s,
@@ -141,7 +146,7 @@ class TerminalSession:
             preexec_fn=_make_controlling_tty,
         )
         os.close(slave)
-        self._closed = False
+        self._exit_code: int | None = None
         # One reader of the master at a time. wait_idle/run_to_completion hold
         # this for their whole duration; the background drainer (below) holds it
         # only between tool calls. Reentrant so a `paused()` caller can use the
@@ -481,10 +486,44 @@ class TerminalSession:
     def wait(self, timeout: float | None = None) -> int:
         return self._proc.wait(timeout=timeout)
 
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+    def close(self, grace: float = STOP_GRACE) -> int:
+        """End the session and return the child's RAW exit code (negative for a
+        signal death). Idempotent: a second call re-returns the stored code without
+        re-signalling.
+
+        A live child is stopped by a ladder, so a TUI gets to restore the terminal
+        and save its state instead of dying under -9:
+          1. SIGTERM its process group — skipped entirely when `grace <= 0`, since
+             sending it and escalating at once would race a default-disposition
+             child to death by SIGTERM where a hard stop promises SIGKILL.
+          2. Poll for exit until `grace` elapses, holding NO lock and leaving `_stop`
+             unset, so the running drainer keeps feeding the cleanup output to pyte.
+          3. Still alive: SIGKILL the group.
+          4. Drain what the child left buffered in the pty. The drainer stops the
+             instant `_stop` is set, so without this rung the tail of a multi-KB
+             goodbye dies with os.close(self._master).
+        Then the usual teardown: stop the drainer, close the master, reap — the reap
+        is the single point that yields the code returned and stored.
+        """
+        if self._exit_code is not None:
+            return self._exit_code
+        if grace > 0 and self._proc.poll() is None:
+            self.send_signal(signal.SIGTERM)
+            deadline = time.monotonic() + grace
+            while self._proc.poll() is None and time.monotonic() < deadline:
+                time.sleep(_POLL)
+        if self._proc.poll() is None:
+            self.send_signal(signal.SIGKILL)
+        # Bound the WAIT for the io lock (not the drain itself, which is bounded by
+        # bytes): a tool call parked in wait_idle holds the lock for its whole budget,
+        # up to MAX_CALL_HARD, and teardown runs on the provider's event loop. Giving
+        # up costs nothing when it happens — whoever holds the lock is feeding the same
+        # output to pyte. _drain_buffered() re-acquires _io_lock; safe — it is an RLock.
+        if self._io_lock.acquire(timeout=STOP_GRACE):
+            try:
+                self._drain_buffered()
+            finally:
+                self._io_lock.release()
         # Stop the background drainer and let it exit its current read BEFORE we
         # close the master out from under it (it catches the close, but joining
         # first keeps teardown clean and race-free).
@@ -494,9 +533,8 @@ class TerminalSession:
             drainer.join(timeout=2.0)
         with contextlib.suppress(OSError):
             os.close(self._master)
-        if self._proc.poll() is None:
-            self._proc.kill()
-            self._proc.wait()
+        self._exit_code = self._proc.wait()
+        return self._exit_code
 
     def __enter__(self) -> TerminalSession:
         return self
