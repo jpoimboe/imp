@@ -2737,6 +2737,34 @@ def test_retired_per_call_sentinel_machinery_is_gone():
     assert sb.sandbox_failure_detail("boom\nrest") == "boom"
 
 
+def _flat_doc(obj: object) -> str:
+    return " ".join((obj.__doc__ or "").split())
+
+
+def test_the_overlay_and_keeper_docstrings_drop_their_retired_rationale():
+    # Spec §8. Four docstrings explained a PER-SPAWN overlay layer and a blanket
+    # --die-with-parent rejection; the keeper contradicts both, and a reader who
+    # trusts either writes the wrong code. Flattened, because every asserted
+    # sentence is hard-wrapped where it lives.
+    import imp.agents.subagents as sa
+    import imp.engine.executor as ex
+    import imp.engine.sandbox as sb
+    module_doc = _flat_doc(sb)
+    assert "group reaping still reaches inside" not in module_doc
+    assert "No `--die-with-parent` / `--new-session`" not in module_doc
+    assert "`--die-with-parent` goes on the KEEPER" in module_doc
+    assert "It must NOT go on the per-call join" in module_doc
+    assert "The command travels in `$IMP_COMMAND` and the cwd in `$IMP_CWD`" in module_doc
+    assert "never `--wd` or Popen's `cwd=`" in module_doc
+    prepare_doc = _flat_doc(sb.prepare_spawn_policy)
+    assert "Minting is per SPAWN" not in prepare_doc
+    assert "minted once per namespace, not per spawn" in prepare_doc
+    for fn in (sa._attach_isolated_home, ex._attach_home_layer):
+        doc = _flat_doc(fn)
+        assert "each spawn mints its own layer" not in doc
+        assert "keeper namespace mints one layer" in doc
+
+
 def test_normalize_returncode_separates_imps_kills_from_the_commands_own():
     # Spec §7. A join propagates a self-inflicted signal as a NEGATIVE code where
     # bwrap mapped it to 128+n; providers key tool_killed on the sign, so the two

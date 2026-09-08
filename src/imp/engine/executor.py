@@ -953,8 +953,8 @@ def _attach_home_layer(
     """Attach the writable-home layer to `policy` and return (policy, cleanup).
     Overlay-capable host → an overlay ROOT that is a SIBLING of transcript_dir
     (keyed only by step.phase/step.name, so it survives its per-reincarnation
-    rmtree); each spawn mints its own layer under that root in
-    prepare_spawn_policy, and cleanup removes the whole root at step teardown.
+    rmtree); each agent run's keeper namespace mints one layer under that root,
+    and cleanup removes the whole root at step teardown.
     Otherwise → a plain rw bind of the real home (fallback); cleanup is a no-op.
     An inactive or home-less policy (e.g. a script gate) is returned unchanged."""
     if not policy.active or not policy.home:

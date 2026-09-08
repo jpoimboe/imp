@@ -201,8 +201,8 @@ def _attach_isolated_home(
     """Attach the writable-home layer to an isolated subagent's policy, keyed by
     the spike worktree, and return (policy, cleanup). The overlay ROOT is a SIBLING
     of the spike worktree under <state dir>/worktrees/ (a real local fs, not the
-    symlinked quest home inside the worktree); each spawn mints its own layer under
-    it in prepare_spawn_policy, and cleanup rmtrees the whole root at teardown.
+    symlinked quest home inside the worktree); the subagent's keeper namespace mints
+    one layer under it, and cleanup rmtrees the whole root at teardown.
     Without overlay support the home is a plain rw bind (cleanup is a no-op). An
     inactive or home-less policy is returned unchanged with cleanup None."""
     if not policy.active or not policy.home:

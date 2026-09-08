@@ -11,11 +11,26 @@ writable-home bind (when a home_layer is present) and then the /tmp bind are
 emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
 secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
 a config-driven bind could re-expose a masked secret dir (spec L1-r5). /tmp is
-an identity bind to the real host /tmp. `--unshare-pid` isolates the process
-table (a shell cannot see or signal anything it did not start); it leaves
-pgid == pid and host-side killpg intact, so group reaping still reaches inside.
-No `--die-with-parent` / `--new-session` — both break the runner's interrupt
-grace (spec B.9); reaping is via the process group.
+an identity bind to the real host /tmp.
+
+`--unshare-pid` isolates the process table (a shell cannot see or signal
+anything outside its own namespace). One keeper namespace per agent run holds
+every command that run issues, so processes persist across calls while killpg
+still reaches a call's own group. Teardown is SIGKILL to the keeper's ns-init,
+whose pid `--info-fd` reports: killing pid 1 of a pid namespace makes the kernel
+kill everything inside, so setsid / double-fork / re-grouping stop mattering.
+`--die-with-parent` goes on the KEEPER — the dead-man's switch for imp dying
+abnormally, safe there because the keeper is never in an interrupted process
+group. It must NOT go on the per-call join, where it would collapse the SIGTERM
+grace (spec B.9). No `--new-session` (F-8).
+
+The command travels in `$IMP_COMMAND` and the cwd in `$IMP_CWD`, off argv, so an
+agent's `pkill -f` cannot match the shell running it; both are unset before
+`eval`, so children see the same environment as before. Not secrecy —
+`/proc/<pid>/environ` and `ps e` inside the sandbox still show it. The cwd must
+be set by an inner `cd`, never `--wd` or Popen's `cwd=`: both resolve in the
+caller's mount namespace and would hand the shell the host's view of a masked
+path.
 """
 
 from __future__ import annotations
@@ -763,13 +778,12 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     read; a hand-pinned $IMP_STATE_DIR carries no marker, and an un-gated --ro-bind of a
     missing source would abort bwrap setup for those users.
 
-    It also MINTS this spawn's home-overlay layer when policy.overlay_root is set:
-    a fresh mkdtemp dir under the root holding its own upper/work/merged. Minting
-    is per SPAWN, not per step, because two concurrently-live overlay mounts
-    sharing one upperdir/workdir is undefined behavior (the kernel's ovl_inuse
-    warning) — and overlap within a step is normal: a background command outlives
-    a foreground one, and non-isolated subagents inherit the step's policy
-    verbatim. No per-spawn cleanup exists; step teardown rmtrees the whole root."""
+    It also MINTS the home-overlay layer when policy.overlay_root is set: a fresh
+    mkdtemp dir under the root holding its own upper/work/merged. `open()` is the
+    only caller, so the layer is minted once per namespace, not per spawn — one
+    live overlay mount per keeper rather than overlapping ones sharing an
+    upperdir/workdir (the kernel's ovl_inuse warning), and every command in the run
+    joins that one mount. No per-layer cleanup; step teardown rmtrees the root."""
     if not policy.active:
         return policy
     for ref_dir in policy.git_ref_reexpose:
