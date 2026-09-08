@@ -215,6 +215,10 @@ def test_close_kills_every_survivor_shape_at_once():
             _poll(lambda: len(_host_pids(marker)) == 4,
                   what=f"four {marker} survivors alive host-side")
             ns.close()
+            # 128+SIGKILL proves the ns-init died of close()'s own signal: bwrap's
+            # monitor propagates it, where the 10s reap fallback SIGKILLs the
+            # monitor itself and shows -9.
+            assert ns.proc.returncode == 128 + signal.SIGKILL
             _poll(lambda: not _host_pids(marker),
                   what=f"zero {marker} survivors after close()")
         finally:
