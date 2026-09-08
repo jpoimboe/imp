@@ -6,9 +6,16 @@ Helpers come from tests.test_sandbox_namespace so the two files cannot drift.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import json
+import os
 import shutil
+import signal
 import subprocess
+import sys
+import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,10 +23,21 @@ import anyio
 import pytest
 
 from imp.agents.runner import QuestContext
-from imp.agents.tools.context import ToolContext, ensure_tool_namespace
-from imp.engine.sandbox import sandbox_available
+from imp.agents.tools import get_registry
+from imp.agents.tools.bg import _tombstone_path
+from imp.agents.tools.context import (
+    ToolContext,
+    ensure_tool_namespace,
+    teardown_tool_context,
+    terminate_tool_processes,
+)
+from imp.engine.sandbox import (
+    SANDBOX_ENTERED_MARKER,
+    SandboxNamespace,
+    sandbox_available,
+)
 from tests.conftest import own_tool_context
-from tests.test_sandbox_namespace import _make_root, _policy_for
+from tests.test_sandbox_namespace import _ALIVE, _host_pids, _make_root, _policy_for, _poll
 
 # The module timeout is the SINGLE outer backstop for a genuine hang; it exceeds
 # the sum of the inner budgets any one test can spend.
@@ -45,6 +63,11 @@ def _ctx(root: Path) -> ToolContext:
 def _open(ctx: ToolContext):
     return anyio.run(lambda: ensure_tool_namespace(
         ctx, engine_env={}, on_retry=lambda _n, _d: None))
+
+
+def _bash(ctx: ToolContext, command: str, **args: object) -> dict:
+    return json.loads(anyio.run(
+        get_registry()["bash"].async_invoke, ctx, {"command": command, **args}))
 
 
 def test_the_namespace_opens_once_and_is_reused():
@@ -113,3 +136,245 @@ def test_the_keeper_survives_the_run_loop_that_opened_it():
         assert done.stdout.strip() == "alive"
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_process_left_running_is_visible_and_killable_in_a_later_call():
+    # AC 1, and the incident's fix: today a pid recorded in one call is meaningless
+    # in the next, so the cleanup an agent attempts could not have worked.
+    root = _make_root()
+    marker = f"imp-run-{uuid.uuid4().hex}"
+    try:
+        ctx = _ctx(root)
+        a = _bash(ctx, f"nohup setsid sh -c '{_ALIVE}' {marker} >/dev/null 2>&1 &")
+        assert a["returncode"] == 0, f"call A failed: {a}"
+        # AC 9b, healthy path: the sentinel is consumed by the keeper's handshake
+        # and never reaches a call's output.
+        assert SANDBOX_ENTERED_MARKER not in a["stderr"]
+        _poll(lambda: _host_pids(marker), what=f"{marker} alive host-side")
+
+        b = _bash(ctx, f"pgrep -f {marker}")
+        assert b["returncode"] == 0, f"call B could not see call A's process: {b}"
+        ns_pid = b["stdout"].split()[0]
+
+        c = _bash(ctx, f"kill {ns_pid}")
+        assert c["returncode"] == 0, f"call B could not kill it: {c}"
+        _poll(lambda: not _host_pids(marker),
+              what=f"{marker} gone after the later call killed it")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_teardown_kills_every_survivor_shape_after_the_background_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 2. (a) four survivor shapes, zero after teardown, verified host-side on a
+    # marker that appears on no other process's argv. (b) the background
+    # escalation COMPLETED before the namespace close — observed as ORDER, which
+    # is what the AC asks for ("pinned by observing teardown order rather than
+    # wall-clock timing"). The observable is the tombstone file, which
+    # terminate_background_processes writes unconditionally and synchronously in
+    # the tombstone read-merge-write step, after its SIGKILL pass. Its existence
+    # at close time therefore proves the escalation ran to completion before the
+    # namespace was closed. bp.status alone would be weaker — it flips in the
+    # pre-SIGTERM check-and-set pass, so it proves the escalation STARTED, not
+    # that it finished. No timing is involved in either direction.
+    #
+    # Deliberately NOT pinned by a SIGTERM trap racing to write a marker. The
+    # background grace keys only on bp.proc.wait() (bg.py:538-541 — no
+    # group-liveness poll, unlike terminate_running_processes at context.py:407),
+    # and under a join the leader is nsenter, which has no TERM handler and dies at
+    # ~0s. The "4s grace" therefore collapses to the ~2ms Python needs to reap the
+    # leader, walk /proc and killpg, and any trap must beat that. Measured through
+    # this exact path: a `touch` trap lost 1/25 on an idle box, and a `: >` builtin
+    # lost 1/25 under CPU load — a coin-flip either way, on the axis this project
+    # is least willing to spend.
+    root = _make_root()
+    marker = f"imp-run-{uuid.uuid4().hex}"
+    plant = (
+        f"sh -c '{_ALIVE}' {marker}-plain >/dev/null 2>&1 &\n"
+        f"nohup setsid sh -c '{_ALIVE}' {marker}-setsid >/dev/null 2>&1 &\n"
+        f"( ( sh -c '{_ALIVE}' {marker}-double >/dev/null 2>&1 & ) & )\n"
+        f"""sh -c "trap '' TERM; {_ALIVE}" {marker}-trap >/dev/null 2>&1 &\n"""
+    )
+    try:
+        ctx = _ctx(root)
+        ctx.background_enabled = True
+        _bash(ctx, f"sh -c '{_ALIVE}' {marker}-bg", run_in_background=True)
+        assert _bash(ctx, plant)["returncode"] == 0
+        # five: the four planted shapes plus the background command itself, which
+        # must be reaped too — through its own escalation, not by the atomic kill.
+        _poll(lambda: len(_host_pids(marker)) == 5,
+              what=f"five {marker} processes alive host-side")
+
+        # SandboxNamespace is a slots dataclass, so the recorder patches the CLASS;
+        # monkeypatch restores it at teardown.
+        observed: dict[str, bool] = {}
+        real_close = SandboxNamespace.close
+
+        def _recording_close(self: SandboxNamespace) -> None:
+            if "tombstoned_at_close" not in observed:
+                # the entry's returncode is not checked here: `await bp.proc.wait()` inside
+                # terminate_background_processes can't update the entry's proc.returncode
+                # across event-loop boundaries (each anyio.run() creates a new
+                # asyncio loop; the child watcher for the spawning loop is closed).
+                # The tombstone file IS synchronous stdlib I/O, written
+                # unconditionally AFTER the SIGKILL pass — its existence proves the
+                # escalation ran to completion before close() was called.
+                observed["tombstoned_at_close"] = _tombstone_path(ctx).exists()
+            real_close(self)
+
+        monkeypatch.setattr(SandboxNamespace, "close", _recording_close)
+
+        anyio.run(teardown_tool_context, ctx)
+
+        _poll(lambda: not _host_pids(marker),
+              what=f"zero {marker} survivors after teardown")
+        assert observed["tombstoned_at_close"], (
+            "the namespace was closed before the background tombstone was written")
+        assert ctx.sandbox_ns is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_DEADMAN = """
+import os, subprocess, sys, time
+from pathlib import Path
+from imp.engine.sandbox import SandboxNamespace, SandboxPolicy
+root = Path(sys.argv[1])
+marker = os.environ["IMP_KEEPER_MARKER"]     # env, never argv: see the test below
+(root / ".git").mkdir(exist_ok=True)
+policy = SandboxPolicy(
+    active=True, worktree=str(root), git_common_dir=str(root / ".git"),
+    git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+    secret_dirs=(), secret_files=(),
+    child_env=(("PATH", os.environ["PATH"]), ("HOME", str(root))),
+    network=True, note="")
+ns = SandboxNamespace.open(policy=policy, engine_env={}, environ=os.environ)
+spawn = ns.join("nohup setsid sh -c 'while :; do sleep 5; done' " + marker
+                + " >/dev/null 2>&1 &", cwd=str(root), engine_env={})
+subprocess.run(spawn.argv, env=spawn.env, pass_fds=spawn.pass_fds, check=True)
+while True:
+    time.sleep(1)
+"""
+
+
+def test_killing_imp_takes_the_namespace_with_it():
+    # AC 3, the last hole: if imp dies abnormally — crash, OOM, SIGKILL — nothing
+    # runs a teardown, so --die-with-parent on the keeper has to be what reaps it.
+    #
+    # The marker reaches the driver in its ENVIRONMENT and only ever lands on the
+    # in-namespace process's argv. That is what makes this falsifiable: pgrep -f
+    # matches argv, so a marker passed as sys.argv[2] would match the DRIVER, the
+    # readiness poll would fire during interpreter startup (measured: 1.9ms, before
+    # `import imp.engine.sandbox` finishes) and the closing poll would be satisfied
+    # by the driver's own death — passing with the flag deleted.
+    root = _make_root()
+    marker = f"imp-run-{uuid.uuid4().hex}"
+    # No pipe: readiness is polled host-side on the marker, so a PIPE nothing
+    # reads would only risk wedging the child on a full buffer.
+    child = subprocess.Popen(
+        [sys.executable, "-c", _DEADMAN, str(root)],
+        env={**os.environ, "IMP_KEEPER_MARKER": marker})
+    try:
+        _poll(lambda: _host_pids(marker), what=f"{marker} alive inside the keeper")
+        # The marker can only be host-visible via the joined command, so reaching
+        # here means the keeper really opened; this also fails loudly if a future
+        # edit puts the marker back on the driver's argv.
+        assert str(child.pid) not in _host_pids(marker)
+        child.kill()
+        child.wait(timeout=30)
+        _poll(lambda: not _host_pids(marker),
+              what=f"{marker} gone after imp was SIGKILLed")
+    finally:
+        child.kill()
+        for pid in _host_pids(marker):      # only reached if the switch failed
+            with contextlib.suppress(OSError, ValueError):
+                os.kill(int(pid), signal.SIGKILL)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_returncode_invariant_holds_on_a_joined_command():
+    # AC 12a. nsenter re-raises a self-inflicted signal ON ITSELF where bwrap
+    # mapped it to 128+n, so without the read-site normalization the agent's own
+    # `kill -9 $$` would report -9 and read as imp having killed its tool.
+    root = _make_root()
+    try:
+        ctx = _ctx(root)
+        assert _bash(ctx, "kill -9 $$")["returncode"] == 137
+        assert _bash(ctx, "kill -15 $$")["returncode"] == 143
+        assert _bash(ctx, "exit 7")["returncode"] == 7
+        assert _bash(ctx, "true")["returncode"] == 0
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_command_imp_kills_reports_a_negative_returncode():
+    # AC 12b, the other side of the same invariant: the SIGN is what a provider
+    # turns into killed_tool_uses, so imp's own group kill must stay negative
+    # where the command's own signal does not. This pins the half that moved —
+    # a REAL imp kill through a join still yields a negative code. The other half,
+    # negative code -> killed_tool_uses, is unchanged by this quest and already
+    # pinned per provider against a stubbed rc: test_claude_code_wrap.py:285 and
+    # test_codex_mcp_dispatch.py::test_negative_rc_bash_records_killed_tool.
+    root = _make_root()
+    try:
+        ctx = _ctx(root)
+        ready = root / "up"
+        out: dict[str, dict] = {}
+
+        async def _runner() -> None:
+            out["r"] = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": f"touch {ready}; sleep 120"}))
+
+        async def _killer() -> None:
+            # Generous inner budget: it never false-fires under a saturated
+            # -n auto run, and the outer fail_after catches a genuine hang.
+            deadline = time.monotonic() + 30.0
+            while not ready.exists():
+                assert time.monotonic() < deadline, "the command never signalled ready"
+                await anyio.sleep(0.02)
+            await terminate_tool_processes(ctx)
+
+        async def _scenario() -> None:
+            with anyio.fail_after(90.0):      # single outer hang-catcher
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(_runner)
+                    tg.start_soon(_killer)
+
+        anyio.run(_scenario)
+        assert out["r"]["returncode"] < 0, (
+            f"imp's own kill did not read as a kill: {out['r']}")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_two_contexts_do_not_share_a_process_table():
+    # AC 4. A sub_agent dispatch builds its OWN ToolContext, never shared with the
+    # parent, and subagents run CONCURRENTLY — a step-wide namespace would put
+    # parallel explorers in one process table where each could pkill the others'
+    # work. The rule is one sentence: your processes live as long as you do.
+    root_a, root_b = _make_root(), _make_root()
+    mark_a = f"imp-a-{uuid.uuid4().hex}"
+    mark_b = f"imp-b-{uuid.uuid4().hex}"
+    try:
+        ctx_a, ctx_b = _ctx(root_a), _ctx(root_b)
+        for ctx, mark in ((ctx_a, mark_a), (ctx_b, mark_b)):
+            assert _bash(
+                ctx, f"nohup setsid sh -c '{_ALIVE}' {mark} >/dev/null 2>&1 &"
+            )["returncode"] == 0
+        _poll(lambda: _host_pids(mark_a) and _host_pids(mark_b),
+              what="both subagents' processes alive host-side")
+
+        # (a) each sees only its own
+        assert _bash(ctx_a, f"pgrep -f {mark_a}")["returncode"] == 0
+        assert _bash(ctx_a, f"pgrep -f {mark_b}")["returncode"] == 1
+        assert _bash(ctx_b, f"pgrep -f {mark_a}")["returncode"] == 1
+
+        # (b) ending one leaves the other untouched
+        anyio.run(teardown_tool_context, ctx_a)
+        _poll(lambda: not _host_pids(mark_a), what="the first subagent's process gone")
+        assert _host_pids(mark_b), "ending one subagent killed the other's work"
+        assert _bash(ctx_b, f"pgrep -f {mark_b}")["returncode"] == 0
+    finally:
+        shutil.rmtree(root_a, ignore_errors=True)
+        shutil.rmtree(root_b, ignore_errors=True)
