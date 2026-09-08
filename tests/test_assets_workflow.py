@@ -1123,15 +1123,19 @@ def test_spiker_prose_documents_copy_on_write_home() -> None:
     # spaces so the asserted phrases match regardless of where lines wrap.
     low = " ".join(text.split()).lower()
     # AC 13: the copy-on-write real-home model — real toolchains/creds visible,
-    # writes captured then discarded — with a PER-COMMAND lifetime.
+    # writes captured then discarded — with a PER-RUN lifetime.
     assert "copy-on-write" in low
     assert "model credentials are all visible" in low   # AC5: real creds visible
-    assert "discarded when the command that made them ends" in low
-    assert "will not be there for the next one" in low
+    assert "discarded when you finish" in low
+    assert "the overlay lasts your whole run" in low
     assert "the real home is never mutated" in low
-    # the stale worktree-lifetime promise is gone — each spawn mints its own layer.
+    # the stale worktree-lifetime promise is gone — the run's keeper mints one layer.
     assert "discarded when the worktree is torn down" not in low
     assert "must survive teardown belongs in the worktree" not in low
+    # the retired PER-COMMAND home lifetime is gone: one layer per agent run now,
+    # so a `pip install --user` in one call is still there in the next.
+    assert "discarded when the command that made them ends" not in low
+    assert "will not be there for the next one" not in low
     # the deleted tmpfs framing is gone.
     assert "fresh, writable scratch space" not in low
     assert "thrown away with the worktree" not in low
