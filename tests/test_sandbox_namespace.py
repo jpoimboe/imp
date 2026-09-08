@@ -514,9 +514,11 @@ def test_join_exec_execs_the_argv_with_no_shell_and_no_command_env():
             spawn = ns.join_exec(payload, cwd=str(root),
                                  engine_env={"IMP_QUEST_TITLE": "Renamed quest"})
             assert spawn.argv[-len(payload):] == payload
-            # No sh -c ANYWHERE — join()'s tail carries both tokens; this one must not.
-            assert "sh" not in spawn.argv
-            assert "-c" not in spawn.argv
+            # No sh -c anywhere in the WRAPPER — join()'s tail carries both tokens;
+            # this one must not. Scoped to the prefix: the payload may name a shell.
+            head = spawn.argv[:len(spawn.argv) - len(payload)]
+            assert "sh" not in head
+            assert "-c" not in head
             assert f"--wdns={root}" in spawn.argv
             # --wd= (like Popen's cwd=) resolves in the CALLER's mount namespace —
             # a measured cwd escape out of a masked directory.
