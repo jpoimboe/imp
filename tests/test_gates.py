@@ -1385,3 +1385,22 @@ def test_run_spawn_passes_the_spawns_inherited_fds_to_the_child(tmp_path) -> Non
         os.close(w)
     assert out["exit"] == 0
     assert out["stdout"] == "inherited"
+
+
+def test_run_command_reports_a_self_inflicted_signal_as_128_plus_n(tmp_path) -> None:
+    # Spec §7 at the gate read site: the command signalled ITSELF, so it must not
+    # read as imp having killed it. -9 today; 137 once the invariant is applied.
+    from imp.engine.gates import run_command
+
+    out = run_command(command="kill -9 $$", cwd=str(tmp_path), timeout_seconds=30)
+    assert out["exit"] == 137
+
+
+def test_run_command_never_returns_an_imp_kill_as_an_exit_code(tmp_path) -> None:
+    # The other half of the invariant: every path where imp kills the group raises,
+    # so no negative code can reach out["exit"] at all.
+    from imp.engine.gates import run_command
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_command(command="trap '' TERM; while :; do sleep 1; done",
+                    cwd=str(tmp_path), timeout_seconds=1)

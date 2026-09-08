@@ -19,6 +19,7 @@ from imp.engine.sandbox import (
     SandboxPolicy,
     SandboxSpawn,
     build_sandbox_spawn,
+    normalize_returncode,
     prepare_spawn_policy,
 )
 from imp.engine.types import Action, Continue, Rule, Step
@@ -188,14 +189,16 @@ def _run_spawn(
                             ) from None
             else:
                 time.sleep(_POLL_INTERVAL_S)
-        proc.wait()
+        exit_code = proc.wait()
     finally:
         selector.close()
         for stream in (proc.stdout, proc.stderr):
             if stream is not None:
                 stream.close()
     return {
-        "exit": proc.returncode,
+        # Spec §7: every path where imp kills the group raises above, so a signal
+        # seen here is the command's own doing and reports 128+n.
+        "exit": normalize_returncode(exit_code, imp_killed=False),
         "stdout": out_buf.decode("utf-8", "replace").rstrip(),
         "stderr": err_buf.decode("utf-8", "replace"),
     }
