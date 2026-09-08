@@ -70,7 +70,7 @@ async def run_session_client(
     leave_mode: str,
     leave_state: dict[str, str] | None = None,
     title: TerminalTitle | None = None,
-    stream: WatchedStream | None = None,
+    stream: WatchedStream,
     non_interactive: bool = False,
     autonomous: bool = False,
     model: str | None = None,
@@ -79,7 +79,7 @@ async def run_session_client(
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state = {} if leave_state is None else leave_state
     title = title if title is not None else TerminalTitle(
-        stream if stream is not None else sys.stdout,
+        stream,
         quest.id, quest.title, project=quest.control_root.name)
     attach = build_session_attach(
         quest, resume=resume,
