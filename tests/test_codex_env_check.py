@@ -10,7 +10,6 @@ def test_env_check_true_with_only_the_binary_present(monkeypatch) -> None:
     """Binary-only, like claude_code's: no importable-package half survives, so a
     run must not be gated on any python package being installed."""
     monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/codex")
-    monkeypatch.setattr("importlib.util.find_spec", lambda _name: None)
     assert _env_check() is True
 
 
