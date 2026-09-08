@@ -3403,3 +3403,126 @@ def test_crlf_fence_keeps_sgr_and_has_no_bare_cr() -> None:
         "intro\r\n```\r\n\x1b[1;33mmock\x1b[0m\r\n```\r\nafter\r\n", 40, True)
     assert "\x1b[1;33mmock\x1b[0m" in out
     assert "\r" not in out
+
+
+def test_breadcrumb_renders_the_severity_tally_after_complete() -> None:
+    # First pass: the tally, and no round segment.
+    bc = nv.BreadcrumbLine(step_name="plan-reviewer", step_label="reviewing plan",
+                           elapsed_s=72.0, action={"verb": "continue"},
+                           round=1, counts=(1, 3, 2))
+    assert "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80)) \
+        == "  reviewing plan · complete · 1 critical, 3 major, 2 minor · 1m 12s"
+
+
+def test_breadcrumb_renders_the_round_before_the_tally_from_round_two() -> None:
+    bc2 = nv.BreadcrumbLine(step_name="plan-reviewer", step_label="reviewing plan",
+                            elapsed_s=58.0, action={"verb": "continue"},
+                            round=2, counts=(0, 2, 1))
+    assert "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80)) \
+        == "  reviewing plan · complete · round 2 · 2 major, 1 minor · 58s"
+    bc3 = nv.BreadcrumbLine(step_name="plan-reviewer", step_label="reviewing plan",
+                            elapsed_s=44.0, action={"verb": "continue"},
+                            round=3, counts=(0, 0, 1))
+    assert "\n".join(rt._render(bc3, depth=1, full=False, color=False, width=80)) \
+        == "  reviewing plan · complete · round 3 · 1 minor · 44s"
+
+
+def test_breadcrumb_renders_an_all_zero_tally_as_clean() -> None:
+    bc = nv.BreadcrumbLine(step_name="plan-reviewer", step_label="reviewing plan",
+                           elapsed_s=31.0, action={"verb": "continue"},
+                           round=4, counts=(0, 0, 0))
+    assert "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80)) \
+        == "  reviewing plan · complete · round 4 · clean · 31s"
+
+
+def test_the_segments_attach_after_the_interrupted_variant_too() -> None:
+    # The leading part is `<name> interrupted` on this branch, so the placement
+    # rule ("after the name part") must not assume the word `complete`.
+    bc = nv.BreadcrumbLine(step_name="coder", step_label="writing code",
+                           elapsed_s=9.0, action={"verb": "continue"},
+                           round=2, interrupted=True)
+    assert "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80)) \
+        == "  writing code interrupted · round 2 · 9s"
+
+
+def test_full_view_shows_the_tally_and_not_the_raw_count_extras() -> None:
+    out = "\n".join(_lines([
+        ev("1", "quest_created", title="t"),
+        ev("2", "step_started", step="plan-reviewer", kind="agent", phase="planning",
+           label="reviewing plan", round=2, timestamp="2026-06-10T00:00:00"),
+        ev("3", "agent_result", agent_id="step:planning/plan-reviewer",
+           status="Success", critical=1, major=3, minor=2),
+        ev("4", "step_completed", step="plan-reviewer", kind="agent",
+           action={"verb": "continue"}, timestamp="2026-06-10T00:01:12"),
+    ], full=True))
+    assert ("reviewing plan · complete · round 2 · 1 critical, 3 major, 2 minor"
+            " · status=Success · 1m 12s") in out
+    assert "critical=1" not in out
+    assert "major=3" not in out
+    assert "minor=2" not in out
+
+
+def test_collapsed_line_carries_the_round_and_is_unchanged_at_round_one() -> None:
+    node = nv.StepNode(name="verify", kind="script", label="running tests",
+                       phase_label="implementation phase · plan 2/6",
+                       show_label=True, closed=True, round=2,
+                       start_ts="2026-06-10T00:00:00", end_ts="2026-06-10T00:00:12")
+    assert rt.collapsed_step_line(node, depth=1, color=False) == \
+        "  implementation phase · plan 2/6 · running tests · complete · round 2 · 12s"
+    node.round = 1
+    assert rt.collapsed_step_line(node, depth=1, color=False) == \
+        "  implementation phase · plan 2/6 · running tests · complete · 12s"
+
+
+def test_the_verify_bounce_marks_verify_and_leaves_task_lead_unmarked() -> None:
+    # loop_counts keys on the step that ISSUES the backward edge, so the round
+    # lands on the next `verify` — and `verify` is body-less, so it must surface
+    # on the collapsed line, which is what imp log actually prints for it.
+    out = "\n".join(_lines([
+        ev("1", "quest_created", title="t"),
+        ev("2", "step_started", step="verify", kind="script", phase="implement",
+           label="running tests", round=1, timestamp="2026-06-10T00:00:00"),
+        ev("3", "step_completed", step="verify", kind="script",
+           action={"verb": "goto", "target": "task-lead", "resume": True,
+                   "rework": True},
+           timestamp="2026-06-10T00:00:12"),
+        ev("4", "step_started", step="task-lead", kind="agent", phase="implement",
+           label="implementing", round=1, timestamp="2026-06-10T00:00:12"),
+        ev("5", "step_completed", step="task-lead", kind="agent",
+           action={"verb": "continue"}, timestamp="2026-06-10T00:00:20"),
+        ev("6", "step_started", step="verify", kind="script", phase="implement",
+           label="running tests", round=2, timestamp="2026-06-10T00:00:20"),
+        ev("7", "step_completed", step="verify", kind="script",
+           action={"verb": "continue"}, timestamp="2026-06-10T00:00:32"),
+    ]))
+    assert [ln.strip() for ln in out.splitlines() if "running tests" in ln] == [
+        "running tests · complete · 12s",
+        "running tests · complete · round 2 · 12s"]
+    assert [ln.strip() for ln in out.splitlines() if "implementing" in ln] == [
+        "implementing", "implementing · complete · 8s"]
+
+
+def test_the_round_resets_per_plan_and_is_never_derived_from_entry_count() -> None:
+    # Six entries of the same step: four under plan 1, two under plan 2. The
+    # fifth reads no round at all — a renderer that counted entries would say
+    # `round 5` there, which is the heuristic this quest rejects.
+    events = [ev("0", "quest_created", title="t")]
+    for i, (plan, rnd) in enumerate(
+            [(1, 1), (1, 2), (1, 3), (1, 4), (2, 1), (2, 2)], start=1):
+        events.append(ev(f"s{i}", "step_started", step="plan-reviewer", kind="agent",
+                         phase="planning", label="reviewing plan",
+                         phase_label=f"planning phase · plan {plan}/2", round=rnd,
+                         timestamp="2026-06-10T00:00:00"))
+        events.append(ev(f"c{i}", "step_completed", step="plan-reviewer", kind="agent",
+                         action={"verb": "continue"},
+                         timestamp="2026-06-10T00:00:05"))
+    out = "\n".join(_lines(events))
+    assert [ln.strip() for ln in out.splitlines()
+            if "reviewing plan · complete" in ln] == [
+        "planning phase · plan 1/2 · reviewing plan · complete · 5s",
+        "planning phase · plan 1/2 · reviewing plan · complete · round 2 · 5s",
+        "planning phase · plan 1/2 · reviewing plan · complete · round 3 · 5s",
+        "planning phase · plan 1/2 · reviewing plan · complete · round 4 · 5s",
+        "planning phase · plan 2/2 · reviewing plan · complete · 5s",
+        "planning phase · plan 2/2 · reviewing plan · complete · round 2 · 5s"]
+    assert "round 5" not in out

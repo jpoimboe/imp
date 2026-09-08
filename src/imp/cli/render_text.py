@@ -593,6 +593,22 @@ def compose_label(segments: Iterable[str | None]) -> str:
     return " · ".join(s for s in segments if s)
 
 
+def round_and_tally_parts(round_: int, counts: tuple[int, int, int] | None) -> list[str]:
+    """The segments a completion line gains after its name part: `round N` from
+    round 2 (a first pass stays unmarked, so the highest number shown is the round
+    count), then the severity tally — non-zero severities in fixed order, or the
+    single word `clean`. Shared by both text completion lines and the markdown one
+    so the three cannot drift."""
+    parts: list[str] = []
+    if round_ >= 2:
+        parts.append(f"round {round_}")
+    if counts is not None:
+        named = [f"{n} {label}"
+                 for n, label in zip(counts, nv._TALLY_FIELDS, strict=True) if n]
+        parts.append(", ".join(named) or "clean")
+    return parts
+
+
 def _phase_rule(label: str) -> str:
     """Fixed-width by design — the navigational landmark is the yellow
     `lifecycle` color, not a full-width bar."""
@@ -628,14 +644,14 @@ def _step_header_label(node: nv.StepNode) -> str:
 def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
                         gutters: tuple[int, ...] = ()) -> str:
     """The single line a body-less visible step collapses to on completion:
-    `<label> · complete · <elapsed>` — label in the step color, the
-    ` · complete · <elapsed>` tail in the existing breadcrumb gray."""
+    `<label> · complete[ · round N] · <elapsed>` — label in the step color, the
+    tail from ` · complete` onward in the existing breadcrumb gray."""
     label = compose_label([node.phase_label, _step_header_label(node)])
     raw = nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts)
     if raw is not None:
         raw = max(0.0, raw - node.backoff_wait_s)
-    done = fmt_seconds_done(raw)
-    tail = " · complete" + (f" · {done}" if done else "")
+    segments = [*round_and_tally_parts(node.round, None), fmt_seconds_done(raw)]
+    tail = " · complete" + "".join(f" · {s}" for s in segments if s)
     indent = _gutter_indent(depth, gutters, color)
     return (indent
             + pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
@@ -954,6 +970,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
         else:
             parts = [f"{name} · complete" if node.show_complete else name]
         parts.insert(0, node.phase_label)
+        parts.extend(round_and_tally_parts(node.round, node.counts))
         if cats >= _ALL_CATEGORIES:
             parts.extend(_caret_escape(e) for e in node.extras)
         if not (node.interrupted or blocked) and (act is None or act.get("verb") != "goto"):
