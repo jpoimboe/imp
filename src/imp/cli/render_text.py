@@ -387,6 +387,51 @@ def _splice_lifted_fences(rendered: str, lifted: dict[str, list[str]]) -> str:
     return "\n".join(out)
 
 
+# A second permanent noncharacter, DISJOINT from `_SLOT_UNIT`. Fence slot keys are
+# `_SLOT_UNIT` runs that survive rich verbatim, so one shared sentinel would let the span
+# splice land a sample inside a fence slot key. Written as an escape, not the literal
+# codepoint, because U+FFFE is invalid in interchange and does not survive every editor.
+_SPAN_UNIT = "\ufffe"
+
+# A single-backtick code span, whole on one line. `[^`]+` excludes an interior backtick
+# and a span whose delimiters sit on different lines; the lookarounds exclude the
+# double-backtick form, whose interior MAY hold a backtick.
+_CODE_SPAN_RE = re.compile(r"(?<!`)`([^`]+)`(?!`)")
+
+
+class _ColoredSpan(NamedTuple):
+    line: int    # line index
+    start: int   # index of the span's FIRST bare SGR code — where the sample begins
+    end: int     # exclusive end of the span's interior (the closing backtick)
+
+
+def _span_cells(sample: str) -> int:
+    """Visible cell width of a span sample — the width its placeholder run must match so
+    rich wraps the paragraph exactly as it would with the codes absent."""
+    from rich.cells import cell_len
+    return cell_len(_strip_sgr(_BARE_SGR_RE.sub("", sample)))
+
+
+def _colored_span_ranges(lines: list[str]) -> list[_ColoredSpan]:
+    """Every inline code span eligible to carry color, in source order. Eligible means:
+    single-line, no interior backtick, not a fence body (`_fence_spans` stays the one
+    definition of "inside a fence"), carrying a bare SGR code, and leaving a sample of
+    non-zero visible width — an all-codes interior would lift to empty backticks, which
+    rich re-parses and no post-render check can catch. One definition of eligibility, so
+    every pass that arms a span interior agrees on what is eligible."""
+    fenced = _fence_body_indices(lines)
+    out: list[_ColoredSpan] = []
+    for i, ln in enumerate(lines):
+        if i in fenced:
+            continue
+        for m in _CODE_SPAN_RE.finditer(ln):
+            code = _BARE_SGR_RE.search(ln, m.start(1), m.end(1))
+            if code is None or _span_cells(ln[code.start():m.end(1)]) == 0:
+                continue
+            out.append(_ColoredSpan(i, code.start(), m.end(1)))
+    return out
+
+
 def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80) -> str:
     import io
 

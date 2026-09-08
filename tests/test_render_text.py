@@ -3302,6 +3302,47 @@ def test_both_fence_scans_see_the_same_text() -> None:
         rt._render_markdown_block(rt._caret_escape_prose(text), 70, 0, color=False))
 
 
+def test_colored_span_ranges_starts_the_sample_at_the_first_bare_code() -> None:
+    # The sample runs from the FIRST bare code to the end of the interior, so leading
+    # uncolored text stays real text and keeps rich's cyan.
+    ln = "Shows `load [1;33m78%[0m` now."
+    (span,) = rt._colored_span_ranges([ln])
+    assert span.line == 0
+    assert ln[span.start:span.end] == "[1;33m78%[0m"
+
+
+def test_colored_span_ranges_skips_spans_with_no_bare_code_and_fence_bodies() -> None:
+    assert rt._colored_span_ranges(["a `--full` b"]) == []
+    assert rt._colored_span_ranges(["a `\x1b[31mred\x1b[0m` b"]) == []      # a real ESC
+    assert rt._colored_span_ranges(["a `^[[31mred^[[0m` b"]) == []          # already defused
+    # A fence body is the fence lift's business, not the span lift's.
+    assert rt._colored_span_ranges(["```", "inline `[1;33m78%[0m` here", "```"]) == []
+
+
+def test_colored_span_ranges_skips_multiline_and_backtick_interior_spans() -> None:
+    assert rt._colored_span_ranges(["a `[1;33m78%", "[0m` b"]) == []
+    assert rt._colored_span_ranges(["a ``[1;33m78`%[0m`` b"]) == []
+
+
+def test_colored_span_ranges_skips_a_zero_visible_width_sample() -> None:
+    # An all-codes interior would lift to an empty run: the code span collapses and no
+    # post-render check can catch it, so it is ineligible up front.
+    assert rt._colored_span_ranges(["Write `[1;33m`, `[0m` — and imp restores it."]) == []
+
+
+def test_colored_span_ranges_returns_every_span_in_source_order() -> None:
+    lines = ["A `[31mone[0m` and `[32mtwo[0m`.", "B `[33mthree[0m` end."]
+    assert [(s.line, lines[s.line][s.start:s.end])
+            for s in rt._colored_span_ranges(lines)] == [
+        (0, "[31mone[0m"), (0, "[32mtwo[0m"), (1, "[33mthree[0m")]
+
+
+def test_span_cells_measures_visible_cells_not_bytes() -> None:
+    assert rt._span_cells("[1;33m78%[0m") == 3
+    assert rt._span_cells("[1;33m世界[0m") == 4      # wide glyphs are two cells each
+    assert rt._span_cells("[0m") == 0
+
+
 def _agent_lines(text: str, *, color: bool, width: int = 80) -> list[str]:
     tree = nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
