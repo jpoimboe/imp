@@ -116,6 +116,7 @@ class StepNode:
     run_start_ts: str | None = None    # test-lane run clock; phase_elapsed reads start_ts
     lane_wait_start_ts: str | None = None  # lane queue-entry clock (block-age)
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
+    round: int = 1                     # per-loop entry count from step_started
     agent_result: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     show_label: bool = True            # step frame (header + breadcrumb) shown
     show_output: bool = False          # surface a script's stdout as a • message
@@ -380,8 +381,9 @@ class LiteralTextNode:
 
 @dataclass
 class BreadcrumbLine:
-    """The merged per-step completion line: `✓ <step> · <N>s` with short scalar
-    output fields and a `· → <action>` suffix (omitted for a plain `continue`).
+    """The merged per-step completion line: `✓ <step> · <N>s` with the step's round
+    and severity tally, short scalar output fields and a `· → <action>` suffix
+    (omitted for a plain `continue`).
     Replaces the rendered OutcomeLine at step completion (issue 3)."""
     step_name: str
     step_label: str | None = None      # step DISPLAY label for the completion line
@@ -389,6 +391,8 @@ class BreadcrumbLine:
     elapsed_s: float | None = None
     action: Any = None                 # dict {verb, target?} from step_completed
     extras: list[str] = field(default_factory=list)
+    round: int = 1                     # the step's per-loop entry count
+    counts: tuple[int, int, int] | None = None  # (critical, major, minor) tally
     show_complete: bool = True         # always True (§4): chrome steps now print
                                        # a start header, so the breadcrumb always
                                        # carries the word "complete".
@@ -1401,6 +1405,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
+                    round=p.get("round", 1),
                     show_label=bool(p.get("show_label", True)),
                     show_output=bool(p.get("show_output", False)),
                     position_label=bool(p.get("position_label", False)),
@@ -1438,6 +1443,8 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_result),
+            round=node.round,
+            counts=severity_counts(node.agent_result),
             step_label=node.label,
             label=p.get("label"),
             phase_label=node.phase_label,
@@ -1652,15 +1659,31 @@ def _last_narration_index(children: list[Any]) -> int | None:
     return None
 
 
+_TALLY_FIELDS = ("critical", "major", "minor")
+
+
+def severity_counts(args: Any) -> tuple[int, int, int] | None:
+    """The reviewer's (critical, major, minor) tally, or None when the step's
+    output carries no counts. All three or nothing — a partial tally has no
+    honest rendering."""
+    if not isinstance(args, dict):
+        return None
+    critical, major, minor = (args.get(k) for k in _TALLY_FIELDS)
+    if isinstance(critical, int) and isinstance(major, int) and isinstance(minor, int):
+        return critical, major, minor
+    return None
+
+
 def _breadcrumb_extras(args: Any) -> list[str]:
     """Short scalar output fields (`status`, `verdict`, `*_path`, numbers, bools,
-    short strings) folded into the breadcrumb as `key=value`. Prose fields and
-    non-scalar values (dicts/lists) are skipped."""
+    short strings) folded into the breadcrumb as `key=value`. Prose fields, the
+    severity counts (which render as a tally) and non-scalar values (dicts/lists)
+    are skipped."""
     if not isinstance(args, dict):
         return []
     out: list[str] = []
     for k, v in args.items():
-        if is_prose_field(k, v):
+        if k in _TALLY_FIELDS or is_prose_field(k, v):
             continue
         if isinstance(v, (str, int, float, bool)):
             out.append(f"{k}={v}")

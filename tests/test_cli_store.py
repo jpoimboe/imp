@@ -5,6 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from imp.cli import narrative as nv
 from imp.cli.store import LocalStore, SearchZones, make_store
 from imp.engine import archive, worktree
 from imp.engine.quest import LAYOUT_VERSION, Quest
@@ -343,3 +344,29 @@ def test_scan_homes_skips_migration_under_held_lock(tmp_path: Path) -> None:
         assert digest.meta["layout_version"] == 11
         assert digest.lock_live is True
         assert _digest_version(tmp_path, "lives") == 11
+
+
+def test_get_events_under_a_held_lock_falls_back_to_the_unmigrated_log(
+    tmp_path: Path,
+) -> None:
+    # store.py catches MigrationLockHeld and reads the raw events.jsonl, which by
+    # definition skipped the round backfill — the builder's default is the only
+    # thing standing between those rows and the renderer.
+    _seed_control(tmp_path)
+    q = _seed_v11_store(tmp_path, "rawlk")
+    _append_event(q, {
+        "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
+        "type": "step_started",
+        "payload": {"step": "plan-reviewer", "kind": "agent", "phase": "planning",
+                    "label": "reviewing plan"}})
+
+    with held_lock(q.quest_dir / "lock"):
+        events = make_store(tmp_path).get_events("rawlk")
+
+    assert events is not None
+    started = [e for e in events if e.get("type") == "step_started"]
+    assert started and all("round" not in e["payload"] for e in started)
+    steps = [c for phase in nv.build_tree(events).root.children
+             if isinstance(phase, nv.PhaseNode)
+             for c in phase.children if isinstance(c, nv.StepNode)]
+    assert [s.round for s in steps] == [1]
