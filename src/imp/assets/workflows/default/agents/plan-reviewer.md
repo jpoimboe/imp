@@ -97,6 +97,13 @@ Then review the prescribed code the way a senior engineer reviews a diff:
   must), and stateful timing (emit / un-emit, write-then-check);
 - does it preserve the invariants the surrounding code relies on.
 
+**Falsifiability** — could each prescribed test be green if the feature were broken? A
+test whose expected value merely echoes the prescribed implementation (plan-echo), or
+whose assertion cannot fail as written, verifies transcription, not behavior. That is a
+**Major** test gap, and it is the one defect class no later gate catches — the suite
+goes green whether or not the feature works. When reading cannot settle it, that is
+what a scratch reconstruction and a baseline run are for.
+
 This lens matters most. Use your own judgement; do not work a checklist.
 
 ## Also confirm (secondary)

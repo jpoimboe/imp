@@ -456,6 +456,25 @@ def test_plan_reviewer_aims_execution_at_what_the_gate_cannot_catch() -> None:
     ) not in body
 
 
+def test_plan_reviewer_lens_names_falsifiability_as_the_uncaught_class() -> None:
+    body = " ".join(_agent_prompt("plan-reviewer").split())
+    para = (
+        "**Falsifiability** — could each prescribed test be green if the "
+        "feature were broken? A test whose expected value merely echoes the "
+        "prescribed implementation (plan-echo), or whose assertion cannot "
+        "fail as written, verifies transcription, not behavior. That is a "
+        "**Major** test gap, and it is the one defect class no later gate "
+        "catches — the suite goes green whether or not the feature works. "
+        "When reading cannot settle it, that is what a scratch reconstruction "
+        "and a baseline run are for."
+    )
+    assert para in body
+    invariants = body.index(
+        "does it preserve the invariants the surrounding code relies on"
+    )
+    assert invariants < body.index(para) < body.index("This lens matters most")
+
+
 def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:
     from imp.engine.loader import parse_agent_file
     path = pathlib.Path(
