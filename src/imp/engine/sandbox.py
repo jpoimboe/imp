@@ -626,6 +626,8 @@ class SandboxNamespace:
         the payload the host's view of a masked path. There is consequently no
         IMP_COMMAND/IMP_CWD in the env — no script reads them, and putting the
         argv in an environment variable when it is already on argv buys nothing.
+        `--wdns` is util-linux 2.38 (2022) or newer; an older host fails this
+        spawn loudly, with an nsenter usage dump.
 
         Everything else is `join`'s, verbatim: the same optional outer
         user-namespace stage, the same pinned ns fds named as /proc/self/fd/N,
