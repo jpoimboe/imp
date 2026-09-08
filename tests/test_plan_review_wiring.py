@@ -44,6 +44,12 @@ def test_plan_review_rules_thread_minors_without_panel_var() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
     assert m.action.resume is True
     assert m.var_mutations == {"plan_minors_integrated": False}
+    # major-only also reworks: the `+ output.major` term is load-bearing
+    major_only = evaluate_rules(rules, vars=_BASE_VARS,
+                                output={"critical": 0, "major": 1, "minor": 0})
+    assert isinstance(major_only.action, Goto) and major_only.action.target == "plan-writer"
+    assert major_only.action.resume is True
+    assert major_only.var_mutations == {"plan_minors_integrated": False}
 
     # verification pass (minors already integrated) -> plan-finalized; clears flag.
     m2 = evaluate_rules(rules, vars={**_BASE_VARS, "plan_minors_integrated": True},

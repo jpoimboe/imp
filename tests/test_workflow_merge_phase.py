@@ -99,6 +99,11 @@ def test_integration_review_routes_counts_to_reconciler() -> None:
                        output={**base, "critical": 1, "major": 0, "minor": 0})
     assert isinstance(m.action, Goto) and m.action.target == "reconciler"
     assert m.action.resume is True
+    # major-only also reworks: the `+ output.major` term is load-bearing
+    m = evaluate_rules(rules, vars={},
+                       output={**base, "critical": 0, "major": 1, "minor": 0})
+    assert isinstance(m.action, Goto) and m.action.target == "reconciler"
+    assert m.action.resume is True
     m = evaluate_rules(rules, vars={},
                        output={**base, "critical": 0, "major": 0, "minor": 2})
     assert isinstance(m.action, Goto) and m.action.target == "reconciler"

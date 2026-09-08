@@ -189,6 +189,15 @@ def test_spec_reviewer_critical_reworks_and_clears_flag() -> None:
     assert isinstance(m.action, Goto)
     assert m.action.target == "spec-finalizer" and m.action.resume is True
     assert m.var_mutations["spec_minors_integrated"] is False
+    # major-only also reworks: the `+ output.major` term is load-bearing
+    major_only = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True},
+        output={"critical": 0, "major": 1, "minor": 0},
+    )
+    assert isinstance(major_only.action, Goto)
+    assert major_only.action.target == "spec-finalizer" and major_only.action.resume is True
+    assert major_only.var_mutations["spec_minors_integrated"] is False
 
 
 def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
