@@ -143,7 +143,10 @@ class ImptyDriver:
 
         By default returns the CURRENT screen (what a human sees right now); the
         status header reports liveness, regime (scroll|screen), and cursor position
-        (a cursor parked just after a prompt = waiting for input). Set full=True to
+        (a cursor parked just after a prompt = waiting for input). Once the program
+        has exited the header adds its exit status right after `alive=False` —
+        `exit=0`, `exit=2`, or a signal name like `exit=SIGINT` for a program killed
+        by one; while it is still running there is no `exit=` field. Set full=True to
         get the whole run so far (scrolled-off history + the current screen) — a
         potentially long dump, so it is opt-in.
         """

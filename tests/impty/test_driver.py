@@ -697,3 +697,18 @@ def test_header_carries_no_exit_field_while_the_child_is_alive() -> None:
         ), header
     finally:
         d.stop()
+
+
+def test_view_docstring_describes_the_exit_field() -> None:
+    doc = ImptyDriver.view.__doc__ or ""
+    assert "exit=0" in doc
+    assert "exit=SIGINT" in doc
+
+
+def test_readme_documents_returncode_and_the_header_exit_field() -> None:
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    line = next((ln for ln in readme.splitlines() if "`returncode" in ln), None)
+    assert line is not None, "README has no line documenting returncode"
+    assert "int | None" in line
+    assert "exit=SIGINT" in readme

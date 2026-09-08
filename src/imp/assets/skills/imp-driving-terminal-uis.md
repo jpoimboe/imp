@@ -27,7 +27,9 @@ send/react loop for interactive programs.
   `env`, if given, *replaces* the environment (TERM still defaulted). Refuses while a
   program is still running — stop() first.
 - **`view(full=False)`** — read the current screen as text, sending nothing. A cursor
-  parked after a prompt means it's waiting for input. `full=True` adds history.
+  parked after a prompt means it's waiting for input. `full=True` adds history. Once
+  the program has exited the header carries its exit status: `exit=0`, `exit=2`, or a
+  signal name like `exit=SIGINT`.
 - **`send(data, wait=True)`** — raw keystrokes: Enter=`\r`, Tab=`\t`, Ctrl-C=`\x03`,
   Backspace=`\x7f`, arrows=`\x1b[A`/`B`/`C`/`D`. `wait=True` settles then returns the
   screen; `wait=<seconds>` settles a fixed time (for an always-animating TUI);

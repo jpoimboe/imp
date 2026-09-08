@@ -337,8 +337,9 @@ not reach imp.
 
 ### Reading state
 
-- `view()` → header `[alive=… regime=… alt_screen=… cursor=(x,y)]` + grid. `alive=False` = imp
-  exited. Cursor parked right after a prompt = waiting for input.
+- `view()` → header `[alive=… regime=… cursor=(x,y)]` + grid. `alive=False` = imp exited, and
+  the header then carries an `exit=…` field right after it (`exit=0`, `exit=130`, or a signal
+  name like `exit=SIGINT`). Cursor parked right after a prompt = waiting for input.
 - `view(full=True)` → the whole run so far (scrolled-off history + current screen); the
   three-part leave block and the quest id live here.
 - `snapshot()` → PNG; use it to *see* the leave banner's color/layout when judging clarity.
