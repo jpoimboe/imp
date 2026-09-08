@@ -189,6 +189,22 @@ def _band_wrap(body: str, bg: str, width: int) -> str:
     return f"{bg}{body}{_RESET}"
 
 
+def _split_pad(left: str, gauged: str, right: str | None, *, width: int) -> str:
+    """`gauged` with `right` anchored flush to the band's right edge, degrading
+    right-first: drop the right group, then the gauge, then clip the left group."""
+    target = width - 2
+    gauged_w = pal.display_width(gauged)
+    if right:
+        gap = target - gauged_w - pal.display_width(right)
+        if gap >= 1:
+            return f"{gauged}{' ' * gap}{right}"
+    if gauged_w <= target:
+        return gauged
+    if pal.display_width(left) <= target:
+        return left
+    return pal.clip_display(left, target)
+
+
 def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
                              width: int, unsandboxed: bool = False,
                              project: str = "") -> str | None:
