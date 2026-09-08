@@ -252,6 +252,9 @@ def test_watchdog_does_not_trip_while_writes_complete_normally() -> None:
         deadline = time.monotonic() + 0.5
         while time.monotonic() < deadline:
             watched.write("tick")
+        # Non-vacuous: a stamp the writes never cleared would leave the watchdog
+        # armed here, and the drive window alone is shorter than the threshold.
+        assert watched.write_started_at is None
     finally:
         watchdog.stop()
     assert not tripped.is_set()
