@@ -70,7 +70,7 @@ class ScriptedAgentRunner:
     async def run(
         self, invocation: AgentInvocation,
     ) -> AsyncGenerator[Event, None]:
-        from imp.agents.tools.bg import terminate_background_processes
+        from imp.agents.tools.context import teardown_tool_context
         from imp.engine.state import JsonlEventLog
 
         elog = invocation.event_log or JsonlEventLog(invocation.events_path)
@@ -203,17 +203,14 @@ class ScriptedAgentRunner:
         finally:
             self._ctx = None
             with contextlib.suppress(Exception):
-                await terminate_background_processes(ctx)
+                await teardown_tool_context(ctx)
 
     async def interrupt(self) -> None:
-        from imp.agents.tools.bg import terminate_background_processes
-        from imp.agents.tools.context import terminate_running_processes
+        from imp.agents.tools.context import terminate_tool_processes
         ctx = self._ctx
         if ctx is not None:
             with contextlib.suppress(Exception):
-                await terminate_running_processes(ctx)
-            with contextlib.suppress(Exception):
-                await terminate_background_processes(ctx)
+                await terminate_tool_processes(ctx)
 
 
 class ScriptedProvider:

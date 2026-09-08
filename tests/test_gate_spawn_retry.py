@@ -1,17 +1,24 @@
 # tests/test_gate_spawn_retry.py
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import anyio
+import pytest
 
 from imp.engine import executor as _executor
-from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+from imp.engine.sandbox import (
+    SANDBOX_SPAWN_MAX_ATTEMPTS,
+    SandboxNamespace,
+    SandboxOpenFailed,
+    SandboxPolicy,
+)
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import Continue, Goto, Pause, Rule, SourceLoc, Step
 from imp.paths import project_state_dir
+
+_BWRAP_ERR = "bwrap: Can't bind mount /nope: No such file or directory"
 
 
 def _quest(tmp_path: Path) -> SimpleNamespace:
@@ -21,14 +28,21 @@ def _quest(tmp_path: Path) -> SimpleNamespace:
         quest_dir=project_state_dir(tmp_path) / "quests" / "test-quest")
 
 
-def _step(action) -> Step:
+def _step(action, command: str = "run-gate") -> Step:
     return Step(
         name="verify", phase="p", kind="script",
         rules=(Rule(condition=None, action=action, mutations=(),
                     source=SourceLoc(file=Path("x"), line=1)),),
         on_max_retries=Pause(), max_loops=10,
         source=SourceLoc(file=Path("x"), line=1),
-        command="run-gate", interruptible=False)
+        command=command, interruptible=False)
+
+
+def _policy(tmp_path: Path) -> SandboxPolicy:
+    return SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="")
 
 
 def _run(step, quest, policy, log):
@@ -39,132 +53,98 @@ def _run(step, quest, policy, log):
     return anyio.run(main)
 
 
-def _no_delay(monkeypatch):
-    monkeypatch.setattr(_executor, "sandbox_spawn_backoff_delay",
-                        lambda attempt: 0.0)
-
-
 def _warn_msgs(log):
     return [e["payload"]["message"] for e in log.read()
             if e["type"] == "runner_warning"]
 
 
-def test_gate_retries_then_succeeds(tmp_path, monkeypatch):
-    _no_delay(monkeypatch)
-    calls = {"n": 0}
+def _failing_open(monkeypatch) -> None:
+    """Every keeper open fails, with no backoff. Retry is owned by open(), so the
+    executor sees exactly one SandboxOpenFailed after the full budget of on_retry
+    calls."""
+    import imp.engine.sandbox as sandbox_mod
 
+    def boom(cls, **kw):
+        raise SandboxOpenFailed(_BWRAP_ERR)
+
+    monkeypatch.setattr(SandboxNamespace, "_open_once", classmethod(boom))
+    monkeypatch.setattr(sandbox_mod, "sandbox_spawn_backoff_delay", lambda a: 0.0)
+
+
+def test_gate_retry_breadcrumbs_render_one_warning_per_failed_attempt(
+        tmp_path, monkeypatch):
+    # open() owns the budget and calls back per failed attempt (pinned in
+    # tests/test_sandbox.py); the executor's job is to render each callback as its
+    # own runner_warning, in order, with the step's own wording.
     def fake_run_script(step, **kw):
-        calls["n"] += 1
-        if calls["n"] <= 2:                       # first two spawns fail to enter
-            return {"exit": 0, "stdout": "", "stderr": "boom-no-marker"}
-        return {"exit": 0, "stdout": "ok",
-                "stderr": f"{SANDBOX_ENTERED_MARKER}\nreal"}
+        kw["on_retry"](2, "first-boom")
+        kw["on_retry"](3, "second-boom")
+        return {"exit": 0, "stdout": "ok", "stderr": ""}
 
     monkeypatch.setattr(_executor, "run_script", fake_run_script)
     log = InMemoryEventLog()
     action, _fb, _m = _run(_step(Continue()), _quest(tmp_path),
                            SimpleNamespace(active=True), log)
-    assert isinstance(action, Continue)           # routed on the real exit 0
-    assert calls["n"] == 3                         # 2 failed spawns + 1 success
+    assert isinstance(action, Continue)             # routed on the real exit 0
     assert _warn_msgs(log) == [
         "sandbox could not start the step; retrying (2/5)",
         "sandbox could not start the step; retrying (3/5)",
     ]
-    warn_events = [e["payload"] for e in log.read()
-                   if e["type"] == "runner_warning"]
-    assert all(p["reason"] == "sandbox-spawn-failed" for p in warn_events)
-    assert all(p["step"] == "verify" for p in warn_events)
+    payloads = [e["payload"] for e in log.read() if e["type"] == "runner_warning"]
+    assert [p["detail"] for p in payloads] == ["first-boom", "second-boom"]
+    assert all(p["reason"] == "sandbox-spawn-failed" for p in payloads)
+    assert all(p["step"] == "verify" for p in payloads)
 
 
-def test_gate_persistent_failure_pauses_without_routing(tmp_path, monkeypatch):
-    _no_delay(monkeypatch)
+def test_gate_persistent_open_failure_pauses_without_routing(tmp_path, monkeypatch):
+    _failing_open(monkeypatch)
     ruled = {"n": 0}
     real_eval = _executor.evaluate_rules
     monkeypatch.setattr(
         _executor, "evaluate_rules",
         lambda *a, **k: (ruled.__setitem__("n", ruled["n"] + 1)
                          or real_eval(*a, **k)))
-    monkeypatch.setattr(
-        _executor, "run_script",
-        lambda step, **kw: {"exit": 0, "stdout": "", "stderr": "boom-no-marker"})
     log = InMemoryEventLog()
     action, _fb, _m = _run(_step(Continue()), _quest(tmp_path),
-                           SimpleNamespace(active=True), log)
+                           _policy(tmp_path), log)
     assert isinstance(action, Pause)
     assert action.reason == "sandbox_spawn_failed"
     assert ruled["n"] == 0                          # evaluate_rules NEVER called
-    types_ = [e["type"] for e in log.read()]
-    assert "step_completed" not in types_          # never routed / finished
-    assert len(_warn_msgs(log)) == 4               # one breadcrumb per retry (2..5)
+    assert "step_completed" not in [e["type"] for e in log.read()]
+    assert len(_warn_msgs(log)) == SANDBOX_SPAWN_MAX_ATTEMPTS - 1
 
 
-_BWRAP_ERR = "bwrap: Can't bind mount /nope: No such file or directory"
-
-
-def test_gate_retry_warnings_carry_the_sandbox_stderr(tmp_path, monkeypatch):
-    # AC 5b: the four retry breadcrumbs precede the pause, so bwrap's own reason
-    # is on screen before the quest stops.
-    _no_delay(monkeypatch)
-    monkeypatch.setattr(
-        _executor, "run_script",
-        lambda step, **kw: {"exit": 0, "stdout": "",
-                            "stderr": f"\n{_BWRAP_ERR}\nnoise below"})
+def test_gate_open_failure_never_runs_the_command(tmp_path, monkeypatch):
+    # AC 16c, through the REAL gates.run_command: exhaustion pauses and the marker
+    # file the gate command would have created is absent.
+    _failing_open(monkeypatch)
+    marker = tmp_path / "ran"
     log = InMemoryEventLog()
-    action, _fb, _m = _run(_step(Continue()), _quest(tmp_path),
-                           SimpleNamespace(active=True), log)
-    assert isinstance(action, Pause)
+    action, _fb, _m = _run(_step(Continue(), command=f"touch {marker}"),
+                           _quest(tmp_path), _policy(tmp_path), log)
+    assert isinstance(action, Pause) and action.reason == "sandbox_spawn_failed"
+    assert not marker.exists()
     details = [e["payload"]["detail"] for e in log.read()
                if e["type"] == "runner_warning"]
-    assert details == [_BWRAP_ERR] * 4
+    assert details == [_BWRAP_ERR] * (SANDBOX_SPAWN_MAX_ATTEMPTS - 1)
 
 
-def test_gate_healthy_nonzero_routes_and_strips_marker(tmp_path, monkeypatch):
-    _no_delay(monkeypatch)
+@pytest.mark.parametrize("policy,exit_code,action,expected", [
+    (SimpleNamespace(active=True), 1, Goto(target="rework"), Goto),
+    (None, 0, Continue(), Continue),
+], ids=["sandboxed", "bare"])
+def test_a_real_gate_result_routes_on_its_exit_code_and_never_retries(
+        tmp_path, monkeypatch, policy, exit_code, action, expected):
+    # With the sentinel detection gone, a gate's exit code is the ONLY signal there
+    # is: a healthy failure is a verdict, and marker-free stderr is just stderr.
+    # Sandboxed and bare shapes collapse to one guarantee, so they are one test.
     monkeypatch.setattr(
         _executor, "run_script",
-        lambda step, **kw: {"exit": 1, "stdout": "",
-                            "stderr": f"{SANDBOX_ENTERED_MARKER}\nboom-detail"})
+        lambda step, **kw: {"exit": exit_code, "stdout": "",
+                            "stderr": "boom-detail"})
     log = InMemoryEventLog()
-    action, feedback, _m = _run(_step(Goto(target="rework")), _quest(tmp_path),
-                                SimpleNamespace(active=True), log)
-    assert isinstance(action, Goto)                # routed on the real exit 1
-    assert SANDBOX_ENTERED_MARKER not in feedback  # marker stripped before feedback
-    assert "boom-detail" in feedback               # real stderr survives the strip
-    assert _warn_msgs(log) == []                    # marker present → no retry
-
-
-def test_gate_syntax_error_routes_as_a_gate_result(tmp_path, monkeypatch):
-    # AC 3: the gate's command does not parse, but the wrapper's sentinel is
-    # emitted anyway, so the executor evaluates the step's rules on the real exit
-    # code instead of pausing with sandbox_spawn_failed.
-    from tests.test_sandbox import wrapper_argv
-    _no_delay(monkeypatch)
-    raw: dict[str, object] = {}
-
-    def run_through_wrapper(step, **kw):
-        p = subprocess.run(wrapper_argv('echo "`'), capture_output=True, text=True)
-        raw["stderr"], raw["exit"] = p.stderr, p.returncode
-        return {"exit": p.returncode, "stdout": p.stdout, "stderr": p.stderr}
-
-    monkeypatch.setattr(_executor, "run_script", run_through_wrapper)
-    log = InMemoryEventLog()
-    action, feedback, _m = _run(_step(Goto(target="rework")), _quest(tmp_path),
-                                SimpleNamespace(active=True), log)
-    assert isinstance(action, Goto)                   # routed, not paused
-    assert raw["exit"] == 2                           # the shell's own exit code
-    assert SANDBOX_ENTERED_MARKER in str(raw["stderr"])   # sentinel survived the bad parse
-    assert SANDBOX_ENTERED_MARKER not in feedback     # stripped before the agent sees it
-    assert feedback.strip() != ""                     # the shell's diagnosis reached it
-    assert _warn_msgs(log) == []                      # no retries emitted
-
-
-def test_gate_bare_host_never_retries_or_pauses(tmp_path, monkeypatch):
-    _no_delay(monkeypatch)
-    monkeypatch.setattr(
-        _executor, "run_script",
-        lambda step, **kw: {"exit": 0, "stdout": "", "stderr": "no marker here"})
-    log = InMemoryEventLog()
-    # sandbox_policy=None → sandbox_active False → marker-absence is NORMAL, not a failure.
-    action, _fb, _m = _run(_step(Continue()), _quest(tmp_path), None, log)
-    assert isinstance(action, Continue)
-    assert _warn_msgs(log) == []
+    got, feedback, _m = _run(_step(action), _quest(tmp_path), policy, log)
+    assert isinstance(got, expected)
+    assert _warn_msgs(log) == []                    # no retry breadcrumbs at all
+    if expected is Goto:
+        assert "boom-detail" in feedback            # the real stderr reached the agent

@@ -16,15 +16,18 @@ import contextlib
 import dataclasses
 import os
 import signal as _signal
-from collections.abc import AsyncGenerator, Iterable, Iterator
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from imp.agents.timeouts import PROCESS_KILL_GRACE_S
 from imp.agents.tools.errors import PermissionDenied
 from imp.engine.env import ALL_DECIDED, TestGates, Undecided
 from imp.engine.types import AgentDef
+
+if TYPE_CHECKING:
+    from imp.engine.sandbox import SandboxNamespace
 
 _KILL_POLL_INTERVAL_S = 0.05  # group-liveness probe cadence inside the kill grace
 
@@ -125,6 +128,9 @@ class ToolContext:
     # Stored BASE policy (home-layer-attached); None => bare sh -c (no sandbox).
     # Tools read the effective policy via the sandbox_policy property below.
     base_sandbox_policy: Any = None
+    # This run's keeper namespace, opened lazily on the first sandboxed spawn by
+    # ensure_tool_namespace; None => not open yet.
+    sandbox_ns: SandboxNamespace | None = None
     # §10/§12: when True, the run is headless (no human at the keyboard). The
     # subagent backoff loop applies a wall-clock ceiling instead of retrying
     # forever. Copied from invocation.headless by each provider.
@@ -426,3 +432,82 @@ async def terminate_running_processes(
                         await p.wait()
                 _signal_pids(survivors, _signal.SIGKILL)
     return procs
+
+
+async def terminate_tool_processes(
+    ctx: ToolContext, *,
+    kill_reason: Literal["interrupted", "sandbox-rebuilt"] = "interrupted",
+) -> None:
+    """Kill this run's tool processes: the foreground group, then the background
+    groups with their existing SIGTERM -> grace -> SIGKILL escalation. Touches NO
+    namespace, so it is safe MID-RUN — the cooperative-steer branch kills here and
+    then re-queries with the same ctx, and closing the namespace there would make
+    every later call fail closed.
+
+    Two plain sequential awaits, NOT a try/finally: a cancellation is the normal
+    way this ends (signals.py abandons interrupt() at a 2s budget), and dragging an
+    abandoned interrupt through the background teardown's shielded 2x4s grace would
+    make it unabandonable — for work run()'s finally repeats moments later anyway.
+    terminate_running_processes' return value (the signalled processes, for a
+    caller that emits tool_killed) is dropped — no provider has ever used it."""
+    from imp.agents.tools.bg import terminate_background_processes
+
+    await terminate_running_processes(ctx)
+    await terminate_background_processes(ctx, kill_reason=kill_reason)
+
+
+def close_sandbox_namespace(ctx: ToolContext) -> None:
+    """Close and drop this run's keeper namespace. Vacating the slot first is what
+    makes the next sandboxed spawn open a fresh one rather than find a closed one.
+    Idempotent. Killing pid 1 of the pid namespace takes everything INSIDE it with
+    it, so this alone reaps every joined command — the kills that precede it in
+    teardown_tool_context are the courtesy grace, not the guarantee. It reaches
+    nothing spawned during a /sandbox off window: that shape runs on the host, so
+    only terminate_tool_processes ends it."""
+    ns, ctx.sandbox_ns = ctx.sandbox_ns, None
+    if ns is not None:
+        ns.close()
+
+
+async def teardown_tool_context(ctx: ToolContext) -> None:
+    """End of the agent run: kill its processes, THEN close its namespace, so every
+    courtesy grace completes before the atomic kill of the ns-init. The close is in
+    a finally — a cancellation landing on the kills must not leak the keeper."""
+    try:
+        await terminate_tool_processes(ctx)
+    finally:
+        close_sandbox_namespace(ctx)
+
+
+async def ensure_tool_namespace(
+    ctx: ToolContext, *, engine_env: Mapping[str, str],
+    on_retry: Callable[[int, str], None],
+) -> SandboxNamespace:
+    """This run's keeper namespace: opened lazily on the first sandboxed spawn and
+    rebuilt iff the value of ctx.base_sandbox_policy changed since — the namespace
+    is a frozen picture of a bind plan, so it stays valid exactly as long as that
+    plan. A rebuild kills through the normal path FIRST, so a registered background
+    process gets its usual grace and a tombstone that says why.
+
+    open() runs on THIS thread, never in a worker: --die-with-parent is a
+    PR_SET_PDEATHSIG, which the kernel fires when the CREATING THREAD exits, so a
+    thread-pool worker would take the keeper down the moment it retired.
+    """
+    from imp.engine.sandbox import SandboxNamespace
+
+    stale = ctx.sandbox_ns
+    if stale is not None and stale.base_policy != ctx.base_sandbox_policy:
+        # Vacate the slot SYNCHRONOUSLY, before the only await here, and close the
+        # object we captured rather than whatever the slot holds afterwards: a
+        # concurrent call must not adopt a namespace being torn down, nor have the
+        # one it just opened closed out from under it.
+        ctx.sandbox_ns = None
+        try:
+            await terminate_tool_processes(ctx, kill_reason="sandbox-rebuilt")
+        finally:
+            stale.close()  # finally: a cancellation mid-kill must not leak the stale keeper
+    if ctx.sandbox_ns is None:
+        ctx.sandbox_ns = SandboxNamespace.open(
+            policy=ctx.base_sandbox_policy, engine_env=engine_env,
+            environ=os.environ, on_retry=on_retry)
+    return ctx.sandbox_ns

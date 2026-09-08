@@ -31,7 +31,7 @@ import signal
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import DEVNULL
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 
@@ -48,12 +48,7 @@ from imp.agents.tools.limits import (
     TOOL_OUTPUT_CAP_BYTES,
     tool_checkpoint,
 )
-from imp.engine.sandbox import (
-    SANDBOX_SPAWN_FAILED_MESSAGE,
-    sandbox_failure_detail,
-    sandbox_spawn_failed,
-    strip_sandbox_marker,
-)
+from imp.engine.sandbox import normalize_returncode
 
 _CMD_TRUNC = 200      # command excerpt in warnings + tombstones (multi-KB sh -c
                       # scripts would otherwise render whole in the narrative)
@@ -73,11 +68,8 @@ class BgProc:
     out_cursor: int = 0
     err_cursor: int = 0
     status: str = "running"         # running | exited | killed
-    kill_reason: str | None = None  # interrupted | output-cap | agent
+    kill_reason: str | None = None  # interrupted | output-cap | agent | sandbox-rebuilt
     returncode: int | None = None
-    overlay_setup_failed: bool = False  # stderr lacked the entry sentinel (spawn failed)
-    overlay_reported: bool = False      # setup-failure warning emitted / terminal proc checked
-    sandbox_active: bool = False        # sandbox was active for this spawn (recorded at spawn)
 
 
 def _bg_dir(ctx: ToolContext) -> Path:
@@ -193,16 +185,11 @@ def _read_page(bp: BgProc, which: str) -> tuple[str, int]:
 def _snapshot(ctx: ToolContext, bp: BgProc, *, wait_ended: str | None = None) -> str:
     out_text, out_rem = _read_page(bp, "out")
     err_text, err_rem = _read_page(bp, "err")
-    # Display-only strip: the sentinel sits at byte 0, so this removes it from the
-    # first page and is a no-op on later pages (does NOT disturb err_rem/cursor).
-    err_text = strip_sandbox_marker(err_text)
     result: dict[str, Any] = {
-        "stdout": out_text, "stderr": err_text,
-        "status": bp.status, "returncode": bp.returncode,
+        "stdout": out_text, "stderr": err_text, "status": bp.status,
+        "returncode": normalize_returncode(
+            bp.returncode, imp_killed=bp.kill_reason is not None),
     }
-    if bp.overlay_setup_failed:
-        result["status"] = "sandbox_setup_failed"
-        result["error"] = SANDBOX_SPAWN_FAILED_MESSAGE
     if bp.kill_reason is not None:
         result["kill_reason"] = bp.kill_reason
     if wait_ended is not None:
@@ -231,12 +218,10 @@ def _snapshot_or_tombstone(
         # Teardown deleted the stream files mid-call. Its check-and-set pass
         # ran FIRST (ordering pin), so the in-memory entry is already a
         # correct tombstone — never surface a raw read error.
-        result: dict[str, Any] = {"stdout": "", "stderr": "",
-                                  "status": bp.status,
-                                  "returncode": bp.returncode}
-        if bp.overlay_setup_failed:
-            result["status"] = "sandbox_setup_failed"
-            result["error"] = SANDBOX_SPAWN_FAILED_MESSAGE
+        result: dict[str, Any] = {
+            "stdout": "", "stderr": "", "status": bp.status,
+            "returncode": normalize_returncode(
+                bp.returncode, imp_killed=bp.kill_reason is not None)}
         if bp.kill_reason is not None:
             result["kill_reason"] = bp.kill_reason
         if wait_ended is not None:
@@ -251,11 +236,9 @@ def _tombstone_result(ctx: ToolContext, bg_id: str) -> str | None:
     result: dict[str, Any] = {
         "stdout": "", "stderr": "",
         "status": ts.get("status", "killed"),
-        "returncode": ts.get("returncode"),
+        "returncode": normalize_returncode(
+            ts.get("returncode"), imp_killed=ts.get("kill_reason") is not None),
     }
-    if ts.get("overlay_setup_failed"):
-        result["status"] = "sandbox_setup_failed"
-        result["error"] = SANDBOX_SPAWN_FAILED_MESSAGE
     if ts.get("kill_reason") is not None:
         result["kill_reason"] = ts.get("kill_reason")
     return json.dumps(result, ensure_ascii=False)
@@ -411,39 +394,6 @@ def _emit_cap_warning(ctx: ToolContext, bp: BgProc) -> None:
             })
 
 
-def _emit_overlay_setup_warning(ctx: ToolContext, bp: BgProc, detail: str) -> None:
-    """Best-effort event for an overlay mount-setup failure; never crashes the sweep host."""
-    if ctx.event_log is None:
-        return
-    cmd = bp.command[:_CMD_TRUNC]
-    with contextlib.suppress(Exception):
-        ctx.event_log.append(
-            agent_id=ctx.agent_id, type="runner_warning",
-            payload={
-                "message": (f"background process {bp.id} ({cmd}) — the OS sandbox "
-                            "could not start the command; it did not run"),
-                "id": bp.id, "command": cmd, "reason": "sandbox-spawn-failed",
-                "detail": detail,
-            })
-
-
-def _detect_overlay_setup_failure(ctx: ToolContext, bp: BgProc) -> None:
-    """Once per terminal proc: read the WHOLE reaped stderr and flag a sandbox
-    spawn failure (entry sentinel absent, guarded by bp.sandbox_active recorded at
-    spawn). overlay_reported doubles as the one-shot read guard."""
-    if bp.overlay_reported or bp.status == "running":
-        return
-    try:
-        stderr = bp.err_path.read_text("utf-8", "replace")
-    except OSError:
-        return
-    bp.overlay_reported = True
-    if not sandbox_spawn_failed(stderr, sandbox_active=bp.sandbox_active):
-        return
-    bp.overlay_setup_failed = True
-    _emit_overlay_setup_warning(ctx, bp, sandbox_failure_detail(stderr))
-
-
 async def _sweep_bg(ctx: ToolContext) -> None:
     """Poll exits + enforce the per-stream file cap for EVERY registered
     BgProc — REGARDLESS of status (forking-server rule: an exited leader's
@@ -453,7 +403,6 @@ async def _sweep_bg(ctx: ToolContext) -> None:
     (and only tests) can shrink it."""
     for bp in list(ctx.background_processes.values()):
         _reap(bp)
-        _detect_overlay_setup_failure(ctx, bp)
         if bp.kill_reason is not None:
             # Breach handling fires ONCE per process — gate on kill_reason is
             # None. Not status != "killed" (conflicts with regardless-of-
@@ -488,7 +437,10 @@ async def _sweep_bg(ctx: ToolContext) -> None:
             bp.returncode = bp.proc.returncode
 
 
-async def terminate_background_processes(ctx: ToolContext) -> None:
+async def terminate_background_processes(
+    ctx: ToolContext, *,
+    kill_reason: Literal["interrupted", "sandbox-rebuilt"] = "interrupted",
+) -> None:
     """All-exits teardown (interrupt path AND run() finally — on a pause BOTH
     fire; must be idempotent). Order is LOAD-BEARING: steps 2-4 await, and a
     concurrent bash_output whose FileNotFoundError fallthrough runs
@@ -510,10 +462,9 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
     # warning promised.
     for bp in procs:
         _reap(bp)
-        _detect_overlay_setup_failure(ctx, bp)
         if bp.status == "running":
             bp.status = "killed"
-            bp.kill_reason = "interrupted"
+            bp.kill_reason = kill_reason
     # Steps 2-4 run SHIELDED (same rationale as _kill_group_escalate): a
     # cancellation landing on the teardown task mid-grace (gen.aclose() from
     # an already-cancelled task, racing interrupts) raises CancelledError — a
@@ -586,7 +537,6 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
                 "kill_reason": bp.kill_reason,
                 "returncode": bp.returncode,
                 "command": bp.command[:_CMD_TRUNC],
-                "overlay_setup_failed": bp.overlay_setup_failed,
             }
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
@@ -599,8 +549,8 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
 
 
 async def _spawn_to_files(
-    argv: list[str], *, out_path: Path, err_path: Path, cwd: str,
-    env: dict[str, str],
+    argv: list[str], *, out_path: Path, err_path: Path, cwd: str | None,
+    env: dict[str, str], pass_fds: tuple[int, ...] = (),
 ) -> Any:
     """Shared spawn body for background AND (Part 2/3) foreground procs.
 
@@ -612,6 +562,10 @@ async def _spawn_to_files(
     handle would flush nothing. On any failure the partially-created files are
     unlinked. Truncating open ('wb') is belt-and-braces: counter seeding means
     the same <id>.out is never legitimately reopened.
+
+    `cwd` is the BARE shape's cwd and is None for a join: a joined command's cwd
+    is set by the inner `cd`, because Popen's cwd= resolves in the CALLER's mount
+    namespace (spec §1) and would also demand the directory exist host-side.
     """
     kwargs: dict[str, object] = {}
     if hasattr(os, "setsid"):
@@ -634,6 +588,8 @@ async def _spawn_to_files(
             stderr=err_f,
             cwd=cwd,
             env=env,
+            # A join argv names its namespaces as /proc/self/fd/N; the child must inherit them.
+            pass_fds=pass_fds,
             **kwargs,  # type: ignore[arg-type]
         )
     except BaseException:
@@ -653,8 +609,8 @@ async def _spawn_to_files(
 
 
 async def spawn_background(
-    ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
-    env: dict[str, str],
+    ctx: ToolContext, *, command: str, argv: list[str], cwd: str | None,
+    env: dict[str, str], pass_fds: tuple[int, ...] = (),
 ) -> str:
     """Spawn ordering (no orphan window): scratch dir + both write-side files
     BEFORE the spawn (in the shared core); register the BgProc immediately AFTER
@@ -668,11 +624,10 @@ async def spawn_background(
     out_path = d / f"{bg_id}.out"
     err_path = d / f"{bg_id}.err"
     proc = await _spawn_to_files(
-        argv, out_path=out_path, err_path=err_path, cwd=cwd, env=env)
+        argv, out_path=out_path, err_path=err_path, cwd=cwd, env=env,
+        pass_fds=pass_fds)
     bp = BgProc(id=bg_id, proc=proc, out_path=out_path, err_path=err_path,
-                command=command,
-                sandbox_active=(ctx.sandbox_policy is not None
-                                and ctx.sandbox_policy.active))
+                command=command)
     ctx.background_processes[bg_id] = bp
     root = ctx.project_root.resolve()
     return json.dumps({

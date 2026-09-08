@@ -11,28 +11,48 @@ writable-home bind (when a home_layer is present) and then the /tmp bind are
 emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
 secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
 a config-driven bind could re-expose a masked secret dir (spec L1-r5). /tmp is
-an identity bind to the real host /tmp. `--unshare-pid` isolates the process
-table (a shell cannot see or signal anything it did not start); it leaves
-pgid == pid and host-side killpg intact, so group reaping still reaches inside.
-No `--die-with-parent` / `--new-session` — both break the runner's interrupt
-grace (spec B.9); reaping is via the process group.
+an identity bind to the real host /tmp.
+
+`--unshare-pid` isolates the process table (a shell cannot see or signal
+anything outside its own namespace). One keeper namespace per agent run holds
+every command that run issues, so processes persist across calls while killpg
+still reaches a call's own group. Teardown is SIGKILL to the keeper's ns-init,
+whose pid `--info-fd` reports: killing pid 1 of a pid namespace makes the kernel
+kill everything inside, so setsid / double-fork / re-grouping stop mattering.
+`--die-with-parent` goes on the KEEPER — the dead-man's switch for imp dying
+abnormally, safe there because the keeper is never in an interrupted process
+group. It must NOT go on the per-call join, where it would collapse the SIGTERM
+grace (spec B.9). No `--new-session` (F-8).
+
+The command travels in `$IMP_COMMAND` and the cwd in `$IMP_CWD`, off argv, so an
+agent's `pkill -f` cannot match the shell running it; both are unset before
+`eval`, so children see the same environment as before. Not secrecy —
+`/proc/<pid>/environ` and `ps e` inside the sandbox still show it. The cwd must
+be set by an inner `cd`, never `--wd` or Popen's `cwd=`: both resolve in the
+caller's mount namespace and would hand the shell the host's view of a masked
+path.
 """
 
 from __future__ import annotations
 
 import contextlib
+import fcntl
+import json
 import os
 import platform
 import random
+import select
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 from imp.engine.env import (
     HEADLESS_ENV,
@@ -65,10 +85,10 @@ class HomeLayer:
 
 @dataclass(frozen=True, slots=True)
 class OverlayRoot:
-    """The dir each spawn mints its OWN home-overlay layer under, paired with the
-    mount shape overlay_mode negotiated for this host. Pairing them keeps a minted
-    layer's userxattr flag inseparable from the root it came from, so a layer
-    claiming a shape the probe never validated cannot be constructed."""
+    """The dir a keeper namespace mints its home-overlay layer under, paired with
+    the mount shape overlay_mode negotiated for this host. Pairing them keeps a
+    minted layer's userxattr flag inseparable from the root it came from, so a
+    layer claiming a shape the probe never validated cannot be constructed."""
     path: str
     userxattr: bool
 
@@ -96,7 +116,7 @@ class SandboxPolicy:
     disposable_tree: bool = False            # agent runs in a disposable git worktree
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
-    overlay_root: OverlayRoot | None = None  # per-step root spawns mint layers under
+    overlay_root: OverlayRoot | None = None  # per-step root keepers mint layers under
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -202,9 +222,9 @@ def _is_engine_passthrough(key: str) -> bool:
     """Engine-env keys allowed through the sandbox env allowlist: every IMP_*
     var, PYTHONPATH (the imp-on-imp import shadow), and the four headless
     overrides (GIT_EDITOR / GIT_TERMINAL_PROMPT / EDITOR / VISUAL) that keep a
-    sandboxed git/tool invocation non-interactive. Shared by both allowlist
-    sites (the per-spawn overlay in build_sandbox_spawn and the policy bake in
-    _build_child_env) so they cannot drift."""
+    sandboxed git/tool invocation non-interactive. Shared by the per-spawn overlay
+    (_spawn_child_env, used by build_sandbox_spawn and SandboxNamespace.join) and
+    the policy bake in _build_child_env, so they cannot drift."""
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
@@ -220,9 +240,18 @@ def sandbox_spawn_failed(stderr: str, *, sandbox_active: bool) -> bool:
     return sandbox_active and SANDBOX_ENTERED_MARKER not in stderr
 
 
-def strip_sandbox_marker(stderr: str) -> str:
-    """Remove the single entry-sentinel line from captured stderr (display-only, idempotent)."""
-    return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
+@overload
+def normalize_returncode(returncode: int, *, imp_killed: bool) -> int: ...
+@overload
+def normalize_returncode(returncode: None, *, imp_killed: bool) -> None: ...
+def normalize_returncode(returncode: int | None, *, imp_killed: bool) -> int | None:
+    """Spec §7: a negative returncode means IMP killed it; anything the command did
+    to itself reports 128+n. nsenter re-raises a signal on itself when its direct
+    child dies by one, where bwrap mapped it to 128+n, so without this a command's
+    own `kill -9 $$` would read as imp having killed the agent's tool."""
+    if returncode is not None and returncode < 0 and not imp_killed:
+        return 128 - returncode
+    return returncode
 
 
 _SANDBOX_DETAIL_MAX_CHARS = 200    # one-line diagnosis budget in a runner_warning payload
@@ -251,28 +280,56 @@ def sandbox_spawn_backoff_delay(attempt: int) -> float:
     return random.uniform(0.0, ceiling)
 
 
+KEEPER_PAYLOAD = "exec sleep infinity"   # the keeper's own command; it holds the namespaces open
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxSpawn:
     """One spawn's argv AND the environment to spawn it with. Produced by a single
     call so the two cannot be mismatched: the argv carries no environment flags, so
     the env field is the sole source of truth — pairing them prevents a caller from
     accidentally supplying os.environ and dumping the user's whole environment into
-    the sandbox."""
+    the sandbox. `pass_fds` are the fds the child must inherit for its argv to mean
+    anything (the keeper's --info-fd, a join's pinned namespace fds); they ride with
+    the argv for the same reason, and are () for an ordinary spawn."""
     argv: list[str]
     env: dict[str, str]
+    pass_fds: tuple[int, ...] = ()
+
+
+def _spawn_child_env(policy: SandboxPolicy,
+                     engine_env: Mapping[str, str]) -> dict[str, str]:
+    """The child environment for ONE spawn: policy.child_env overlaid with the
+    engine-passthrough slice of the LIVE engine_env, which authoritatively
+    supersedes the values frozen into the policy at run start (name-on-intent: a
+    post-rename IMP_QUEST_TITLE must beat the empty one baked at run start). Dict
+    preserves first-seen order; reassigning a key updates it in place."""
+    env = dict(policy.child_env)
+    for k, v in engine_env.items():
+        if _is_engine_passthrough(k):
+            env[k] = v
+    return env
+
+
+_BARE_SCRIPT = (          # no `cd`: one mount namespace, so the spawn's own cwd= applies
+    'cmd=$IMP_COMMAND\n'
+    'unset IMP_COMMAND\n'
+    'eval "$cmd"\n'
+)
 
 
 def build_sandbox_spawn(
     command: str, *, cwd: str, policy: SandboxPolicy | None,
     engine_env: Mapping[str, str], environ: Mapping[str, str],
-    shim_dir: str = "",
+    shim_dir: str = "", keeper_info_fd: int | None = None,
 ) -> SandboxSpawn:
     """Return the argv to spawn `command` AND the environment to spawn it with.
     When the policy is active, wrap with bwrap per spec §B.2 (fixed flag order) and
-    the env is the resolved child environment; otherwise the bare ["sh","-c",cmd]
-    with the host environment (`environ` overlaid with `engine_env`, plus the
-    `shim_dir` PATH prefix) — the `/sandbox off` path, deliberately unchanged. A
-    None policy is the same unsandboxed case. `shim_dir` is ignored under an active
+    the env is the resolved child environment; otherwise a bare `sh -c` evaluates
+    the command out of `$IMP_COMMAND` — off argv like a join's, so `/sandbox off`
+    does not keep the self-`pkill` footgun — with the host environment (`environ`
+    overlaid with `engine_env`, plus the `shim_dir` PATH prefix). A None policy is
+    the same unsandboxed case. `shim_dir` is ignored under an active
     policy: the PATH shim is already baked into `policy.child_env` by `_build_child_env`.
 
     `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
@@ -291,6 +348,14 @@ def build_sandbox_spawn(
     deliberate non-IMP_ exception — the imp-on-imp import shadow — matching
     `_build_child_env`.
 
+    `keeper_info_fd` makes this a KEEPER spawn: bwrap additionally gets
+    `--info-fd <fd>` (where it reports the ns-init's pid) and `--die-with-parent`
+    (the dead-man's switch for imp dying abnormally), and the fd comes back on
+    `SandboxSpawn.pass_fds` so the flag and the inherited fd cannot be separated.
+    Both flags belong to the keeper and only the keeper: on a per-call spawn
+    `--die-with-parent` would collapse the runner's SIGTERM grace (spec B.9).
+    `SandboxNamespace.open()` is the only caller and passes KEEPER_PAYLOAD.
+
     An ACTIVE policy carrying overlay_root with an un-minted home layer is a
     fail-open bug (it would bind the real $HOME rw) and raises; the INACTIVE
     variant of that same shape is the reachable `/sandbox off` case and is fine."""
@@ -298,7 +363,8 @@ def build_sandbox_spawn(
         env = overlay_engine_env(environ, engine_env)
         if shim_dir:
             env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
-        return SandboxSpawn(argv=["sh", "-c", command], env=env)
+        env["IMP_COMMAND"] = command
+        return SandboxSpawn(argv=["sh", "-c", _BARE_SCRIPT], env=env)
 
     if (policy.overlay_root is not None and policy.home_layer is not None
             and not policy.home_layer.is_overlay):
@@ -338,18 +404,19 @@ def build_sandbox_spawn(
     argv += ["--proc", "/proc", "--dev", "/dev"]
     # 12. chdir
     argv += ["--chdir", cwd]
+    # 12a. KEEPER only: bwrap reports the ns-init's pid on this fd, and
+    # --die-with-parent tears the whole namespace down if imp dies abnormally.
+    if keeper_info_fd is not None:
+        argv += ["--info-fd", str(keeper_info_fd), "--die-with-parent"]
     # 13. the child environment — delivered out-of-band on the spawn, NOT on argv
     # (argv is world-readable via /proc). The IMP_* slice comes authoritatively
     # from the live per-spawn engine_env (prefix allowlist) so a post-rename title
     # wins over the value frozen into policy.child_env at run start
     # (name-on-intent). Dict preserves first-seen order; reassigning a key updates
     # in place.
-    child_env = dict(policy.child_env)
-    for k, v in engine_env.items():
-        if _is_engine_passthrough(k):
-            child_env[k] = v
-    # 14. namespaces — NO --die-with-parent / --new-session (B.9); --unshare-pid is
-    # safe (the group kill crosses the namespace)
+    child_env = _spawn_child_env(policy, engine_env)
+    # 14. namespaces — a PER-CALL spawn carries no --die-with-parent / --new-session
+    # (B.9); --unshare-pid is safe (the group kill crosses the namespace)
     argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-pid"]
     # 15. optional network isolation
     if not policy.network:
@@ -362,6 +429,7 @@ def build_sandbox_spawn(
              f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; "
              'exec sh -c "$0"',
              command]
+    pass_fds = () if keeper_info_fd is None else (keeper_info_fd,)
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
         # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner
@@ -378,8 +446,302 @@ def build_sandbox_spawn(
         )
         return SandboxSpawn(
             argv=["unshare", "--user", "--map-root-user", "--mount", "sh", "-c", mount],
-            env=child_env)
-    return SandboxSpawn(argv=argv, env=child_env)
+            env=child_env, pass_fds=pass_fds)
+    return SandboxSpawn(argv=argv, env=child_env, pass_fds=pass_fds)
+
+
+_NSENTER_FLAG = {"user": "user", "mnt": "mount", "pid": "pid", "uts": "uts",
+                 "ipc": "ipc", "net": "net"}
+_KEEPER_NS_KINDS = ("user", "mnt", "pid", "uts", "ipc")   # + net iff policy isolates it
+
+_NS_GET_USERNS = 0xB701   # ioctl(ns_fd) -> fd on the user namespace that OWNS it
+
+_JOIN_SCRIPT = (
+    'cd "$IMP_CWD" || exit 1\n'
+    'cmd=$IMP_COMMAND\n'
+    'unset IMP_COMMAND IMP_CWD\n'
+    'eval "$cmd"\n'
+)
+
+
+_KEEPER_READY_TIMEOUT_S = 30.0   # generous vs the measured 7-15ms spawn-to-ready
+_KEEPER_REAP_TIMEOUT_S = 10.0
+
+
+class SandboxOpenFailed(Exception):
+    """The keeper namespace could not be opened, so no command was spawned."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail or "the sandbox namespace could not be opened")
+        self.detail = detail
+
+
+def _read_chunk(fd: int, deadline: float) -> bytes:
+    """One read from `fd`, bounded by `deadline`; b"" on EOF or timeout."""
+    timeout = deadline - time.monotonic()
+    if timeout <= 0:
+        return b""
+    ready, _, _ = select.select([fd], [], [], timeout)
+    return os.read(fd, 65536) if ready else b""
+
+
+def _read_to_eof(fd: int, deadline: float) -> str:
+    """Read `fd` to EOF: bwrap emits the --info-fd JSON in three separate write()
+    calls, so parsing the first chunk is wrong. bwrap closes the fd once it has
+    written, well before the payload runs, so this cannot wedge on a live keeper."""
+    buf = b""
+    while chunk := _read_chunk(fd, deadline):
+        buf += chunk
+    return buf.decode("utf-8", "replace")
+
+
+def _await_sentinel(fd: int, deadline: float) -> str:
+    """Read the keeper's stderr until the entry sentinel arrives, the pipe hits
+    EOF, or the deadline passes, and return everything read. Load-bearing, not
+    hygiene: bwrap publishes its --info-fd child-pid BEFORE the mount namespace is
+    finished, and joining on the pid alone hit execvp ENOENT 29 times in 40 (unsafe
+    window 10-20ms) where gating on the sentinel failed 0 in 40. The overlay mount
+    runs before the exec and fails loud, so sentinel ABSENCE is the sole failure
+    signal — no bespoke marker or exit code is needed."""
+    buf = b""
+    while SANDBOX_ENTERED_MARKER not in buf.decode("utf-8", "replace"):
+        chunk = _read_chunk(fd, deadline)
+        if not chunk:
+            break
+        buf += chunk
+    return buf.decode("utf-8", "replace")
+
+
+def _abandon_keeper(proc: subprocess.Popen[bytes], ns_fds: list[tuple[str, int]],
+                    err_fd: int) -> None:
+    """Tear down a keeper that never became usable, closing everything a live
+    namespace would have owned. SIGTERM first: bwrap's monitor handles it and takes
+    the sandbox with it, where a SIGKILL to the monitor would leave the ns-init
+    alive and the namespace still joinable."""
+    for _kind, fd in ns_fds:
+        os.close(fd)
+    os.close(err_fd)
+    proc.terminate()
+    try:
+        proc.wait(timeout=_KEEPER_REAP_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+def _ns_owner_fd(fds: dict[str, int]) -> int | None:
+    """An fd on the user namespace that OWNS the keeper's non-user namespaces, or
+    None when that is the payload's own user namespace.
+
+    bwrap nests a SECOND user namespace for the payload whenever the sandbox uid
+    differs from the uid it needed in the first one (--dev forces uid 0 there for
+    devpts), i.e. whenever imp does not run as uid 0. Capabilities gained by
+    entering that child namespace do not reach namespaces owned by its parent, so
+    a join that enters it first can never setns into the ipc/uts/pid/mnt/net
+    namespaces: the owner namespace has to be entered first."""
+    def ident(fd: int) -> tuple[int, int]:
+        st = os.fstat(fd)
+        return (st.st_dev, st.st_ino)
+
+    owner = fcntl.ioctl(fds["ipc"], _NS_GET_USERNS, 0)
+    if ident(owner) == ident(fds["user"]):
+        os.close(owner)
+        return None
+    return owner
+
+
+@dataclass(slots=True)
+class SandboxNamespace:
+    """One keeper namespace: a bwrap sandbox whose payload is `sleep infinity`,
+    held open so every command joins it instead of building its own. Processes
+    persist and stay killable across joins, and close() ends all of them at once.
+
+    `policy` is the PREPARED policy the keeper argv was built from (its home
+    overlay layer is minted once, here, not per join). `base_policy` is the value
+    open() was handed — the namespace is a frozen picture of that bind plan, so it
+    stays valid exactly as long as that value does.
+
+    `ns_fds` pins /proc/<ns-init>/ns/* as open fds and the join names them as
+    /proc/self/fd/N rather than `--target <pid>`: no pid-reuse window, and it fails
+    CLOSED once the ns-init dies (`nsenter: fork failed: Cannot allocate memory`),
+    where a recycled --target pid would fail open."""
+    policy: SandboxPolicy
+    base_policy: SandboxPolicy
+    ns_fds: tuple[tuple[str, int], ...]
+    outer_user_fd: int | None
+    ns_init_pid: int     # pid 1 of the keeper's pid namespace, as seen from imp
+    err_fd: int          # read end of the keeper's stderr; the keeper holds the write end for life
+    proc: subprocess.Popen[bytes]
+    closed: bool = False
+
+    def join(self, command: str, *, cwd: str,
+             engine_env: Mapping[str, str]) -> SandboxSpawn:
+        """The argv and env to run ONE command inside this namespace.
+
+        The command travels in $IMP_COMMAND and the cwd in $IMP_CWD, off argv, so
+        an agent's `pkill -f` cannot match the shell running it; both are unset
+        before the eval, so children see the same environment as before. This is
+        NOT secrecy — /proc/<pid>/environ and `ps e` inside the sandbox still show
+        the command. The cwd must be set by the inner `cd`, never --wd or Popen's
+        cwd=: both resolve in the CALLER's mount namespace and would hand the shell
+        the host's view of a masked path. The env is rebuilt on every call, never
+        captured at open(), so a mid-run IMP_* change reaches the next command.
+
+        The command runs in a CHILD user namespace: entering the keeper's own
+        hands it CAP_FULL_SET there whenever bwrap built a single userns level
+        (the production shape — the home overlay runs bwrap as root), which is
+        enough to `umount` a secret_dirs mask and read what it hid. The child
+        namespace owns no mount, and --map-current-user keeps the uid identical,
+        so nothing else changes; with two levels the caps are already empty and
+        the stage is a no-op."""
+        if self.closed:
+            raise AssertionError("join on a closed SandboxNamespace")
+        argv: list[str] = []
+        pass_fds = tuple(fd for _kind, fd in self.ns_fds)
+        if self.outer_user_fd is not None:
+            argv += ["nsenter", f"--user=/proc/self/fd/{self.outer_user_fd}",
+                     "--preserve-credentials", "--"]
+            pass_fds += (self.outer_user_fd,)
+        argv += ["nsenter"]
+        argv += [f"--{_NSENTER_FLAG[kind]}=/proc/self/fd/{fd}" for kind, fd in self.ns_fds]
+        argv += ["--preserve-credentials", "--",
+                 "unshare", "--user", "--map-current-user", "--",
+                 "sh", "-c", _JOIN_SCRIPT]
+        env = _spawn_child_env(self.policy, engine_env)
+        env["IMP_COMMAND"] = command
+        env["IMP_CWD"] = cwd
+        return SandboxSpawn(argv=argv, env=env, pass_fds=pass_fds)
+
+    @classmethod
+    def open(cls, *, policy: SandboxPolicy, engine_env: Mapping[str, str],
+             environ: Mapping[str, str],
+             on_retry: Callable[[int, str], None] | None = None) -> SandboxNamespace:
+        """Open a keeper namespace from `policy`, retrying the same spawn budget the
+        per-call spawn used to carry. Retry is safe by construction: a failed open
+        spawns no command. `on_retry(next_attempt, detail)` fires once per failed
+        attempt so each caller keeps its own runner_warning wording; on exhaustion
+        this raises SandboxOpenFailed carrying the detail, and the caller decides
+        what to report. Blocking (the keeper handshake is ~7-15ms, the backoffs up
+        to 400ms). The keeper must not OUTLIVE the thread that opened it:
+        --die-with-parent is a PR_SET_PDEATHSIG, which the kernel fires when the
+        creating THREAD exits, so a namespace opened in a thread-pool worker and
+        handed onwards dies when that worker retires. One kept across calls is
+        therefore opened on the thread that owns it (ensure_tool_namespace); one
+        opened and closed inside a single call may open in a worker, since no
+        window exists in which the worker could retire first (gates.run_command)."""
+        if not policy.active:
+            raise AssertionError("SandboxNamespace.open on an inactive policy")
+        for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
+            try:
+                return cls._open_once(policy=policy, engine_env=engine_env,
+                                      environ=environ)
+            except SandboxOpenFailed as failure:
+                if attempt == SANDBOX_SPAWN_MAX_ATTEMPTS:
+                    raise
+                if on_retry is not None:
+                    on_retry(attempt + 1, failure.detail)
+                time.sleep(sandbox_spawn_backoff_delay(attempt))
+        raise AssertionError("open retry loop must return or raise on the last attempt")
+
+    @classmethod
+    def _open_once(cls, *, policy: SandboxPolicy, engine_env: Mapping[str, str],
+                   environ: Mapping[str, str]) -> SandboxNamespace:
+        # prepare_spawn_policy MUST run first: it mints the home-overlay layer whose
+        # merged path is substituted into the bwrap argv, and the whole bwrap is then
+        # wrapped in an `unshare … mount -t overlay … || exit 1; exec bwrap …` chain,
+        # so the layer paths are INPUTS to building the argv. One layer per namespace.
+        prepared = prepare_spawn_policy(policy)
+        info_r, info_w = os.pipe()
+        err_r, err_w = os.pipe()
+        devnull = os.open(os.devnull, os.O_RDWR)
+        spawn = build_sandbox_spawn(
+            KEEPER_PAYLOAD, cwd=prepared.worktree, policy=prepared,
+            engine_env=engine_env, environ=environ, keeper_info_fd=info_w)
+        try:
+            # The keeper must inherit NO caller pipe (a long-lived holder of a write
+            # end wedges the reader forever), and start_new_session keeps it out of
+            # any interrupted process group — --die-with-parent is its only leash.
+            proc = subprocess.Popen(
+                spawn.argv, env=spawn.env, pass_fds=spawn.pass_fds,
+                stdin=devnull, stdout=devnull, stderr=err_w,
+                start_new_session=True)
+        except OSError as exc:
+            os.close(info_r)
+            os.close(err_r)
+            raise SandboxOpenFailed(str(exc)) from exc
+        finally:
+            os.close(info_w)
+            os.close(err_w)     # our copy; the keeper keeps its own for life
+            os.close(devnull)
+        deadline = time.monotonic() + _KEEPER_READY_TIMEOUT_S
+        ns_fds: list[tuple[str, int]] = []
+        outer_user_fd: int | None = None
+        try:
+            info = _read_to_eof(info_r, deadline)
+            stderr = _await_sentinel(err_r, deadline)
+            if sandbox_spawn_failed(stderr, sandbox_active=True):
+                raise SandboxOpenFailed(sandbox_failure_detail(stderr))
+            # bwrap's --info-fd child, NOT the outer unshare: that is what makes the
+            # pin land on the real ns-init and leaves imp as bwrap's direct parent.
+            # Reaching here means the sentinel arrived, so bwrap finished writing the
+            # JSON; a ValueError or LookupError is still caught below rather than
+            # escaping open()'s retry and leaking a live keeper.
+            child_pid = int(json.loads(info)["child-pid"])
+            kinds = list(_KEEPER_NS_KINDS)
+            if not prepared.network:
+                kinds.append("net")
+            for kind in kinds:
+                ns_fds.append((kind, os.open(f"/proc/{child_pid}/ns/{kind}", os.O_RDONLY)))
+            outer_user_fd = _ns_owner_fd(dict(ns_fds))
+        except SandboxOpenFailed:
+            _abandon_keeper(proc, ns_fds, err_r)
+            raise
+        except (OSError, ValueError, LookupError) as exc:
+            _abandon_keeper(proc, ns_fds, err_r)
+            raise SandboxOpenFailed(str(exc)) from exc
+        finally:
+            os.close(info_r)     # bwrap has closed its end; nothing writes here again
+        # err_r stays OPEN and is owned by the namespace: the keeper holds the write
+        # end for its whole life, so closing the read end here would make any later
+        # write by the bwrap monitor raise EPIPE and take the whole namespace down.
+        return cls(policy=prepared, base_policy=policy, ns_fds=tuple(ns_fds),
+                   outer_user_fd=outer_user_fd,
+                   ns_init_pid=child_pid, err_fd=err_r, proc=proc)
+
+    def _is_ns_init(self) -> bool:
+        """ns_init_pid still names THIS namespace's init, i.e. the pid has not been
+        recycled since open(). Compared against the pid-namespace fd pinned at
+        open(), so a stranger that inherited the pid can never be signalled: it
+        would have to live in our own pid namespace, which cannot outlive its init."""
+        try:
+            live = os.stat(f"/proc/{self.ns_init_pid}/ns/pid")
+        except OSError:
+            return False
+        pinned = os.fstat(dict(self.ns_fds)["pid"])
+        return (live.st_dev, live.st_ino) == (pinned.st_dev, pinned.st_ino)
+
+    def close(self) -> None:
+        """SIGKILL the ns-init: killing pid 1 of a pid namespace makes the kernel kill
+        everything inside, so setsid / nohup / double-fork / re-grouping stop
+        mattering. SIGTERM would be a no-op (a pid-ns init is SIGNAL_UNKILLABLE for
+        default-action signals) and killing the outer bwrap would leave the init
+        alive and still joinable. Idempotent."""
+        if self.closed:
+            return
+        self.closed = True
+        if self._is_ns_init():
+            with contextlib.suppress(OSError):
+                os.kill(self.ns_init_pid, signal.SIGKILL)
+        for _kind, fd in self.ns_fds:
+            os.close(fd)
+        if self.outer_user_fd is not None:
+            os.close(self.outer_user_fd)
+        os.close(self.err_fd)
+        try:
+            self.proc.wait(timeout=_KEEPER_REAP_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait()
 
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
@@ -416,13 +778,12 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     read; a hand-pinned $IMP_STATE_DIR carries no marker, and an un-gated --ro-bind of a
     missing source would abort bwrap setup for those users.
 
-    It also MINTS this spawn's home-overlay layer when policy.overlay_root is set:
-    a fresh mkdtemp dir under the root holding its own upper/work/merged. Minting
-    is per SPAWN, not per step, because two concurrently-live overlay mounts
-    sharing one upperdir/workdir is undefined behavior (the kernel's ovl_inuse
-    warning) — and overlap within a step is normal: a background command outlives
-    a foreground one, and non-isolated subagents inherit the step's policy
-    verbatim. No per-spawn cleanup exists; step teardown rmtrees the whole root."""
+    It also MINTS the home-overlay layer when policy.overlay_root is set: a fresh
+    mkdtemp dir under the root holding its own upper/work/merged. `open()` is the
+    only caller, so the layer is minted once per namespace, not per spawn — one
+    live overlay mount per keeper rather than overlapping ones sharing an
+    upperdir/workdir (the kernel's ovl_inuse warning), and every command in the run
+    joins that one mount. No per-layer cleanup; step teardown rmtrees the root."""
     if not policy.active:
         return policy
     for ref_dir in policy.git_ref_reexpose:
@@ -545,11 +906,11 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
 
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
     real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
-    tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
+    tmpfs), but the lowerdir is `home` — the SAME shape the keeper's mount in
     build_sandbox_spawn uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
-    nothing. Cached like sandbox_available(); the answer is carried to the
-    per-command mount (via make_home_layer), so probe and spawn always agree.
+    nothing. Cached like sandbox_available(); the answer is carried to the keeper's
+    mount (via make_home_layer), so probe and spawn always agree.
 
     Tests that monkeypatch subprocess.run / shutil.which / platform.system must
     call overlay_mode.cache_clear() first (the result is process-global cached,
@@ -585,14 +946,15 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
 def make_home_layer(
     home: str, *, root: Path, userxattr: bool | None,
 ) -> tuple[HomeLayer, OverlayRoot | None, Callable[[], None]]:
-    """Build one invocation's writable-home layer, the root its spawns mint into,
+    """Build one invocation's writable-home layer, the root its keepers mint into,
     and the teardown callable. `userxattr` is overlay_mode's tri-state. None → the
     plain rw bind of the real home (fallback): no dirs, no overlay root, a no-op
     cleanup. True/False → create `root` and report it as the policy's overlay_root,
-    carrying the negotiated flag so every per-spawn mount uses the exact shape the
-    probe validated; each SPAWN then mints its own upper/work/merged under the root
-    in prepare_spawn_policy, and the returned cleanup rmtrees the whole root once
-    (no per-spawn cleanup exists, so a hard-killed command cannot leak a layer).
+    carrying the negotiated flag so every mount uses the exact shape the probe
+    validated; prepare_spawn_policy then mints an upper/work/merged under the root
+    for each policy it prepares — once per keeper namespace on the tool path — and
+    the returned cleanup rmtrees the whole root once (no per-layer cleanup exists,
+    so a hard-killed command cannot leak a layer).
     The layer is the same plain HomeLayer in BOTH branches. The CALLER probes
     (overlay_mode at its own probe location) and chooses where the root lives, so
     this primitive is shared by the executor (root sibling to transcript_dir) and

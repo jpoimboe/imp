@@ -40,9 +40,11 @@ def test_partial_states_the_write_bounds_ahead_of_the_hatches() -> None:
 
 def test_partial_documents_the_pid_namespace_and_routes_usr1_through_sandbox_off() -> None:
     flat = _flat(PARTIAL.read_text())
-    assert ("imp's bash sandbox runs every shell command in a fresh user and pid "
-            "namespace") in flat
-    assert "cannot see or signal any process outside its own command" in flat
+    assert ("imp's bash sandbox runs all your shell commands in one user and pid "
+            "namespace of their own") in flat
+    assert ("cannot attach a debugger (`gdb`, `py-spy`, `strace`) to a live process "
+            "outside it") in flat
+    assert "cannot see or signal any process it did not start" in flat
     assert "One escape hatch exists, plus one recipe that needs it." in flat
     # The USR1 recipe no longer works from inside the sandbox: it leads with /sandbox off.
     assert "**Stack-dumping a wedged imp process needs `/sandbox off`.**" in flat
@@ -51,6 +53,8 @@ def test_partial_documents_the_pid_namespace_and_routes_usr1_through_sandbox_off
     # The stale claims are gone, not re-worded.
     assert "signals cross user namespaces" not in flat
     assert "needs no unsandboxing" not in flat
+    assert "in a fresh user and pid namespace" not in flat
+    assert "any process outside its own command" not in flat
 
 
 def test_no_source_or_test_file_references_the_old_partial_name() -> None:

@@ -55,7 +55,12 @@ def test_tool_reference_describes_line_clipping_and_byte_exactness() -> None:
     body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
     assert "each line over 2000 chars is clipped to 2000" in body
     assert "the two streams are cut to a combined 30 KB head" in body
-    assert "no `notice` means the output is byte-exact" in body
+    # Spec §8: ONE standing exception now — the sandbox entry marker never
+    # reaches a call's stderr under a keeper, so the clause loses it.
+    assert ('no `notice` means the output is byte-exact — bar one standing '
+            'exception, an `errors="replace"` decode. Runaway output is killed '
+            'at 5 MB.') in body
+    assert "sandbox entry marker" not in body
     assert "Foreground commands are interruptible" in body
 
 
@@ -68,14 +73,19 @@ def test_tool_reference_documents_sandbox_note() -> None:
             "retrying never helps.") in body
 
 
-def test_tool_reference_documents_per_call_pid_namespaces() -> None:
-    # The bash section warns that pids are namespace-local and names bash_kill(id) as
-    # the way to stop a background task. Whitespace-normalized: the prose is wrapped.
+def test_tool_reference_documents_the_shared_pid_namespace() -> None:
+    # Spec §8's replaced bullet: pids carry across calls and everything in the
+    # namespace dies at end of run. Whitespace-normalized: the prose is wrapped.
     body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
-    assert ("Each call gets its own pid namespace, so `ps` shows only that call's own "
-            "processes and a pid recorded in one call means nothing in the next.") in body
-    assert ("The `pid` in a background descriptor is a host-side handle — a shell command "
-            "cannot signal it; stop a background task with `bash_kill(id)`.") in body
+    assert ("All your calls share one pid namespace, so `ps` sees every process you "
+            "left running and a pid from an earlier call is still valid. Everything "
+            "in it is killed when you finish, so nothing you detach outlives your "
+            "run.") in body
+    assert ("The `pid` in a background descriptor is a host-side handle a shell "
+            "command cannot signal — use `bash_kill(id)`, or `ps` and its "
+            "namespace-local pid.") in body
+    # The retired per-call promise is gone, not re-worded.
+    assert "a pid recorded in one call means nothing in the next" not in body
 
 
 def _write_file_section() -> str:

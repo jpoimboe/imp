@@ -7,15 +7,21 @@ import os
 import subprocess
 import tempfile
 import types as _types
+import uuid
 from pathlib import Path
 
 import pytest
 
+import imp.engine.sandbox as sandbox_mod
 from imp.engine.env import engine_env
 from imp.engine.sandbox import (
+    KEEPER_PAYLOAD,
+    SANDBOX_SPAWN_MAX_ATTEMPTS,
     HomeLayer,
     OverlayRoot,
     SandboxConfig,
+    SandboxNamespace,
+    SandboxOpenFailed,
     SandboxPolicy,
     SandboxUnavailable,
     _force_rmtree,
@@ -67,10 +73,14 @@ def wrapper_argv(command: str) -> list[str]:
 
 def test_inactive_policy_returns_bare_argv():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    argv = _argv("echo hi", cwd="/state/worktrees/abc",
-                              policy=_policy(active=False), engine_env={})
-    assert argv == ["sh", "-c", "echo hi"]
-    assert SANDBOX_ENTERED_MARKER not in argv[-1]
+    spawn = build_sandbox_spawn("echo hi", cwd="/state/worktrees/abc",
+                                policy=_policy(active=False), engine_env={}, environ={})
+    assert spawn.argv[:2] == ["sh", "-c"]
+    assert "echo hi" not in spawn.argv[2]          # the command is not on argv
+    assert spawn.argv[2].splitlines() == [
+        "cmd=$IMP_COMMAND", "unset IMP_COMMAND", 'eval "$cmd"']
+    assert spawn.env["IMP_COMMAND"] == "echo hi"
+    assert SANDBOX_ENTERED_MARKER not in spawn.argv[2]
 
 
 def test_active_policy_wraps_with_bwrap():
@@ -101,6 +111,16 @@ def _run_wrapper(command: str, stdin: str | None = None) -> subprocess.Completed
     """Run the builder's real wrapper argv on the host (no bwrap needed)."""
     return subprocess.run(wrapper_argv(command), input=stdin, text=True,
                           capture_output=True)
+
+
+def _run_bare(command: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run the builder's real UNSANDBOXED spawn on the host — the `/sandbox off`
+    shape, whose command travels in the environment exactly as a join's does."""
+    spawn = build_sandbox_spawn(
+        command, cwd="/", policy=_policy(active=False), engine_env={},
+        environ={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+    return subprocess.run(spawn.argv, input=stdin, text=True, capture_output=True,
+                          env=spawn.env)
 
 
 def test_wrapper_emits_the_sentinel_before_a_syntax_error():
@@ -140,6 +160,48 @@ def test_wrapper_survives_quotes_backslashes_and_dollars():
     p = _run_wrapper(cmd)
     assert p.returncode == 0
     assert p.stdout.splitlines() == ["dq 2", "sq", "lit$eral", r"back\slash"]
+
+
+def test_the_bare_shape_hides_the_command_from_its_own_pkill():
+    # AC 10b: /sandbox off keeps the footgun unless the command leaves argv. The
+    # needle occurs only inside the command's own text, so a correct build matches
+    # nothing; with the command on argv, pkill kills the shell running it (rc -15).
+    needle = f"imp-needle-{uuid.uuid4().hex}"
+    done = _run_bare(f'pkill -f "{needle}"; echo pkill-rc=$?; ps auxww')
+    assert done.returncode == 0
+    assert done.stdout.splitlines()[0] == "pkill-rc=1"   # pkill: no process matched
+    # Sampled host-wide from inside, WHILE the shell running the command is alive:
+    # a sample taken after it exits cannot tell "never on argv" from "gone".
+    assert needle not in done.stdout
+
+
+def test_the_bare_shape_matches_a_plain_sh_c():
+    # AC 11a/b: status propagation, set -e, $0/$#/$@ and the command's own stdin
+    # (which `sh -s` would have eaten — that is why it was rejected) are exactly
+    # what `sh -c <command>` gives today. Only that half of the stdin claim is
+    # pinned here: "/dev/null when nothing is piped" is the SPAWN's doing
+    # (_spawn_to_files' stdin=DEVNULL), which this shape change does not touch.
+    assert _run_bare("exit 7").returncode == 7
+    assert _run_bare("true; false").returncode == 1
+    aborted = _run_bare("set -e; echo hello; false; echo unreachable")
+    assert (aborted.returncode, aborted.stdout) == (1, "hello\n")
+    assert _run_bare('echo "[$0] [$#] [$@]"').stdout == "[sh] [0] []\n"
+    piped = _run_bare("cat", stdin="piped-in\n")
+    assert (piped.returncode, piped.stdout) == (0, "piped-in\n")
+    quoted = _run_bare(r"""printf '%s\n' "dq $((1+1))" 'sq' 'lit$eral' 'back\slash'""")
+    assert quoted.stdout.splitlines() == ["dq 2", "sq", "lit$eral", r"back\slash"]
+    # `eval $cmd` unquoted would word-split the value and rejoin on single
+    # spaces, collapsing the run inside the quoted argument.
+    spaced = _run_bare(r"""printf '%s\n' 'two  spaces'""")
+    assert spaced.stdout == "two  spaces\n"
+
+
+def test_the_bare_shape_leaves_no_imp_command_in_a_childs_environment():
+    # AC 11c: the unset keeps the child environment byte-identical to today's. This
+    # is NOT secrecy — /proc/<pid>/environ and `ps e` still show the command, since
+    # they read the exec-time block the unset does not rewrite.
+    assert "IMP_COMMAND" not in _run_bare("env").stdout
+    assert "IMP_COMMAND" not in _run_bare("sh -c env").stdout
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
@@ -299,9 +361,41 @@ def test_no_pythonpath_in_child_env_when_engine_env_lacks_it():
 def test_requires_pid_namespace_and_no_die_with_parent():
     argv = _argv("x", cwd="/wt", policy=_policy(), engine_env={})
     assert "--unshare-pid" in argv          # process-table isolation
-    assert "--die-with-parent" not in argv  # B.9.2 (H-A)
+    # B.9.2 (H-A): a PER-CALL spawn never carries it — it would collapse the
+    # runner's SIGTERM grace. Only the keeper does (see the keeper tests below).
+    assert "--die-with-parent" not in argv
     assert "--new-session" not in argv      # B.9.3 (F-8)
     assert "--unshare-user" in argv
+
+
+def test_keeper_spawn_carries_info_fd_and_die_with_parent():
+    spawn = build_sandbox_spawn(
+        KEEPER_PAYLOAD, cwd="/wt", policy=_policy(), engine_env={}, environ={},
+        keeper_info_fd=7)
+    assert spawn.argv[spawn.argv.index("--info-fd") + 1] == "7"
+    assert "--die-with-parent" in spawn.argv   # dead-man's switch, KEEPER only
+    assert spawn.argv[-1] == KEEPER_PAYLOAD
+    # the flag and the fd the child must inherit travel together
+    assert spawn.pass_fds == (7,)
+
+
+def test_keeper_flags_survive_the_overlay_unshare_wrapper():
+    # The overlay shape embeds the whole bwrap argv in an `sh -c` string, so the
+    # keeper flags have to be emitted BEFORE the wrap, not spliced in after it.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(
+        home="/home/u", merged="/ovl/merged", upper="/ovl/upper", work="/ovl/work"))
+    spawn = build_sandbox_spawn(
+        KEEPER_PAYLOAD, cwd="/wt", policy=pol, engine_env={}, environ={},
+        keeper_info_fd=9)
+    assert spawn.argv[0] == "unshare"
+    assert "--info-fd 9 --die-with-parent" in spawn.argv[-1]
+    assert spawn.pass_fds == (9,)
+
+
+def test_an_ordinary_spawn_passes_no_fds():
+    spawn = build_sandbox_spawn("x", cwd="/wt", policy=_policy(), engine_env={},
+                                environ={})
+    assert spawn.pass_fds == ()
 
 
 def test_network_off_adds_unshare_net():
@@ -682,7 +776,7 @@ def test_overlay_mode_probes_with_real_home_as_lowerdir(tmp_path, monkeypatch):
     home = tmp_path / "agent-home"
     assert sb.overlay_mode(tmp_path, home) is True
     mount_cmd = calls["argv"][-1]
-    # probes with the REAL home as lowerdir — the same shape the per-command mount
+    # probes with the REAL home as lowerdir — the same shape the keeper's mount
     # in build_sandbox_spawn uses — not a synthetic empty lower under the probe dir.
     assert f"lowerdir={home}" in mount_cmd
     assert str(tmp_path / ".overlay-probe" / "lower") not in mount_cmd
@@ -1365,16 +1459,6 @@ def test_spawn_failed_message_no_longer_claims_transience():
     assert SANDBOX_SPAWN_FAILED_MESSAGE == (
         "the OS sandbox could not start your command; it did NOT run "
         "(a sandbox-setup failure, not your command's own exit)")
-
-
-def test_strip_sandbox_marker_removes_single_line():
-    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER, strip_sandbox_marker
-    raw = f"{SANDBOX_ENTERED_MARKER}\nreal line\nsecond"
-    assert strip_sandbox_marker(raw) == "real line\nsecond"
-    # idempotent: a second strip (marker already gone) is a no-op
-    assert strip_sandbox_marker(strip_sandbox_marker(raw)) == "real line\nsecond"
-    # no marker present -> unchanged
-    assert strip_sandbox_marker("just output\n") == "just output\n"
 
 
 def test_sandbox_spawn_backoff_bounds_and_cap():
@@ -2624,6 +2708,78 @@ def test_retired_overlay_symbols_are_gone():
         assert not hasattr(sb, name), f"{name} should be deleted"
 
 
+def test_retired_per_call_sentinel_machinery_is_gone():
+    # AC 14a/b: the deletions are real, not merely unused. hasattr on the MODULE
+    # is the call-site check — these names reach bg.py only by import, so an
+    # import surviving means a call site survived with it.
+    import imp.agents.tools.bg as bg
+    for name in ("_detect_overlay_setup_failure", "_emit_overlay_setup_warning",
+                 "strip_sandbox_marker", "sandbox_spawn_failed",
+                 "sandbox_failure_detail", "SANDBOX_SPAWN_FAILED_MESSAGE"):
+        assert not hasattr(bg, name), f"{name} should be gone from bg.py"
+    for field in ("overlay_setup_failed", "overlay_reported", "sandbox_active"):
+        assert field not in bg.BgProc.__dataclass_fields__
+    # AC 14b's bash.py and executor.py halves. Named individually rather than
+    # checked wholesale because both modules KEEP importing sandbox symbols that
+    # are not part of the sentinel path: SANDBOX_SPAWN_MAX_ATTEMPTS (the retry
+    # wording) in both, and SANDBOX_SPAWN_FAILED_MESSAGE in bash.py.
+    import imp.agents.tools.bash as bash
+    import imp.engine.executor as ex
+    for mod in (bash, ex):
+        for name in ("strip_sandbox_marker", "sandbox_spawn_failed",
+                     "sandbox_failure_detail"):
+            assert not hasattr(mod, name), f"{name} should be gone from {mod.__name__}"
+    # strip_sandbox_marker is gone OUTRIGHT: the executor's was its last call site,
+    # and open()'s handshake reads the sentinel with _await_sentinel, never this.
+    import imp.engine.sandbox as sb
+    assert not hasattr(sb, "strip_sandbox_marker")
+    # ...but the two the handshake DOES use must survive.
+    assert sb.sandbox_spawn_failed("", sandbox_active=True) is True
+    assert sb.sandbox_failure_detail("boom\nrest") == "boom"
+
+
+def _flat_doc(obj: object) -> str:
+    return " ".join((obj.__doc__ or "").split())
+
+
+def test_the_overlay_and_keeper_docstrings_drop_their_retired_rationale():
+    # Spec §8. Four docstrings explained a PER-SPAWN overlay layer and a blanket
+    # --die-with-parent rejection; the keeper contradicts both, and a reader who
+    # trusts either writes the wrong code. Flattened, because every asserted
+    # sentence is hard-wrapped where it lives.
+    import imp.agents.subagents as sa
+    import imp.engine.executor as ex
+    import imp.engine.sandbox as sb
+    module_doc = _flat_doc(sb)
+    assert "group reaping still reaches inside" not in module_doc
+    assert "No `--die-with-parent` / `--new-session`" not in module_doc
+    assert "`--die-with-parent` goes on the KEEPER" in module_doc
+    assert "It must NOT go on the per-call join" in module_doc
+    assert "The command travels in `$IMP_COMMAND` and the cwd in `$IMP_CWD`" in module_doc
+    assert "never `--wd` or Popen's `cwd=`" in module_doc
+    prepare_doc = _flat_doc(sb.prepare_spawn_policy)
+    assert "Minting is per SPAWN" not in prepare_doc
+    assert "minted once per namespace, not per spawn" in prepare_doc
+    for fn in (sa._attach_isolated_home, ex._attach_home_layer):
+        doc = _flat_doc(fn)
+        assert "each spawn mints its own layer" not in doc
+        assert "keeper namespace mints one layer" in doc
+
+
+def test_normalize_returncode_separates_imps_kills_from_the_commands_own():
+    # Spec §7. A join propagates a self-inflicted signal as a NEGATIVE code where
+    # bwrap mapped it to 128+n; providers key tool_killed on the sign, so the two
+    # must not blur. imp knows which it did, so the read site decides.
+    from imp.engine.sandbox import normalize_returncode
+    assert normalize_returncode(-9, imp_killed=False) == 137    # kill -9 $$
+    assert normalize_returncode(-15, imp_killed=False) == 143   # kill -15 $$
+    assert normalize_returncode(-15, imp_killed=True) == -15    # imp killed the group
+    assert normalize_returncode(-9, imp_killed=True) == -9
+    assert normalize_returncode(7, imp_killed=False) == 7       # untouched
+    assert normalize_returncode(0, imp_killed=True) == 0
+    assert normalize_returncode(None, imp_killed=False) is None
+
+
 def test_child_env_carries_the_state_dir_when_the_spawn_supplies_none():
     # The bash tool passes no control root, so its live engine_env has no
     # IMP_STATE_DIR — the value baked into policy.child_env at run start must still
@@ -2835,8 +2991,7 @@ def test_an_inactive_policy_carries_no_repo_re_expose(tmp_path):
     assert pol.note == "unsandboxed_by_config"
     assert pol.state_repo_ro == ""
     assert not [b for b, _ in pol.bind_plan() if b.endswith("/repo")]
-    assert _argv("x", cwd="/wt", policy=pol, engine_env={}) == [
-        "sh", "-c", "x"]
+    assert _argv("x", cwd="/wt", policy=pol, engine_env={})[:2] == ["sh", "-c"]
 
 
 def test_spawn_env_is_the_bake_refreshed_by_the_live_engine_env():
@@ -2873,11 +3028,12 @@ def test_inactive_policy_spawn_keeps_the_host_environment():
         environ={"PATH": "/usr/bin", "HOME": "/home/u",
                  "IMP_TEST_CMD_FAST": "stale-gate"},
         shim_dir="/q/imp-shim")
-    assert spawn.argv == ["sh", "-c", "echo hi"]
+    assert spawn.argv[:2] == ["sh", "-c"]
     assert spawn.env == {
         "PATH": "/q/imp-shim" + os.pathsep + "/usr/bin",
         "HOME": "/home/u",
         "IMP_QUEST_ID": "abc",
+        "IMP_COMMAND": "echo hi",
     }
 
 
@@ -2908,3 +3064,167 @@ def test_overlay_home_shell_string_carries_no_environment():
     assert spawn.argv[0] == "unshare"
     assert "canary-42:secret" not in " ".join(spawn.argv)
     assert spawn.env["IMP_TELEGRAM_TOKEN"] == "canary-42:secret"
+
+
+def _ns(*, network: bool = True, outer_user_fd: int | None = None) -> SandboxNamespace:
+    """A namespace with DUMMY fd numbers: join() is pure given the pins, so its
+    argv/env shape needs no real keeper. fds are 10.. in pin order."""
+    kinds = ["user", "mnt", "pid", "uts", "ipc"] + ([] if network else ["net"])
+    pol = _policy(network=network)
+    return SandboxNamespace(
+        policy=pol, base_policy=pol,
+        ns_fds=tuple((k, 10 + i) for i, k in enumerate(kinds)),
+        outer_user_fd=outer_user_fd,
+        ns_init_pid=4242, err_fd=98, proc=None)
+
+
+def test_join_enumerates_the_namespace_flags_by_pinned_fd():
+    argv = _ns().join("echo hi", cwd="/wt", engine_env={}).argv
+    assert argv[0] == "nsenter"
+    assert argv[1:6] == ["--user=/proc/self/fd/10", "--mount=/proc/self/fd/11",
+                         "--pid=/proc/self/fd/12", "--uts=/proc/self/fd/13",
+                         "--ipc=/proc/self/fd/14"]
+    # mandatory: bwrap writes `deny` to setgroups, so without it nsenter dies
+    assert "--preserve-credentials" in argv
+    assert "--all" not in argv                                  # EPERM on net/cgroup/time
+    assert not any(a.startswith("--target") for a in argv)      # pins, not a pid
+
+
+def test_join_enters_the_net_namespace_iff_the_policy_isolates_it():
+    # Fails OPEN if dropped: an omitted --net against an --unshare-net keeper
+    # silently leaves the command in the HOST network namespace.
+    isolated = _ns(network=False).join("x", cwd="/wt", engine_env={}).argv
+    assert "--net=/proc/self/fd/15" in isolated
+    networked = _ns(network=True).join("x", cwd="/wt", engine_env={}).argv
+    assert not any(a.startswith("--net") for a in networked)
+
+
+def test_join_passes_every_pinned_fd_to_the_child():
+    spawn = _ns(network=False).join("x", cwd="/wt", engine_env={})
+    assert spawn.pass_fds == (10, 11, 12, 13, 14, 15)
+
+
+def test_join_keeps_command_and_cwd_off_argv():
+    spawn = _ns().join('pkill -f "needle"', cwd="/masked/dir", engine_env={})
+    joined = " ".join(spawn.argv)
+    assert "pkill" not in joined and "needle" not in joined
+    assert "/masked/dir" not in joined
+    assert spawn.env["IMP_COMMAND"] == 'pkill -f "needle"'
+    assert spawn.env["IMP_CWD"] == "/masked/dir"
+
+
+def test_join_sets_the_cwd_with_an_inner_cd_and_never_die_with_parent():
+    spawn = _ns().join("x", cwd="/masked/dir", engine_env={})
+    # --wd resolves in the CALLER's mount namespace; the join must not use it,
+    # and --die-with-parent here would collapse the runner's SIGTERM grace.
+    assert "--wd" not in " ".join(spawn.argv)
+    assert "--die-with-parent" not in spawn.argv
+    assert spawn.argv[-2] == "-c"
+    assert spawn.argv[-1].splitlines()[0] == 'cd "$IMP_CWD" || exit 1'
+    assert 'unset IMP_COMMAND IMP_CWD' in spawn.argv[-1]
+
+
+def test_join_drops_into_a_child_userns_before_running_the_command():
+    # Entering the keeper's own user namespace grants CAP_FULL_SET there whenever
+    # bwrap built one userns level, which is enough to umount a secret mask. The
+    # child namespace owns nothing, so the stage must sit INSIDE the nsenter, right
+    # ahead of the shell — anywhere earlier and the caps are regained on entry.
+    argv = _ns().join("x", cwd="/wt", engine_env={}).argv
+    assert argv[argv.index("--") + 1] == "unshare"
+    assert argv[-7:-1] == ["unshare", "--user", "--map-current-user", "--",
+                           "sh", "-c"]
+    # --map-root-user would change the uid the command runs as; this one must not.
+    assert "--map-root-user" not in argv
+    # Two-stage shape: the placement requirement is SHARPER here, because between
+    # the stages is a plausible-looking spot where the inner nsenter would hand the
+    # caps straight back. Slicing past the outer `--` first is what makes the
+    # assertion name the inner nsenter's `--` rather than the outer's.
+    two_stage = _ns(outer_user_fd=77).join("x", cwd="/wt", engine_env={}).argv
+    inner = two_stage[two_stage.index("--") + 1:]
+    assert inner[inner.index("--") + 1] == "unshare"
+    assert two_stage[-7:-1] == ["unshare", "--user", "--map-current-user", "--",
+                                "sh", "-c"]
+
+
+def test_join_env_overlays_the_live_engine_slice_on_the_policy_env():
+    spawn = _ns().join("x", cwd="/wt", engine_env={
+        "IMP_QUEST_TITLE": "renamed", "NOT_ENGINE": "1"})
+    assert spawn.env["IMP_QUEST_TITLE"] == "renamed"   # name-on-intent override
+    assert spawn.env["HOME"] == "/home/u"              # from policy.child_env
+    assert "NOT_ENGINE" not in spawn.env
+
+
+def test_join_enters_the_owner_userns_in_a_first_stage_when_bwrap_nested_two():
+    # Two argv shapes, chosen at open() from a measured fact. When bwrap nests a
+    # second userns for the payload (any imp uid != 0), ipc/uts/pid/mnt/net are owned
+    # by the OUTER one and caps never flow up, so it must be entered first. With one
+    # level OWNER == PAYLOAD, re-entering it is EINVAL -- hence None, and the
+    # single-stage argv the tests above pin.
+    spawn = _ns(outer_user_fd=77).join("echo hi", cwd="/masked/dir", engine_env={})
+    argv = spawn.argv
+    assert argv[:4] == ["nsenter", "--user=/proc/self/fd/77",
+                        "--preserve-credentials", "--"]
+    inner = argv[4:]
+    assert inner[:6] == ["nsenter", "--user=/proc/self/fd/10",
+                         "--mount=/proc/self/fd/11", "--pid=/proc/self/fd/12",
+                         "--uts=/proc/self/fd/13", "--ipc=/proc/self/fd/14"]
+    assert inner[6] == "--preserve-credentials"
+    assert 77 in spawn.pass_fds
+    joined = " ".join(argv)
+    assert "echo hi" not in joined and "/masked/dir" not in joined
+
+
+def test_join_on_a_closed_namespace_is_refused():
+    # The pinned fd numbers are recycled after close(); an argv naming them would
+    # silently enter WHATEVER now holds those numbers.
+    ns = _ns()
+    ns.closed = True
+    with pytest.raises(AssertionError):
+        ns.join("x", cwd="/wt", engine_env={})
+
+
+def test_open_retries_the_whole_spawn_budget_and_reports_each_attempt(monkeypatch):
+    attempts = []
+
+    def boom(cls, **kw):
+        attempts.append(kw)
+        raise SandboxOpenFailed("overlay mount failed")
+
+    monkeypatch.setattr(SandboxNamespace, "_open_once", classmethod(boom))
+    monkeypatch.setattr(sandbox_mod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    seen: list[tuple[int, str]] = []
+    with pytest.raises(SandboxOpenFailed) as exc:
+        SandboxNamespace.open(policy=_policy(), engine_env={}, environ={},
+                              on_retry=lambda n, detail: seen.append((n, detail)))
+    assert len(attempts) == SANDBOX_SPAWN_MAX_ATTEMPTS
+    # one breadcrumb per FAILED attempt, naming the attempt that follows it
+    assert seen == [(n, "overlay mount failed")
+                    for n in range(2, SANDBOX_SPAWN_MAX_ATTEMPTS + 1)]
+    assert exc.value.detail == "overlay mount failed"
+
+
+def test_open_stops_retrying_once_an_attempt_succeeds(monkeypatch):
+    attempts: list[int] = []
+    opened = object()
+
+    def flaky(cls, **kw):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise SandboxOpenFailed("transient")
+        return opened
+
+    monkeypatch.setattr(SandboxNamespace, "_open_once", classmethod(flaky))
+    monkeypatch.setattr(sandbox_mod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    seen: list[tuple[int, str]] = []
+    got = SandboxNamespace.open(policy=_policy(), engine_env={}, environ={},
+                                on_retry=lambda n, detail: seen.append((n, detail)))
+    assert got is opened
+    assert len(attempts) == 2
+    assert seen == [(2, "transient")]
+
+
+def test_open_on_an_inactive_policy_is_refused():
+    # A keeper built from an inactive policy would be a bare host `sh -c`, with
+    # no namespaces to pin — fail closed rather than silently unsandbox the run.
+    with pytest.raises(AssertionError):
+        SandboxNamespace.open(policy=_policy(active=False), engine_env={}, environ={})

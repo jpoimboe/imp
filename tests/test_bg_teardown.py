@@ -68,8 +68,7 @@ def test_teardown_preserves_terminal_states(tmp_path: Path) -> None:
         await terminate_background_processes(ctx)
         ts = json.loads(_tombstone_path(ctx).read_text())
         assert ts[out["id"]] == {"status": "exited", "kill_reason": None,
-                                 "returncode": 4, "command": "exit 4",
-                                 "overlay_setup_failed": False}
+                                 "returncode": 4, "command": "exit 4"}
     anyio.run(main)
 
 

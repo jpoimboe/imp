@@ -293,3 +293,46 @@ def test_sweep_fires_on_non_bash_tool_dispatch(
         finally:
             await _cleanup(ctx)
     anyio.run(main)
+
+
+def test_a_background_command_that_signals_itself_reports_128_plus_n(
+    tmp_path: Path,
+) -> None:
+    # Spec §7 at the bg read site: the command killed ITSELF, so the descriptor
+    # must not read as imp having killed the agent's tool (returncode < 0 is what
+    # the providers turn into killed_tool_uses).
+    async def main() -> None:
+        from imp.agents.tools.bg import _sweep_bg
+        ctx = _ctx(tmp_path)
+        try:
+            out = await _spawn(ctx, "kill -9 $$")
+            bp = ctx.background_processes[out["id"]]
+            with anyio.fail_after(30):      # deadlock backstop only
+                await bp.proc.wait()
+            await _sweep_bg(ctx)
+            snap = json.loads(await get_registry()["bash_output"].async_invoke(
+                ctx, {"id": out["id"]}))
+            assert snap["returncode"] == 137
+            assert "kill_reason" not in snap
+        finally:
+            await _cleanup(ctx)
+
+    anyio.run(main)
+
+
+def test_an_imp_killed_background_command_keeps_its_negative_returncode(
+    tmp_path: Path,
+) -> None:
+    # The other half of the same invariant: imp's own kill stays negative, or the
+    # provider stops recording it in killed_tool_uses.
+    async def main() -> None:
+        from imp.agents.tools.bg import terminate_background_processes
+        ctx = _ctx(tmp_path)
+        out = await _spawn(ctx, "while :; do sleep 5; done")
+        await terminate_background_processes(ctx)
+        snap = json.loads(await get_registry()["bash_output"].async_invoke(
+            ctx, {"id": out["id"]}))
+        assert snap["returncode"] < 0
+        assert snap["kill_reason"] == "interrupted"
+
+    anyio.run(main)

@@ -25,10 +25,9 @@ caller's checkout nor the quest's own worktree.
 Your home directory is a **copy-on-write view of the real home**: the real
 toolchains, caches, configs, and model credentials are all visible. Writes to
 home — new files, config edits, a global git identity — are captured in a
-throwaway overlay and discarded when the command that made them ends; the real
-home is never mutated. Each command starts from the real home again, so a `pip
-install --user` or `git config --global` will not be there for the next one — do
-it in the same command that needs it, or install into the worktree.
+throwaway overlay and discarded when you finish; the real home is never
+mutated. The overlay lasts your whole run, so a `pip install --user` or
+`git config --global` in one command is still there in the next.
 
 **The full-suite rule does not bind you here.** Your worktree is disposable and your
 job is empirical: if answering the question needs a patched tree, a reconstructed

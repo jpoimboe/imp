@@ -125,9 +125,9 @@ async def test_codex_interrupt_commits_cancel_before_abandonable_awaits(
         await hung.wait()
         return []
 
-    # codex_runner binds terminate_running_processes at module top: patch that module, not context.
+    # codex_runner binds terminate_tool_processes at module top: patch that module, not context.
     monkeypatch.setattr(
-        "imp.providers.codex_runner.terminate_running_processes", _hang)
+        "imp.providers.codex_runner.terminate_tool_processes", _hang)
 
     class _Ctx:
         def __init__(self) -> None:

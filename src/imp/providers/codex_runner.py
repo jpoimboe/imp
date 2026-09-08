@@ -2,7 +2,7 @@
 # Copyright 2026 Josh Poimboeuf
 """CodexAgentRunner — the heavy lifting for the `codex` provider.
 
-Implements: interrupt() with three effects, fail-fast preflight(), and
+Implements: interrupt() with two effects, fail-fast preflight(), and
 process_event() for basic event types. Native writes need no runner-side guard:
 codex's own `read-only` sandbox refuses them.
 """
@@ -39,7 +39,7 @@ from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
     request_bracketed,
-    terminate_running_processes,
+    terminate_tool_processes,
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
@@ -588,7 +588,10 @@ class CodexSession(ObserveSession):
 
         # Cap trip from inside the MCP wrapper → tear the turn down + bail.
         if state.abort_requested:
-            await terminate_running_processes(self.ctx)
+            # Not a pair today; substituting is still right — the added background
+            # kill is what run()'s finally does moments later anyway, and this path
+            # is ending the run.
+            await terminate_tool_processes(self.ctx)
             yield Error(payload={
                 "category": "config",
                 "kind": "tool_call_ceiling_exceeded",
@@ -846,9 +849,9 @@ class CodexAgentRunner:
                     # None guard: _ctx is assigned mid-_enter (after preflight).
                     # run()'s OWN finally — an abandoned session generator only
                     # GC-finalizes (PEP 525), so bg teardown must not depend on it.
-                    from imp.agents.tools.bg import terminate_background_processes
+                    from imp.agents.tools.context import teardown_tool_context
                     with contextlib.suppress(Exception):
-                        await terminate_background_processes(self._ctx)
+                        await teardown_tool_context(self._ctx)
 
     def _canonical_auth_path(self) -> Path:
         """The canonical codex `auth.json` — honors $CODEX_HOME (fallback
@@ -968,21 +971,17 @@ class CodexAgentRunner:
         return prompt
 
     async def interrupt(self) -> None:
-        """Cancel the run — three effects:
+        """Cancel the run — two effects:
           1. set `self._cancel = True`.
-          2. `terminate_running_processes(ctx)`.
-          3. `terminate_background_processes(ctx)` (Decision 7: pause kills
-             bg processes; persisted tombstones explain it on resume).
-        Idempotent. The `codex exec` child needs no fourth effect: closing the
+          2. `terminate_tool_processes(ctx)` — foreground then background
+             (Decision 7: pause kills bg processes; persisted tombstones
+             explain it on resume). NOT the namespace: interrupt is not by
+             itself the end of the run, so the close stays in run()'s finally.
+        Idempotent. The `codex exec` child needs no third effect: closing the
         event stream group-kills its whole session in codex_exec's teardown."""
-        from imp.agents.tools.bg import terminate_background_processes
         self._cancel = True
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx)
-            # Decision 7: pause kills background processes too (leak
-            # resistance); the persisted tombstones give the resumed agent an
-            # explanation. Idempotent vs the run() finally (both fire on pause).
-            await terminate_background_processes(self._ctx)
+            await terminate_tool_processes(self._ctx)
 
 
 # ── Event mapping ─────────────────────────────────────────────────────────────

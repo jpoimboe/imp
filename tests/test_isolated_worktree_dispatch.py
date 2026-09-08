@@ -398,7 +398,7 @@ def test_build_isolated_policy_threads_pythonpath(monkeypatch, tmp_path):
 
 def test_attach_isolated_home_overlay_root_is_sibling_of_spike(tmp_path, monkeypatch):
     # AC 7 (unit): the overlay ROOT is a SIBLING of the spike worktree (keyed by
-    # its name), spawns mint their own layers under it, and cleanup removes it.
+    # its name), a keeper mints its layer under it, and cleanup removes it.
     import imp.agents.subagents as subagents
     from imp.engine.sandbox import HomeLayer, prepare_spawn_policy
     monkeypatch.setattr("imp.engine.sandbox.overlay_mode", lambda _b, _h: True)

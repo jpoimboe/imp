@@ -4514,7 +4514,7 @@ def test_attach_home_layer_overlay_creates_sibling_root(tmp_path, monkeypatch):
     root = tmp_path / "steps" / "build" / "coder.overlay"
     transcript_dir = tmp_path / "steps" / "build" / "coder"
     assert pol.overlay_root.path == str(root) and root.is_dir()
-    # the STEP policy carries a plain layer; each spawn mints its own under the root
+    # the STEP policy carries a plain layer; a keeper mints one under the root
     assert pol.home_layer == HomeLayer(home="/home/u")
     # SIBLING of transcript_dir (not a child) — survives its rmtree on reincarnation.
     assert root.parent == transcript_dir.parent and root != transcript_dir
@@ -4625,7 +4625,7 @@ def test_sandbox_off_shape_with_overlay_root_builds_bare_argv(tmp_path, monkeypa
     assert pol.overlay_root and not pol.home_layer.is_overlay   # the decorated shape
     off = dataclasses.replace(pol, active=False)
     assert build_sandbox_spawn("echo hi", cwd="/wt", policy=off,
-                               engine_env={}, environ={}).argv == ["sh", "-c", "echo hi"]
+                               engine_env={}, environ={}).argv[:2] == ["sh", "-c"]
     cleanup()
 
 
@@ -4649,7 +4649,7 @@ def test_warn_if_no_overlay_silent_when_available(monkeypatch):
 
 def test_attach_home_layer_records_probed_userxattr(tmp_path, monkeypatch):
     # AC 6: the probe's answer reaches the spawn unchanged — it rides on the
-    # overlay root and lands on the layer each spawn mints: True mounts WITH
+    # overlay root and lands on the layer a keeper mints: True mounts WITH
     # userxattr, False mounts without, and both are real COW overlays.
     from imp.engine import executor as ex
     from imp.engine.sandbox import prepare_spawn_policy

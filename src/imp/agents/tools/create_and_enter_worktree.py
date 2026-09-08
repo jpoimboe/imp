@@ -18,6 +18,7 @@ from imp.engine.backoff import interruptible_sleep
 from imp.engine.env import engine_env
 from imp.engine.feedback import truncate_detail
 from imp.engine.gates import ScriptOutputExceeded, run_command
+from imp.engine.sandbox import SandboxOpenFailed
 from imp.engine.shim import imp_shim_dir
 
 _DEP_POLL_INTERVAL = 2.0
@@ -91,6 +92,8 @@ async def _run_worktree_setup(ctx: Any, quest: Any) -> None:
     except ScriptOutputExceeded as exc:
         raise FatalToolError(
             f"worktree_setup output cap exceeded: {command}: {exc}") from exc
+    except SandboxOpenFailed as exc:
+        raise FatalToolError(f"worktree_setup failed: {exc}") from exc
     if out["exit"] != 0:
         raise FatalToolError(
             f"worktree_setup failed (exit {out['exit']}): {command}"

@@ -461,14 +461,13 @@ class AnthropicAgentRunner:
                 # AFTER the _build_tools/check_web_capability raise sites — the
                 # finally runs with None when the generator is aclosed before its
                 # first pull or those early raises fire.
-                from imp.agents.tools.bg import terminate_background_processes
+                from imp.agents.tools.context import teardown_tool_context
                 with contextlib.suppress(Exception):
-                    await terminate_background_processes(self._ctx)
+                    await teardown_tool_context(self._ctx)
             await self._close_client()
 
     async def interrupt(self) -> None:
-        from imp.agents.tools.bg import terminate_background_processes
-        from imp.agents.tools.context import terminate_running_processes
+        from imp.agents.tools.context import terminate_tool_processes
         self._cancel = True
         # M5: the run loop's `finally` may have just set _cancel_scope to None and
         # exited the scope. Calling .cancel() on an already-exited anyio CancelScope
@@ -477,11 +476,11 @@ class AnthropicAgentRunner:
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx)
             # Decision 7: pause kills background processes too (leak
             # resistance); the persisted tombstones give the resumed agent an
             # explanation. Idempotent vs the run() finally (both fire on pause).
-            await terminate_background_processes(self._ctx)
+            # No close here: interrupt is not by itself the end of the run.
+            await terminate_tool_processes(self._ctx)
 
 
 class AnthropicSession(PushSession):
