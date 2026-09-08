@@ -784,20 +784,31 @@ def test_close_with_no_grace_skips_sigterm_and_kills_outright() -> None:
         s.close()
 
 
-def test_close_is_idempotent_and_does_not_signal_twice(monkeypatch) -> None:
+def test_close_is_idempotent_and_does_not_repeat_teardown(monkeypatch) -> None:
     s = TerminalSession([sys.executable, "-c", "import time; time.sleep(30)"])
     # -SIGTERM proves the graceful rung fired: a default-disposition child dies of
     # the signal it was actually sent, so the old unconditional kill() reads -SIGKILL.
     first = s.close()
     assert first == -signal.SIGTERM
     signalled: list[int] = []
+    reaped: list[float | None] = []
 
     def spy(sig: int = signal.SIGINT) -> None:
         signalled.append(sig)
 
+    def spy_wait(timeout: float | None = None) -> int:
+        reaped.append(timeout)
+        return first
+
     monkeypatch.setattr(s, "send_signal", spy)
-    assert s.close() == first          # same stored code, no second teardown
-    assert signalled == []             # and nothing re-signalled (pids get recycled)
+    # The reap is the discriminating oracle: every other rung is a no-op for an
+    # already-dead child, so a second close() that ran the teardown body would still
+    # return the cached code and signal nothing. Only the stored-code early return
+    # keeps it out of _proc.wait().
+    monkeypatch.setattr(s._proc, "wait", spy_wait)
+    assert s.close() == first          # same stored code...
+    assert reaped == [], "second close() re-ran teardown instead of returning the stored code"
+    assert signalled == []             # ...and nothing re-signalled (pids get recycled)
     # Polled, not sampled: close()'s drainer.join can expire under a saturated run.
     assert _poll(lambda: not s._drainer.is_alive(),
                  timeout=E2E_POLL_TIMEOUT), "drainer outlived close()"
