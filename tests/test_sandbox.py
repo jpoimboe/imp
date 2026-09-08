@@ -174,6 +174,35 @@ def test_the_bare_shape_hides_the_command_from_its_own_pkill():
     assert needle not in listing                     # on no process's argv, host-side
 
 
+def test_the_bare_shape_matches_a_plain_sh_c():
+    # AC 11a/b: status propagation, set -e, $0/$#/$@ and the command's own stdin
+    # (which `sh -s` would have eaten — that is why it was rejected) are exactly
+    # what `sh -c <command>` gives today. Only that half of the stdin claim is
+    # pinned here: "/dev/null when nothing is piped" is the SPAWN's doing
+    # (_spawn_to_files' stdin=DEVNULL), which this shape change does not touch.
+    assert _run_bare("exit 7").returncode == 7
+    assert _run_bare("true; false").returncode == 1
+    aborted = _run_bare("set -e; echo hello; false; echo unreachable")
+    assert (aborted.returncode, aborted.stdout) == (1, "hello\n")
+    assert _run_bare('echo "[$0] [$#] [$@]"').stdout == "[sh] [0] []\n"
+    piped = _run_bare("cat", stdin="piped-in\n")
+    assert (piped.returncode, piped.stdout) == (0, "piped-in\n")
+    quoted = _run_bare(r"""printf '%s\n' "dq $((1+1))" 'sq' 'lit$eral' 'back\slash'""")
+    assert quoted.stdout.splitlines() == ["dq 2", "sq", "lit$eral", r"back\slash"]
+    # `eval $cmd` unquoted would word-split the value and rejoin on single
+    # spaces, collapsing the run inside the quoted argument.
+    spaced = _run_bare(r"""printf '%s\n' 'two  spaces'""")
+    assert spaced.stdout == "two  spaces\n"
+
+
+def test_the_bare_shape_leaves_no_imp_command_in_a_childs_environment():
+    # AC 11c: the unset keeps the child environment byte-identical to today's. This
+    # is NOT secrecy — /proc/<pid>/environ and `ps e` still show the command, since
+    # they read the exec-time block the unset does not rewrite.
+    assert "IMP_COMMAND" not in _run_bare("env").stdout
+    assert "IMP_COMMAND" not in _run_bare("sh -c env").stdout
+
+
 def test_worktree_and_git_are_rw_bound_at_real_path():
     argv = " ".join(_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--bind /state/worktrees/abc /state/worktrees/abc" in argv
