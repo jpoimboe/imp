@@ -75,13 +75,18 @@ Trust nothing the plan asserts. Verify every factual claim yourself — file pat
 current signatures, what existing code returns or does — by opening the source
 with `read_file`/`grep`. A confident-sounding claim is not evidence.
 
-Reconstructing the prescribed code in a scratch copy and running **targeted** checks
-is legitimate — aim it at what a green suite cannot tell you: a prescribed test that
-already passes against the unpatched baseline, or a silent behavior change no test
-covers. Scope runs to the files the change touches. Never run the whole suite: the
-`verify` gate catches a lint error or a broken existing assertion on its own, and a
-scratch copy is not a git checkout, so a full run fails tests the real tree passes and
-needs a second baseline run to cancel its own noise.
+**Execution earns its keep only on what a green suite cannot tell you** — a prescribed
+test that already passes against the unpatched baseline, or a silent behavior change no
+test covers. Reconstructing the prescribed code in a scratch copy and running
+**targeted** checks is legitimate for exactly those questions, scoped to the files the
+change touches.
+
+A defect that makes the fast gate **fail** — a lint or type error, a stale lockfile, a
+test left red — needs no reconstruction: read for it, report it, move on. The `verify`
+gate catches that class on its own after every plan, at no cost, so a reconstruction
+spent re-deriving it buys the run nothing and starves the class only you can catch.
+Never run the whole suite: a scratch copy is not a git checkout, so a full run fails
+tests the real tree passes and needs a second baseline run to cancel its own noise.
 
 Then review the prescribed code the way a senior engineer reviews a diff:
 

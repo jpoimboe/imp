@@ -430,6 +430,32 @@ def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
     ) in body
 
 
+def test_plan_reviewer_aims_execution_at_what_the_gate_cannot_catch() -> None:
+    body = " ".join(_agent_prompt("plan-reviewer").split())
+    assert (
+        "**Execution earns its keep only on what a green suite cannot tell "
+        "you** — a prescribed test that already passes against the unpatched "
+        "baseline, or a silent behavior change no test covers. Reconstructing "
+        "the prescribed code in a scratch copy and running **targeted** checks "
+        "is legitimate for exactly those questions, scoped to the files the "
+        "change touches."
+    ) in body
+    assert (
+        "A defect that makes the fast gate **fail** — a lint or type error, a "
+        "stale lockfile, a test left red — needs no reconstruction: read for "
+        "it, report it, move on. The `verify` gate catches that class on its "
+        "own after every plan, at no cost, so a reconstruction spent "
+        "re-deriving it buys the run nothing and starves the class only you "
+        "can catch. Never run the whole suite: a scratch copy is not a git "
+        "checkout, so a full run fails tests the real tree passes and needs a "
+        "second baseline run to cancel its own noise."
+    ) in body
+    assert (
+        "the `verify` gate catches a lint error or a broken existing "
+        "assertion on its own"
+    ) not in body
+
+
 def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:
     from imp.engine.loader import parse_agent_file
     path = pathlib.Path(
