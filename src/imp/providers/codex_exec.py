@@ -116,8 +116,12 @@ async def _run_exec(
     assert stdin is not None and stdout is not None and stderr is not None
     stderr_task = asyncio.create_task(_drain_stderr(stderr, current_stderr_sink.get()))
     try:
-        stdin.write(prompt.encode("utf-8"))
-        await stdin.drain()
+        # A child that exits before draining the prompt (a codex too old for --json
+        # rejects the flag and exits) breaks the pipe; its exit code and stderr are
+        # the real diagnosis, so fall through to the read loop instead of raising here.
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            stdin.write(prompt.encode("utf-8"))
+            await stdin.drain()
         stdin.close()  # codex reads stdin to EOF: without the close every turn hangs
 
         while True:

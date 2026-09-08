@@ -141,6 +141,13 @@ sys.stderr.flush()
 sys.exit(3)
 """
 
+_EARLY_EXIT = """\
+import sys
+sys.stderr.write("error: unexpected argument '--json' found\\n")
+sys.stderr.flush()
+sys.exit(2)
+"""
+
 _FAILING_CHATTY = """\
 import sys
 sys.stdin.read()
@@ -492,3 +499,22 @@ async def test_cancelling_the_consumer_reaps_the_whole_child_group(
     child, grandchild = (int(x) for x in seen[0].item.text.split())
     _await_death(child, f"codex child {child} survived cancellation")
     _await_death(grandchild, f"codex grandchild {grandchild} survived cancellation")
+
+
+@pytest.mark.anyio
+async def test_a_child_exiting_before_the_prompt_lands_still_raises_with_its_stderr(
+        tmp_path: Path) -> None:
+    """A child too old for --json exits before consuming a multi-MiB prompt,
+    breaking the pipe; the error must carry the exit code and stderr."""
+    exe = _fake_codex(tmp_path, _EARLY_EXIT)
+    sink = StderrSink(tmp_path / "stderr.log")
+    token = current_stderr_sink.set(sink)
+    try:
+        with pytest.raises(CodexExecError) as excinfo:
+            await _collect(exe, "x" * (1024 * 1024))
+        msg = str(excinfo.value)
+        assert "code 2" in msg
+        assert "error: unexpected argument '--json' found" in msg
+        assert "error: unexpected argument '--json' found" in (sink.tail() or "")
+    finally:
+        current_stderr_sink.reset(token)
