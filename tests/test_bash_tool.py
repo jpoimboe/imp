@@ -125,28 +125,49 @@ _DENIED_WRITE_STDERR = (
 )
 
 
-def _sandboxed_sh(monkeypatch: pytest.MonkeyPatch, script: str) -> None:
-    """Run `script` through the REAL wrapper minus bwrap: the trailing
-    `sh -c <sentinel script> <script>` argv build_sandbox_spawn emits. The tool
-    believes the sandbox is active, the entry marker is emitted by the outer
-    shell, and these tests move with the wrapper instead of re-encoding it."""
-    import imp.agents.tools.bash as bashmod
-    from tests.test_sandbox import wrapper_argv
-    monkeypatch.setattr(
-        bashmod, "build_sandbox_spawn",
-        lambda command, **kw: SandboxSpawn(argv=wrapper_argv(script),
-                                           env=dict(os.environ)))
+class _RunsOnTheHost:
+    """A stand-in namespace whose join runs `script` through a plain sh -c on the
+    host: the tool believes the sandbox is active and takes the join path, without
+    a real keeper. base_policy makes the reuse rule adopt it."""
+
+    def __init__(self, base_policy: object, script: str) -> None:
+        self.base_policy = base_policy
+        self._script = script
+
+    def join(self, command: str, *, cwd: str, engine_env: dict) -> SandboxSpawn:
+        return SandboxSpawn(argv=["sh", "-c", self._script], env=dict(os.environ))
+
+    def close(self) -> None:
+        pass
+
+
+def _joined_sh(ctx: ToolContext, script: str) -> None:
+    ctx.sandbox_ns = _RunsOnTheHost(ctx.base_sandbox_policy, script)
+
+
+def _unopened_ns(ctx: ToolContext):
+    """A REAL SandboxNamespace with dummy fds and no keeper, so join() — the
+    production argv and env builder — runs verbatim. Only for tests that capture
+    the spawn and never let it happen: it must never be close()d or joined for
+    real, since close() would os.close(71) and then call .wait() on None."""
+    from imp.engine.sandbox import SandboxNamespace
+    pol = ctx.base_sandbox_policy
+    ctx.sandbox_ns = SandboxNamespace(
+        policy=pol, base_policy=pol,
+        ns_fds=(("user", 71), ("mnt", 72), ("pid", 73), ("uts", 74), ("ipc", 75)),
+        outer_user_fd=None, ns_init_pid=0, err_fd=-1, proc=None)
+    return ctx.sandbox_ns
 
 
 @pytest.mark.parametrize("message", _DENIED_WRITE_STDERR)
 def test_bash_denied_write_carries_sandbox_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, message: str,
+    tmp_path: Path, message: str,
 ) -> None:
     # AC 3: active policy + nonzero exit + a mask-shaped stderr marker in any
     # casing => the verbatim note BESIDE the untouched OS error.
-    _sandboxed_sh(monkeypatch, f"echo {shlex.quote(message)} >&2; exit 128")
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
+    _joined_sh(ctx, f"echo {shlex.quote(message)} >&2; exit 128")
     out = json.loads(_run_bash(
         ctx, {"command": "git update-ref refs/heads/main HEAD"}))
     assert out["returncode"] == 128
@@ -154,26 +175,22 @@ def test_bash_denied_write_carries_sandbox_note(
     assert message in out["stderr"]     # the raw OS error is still reported
 
 
-def test_bash_no_sandbox_note_on_success(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_bash_no_sandbox_note_on_success(tmp_path: Path) -> None:
     # AC 4a: a marker on a command that SUCCEEDED is not a denial.
-    _sandboxed_sh(monkeypatch, "echo 'warning: Read-only file system' >&2; exit 0")
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
+    _joined_sh(ctx, "echo 'warning: Read-only file system' >&2; exit 0")
     out = json.loads(_run_bash(ctx, {"command": "x"}))
     assert out["returncode"] == 0
     assert "sandbox_note" not in out
 
 
-def test_bash_no_sandbox_note_without_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_bash_no_sandbox_note_without_marker(tmp_path: Path) -> None:
     # AC 4b: `Permission denied` is deliberately NOT a marker — it is common for
     # unrelated reasons (non-executable file, missing tool).
-    _sandboxed_sh(monkeypatch, "echo 'sh: ./x: Permission denied' >&2; exit 126")
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
+    _joined_sh(ctx, "echo 'sh: ./x: Permission denied' >&2; exit 126")
     out = json.loads(_run_bash(ctx, {"command": "./x"}))
     assert out["returncode"] == 126
     assert "Permission denied" in out["stderr"]
@@ -212,12 +229,12 @@ def test_bash_cap_killed_command_carries_no_sandbox_note(
     from imp.agents.tools import limits
     monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
     monkeypatch.setattr(bash_mod, "_FG_CAP_POLL_S", 0.05)
-    _sandboxed_sh(
-        monkeypatch,
-        "echo 'fatal: cannot lock ref refs/heads/main' >&2; "
-        f"{_THREE_LONG_LINES}; sleep 30")
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
+    _joined_sh(
+        ctx,
+        "echo 'fatal: cannot lock ref refs/heads/main' >&2; "
+        f"{_THREE_LONG_LINES}; sleep 30")
 
     async def go() -> dict:
         with anyio.fail_after(60):      # deadlock backstop only
@@ -229,19 +246,17 @@ def test_bash_cap_killed_command_carries_no_sandbox_note(
     assert "sandbox_note" not in out
 
 
-def test_bash_sandbox_note_fires_past_display_cap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_bash_sandbox_note_fires_past_display_cap(tmp_path: Path) -> None:
     # AC 5: the note is derived from the FULL post-strip stderr. 40 KB of filler
     # pushes the refusal past the 30 KB display cut, so the RETURNED stderr no
     # longer carries it — the note must still fire.
-    _sandboxed_sh(
-        monkeypatch,
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    _joined_sh(
+        ctx,
         "python3 -c 'import sys; sys.stderr.write((\"E\" * 99 + chr(10)) * 400)'; "
         "echo 'fatal: cannot lock ref refs/heads/main: Read-only file system' >&2; "
         "exit 128")
-    ctx = _ctx(tmp_path)
-    ctx.base_sandbox_policy = _active_policy(tmp_path)
     out = json.loads(_run_bash(
         ctx, {"command": "git update-ref refs/heads/main HEAD"}))
     assert out["returncode"] == 128
@@ -253,21 +268,26 @@ def test_bash_sandbox_note_fires_past_display_cap(
 def test_bash_reports_sandbox_spawn_failure_distinctly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import imp.agents.tools.bash as bashmod
-    # Simulate a sandboxed spawn that failed to ENTER: an argv that exits nonzero
-    # and never emits the entry sentinel (no real bwrap). Every attempt fails, so
-    # the tool retries to exhaustion and returns the setup-failure result.
-    monkeypatch.setattr(
-        bashmod, "build_sandbox_spawn",
-        lambda command, **kw: SandboxSpawn(argv=["sh", "-c", "exit 3"],
-                                           env=dict(os.environ)))
-    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    # AC 9a/9b: the open exhausted its budget, so NO command was spawned — the
+    # result says so, carries no output at all, and cannot leak the sentinel.
+    from imp.engine.sandbox import (
+        SANDBOX_ENTERED_MARKER,
+        SandboxNamespace,
+        SandboxOpenFailed,
+    )
+
+    def boom(**kw: object) -> None:
+        raise SandboxOpenFailed("bwrap: Can't bind mount /nope")
+
+    monkeypatch.setattr(SandboxNamespace, "open", staticmethod(boom))
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "x"}))
     assert out["status"] == "sandbox_setup_failed"
     assert "did NOT run" in out["error"]
-    assert out["returncode"] == 3
+    assert (out["stdout"], out["stderr"]) == ("", "")
+    assert SANDBOX_ENTERED_MARKER not in json.dumps(out)
+    assert "returncode" not in out          # nothing ran, so there is none
 
 
 def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
@@ -279,14 +299,14 @@ def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
 
 
 def test_bash_syntax_error_is_a_plain_result_not_a_spawn_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     # AC 1/2: an unterminated backquote cannot suppress the sentinel, so the
     # command's own exit 2 and stderr are reported and NOTHING is retried.
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    _sandboxed_sh(monkeypatch, 'echo "`')
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
+    _joined_sh(ctx, 'echo "`')
     ctx.event_log = _RecLog()
     out = json.loads(_run_bash(ctx, {"command": 'echo "`'}))
     assert "status" not in out                       # not a sandbox-setup failure
@@ -303,87 +323,29 @@ _BWRAP_ERR = "bwrap: Can't bind mount /nope: No such file or directory"
 def test_bash_sandbox_spawn_failure_emits_event(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import imp.agents.tools.bash as bashmod
-    script = f"printf '%s\\n' {shlex.quote(_BWRAP_ERR)} >&2; exit 3"
-    monkeypatch.setattr(
-        bashmod, "build_sandbox_spawn",
-        lambda command, **kw: SandboxSpawn(argv=["sh", "-c", script],
-                                           env=dict(os.environ)))
-    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    # Retry is owned by open(); REPORTING stays with the caller. This pins the
+    # caller's half: given N callbacks, the tool emits N breadcrumbs with its own
+    # wording plus the terminal warning. That open() really fires one callback per
+    # failed attempt over the 5-attempt budget is Part 1's pin
+    # (test_sandbox.py::test_open_retries_the_whole_spawn_budget_and_reports_each_attempt),
+    # not this fake's loop — which is why the numbers here come from `boom`.
+    from imp.engine.sandbox import SandboxNamespace, SandboxOpenFailed
+
+    def boom(*, policy, engine_env, environ, on_retry=None):
+        for attempt in range(2, 6):
+            on_retry(attempt, _BWRAP_ERR)
+        raise SandboxOpenFailed(_BWRAP_ERR)
+
+    monkeypatch.setattr(SandboxNamespace, "open", staticmethod(boom))
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
     ctx.event_log = _RecLog()
     json.loads(_run_bash(ctx, {"command": "x"}))
     warns = ctx.event_log.warnings()
-    # 4 retry breadcrumbs (attempts 2..5) then the terminal setup-failure warning.
     assert [w["reason"] for w in warns] == ["sandbox-spawn-failed"] * 5
     assert "retrying (2/5)" in warns[0]["message"]
     assert "retrying (5/5)" in warns[3]["message"]
-    # AC 5a: bwrap's reason rides BOTH foreground emit paths — every retry
-    # breadcrumb and the terminal overlay-setup warning.
     assert [w["detail"] for w in warns] == [_BWRAP_ERR] * 5
-
-
-def test_bash_retries_then_succeeds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # `bash()` builds `argv` ONCE (above the retry region) and the
-    # loop re-spawns that same argv on each attempt — exactly as production absorbs
-    # a transient bwrap userns failure. So the retry variation must be driven
-    # through the seam the loop re-invokes (the spawn itself), NOT build_sandbox_spawn
-    # (off the retry path — called once). A stateful counter-file argv makes the
-    # fixed command fail (no marker, exit 3) on the first two spawns and enter the
-    # sandbox (emit the marker) on the 3rd.
-    import shlex
-
-    import imp.agents.tools.bash as bashmod
-    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    counter = tmp_path / "spawn-count"
-    q = shlex.quote(str(counter))
-    script = (
-        f"n=$(cat {q} 2>/dev/null || echo 0); n=$((n+1)); "
-        f'echo "$n" > {q}; '
-        f'if [ "$n" -ge 3 ]; then '
-        f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo done; "
-        f"else exit 3; fi")
-    monkeypatch.setattr(
-        bashmod, "build_sandbox_spawn",
-        lambda command, **kw: SandboxSpawn(argv=["sh", "-c", script],
-                                           env=dict(os.environ)))
-    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
-    ctx = _ctx(tmp_path)
-    ctx.base_sandbox_policy = _active_policy(tmp_path)
-    ctx.event_log = _RecLog()
-    out = json.loads(_run_bash(ctx, {"command": "x"}))
-    assert "status" not in out                           # healthy on the 3rd attempt
-    assert out["returncode"] == 0
-    assert "done" in out["stdout"]
-    assert counter.read_text().strip() == "3"            # 2 failed spawns + 1 success
-    warns = ctx.event_log.warnings()
-    assert [w["reason"] for w in warns] == ["sandbox-spawn-failed"] * 2
-    assert "retrying (2/5)" in warns[0]["message"]
-    assert "retrying (3/5)" in warns[1]["message"]
-
-
-def test_bash_healthy_sandboxed_command_strips_marker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import imp.agents.tools.bash as bashmod
-    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
-    monkeypatch.setattr(
-        bashmod, "build_sandbox_spawn",
-        lambda command, **kw: SandboxSpawn(
-            argv=["sh", "-c",
-                  f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo real >&2; "
-                  "echo out"],
-            env=dict(os.environ)))
-    ctx = _ctx(tmp_path)
-    ctx.base_sandbox_policy = _active_policy(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "x"}))
-    assert "status" not in out                          # healthy result
-    assert SANDBOX_ENTERED_MARKER not in out["stderr"]  # marker stripped
-    assert "real" in out["stderr"]
-    assert out["returncode"] == 0
 
 
 def test_bash_bare_command_never_flagged_spawn_failure(tmp_path: Path) -> None:
@@ -631,30 +593,35 @@ def test_bash_relative_cd_works(tmp_path: Path) -> None:
     assert str(sub) in out["stdout"]
 
 
-def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bash_joins_the_namespace_under_an_active_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An active policy no longer builds a per-call bwrap: it joins the run's
+    # keeper. The command is off argv, and the pinned ns fds must be inherited by
+    # the spawn or /proc/self/fd/N names nothing in the child.
     import imp.agents.tools.bash as bashmod
-    from imp.engine.sandbox import SandboxPolicy
 
     captured: dict[str, object] = {}
 
     async def fake_open_process(argv: list[str], **kw: object) -> object:
         captured["argv"] = argv
-        raise RuntimeError("stop after capture")   # we only assert the argv
+        captured["env"] = kw["env"]
+        captured["pass_fds"] = kw["pass_fds"]
+        raise RuntimeError("stop after capture")   # we only assert the spawn
 
     monkeypatch.setattr(bashmod.anyio, "open_process", fake_open_process)
     ctx = _ctx(tmp_path)
-    ctx.base_sandbox_policy = SandboxPolicy(
-        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
-        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
-        secret_dirs=(), secret_files=(),
-        child_env=(("PATH", "/usr/bin"),), network=True, note="",
-    )
-    # _run_bash propagates the RuntimeError out via anyio.run
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    _unopened_ns(ctx)
     with pytest.raises(RuntimeError):
         _run_bash(ctx, {"command": "echo hi"})
-    assert captured["argv"][0] == "bwrap"
-    assert captured["argv"][-4:-2] == ["sh", "-c"]
-    assert captured["argv"][-1] == "echo hi"
+    argv = captured["argv"]
+    assert argv[0] == "nsenter"
+    assert argv[-3:-1] == ["sh", "-c"]
+    assert "echo hi" not in argv[-1]                   # off argv (AC 10)
+    assert captured["env"]["IMP_COMMAND"] == "echo hi"
+    assert captured["env"]["IMP_CWD"] == str(tmp_path)
+    assert tuple(captured["pass_fds"]) == (71, 72, 73, 74, 75)
 
 
 def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1198,31 +1165,6 @@ def test_bash_cap_killed_runaway_reports_clipped_output(
     assert ctx.running_processes == []
 
 
-def test_bash_sandbox_setup_failure_clips_and_discloses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # AC 5b: the sandbox-setup-failure branch returns the same clipped text with the
-    # same notice + spill as any other branch — no branch returns altered output
-    # without disclosing it. AC 5c: the four RETRIED attempts (whose output is
-    # discarded) write no spill file, so exactly one file exists.
-    import imp.agents.tools.bash as bashmod
-    monkeypatch.setattr(
-        bashmod, "build_sandbox_spawn",
-        lambda command, **kw: SandboxSpawn(
-            argv=["sh", "-c", "python3 -c 'print(\"L\" * 28000)'; exit 3"],
-            env=dict(os.environ)))
-    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
-    ctx = _ctx(tmp_path)
-    ctx.base_sandbox_policy = _active_policy(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "x"}))
-    assert out["status"] == "sandbox_setup_failed"
-    assert out["stdout"].split("\n")[0] == "L" * MATCH_LINE_CAP_BYTES + "…[truncated]"
-    assert out["notice"].startswith("1 long line clipped at 2000 chars. [")
-    spilled = list((tmp_path / "tool-results").iterdir())
-    assert len(spilled) == 1
-    assert spilled[0].read_bytes() == b"L" * 28_000 + b"\n"
-
-
 def test_bash_clips_long_line_on_stderr_and_sums_cross_stream_count(
     tmp_path: Path,
 ) -> None:
@@ -1407,6 +1349,7 @@ def test_bash_foreground_spawns_with_the_sandbox_child_env(
     monkeypatch.setattr(bashmod.anyio, "open_process", fake_open_process)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _secret_policy(tmp_path)
+    _unopened_ns(ctx)
     with pytest.raises(RuntimeError):
         _run_bash(ctx, {"command": "echo hi"})
     env = captured["env"]
@@ -1424,7 +1367,7 @@ def test_bash_background_spawns_with_the_sandbox_child_env(
     monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
     captured: dict[str, object] = {}
 
-    async def fake_spawn_background(ctx, *, command, argv, cwd, env):
+    async def fake_spawn_background(ctx, *, command, argv, cwd, env, pass_fds=()):
         captured["env"] = env
         return "bg1"
 
@@ -1432,6 +1375,7 @@ def test_bash_background_spawns_with_the_sandbox_child_env(
     ctx = _ctx(tmp_path)
     ctx.background_enabled = True
     ctx.base_sandbox_policy = _secret_policy(tmp_path)
+    _unopened_ns(ctx)
     assert _run_bash(ctx, {"command": "echo hi", "run_in_background": True}) == "bg1"
     env = captured["env"]
     assert "IMP_TELEGRAM_TOKEN" not in env

@@ -17,7 +17,6 @@ import contextlib
 import json
 import os
 import signal
-from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,7 +24,11 @@ import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools import limits as _limits
-from imp.agents.tools.context import ToolContext, kill_process_tree
+from imp.agents.tools.context import (
+    ToolContext,
+    ensure_tool_namespace,
+    kill_process_tree,
+)
 from imp.agents.tools.limits import (
     BASH_FOREGROUND_TIMEOUT_MAX_S,
     BASH_FOREGROUND_TIMEOUT_S,
@@ -38,12 +41,9 @@ from imp.engine.env import engine_env
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_FAILED_MESSAGE,
     SANDBOX_SPAWN_MAX_ATTEMPTS,
+    SandboxOpenFailed,
     build_sandbox_spawn,
-    prepare_spawn_policy,
-    sandbox_failure_detail,
-    sandbox_spawn_backoff_delay,
-    sandbox_spawn_failed,
-    strip_sandbox_marker,
+    normalize_returncode,
 )
 from imp.engine.shim import imp_shim_dir
 
@@ -92,12 +92,6 @@ def _emit_spawn_retry_warning(ctx: ToolContext, command: str, next_attempt: int,
                 "command": command[:_EVENT_COMMAND_PREVIEW_LEN],
                 "reason": "sandbox-spawn-failed", "detail": detail,
             })
-
-
-@dataclass(frozen=True)
-class _SpawnRetry:
-    """Retry signal from one foreground attempt, carrying the sandbox's own stderr line."""
-    detail: str
 
 
 def _effective_foreground_timeout(timeout: float | None) -> float:
@@ -190,26 +184,51 @@ async def bash(
         pythonpath=ctx.pythonpath,
     )
     policy = ctx.sandbox_policy
-    spawn = build_sandbox_spawn(
-        command, cwd=cwd_path,
-        policy=prepare_spawn_policy(policy) if policy is not None else None,
-        engine_env=eng, environ=os.environ,
-        shim_dir=str(imp_shim_dir(qdir)) if qdir is not None else "")
-    argv, env = spawn.argv, spawn.env
+    coordinator = getattr(ctx, "coordinator", None)
     if run_in_background:
         if not ctx.background_enabled:
             # Future-provider defense: a provider exposing registry bash without
             # the bg wiring (injection + sweeps + teardown) gets a loud refusal
             # with the foreground alternative rather than an unmanageable orphan.
+            # Above the spawn build: refusing costs no keeper.
             raise ValueError(
                 "run_in_background is not supported under this provider's "
                 "tool loop; run the command in the foreground instead")
+    else:
+        # §4: a pending pause must not spawn the child (mirrors the bg-process
+        # contract) — and opening the keeper IS spawning one, so this precedes it.
+        await tool_checkpoint(coordinator, None)
+    if policy is not None and policy.active:
+        try:
+            ns = await ensure_tool_namespace(
+                ctx, engine_env=eng,
+                on_retry=lambda n, detail: _emit_spawn_retry_warning(
+                    ctx, command, n, detail))
+        except SandboxOpenFailed as failure:
+            # The budget is exhausted and NO command was spawned, so there is no
+            # output and no return code to report — only why nothing ran.
+            _emit_overlay_setup_warning(ctx, command, failure.detail)
+            return json.dumps({"stdout": "", "stderr": "",
+                               "status": "sandbox_setup_failed",
+                               "error": SANDBOX_SPAWN_FAILED_MESSAGE},
+                              ensure_ascii=False)
+        spawn = ns.join(command, cwd=cwd_path, engine_env=eng)
+    else:
+        # /sandbox off, or no policy at all: the bare shape, whose command also
+        # travels in $IMP_COMMAND. shim_dir is ignored under an active policy, so
+        # the join loses nothing by not passing it. Dropping prepare_spawn_policy
+        # here is a strict no-op: it early-returns the SAME object for an inactive
+        # policy, so it never reached the ref-reexpose or layer-minting work here.
+        spawn = build_sandbox_spawn(
+            command, cwd=cwd_path, policy=policy, engine_env=eng,
+            environ=os.environ,
+            shim_dir=str(imp_shim_dir(qdir)) if qdir is not None else "")
+    argv, env, pass_fds = spawn.argv, spawn.env, spawn.pass_fds
+    if run_in_background:
         from imp.agents.tools.bg import spawn_background
         return await spawn_background(
-            ctx, command=command, argv=argv, cwd=cwd_path, env=env)
-    # §4: a pending pause must not spawn the child (mirrors the bg-process contract).
-    coordinator = getattr(ctx, "coordinator", None)
-    await tool_checkpoint(coordinator, None)
+            ctx, command=command, argv=argv, cwd=cwd_path, env=env,
+            pass_fds=pass_fds)
 
     # Foreground now spawns to scratch FILES via the shared core (like bg.py), not
     # pipes: this is what makes a deadline-exceeding command promotable (Part 3)
@@ -221,202 +240,185 @@ async def bash(
     d = _bg_dir(ctx)
     d.mkdir(parents=True, exist_ok=True)
 
-    async def _run_once(attempt: int) -> str | _SpawnRetry:
-        stem = f"fg-{uuid4().hex}"
-        out_path = d / f"{stem}.out"
-        err_path = d / f"{stem}.err"
-        proc = await _spawn_to_files(
-            argv, out_path=out_path, err_path=err_path, cwd=cwd_path, env=env)
-        ctx.running_processes.append(proc)
+    stem = f"fg-{uuid4().hex}"
+    out_path = d / f"{stem}.out"
+    err_path = d / f"{stem}.err"
+    proc = await _spawn_to_files(
+        argv, out_path=out_path, err_path=err_path, cwd=cwd_path, env=env,
+        pass_fds=pass_fds)
+    ctx.running_processes.append(proc)
 
-        # Decision 10 ticker: sweeps the background registry while THIS foreground call
-        # blocks the loop — the only coverage for a long QUIET command. Own
-        # CancelScope, cancelled right after proc.wait() (an uncancelled ticker would
-        # hold the task group open to the fail_after; cancelling the whole group would
-        # race the other pollers). Skipped when the registry is empty.
-        has_bg = bool(ctx.background_processes)
-        ticker_scope = anyio.CancelScope()
+    # Decision 10 ticker: sweeps the background registry while THIS foreground call
+    # blocks the loop — the only coverage for a long QUIET command. Own
+    # CancelScope, cancelled right after proc.wait() (an uncancelled ticker would
+    # hold the task group open to the fail_after; cancelling the whole group would
+    # race the other pollers). Skipped when the registry is empty.
+    has_bg = bool(ctx.background_processes)
+    ticker_scope = anyio.CancelScope()
 
-        async def _bg_ticker() -> None:
-            from imp.agents.tools.bg import _sweep_bg
-            with ticker_scope:
-                while True:
-                    await anyio.sleep(1.0)
-                    await _sweep_bg(ctx)
+    async def _bg_ticker() -> None:
+        from imp.agents.tools.bg import _sweep_bg
+        with ticker_scope:
+            while True:
+                await anyio.sleep(1.0)
+                await _sweep_bg(ctx)
 
-        # Foreground own-cap check: the file-model analogue of the old combined-byte
-        # ceiling. On the ~1 s cadence, stat BOTH scratch files; if their COMBINED
-        # size crosses BG_STREAM_FILE_CAP_BYTES (read through _limits so tests can
-        # shrink it, matching _sweep_bg), SIGKILL the group (single-shot, wait-free,
-        # so proc.wait() returns) and flag `capped`. A cap-kill is cleanup, not a
-        # tool_killed signal — the result carries returncode 0. Own CancelScope,
-        # cancelled after proc.wait().
-        capped = False
-        capcheck_scope = anyio.CancelScope()
+    # Foreground own-cap check: the file-model analogue of the old combined-byte
+    # ceiling. On the ~1 s cadence, stat BOTH scratch files; if their COMBINED
+    # size crosses BG_STREAM_FILE_CAP_BYTES (read through _limits so tests can
+    # shrink it, matching _sweep_bg), SIGKILL the group (single-shot, wait-free,
+    # so proc.wait() returns) and flag `capped`. A cap-kill is cleanup, not a
+    # tool_killed signal — the result carries returncode 0. Own CancelScope,
+    # cancelled after proc.wait().
+    capped = False
+    capcheck_scope = anyio.CancelScope()
 
-        async def _own_cap_poller() -> None:
-            nonlocal capped
-            with capcheck_scope:
-                while True:
-                    await anyio.sleep(_FG_CAP_POLL_S)
-                    try:
-                        total = (os.stat(out_path).st_size
-                                 + os.stat(err_path).st_size)
-                    except OSError:
-                        continue
-                    if total > _limits.BG_STREAM_FILE_CAP_BYTES:
-                        capped = True
-                        await kill_process_tree(proc, signal.SIGKILL)
-                        return
+    async def _own_cap_poller() -> None:
+        nonlocal capped
+        with capcheck_scope:
+            while True:
+                await anyio.sleep(_FG_CAP_POLL_S)
+                try:
+                    total = (os.stat(out_path).st_size
+                             + os.stat(err_path).st_size)
+                except OSError:
+                    continue
+                if total > _limits.BG_STREAM_FILE_CAP_BYTES:
+                    capped = True
+                    await kill_process_tree(proc, signal.SIGKILL)
+                    return
 
-        # §4: a pause landing MID-COMMAND -> SIGKILL the group so proc.wait() returns,
-        # and flag the call to return the terminated-by-pause tombstone. Own
-        # CancelScope, cancelled synchronously the instant proc.wait() returns so a
-        # pause flipping right after a natural completion cannot tombstone it.
-        paused = False
-        pause_scope = anyio.CancelScope()
+    # §4: a pause landing MID-COMMAND -> SIGKILL the group so proc.wait() returns,
+    # and flag the call to return the terminated-by-pause tombstone. Own
+    # CancelScope, cancelled synchronously the instant proc.wait() returns so a
+    # pause flipping right after a natural completion cannot tombstone it.
+    paused = False
+    pause_scope = anyio.CancelScope()
 
-        async def _pause_poller() -> None:
-            nonlocal paused
-            assert coordinator is not None      # poller only started under this guard
-            with pause_scope:
-                while True:
-                    await anyio.sleep(_PAUSE_POLL_S)
-                    if coordinator.should_pause and proc.returncode is None:
-                        paused = True
-                        await kill_process_tree(proc, signal.SIGKILL)
-                        return
+    async def _pause_poller() -> None:
+        nonlocal paused
+        assert coordinator is not None      # poller only started under this guard
+        with pause_scope:
+            while True:
+                await anyio.sleep(_PAUSE_POLL_S)
+                if coordinator.should_pause and proc.returncode is None:
+                    paused = True
+                    await kill_process_tree(proc, signal.SIGKILL)
+                    return
 
+    reaped_by_teardown = False
+    try:
         try:
-            try:
-                with anyio.fail_after(_effective_foreground_timeout(timeout)):
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(_own_cap_poller)
-                        if has_bg:
-                            tg.start_soon(_bg_ticker)
-                        if coordinator is not None:
-                            tg.start_soon(_pause_poller)
-                        await proc.wait()
-                        capcheck_scope.cancel()
-                        if has_bg:
-                            ticker_scope.cancel()
-                        if coordinator is not None:
-                            pause_scope.cancel()
-            except TimeoutError:
-                # Deadline exceeded: PROMOTE, don't kill. Seed the counter, allocate a
-                # canonical bgN, and same-dir rename the fg-<uuid> scratch files to
-                # bgN.* — the child's open write fds stay valid (unchanged inode), so it
-                # keeps writing to the renamed paths. Canonical bgN naming is REQUIRED:
-                # resume counter-seeding scans stream filenames (_FILE_RE) to never
-                # re-alias a transcript-referenced id, and a promoted id is exactly such
-                # an id. Wrap the still-running proc in a BgProc and register it; the
-                # `finally` removes it from running_processes, so it is now managed
-                # solely through the background lifecycle.
-                _seed_counter(ctx)
-                bg_id = ctx.next_bg_id()
-                new_out = d / f"{bg_id}.out"
-                new_err = d / f"{bg_id}.err"
-                os.rename(out_path, new_out)
-                os.rename(err_path, new_err)
-                ctx.background_processes[bg_id] = BgProc(
-                    id=bg_id, proc=proc, out_path=new_out, err_path=new_err,
-                    command=command)
-                root = ctx.project_root.resolve()
-                deadline_s = _effective_foreground_timeout(timeout)
-                note = (
-                    f"foreground command exceeded its {deadline_s:g} s deadline and was "
-                    f'moved to the background; read it with bash_output("{bg_id}") and '
-                    f'stop it with bash_kill("{bg_id}")')
-                return json.dumps({
-                    "id": bg_id,
-                    "pid": proc.pid,
-                    "command": command,
-                    "status": "running",
-                    "note": note,
-                    "out_path": os.path.relpath(new_out.resolve(), root),
-                    "err_path": os.path.relpath(new_err.resolve(), root),
-                }, ensure_ascii=False)
-        finally:
-            with contextlib.suppress(ValueError):
-                ctx.running_processes.remove(proc)
+            with anyio.fail_after(_effective_foreground_timeout(timeout)):
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(_own_cap_poller)
+                    if has_bg:
+                        tg.start_soon(_bg_ticker)
+                    if coordinator is not None:
+                        tg.start_soon(_pause_poller)
+                    await proc.wait()
+                    capcheck_scope.cancel()
+                    if has_bg:
+                        ticker_scope.cancel()
+                    if coordinator is not None:
+                        pause_scope.cancel()
+        except TimeoutError:
+            # Deadline exceeded: PROMOTE, don't kill. Seed the counter, allocate a
+            # canonical bgN, and same-dir rename the fg-<uuid> scratch files to
+            # bgN.* — the child's open write fds stay valid (unchanged inode), so it
+            # keeps writing to the renamed paths. Canonical bgN naming is REQUIRED:
+            # resume counter-seeding scans stream filenames (_FILE_RE) to never
+            # re-alias a transcript-referenced id, and a promoted id is exactly such
+            # an id. Wrap the still-running proc in a BgProc and register it; the
+            # `finally` removes it from running_processes, so it is now managed
+            # solely through the background lifecycle.
+            _seed_counter(ctx)
+            bg_id = ctx.next_bg_id()
+            new_out = d / f"{bg_id}.out"
+            new_err = d / f"{bg_id}.err"
+            os.rename(out_path, new_out)
+            os.rename(err_path, new_err)
+            ctx.background_processes[bg_id] = BgProc(
+                id=bg_id, proc=proc, out_path=new_out, err_path=new_err,
+                command=command)
+            root = ctx.project_root.resolve()
+            deadline_s = _effective_foreground_timeout(timeout)
+            note = (
+                f"foreground command exceeded its {deadline_s:g} s deadline and was "
+                f'moved to the background; read it with bash_output("{bg_id}") and '
+                f'stop it with bash_kill("{bg_id}")')
+            return json.dumps({
+                "id": bg_id,
+                "pid": proc.pid,
+                "command": command,
+                "status": "running",
+                "note": note,
+                "out_path": os.path.relpath(new_out.resolve(), root),
+                "err_path": os.path.relpath(new_err.resolve(), root),
+            }, ensure_ascii=False)
+    finally:
+        try:
+            ctx.running_processes.remove(proc)
+        except ValueError:
+            # Drained by someone else: terminate_tool_processes owns this kill,
+            # so a negative code below is imp's and must stay negative.
+            reaped_by_teardown = True
 
-        # Whole-file read (NOT bg.py's cursor-paged _read_page — that reader is for
-        # incremental background tailing). Bounded by the own-cap kill above. Then
-        # unlink the scratch files: a non-promoted foreground proc leaves nothing.
-        out_bytes = out_path.read_bytes()
-        err_bytes = err_path.read_bytes()
-        for p in (out_path, err_path):
-            with contextlib.suppress(OSError):
-                p.unlink()
-        stdout = out_bytes.decode("utf-8", "replace")
-        stderr = err_bytes.decode("utf-8", "replace")
-        # Detect BEFORE stripping (marker absence is the signal), guarded on whether
-        # the sandbox was active for THIS spawn, then strip so no agent sees the marker.
-        spawn_failed = sandbox_spawn_failed(
-            stderr, sandbox_active=policy is not None and policy.active)
-        stderr = strip_sandbox_marker(stderr)
-        if spawn_failed and attempt < SANDBOX_SPAWN_MAX_ATTEMPTS:
-            # The sandbox never entered the command, so re-spawning is provably safe
-            # (the command never ran). Signal the outer loop to retry after backoff.
-            return _SpawnRetry(sandbox_failure_detail(stderr))
-        # Clip-then-cap, decided ONCE for every branch below: clipping first is what
-        # keeps a pathological line from eating the whole 30 KB budget, and routing
-        # every return through _finish is what makes the advertised invariant
-        # structural — absence of a `notice` means the returned text is byte-exact.
-        clipped_out, n_out = clip_long_lines(stdout)
-        clipped_err, n_err = clip_long_lines(stderr)
-        disp_out, disp_err, over_cap = _cap_combined(clipped_out, clipped_err)
-        clause = _clip_cap_notice_clause(n_out + n_err, over_cap)
-        notice: str | None = None
-        if clause is not None:
-            # The spill body is the RAW decoded output — unclipped and uncapped — so
-            # the exact bytes stay recoverable with an ordinary read_file.
-            full = (f"=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}"
-                    if stderr else stdout)
-            notice = f"{clause} {spill_tool_output(ctx, uuid4().hex, full, preview_bytes=0)}"
+    # Whole-file read (NOT bg.py's cursor-paged _read_page — that reader is for
+    # incremental background tailing). Bounded by the own-cap kill above. Then
+    # unlink the scratch files: a non-promoted foreground proc leaves nothing.
+    out_bytes = out_path.read_bytes()
+    err_bytes = err_path.read_bytes()
+    for p in (out_path, err_path):
+        with contextlib.suppress(OSError):
+            p.unlink()
+    stdout = out_bytes.decode("utf-8", "replace")
+    stderr = err_bytes.decode("utf-8", "replace")
+    # Clip-then-cap, decided ONCE for every branch below: clipping first is what
+    # keeps a pathological line from eating the whole 30 KB budget, and routing
+    # every return through _finish is what makes the advertised invariant
+    # structural — absence of a `notice` means the returned text is byte-exact.
+    clipped_out, n_out = clip_long_lines(stdout)
+    clipped_err, n_err = clip_long_lines(stderr)
+    disp_out, disp_err, over_cap = _cap_combined(clipped_out, clipped_err)
+    clause = _clip_cap_notice_clause(n_out + n_err, over_cap)
+    notice: str | None = None
+    if clause is not None:
+        # The spill body is the RAW decoded output — unclipped and uncapped — so
+        # the exact bytes stay recoverable with an ordinary read_file.
+        full = (f"=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}"
+                if stderr else stdout)
+        notice = f"{clause} {spill_tool_output(ctx, uuid4().hex, full, preview_bytes=0)}"
 
-        def _finish(**fields: object) -> str:
-            result: dict[str, object] = {
-                "stdout": disp_out,
-                "stderr": disp_err,
-                **fields,
-            }
-            if notice is not None:
-                result["notice"] = notice
-            return json.dumps(result, ensure_ascii=False)
+    def _finish(**fields: object) -> str:
+        result: dict[str, object] = {
+            "stdout": disp_out,
+            "stderr": disp_err,
+            **fields,
+        }
+        if notice is not None:
+            result["notice"] = notice
+        return json.dumps(result, ensure_ascii=False)
 
-        if spawn_failed:
-            # Retries exhausted: report distinctly. Such a failure exits immediately,
-            # so it never reaches promotion.
-            _emit_overlay_setup_warning(ctx, command, sandbox_failure_detail(stderr))
-            return _finish(status="sandbox_setup_failed",
-                           error=SANDBOX_SPAWN_FAILED_MESSAGE,
-                           returncode=proc.returncode)
-        if paused:
-            # A pause landed mid-command: the poller SIGKILL'd the group. Return the
-            # terminated-by-pause tombstone (the same shape
-            # terminate_background_processes writes). returncode stays the real
-            # negative signal (an honest kill — unlike the cap path).
-            return _finish(
-                status="killed", kill_reason="interrupted",
-                returncode=(proc.returncode if proc.returncode is not None
-                            else -signal.SIGKILL))
-        # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
-        # SIGKILL we issued was cleanup and must NOT read as tool_killed (the
-        # provider keys that on returncode < 0).
-        returncode = 0 if capped else (
-            proc.returncode if proc.returncode is not None else -signal.SIGKILL)
-        if _sandbox_denied_write(
-                stderr, sandbox_active=policy is not None and policy.active,
-                returncode=returncode):
-            return _finish(returncode=returncode,
-                           sandbox_note=_SANDBOX_DENIAL_NOTE)
-        return _finish(returncode=returncode)
-
-    for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
-        outcome = await _run_once(attempt)
-        if isinstance(outcome, str):
-            return outcome
-        _emit_spawn_retry_warning(ctx, command, attempt + 1, outcome.detail)
-        await anyio.sleep(sandbox_spawn_backoff_delay(attempt))
-    raise AssertionError("foreground retry loop must return on the final attempt")
+    if paused:
+        # A pause landed mid-command: the poller SIGKILL'd the group. Return the
+        # terminated-by-pause tombstone (the same shape
+        # terminate_background_processes writes). returncode stays the real
+        # negative signal (an honest kill — unlike the cap path).
+        return _finish(
+            status="killed", kill_reason="interrupted",
+            returncode=(proc.returncode if proc.returncode is not None
+                        else -signal.SIGKILL))
+    # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
+    # SIGKILL we issued was cleanup and must NOT read as tool_killed (the
+    # provider keys that on returncode < 0). Every other kill imp issued on this
+    # path already returned above; what is left is the command's own doing.
+    returncode = 0 if capped else normalize_returncode(
+        proc.returncode if proc.returncode is not None else -signal.SIGKILL,
+        imp_killed=reaped_by_teardown)
+    if _sandbox_denied_write(
+            stderr, sandbox_active=policy is not None and policy.active,
+            returncode=returncode):
+        return _finish(returncode=returncode,
+                       sandbox_note=_SANDBOX_DENIAL_NOTE)
+    return _finish(returncode=returncode)

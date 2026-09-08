@@ -238,23 +238,25 @@ def test_gate_timeout_kills_group_no_orphan() -> None:
 
 
 def _runs_the_command(pid: int, marker: str) -> bool:
-    """True if `pid` is the shell running the sandboxed command — argv is
-    `sh -c <command>` and the command text carries `marker`. Readable host-side only
-    while the process is alive, so callers probe BEFORE the kill. Excludes the bwrap
-    wrapper, whose argv also carries the command text but starts with `bwrap`."""
+    """The shell actually running the command, host-side. Its cmdline cannot name
+    the command any more — that travels in $IMP_COMMAND, off argv — but the
+    exec-time environment block still does, which is the same reason §2 calls this
+    not-secrecy rather than confidentiality."""
     try:
-        parts = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\x00")
+        parts = Path(f"/proc/{pid}/cmdline").read_bytes().decode(
+            errors="replace").split("\x00")
+        environ = Path(f"/proc/{pid}/environ").read_bytes().decode(errors="replace")
     except OSError:
         return False
-    return parts[:2] == ["sh", "-c"] and any(marker in part for part in parts[2:])
+    return parts[:2] == ["sh", "-c"] and marker in environ
 
 
 @requires_overlay
-def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
-    """AC7: drive the real bash-tool -> terminate_running_processes path (the same
+def test_sigterm_reaches_the_joined_shell_inside_the_keeper() -> None:
+    """AC7: drive the real bash-tool → terminate_running_processes path (the same
     path Ctrl-C hits) under a real COW-overlay policy, and prove killpg
-    SIGTERM->grace->SIGKILL reaps the processes INSIDE the sandbox through the
-    unshare + overlay + bwrap layers. The crux is that the shell actually running the
+    SIGTERM→grace→SIGKILL reaps the processes INSIDE the keeper through the nsenter
+    + unshare + bwrap layers. The crux is that the shell actually running the
     command dies, not merely the top unshare process: it is identified host-side by
     /proc/<pid>/cmdline among the descendants enumerated while the tree is still
     alive. An inner `$$` cannot serve — under a pid namespace it is a namespace-local

@@ -2728,6 +2728,13 @@ def test_retired_per_call_sentinel_machinery_is_gone():
         assert not hasattr(bg, name), f"{name} should be gone from bg.py"
     for field in ("overlay_setup_failed", "overlay_reported", "sandbox_active"):
         assert field not in bg.BgProc.__dataclass_fields__
+    # AC 14b's bash.py half. Named individually because bash KEEPS importing
+    # SANDBOX_SPAWN_FAILED_MESSAGE and SANDBOX_SPAWN_MAX_ATTEMPTS, which are not
+    # part of the sentinel path. (The executor's half is Part 4's, per deferred.md.)
+    import imp.agents.tools.bash as bash
+    for name in ("strip_sandbox_marker", "sandbox_spawn_failed",
+                 "sandbox_failure_detail"):
+        assert not hasattr(bash, name), f"{name} should be gone from bash.py"
 
 
 def test_normalize_returncode_separates_imps_kills_from_the_commands_own():

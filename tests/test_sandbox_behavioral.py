@@ -1207,12 +1207,11 @@ def test_overlay_home_faithful_isolated_and_masked() -> None:
 
 
 @requires_overlay
-def test_overlay_home_write_does_not_persist_across_bash_calls() -> None:
-    # AC 4: each spawn mints its OWN overlay layer, so a $HOME write in one bash
-    # call is NOT visible to the next — the accepted semantics change. The first
-    # call reads its own write back, so the test cannot pass vacuously on a
-    # read-only home; the falsifier below keeps it honest about the mechanism —
-    # the write went to that call's discarded upper, never to the real home.
+def test_overlay_home_write_persists_within_a_run_and_not_across() -> None:
+    # AC 13, the accepted semantics change of §5: the layer is minted once per
+    # NAMESPACE, so a $HOME write in one bash call is readable in the next of the
+    # same agent run. A fresh run gets a fresh layer and starts clean, and the
+    # user's real home (the lowerdir) never sees the file either way.
     root = _make_overlay_root()
     try:
         home = root / "home"
@@ -1223,14 +1222,18 @@ def test_overlay_home_write_does_not_persist_across_bash_calls() -> None:
             r1 = _bash(
                 ctx, 'echo PERSISTED > "$HOME/across.txt" && cat "$HOME/across.txt"')
             assert r1["returncode"] == 0, f"first call failed: {r1}"
-            assert "PERSISTED" in r1["stdout"]      # written and read back in-spawn
+            assert "PERSISTED" in r1["stdout"]
             r2 = _bash(ctx, 'cat "$HOME/across.txt" || echo MISSING')
             assert r2["returncode"] == 0, f"second call did not run: {r2}"
-            assert "MISSING" in r2["stdout"], (
-                f"write leaked into the next bash call: {r2['stdout']!r}")
-            assert "PERSISTED" not in r2["stdout"]
+            assert "PERSISTED" in r2["stdout"], (
+                f"the write did not carry across the call: {r2['stdout']!r}")
             # falsifier: the isolated real home (the lowerdir) never saw the file.
             assert not (home / "across.txt").exists()
+            # and a FRESH agent run starts clean — its own context, its own layer.
+            fresh = _ctx(Path(pol.worktree), pol)
+            r3 = _bash(fresh, 'cat "$HOME/across.txt" || echo MISSING')
+            assert "MISSING" in r3["stdout"], (
+                f"the write leaked into a new agent run: {r3['stdout']!r}")
         finally:
             cleanup()
     finally:
@@ -1238,13 +1241,14 @@ def test_overlay_home_write_does_not_persist_across_bash_calls() -> None:
 
 
 @requires_overlay
-def test_concurrent_background_and_foreground_get_separate_upperdirs() -> None:
-    # Two sandboxed commands CONCURRENTLY LIVE within one step — a background
-    # command still running while a foreground command runs — are the shape that
-    # produced the kernel's ovl_inuse warning back when the upperdir was keyed
-    # per STEP. Each spawn now mints its own layer, so the two mounts share
-    # nothing. The handshake through the shared rw worktree makes the overlap
-    # deterministic rather than timing-dependent: the background command
+def test_concurrent_background_and_foreground_share_one_layer() -> None:
+    # Two sandboxed commands CONCURRENTLY LIVE within one agent run — a background
+    # command still running while a foreground command runs — used to be the
+    # ovl_inuse hazard, because each spawn minted its own layer over one root. The
+    # keeper mints ONE layer and mounts it once, so the hazard is gone by
+    # construction and the two commands share a $HOME, exactly as they share a
+    # process table. The handshake through the shared rw worktree makes the
+    # overlap deterministic rather than timing-dependent: the background command
     # publishes `bg-ready` and then blocks until `release`, which the foreground
     # command creates only AFTER writing and listing its own $HOME.
     root = _make_overlay_root()
@@ -1289,19 +1293,24 @@ def test_concurrent_background_and_foreground_get_separate_upperdirs() -> None:
             assert done["status"] == "exited", f"background unfinished: {done}"
             assert done["returncode"] == 0, f"background call failed: {done}"
 
-            # the smoking gun: on one shared upperdir the still-running
-            # background command's file would show up in the foreground $HOME.
+            # one layer per namespace: the still-running background command's
+            # $HOME write is visible to the concurrent foreground call.
             listed = str(fg["stdout"]).split()
             assert "fg.txt" in listed, f"foreground $HOME listing: {listed}"
-            assert "bg.txt" not in listed, f"live mounts shared an upper: {listed}"
+            assert "bg.txt" in listed, f"the two calls did not share a layer: {listed}"
 
-            # one layer per spawn, each upper holding only its own write.
+            # AC 14c by observable consequence: prepare_spawn_policy mkdtemps a
+            # layer per CALL, and its only tool-path caller is now _open_once —
+            # so two concurrently-live spawns leave exactly ONE, holding both
+            # writes. This is the assertion that would catch a regression to
+            # per-spawn minting; `listed` above would still pass on two layers
+            # if the mounts happened to share an upper.
             layers = sorted(
                 p for p in Path(pol.overlay_root.path).iterdir() if p.is_dir())
-            assert len(layers) == 2, f"expected one layer per spawn, got {layers}"
+            assert len(layers) == 1, f"expected one layer per namespace, got {layers}"
             contents = sorted(
                 sorted(f.name for f in (d / "upper").iterdir()) for d in layers)
-            assert contents == [["bg.txt"], ["fg.txt"]], contents
+            assert contents == [["bg.txt", "fg.txt"]], contents
 
             # the lowerdir — the real home — saw neither write.
             assert sorted(p.name for p in home.iterdir()) == [], "real home mutated"
