@@ -16,7 +16,7 @@ import contextlib
 import dataclasses
 import os
 import signal as _signal
-from collections.abc import AsyncGenerator, Iterable, Iterator
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -477,3 +477,37 @@ async def teardown_tool_context(ctx: ToolContext) -> None:
         await terminate_tool_processes(ctx)
     finally:
         close_sandbox_namespace(ctx)
+
+
+async def ensure_tool_namespace(
+    ctx: ToolContext, *, engine_env: Mapping[str, str],
+    on_retry: Callable[[int, str], None],
+) -> SandboxNamespace:
+    """This run's keeper namespace: opened lazily on the first sandboxed spawn and
+    rebuilt iff the value of ctx.base_sandbox_policy changed since — the namespace
+    is a frozen picture of a bind plan, so it stays valid exactly as long as that
+    plan. A rebuild kills through the normal path FIRST, so a registered background
+    process gets its usual grace and a tombstone that says why.
+
+    open() runs on THIS thread, never in a worker: --die-with-parent is a
+    PR_SET_PDEATHSIG, which the kernel fires when the CREATING THREAD exits, so a
+    thread-pool worker would take the keeper down the moment it retired.
+    """
+    from imp.engine.sandbox import SandboxNamespace
+
+    stale = ctx.sandbox_ns
+    if stale is not None and stale.base_policy != ctx.base_sandbox_policy:
+        # Vacate the slot SYNCHRONOUSLY, before the only await here, and close the
+        # object we captured rather than whatever the slot holds afterwards: a
+        # concurrent call must not adopt a namespace being torn down, nor have the
+        # one it just opened closed out from under it.
+        ctx.sandbox_ns = None
+        try:
+            await terminate_tool_processes(ctx, kill_reason="sandbox-rebuilt")
+        finally:
+            stale.close()  # finally: a cancellation mid-kill must not leak the stale keeper
+    if ctx.sandbox_ns is None:
+        ctx.sandbox_ns = SandboxNamespace.open(
+            policy=ctx.base_sandbox_policy, engine_env=engine_env,
+            environ=os.environ, on_retry=on_retry)
+    return ctx.sandbox_ns

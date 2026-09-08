@@ -612,7 +612,9 @@ class SandboxNamespace:
         attempt so each caller keeps its own runner_warning wording; on exhaustion
         this raises SandboxOpenFailed carrying the detail, and the caller decides
         what to report. Blocking (the keeper handshake is ~7-15ms, the backoffs up
-        to 400ms): async callers run it in a worker thread."""
+        to 400ms), and it must run on the CALLER's own thread: --die-with-parent is
+        a PR_SET_PDEATHSIG, which the kernel fires when the creating THREAD exits,
+        so a keeper opened in a thread-pool worker dies when that worker retires."""
         if not policy.active:
             raise AssertionError("SandboxNamespace.open on an inactive policy")
         for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
@@ -935,10 +937,11 @@ def make_home_layer(
     and the teardown callable. `userxattr` is overlay_mode's tri-state. None → the
     plain rw bind of the real home (fallback): no dirs, no overlay root, a no-op
     cleanup. True/False → create `root` and report it as the policy's overlay_root,
-    carrying the negotiated flag so every per-spawn mount uses the exact shape the
-    probe validated; each SPAWN then mints its own upper/work/merged under the root
-    in prepare_spawn_policy, and the returned cleanup rmtrees the whole root once
-    (no per-spawn cleanup exists, so a hard-killed command cannot leak a layer).
+    carrying the negotiated flag so every mount uses the exact shape the probe
+    validated; prepare_spawn_policy then mints an upper/work/merged under the root
+    for each policy it prepares — once per keeper namespace on the tool path — and
+    the returned cleanup rmtrees the whole root once (no per-layer cleanup exists,
+    so a hard-killed command cannot leak a layer).
     The layer is the same plain HomeLayer in BOTH branches. The CALLER probes
     (overlay_mode at its own probe location) and chooses where the root lives, so
     this primitive is shared by the executor (root sibling to transcript_dir) and
