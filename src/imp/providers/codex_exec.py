@@ -31,6 +31,8 @@ from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 # 64 MiB ceiling for one JSONL line: asyncio's 64 KiB default makes
 # StreamReader.readline() raise on a larger codex event line.
 CODEX_STREAM_LIMIT = 64 * 1024 * 1024
+# Full stream reaches the sink; this only bounds what an error message carries into the event log.
+STDERR_ERROR_CHARS = 4096
 INTERNAL_ORIGINATOR_ENV = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE"
 # Server-visible: what OpenAI's backend sees. Not this quest's experiment.
 CODEX_ORIGINATOR = "codex_sdk_py"
@@ -82,16 +84,20 @@ async def _drain_stderr(stream: asyncio.StreamReader, sink: StderrSink | None) -
     # Incremental so a multi-byte char split across two reads decodes correctly
     # instead of becoming U+FFFD on the boundary.
     decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    parts: list[str] = []
+    tail = ""
+    truncated = False
     while True:
         chunk = await stream.read(4096)
         text = decoder.decode(chunk, final=not chunk)
         if text:
-            parts.append(text)
             if sink is not None:
                 sink.feed(text)
+            tail += text
+            if len(tail) > STDERR_ERROR_CHARS:
+                tail = tail[-STDERR_ERROR_CHARS:]
+                truncated = True
         if not chunk:
-            return "".join(parts)
+            return f"[stderr truncated]\n{tail}" if truncated else tail
 
 
 async def _run_exec(

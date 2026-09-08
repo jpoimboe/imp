@@ -16,6 +16,7 @@ import pytest
 
 from imp.providers.codex_exec import (
     CODEX_STREAM_LIMIT,
+    STDERR_ERROR_CHARS,
     Codex,
     CodexExecError,
     CodexOptions,
@@ -140,6 +141,15 @@ sys.stderr.flush()
 sys.exit(3)
 """
 
+_FAILING_CHATTY = """\
+import sys
+sys.stdin.read()
+sys.stderr.write("e" * (1024 * 1024))
+sys.stderr.write("\\nboom: the real error\\n")
+sys.stderr.flush()
+sys.exit(3)
+"""
+
 _GRANDPARENT = """\
 import os, subprocess, sys, time
 sys.stdin.read()
@@ -231,6 +241,18 @@ async def test_a_non_zero_exit_raises_carrying_the_child_stderr(tmp_path: Path) 
         await _collect(exe, "go")
     assert "boom: codex could not start" in str(excinfo.value)
     assert "3" in str(excinfo.value)
+
+
+@pytest.mark.anyio
+async def test_a_flooding_child_produces_a_bounded_error_message_with_the_tail(
+        tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _FAILING_CHATTY)
+    with pytest.raises(CodexExecError) as excinfo:
+        await _collect(exe, "go")
+    msg = str(excinfo.value)
+    assert "boom: the real error" in msg
+    assert "[stderr truncated]" in msg
+    assert len(msg) < 2 * STDERR_ERROR_CHARS
 
 
 @pytest.mark.anyio
