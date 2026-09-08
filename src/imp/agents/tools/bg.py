@@ -31,7 +31,7 @@ import signal
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import DEVNULL
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 
@@ -68,7 +68,7 @@ class BgProc:
     out_cursor: int = 0
     err_cursor: int = 0
     status: str = "running"         # running | exited | killed
-    kill_reason: str | None = None  # interrupted | output-cap | agent
+    kill_reason: str | None = None  # interrupted | output-cap | agent | sandbox-rebuilt
     returncode: int | None = None
 
 
@@ -437,7 +437,10 @@ async def _sweep_bg(ctx: ToolContext) -> None:
             bp.returncode = bp.proc.returncode
 
 
-async def terminate_background_processes(ctx: ToolContext) -> None:
+async def terminate_background_processes(
+    ctx: ToolContext, *,
+    kill_reason: Literal["interrupted", "sandbox-rebuilt"] = "interrupted",
+) -> None:
     """All-exits teardown (interrupt path AND run() finally — on a pause BOTH
     fire; must be idempotent). Order is LOAD-BEARING: steps 2-4 await, and a
     concurrent bash_output whose FileNotFoundError fallthrough runs
@@ -461,7 +464,7 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
         _reap(bp)
         if bp.status == "running":
             bp.status = "killed"
-            bp.kill_reason = "interrupted"
+            bp.kill_reason = kill_reason
     # Steps 2-4 run SHIELDED (same rationale as _kill_group_escalate): a
     # cancellation landing on the teardown task mid-grace (gen.aclose() from
     # an already-cancelled task, racing interrupts) raises CancelledError — a

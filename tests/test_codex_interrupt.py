@@ -28,7 +28,7 @@ async def test_interrupt_sets_cancel_and_terminates_processes(tmp_path: Path) ->
     runner = CodexAgentRunner(model_name="gpt-5.5")
     runner._ctx = _ctx(tmp_path)
 
-    with patch("imp.providers.codex_runner.terminate_running_processes",
+    with patch("imp.providers.codex_runner.terminate_tool_processes",
                new_callable=AsyncMock) as term:
         await runner.interrupt()
         assert runner._cancel is True
@@ -36,7 +36,7 @@ async def test_interrupt_sets_cancel_and_terminates_processes(tmp_path: Path) ->
         args, kwargs = term.call_args
         assert args[0] is runner._ctx
         # No timeout literal: interrupt() now relies on the 4 s named grace
-        # default (PROCESS_KILL_GRACE_S) inside terminate_running_processes.
+        # default (PROCESS_KILL_GRACE_S) inside terminate_tool_processes.
         assert "timeout" not in kwargs
         assert len(args) == 1
 
@@ -46,7 +46,7 @@ async def test_interrupt_is_idempotent(tmp_path: Path) -> None:
     runner = CodexAgentRunner(model_name="gpt-5.5")
     runner._ctx = _ctx(tmp_path)
 
-    with patch("imp.providers.codex_runner.terminate_running_processes",
+    with patch("imp.providers.codex_runner.terminate_tool_processes",
                new_callable=AsyncMock) as term:
         await runner.interrupt()
         await runner.interrupt()  # second call must not raise

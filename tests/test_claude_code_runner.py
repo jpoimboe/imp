@@ -3193,7 +3193,7 @@ async def test_inflight_tool_interrupt_orders_interrupt_before_reap(
     async def _term_run(_ctx: Any) -> None:
         order.append("terminate_running")
 
-    async def _term_bg(_ctx: Any) -> None:
+    async def _term_bg(_ctx: Any, **_kw: Any) -> None:
         order.append("terminate_bg")
 
     monkeypatch.setattr(

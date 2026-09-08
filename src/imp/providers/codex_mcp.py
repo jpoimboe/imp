@@ -77,8 +77,8 @@ class RunState:
     MCP server spans all in-turn nudges/resumes (design "Cap scope").
 
     `abort_requested` is set whenever a cap trip fires; the runner observes it
-    and routes the abort through `terminate_running_processes(ctx)` so
-    governed `bash` children don't leak (N2).
+    and routes the abort through `terminate_tool_processes(ctx)` so governed
+    `bash` children don't leak (N2).
     """
     cap: int
     dispatch_count: int = 0

@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 
+import anyio
 import pytest
 
 from imp.agents.tools.context import ToolContext
@@ -611,3 +612,101 @@ def test_sandbox_policy_is_live_property(tmp_path: Path) -> None:
     ctx.base_sandbox_policy = None
     ctx.coordinator = SimpleNamespace(unsandboxed=True)
     assert ctx.sandbox_policy is None
+
+
+def test_terminate_tool_processes_kills_both_registries(tmp_path: Path) -> None:
+    # The mid-run-safe half of the split: foreground group, then background groups
+    # with their own escalation — and NO namespace touched, because the
+    # cooperative-steer branch re-queries with this same ctx.
+    from imp.agents.tools.bg import spawn_background
+    from imp.agents.tools.context import terminate_tool_processes
+
+    async def main() -> None:
+        ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
+        ctx.agent_id = "step:build/coder"
+        ctx.background_enabled = True
+        sentinel = object()
+        ctx.sandbox_ns = sentinel
+        await spawn_background(
+            ctx, command="while :; do sleep 5; done",
+            argv=["sh", "-c", "while :; do sleep 5; done"], cwd=str(tmp_path),
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+        bp = next(iter(ctx.background_processes.values()))
+        await terminate_tool_processes(ctx)
+        assert bp.status == "killed"
+        assert bp.kill_reason == "interrupted"
+        assert ctx.sandbox_ns is sentinel      # the namespace is NOT touched
+
+    anyio.run(main)
+
+
+def test_terminate_tool_processes_can_name_the_rebuild_reason(tmp_path: Path) -> None:
+    # A rebuild kills through the normal path, so a background entry gets its
+    # tombstone and an explanation instead of a bare negative returncode.
+    from imp.agents.tools.bg import spawn_background
+    from imp.agents.tools.context import terminate_tool_processes
+
+    async def main() -> None:
+        ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
+        ctx.agent_id = "step:build/coder"
+        ctx.background_enabled = True
+        await spawn_background(
+            ctx, command="while :; do sleep 5; done",
+            argv=["sh", "-c", "while :; do sleep 5; done"], cwd=str(tmp_path),
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+        bp = next(iter(ctx.background_processes.values()))
+        await terminate_tool_processes(ctx, kill_reason="sandbox-rebuilt")
+        assert bp.kill_reason == "sandbox-rebuilt"
+
+    anyio.run(main)
+
+
+def test_teardown_tool_context_closes_the_namespace_last(tmp_path: Path) -> None:
+    # Order is the point: the background escalation COMPLETES before the close.
+    # The namespace samples the registry AT CLOSE TIME, which is what
+    # discriminates — asserting after teardown could not fail, since by then both
+    # ran. The observable is the reaped returncode, recorded only after the
+    # unconditional SIGKILL pass (bg.py:568-571); bp.status would be weaker, as it
+    # flips in the pre-SIGTERM pass and so proves only that the escalation began.
+    from imp.agents.tools.bg import spawn_background
+    from imp.agents.tools.context import teardown_tool_context
+
+    observed: dict[str, bool] = {}
+
+    class _NS:
+        # No base_policy: only ensure_tool_namespace reads it, and this path
+        # never calls it (same as Task 5's sibling double).
+        def __init__(self, ctx: ToolContext) -> None:
+            self._ctx = ctx
+
+        def close(self) -> None:
+            bp = next(iter(self._ctx.background_processes.values()))
+            observed["reaped_at_close"] = bp.returncode is not None
+
+    async def main() -> None:
+        ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
+        ctx.agent_id = "step:build/coder"
+        ctx.background_enabled = True
+        ctx.sandbox_ns = _NS(ctx)
+        await spawn_background(
+            ctx, command="while :; do sleep 5; done",
+            argv=["sh", "-c", "while :; do sleep 5; done"], cwd=str(tmp_path),
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+        await teardown_tool_context(ctx)
+        assert observed["reaped_at_close"]
+        assert ctx.sandbox_ns is None          # a second teardown is a no-op
+
+    anyio.run(main)
+
+
+def test_no_provider_still_calls_the_unsplit_pair() -> None:
+    # Spec §3: close() appears at five sites that are all the same shape, and at
+    # no branch that continues — the mid-run close is unrepresentable rather than
+    # merely avoided. That holds only while no provider reaches past the split.
+    from pathlib import Path as _Path
+
+    from imp.providers import anthropic, claude_code, codex_runner, openai, scripted
+    for mod in (anthropic, openai, claude_code, codex_runner, scripted):
+        src = _Path(mod.__file__).read_text()
+        assert "terminate_running_processes" not in src, mod.__name__
+        assert "terminate_background_processes" not in src, mod.__name__

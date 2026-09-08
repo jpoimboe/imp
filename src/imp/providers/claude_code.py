@@ -1872,10 +1872,10 @@ class ClaudeCodeSession(ObserveSession):
             repair_interrupt_marker_on_resume(
                 self.messages, self.transcript,
                 captured=_load_captured_tool_results(invocation.transcript_dir))
-            from imp.agents.tools.bg import terminate_background_processes
-            from imp.agents.tools.context import terminate_running_processes
-            await terminate_running_processes(ctx)
-            await terminate_background_processes(ctx)
+            # Kills only: this branch RE-QUERIES with the same ctx, so closing the
+            # namespace here would fail-close every later bash call.
+            from imp.agents.tools.context import terminate_tool_processes
+            await terminate_tool_processes(ctx)
             last_text = ""
             for prev in reversed(self.messages):
                 if prev.role == "assistant":
@@ -2208,9 +2208,9 @@ class ClaudeCodeAgentRunner:
                 # OWN finally (not _run_loop's): an abandoned inner generator
                 # only GC-finalizes (PEP 525), so _run_loop's finally is not
                 # aclose-deterministic.
-                from imp.agents.tools.bg import terminate_background_processes
+                from imp.agents.tools.context import teardown_tool_context
                 with contextlib.suppress(Exception):
-                    await terminate_background_processes(self._ctx)
+                    await teardown_tool_context(self._ctx)
             # run()'s finally explicitly exits the client context manager
             # (graceful disconnect) then reaps the transport group as a safety
             # net, and drops the stale handle so a late interrupt() is a no-op
