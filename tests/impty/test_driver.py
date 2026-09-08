@@ -810,3 +810,20 @@ def test_start_failure_closes_the_unsettled_session_without_grace(monkeypatch) -
     # A program that never reached a usable state gets no SIGTERM courtesy.
     assert seen == [0.0]
     assert d._session is None
+
+
+def test_stop_docstring_describes_the_graceful_ladder() -> None:
+    doc = ImptyDriver.stop.__doc__ or ""
+    assert "SIGTERM" in doc
+    assert "SIGKILL" in doc
+    assert "[stopped: exit=" in doc
+
+
+def test_readme_documents_close_grace_and_its_return() -> None:
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    line = next((ln for ln in readme.splitlines() if ln.startswith("- `close(")), None)
+    assert line is not None, "README has no line documenting close()"
+    assert "grace" in line
+    assert "-> int" in line
+    assert "SIGTERM" in line and "SIGKILL" in line

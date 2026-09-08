@@ -45,7 +45,9 @@ send/react loop for interactive programs.
 - **`resize(rows, cols, wait=True)`** — resize the terminal (SIGWINCH) to test reflow.
 - **`send_signal(sig=2)`** — deliver a real signal to the program's group (SIGINT=2,
   SIGTERM=15), independent of tty mode.
-- **`stop()`** — kill the current program and end the session.
+- **`stop()`** — end the session: SIGTERM the program's group, allow it 1s to clean
+  up, then SIGKILL. Returns its exit status and final screen. `send_signal(9)` first
+  if you want it killed outright.
 
 ## The loop
 

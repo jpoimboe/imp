@@ -50,7 +50,9 @@ THIN_DESCRIPTIONS: dict[str, str] = {
     "snapshot": (
         "Render the current screen to a PNG (color, bold, box-drawing) and return its path."
     ),
-    "stop": "Kill the current program and end the terminal session.",
+    "stop": (
+        "Stop the program gracefully (SIGTERM, then SIGKILL) and end the terminal session."
+    ),
 }
 
 
