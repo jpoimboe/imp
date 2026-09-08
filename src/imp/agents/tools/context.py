@@ -30,7 +30,7 @@ from imp.engine.types import AgentDef
 
 if TYPE_CHECKING:
     from imp.engine.sandbox import SandboxNamespace
-    from impty.driver import PtySpawn, SandboxHook
+    from impty.driver import ImptyDriver, PtySpawn, SandboxHook
 
 _KILL_POLL_INTERVAL_S = 0.05  # group-liveness probe cadence inside the kill grace
 
@@ -134,6 +134,7 @@ class ToolContext:
     # This run's keeper namespace, opened lazily on the first sandboxed spawn by
     # ensure_tool_namespace; None => not open yet.
     sandbox_ns: SandboxNamespace | None = None
+    impty_driver: ImptyDriver | None = None
     # §10/§12: when True, the run is headless (no human at the keyboard). The
     # subagent backoff loop applies a wall-clock ceiling instead of retrying
     # forever. Copied from invocation.headless by each provider.
@@ -459,6 +460,19 @@ async def terminate_tool_processes(
     await terminate_background_processes(ctx, kill_reason=kill_reason)
 
 
+def close_impty_session(ctx: ToolContext) -> None:
+    """End the live pty session, if any, and leave the driver in place.
+
+    Called at BOTH sites that destroy a namespace: the rebuild branch of
+    ensure_tool_namespace does not route through close_sandbox_namespace, so a
+    single seam there would leave that path tearing a namespace down under a live
+    session — a corpse whose last screen still renders. ImptyDriver.close is
+    idempotent and clears only its session, so the driver stays usable and a later
+    start() opens one in whichever namespace is current."""
+    if ctx.impty_driver is not None:
+        ctx.impty_driver.close()
+
+
 def close_sandbox_namespace(ctx: ToolContext) -> None:
     """Close and drop this run's keeper namespace. Vacating the slot first is what
     makes the next sandboxed spawn open a fresh one rather than find a closed one.
@@ -466,10 +480,16 @@ def close_sandbox_namespace(ctx: ToolContext) -> None:
     it, so this alone reaps every joined command — the kills that precede it in
     teardown_tool_context are the courtesy grace, not the guarantee. It reaches
     nothing spawned during a /sandbox off window: that shape runs on the host, so
-    only terminate_tool_processes ends it."""
+    only terminate_tool_processes ends it. The pty session ends FIRST, in a try
+    whose finally is the keeper close: closing the namespace under a live session
+    would leave the driver holding a dead child, and a raise (or a cancellation)
+    on the way must still not leak the keeper."""
     ns, ctx.sandbox_ns = ctx.sandbox_ns, None
-    if ns is not None:
-        ns.close()
+    try:
+        close_impty_session(ctx)
+    finally:
+        if ns is not None:
+            ns.close()
 
 
 async def teardown_tool_context(ctx: ToolContext) -> None:
@@ -546,12 +566,15 @@ async def ensure_tool_namespace(
 
     stale = ctx.sandbox_ns
     if stale is not None and stale.base_policy != ctx.base_sandbox_policy:
-        # Vacate the slot SYNCHRONOUSLY, before the only await here, and close the
-        # object we captured rather than whatever the slot holds afterwards: a
-        # concurrent call must not adopt a namespace being torn down, nor have the
-        # one it just opened closed out from under it.
-        ctx.sandbox_ns = None
         try:
+            # First, and before the slot is vacated: no concurrent start may drop a
+            # session into a namespace already condemned.
+            close_impty_session(ctx)
+            # Vacate the slot SYNCHRONOUSLY, before the only await here, and close
+            # the object we captured rather than whatever the slot holds
+            # afterwards: a concurrent call must not adopt a namespace being torn
+            # down, nor have the one it just opened closed out from under it.
+            ctx.sandbox_ns = None
             await terminate_tool_processes(ctx, kill_reason="sandbox-rebuilt")
         finally:
             stale.close()  # finally: a cancellation mid-kill must not leak the stale keeper
@@ -622,3 +645,15 @@ def make_impty_sandbox_hook(ctx: ToolContext) -> SandboxHook:
                         pass_fds=spawn.pass_fds)
 
     return hook
+
+
+def attach_impty_driver(ctx: ToolContext) -> ImptyDriver:
+    """This run's ImptyDriver: spawning through ctx's sandbox AND registered on
+    ctx so both namespace-destroying sites can end its session. One call does
+    both — a driver hooked but unregistered would outlive its own namespace, and
+    one registered but unhooked would spawn on the host. Must be called on the
+    run's event loop (make_impty_sandbox_hook captures it)."""
+    from impty.driver import ImptyDriver
+
+    ctx.impty_driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+    return ctx.impty_driver

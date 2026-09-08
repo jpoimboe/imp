@@ -959,3 +959,87 @@ def test_a_failed_namespace_open_surfaces_as_the_terminal_diagnostic(
         "RuntimeError: sandbox could not start the terminal session: "
         "bwrap: execvp sleep: No such file or directory")
     assert spawns == []
+
+
+def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One call does both, so the broken pairing is unrepresentable: a driver
+    # hooked but not registered would outlive the namespace it spawns into, and a
+    # driver registered but not hooked would be closed at teardown for nothing.
+    from imp.agents.tools.context import attach_impty_driver, close_impty_session
+
+    ns = _FakeNamespace()
+    _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    closed: list[str] = []
+
+    async def _main() -> object:
+        driver = attach_impty_driver(ctx)
+        assert ctx.impty_driver is driver
+        # The hook is live: it plans a join rather than declining.
+        plan = await asyncio.to_thread(lambda: driver._sandbox(["true"], None, None))
+        assert plan is not None and plan.argv[0] == "nsenter"
+        monkeypatch.setattr(driver, "close", lambda: closed.append("closed"))
+        return driver
+
+    driver = asyncio.run(_main())
+    close_impty_session(ctx)
+    assert closed == ["closed"]
+    # The DRIVER survives its session: close() clears only the session, so a later
+    # start() opens one in whichever namespace is current.
+    assert ctx.impty_driver is driver
+
+
+def test_a_failing_pty_close_still_reaps_the_keeper(tmp_path: Path) -> None:
+    # The session close runs FIRST (the namespace must not die under a live pty),
+    # so an exception there sits directly in front of the keeper close. Both
+    # existing ImptyDriver.close() call sites are already guarded, and the
+    # providers suppress what this raises — so an unguarded call here would leak
+    # a live keeper silently for the rest of the run.
+    from imp.agents.tools.context import close_sandbox_namespace
+
+    closed: list[str] = []
+
+    class _Boom:
+        def close(self) -> None:
+            closed.append("session")
+            raise RuntimeError("teardown blew up")
+
+    class _NS:
+        def close(self) -> None:
+            closed.append("namespace")
+
+    ctx = _ctx(tmp_path)
+    ctx.impty_driver = _Boom()
+    ctx.sandbox_ns = _NS()
+    with pytest.raises(RuntimeError, match="teardown blew up"):
+        close_sandbox_namespace(ctx)
+    # Ordering intact, keeper reaped anyway, and the failure is NOT swallowed —
+    # suppressing it here would hide a real teardown bug behind a silent leak.
+    assert closed == ["session", "namespace"]
+    assert ctx.sandbox_ns is None
+
+
+def test_close_impty_session_is_a_no_op_without_a_driver(tmp_path: Path) -> None:
+    # Every non-impty run reaches both call sites with impty_driver None, and the
+    # conftest owner reaches close_sandbox_namespace for every registered context.
+    from imp.agents.tools.context import close_impty_session
+
+    ctx = _ctx(tmp_path)
+    assert ctx.impty_driver is None
+    close_impty_session(ctx)
+
+
+def test_both_providers_attach_the_driver_through_the_context() -> None:
+    # The wiring is two one-line call sites and no test can drive a provider's
+    # _enter, so it is pinned at the source. A bare ImptyDriver() in either
+    # provider is the exact regression: it spawns on the host, unconfined.
+    from pathlib import Path as _Path
+
+    from imp.providers import claude_code, codex_runner
+    for mod in (claude_code, codex_runner):
+        src = _Path(mod.__file__).read_text()
+        assert "attach_impty_driver(ctx)" in src, mod.__name__
+        assert "ImptyDriver()" not in src, mod.__name__

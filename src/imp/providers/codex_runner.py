@@ -326,9 +326,9 @@ class CodexSession(ObserveSession):
         #    provision time, from the agent's declared tools.
         impty_bearer: str | None = None
         if "impty" in invocation.agent_def.drivers:
-            from impty.driver import ImptyDriver
+            from imp.agents.tools.context import attach_impty_driver
             impty_bearer = secrets.token_urlsafe(24)
-            runner._impty_driver = ImptyDriver()
+            runner._impty_driver = attach_impty_driver(ctx)
             runner._impty_handle = await start_impty_server(
                 driver=runner._impty_driver, bearer_token=impty_bearer,
                 host="127.0.0.1", runner_loop=state.runner_loop,

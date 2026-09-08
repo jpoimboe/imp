@@ -1277,8 +1277,8 @@ class ClaudeCodeSession(ObserveSession):
 
         impty_server = None
         if mcp_server is not None and "impty" in invocation.agent_def.drivers:
-            from impty.driver import ImptyDriver
-            runner._impty_driver = ImptyDriver()
+            from imp.agents.tools.context import attach_impty_driver
+            runner._impty_driver = attach_impty_driver(ctx)
             impty_tools = await _make_impty_sdk_tools(runner._impty_driver)
             impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
 

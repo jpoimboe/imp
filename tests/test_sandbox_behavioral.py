@@ -18,6 +18,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -37,7 +38,10 @@ from imp.agents.tools import get_registry
 from imp.agents.tools.bg import terminate_background_processes
 from imp.agents.tools.context import (
     ToolContext,
+    attach_impty_driver,
+    ensure_tool_namespace,
     make_impty_sandbox_hook,
+    teardown_tool_context,
     terminate_running_processes,
 )
 from imp.engine import worktree as wt
@@ -57,7 +61,7 @@ from impty import TerminalSession
 from impty.driver import ImptyDriver
 from tests.conftest import assert_all_tool_contexts_owned, own_tool_context
 from tests.impty.e2e_support import can_pty
-from tests.test_sandbox_namespace import _poll
+from tests.test_sandbox_namespace import _host_pids, _poll
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -2458,4 +2462,182 @@ def test_toggling_the_sandbox_back_on_rejoins_the_very_same_namespace() -> None:
     try:
         asyncio.run(_main())
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_SLEEPER = "import time\nprint('PTY-READY', flush=True)\ntime.sleep(300)\n"
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_teardown_closes_the_pty_session_before_the_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 8(b): ORDER, not end state. Killing pid 1 of the pid namespace first
+    would leave the driver holding a dead child and a corpse screen that still
+    renders — today claude_code tears down in exactly that order."""
+    root = _make_root()
+    order: list[str] = []
+    real_ns_close = SandboxNamespace.close
+
+    def spy_ns_close(self: SandboxNamespace) -> None:
+        order.append("namespace")
+        real_ns_close(self)
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        real_driver_close = driver.close
+
+        def spy_driver_close() -> None:
+            order.append("session")
+            real_driver_close()
+
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER]))
+        assert "PTY-READY" in screen, screen
+        # Spied AFTER the start, so only the teardown's closes are recorded.
+        monkeypatch.setattr(driver, "close", spy_driver_close)
+        monkeypatch.setattr(SandboxNamespace, "close", spy_ns_close)
+        await teardown_tool_context(ctx)
+
+    try:
+        asyncio.run(_main())
+        assert order == ["session", "namespace"], order
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_namespace_rebuild_closes_the_pty_session_before_the_stale_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 9(a): create_and_enter_worktree reassigns base_sandbox_policy, and the
+    rebuild branch deliberately does NOT route through close_sandbox_namespace —
+    it vacates the slot and closes the object it captured, inline. A single seam
+    at the end-of-run site would leave THIS path tearing a namespace down under a
+    live session."""
+    root = _make_root()
+    other = _make_root()
+    order: list[str] = []
+    real_ns_close = SandboxNamespace.close
+
+    def spy_ns_close(self: SandboxNamespace) -> None:
+        order.append("namespace")
+        real_ns_close(self)
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        real_driver_close = driver.close
+
+        def spy_driver_close() -> None:
+            order.append("session")
+            real_driver_close()
+
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER]))
+        assert "PTY-READY" in screen, screen
+        first = ctx.sandbox_ns
+        monkeypatch.setattr(driver, "close", spy_driver_close)
+        monkeypatch.setattr(SandboxNamespace, "close", spy_ns_close)
+        ctx.base_sandbox_policy = dataclasses.replace(
+            ctx.base_sandbox_policy, worktree=str(other))
+        second = await ensure_tool_namespace(ctx, engine_env={},
+                                             on_retry=lambda _n, _d: None)
+        assert second is not first          # the branch really was taken
+        # Deliberately NO trailing driver.close(): the rebuild branch already
+        # closed the session, so the only way "session" can reach `order` is if
+        # that branch put it there. A courtesy close would route through the same
+        # spy, append a third entry, AND hollow out the oracle.
+
+    try:
+        asyncio.run(_main())
+        assert order == ["session", "namespace"], order
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(other, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_after_a_rebuild_the_driver_reports_no_session_and_rejoins_the_new_one() -> None:
+    """AC 9(b): the agent gets the ordinary no-session answer rather than a screen
+    from a namespace that no longer exists, and a fresh start on the SAME driver
+    lands in the new namespace — proven by a bash call through the same context
+    seeing it, which is only true if both are in one pid namespace."""
+    root = _make_root()
+    other = _make_root()
+    marker = f"PTY-REBOUND-{uuid.uuid4().hex[:8]}"
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER]))
+        ctx.base_sandbox_policy = dataclasses.replace(
+            ctx.base_sandbox_policy, worktree=str(other))
+        await ensure_tool_namespace(ctx, engine_env={},
+                                    on_retry=lambda _n, _d: None)
+        with pytest.raises(RuntimeError, match="no session"):
+            await asyncio.to_thread(driver.view)
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SLEEPER, marker]))
+        assert "PTY-READY" in screen, screen
+        found = json.loads(await get_registry()["bash"].async_invoke(
+            ctx, {"command": f"pgrep -f {marker}"}))
+        assert found["returncode"] == 0, found
+        await asyncio.to_thread(driver.close)
+
+    try:
+        asyncio.run(_main())
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(other, ignore_errors=True)
+
+
+_SPAWNS_A_GRANDCHILD = (
+    "import subprocess, sys, time\n"
+    "subprocess.Popen(['setsid', 'sh', '-c',\n"
+    "                  'while :; do sleep 5; done', sys.argv[1] + '-GC'])\n"
+    "print('PTY-READY', flush=True)\n"
+    "time.sleep(300)\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_teardown_reaps_a_setsid_grandchild_of_a_pty_program() -> None:
+    """AC 8(a): TerminalSession.close() deliberately does not chase grandchildren
+    (that contract is unchanged), so today a setsid'd one leaks to the host for
+    good — the same stray class the keeper exists to prevent. It is the NAMESPACE
+    close that ends it, which is why the two closes must both happen and in this
+    order. The grandchild carries its own `-GC` marker so 'still alive after the
+    session close' names IT and not the dying pty program."""
+    root = _make_root()
+    marker = f"PTY-STRAY-{uuid.uuid4().hex[:8]}"
+    gc_marker = f"{marker}-GC"
+
+    async def _main() -> None:
+        ctx = _ctx(root, _active_policy(root))
+        driver = attach_impty_driver(ctx)
+        screen = await asyncio.to_thread(
+            lambda: driver.start([sys.executable, "-c", _SPAWNS_A_GRANDCHILD, marker]))
+        assert "PTY-READY" in screen, screen
+        _poll(lambda: bool(_host_pids(gc_marker)), what="the setsid grandchild")
+        await asyncio.to_thread(driver.close)
+        # The session close alone leaves it — without this the test could pass on
+        # a teardown that never needed the namespace at all.
+        assert _host_pids(gc_marker), "the session close reaped it; nothing is proven"
+        await teardown_tool_context(ctx)
+        _poll(lambda: not _host_pids(gc_marker),
+              what="the setsid grandchild dying with the namespace")
+
+    try:
+        asyncio.run(_main())
+    finally:
+        for pid in _host_pids(gc_marker):
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int(pid), signal.SIGKILL)
         shutil.rmtree(root, ignore_errors=True)

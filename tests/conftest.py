@@ -6,6 +6,7 @@ import argparse
 import json
 import multiprocessing as mp
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -415,7 +416,12 @@ def assert_all_tool_contexts_owned(path: Path) -> None:
     one: it catches the likely mistake (a new context added without an owner) but
     would pass if one site were double-wrapped and another missed."""
     src = path.read_text(encoding="utf-8")
-    assert src.count("ToolContext(") == src.count("own_tool_context(")
+    # Word-boundary, not str.count: "own_tool_context(" is a SUBSTRING of
+    # "teardown_tool_context(", so a plain count credits every teardown call as an
+    # ownership registration and the balance silently inflates.
+    n_built = len(re.findall(r"\bToolContext\(", src))
+    n_owned = len(re.findall(r"\bown_tool_context\(", src))
+    assert n_built == n_owned, f"{n_built} built vs {n_owned} owned"
 
 
 @pytest.fixture(autouse=True)
