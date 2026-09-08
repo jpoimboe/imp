@@ -37,7 +37,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 from imp.engine.env import (
     HEADLESS_ENV,
@@ -228,6 +228,20 @@ def sandbox_spawn_failed(stderr: str, *, sandbox_active: bool) -> bool:
 def strip_sandbox_marker(stderr: str) -> str:
     """Remove the single entry-sentinel line from captured stderr (display-only, idempotent)."""
     return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
+
+
+@overload
+def normalize_returncode(returncode: int, *, imp_killed: bool) -> int: ...
+@overload
+def normalize_returncode(returncode: None, *, imp_killed: bool) -> None: ...
+def normalize_returncode(returncode: int | None, *, imp_killed: bool) -> int | None:
+    """Spec §7: a negative returncode means IMP killed it; anything the command did
+    to itself reports 128+n. nsenter re-raises a signal on itself when its direct
+    child dies by one, where bwrap mapped it to 128+n, so without this a command's
+    own `kill -9 $$` would read as imp having killed the agent's tool."""
+    if returncode is not None and returncode < 0 and not imp_killed:
+        return 128 - returncode
+    return returncode
 
 
 _SANDBOX_DETAIL_MAX_CHARS = 200    # one-line diagnosis budget in a runner_warning payload

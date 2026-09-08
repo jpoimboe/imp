@@ -48,6 +48,7 @@ from imp.agents.tools.limits import (
     TOOL_OUTPUT_CAP_BYTES,
     tool_checkpoint,
 )
+from imp.engine.sandbox import normalize_returncode
 
 _CMD_TRUNC = 200      # command excerpt in warnings + tombstones (multi-KB sh -c
                       # scripts would otherwise render whole in the narrative)
@@ -185,8 +186,9 @@ def _snapshot(ctx: ToolContext, bp: BgProc, *, wait_ended: str | None = None) ->
     out_text, out_rem = _read_page(bp, "out")
     err_text, err_rem = _read_page(bp, "err")
     result: dict[str, Any] = {
-        "stdout": out_text, "stderr": err_text,
-        "status": bp.status, "returncode": bp.returncode,
+        "stdout": out_text, "stderr": err_text, "status": bp.status,
+        "returncode": normalize_returncode(
+            bp.returncode, imp_killed=bp.kill_reason is not None),
     }
     if bp.kill_reason is not None:
         result["kill_reason"] = bp.kill_reason
@@ -216,9 +218,10 @@ def _snapshot_or_tombstone(
         # Teardown deleted the stream files mid-call. Its check-and-set pass
         # ran FIRST (ordering pin), so the in-memory entry is already a
         # correct tombstone — never surface a raw read error.
-        result: dict[str, Any] = {"stdout": "", "stderr": "",
-                                  "status": bp.status,
-                                  "returncode": bp.returncode}
+        result: dict[str, Any] = {
+            "stdout": "", "stderr": "", "status": bp.status,
+            "returncode": normalize_returncode(
+                bp.returncode, imp_killed=bp.kill_reason is not None)}
         if bp.kill_reason is not None:
             result["kill_reason"] = bp.kill_reason
         if wait_ended is not None:
@@ -233,7 +236,8 @@ def _tombstone_result(ctx: ToolContext, bg_id: str) -> str | None:
     result: dict[str, Any] = {
         "stdout": "", "stderr": "",
         "status": ts.get("status", "killed"),
-        "returncode": ts.get("returncode"),
+        "returncode": normalize_returncode(
+            ts.get("returncode"), imp_killed=ts.get("kill_reason") is not None),
     }
     if ts.get("kill_reason") is not None:
         result["kill_reason"] = ts.get("kill_reason")

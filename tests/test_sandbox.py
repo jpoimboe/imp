@@ -2730,6 +2730,20 @@ def test_retired_per_call_sentinel_machinery_is_gone():
         assert field not in bg.BgProc.__dataclass_fields__
 
 
+def test_normalize_returncode_separates_imps_kills_from_the_commands_own():
+    # Spec §7. A join propagates a self-inflicted signal as a NEGATIVE code where
+    # bwrap mapped it to 128+n; providers key tool_killed on the sign, so the two
+    # must not blur. imp knows which it did, so the read site decides.
+    from imp.engine.sandbox import normalize_returncode
+    assert normalize_returncode(-9, imp_killed=False) == 137    # kill -9 $$
+    assert normalize_returncode(-15, imp_killed=False) == 143   # kill -15 $$
+    assert normalize_returncode(-15, imp_killed=True) == -15    # imp killed the group
+    assert normalize_returncode(-9, imp_killed=True) == -9
+    assert normalize_returncode(7, imp_killed=False) == 7       # untouched
+    assert normalize_returncode(0, imp_killed=True) == 0
+    assert normalize_returncode(None, imp_killed=False) is None
+
+
 def test_child_env_carries_the_state_dir_when_the_spawn_supplies_none():
     # The bash tool passes no control root, so its live engine_env has no
     # IMP_STATE_DIR — the value baked into policy.child_env at run start must still
