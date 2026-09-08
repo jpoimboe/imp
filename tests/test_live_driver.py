@@ -5,6 +5,7 @@ import asyncio
 import inspect
 import io
 import json
+import re
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
@@ -2556,6 +2557,115 @@ def test_split_pad_clips_the_left_group_only_as_a_last_resort() -> None:
     assert pal.display_width(body) == 10
 
 
+_ROW_NOW = 1_788_000_000.0                       # fixed, so the countdown is deterministic
+_LONG_TITLE = "Context and quota gauges in the live footer"     # 43 columns
+_SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _visible(text: str) -> str:
+    """The row's columns with every escape removed — the layout, minus the color."""
+    return _SGR.sub("", text)
+
+
+def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> str:
+    """The row's worst case: 43-column title, full structural group, gauge, quota."""
+    from imp.cli.live_driver import compose_position_row
+    from imp.providers.quota import QuotaReading, QuotaWindow
+    reading = QuotaReading(
+        provider="claude_code", plan=None, raw={},
+        windows=(QuotaWindow("5h", 62.0, int(_ROW_NOW) + 9960),   # 2h46m -> (3h left)
+                 QuotaWindow("7d", 7.0, None)))
+    return compose_position_row(
+        activity=nv.Activity(kind="agent", model="claude-opus-5",
+                             provider="claude_code", phase="implementation",
+                             plan="plan-1", counter="step 3/7"),
+        quest_id="nota40", title=title, project="imp", prompt_tokens=None,
+        color=color, width=width, context_pct=44.0, auth_mode="subscription",
+        quota=reading, now_epoch=_ROW_NOW)
+
+
+def test_position_row_anchors_the_quota_flush_to_the_band_edge() -> None:
+    left = ("imp · nota40 · Context and quota gauges in the live footer · "
+            "implementation · plan-1 · step 3/7 · claude-opus-5 · ████░░░░░░ 44%")
+    row = _wide_row(200)
+    # 128 + 39 + 31 = 198: both groups at their edges, spaces in between.
+    assert row == left + " " * 39 + "session 62% (3h left) · week 7%"
+    assert pal.display_width(row) == 198
+    assert " · session" not in row          # reached across the gap, never ` · `-joined
+
+
+def test_position_row_fit_ladder_drops_the_quota_then_the_gauge_then_clips() -> None:
+    for width in (80, 100, 120, 150, 200):
+        assert pal.display_width(_wide_row(width)) <= width - 2, width
+        assert pal.display_width(_wide_row(width, title="t")) <= width - 2, width
+    # 150: the quota goes whole and the gauge survives, ending at a segment
+    # boundary — where the blind clip used to sever the 160-column row mid-field.
+    at150 = _wide_row(150)
+    assert at150.endswith("claude-opus-5 · ████░░░░░░ 44%")
+    assert "session" not in at150 and "…" not in at150
+    assert pal.display_width(at150) == 128
+    # 120: the gauge goes next; every structural segment is still there.
+    at120 = _wide_row(120)
+    assert at120.startswith(f"imp · nota40 · {_LONG_TITLE} · implementation")
+    assert at120.endswith("plan-1 · step 3/7 · claude-opus-5")
+    assert "44%" not in at120 and "…" not in at120
+    # 100: nothing left to drop, so the title itself is truncated — and only then.
+    at100 = _wide_row(100)
+    assert at100.endswith("…")
+    assert pal.display_width(at100) == 98
+
+
+def test_position_row_layout_is_identical_with_and_without_color() -> None:
+    plain = _wide_row(200)
+    try:
+        pal.set_theme("ansi")
+        unbanded = _wide_row(200, color=True)
+        pal.set_theme("dark")
+        banded = _wide_row(200, color=True)
+    finally:
+        pal.set_theme("ansi")
+    assert unbanded != plain and banded != plain          # sanity: color did paint
+    assert _visible(unbanded) == plain                    # same gap, same offsets
+    assert _visible(banded) == plain
+    assert banded.startswith("\x1b[48;2;43;47;58m")       # only the band differs
+    assert banded.endswith("\x1b[0m")
+    assert pal.display_width(banded) == 198               # the right group fills the band
+
+
+def test_prelaunch_row_fits_the_band_and_pads_under_a_banded_theme() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    narrow = compose_prelaunch_position_row(
+        phase="implementation phase", plan="plan 2/4", step_label="task 1/3",
+        model="claude-opus-5", project="imp", quest_id="nota40",
+        title=_LONG_TITLE, color=False, width=80)
+    assert "%" not in narrow                     # still no gauge before launch
+    assert narrow.endswith("…")                  # 119 columns clipped to the target
+    assert pal.display_width(narrow) == 78
+    try:
+        pal.set_theme("dark")
+        banded = compose_prelaunch_position_row(
+            phase=None, plan=None, step_label=None, model=None, project="imp",
+            quest_id="nota40", title="t", color=True, width=80)
+    finally:
+        pal.set_theme("ansi")
+    assert banded.startswith("\x1b[48;2;43;47;58m") and banded.endswith("\x1b[0m")
+    assert pal.display_width(banded) == 78       # short row still padded to width - 2
+
+
+def test_static_toolbar_fits_the_band_at_the_terminal_width(monkeypatch) -> None:
+    monkeypatch.setenv("COLUMNS", "80")          # compose_toolbar_static reads term_width()
+    drv, _ = _driver()
+    drv.on_event(ev("1", "quest_created", id="nota40", title=_LONG_TITLE))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                    model="claude-opus-5", provider="anthropic", label="task 1/3",
+                    phase_label="implementation phase · plan 1/1", position_label=True))
+    toolbar = drv.compose_toolbar_static()
+    assert toolbar is not None
+    assert toolbar.startswith("nota40 · Context and quota")
+    assert toolbar.endswith("…")                 # 113 columns, truncated at the target
+    assert pal.display_width(toolbar) == 78
+
+
 def _sub_builder(*subs, readings=(), start_ts=None):
     """A builder with an agent step and one running sub_agent fold per (event_id, name)."""
     b = nv.NarrativeBuilder()
@@ -3121,7 +3231,7 @@ def test_compose_position_row_shows_unsandboxed_after_title() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
                                title="streaming footer", prompt_tokens=None,
-                               color=False, width=80, unsandboxed=True)
+                               color=False, width=120, unsandboxed=True)
     assert row == ("z9gixx · streaming footer · unsandboxed · implementation "
                    "phase · plan 1/1 · task 1/3 · m")
 

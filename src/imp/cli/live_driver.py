@@ -235,8 +235,9 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          cost: RowUsage | None = None,
                          now_epoch: float | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
-    """Row 3 of the live footer: one flat, left-aligned line ordered
-    project · id · title · phase · plan · counter · model · context · quota-or-cost."""
+    """Row 3 of the live footer: the left group — project · id · title ·
+    unsandboxed · phase · plan · counter · model · context gauge — with the
+    quota-or-cost group anchored flush to the band's right edge."""
     # Lazy import keeps `import live_driver` free of the providers package.
     from imp.cli.accounting import is_metered
 
@@ -266,9 +267,10 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
     else:
         tail = (quota_field(quota, now_epoch=now_epoch, color=color, over_bg=over)
                 if quota is not None else None)
-    body = rt.compose_label([project_seg, id_seg, title_seg, unsandboxed_seg,
-                             phase_seg, plan_seg, counter_seg,
-                             model_seg, bar, tail])
+    left_segs = [project_seg, id_seg, title_seg, unsandboxed_seg,
+                 phase_seg, plan_seg, counter_seg, model_seg]
+    body = _split_pad(rt.compose_label(left_segs),
+                      rt.compose_label([*left_segs, bar]), tail, width=width)
     return _band_wrap(body, bg, width)
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from imp.cli import narrative as nv
+from imp.cli import palette as pal
 from imp.cli.accounting import RowUsage
 from imp.cli.live_driver import compose_position_row, quota_field
 from imp.providers.quota import QuotaReading, QuotaWindow
@@ -33,27 +34,29 @@ def _row(**kw: Any) -> str:
 
 # AC 8
 def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
+    left = "implement phase · claude-opus-5 · ████░░░░░░ 44%"
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
-    assert _row(auth_mode="subscription", quota=calm) == (
-        "implement phase · claude-opus-5 · ████░░░░░░ 44% · session 34% · week 7%")
+    row = _row(auth_mode="subscription", quota=calm)
+    # 48 + 129 + 21 = 198 = width - 2: the field is reached across the gap.
+    assert row == left + " " * 129 + "session 34% · week 7%"
+    assert pal.display_width(row) == 198
 
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
                       QuotaWindow("7d", 7.0, int(_NOW) + 600000))
     assert _row(auth_mode="subscription", quota=one_up).endswith(
-        "████░░░░░░ 44% · session 62% (40m left) · week 7%")
+        "session 62% (40m left) · week 7%")
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
     assert _row(auth_mode="subscription", quota=both).endswith(
-        "████░░░░░░ 44% · session 92% (40m left) · week 96% (2d left)")
+        "session 92% (40m left) · week 96% (2d left)")
 
 
 # AC 9
 def test_the_bands_are_evaluated_on_the_displayed_integer() -> None:
     def field(pct: float) -> str:
-        row = _row(color=True, auth_mode="subscription",
-                   quota=_reading(QuotaWindow("5h", pct, int(_NOW) + 2400)))
-        return row.split(" · ")[-1]
+        return quota_field(_reading(QuotaWindow("5h", pct, int(_NOW) + 2400)),
+                           now_epoch=_NOW, color=True, over_bg=False)
 
     assert "\x1b[32m49%" in field(49.0)      # green below 50
     assert "\x1b[33m50%" in field(50.0)      # gold from 50
@@ -85,15 +88,17 @@ def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
 # AC 10
 def test_a_metered_backend_renders_the_bare_quest_total() -> None:
     priced = RowUsage(dollars=4.21, priced=1)
-    assert _row(auth_mode="apikey", cost=priced).endswith(
-        "████░░░░░░ 44% · $4.21")                    # no label, no color, no ~
+    row = _row(auth_mode="apikey", cost=priced)
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 44%" + " " * 145 + "$4.21"
+    assert " · $4.21" not in row                 # flush right, no label, no color, no ~
+    assert pal.display_width(row) == 198
     # A step on a model the price table lacks still renders the figure, no ≥.
     with_unpriced = RowUsage(dollars=4.21, priced=1, unpriced=1)
-    assert _row(auth_mode="apikey", cost=with_unpriced).endswith(" · $4.21")
+    assert _row(auth_mode="apikey", cost=with_unpriced).endswith(" $4.21")
     assert _row(auth_mode="apikey", cost=RowUsage(dollars=0.004,
-                                                  priced=1)).endswith(" · <$0.01")
+                                                  priced=1)).endswith(" <$0.01")
     # An API-keyed provider carries no auth_mode and is metered all the same.
-    assert _row(activity=_act(provider="anthropic"), cost=priced).endswith(" · $4.21")
+    assert _row(activity=_act(provider="anthropic"), cost=priced).endswith(" $4.21")
 
 
 # AC 10
@@ -114,7 +119,7 @@ def test_a_subscription_backend_with_no_reading_renders_no_field() -> None:
 
 def test_an_unrecognized_window_label_renders_verbatim() -> None:
     odd = _reading(QuotaWindow("30d", 12.0, None))
-    assert _row(auth_mode="subscription", quota=odd).endswith(" · 30d 12%")
+    assert _row(auth_mode="subscription", quota=odd).endswith("30d 12%")
 
 
 def test_the_countdown_rounds_to_one_nearest_unit() -> None:
