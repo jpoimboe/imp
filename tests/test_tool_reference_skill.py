@@ -78,7 +78,8 @@ def test_tool_reference_documents_the_shared_pid_namespace() -> None:
     # namespace dies at end of run. Whitespace-normalized: the prose is wrapped.
     body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
     assert ("All your calls share one pid namespace, so `ps` sees every process you "
-            "left running and a pid from an earlier call is still valid. Everything "
+            "left running and a pid from an earlier call is still valid — including "
+            "a program you left running on a terminal session. Everything "
             "in it is killed when you finish, so nothing you detach outlives your "
             "run.") in body
     assert ("The `pid` in a background descriptor is a host-side handle a shell "

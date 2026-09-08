@@ -40,8 +40,10 @@ def test_partial_states_the_write_bounds_ahead_of_the_hatches() -> None:
 
 def test_partial_documents_the_pid_namespace_and_routes_usr1_through_sandbox_off() -> None:
     flat = _flat(PARTIAL.read_text())
-    assert ("imp's bash sandbox runs all your shell commands in one user and pid "
-            "namespace of their own") in flat
+    # The terminal clause is load-bearing: a program driven on a pty joins the
+    # same namespace, so the sentence can no longer say "shell commands" alone.
+    assert ("imp's sandbox runs all your shell commands — and any program you "
+            "drive on a terminal — in one user and pid namespace of their own") in flat
     assert ("cannot attach a debugger (`gdb`, `py-spy`, `strace`) to a live process "
             "outside it") in flat
     assert "cannot see or signal any process it did not start" in flat

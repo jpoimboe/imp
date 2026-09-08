@@ -124,7 +124,8 @@ anyway.
   block-buffer (~4 KB): early lines (e.g. a server's 'listening' banner) may lag
   until a flush.
 - All your calls share one pid namespace, so `ps` sees every process you left
-  running and a pid from an earlier call is still valid. Everything in it is
+  running and a pid from an earlier call is still valid — including a program you
+  left running on a terminal session. Everything in it is
   killed when you finish, so nothing you detach outlives your run. The `pid` in
   a background descriptor is a host-side handle a shell command cannot signal —
   use `bash_kill(id)`, or `ps` and its namespace-local pid.

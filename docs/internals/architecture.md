@@ -128,7 +128,7 @@ flowchart LR
 | Workflow assets | `assets/__init__.py` | Bundled workflows ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one. Workflow-agnostic front-door partials ship bundled under `assets/partials/` and are overlaid (local-first) into each quest's `workflow/partials/` at snapshot time, like skills. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
 | Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |
-| Live drivers | `engine/drivers.py` | Per-agent live-driver capability (`drivers:` frontmatter, e.g. `impty`): stdio MCP servers granted to an agent, launched self-hosted. |
+| Live drivers | `engine/drivers.py` | Per-agent live-driver capability (`drivers:` frontmatter, e.g. `impty`): stdio MCP servers granted to an agent, hosted in imp's own process; the programs they spawn on a pty join the run's sandbox namespace, exactly as `bash` commands do. |
 
 **Invariants:** the event log is the single source of truth (state is a rebuildable cursor); the same `NarrativeBuilder` path renders both live and `imp log`.
 
