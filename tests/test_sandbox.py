@@ -2717,6 +2717,19 @@ def test_retired_overlay_symbols_are_gone():
         assert not hasattr(sb, name), f"{name} should be deleted"
 
 
+def test_retired_per_call_sentinel_machinery_is_gone():
+    # AC 14a/b: the deletions are real, not merely unused. hasattr on the MODULE
+    # is the call-site check — these names reach bg.py only by import, so an
+    # import surviving means a call site survived with it.
+    import imp.agents.tools.bg as bg
+    for name in ("_detect_overlay_setup_failure", "_emit_overlay_setup_warning",
+                 "strip_sandbox_marker", "sandbox_spawn_failed",
+                 "sandbox_failure_detail", "SANDBOX_SPAWN_FAILED_MESSAGE"):
+        assert not hasattr(bg, name), f"{name} should be gone from bg.py"
+    for field in ("overlay_setup_failed", "overlay_reported", "sandbox_active"):
+        assert field not in bg.BgProc.__dataclass_fields__
+
+
 def test_child_env_carries_the_state_dir_when_the_spawn_supplies_none():
     # The bash tool passes no control root, so its live engine_env has no
     # IMP_STATE_DIR — the value baked into policy.child_env at run start must still
