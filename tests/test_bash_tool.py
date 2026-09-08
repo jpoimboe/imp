@@ -1381,3 +1381,39 @@ def test_bash_background_spawns_with_the_sandbox_child_env(
     assert "IMP_TELEGRAM_TOKEN" not in env
     assert env["PATH"] == "/usr/bin"
     assert env["IMP_QUEST_ID"] == "test01"
+
+
+@pytest.mark.parametrize("in_background", [False, True],
+                         ids=["foreground", "background"])
+def test_a_joined_spawn_takes_no_host_cwd_where_a_bare_one_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_background: bool,
+) -> None:
+    # Spec §1: on a join the cwd is set by the inner `cd`, never Popen's `cwd=` —
+    # both resolve in the CALLER's mount namespace. The bare /sandbox off shape
+    # has no inner `cd`, so its cwd must stay. Captured at the one spawn both
+    # shapes and both foreground/background paths funnel through.
+    import imp.agents.tools.bg as bgmod
+
+    seen: list[object] = []
+
+    async def fake_open_process(argv: list[str], **kw: object) -> object:
+        seen.append(kw.get("cwd"))
+        raise RuntimeError("stop after capture")
+
+    monkeypatch.setattr(bgmod.anyio, "open_process", fake_open_process)
+    args = {"command": "echo hi", "cwd": str(tmp_path),
+            "run_in_background": in_background}
+
+    joined = _ctx(tmp_path)
+    joined.background_enabled = True
+    joined.base_sandbox_policy = _active_policy(tmp_path)
+    _unopened_ns(joined)
+    with pytest.raises(RuntimeError):
+        _run_bash(joined, args)
+
+    bare = _ctx(tmp_path)                    # no policy at all: the bare shape
+    bare.background_enabled = True
+    with pytest.raises(RuntimeError):
+        _run_bash(bare, args)
+
+    assert seen == [None, str(tmp_path)]

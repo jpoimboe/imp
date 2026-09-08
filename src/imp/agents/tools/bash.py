@@ -213,6 +213,9 @@ async def bash(
                                "error": SANDBOX_SPAWN_FAILED_MESSAGE},
                               ensure_ascii=False)
         spawn = ns.join(command, cwd=cwd_path, engine_env=eng)
+        # cwd=None: the join's own inner `cd` applies it inside the keeper's
+        # mount namespace, which is the only one where it means anything.
+        spawn_cwd: str | None = None
     else:
         # /sandbox off, or no policy at all: the bare shape, whose command also
         # travels in $IMP_COMMAND. shim_dir is ignored under an active policy, so
@@ -223,11 +226,12 @@ async def bash(
             command, cwd=cwd_path, policy=policy, engine_env=eng,
             environ=os.environ,
             shim_dir=str(imp_shim_dir(qdir)) if qdir is not None else "")
+        spawn_cwd = cwd_path
     argv, env, pass_fds = spawn.argv, spawn.env, spawn.pass_fds
     if run_in_background:
         from imp.agents.tools.bg import spawn_background
         return await spawn_background(
-            ctx, command=command, argv=argv, cwd=cwd_path, env=env,
+            ctx, command=command, argv=argv, cwd=spawn_cwd, env=env,
             pass_fds=pass_fds)
 
     # Foreground now spawns to scratch FILES via the shared core (like bg.py), not
@@ -244,7 +248,7 @@ async def bash(
     out_path = d / f"{stem}.out"
     err_path = d / f"{stem}.err"
     proc = await _spawn_to_files(
-        argv, out_path=out_path, err_path=err_path, cwd=cwd_path, env=env,
+        argv, out_path=out_path, err_path=err_path, cwd=spawn_cwd, env=env,
         pass_fds=pass_fds)
     ctx.running_processes.append(proc)
 

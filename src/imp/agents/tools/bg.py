@@ -549,7 +549,7 @@ async def terminate_background_processes(
 
 
 async def _spawn_to_files(
-    argv: list[str], *, out_path: Path, err_path: Path, cwd: str,
+    argv: list[str], *, out_path: Path, err_path: Path, cwd: str | None,
     env: dict[str, str], pass_fds: tuple[int, ...] = (),
 ) -> Any:
     """Shared spawn body for background AND (Part 2/3) foreground procs.
@@ -562,6 +562,10 @@ async def _spawn_to_files(
     handle would flush nothing. On any failure the partially-created files are
     unlinked. Truncating open ('wb') is belt-and-braces: counter seeding means
     the same <id>.out is never legitimately reopened.
+
+    `cwd` is the BARE shape's cwd and is None for a join: a joined command's cwd
+    is set by the inner `cd`, because Popen's cwd= resolves in the CALLER's mount
+    namespace (spec §1) and would also demand the directory exist host-side.
     """
     kwargs: dict[str, object] = {}
     if hasattr(os, "setsid"):
@@ -605,7 +609,7 @@ async def _spawn_to_files(
 
 
 async def spawn_background(
-    ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
+    ctx: ToolContext, *, command: str, argv: list[str], cwd: str | None,
     env: dict[str, str], pass_fds: tuple[int, ...] = (),
 ) -> str:
     """Spawn ordering (no orphan window): scratch dir + both write-side files

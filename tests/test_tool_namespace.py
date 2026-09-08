@@ -497,3 +497,48 @@ def test_two_contexts_do_not_share_a_process_table():
     finally:
         shutil.rmtree(root_a, ignore_errors=True)
         shutil.rmtree(root_b, ignore_errors=True)
+
+
+def test_a_call_can_use_a_cwd_that_exists_only_inside_the_keeper():
+    # Spec §1: the join's cwd is set by the inner `cd`, never Popen's `cwd=`,
+    # which resolves in the CALLER's mount namespace. Passing it also demanded
+    # the directory exist HOST-side, and a miss raised FileNotFoundError out of
+    # the spawn instead of reporting a shell error. Reachable, not theoretical:
+    # a --tmpfs mask (here) and §5's per-run $HOME overlay both hold directories
+    # with no host-side path at all.
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    try:
+        ctx = _ctx(root)
+        ctx.base_sandbox_policy = _policy_for(root, secret_dirs=(str(masked),))
+        ctx.background_enabled = True
+        inside = masked / "only-inside"
+
+        made = _bash(ctx, f"mkdir -p {inside}")
+        assert made["returncode"] == 0, made
+        assert not inside.exists()      # it lives in the keeper's tmpfs alone
+
+        # (a) foreground
+        done = _bash(ctx, "pwd", cwd=str(inside))
+        assert done["returncode"] == 0, done
+        assert done["stdout"].strip() == str(inside)
+
+        # (b) background, through the same shared spawn core. The beacon is read
+        # host-side: a bash_output wait cannot reach a terminal status here,
+        # since each call runs its own anyio.run and the child watcher that would
+        # update returncode belongs to the closed loop that spawned it.
+        beacon = root / "bg-cwd.txt"
+        started = _bash(ctx, f"pwd > {beacon}", cwd=str(inside),
+                        run_in_background=True)
+        assert started["status"] == "running", started
+        assert _poll(lambda: beacon.read_text().strip() if beacon.exists() else "",
+                     what="the background call's own pwd") == str(inside)
+
+        # (c) a cwd in NEITHER view is now a shell error the agent can read
+        missing = root / "nope"
+        gone = _bash(ctx, "pwd", cwd=str(missing))
+        assert gone["returncode"] != 0
+        assert str(missing) in gone["stderr"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
