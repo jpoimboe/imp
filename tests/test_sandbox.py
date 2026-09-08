@@ -776,7 +776,7 @@ def test_overlay_mode_probes_with_real_home_as_lowerdir(tmp_path, monkeypatch):
     home = tmp_path / "agent-home"
     assert sb.overlay_mode(tmp_path, home) is True
     mount_cmd = calls["argv"][-1]
-    # probes with the REAL home as lowerdir — the same shape the per-command mount
+    # probes with the REAL home as lowerdir — the same shape the keeper's mount
     # in build_sandbox_spawn uses — not a synthetic empty lower under the probe dir.
     assert f"lowerdir={home}" in mount_cmd
     assert str(tmp_path / ".overlay-probe" / "lower") not in mount_cmd

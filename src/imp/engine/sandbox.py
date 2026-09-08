@@ -85,10 +85,10 @@ class HomeLayer:
 
 @dataclass(frozen=True, slots=True)
 class OverlayRoot:
-    """The dir each spawn mints its OWN home-overlay layer under, paired with the
-    mount shape overlay_mode negotiated for this host. Pairing them keeps a minted
-    layer's userxattr flag inseparable from the root it came from, so a layer
-    claiming a shape the probe never validated cannot be constructed."""
+    """The dir a keeper namespace mints its home-overlay layer under, paired with
+    the mount shape overlay_mode negotiated for this host. Pairing them keeps a
+    minted layer's userxattr flag inseparable from the root it came from, so a
+    layer claiming a shape the probe never validated cannot be constructed."""
     path: str
     userxattr: bool
 
@@ -116,7 +116,7 @@ class SandboxPolicy:
     disposable_tree: bool = False            # agent runs in a disposable git worktree
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
-    overlay_root: OverlayRoot | None = None  # per-step root spawns mint layers under
+    overlay_root: OverlayRoot | None = None  # per-step root keepers mint layers under
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -906,11 +906,11 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
 
     The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
     real dir under the quest home, NOT /tmp — some hosts refuse an overlay upperdir on
-    tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
+    tmpfs), but the lowerdir is `home` — the SAME shape the keeper's mount in
     build_sandbox_spawn uses — so the probe exercises the overlapping-layers
     condition the real mount hits instead of a synthetic empty lower that overlaps
-    nothing. Cached like sandbox_available(); the answer is carried to the
-    per-command mount (via make_home_layer), so probe and spawn always agree.
+    nothing. Cached like sandbox_available(); the answer is carried to the keeper's
+    mount (via make_home_layer), so probe and spawn always agree.
 
     Tests that monkeypatch subprocess.run / shutil.which / platform.system must
     call overlay_mode.cache_clear() first (the result is process-global cached,
@@ -946,7 +946,7 @@ def overlay_mode(probe_base: Path, home: Path) -> bool | None:
 def make_home_layer(
     home: str, *, root: Path, userxattr: bool | None,
 ) -> tuple[HomeLayer, OverlayRoot | None, Callable[[], None]]:
-    """Build one invocation's writable-home layer, the root its spawns mint into,
+    """Build one invocation's writable-home layer, the root its keepers mint into,
     and the teardown callable. `userxattr` is overlay_mode's tri-state. None → the
     plain rw bind of the real home (fallback): no dirs, no overlay root, a no-op
     cleanup. True/False → create `root` and report it as the policy's overlay_root,
