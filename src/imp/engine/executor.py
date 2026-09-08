@@ -70,6 +70,7 @@ from imp.engine.quest import Quest
 from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_MAX_ATTEMPTS,
+    SandboxOpenFailed,
     SandboxUnavailable,
     _force_rmtree,
     make_home_layer,
@@ -77,10 +78,6 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
     sandbox_config_from_raw,
-    sandbox_failure_detail,
-    sandbox_spawn_backoff_delay,
-    sandbox_spawn_failed,
-    strip_sandbox_marker,
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.seed import seed_workflow_start
@@ -1190,6 +1187,18 @@ async def _route_script(
                     functools.partial(_test_lane.acquire_blocking,
                                       quest.control_root, max_parallel_test_runs))
                 _emit(log, "test_lane_acquired", {"step": step.name})
+        def _emit_spawn_retry(next_attempt: int, detail: str) -> None:
+            # open() fires this on the anyio WORKER thread; from_thread hops it back
+            # to the loop thread, the single terminal writer. A hop, not a buffer:
+            # the breadcrumb's whole job is telling the user WHY the gate is stalling,
+            # so it has to appear during the stall, not batched to the gate's end.
+            anyio.from_thread.run_sync(
+                _emit, log, "runner_warning", {
+                    "message": ("sandbox could not start the step; retrying "
+                                f"({next_attempt}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
+                    "step": step.name, "reason": "sandbox-spawn-failed",
+                    "detail": detail})
+
         run_call = functools.partial(
             run_script, step, cwd=quest.workflow_dir,
             env_extra=engine_env(project_root=quest.project_root,
@@ -1201,26 +1210,9 @@ async def _route_script(
                                  test_gates=test_gates,
                                  pythonpath=pythonpath),
             policy=sandbox_policy, command=command, abort=abort,
-            shim_dir=str(imp_shim_dir(quest.quest_dir)))
-        sandbox_active = sandbox_policy is not None and sandbox_policy.active
-        for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):
-            out = await anyio.to_thread.run_sync(run_call)
-            if not sandbox_spawn_failed(out["stderr"], sandbox_active=sandbox_active):
-                break
-            if attempt == SANDBOX_SPAWN_MAX_ATTEMPTS:
-                # Retries exhausted: bwrap never entered the command, so its exit is
-                # infrastructure, not a gate verdict. Pause with an honest reason and
-                # NEVER touch the step's rules (no evaluate_rules, no script_blocked).
-                return Pause(reason="sandbox_spawn_failed"), None, {}
-            _emit(log, "runner_warning", {
-                "message": ("sandbox could not start the step; retrying "
-                            f"({attempt + 1}/{SANDBOX_SPAWN_MAX_ATTEMPTS})"),
-                "step": step.name, "reason": "sandbox-spawn-failed",
-                "detail": sandbox_failure_detail(out["stderr"])})
-            await anyio.sleep(sandbox_spawn_backoff_delay(attempt))
-        # Loop exited cleanly — strip the sentinel line (if any) before any rule,
-        # feedback string, or script_blocked event sees it. No-op on a bare gate.
-        out = {**out, "stderr": strip_sandbox_marker(out["stderr"])}
+            shim_dir=str(imp_shim_dir(quest.quest_dir)),
+            on_retry=_emit_spawn_retry)
+        out = await anyio.to_thread.run_sync(run_call)
         if output_path is not None:
             assert step.output_schema is not None
             try:
@@ -1235,6 +1227,11 @@ async def _route_script(
                 return Pause(reason="script_blocked"), str(e), {}
     except ScriptInterrupted:
         return Pause(interrupt=True), None, {}
+    except SandboxOpenFailed:
+        # The budget is exhausted and NO command was spawned, so this exit is
+        # infrastructure, not a gate verdict. NEVER touch the step's rules (no
+        # evaluate_rules, no script_blocked).
+        return Pause(reason="sandbox_spawn_failed"), None, {}
     finally:
         if output_path is not None:
             output_path.unlink(missing_ok=True)

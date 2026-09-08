@@ -16,11 +16,11 @@ from typing import Any
 
 from imp.engine.expr import EvalEnv, evaluate
 from imp.engine.sandbox import (
+    SandboxNamespace,
     SandboxPolicy,
     SandboxSpawn,
     build_sandbox_spawn,
     normalize_returncode,
-    prepare_spawn_policy,
 )
 from imp.engine.types import Action, Continue, Rule, Step
 
@@ -110,13 +110,19 @@ def evaluate_rules(
 
 
 def _run_spawn(
-    spawn: SandboxSpawn, *, command: str, cwd: str,
+    spawn: SandboxSpawn, *, command: str, cwd: str | None,
     timeout_seconds: int | None, abort: Callable[[], bool] | None,
 ) -> dict[str, Any]:
     """Spawn one prepared SandboxSpawn, drain both streams, return {exit, stdout, stderr}.
 
     `command` is carried only for the TimeoutExpired message: it is off argv, so
-    proc.args would name the wrapper instead of the gate the user wrote."""
+    proc.args would name the wrapper instead of the gate the user wrote.
+
+    `cwd` is the BARE shape's cwd only, and is None for a join: a joined command's
+    cwd is set by the inner `cd`, never here, because Popen's cwd= resolves in the
+    CALLER's mount namespace (spec §1). Passing it would also demand the gate's cwd
+    exist host-side, where a miss is an uncaught FileNotFoundError rather than a
+    gate verdict."""
     proc = subprocess.Popen(
         spawn.argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=spawn.env, pass_fds=spawn.pass_fds, start_new_session=True,
@@ -209,39 +215,63 @@ def run_command(
     env_extra: dict[str, str] | None = None,
     policy: SandboxPolicy | None = None,
     abort: Callable[[], bool] | None = None, shim_dir: str = "",
+    on_retry: Callable[[int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Run one shell command; return {exit, stdout, stderr}.
 
     The command string is an explicit shell expression read live from the
     quest's own worktree (principal-based trust: the quest author and workflow
-    author are the same V0 principal). When `policy` is active it is wrapped with
-    bwrap (build_sandbox_spawn appends `sh -c <sentinel script> <command>`, the
-    command its own argv element); otherwise the bare `sh -c` runs.
+    author are the same V0 principal). When `policy` is active the command runs
+    inside a keeper namespace opened and closed around this one call; otherwise
+    a bare `sh -c` runs. Either way the command travels in `$IMP_COMMAND`, off
+    argv.
 
-    Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a
-    timeout must kill the process GROUP, not just the bwrap pid — else the inner
-    `sh` is orphaned. So this uses Popen(start_new_session=True) + an owned
-    selectors drain loop and a graceful group kill (SIGTERM -> grace -> SIGKILL)
-    on the timeout, abort, and output-cap paths. `cwd` must lie inside the
-    writable set (worktree/`/tmp`); a command pointed at the RO floor fails.
+    Reaping (spec B.9/H-A): the join carries no --die-with-parent, so a timeout
+    must kill the process GROUP, not just the join pid — else the inner `sh` is
+    orphaned; closing the keeper then kills whatever escaped the group. So this
+    uses Popen(start_new_session=True) + an owned selectors drain loop and a
+    graceful group kill (SIGTERM -> grace -> SIGKILL) on the timeout, abort, and
+    output-cap paths. `cwd` must lie inside the writable set (worktree/`/tmp`); a
+    command pointed at the RO floor fails.
 
     `env_extra` (an engine_env result) is the live per-spawn engine env: it refreshes
     the sandbox child environment's IMP_* slice, and on the unsandboxed path it is
     overlaid authoritatively so a stale inherited engine var cannot leak
     (engine_env's "absent => no gate" contract).
+
+    open() owns the spawn-retry budget and calls `on_retry(next_attempt, detail)`
+    once per failed attempt; on exhaustion SandboxOpenFailed propagates and no
+    command runs. The keeper's --die-with-parent is a PR_SET_PDEATHSIG on the
+    CREATING THREAD, which is safe here only because the keeper never outlives
+    this call — a caller must not hand the namespace onwards.
     """
-    spawn = build_sandbox_spawn(
-        command, cwd=cwd,
-        policy=prepare_spawn_policy(policy) if policy is not None else None,
-        engine_env=env_extra or {}, environ=os.environ, shim_dir=shim_dir)
-    return _run_spawn(spawn, command=command, cwd=cwd,
-                      timeout_seconds=timeout_seconds, abort=abort)
+    if policy is not None and policy.active:
+        ns = SandboxNamespace.open(policy=policy, engine_env=env_extra or {},
+                                   environ=os.environ, on_retry=on_retry)
+        try:
+            # cwd=None: the join's own inner `cd` applies it inside the keeper's
+            # mount namespace, which is the only one where it means anything.
+            return _run_spawn(
+                ns.join(command, cwd=cwd, engine_env=env_extra or {}),
+                command=command, cwd=None, timeout_seconds=timeout_seconds,
+                abort=abort)
+        finally:
+            ns.close()
+    # No policy, or /sandbox off. Dropping prepare_spawn_policy here is a strict
+    # no-op: it early-returns the SAME object for an inactive policy, so it never
+    # reached the ref-reexpose or layer-minting work.
+    return _run_spawn(
+        build_sandbox_spawn(command, cwd=cwd, policy=policy,
+                            engine_env=env_extra or {}, environ=os.environ,
+                            shim_dir=shim_dir),
+        command=command, cwd=cwd, timeout_seconds=timeout_seconds, abort=abort)
 
 
 def run_script(
     step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
     policy: SandboxPolicy | None = None, command: str | None = None,
     abort: Callable[[], bool] | None = None, shim_dir: str = "",
+    on_retry: Callable[[int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Unpack a script step's command/cwd/timeout and run it via run_command."""
     cmd = command if command is not None else step.command
@@ -249,4 +279,4 @@ def run_script(
     return run_command(
         command=cmd, cwd=step.cwd or str(cwd),
         timeout_seconds=step.timeout_seconds, env_extra=env_extra,
-        policy=policy, abort=abort, shim_dir=shim_dir)
+        policy=policy, abort=abort, shim_dir=shim_dir, on_retry=on_retry)

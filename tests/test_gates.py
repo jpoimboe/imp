@@ -25,6 +25,60 @@ def _rule(cond, action, muts=()):
     return Rule(condition=cond, action=action, mutations=muts, source=loc())
 
 
+def _active_policy(tmp_path, **over):
+    """A minimal ACTIVE policy. Every test in this file fakes the keeper away; the
+    real-keeper coverage lives in tests/test_gates_namespace.py."""
+    from imp.engine.sandbox import SandboxPolicy
+    base = dict(active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path),
+                git_ro_remask=(), writable_caches=(), extra_readable=(),
+                extra_writable=(), secret_dirs=(), secret_files=(),
+                child_env=(), network=True, note="")
+    return SandboxPolicy(**{**base, **over})
+
+
+def _capture_spawn(monkeypatch) -> dict:
+    """Capture the SandboxSpawn run_command hands to the drain loop, so the argv and
+    env can be asserted without spawning anything."""
+    import imp.engine.gates as gatesmod
+
+    captured: dict = {}
+
+    def _fake(spawn, **kw):
+        captured["argv"] = spawn.argv
+        captured["env"] = spawn.env
+        captured["pass_fds"] = spawn.pass_fds
+        return {"exit": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(gatesmod, "_run_spawn", _fake)
+    return captured
+
+
+def _fake_keeper(monkeypatch, policy) -> list:
+    """Make SandboxNamespace.open return a REAL namespace holding throwaway fds, so
+    join() is the production argv/env builder and close() is safe: ns_init_pid 0 can
+    never match the pinned pid fd, so nothing is signalled. Patches the CLASS —
+    SandboxNamespace is a slots dataclass. Returns the list close() appends to."""
+    from imp.engine.sandbox import SandboxNamespace
+
+    fds = [os.open(os.devnull, os.O_RDONLY) for _ in range(6)]
+    ns = SandboxNamespace(
+        policy=policy, base_policy=policy,
+        ns_fds=(("user", fds[0]), ("mnt", fds[1]), ("pid", fds[2]),
+                ("uts", fds[3]), ("ipc", fds[4])),
+        outer_user_fd=None, ns_init_pid=0, err_fd=fds[5],
+        proc=subprocess.Popen(["true"]))
+    closed: list = []
+    real_close = SandboxNamespace.close
+
+    def _recording_close(self) -> None:
+        closed.append(True)
+        real_close(self)
+
+    monkeypatch.setattr(SandboxNamespace, "open", staticmethod(lambda **kw: ns))
+    monkeypatch.setattr(SandboxNamespace, "close", _recording_close)
+    return closed
+
+
 def test_evaluate_rules_first_match_wins() -> None:
     rules = (
         _rule(Binary("==", Name("verdict"), StrLit("rework")), Goto("spec-writer")),
@@ -104,101 +158,28 @@ def test_run_script_bare_when_no_policy(tmp_path) -> None:
     assert out["exit"] == 0 and "hi" in out["stdout"]
 
 
-def test_run_script_wraps_with_active_policy(tmp_path, monkeypatch) -> None:
-    import imp.engine.gates as gatesmod
-    from imp.engine.sandbox import SandboxPolicy
-
-    captured: dict[str, object] = {}
-    real_popen = gatesmod.subprocess.Popen
-
-    class FakePopen:
-        def __init__(self, argv, **kw):
-            captured["argv"] = argv
-            self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
-                                                  if k in ("cwd", "env", "start_new_session",
-                                                           "stdout", "stderr")})
-
-        @property
-        def stdout(self):
-            return self._inner.stdout
-
-        @property
-        def stderr(self):
-            return self._inner.stderr
-
-        def poll(self):
-            return self._inner.poll()
-
-        def wait(self, timeout=None):
-            return self._inner.wait(timeout)
-
-        @property
-        def returncode(self):
-            return self._inner.returncode
-
-        @property
-        def pid(self):
-            return self._inner.pid
-
-    monkeypatch.setattr(gatesmod.subprocess, "Popen", FakePopen)
-    pol = SandboxPolicy(active=True, worktree=str(tmp_path),
-                        git_common_dir=str(tmp_path), git_ro_remask=(),
-                        writable_caches=(), extra_readable=(), extra_writable=(),
-                        secret_dirs=(), secret_files=(),
-                        child_env=(), network=True, note="")
-    step = _script_step("echo hi")
-    run_script(step, cwd=tmp_path, policy=pol)
-    assert captured["argv"][0] == "bwrap"
+def test_run_script_joins_the_keeper_under_an_active_policy(tmp_path, monkeypatch) -> None:
+    # An active policy no longer builds a per-call bwrap: run_command opens a keeper,
+    # joins it, and closes it around the one command (spec §4).
+    pol = _active_policy(tmp_path)
+    captured = _capture_spawn(monkeypatch)
+    closed = _fake_keeper(monkeypatch, pol)
+    run_script(_script_step("echo hi"), cwd=tmp_path, policy=pol)
+    assert captured["argv"][0] == "nsenter"
+    assert "echo hi" not in " ".join(captured["argv"])     # off argv (spec §2)
+    assert captured["env"]["IMP_COMMAND"] == "echo hi"
+    assert len(captured["pass_fds"]) == 5                  # the five pinned ns fds ride along
+    assert closed == [True]                                # closed around the one command
 
 
 def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -> None:
     # Regression: the sandbox policy is frozen once at run start with an empty
     # name-on-intent slug; a post-rename gate passes a fresh env_extra. run_script
-    # must thread env_extra into the sandbox so the gate sees the real slug, not "".
-    import imp.engine.gates as gatesmod
-    from imp.engine.sandbox import SandboxPolicy
-
-    captured: dict[str, object] = {}
-    real_popen = gatesmod.subprocess.Popen
-
-    class FakePopen:
-        def __init__(self, argv, **kw):
-            captured["argv"] = argv
-            captured["env"] = kw.get("env")
-            self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
-                                                  if k in ("cwd", "env", "start_new_session",
-                                                           "stdout", "stderr")})
-
-        @property
-        def stdout(self):
-            return self._inner.stdout
-
-        @property
-        def stderr(self):
-            return self._inner.stderr
-
-        def poll(self):
-            return self._inner.poll()
-
-        def wait(self, timeout=None):
-            return self._inner.wait(timeout)
-
-        @property
-        def returncode(self):
-            return self._inner.returncode
-
-        @property
-        def pid(self):
-            return self._inner.pid
-
-    monkeypatch.setattr(gatesmod.subprocess, "Popen", FakePopen)
-    pol = SandboxPolicy(active=True, worktree=str(tmp_path),
-                        git_common_dir=str(tmp_path), git_ro_remask=(),
-                        writable_caches=(), extra_readable=(), extra_writable=(),
-                        secret_dirs=(), secret_files=(),
-                        child_env=(("IMP_QUEST_ID", ""),), network=True, note="")
-    step = _script_step("echo hi")
-    run_script(step, cwd=tmp_path, policy=pol,
+    # must thread env_extra into the join so the gate sees the real slug, not "".
+    pol = _active_policy(tmp_path, child_env=(("IMP_QUEST_ID", ""),))
+    captured = _capture_spawn(monkeypatch)
+    _fake_keeper(monkeypatch, pol)
+    run_script(_script_step("echo hi"), cwd=tmp_path, policy=pol,
                env_extra={"IMP_QUEST_ID": "realid01"})
     assert captured["env"]["IMP_QUEST_ID"] == "realid01"
     assert "realid01" not in " ".join(captured["argv"])
@@ -1314,53 +1295,15 @@ def test_run_script_delegates_unpacked_step_fields(tmp_path, monkeypatch) -> Non
 
 def test_run_script_spawns_with_the_sandbox_child_env(tmp_path, monkeypatch) -> None:
     # AC 5: an ambient secret in the gate process must not reach the gate's child.
-    import imp.engine.gates as gatesmod
-    from imp.engine.sandbox import SandboxPolicy
-
     monkeypatch.setenv("IMP_TELEGRAM_TOKEN", "canary-42:secret")
-    captured: dict[str, object] = {}
-    real_popen = gatesmod.subprocess.Popen
-
-    class FakePopen:
-        def __init__(self, argv, **kw):
-            captured["argv"] = argv
-            captured["env"] = kw.get("env")
-            self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
-                                                  if k in ("cwd", "env", "start_new_session",
-                                                           "stdout", "stderr")})
-
-        @property
-        def stdout(self):
-            return self._inner.stdout
-
-        @property
-        def stderr(self):
-            return self._inner.stderr
-
-        def poll(self):
-            return self._inner.poll()
-
-        def wait(self, timeout=None):
-            return self._inner.wait(timeout)
-
-        @property
-        def returncode(self):
-            return self._inner.returncode
-
-        @property
-        def pid(self):
-            return self._inner.pid
-
-    monkeypatch.setattr(gatesmod.subprocess, "Popen", FakePopen)
-    pol = SandboxPolicy(active=True, worktree=str(tmp_path),
-                        git_common_dir=str(tmp_path), git_ro_remask=(),
-                        writable_caches=(), extra_readable=(), extra_writable=(),
-                        secret_dirs=(), secret_files=(),
-                        child_env=(("PATH", "/usr/bin"), ("IMP_QUEST_ID", "")),
-                        network=True, note="")
+    pol = _active_policy(tmp_path,
+                         child_env=(("PATH", "/usr/bin"), ("IMP_QUEST_ID", "")))
+    captured = _capture_spawn(monkeypatch)
+    _fake_keeper(monkeypatch, pol)
     run_script(_script_step("echo hi"), cwd=tmp_path, policy=pol,
                env_extra={"IMP_QUEST_ID": "realid01"})
-    assert captured["env"] == {"PATH": "/usr/bin", "IMP_QUEST_ID": "realid01"}
+    assert captured["env"] == {"PATH": "/usr/bin", "IMP_QUEST_ID": "realid01",
+                               "IMP_COMMAND": "echo hi", "IMP_CWD": str(tmp_path)}
 
 
 def test_run_spawn_passes_the_spawns_inherited_fds_to_the_child(tmp_path) -> None:

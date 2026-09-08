@@ -225,11 +225,6 @@ def sandbox_spawn_failed(stderr: str, *, sandbox_active: bool) -> bool:
     return sandbox_active and SANDBOX_ENTERED_MARKER not in stderr
 
 
-def strip_sandbox_marker(stderr: str) -> str:
-    """Remove the single entry-sentinel line from captured stderr (display-only, idempotent)."""
-    return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
-
-
 @overload
 def normalize_returncode(returncode: int, *, imp_killed: bool) -> int: ...
 @overload
@@ -612,9 +607,13 @@ class SandboxNamespace:
         attempt so each caller keeps its own runner_warning wording; on exhaustion
         this raises SandboxOpenFailed carrying the detail, and the caller decides
         what to report. Blocking (the keeper handshake is ~7-15ms, the backoffs up
-        to 400ms), and it must run on the CALLER's own thread: --die-with-parent is
-        a PR_SET_PDEATHSIG, which the kernel fires when the creating THREAD exits,
-        so a keeper opened in a thread-pool worker dies when that worker retires."""
+        to 400ms). The keeper must not OUTLIVE the thread that opened it:
+        --die-with-parent is a PR_SET_PDEATHSIG, which the kernel fires when the
+        creating THREAD exits, so a namespace opened in a thread-pool worker and
+        handed onwards dies when that worker retires. One kept across calls is
+        therefore opened on the thread that owns it (ensure_tool_namespace); one
+        opened and closed inside a single call may open in a worker, since no
+        window exists in which the worker could retire first (gates.run_command)."""
         if not policy.active:
             raise AssertionError("SandboxNamespace.open on an inactive policy")
         for attempt in range(1, SANDBOX_SPAWN_MAX_ATTEMPTS + 1):

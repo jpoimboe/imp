@@ -1460,16 +1460,6 @@ def test_spawn_failed_message_no_longer_claims_transience():
         "(a sandbox-setup failure, not your command's own exit)")
 
 
-def test_strip_sandbox_marker_removes_single_line():
-    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER, strip_sandbox_marker
-    raw = f"{SANDBOX_ENTERED_MARKER}\nreal line\nsecond"
-    assert strip_sandbox_marker(raw) == "real line\nsecond"
-    # idempotent: a second strip (marker already gone) is a no-op
-    assert strip_sandbox_marker(strip_sandbox_marker(raw)) == "real line\nsecond"
-    # no marker present -> unchanged
-    assert strip_sandbox_marker("just output\n") == "just output\n"
-
-
 def test_sandbox_spawn_backoff_bounds_and_cap():
     from imp.engine.sandbox import (
         SANDBOX_SPAWN_MAX_ATTEMPTS,
@@ -2728,13 +2718,23 @@ def test_retired_per_call_sentinel_machinery_is_gone():
         assert not hasattr(bg, name), f"{name} should be gone from bg.py"
     for field in ("overlay_setup_failed", "overlay_reported", "sandbox_active"):
         assert field not in bg.BgProc.__dataclass_fields__
-    # AC 14b's bash.py half. Named individually because bash KEEPS importing
-    # SANDBOX_SPAWN_FAILED_MESSAGE and SANDBOX_SPAWN_MAX_ATTEMPTS, which are not
-    # part of the sentinel path. (The executor's half is Part 4's, per deferred.md.)
+    # AC 14b's bash.py and executor.py halves. Named individually rather than
+    # checked wholesale because both modules KEEP importing sandbox symbols that
+    # are not part of the sentinel path: SANDBOX_SPAWN_MAX_ATTEMPTS (the retry
+    # wording) in both, and SANDBOX_SPAWN_FAILED_MESSAGE in bash.py.
     import imp.agents.tools.bash as bash
-    for name in ("strip_sandbox_marker", "sandbox_spawn_failed",
-                 "sandbox_failure_detail"):
-        assert not hasattr(bash, name), f"{name} should be gone from bash.py"
+    import imp.engine.executor as ex
+    for mod in (bash, ex):
+        for name in ("strip_sandbox_marker", "sandbox_spawn_failed",
+                     "sandbox_failure_detail"):
+            assert not hasattr(mod, name), f"{name} should be gone from {mod.__name__}"
+    # strip_sandbox_marker is gone OUTRIGHT: the executor's was its last call site,
+    # and open()'s handshake reads the sentinel with _await_sentinel, never this.
+    import imp.engine.sandbox as sb
+    assert not hasattr(sb, "strip_sandbox_marker")
+    # ...but the two the handshake DOES use must survive.
+    assert sb.sandbox_spawn_failed("", sandbox_active=True) is True
+    assert sb.sandbox_failure_detail("boom\nrest") == "boom"
 
 
 def test_normalize_returncode_separates_imps_kills_from_the_commands_own():
