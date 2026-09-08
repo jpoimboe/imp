@@ -37,6 +37,12 @@ _POLL = 0.02  # 20 ms — nominal Phase-1 poll cadence cap
 _DRAIN_YIELD = 0.002  # 2 ms — gap the background drainer leaves between reads so a
 # tool-call thread waiting on the io lock is never starved by the drainer.
 
+# Ceiling on one _drain_buffered() call, in bytes. A writer that has already exited can
+# have left at most one pty buffer behind — tens of KB, and comfortably under 64 KiB on
+# every Linux measurement — so a real goodbye never approaches this. Only a process still
+# writing to the slave can, which is exactly the shape the ceiling exists to bound.
+_DRAIN_LIMIT_BYTES = 262144
+
 # The default settle policy — the SINGLE source of truth for settling, inherited
 # by the MCP tool layer. A settling program returns from wait_idle as soon as it's
 # quiet for `idle`, so `hard` is only a max-patience CEILING: it bites only when the
@@ -146,6 +152,9 @@ class TerminalSession:
         # output?" is just `is not None`, so the settle test can't conflate
         # "saw something, ever" with "saw something recently".
         self._last_data_t: float | None = None
+        # Total bytes read off the master by any reader — the quantity _drain_buffered
+        # bounds itself by.
+        self._bytes_read = 0
         self._stop = False
         self._drainer = threading.Thread(
             target=self._drain_forever, name="impty-drainer", daemon=True,
@@ -310,6 +319,7 @@ class TerminalSession:
             # BaseException still propagates, so timeouts/^C are unaffected.
             _log.exception("impty: unparseable output dropped; continuing")
         self._last_data_t = time.monotonic()
+        self._bytes_read += len(chunk)
         return _StepResult.DATA
 
     def wait_idle(
@@ -360,6 +370,25 @@ class TerminalSession:
                 if now - start > hard:
                     return False
 
+    def _drain_buffered(self) -> None:
+        """Drain every immediately-available chunk into pyte via zero-timeout reads
+        until EOF (full capture), the first QUIET (nothing readable right now), or
+        _DRAIN_LIMIT_BYTES.
+
+        Everything a writer that has EXITED left behind already sits in the kernel pty
+        buffer, so back-to-back zero-timeout reads capture all of it however long pyte's
+        feed() takes: feed cost is never waited on, so nothing can expire mid-drain and
+        drop the trailing line. The bound is therefore a byte ceiling and NOT a
+        deadline — a clock would race that feed and truncate a real goodbye under load.
+        Only a process still writing to the slave (a setsid()'d grandchild the signals
+        can't reach) can keep the loop in DATA, and _DRAIN_LIMIT_BYTES stops it. One
+        that merely trickles stops sooner still, on the first inter-byte gap's QUIET."""
+        with self._io_lock:
+            start = self._bytes_read
+            while self._bytes_read - start < _DRAIN_LIMIT_BYTES:
+                if self._read_step(0.0) is not _StepResult.DATA:
+                    break
+
     def run_to_completion(self, hard: float = 60.0) -> int:
         """Drive the child to exit, feeding ALL remaining output to pyte first.
 
@@ -369,16 +398,15 @@ class TerminalSession:
             closes (EOF). Checking poll() each iteration (not only when
             not-readable) is what lets a continuously-streaming, slave-pinning
             grandchild terminate instead of stalling to the hard cap.
-          Phase 2 (child exited) — drain the kernel buffer via zero-timeout
-            reads until EOF or the first QUIET, backstopped only by the overall
-            `hard` deadline. In the normal flood case (no grandchild) the exited
-            child's output is finite and fully buffered, so back-to-back
-            zero-timeout reads reach EOF regardless of pyte feed() cost → full
-            capture, with no fixed grace window that could expire mid-drain and
-            drop the trailing sentinel. A slave-pinning grandchild trickles with
-            inter-byte gaps, so its first gap returns QUIET and Phase 2 stops
-            fast instead of stalling to `hard` (its trailing bytes may be
-            truncated — desired; they are the grandchild's).
+          Phase 2 (child exited) — drain what the child left buffered; see
+            _drain_buffered. Bounded by ITS byte ceiling, NOT by `hard`: this
+            phase can overrun the deadline by the read + pyte-feed cost of up to
+            _DRAIN_LIMIT_BYTES, deliberately, since capturing the child's last
+            line must not race a clock. No TimeoutExpired risk follows — the
+            reap after it is instant for an already-exited child. A slave-pinning
+            grandchild stops it far sooner, on the first inter-byte gap's QUIET
+            (its trailing bytes may be truncated — desired; they are the
+            grandchild's).
 
         Returns the child's exit code. Raises subprocess.TimeoutExpired if
         `hard` elapses while the child is STILL ALIVE; the process is left
@@ -396,17 +424,8 @@ class TerminalSession:
                     raise subprocess.TimeoutExpired(self._proc.args, hard)
                 if self._read_step(_select_slice(remaining)) is _StepResult.EOF:
                     break
-            # Phase 2 — child exited: drain every immediately-available chunk via
-            # zero-timeout reads until EOF (full capture) or the first QUIET
-            # (nothing readable right now), backstopped only by the overall `hard`
-            # deadline. The exited child's entire remaining output already sits in
-            # the kernel pty buffer, so back-to-back zero-timeout reads drain it
-            # all to EOF regardless of how long pyte's feed() takes — feed cost is
-            # never waited on, so no fixed window can expire mid-drain and drop the
-            # trailing sentinel.
-            while time.monotonic() < deadline:
-                if self._read_step(0.0) is not _StepResult.DATA:
-                    break  # EOF (full capture) or QUIET (nothing more) — done
+            # Phase 2 — child exited: drain what it left buffered (see _drain_buffered).
+            self._drain_buffered()
             # Reap, bounded by the remaining hard budget (floored so a Phase-2 stop
             # right at the deadline can't hand wait() a ~0 timeout and spuriously
             # raise for an already-dead child).
