@@ -3521,6 +3521,76 @@ def test_agent_prose_inline_span_reaches_the_screen_in_color() -> None:
     assert "^[[1;33m" not in out                    # nor caret noise
 
 
+def test_literal_text_node_span_is_not_armed_or_colored() -> None:
+    # Hook-script stdout is content-origin and escaped absolutely, so it gets neither
+    # fence nor span color — the asymmetry of one without the other has no explanation.
+    node = nv.LiteralTextNode(
+        text="hook says `[1;33m78%[0m` here.\n\n```\n[1;33mmock[0m\n```\n")
+    out = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert "[1;33m78%[0m" in _visible(out)          # the span: literal, uncolored
+    # The fence half of the same guarantee: `arm_spans` gates only the span branch, and
+    # the fence lift stays inert here because `_caret_escape` leaves it no real ESC.
+    assert "[1;33mmock[0m" in _visible(out)
+    assert "\x1b[1;33m" not in out                  # nothing armed anywhere on this path
+
+
+def test_a_real_escape_inside_a_span_stays_caret_escaped() -> None:
+    out = rt._markdown_to_ansi(
+        rt._caret_escape_prose("A span `\x1b[31mred\x1b[0m` here."), 40, True)
+    assert "^[[31mred^[[0m" in out
+    assert "\x1b[31m" not in out
+
+
+def test_non_sgr_control_bytes_inside_an_eligible_span_stay_in_caret_notation() -> None:
+    src = "A span `[1;33m78%\x07\x1b[5A\x1b]0;t\x07[0m` here."
+    out = rt._markdown_to_ansi(rt._caret_escape_prose(src), 60, True)
+    assert "\x1b[1;33m78%^G^[[5A^[]0;t^G\x1b[0m" in out
+    assert "\x07" not in out
+
+
+def test_a_span_split_across_lines_renders_literally() -> None:
+    out = rt._markdown_to_ansi("A span `[1;33m78%\n[0m` here.", 40, True)
+    assert "[1;33m" in _visible(out)
+    assert "\x1b[1;33m" not in out
+
+
+def test_a_span_whose_interior_holds_a_backtick_renders_literally() -> None:
+    out = rt._markdown_to_ansi("A span ``[1;33m78`%[0m`` here.", 44, True)
+    assert "[1;33m" in _visible(out)
+    assert "\x1b[1;33m" not in out
+
+
+def test_content_carrying_the_span_unit_disables_the_lift_for_the_render() -> None:
+    out = rt._markdown_to_ansi(
+        "Odd " + rt._SPAN_UNIT + " char and `[1;33m78%[0m` here.", 44, True)
+    assert rt._SPAN_UNIT in _visible(out)           # the codepoint is content, kept
+    assert "[1;33m" in _visible(out)
+    assert "\x1b[1;33m" not in out
+
+
+def test_an_all_codes_span_still_renders_as_two_cyan_spans() -> None:
+    # The ordinary way prose discusses SGR. Lifting it would collapse the two spans into
+    # one and drop both codes from the output entirely.
+    src = "Write each SGR code without it — `[1;33m`, `[0m` — and imp restores it."
+    out = rt._markdown_to_ansi(src, 76, True)
+    assert out.count("\x1b[36m") == 2
+    assert "[1;33m" in _visible(out) and "[0m" in _visible(out)
+    assert "\x1b[36m\x1b[0m" not in out             # no empty code span
+
+
+def test_a_colored_span_inside_a_fence_is_left_to_the_fence_path() -> None:
+    src = "Look:\n\n```\ninline `[1;33m78%[0m` here\n```\n"
+    out = rt._markdown_to_ansi(rt._caret_escape_prose(src), 60, True)
+    assert "inline `\x1b[1;33m78%\x1b[0m` here" in out   # backticks intact, fence colored
+
+
+def test_a_colored_fence_and_a_colored_span_both_render() -> None:
+    src = "a `[31mx[0m` b\n\n```\n[32mmock[0m\n```\n"
+    out = rt._markdown_to_ansi(rt._caret_escape_prose(src), 60, True)
+    assert "\x1b[31mx\x1b[0m" in out and "\x1b[32mmock\x1b[0m" in out
+    assert rt._SLOT_UNIT not in out and rt._SPAN_UNIT not in out
+
+
 def _agent_lines(text: str, *, color: bool, width: int = 80) -> list[str]:
     tree = nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",

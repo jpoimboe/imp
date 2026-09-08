@@ -531,7 +531,8 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
 
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,
                            display_width: int = 80,
-                           gutters: tuple[int, ...] = ()) -> list[str]:
+                           gutters: tuple[int, ...] = (),
+                           arm_spans: bool = True) -> list[str]:
     """Render one finalized prose block as markdown→ANSI at inner width, then
     prefix the depth gutter/indent. rich owns bold/heading/list/fence formatting;
     we own the magenta gutter. We never slice rich's output, so no escape is ever
@@ -552,7 +553,7 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     bullet = pal.ansi("• ", "bold", enabled=color)   # bold dot marks the turn
     out: list[str] = []
     first = True
-    for raw in _markdown_to_ansi(text, inner, color, display_width).splitlines():
+    for raw in _markdown_to_ansi(text, inner, color, display_width, arm_spans).splitlines():
         stripped = raw.rstrip()
         if not stripped:
             # Blank line inside the prose block — emit the bare gutter-indent
@@ -999,7 +1000,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
                              *pal.NODE_COLORS[node.color_role], gutters=gutters)
             return
         yield from _render_markdown_block(_caret_escape(node.text), width, depth,
-                                          color, display_width, gutters)
+                                          color, display_width, gutters, arm_spans=False)
         return
 
     if isinstance(node, nv.EngineMessageNode):
