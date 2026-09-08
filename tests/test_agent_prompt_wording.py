@@ -426,8 +426,55 @@ def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
         "suite green. A plan that defers greening to a later plan (renames or "
         "removes something and leaves its consumers or tests red) is a "
         "**Major** finding: the `verify` gate runs after every plan and will "
-        "reject it."
+        "reject it. Establish this by reading — the callers a rename orphans, "
+        "the assertions an edit invalidates — never by reconstructing; the "
+        "gate is the backstop that makes missing one cheap."
     ) in body
+
+
+def test_plan_reviewer_aims_execution_at_what_the_gate_cannot_catch() -> None:
+    body = " ".join(_agent_prompt("plan-reviewer").split())
+    assert (
+        "**Execution earns its keep only on what a green suite cannot tell "
+        "you** — a prescribed test that already passes against the unpatched "
+        "baseline, or a silent behavior change no test covers. Reconstructing "
+        "the prescribed code in a scratch copy and running **targeted** checks "
+        "is legitimate for exactly those questions, scoped to the files the "
+        "change touches."
+    ) in body
+    assert (
+        "A defect that makes the fast gate **fail** — a lint or type error, a "
+        "stale lockfile, a test left red — needs no reconstruction: read for "
+        "it, report it, move on. The `verify` gate catches that class on its "
+        "own after every plan, at no cost, so a reconstruction spent "
+        "re-deriving it buys the run nothing and starves the class only you "
+        "can catch. Never run the whole suite: a scratch copy is not a git "
+        "checkout, so a full run fails tests the real tree passes and needs a "
+        "second baseline run to cancel its own noise."
+    ) in body
+    assert (
+        "the `verify` gate catches a lint error or a broken existing "
+        "assertion on its own"
+    ) not in body
+
+
+def test_plan_reviewer_lens_names_falsifiability_as_the_uncaught_class() -> None:
+    body = " ".join(_agent_prompt("plan-reviewer").split())
+    para = (
+        "**Falsifiability** — could each prescribed test be green if the "
+        "feature were broken? A test whose expected value merely echoes the "
+        "prescribed implementation (plan-echo), or whose assertion cannot "
+        "fail as written, verifies transcription, not behavior. That is a "
+        "**Major** test gap, and it is the one defect class no later gate "
+        "catches — the suite goes green whether or not the feature works. "
+        "When reading cannot settle it, that is what a scratch reconstruction "
+        "and a baseline run are for."
+    )
+    assert para in body
+    invariants = body.index(
+        "does it preserve the invariants the surrounding code relies on"
+    )
+    assert invariants < body.index(para) < body.index("This lens matters most")
 
 
 def test_spec_finalizer_adopts_grounded_draft_not_reground(tmp_path) -> None:

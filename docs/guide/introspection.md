@@ -109,6 +109,11 @@ answers the question, and never dump the raw log as your default.
   payloads, including the full timestamp, uncapped. Drop to this tier only for
   the few events whose full contents you actually need.
 
+**Counting tool calls measures reach, not effort.** An agent that can shell out reads
+files two ways, so a fall in `read_file` calls can conceal an equal rise in bash
+`cat`/`sed`/`head`/`grep`. Count bash reads as reads, and prefer a measure of what was
+touched — distinct files opened, overlap with the previous attempt — over call counts.
+
 ## Reading another quest
 
 To understand a *different* quest — live or archived — reach for the `imp` CLI

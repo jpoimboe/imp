@@ -42,3 +42,18 @@ def test_reading_another_quest_credits_the_daemon_not_the_sandbox_floor() -> Non
     assert ("**This** project's history is unreachable that way (its sibling quest homes "
             "and archive are masked); search it with `imp search` / `imp events search`, "
             "which the daemon resolves.") in flat
+
+
+def test_introspection_warns_that_call_counts_measure_reach_not_effort() -> None:
+    flat = _flat(_SKILL.read_text())
+    para = (
+        "**Counting tool calls measures reach, not effort.** An agent that "
+        "can shell out reads files two ways, so a fall in `read_file` calls "
+        "can conceal an equal rise in bash `cat`/`sed`/`head`/`grep`. Count "
+        "bash reads as reads, and prefer a measure of what was touched — "
+        "distinct files opened, overlap with the previous attempt — over "
+        "call counts."
+    )
+    assert para in flat
+    raw = flat.index("- **Raw** — `imp events <id> --json`")
+    assert raw < flat.index(para) < flat.index("## Reading another quest")
