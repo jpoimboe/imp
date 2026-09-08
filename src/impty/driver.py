@@ -17,7 +17,8 @@ import codecs
 import re
 import signal
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 
 from impty import TerminalSession
 from impty.session import (
@@ -71,11 +72,33 @@ def _fixed_settle(wait: float) -> tuple[float, str]:
     return settle, f"[waited {settle:g}s call cap ({requested:g}s requested)]\n"
 
 
-class ImptyDriver:
-    """One lazy `TerminalSession` at a time. `start` refuses to replace a live one."""
+@dataclass(frozen=True, slots=True)
+class PtySpawn:
+    """An embedding host's replacement for the spawn `start()` would have made
+    itself: the argv to exec, the child environment as-is, and the fds that must
+    survive the fork. The cwd is the host's to resolve and rides inside `argv`."""
 
-    def __init__(self) -> None:
+    argv: list[str]
+    env: dict[str, str]
+    pass_fds: tuple[int, ...] = ()
+
+
+SandboxHook = Callable[
+    [Sequence[str], str | None, Mapping[str, str] | None], PtySpawn | None
+]
+
+
+class ImptyDriver:
+    """One lazy `TerminalSession` at a time. `start` refuses to replace a live one.
+
+    `sandbox`, when given, is consulted on every `start()` with the requested
+    (argv, cwd, env): a returned `PtySpawn` replaces the spawn wholesale, and `None`
+    spawns bare. impty imports nothing from the embedding host — the sandbox arrives
+    as this callable or not at all."""
+
+    def __init__(self, sandbox: SandboxHook | None = None) -> None:
         self._session: TerminalSession | None = None
+        self._sandbox = sandbox
 
     def _require(self) -> TerminalSession:
         if self._session is None:
@@ -129,7 +152,16 @@ class ImptyDriver:
                 raise RuntimeError("session already running — call stop() first")
             self._session.close()
             self._session = None
-        session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
+        plan = None if self._sandbox is None else self._sandbox(argv, cwd, env)
+        if plan is None:
+            session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
+        else:
+            # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
+            # namespace, so a plan's cwd rides inside plan.argv instead.
+            session = TerminalSession(
+                plan.argv, cwd=None, cols=cols, rows=rows,
+                env=plan.env, pass_fds=plan.pass_fds,
+            )
         try:
             session.wait_idle()  # inherit the library settle policy
         except BaseException:

@@ -35,6 +35,23 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 By default the child inherits your environment with `TERM=xterm-256color` so a real
 program's color emission (and thus `cell().fg`) is deterministic; pass `env=` to override.
 
+## Embedding: the sandbox hook
+
+impty imports nothing from its host and never requires a sandbox. A host that wants
+the driven program confined injects one callable:
+
+```python
+ImptyDriver(sandbox=hook)   # hook(argv, cwd, env) -> PtySpawn | None
+```
+
+Returning `PtySpawn(argv, env, pass_fds)` replaces the spawn wholesale: the host's own
+argv (e.g. a namespace join that execs the caller's argv), the child environment it
+computed, and the fds that must survive the fork — which `TerminalSession(pass_fds=…)`
+forwards to `Popen`. The cwd is then the host's to resolve inside its own argv, so the
+session is spawned with `cwd=None` (`Popen`'s `cwd=` would resolve in the *caller's*
+mount namespace). Returning `None` — or passing no hook at all, as `python -m impty.mcp`
+does — spawns the program bare, exactly as it always did.
+
 ## Sequences pyte can't parse (the `TerminalStream` filter)
 
 Child output goes through `impty.stream.TerminalStream` before pyte's parser. It

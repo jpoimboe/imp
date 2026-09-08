@@ -7,13 +7,15 @@ import signal
 import sys
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
 
 from impty import TerminalSession
-from impty.driver import ImptyDriver, _decode_keys, _format_exit
+from impty.driver import ImptyDriver, PtySpawn, _decode_keys, _format_exit
 from impty.render import _MAX_DIM
 from impty.session import (
     DEFAULT_CHANGE_HARD,
@@ -827,6 +829,105 @@ def test_readme_documents_close_grace_and_its_return() -> None:
     assert "grace" in line
     assert "-> int" in line
     assert "SIGTERM" in line and "SIGKILL" in line
+
+
+def _spy_spawn(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Record the arguments `ImptyDriver.start` hands `TerminalSession`, then spawn
+    for real — so every assertion is about a session that actually ran."""
+    seen: dict[str, Any] = {}
+    real_init = TerminalSession.__init__
+
+    def spy(self: TerminalSession, argv: Sequence[str], **kwargs: Any) -> None:
+        seen["argv"] = list(argv)
+        seen.update(kwargs)
+        real_init(self, argv, **kwargs)
+
+    monkeypatch.setattr(TerminalSession, "__init__", spy)
+    return seen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_with_no_hook_spawns_the_callers_argv_bare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The shape `python -m impty.mcp` and every direct library user get: the caller's
+    # own argv, no pinned fds, and the caller's cwd handed straight to Popen.
+    seen = _spy_spawn(monkeypatch)
+    argv = [sys.executable, "-c", "import os; print(os.path.basename(os.getcwd()))"]
+    d = ImptyDriver()
+    try:
+        screen = d.start(argv, cwd=str(tmp_path))
+    finally:
+        d.stop()
+    assert seen["argv"] == argv
+    assert seen["cwd"] == str(tmp_path)
+    assert seen.get("pass_fds", ()) == ()
+    assert tmp_path.name in screen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_hook_returning_none_spawns_bare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # How `/sandbox off` is expressed: no flag, no driver state — the hook just
+    # declines, per call.
+    seen = _spy_spawn(monkeypatch)
+    calls: list[tuple[list[str], str | None, dict[str, str] | None]] = []
+
+    def hook(
+        argv: Sequence[str], cwd: str | None, env: Mapping[str, str] | None,
+    ) -> PtySpawn | None:
+        calls.append((list(argv), cwd, None if env is None else dict(env)))
+        return None
+
+    argv = [sys.executable, "-c", "print('BARE-RAN')"]
+    d = ImptyDriver(sandbox=hook)
+    try:
+        screen = d.start(argv, cwd=str(tmp_path))
+    finally:
+        d.stop()
+    assert calls == [(argv, str(tmp_path), None)]
+    assert seen["argv"] == argv
+    assert seen["cwd"] == str(tmp_path)
+    assert "BARE-RAN" in screen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_hook_plan_replaces_the_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _spy_spawn(monkeypatch)
+    plan_prog = (
+        "import os\n"
+        "print('PLANNED-RAN',\n"
+        "      'PLANNED=' + os.environ.get('PLANNED', '<none>'),\n"
+        "      'HOME=' + os.environ.get('HOME', '<none>'))\n"
+    )
+    plan_argv = [sys.executable, "-c", plan_prog]
+    # No HOME: the plan's env must reach the child AS GIVEN. A session that unioned
+    # os.environ under it would leak the host environment into a curated child env.
+    plan_env = {"PLANNED": "yes", "PATH": os.environ["PATH"]}
+    r, w = os.pipe()
+
+    def hook(
+        argv: Sequence[str], cwd: str | None, env: Mapping[str, str] | None,
+    ) -> PtySpawn | None:
+        return PtySpawn(argv=plan_argv, env=plan_env, pass_fds=(w,))
+
+    d = ImptyDriver(sandbox=hook)
+    try:
+        screen = d.start([sys.executable, "-c", "print('NEVER')"], cwd=str(tmp_path))
+    finally:
+        d.stop()
+        os.close(r)
+        os.close(w)
+    assert seen["argv"] == plan_argv
+    # Load-bearing: Popen's cwd= resolves in the CALLER's mount namespace, so a
+    # plan's cwd must ride inside its own argv, never here.
+    assert seen["cwd"] is None
+    assert seen["pass_fds"] == (w,)
+    assert "PLANNED-RAN PLANNED=yes HOME=<none>" in screen
+    assert "NEVER" not in screen
 
 
 def test_send_signal_copy_names_the_terminals_foreground_group() -> None:
