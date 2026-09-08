@@ -106,6 +106,16 @@ sys.stdout.write("x" * {_BIG_LINE} + "\\n")
 sys.stdout.flush()
 """
 
+_CHUNKED_BIG_WRITER = f"""\
+import sys, time
+sys.stdin.read()
+data = "x" * {_BIG_LINE} + "\\n"
+for i in range(0, len(data), 4096):
+    sys.stdout.write(data[i:i + 4096])
+    sys.stdout.flush()
+    time.sleep(0.0005)
+"""
+
 _PGID_REPORTER = """\
 import os, sys
 sys.stdin.read()
@@ -187,6 +197,15 @@ async def test_a_jsonl_line_over_64_kib_is_read_whole(tmp_path: Path) -> None:
     lines = await _collect(exe, "go")
     assert len(lines[0]) == _BIG_LINE
     assert CODEX_STREAM_LIMIT == 64 * 1024 * 1024
+
+
+@pytest.mark.anyio
+async def test_a_chunked_jsonl_line_over_64_kib_is_read_whole(tmp_path: Path) -> None:
+    """Same line in spaced 4 KiB writes: the granularity a loaded machine produces,
+    which pauses the reader early enough to block the child mid-write."""
+    exe = _fake_codex(tmp_path, _CHUNKED_BIG_WRITER)
+    lines = await _collect(exe, "go")
+    assert len(lines[0]) == _BIG_LINE
 
 
 @pytest.mark.anyio
