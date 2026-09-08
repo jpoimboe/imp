@@ -133,7 +133,9 @@ class ImptyDriver:
         try:
             session.wait_idle()  # inherit the library settle policy
         except BaseException:
-            session.close()
+            # It never reached a usable state (and this path may itself be a
+            # cancellation) — no SIGTERM courtesy, no second of waiting.
+            session.close(grace=0.0)
             raise
         self._session = session
         return self._render(session)
@@ -329,12 +331,24 @@ class ImptyDriver:
         return f"[wrote {path}]"
 
     def stop(self) -> str:
-        """Kill the current program and end the session."""
-        if self._session is None:
+        """End the session and return the program's exit status plus its final screen.
+
+        SIGTERMs the program's process group, gives it a second to clean up (restore
+        the terminal, save state, flush) and then SIGKILLs it, so whatever it prints
+        on the way out is captured. The first line is `[stopped: exit=…]` — a number
+        for a normal exit, a signal name for a signal death, so
+        `[stopped: exit=SIGKILL]` is the tell that it ignored SIGTERM. The rest is the
+        last screen it painted; there is no liveness header, the session is gone.
+        Call `send_signal(9)` first if you want it killed outright. `[no session]`
+        when nothing is running.
+        """
+        session = self._session
+        if session is None:
             return "[no session]"
-        self._session.close()
+        code = session.close()
         self._session = None
-        return "[stopped]"
+        body = "\n".join(session.lines(limit=session.rows))
+        return f"[stopped: exit={_format_exit(code)}]\n{body}"
 
     def close(self) -> None:
         """Teardown entry point for the runner: end the session if one is live.

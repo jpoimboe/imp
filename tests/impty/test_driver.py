@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from impty import TerminalSession
 from impty.driver import ImptyDriver, _decode_keys, _format_exit
 from impty.render import _MAX_DIM
 from impty.session import (
@@ -19,8 +20,9 @@ from impty.session import (
     DEFAULT_SETTLE_HARD,
     DEFAULT_SETTLE_IDLE,
     MAX_CALL_HARD,
+    STOP_GRACE,
 )
-from tests.impty.e2e_support import can_pty
+from tests.impty.e2e_support import E2E_POLL_TIMEOUT, _pid_gone, _poll, can_pty
 
 _SIGINT_CHILD = (
     "import os, signal, sys, time, tty\n"
@@ -712,3 +714,99 @@ def test_readme_documents_returncode_and_the_header_exit_field() -> None:
     assert line is not None, "README has no line documenting returncode"
     assert "int | None" in line
     assert "exit=SIGINT" in readme
+
+
+# 16 KB of goodbye, sized from both directions and measured on this checkout:
+#   - INSIDE the pty buffer, so the child dumps the whole payload and exits without
+#     ever blocking on its own write. (Capacity is not one fixed number — it falls as
+#     the writer's chunk size rises: measured here, 19457 B at 1-byte writes, 18265 B
+#     at the 65-byte lines this child writes, 12288 B at 4 KB. The ~16.4 KB payload
+#     fits at the size that actually applies, and the drainer is reading throughout
+#     besides.) Its exit therefore never waits on pyte finishing a feed inside the
+#     grace window — the dependency that makes this criterion false-fire under load.
+#     Measured at 6x CPU oversubscription: 14/14 clean here, where a 32 KB payload
+#     (which does block) fails 4/14 with `[stopped: exit=SIGKILL]`, killed mid-cleanup.
+#   - still far more than the drainer can consume in the instant between the child's
+#     exit and close() proceeding, so with the post-exit drain rung removed the tail
+#     is lost 6/6 at this size. The criterion stays fully falsifiable.
+_GOODBYE_BYTES = 16384
+
+_SIGTERM_GOODBYE_CHILD = (
+    "import os, signal, sys, time, tty\n"
+    "LINE = b'CLEANUP ' + b'x' * 55 + b'\\r\\n'\n"
+    f"N = {_GOODBYE_BYTES} // len(LINE)\n"
+    "def _handler(signum, frame):\n"
+    "    for _ in range(N):\n"
+    "        os.write(1, LINE)\n"
+    "    os.write(1, b'GOODBYE-TAIL\\r\\n')\n"
+    "    os._exit(0)\n"
+    "signal.signal(signal.SIGTERM, _handler)\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+_SIGTERM_IGNORING_CHILD = (
+    "import os, signal, sys, time, tty\n"
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+
+def _started(d: ImptyDriver) -> None:
+    """Poll until the child's READY reaches the screen. start()'s own settle caps at
+    3 s, which a saturated -n auto run can push interpreter startup past — and a
+    stop() landing before the child installs its SIGTERM handler would kill it with
+    the default disposition and read the wrong exit status."""
+    assert _poll(lambda: "READY" in d.view(), timeout=E2E_POLL_TIMEOUT), \
+        "child never reached READY"
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_stop_reports_a_clean_exit_and_keeps_the_tail_of_the_goodbye() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _SIGTERM_GOODBYE_CHILD])
+    _started(d)
+    out = d.stop()
+    assert out.splitlines()[0] == "[stopped: exit=0]"
+    # The LAST line the child wrote: present only if the post-exit drain rung ran.
+    assert "GOODBYE-TAIL" in out
+    assert "[alive=" not in out          # one header line, not two
+    assert d._session is None
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_stop_escalates_to_sigkill_when_the_program_ignores_sigterm() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _SIGTERM_IGNORING_CHILD])
+    _started(d)
+    pid = d._require().pid
+    out = d.stop()
+    assert out.splitlines()[0] == "[stopped: exit=SIGKILL]"
+    assert _poll(lambda: _pid_gone(pid), timeout=E2E_POLL_TIMEOUT), \
+        "program survived stop()"
+    assert d._session is None
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_failure_closes_the_unsettled_session_without_grace(monkeypatch) -> None:
+    seen: list[float] = []
+    real_close = TerminalSession.close
+
+    def spy_close(self: TerminalSession, grace: float = STOP_GRACE) -> int:
+        seen.append(grace)
+        return real_close(self, grace=grace)
+
+    def boom(self: TerminalSession, *args: object, **kwargs: object) -> bool:
+        raise RuntimeError("settle blew up")
+
+    monkeypatch.setattr(TerminalSession, "wait_idle", boom)
+    monkeypatch.setattr(TerminalSession, "close", spy_close)
+    d = ImptyDriver()
+    with pytest.raises(RuntimeError, match="settle blew up"):
+        d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    # A program that never reached a usable state gets no SIGTERM courtesy.
+    assert seen == [0.0]
+    assert d._session is None
