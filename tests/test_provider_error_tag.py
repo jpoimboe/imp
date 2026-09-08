@@ -11,7 +11,7 @@ import pytest
 from imp.engine.state import JsonlEventLog
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.codex_runner import CodexAgentRunner
-from imp.providers.observe_classify import classifies_as_provider_error
+from imp.providers.observe_classify import matches_error_prose
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 from tests.codex_fakes import (
     FakeCodex,
@@ -36,11 +36,11 @@ def _rows(tmp_path: Path) -> list[dict[str, Any]]:
     return list(JsonlEventLog(tmp_path / "e.jsonl").read())
 
 
-def test_predicate_is_anchored_and_matches_the_error_path() -> None:
-    assert classifies_as_provider_error(AUTH_PROSE) is True
-    assert classifies_as_provider_error(ORDINARY) is False
+def test_the_grouping_predicate_is_wording_only_and_anchored() -> None:
+    assert matches_error_prose(AUTH_PROSE) is True
+    assert matches_error_prose(ORDINARY) is False
     # Anchored: prose that merely quotes the pattern mid-document is not an error.
-    assert classifies_as_provider_error(f"Here is my review of auth.\n{AUTH_PROSE}") is False
+    assert matches_error_prose(f"Here is my review of auth.\n{AUTH_PROSE}") is False
 
 
 @pytest.mark.anyio

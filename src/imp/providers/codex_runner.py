@@ -78,6 +78,7 @@ from imp.providers.codex_token_refresh import (
 from imp.providers.observe_classify import (
     _classify_agent_text,
     classifies_as_provider_error,
+    matches_error_prose,
 )
 from imp.providers.observe_session import ObserveSession
 from imp.providers.stderr_sink import current_stderr_sink
@@ -1162,7 +1163,7 @@ def process_event(
             # events, so a turn's prose can lead its tool_calls.
             if text:
                 # Split at the classifying boundary so error prose gets its own node.
-                if classifies_as_provider_error(text) and state.get("prose_buffer"):
+                if matches_error_prose(text) and state.get("prose_buffer"):
                     _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
                                        model=model, state=state)
                 state.setdefault("prose_buffer", []).append(text)

@@ -11,7 +11,7 @@ from imp.providers import errors as perr
 from imp.providers.quota import QuotaReading
 
 # Prose Anthropic emits locally after clearing the saved credentials: terminal,
-# unless the same scan carries a routable status code (see _classify_agent_text).
+# unless the same scan carries a routable status code (see _match_error_prose).
 _AUTH_PATTERNS = (
     "Invalid API key",
     "Please run `/login`",
@@ -75,7 +75,7 @@ def _rate_limit_with_reset_hint(
     return perr.RateLimitError(f"claude CLI: {text[:200]}", detail=detail)
 
 
-def _classify_agent_text(
+def _match_error_prose(
     text: str, *, anchored: bool = True, reading: QuotaReading | None = None,
 ) -> perr.ProviderError | None:
     """Detect known claude CLI terminal-error patterns in agent text.
@@ -155,6 +155,18 @@ def _classify_agent_text(
         # it falls through to None (Pause) here.
         return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
+
+
+def _classify_agent_text(
+    text: str, *, anchored: bool = True, reading: QuotaReading | None = None,
+) -> perr.ProviderError | None:
+    return _match_error_prose(text, anchored=anchored, reading=reading)
+
+
+def matches_error_prose(text: str) -> bool:
+    """Wording-only anchored match, no authorship evidence: it decides where a
+    prose node splits, at stream time before usage exists."""
+    return _match_error_prose(text) is not None
 
 
 def classifies_as_provider_error(text: str) -> bool:

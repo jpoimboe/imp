@@ -127,6 +127,7 @@ from imp.providers.claude_token_refresh import (
 from imp.providers.observe_classify import (
     _classify_agent_text,
     classifies_as_provider_error,
+    matches_error_prose,
 )
 from imp.providers.observe_session import ObserveSession
 from imp.providers.quota import QuotaReading, QuotaWindow
@@ -1656,7 +1657,7 @@ class ClaudeCodeSession(ObserveSession):
                             and mid != self._llm_group_key):
                         await self._flush_llm_group()
                     # Split at the classifying boundary so error prose gets its own node.
-                    if classifies_as_provider_error(_text_of(imp_msg)) and self._llm_blocks:
+                    if matches_error_prose(_text_of(imp_msg)) and self._llm_blocks:
                         await self._flush_llm_group()
                     frag = _serialize_claude_code_message(raw)
                     if not self._llm_group_open:
