@@ -601,7 +601,8 @@ def render_question_block(text: str, width: int, depth: int, color: bool,
                           display_width: int = 80,
                           gutters: tuple[int, ...] = ()) -> list[str]:
     """The question is agent-authored, so it is prose-escaped here rather than by the
-    caller — no caller can hand this surface unescaped content-origin text."""
+    caller — the escape is part of what this surface guarantees, not a precondition on
+    the caller."""
     inner = max(8, width - _INDENT_W * depth)
     indent = _gutter_indent(depth, gutters, color)
     out: list[str] = []
