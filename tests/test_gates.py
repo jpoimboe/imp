@@ -1271,6 +1271,19 @@ def test_run_command_timeout_carries_partial_output(tmp_path) -> None:
     assert ei.value.stderr == ""
 
 
+def test_run_command_timeout_names_the_gate_command(tmp_path) -> None:
+    # summarize_exception renders str(e), and the command is off argv now — so
+    # proc.args would name the wrapper script instead of the gate the user wrote.
+    from imp.engine.errors import summarize_exception
+    from imp.engine.gates import run_command
+
+    with pytest.raises(subprocess.TimeoutExpired) as ei:
+        run_command(command="sleep 30", cwd=str(tmp_path), timeout_seconds=1)
+    message, _detail = summarize_exception(ei.value)
+    assert "sleep 30" in message
+    assert "IMP_COMMAND" not in message
+
+
 def test_run_script_delegates_unpacked_step_fields(tmp_path, monkeypatch) -> None:
     import dataclasses
 

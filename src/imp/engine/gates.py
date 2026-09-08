@@ -178,8 +178,10 @@ def run_command(
                     raise ScriptInterrupted from None
                 if now - start >= timeout:
                     _graceful_kill(proc)
+                    # `command`, not proc.args: the command is off argv, so args
+                    # names only the wrapper.
                     raise subprocess.TimeoutExpired(
-                        proc.args, timeout,
+                        command, timeout,
                         output=out_buf.decode("utf-8", "replace").rstrip(),
                         stderr=err_buf.decode("utf-8", "replace"),
                     ) from None
