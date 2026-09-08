@@ -675,9 +675,7 @@ def test_classify_agent_text_login_required_unbackticked_unanchored() -> None:
     # Full-text mode (used by _termination_from_result on erroring turns)
     # must match the unbackticked string even buried below the first line.
     out = cc._classify_agent_text(
-        "Session ended abnormally.\nNot logged in · Please run /login",
-        anchored=False, output_tokens=0,
-    )
+        "Session ended abnormally.\nNot logged in · Please run /login", anchored=False)
     assert isinstance(out, perr.AuthTerminalError)
 
 
