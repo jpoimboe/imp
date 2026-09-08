@@ -468,7 +468,9 @@ def _lift_colored_spans(text: str, color: bool) -> tuple[str, list[tuple[str, st
     a bare code armed before `_caret_escape_prose` comes back as `^[[1;33m`, which the
     lookbehinds refuse to re-arm. Each spliced sample ends with a reset, matching the
     fence path; with color off the codes are stripped instead. Only lines are rewritten,
-    never line COUNT, so the later fence scan sees exactly the same fences."""
+    never line COUNT, so the later fence scan sees exactly the same fences.
+    Input must arrive caret-escaped: a raw C0 byte in a sample measures narrower here
+    than the caret notation it is re-emitted as, overflowing the placeholder run."""
     if _SPAN_UNIT in text:
         return text, []
     lines = text.split("\n")
