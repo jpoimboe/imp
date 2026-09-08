@@ -5,6 +5,7 @@ import io
 import json
 import os
 import signal
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from imp.agents.transcript import SkillReply
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
+from imp.cli.terminal_watchdog import WATCHDOG_THREAD_NAME, WatchedStream
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient, StreamEnding
 from imp.remote.session.protocol import (
@@ -3090,3 +3092,53 @@ async def test_terminal_client_reports_clean_ending_when_a_leave_cancels_the_loo
     # The loop was cancelled and never returned an ending: it must read as clean,
     # never as a fault (a fault would print the lost-connection block on every detach).
     assert endings == [StreamEnding.CLEAN]
+
+
+@pytest.mark.anyio
+async def test_no_watchdog_thread_outlives_a_normal_leased_attach(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    watched = WatchedStream(_TTYStream())
+    before = {t for t in threading.enumerate() if t.name == WATCHDOG_THREAD_NAME}
+    spawned: set[threading.Thread] = set()
+    good = encode_event({"type": "step_started", "payload": {}})
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    rendered: list[str] = []
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            rendered.append(event["type"])
+
+        def finish(self) -> None:
+            # Runs inside run_terminal_client's finally, before the watchdog is
+            # joined — so this is where an armed poller is still observable.
+            spawned.update(
+                {t for t in threading.enumerate()
+                 if t.name == WATCHDOG_THREAD_NAME} - before)
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            # One frame, then the peer closes: receive_events ends CLEAN.
+            await serve_raw_frames(sock, good.encode("utf-8") + b"\n", tg)
+            ending = await run_terminal_client(
+                attach=_attach, driver=_Driver(), coord=coord,
+                solicit=_solicit, leave_mode="new", stream=watched)
+            tg.cancel_scope.cancel()
+
+    assert ending is StreamEnding.CLEAN
+    assert rendered == ["step_started"]
+    assert len(spawned) == 1              # it really was armed during the attach
+    assert not any(t.is_alive() for t in spawned)
+    assert watched.on_terminal_gone is None

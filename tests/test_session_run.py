@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 from pathlib import Path
@@ -17,6 +18,7 @@ from imp.cli.session_run import (
     run_session_client,
 )
 from imp.cli.signals import InterruptCoordinator
+from imp.cli.terminal_watchdog import WatchedStream
 from imp.engine import archive
 from imp.engine.quest import Quest
 from imp.engine.state import State
@@ -42,6 +44,11 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
         project_root=tmp_path,
         quest_dir=project_state_dir(tmp_path) / "quests" / quest_id,
     )
+
+
+def _watched() -> WatchedStream:
+    """The leased funnel now requires its wrapper; these tests only need a real one."""
+    return WatchedStream(io.StringIO())
 
 
 def test_resolve_settled_outcome_completed_when_merged_no_worktree(tmp_path: Path) -> None:
@@ -150,7 +157,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
             async def _go() -> None:
                 rc_holder["rc"] = await run_session_client(
                     quest, driver=_Driver(), coord=coord, solicit=_solicit,
-                    leave_mode="new")
+                    leave_mode="new", stream=_watched())
 
             tg.start_soon(_go)
             await wait_until(lambda: "rc" in rc_holder)
@@ -211,7 +218,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
             async def _go() -> None:
                 rc_holder["rc"] = await run_session_client(
                     quest, driver=_Driver(), coord=coord,
-                    solicit=_solicit, status=_Status(), leave_mode="new")
+                    solicit=_solicit, status=_Status(), leave_mode="new", stream=_watched())
 
             tg.start_soon(_go)
             await wait_until(lambda: "rc" in rc_holder)
@@ -254,7 +261,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
     coord._interrupted = True
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit,
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
     assert rc == 130
 
 
@@ -438,7 +445,7 @@ async def test_run_session_client_threads_resume_into_attach(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit, resume=True,
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     assert captured["resume"] is True
     assert captured["lease"] is True   # the terminal path leases
@@ -483,7 +490,7 @@ async def test_daemon_startup_timeout_surfaces_distinctly(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new")
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     assert rc == 3                       # distinct daemon-startup-failure code
     assert summarized == []              # NOT routed through the paused summary
     out = capsys.readouterr().out
@@ -514,7 +521,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new")
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     assert rc == 0                       # NOT rc=3: change already completed
     captured = capsys.readouterr()
     assert "startup failed" not in (captured.out + captured.err)
@@ -541,7 +548,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_home_reaped(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new")
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     captured = capsys.readouterr()
     assert rc == 0                                    # NOT rc=3: the run had completed
     assert "startup failed" not in (captured.out + captured.err)
@@ -570,7 +577,7 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="new")
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
 
     assert captured["leave_mode"] == "new"
     # The foreground does NOT apply the disposition — the daemon owns it.
@@ -601,7 +608,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), leave_mode="chat")
+        solicit=lambda _p: _never(), leave_mode="chat", stream=_watched())
 
     assert captured["leave_mode"] == "chat"
     assert (project_state_dir(tmp_path) / "quests" / "c1").exists()
@@ -630,7 +637,7 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     title = captured["title"]
     assert isinstance(title, TerminalTitle)
@@ -660,7 +667,7 @@ async def test_run_session_client_passes_control_root(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     assert captured["control_root"] == quest.control_root
     assert rc == 0
@@ -704,7 +711,7 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     assert rc == 3
     assert reset_calls == ["reset"]
@@ -737,7 +744,7 @@ async def test_run_session_client_threads_provided_leave_state(
     ls: dict[str, str] = {}
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
-        leave_state=ls, leave_mode="new")
+        leave_state=ls, leave_mode="new", stream=_watched())
 
     assert ls["intent"] == "clear"        # the caller's dict surfaced the signal
     assert seen["leave_state"] is ls      # same dict fed to the disposition
@@ -782,7 +789,7 @@ async def test_run_session_client_reuses_passed_in_title(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), title=sentinel, leave_mode="new")
+        solicit=lambda _p: _never(), title=sentinel, leave_mode="new", stream=_watched())
 
     assert captured["title"] is sentinel   # the exact instance flowed through
     assert rc == 0
@@ -832,7 +839,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit, autonomous=True,
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
     assert rc == 0
     assert captured["autonomous"] is True
 
@@ -862,7 +869,7 @@ async def test_daemon_startup_crash_surfaces_exit_code_and_stderr_path(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     assert rc == 3
     out = capsys.readouterr().out
@@ -1009,7 +1016,7 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=driver, coord=coord, solicit=lambda _p: _never(),
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     assert captured["local_echo"] == driver.seed_pending_reply
     assert rc == 0
@@ -1039,7 +1046,7 @@ async def test_run_session_client_installs_startup_status(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=lambda _p: _never(),
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     assert installed == [True]           # called exactly once
     assert rc == 0
@@ -1084,7 +1091,7 @@ async def test_run_session_client_threads_model(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit,
-        model="anthropic:claude-fable-5", leave_mode="new")
+        model="anthropic:claude-fable-5", leave_mode="new", stream=_watched())
 
     assert rc == 0
     assert captured["model"] == "anthropic:claude-fable-5"
@@ -1129,7 +1136,7 @@ async def test_run_session_client_threads_opening_unsandboxed(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit,
-        opening_unsandboxed=True, leave_mode="new")
+        opening_unsandboxed=True, leave_mode="new", stream=_watched())
 
     assert rc == 0
     assert captured["opening_unsandboxed"] is True
@@ -1138,6 +1145,13 @@ async def test_run_session_client_threads_opening_unsandboxed(
 def test_run_session_client_leave_mode_is_required() -> None:
     import inspect
     p = inspect.signature(run_session_client).parameters["leave_mode"]
+    assert p.default is inspect.Parameter.empty
+
+
+def test_run_session_client_stream_is_required() -> None:
+    # A leased attach that forgot its wrapper would run unwatched; the signature forbids it.
+    import inspect
+    p = inspect.signature(run_session_client).parameters["stream"]
     assert p.default is inspect.Parameter.empty
 
 
@@ -1169,7 +1183,7 @@ async def test_daemon_layout_downgrade_surfaces_message_directly(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
-        leave_mode="new")
+        leave_mode="new", stream=_watched())
 
     assert rc == 2                                       # clean user error, not the crash rc 3
     captured = capsys.readouterr()
@@ -1207,7 +1221,7 @@ async def test_run_session_client_registers_ack_hook_when_interactive(
     drv = _Driver()
     rc = await run_session_client(
         quest, driver=drv, coord=coord, solicit=_solicit,
-        leave_mode="new", non_interactive=False)
+        leave_mode="new", non_interactive=False, stream=_watched())
 
     assert rc == 0
     assert coord._ack_hook is not None            # hook registered on an interactive run
@@ -1242,7 +1256,7 @@ async def test_run_session_client_leaves_ack_hook_unregistered_when_headless(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit,
-        leave_mode="new", non_interactive=True)
+        leave_mode="new", non_interactive=True, stream=_watched())
 
     assert rc == 0
     assert coord._ack_hook is None                # never registered in a headless run
@@ -1269,7 +1283,7 @@ async def test_stream_fault_with_merged_state_renders_the_completed_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new")
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 0
     assert out.split("\n")[0] == "merged into main"
@@ -1292,7 +1306,7 @@ async def test_stream_fault_without_a_terminal_state_reports_lost_connection(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new")
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     lines = out.split("\n")
     assert rc == 4
@@ -1325,7 +1339,7 @@ async def test_clean_ending_still_renders_the_paused_block(
 
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=InterruptCoordinator(),
-        solicit=lambda _p: _never(), leave_mode="new")
+        solicit=lambda _p: _never(), leave_mode="new", stream=_watched())
     out = capsys.readouterr().out
     assert rc == 1
     assert out.split("\n")[0] == "paused"
@@ -1382,3 +1396,40 @@ def test_stray_live_line_still_renders_merged_from_the_archived_record(
     assert lines[0] == "merged into main"
     assert "done · commits on" not in out
     assert lines[1] == "2026-07-05-keku · > resolve me from archive"
+
+
+@pytest.mark.anyio
+async def test_watched_stream_reaches_the_fallback_title_and_the_terminal_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.session_run as session_run
+
+    quest = _make_quest(tmp_path, "watched-feat")
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+    watched = WatchedStream(io.StringIO())
+    seen: dict[str, Any] = {}
+
+    class _RecordingTitle:
+        def __init__(self, stream: Any, *_a: Any, **_kw: Any) -> None:
+            seen["title_stream"] = stream
+
+        def reset(self) -> None: ...
+
+    async def _stub(**kwargs: Any) -> StreamEnding:
+        seen["client_stream"] = kwargs["stream"]
+        seen["title"] = kwargs["title"]
+        return StreamEnding.CLEAN
+
+    monkeypatch.setattr(session_run, "TerminalTitle", _RecordingTitle)
+    monkeypatch.setattr(session_run, "run_terminal_client", _stub)
+
+    coord = InterruptCoordinator()
+    await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=coord,
+        solicit=lambda _p: _never(), leave_mode="new", stream=watched)
+
+    # The fallback TerminalTitle and run_terminal_client hold the SAME wrapper.
+    assert seen["title_stream"] is watched
+    assert seen["client_stream"] is watched
+    assert isinstance(seen["title"], _RecordingTitle)

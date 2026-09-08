@@ -67,7 +67,7 @@ bookkeeping. Ask the CLI instead:
 - `imp list` — the board: in-flight quests and drafts, the backlog, and
   completed quests (merged or done); `--all` adds abandoned and shelved
   conversations.
-- `imp show <id>` — a quest's card: status, current step, intent, and summary
+- `imp show <id>` — a quest's card: status, why it halted, current step, intent, and summary
   (`show <id> spec` for the raw spec, `show <id> verify` for the last failing
   gate run, `--json` for a structured card).
 - `imp search <query>` — case-insensitive substring search across in-flight,

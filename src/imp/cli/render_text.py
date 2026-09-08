@@ -51,6 +51,9 @@ _PAUSE_REASON_COPY: dict[str, str] = {
     "quota":
         "quota is exhausted; the quest is paused and resumable — wait for the "
         "limit to reset or add credits, then resume",
+    "detached":
+        "the terminal running this quest went away; the quest is paused and "
+        "resumable — resume to pick it up where it stopped",
 }
 
 

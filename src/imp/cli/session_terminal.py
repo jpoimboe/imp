@@ -17,6 +17,7 @@ and the solicit callback, and replaces the in-process run_quest call in
 from __future__ import annotations
 
 import contextlib
+import functools
 import math
 import signal
 from collections.abc import Awaitable, Callable
@@ -29,6 +30,7 @@ from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import TerminalTitle
+from imp.cli.terminal_watchdog import WatchedStream, terminal_gone, watch_terminal
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient, StreamEnding
@@ -52,6 +54,7 @@ async def run_terminal_client(
     leave_state: dict[str, str] | None = None,
     leave_mode: str,
     title: TerminalTitle | None = None,
+    stream: WatchedStream | None = None,
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
 ) -> StreamEnding:
@@ -117,6 +120,8 @@ async def run_terminal_client(
             stack.enter_context(anyio.open_signal_receiver(sigquit))
             if sigquit is not None else None)
         client = await attach(_on_event)
+        stack.enter_context(
+            watch_terminal(stream, functools.partial(terminal_gone, client)))
         # Snapshot should_pause AFTER attach but BEFORE binding the runner.
         # An interrupt that arrived during attach() found fn=None in signal_pause
         # and wasn't forwarded to the daemon. Detect it here so the flush task

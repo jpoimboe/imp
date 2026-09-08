@@ -3108,6 +3108,20 @@ def test_quota_pause_renders_plain_speak_copy() -> None:
     assert "paused (quota)" not in out
 
 
+def test_detached_pause_renders_plain_speak_copy() -> None:
+    node = nv.PauseNode(reason="detached")
+    line = "\n".join(rt._render(node, depth=0, full=False, color=False, width=200))
+    assert line == (
+        "paused — the terminal running this quest went away; the quest is paused "
+        "and resumable — resume to pick it up where it stopped")
+    # the payload's interrupt_reason routes here, not the engine's `interrupt`
+    out = "\n".join(_lines([
+        _ev("1", "workflow_paused", reason="interrupt", interrupt_reason="detached"),
+    ], width=200))
+    assert "the terminal running this quest went away" in out
+    assert "paused (detached)" not in out      # bare-token fallback is gone
+
+
 def test_auth_terminal_pause_renders_the_reauth_copy() -> None:
     # kind must not disturb the shipped copy
     out = "\n".join(_lines([

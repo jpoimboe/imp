@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from imp.cli.live_status import LiveStatus
     from imp.cli.session_run import SettledOutcome
     from imp.cli.store import SearchHit, Store, _Row
+    from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.quest import Quest
     from imp.engine.state import State
     from imp.remote.session.attach import DaemonStartupError
@@ -899,11 +900,13 @@ async def _run_cleared_session(
     from imp.cli.session_run import make_interactive_solicit, run_session_client
     from imp.cli.signals import InterruptCoordinator
     from imp.cli.terminal_title import TerminalTitle
+    from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.abandon import discard_conversation
     from imp.engine.quest import Quest, live_stems
     from imp.engine.quest_id import new_quest_id
 
     color = should_use_color(sys.stdout)
+    watched = WatchedStream(sys.stdout)
     quest = Quest.create_draft(
         control, title="", quest_id=new_quest_id(existing_stems=live_stems(control)),
         base_branch=base, origin="draft")
@@ -912,7 +915,7 @@ async def _run_cleared_session(
         print(_run_header_line(quest.id, quest.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
         term_title = TerminalTitle(
-            sys.stdout, quest.id, quest.title, initial="idle",
+            watched, quest.id, quest.title, initial="idle",
             project=quest.control_root.name)
         prompt = Prompt(skills_dir=quest.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color, quest=quest)
@@ -939,9 +942,9 @@ async def _run_cleared_session(
         # Persist the intent durably so the reopened chat's opening step seeds from
         # quest.json (mirroring the imp new path), surviving any later resume.
         quest.set_seed_opening(opening_text)
-        status = LiveStatus(sys.stdout)
+        status = LiveStatus(watched)
         driver = LiveDriver(
-            stream=sys.stdout, color=color, width=_term_width,
+            stream=watched, color=color, width=_term_width,
             display_width=_display_width, status=status,
             quest_id=quest.id, title=quest.title,
             project=quest.control_root.name)
@@ -953,7 +956,7 @@ async def _run_cleared_session(
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, model=cleared_model,
-            opening_unsandboxed=cleared_unsandboxed)
+            opening_unsandboxed=cleared_unsandboxed, stream=watched)
     finally:
         if not _session_started:
             discard_conversation(quest)
@@ -1101,9 +1104,11 @@ async def _run_fresh_session(
         run_session_client,
     )
     from imp.cli.signals import InterruptCoordinator
+    from imp.cli.terminal_watchdog import WatchedStream
 
     _print_run_header(
         quest.id, quest.title, "new", color=should_use_color(sys.stdout))
+    watched = WatchedStream(sys.stdout)
     headless, auto_headless = _select_headless(args)
     autonomous = bool(getattr(args, "autonomous", False))
     if headless:
@@ -1111,8 +1116,8 @@ async def _run_fresh_session(
             _emit_cli_error(
                 f"no tty detected — running headless; "
                 f"resume with `imp resume {quest.id}`")
-        status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
+        status = LiveStatus(watched)
+        driver = LiveDriver(stream=watched,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
@@ -1123,11 +1128,11 @@ async def _run_fresh_session(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status, non_interactive=True,
             leave_mode=quest.create_mode,
-            autonomous=autonomous)
+            autonomous=autonomous, stream=watched)
 
     async def _first(leave_state: dict[str, str]) -> int:
-        status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
+        status = LiveStatus(watched)
+        driver = LiveDriver(stream=watched,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
@@ -1141,7 +1146,7 @@ async def _run_fresh_session(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
-            autonomous=autonomous)
+            autonomous=autonomous, stream=watched)
 
     return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
@@ -1201,6 +1206,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     )
     from imp.cli.signals import install_process_group, prompt_sigint_guard
     from imp.cli.terminal_title import TerminalTitle
+    from imp.cli.terminal_watchdog import WatchedStream
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
     from imp.engine import worktree
     from imp.engine.abandon import discard_conversation
@@ -1322,8 +1328,9 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     # (blocked on the user) with no daemon event yet to correct the glyph.
     show_opening_prompt = _should_prompt_opening(
         seed_text=seed.seed_text, interactive=interactive)
+    watched = WatchedStream(sys.stdout)
     term_title = TerminalTitle(
-        sys.stdout, quest.id, quest.title,
+        watched, quest.id, quest.title,
         initial="idle" if show_opening_prompt else "busy",
         project=quest.control_root.name)
 
@@ -1371,8 +1378,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if not header_printed:
             _print_run_header(
                 quest.id, quest.title, leave_mode, color=should_use_color(sys.stdout))
-        status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
+        status = LiveStatus(watched)
+        driver = LiveDriver(stream=watched,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
@@ -1385,14 +1392,14 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             title=term_title,
             leave_mode=leave_mode,
             non_interactive=True, autonomous=autonomous, model=opening_model,
-            opening_unsandboxed=opening_unsandboxed)
+            opening_unsandboxed=opening_unsandboxed, stream=watched)
 
     if not header_printed:
         _print_opening(quest, leave_mode, interactive=interactive, color=color)
 
     async def _first(leave_state: dict[str, str]) -> int:
-        status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
+        status = LiveStatus(watched)
+        driver = LiveDriver(stream=watched,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title,
@@ -1407,7 +1414,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous,
-            model=opening_model, opening_unsandboxed=opening_unsandboxed)
+            model=opening_model, opening_unsandboxed=opening_unsandboxed, stream=watched)
 
     return await _clear_loop(control, base, first=_first, leave_mode=leave_mode)
 
@@ -1452,13 +1459,13 @@ def _warn_if_blocked(quest: Quest) -> None:
 
 def _build_resume_driver(
     *, quest: Quest, state: State, status: LiveStatus,
-    color: bool, preceded_by_blank: bool = False,
+    color: bool, stream: WatchedStream, preceded_by_blank: bool = False,
 ) -> LiveDriver:
     from imp.agents.random_status import random_status_phrase
     from imp.cli.live_driver import LiveDriver
     # startup_verb is drawn once at construction — compose_startup stores it, never re-draws.
     return LiveDriver(
-        stream=sys.stdout, color=color,
+        stream=stream, color=color,
         width=_term_width, display_width=_display_width, status=status,
         suppress_replay=True, preceded_by_blank=preceded_by_blank,
         startup_verb=state.step_label or random_status_phrase(),
@@ -1503,6 +1510,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         run_session_client,
     )
     from imp.cli.signals import install_process_group
+    from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.state import State, lock_is_live
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(
@@ -1535,6 +1543,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         quest.id, lock_live=lock_is_live(quest.quest_dir / "lock"),
         halt_condition=state.halt_condition)
 
+    watched = WatchedStream(sys.stdout)
     headless, auto_headless = _select_headless(args)
     autonomous = bool(getattr(args, "autonomous", False))
     if headless:
@@ -1544,15 +1553,15 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 f"resume with `imp resume {quest.id}`")
         color = should_use_color(sys.stdout)
         _print_resume_opening(quest, marker, live_notice, color=color)
-        status = LiveStatus(sys.stdout)
+        status = LiveStatus(watched)
         driver = _build_resume_driver(
-            quest=quest, state=state, status=status, color=color)
+            quest=quest, state=state, status=status, color=color, stream=watched)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, non_interactive=True,
-            leave_mode=quest.create_mode, autonomous=autonomous)
+            leave_mode=quest.create_mode, autonomous=autonomous, stream=watched)
     if not getattr(args, "message", None):
         question = bare_turn_end_question(quest)
         if question is not None:
@@ -1568,10 +1577,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         non_interactive=bool(getattr(args, "non_interactive", False))))
 
     async def _first(leave_state: dict[str, str]) -> int:
-        status = LiveStatus(sys.stdout)
+        status = LiveStatus(watched)
         driver = _build_resume_driver(
             quest=quest, state=state, status=status,
-            color=should_use_color(sys.stdout), preceded_by_blank=splash_shown)
+            color=should_use_color(sys.stdout), preceded_by_blank=splash_shown,
+            stream=watched)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
@@ -1579,7 +1589,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
-            autonomous=autonomous)
+            autonomous=autonomous, stream=watched)
 
     return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
@@ -1634,10 +1644,12 @@ async def _resume_inert(
     from imp.cli.session_run import make_interactive_solicit, run_session_client
     from imp.cli.signals import InterruptCoordinator
     from imp.cli.terminal_title import TerminalTitle
+    from imp.cli.terminal_watchdog import WatchedStream
     from imp.engine.state import State
 
     color = should_use_color(sys.stdout)
-    term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle",
+    watched = WatchedStream(sys.stdout)
+    term_title = TerminalTitle(watched, quest.id, quest.title, initial="idle",
                                project=quest.control_root.name)
     state = State.load(quest.state_dir)
     phase_head, _sep, plan_tail = (state.phase_label or "").partition(" · ")
@@ -1651,10 +1663,10 @@ async def _resume_inert(
 
     async def _launch(line: str) -> int:
         async def _first(leave_state: dict[str, str]) -> int:
-            status = LiveStatus(sys.stdout)
+            status = LiveStatus(watched)
             driver = _build_resume_driver(
                 quest=quest, state=state, status=status,
-                color=color)
+                color=color, stream=watched)
             driver.echo_submitted_reply(line)   # visible echo, before the boot spinner
             coord = InterruptCoordinator()
             inner = make_interactive_solicit(
@@ -1664,7 +1676,7 @@ async def _resume_inert(
                 quest, driver=driver, coord=coord, solicit=solicit,
                 resume=True, status=status, leave_state=leave_state,
                 leave_mode=quest.create_mode,
-                title=term_title, autonomous=autonomous)
+                title=term_title, autonomous=autonomous, stream=watched)
 
         return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
@@ -1889,6 +1901,25 @@ def _vars_line(values: dict[str, object], width: int, *, color: bool) -> str:
         _card_field("vars:", body, width, color=color), _display_width())
 
 
+# Short card phrasing for the halt reasons a bare token does not explain; the long
+# `imp log` copy is render_text._PAUSE_REASON_COPY. An unmapped token prints bare.
+_CARD_PAUSE_PHRASE: dict[str, str] = {
+    "detached": "the terminal went away",
+    "sigterm": "interrupted",
+    "reauth_needed": "provider login expired",
+    "sandbox_spawn_failed": "the sandbox could not start",
+    "max_loops": "a step hit its loop limit",
+    "quota": "quota exhausted",
+}
+
+
+def _card_pause_token(status: str, pause_reason: str | None) -> str | None:
+    """The halt reason `imp show` surfaces, card and --json alike: only the two halt
+    statuses whose reason is not already the status word (`merge_blocked` restates
+    itself; `new`/`running`/`waiting` are not halted)."""
+    return pause_reason if status in ("paused", "error") else None
+
+
 def _quest_card(control: Path, quest_id: str, *, now: datetime,
                 color: bool) -> list[str]:
     from imp.cli.store import _INFLIGHT, make_store
@@ -1903,6 +1934,10 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
             quest_row.display_word(card.status),
             15, color=color),
     ]
+    reason = _card_pause_token(card.status, card.pause_reason)
+    if reason:
+        lines.append(_card_field(
+            "reason:", _CARD_PAUSE_PHRASE.get(reason, reason), 15, color=color))
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         step_text = card.step_label or card.step
         position = f"{card.phase_label} · {step_text}" if card.phase_label else step_text
@@ -1959,6 +1994,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "id": card.quest_id,
         "title": card.title.strip() or None,
         "status": card.status,
+        "pause_reason": _card_pause_token(card.status, card.pause_reason),
         "created": card.created or None,
         "last_activity": card.last or None,
         "base_branch": card.base_branch,

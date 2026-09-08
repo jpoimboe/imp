@@ -46,6 +46,7 @@ class HomeDigest(NamedTuple):
 class QuestCard:
     quest_id: str
     status: str
+    pause_reason: str | None
     step: str
     last: str
     title: str
@@ -170,7 +171,8 @@ class LocalStore:
         meta = _quest_meta(self.control_root, quest_id) or {}
         state = _quest_state(self.control_root, quest_id) or {}
         return QuestCard(
-            quest_id=_id, status=status, step=step, last=last, title=title,
+            quest_id=_id, status=status, pause_reason=_last_pause_reason(events),
+            step=step, last=last, title=title,
             created=created, step_label=step_label, phase_label=phase_label,
             base_branch=meta.get("base_branch"),
             merge_commit=state.get("merge_commit"),
@@ -325,6 +327,29 @@ def _quest_state(control: Path, quest_id: str) -> dict[str, Any] | None:
         return result
     except json.JSONDecodeError:
         return None
+
+
+def _last_pause_reason(events: list[dict[str, Any]]) -> str | None:
+    """The reason token of the halt a quest is still in. interrupt_reason wins over
+    the engine's reason; a your-turn park is no reason at all; and a workflow_resumed
+    with no later pause (or, for a draft, conversation_saved) leaves the recorded
+    token a fossil of a halt that is over."""
+    reason: str | None = None
+    resumed = False
+    for e in events:
+        t = e.get("type")
+        if t == "workflow_paused":
+            p = e.get("payload") or {}
+            token = p.get("interrupt_reason") or p.get("reason")
+            reason = str(token) if token else None
+            resumed = False
+        elif t == "workflow_resumed":
+            resumed = True
+        elif t == "conversation_saved":
+            resumed = False
+    if resumed or reason == "awaiting_user":
+        return None
+    return reason
 
 
 def _is_backlog_home(
