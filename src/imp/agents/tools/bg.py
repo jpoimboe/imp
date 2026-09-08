@@ -547,7 +547,7 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
 
 async def _spawn_to_files(
     argv: list[str], *, out_path: Path, err_path: Path, cwd: str,
-    env: dict[str, str],
+    env: dict[str, str], pass_fds: tuple[int, ...] = (),
 ) -> Any:
     """Shared spawn body for background AND (Part 2/3) foreground procs.
 
@@ -581,6 +581,8 @@ async def _spawn_to_files(
             stderr=err_f,
             cwd=cwd,
             env=env,
+            # A join argv names its namespaces as /proc/self/fd/N; the child must inherit them.
+            pass_fds=pass_fds,
             **kwargs,  # type: ignore[arg-type]
         )
     except BaseException:
@@ -601,7 +603,7 @@ async def _spawn_to_files(
 
 async def spawn_background(
     ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
-    env: dict[str, str],
+    env: dict[str, str], pass_fds: tuple[int, ...] = (),
 ) -> str:
     """Spawn ordering (no orphan window): scratch dir + both write-side files
     BEFORE the spawn (in the shared core); register the BgProc immediately AFTER
@@ -615,7 +617,8 @@ async def spawn_background(
     out_path = d / f"{bg_id}.out"
     err_path = d / f"{bg_id}.err"
     proc = await _spawn_to_files(
-        argv, out_path=out_path, err_path=err_path, cwd=cwd, env=env)
+        argv, out_path=out_path, err_path=err_path, cwd=cwd, env=env,
+        pass_fds=pass_fds)
     bp = BgProc(id=bg_id, proc=proc, out_path=out_path, err_path=err_path,
                 command=command)
     ctx.background_processes[bg_id] = bp

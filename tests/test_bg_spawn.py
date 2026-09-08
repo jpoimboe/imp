@@ -239,3 +239,32 @@ def test_spawn_to_files_unlinks_both_on_spawn_failure(
         assert not out_path.exists()
         assert not err_path.exists()
     anyio.run(main)
+
+
+def test_a_spawn_inherits_the_namespace_fds_it_was_given(tmp_path: Path) -> None:
+    # A join argv names its namespaces as /proc/self/fd/N, so the fds must reach
+    # the child or nsenter resolves nothing. Assert through the OS, not a captured
+    # kwarg: the child reads back the fd it was handed.
+    from imp.agents.tools.bg import _spawn_to_files
+
+    r, w = os.pipe()
+    os.write(w, b"inherited\n")
+    os.close(w)
+    out_path = tmp_path / "o"
+    err_path = tmp_path / "e"
+
+    async def main() -> None:
+        proc = await _spawn_to_files(
+            ["sh", "-c", f"cat /proc/self/fd/{r}"],
+            out_path=out_path, err_path=err_path, cwd=str(tmp_path),
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+            pass_fds=(r,))
+        with anyio.fail_after(30):      # deadlock backstop only
+            await proc.wait()
+        assert proc.returncode == 0
+
+    try:
+        anyio.run(main)
+    finally:
+        os.close(r)
+    assert out_path.read_text() == "inherited\n"
