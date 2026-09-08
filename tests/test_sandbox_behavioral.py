@@ -36,6 +36,7 @@ from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine import worktree as wt
 from imp.engine.sandbox import (
     SandboxConfig,
+    SandboxNamespace,
     SandboxPolicy,
     build_sandbox_spawn,
     make_home_layer,
@@ -45,7 +46,9 @@ from imp.engine.sandbox import (
 )
 from imp.engine.shim import write_imp_shim
 from imp.paths import imp_home, project_state_dir
+from impty import TerminalSession
 from tests.conftest import assert_all_tool_contexts_owned, own_tool_context
+from tests.impty.e2e_support import can_pty
 
 pytestmark = pytest.mark.skipif(
     not sandbox_available(),
@@ -2108,3 +2111,121 @@ def test_artifact_ref_history_readable_from_readonly_sandboxed_worktree() -> Non
 
 def test_every_tool_context_here_is_owned():
     assert_all_tool_contexts_owned(Path(__file__))
+
+
+# ---------------------------------------------------------------------------
+# join_exec — the exec-shaped join a pty session's argv payload rides on
+# ---------------------------------------------------------------------------
+
+_JOIN_RUN_TIMEOUT_S = 30.0   # generous vs the measured ~1ms join; never false-fires
+
+# Every test below opens a real keeper, so each carries its own outer timeout:
+# this file's module mark is skipif-only, leaving the project-wide 60s default
+# (pyproject.toml), which a keeper open plus a join can legitimately exceed under
+# a saturated -n auto run — SandboxNamespace.open retries its spawn up to
+# SANDBOX_SPAWN_MAX_ATTEMPTS times with backoffs before _JOIN_RUN_TIMEOUT_S even
+# starts. 180s is the single outer hang-catcher, sized generously against the
+# ~5ms measured open rather than as an arithmetic bound on the worst case.
+
+
+def _run_joined(ns: SandboxNamespace, argv: list[str],
+                *, cwd: str) -> subprocess.CompletedProcess[str]:
+    """Run one argv through `ns.join_exec` headlessly — the same shape a pty
+    caller spawns, minus the terminal."""
+    spawn = ns.join_exec(argv, cwd=cwd, engine_env={})
+    return subprocess.run(spawn.argv, env=spawn.env, pass_fds=spawn.pass_fds,
+                          capture_output=True, text=True,
+                          timeout=_JOIN_RUN_TIMEOUT_S)
+
+
+@pytest.mark.timeout(180)
+def test_join_exec_resolves_its_cwd_inside_the_namespaces_mount_view() -> None:
+    """AC 7(d): the cwd rides on --wdns, which resolves in the TARGET mount
+    namespace. --wd= and Popen's cwd= both resolve in the CALLER's, and were
+    measured handing the payload the host's view of a --tmpfs-masked directory."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text("REAL-SECRET-CONTENTS-12345\n")
+    try:
+        ns = SandboxNamespace.open(
+            policy=_active_policy(root, secret_dirs=(str(masked),)),
+            engine_env={}, environ=os.environ)
+        try:
+            done = _run_joined(ns, ["sh", "-c", "pwd; ls -A ."], cwd=str(masked))
+            assert done.returncode == 0, done.stderr
+            lines = done.stdout.splitlines()
+            assert lines[0] == str(masked)   # the requested cwd, not a fallback
+            assert lines[1:] == []           # the empty tmpfs mask, not flag.txt
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+def test_a_joined_payload_cannot_unmount_a_secret_mask() -> None:
+    """AC 7(c): entering the keeper's own user namespace hands the payload
+    CAP_FULL_SET whenever bwrap built a single userns level (the production
+    shape), which is enough to umount a secret_dirs tmpfs and read what it hid.
+    Dropping join()'s `unshare --user --map-current-user` stage from the exec
+    shape would give a driven program a capability `bash` does not have."""
+    root = _make_root()
+    masked = root / "masked"
+    masked.mkdir()
+    (masked / "flag.txt").write_text("REAL-SECRET-CONTENTS-12345\n")
+    q = shlex.quote(str(masked))
+    probe = (
+        # Without this guard a missing umount(8) would make the whole test pass
+        # vacuously — it would "prove" confinement by never attempting the escape.
+        f"command -v umount >/dev/null || {{ echo NO-UMOUNT; exit 1; }}; "
+        f"umount {q} 2>&1 | head -1; "
+        f"cat {q}/flag.txt 2>&1 | head -1; "
+        # Positive, not merely absent: a missing secret proves nothing on its own
+        # (any unrelated `cat` failure reads the same). The mask must still BE there
+        # afterwards, which for a --tmpfs is an empty listing.
+        f'echo "LEFT=[$(ls -A {q})]"; '
+        f"echo PROBE-DONE"
+    )
+    try:
+        ns = SandboxNamespace.open(
+            policy=_active_policy(root, secret_dirs=(str(masked),)),
+            engine_env={}, environ=os.environ)
+        try:
+            done = _run_joined(ns, ["sh", "-c", probe], cwd=str(root))
+            assert "NO-UMOUNT" not in done.stdout, "umount(8) missing; probe was vacuous"
+            assert "PROBE-DONE" in done.stdout, done.stdout
+            assert "LEFT=[]" in done.stdout, done.stdout   # the mask survived the umount
+            assert "REAL-SECRET-CONTENTS-12345" not in done.stdout
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
+    """AC 10: nsenter faithfully re-raises the child's terminating signal on
+    itself, so a joined session's returncode keeps the negative-signal shape the
+    providers' tool_killed detection reads — never 128+n, never nsenter's own."""
+    root = _make_root()
+    cases = [
+        ("import sys; sys.exit(7)", 7),
+        ("import os, signal; os.kill(os.getpid(), signal.SIGKILL)", -9),
+        ("import os, signal; os.kill(os.getpid(), signal.SIGTERM)", -15),
+    ]
+    try:
+        ns = SandboxNamespace.open(policy=_active_policy(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            for prog, expected in cases:
+                spawn = ns.join_exec([sys.executable, "-c", prog],
+                                     cwd=str(root), engine_env={})
+                with TerminalSession(spawn.argv, cwd=None, env=spawn.env,
+                                     pass_fds=spawn.pass_fds) as s:
+                    assert s.run_to_completion(hard=30.0) == expected, prog
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)

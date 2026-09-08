@@ -498,3 +498,84 @@ def test_a_later_join_sees_an_engine_value_that_changed_mid_run():
             ns.close()
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_join_exec_execs_the_argv_with_no_shell_and_no_command_env():
+    # AC 7(a)/(b): a pty session's payload is an argv, not a script. It must be
+    # exec'd directly — a shell between the tty and the program would add a
+    # process and reinterpret its arguments — and the cwd rides on --wdns, which
+    # resolves in the TARGET mount namespace, replacing join()'s inner `cd`.
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            payload = ["vim", "-u", "NONE", "notes.txt"]
+            spawn = ns.join_exec(payload, cwd=str(root),
+                                 engine_env={"IMP_QUEST_TITLE": "Renamed quest"})
+            assert spawn.argv[-len(payload):] == payload
+            # No sh -c ANYWHERE — join()'s tail carries both tokens; this one must not.
+            assert "sh" not in spawn.argv
+            assert "-c" not in spawn.argv
+            assert f"--wdns={root}" in spawn.argv
+            # --wd= (like Popen's cwd=) resolves in the CALLER's mount namespace —
+            # a measured cwd escape out of a masked directory.
+            assert [a for a in spawn.argv if a.startswith("--wd=")] == []
+            # The capability drop join() carries, kept verbatim and immediately
+            # before the payload: entering the keeper's own user namespace hands
+            # CAP_FULL_SET whenever bwrap built a single userns level.
+            i = spawn.argv.index("unshare")
+            assert spawn.argv[i:i + 4] == ["unshare", "--user",
+                                           "--map-current-user", "--"]
+            assert i + 4 == len(spawn.argv) - len(payload)
+            # No script to read them, and the argv is already on argv.
+            assert "IMP_COMMAND" not in spawn.env
+            assert "IMP_CWD" not in spawn.env
+            # The env is still join()'s: policy.child_env overlaid with the LIVE
+            # per-call engine_env, so a post-rename title reaches the next spawn.
+            assert spawn.env["IMP_QUEST_TITLE"] == "Renamed quest"
+            assert spawn.env["HOME"] == str(root / "home")
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_join_exec_enters_the_same_namespaces_as_join_by_the_same_pinned_fds():
+    # The fds must ride on the spawn: Popen closes every other inherited fd, and a
+    # join whose /proc/self/fd/N arguments name nothing fails ENOENT. Comparing
+    # against join() is the point — the two paths must reach the SAME namespaces,
+    # or a pty program would be confined somewhere the run's bash calls are not.
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            joined = ns.join("true", cwd=str(root), engine_env={})
+            execed = ns.join_exec(["true"], cwd=str(root), engine_env={})
+            assert execed.pass_fds == joined.pass_fds
+            assert execed.pass_fds != ()          # the pinned ns fds, not empty
+            pinned = [a for a in execed.argv if "/proc/self/fd/" in a]
+            assert pinned == [a for a in joined.argv if "/proc/self/fd/" in a]
+            # every pinned fd is actually named, so none can be silently dropped
+            assert len(pinned) == len(set(execed.pass_fds))
+            assert "--preserve-credentials" in execed.argv
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_join_exec_refuses_a_closed_namespace():
+    # close() shuts the pinned fds, and fd numbers are recycled: naming
+    # /proc/self/fd/N afterwards would enter whatever namespace has since taken
+    # that number. Fail loud instead, exactly as join() does.
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        ns.close()
+        with pytest.raises(AssertionError):
+            ns.join_exec(["true"], cwd=str(root), engine_env={})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
