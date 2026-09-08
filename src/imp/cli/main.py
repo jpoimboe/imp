@@ -1901,6 +1901,25 @@ def _vars_line(values: dict[str, object], width: int, *, color: bool) -> str:
         _card_field("vars:", body, width, color=color), _display_width())
 
 
+# Short card phrasing for the halt reasons a bare token does not explain; the long
+# `imp log` copy is render_text._PAUSE_REASON_COPY. An unmapped token prints bare.
+_CARD_PAUSE_PHRASE: dict[str, str] = {
+    "detached": "the terminal went away",
+    "sigterm": "interrupted",
+    "reauth_needed": "provider login expired",
+    "sandbox_spawn_failed": "the sandbox could not start",
+    "max_loops": "a step hit its loop limit",
+    "quota": "quota exhausted",
+}
+
+
+def _card_pause_token(status: str, pause_reason: str | None) -> str | None:
+    """The halt reason `imp show` surfaces, card and --json alike: only the two halt
+    statuses whose reason is not already the status word (`merge_blocked` restates
+    itself; `new`/`running`/`waiting` are not halted)."""
+    return pause_reason if status in ("paused", "error") else None
+
+
 def _quest_card(control: Path, quest_id: str, *, now: datetime,
                 color: bool) -> list[str]:
     from imp.cli.store import _INFLIGHT, make_store
@@ -1915,6 +1934,10 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
             quest_row.display_word(card.status),
             15, color=color),
     ]
+    reason = _card_pause_token(card.status, card.pause_reason)
+    if reason:
+        lines.append(_card_field(
+            "reason:", _CARD_PAUSE_PHRASE.get(reason, reason), 15, color=color))
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         step_text = card.step_label or card.step
         position = f"{card.phase_label} · {step_text}" if card.phase_label else step_text
@@ -1971,6 +1994,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "id": card.quest_id,
         "title": card.title.strip() or None,
         "status": card.status,
+        "pause_reason": _card_pause_token(card.status, card.pause_reason),
         "created": card.created or None,
         "last_activity": card.last or None,
         "base_branch": card.base_branch,

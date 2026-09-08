@@ -73,7 +73,9 @@ finished); do not invent quests that the commands did not list.
 
 `imp show <id>` — the overview detail card: id, title, status, timing,
 dependencies, opening intent, and the summary inlined. A quest that completed with a
-recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. A running
+recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. A quest
+halted as paused or error shows a `reason:` line beneath `status:` naming why it
+stopped; `--json` carries the raw token as `pause_reason`. A running
 quest shows a `vars:` line of its effective workflow variables; one still in the backlog
 shows the overrides it was filed with, or no line at all if it was filed with none. `--json`
 carries the same under a `vars` key. Add a
@@ -117,7 +119,7 @@ there at all; these readers resolve them anyway, because the unsandboxed daemon
 answers them — not the sandbox floor:
 
 - **`imp show <id>`** — the primary "what is this quest / what did it accomplish"
-  read: the quest's detail card (id, title, status, timing, dependencies, the
+  read: the quest's detail card (id, title, status, why it halted, timing, dependencies, the
   opening intent, and the summary inlined). Add `spec` for the raw spec, `verify`
   for the last failing gate run, or `--json` for the card as a structured object.
 - **`imp events <id>`** — the event history, when you need the trace rather than
