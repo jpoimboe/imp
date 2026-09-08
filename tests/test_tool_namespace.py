@@ -348,6 +348,125 @@ def test_a_command_imp_kills_reports_a_negative_returncode():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _ns_id(ctx: ToolContext) -> str:
+    """The pid namespace a call actually landed in — the identity probe that tells
+    reuse from rebuild without depending on any object."""
+    done = _bash(ctx, "readlink /proc/self/ns/pid")
+    assert done["returncode"] == 0, done
+    return done["stdout"].strip()
+
+
+def test_a_sandbox_off_toggle_suspends_joining_without_a_rebuild():
+    # AC 17 and AC 18d. ctx.sandbox_policy is DERIVED — it consults
+    # coordinator.unsandboxed on every read and never touches base_sandbox_policy —
+    # so the key is unchanged and the off-window commands simply run the
+    # unsandboxed shape. Keying on the effective policy would rebuild on every
+    # toggle and kill the agent's own background work mid-run.
+    root = _make_root()
+    marker = f"imp-run-{uuid.uuid4().hex}"
+    try:
+        ctx = _ctx(root)
+        assert _bash(
+            ctx, f"nohup setsid sh -c '{_ALIVE}' {marker} >/dev/null 2>&1 &"
+        )["returncode"] == 0
+        _poll(lambda: _host_pids(marker), what=f"{marker} alive host-side")
+        inside = _ns_id(ctx)
+        ns_before = ctx.sandbox_ns
+
+        ctx.coordinator.unsandboxed = True
+        off = _ns_id(ctx)
+        assert off != inside, "the off-window command still joined the namespace"
+        assert off == os.readlink("/proc/self/ns/pid")   # it ran on the host
+        assert ctx.sandbox_ns is ns_before               # nothing was rebuilt
+
+        ctx.coordinator.unsandboxed = False
+        assert _ns_id(ctx) == inside                     # rejoined the same one
+        assert _host_pids(marker), "the toggle killed the run's own background work"
+        assert _bash(ctx, f"pgrep -f {marker}")["returncode"] == 0
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_base_policy_change_rebuilds_the_namespace():
+    # AC 18. create_and_enter_worktree is the only site in src/ that reassigns
+    # ctx.base_sandbox_policy and ctx.project_root mid-run
+    # (create_and_enter_worktree.py:124-131, pinned by
+    # tests/test_create_and_enter_worktree_tool.py); this is what that reassignment
+    # must then cause. A keeper pinned to the pre-materialize plan would leave
+    # every later call unable to see the worktree the agent was just told it is in.
+    root = _make_root()
+    fresh = _make_root()
+    marker = f"imp-run-{uuid.uuid4().hex}"
+    try:
+        ctx = _ctx(root)
+        ctx.background_enabled = True
+        started = _bash(ctx, f"sh -c '{_ALIVE}' {marker}", run_in_background=True)
+        _poll(lambda: _host_pids(marker), what=f"{marker} alive host-side")
+        before = _ns_id(ctx)
+
+        # exactly what the tool does when the worktree materializes: rewrite
+        # project_root and repoint the base policy at the new tree. (The tool also
+        # replaces git_worktree_self; either bind-plan field alone changes the
+        # value, and it is the value that is the key.)
+        ctx.project_root = fresh
+        ctx.base_sandbox_policy = _policy_for(fresh)
+
+        # (a) the join carries the POST-materialize bind plan
+        wrote = _bash(ctx, 'pwd; echo NEW > new.txt; cat new.txt')
+        assert wrote["returncode"] == 0, wrote
+        assert wrote["stdout"].splitlines()[0] == str(fresh)
+        assert "NEW" in wrote["stdout"]
+        assert (fresh / "new.txt").read_text() == "NEW\n"
+        assert _ns_id(ctx) != before                  # a different namespace
+
+        # (b) the namespace opened before the change is closed
+        _poll(lambda: not _host_pids(marker),
+              what="the pre-rebuild process gone with its namespace")
+
+        # (c) and it was killed through the normal path, with an explanation
+        done = json.loads(anyio.run(
+            get_registry()["bash_output"].async_invoke, ctx, {"id": started["id"]}))
+        assert done["kill_reason"] == "sandbox-rebuilt"
+        assert done["status"] == "killed"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(fresh, ignore_errors=True)
+
+
+def test_a_steer_leaves_the_namespace_usable():
+    # AC 19. The cooperative-steer branch kills and then RE-QUERIES with the same
+    # ctx (claude_code.py:1859 -> _requery_pending -> return False). Closing there
+    # would destroy the namespace while the run continues, and the pinned fds fail
+    # closed — every later bash call would die "nsenter: fork failed".
+    root = _make_root()
+    marker = f"imp-run-{uuid.uuid4().hex}"
+    try:
+        ctx = _ctx(root)
+        ctx.background_enabled = True
+        _bash(ctx, 'echo BEFORE > "$HOME/steer.txt"')
+        _bash(ctx, f"sh -c '{_ALIVE}' {marker}", run_in_background=True)
+        _poll(lambda: _host_pids(marker), what=f"{marker} alive host-side")
+        before = _ns_id(ctx)
+        ns_before = ctx.sandbox_ns
+
+        anyio.run(terminate_tool_processes, ctx)      # what the steer site does
+
+        # (b) the kills still happen
+        _poll(lambda: not _host_pids(marker),
+              what="the process running across the steer terminated")
+        # (a) and the next call succeeds rather than failing closed
+        after = _bash(ctx, 'cat "$HOME/steer.txt"')
+        assert after["returncode"] == 0, f"the steer broke the namespace: {after}"
+        assert "BEFORE" in after["stdout"]
+        # (c) reused, not rebuilt. The $HOME read above does NOT discriminate on
+        # this policy — _policy_for puts HOME inside the worktree with no overlay
+        # root, so that file would survive a rebuild too; these two carry it.
+        assert ctx.sandbox_ns is ns_before
+        assert _ns_id(ctx) == before
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_two_contexts_do_not_share_a_process_table():
     # AC 4. A sub_agent dispatch builds its OWN ToolContext, never shared with the
     # parent, and subagents run CONCURRENTLY — a step-wide namespace would put
