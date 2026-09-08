@@ -40,6 +40,12 @@ def test_terminal_ui_skill_closes_by_telling_the_agent_to_paste_the_screen() -> 
     # An agent cannot type ESC, so the bare spelling is the load-bearing instruction:
     # without it the skill describes a feature no model can reach.
     assert "write each SGR code without it — `[1;33m`" in section
+    # The capability itself: without this sentence the skill still tells the agent
+    # nothing outside a fence is restored, and no model would try an inline sample.
+    assert ("imp restores it inside the fence, and inside a single-line inline code "
+            "span, so a short sample like `` `[1;33m78%[0m` `` keeps its color "
+            "mid-sentence") in section
+    assert "Outside a fence nothing is restored" not in section
     assert "any control byte that isn't SGR arrives as literal `^[[33m`" in section
     assert " ".join(body.split()).endswith("give the snapshot PNG path too.")
 
