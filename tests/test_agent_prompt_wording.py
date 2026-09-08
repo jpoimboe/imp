@@ -426,7 +426,9 @@ def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
         "suite green. A plan that defers greening to a later plan (renames or "
         "removes something and leaves its consumers or tests red) is a "
         "**Major** finding: the `verify` gate runs after every plan and will "
-        "reject it."
+        "reject it. Establish this by reading — the callers a rename orphans, "
+        "the assertions an edit invalidates — never by reconstructing; the "
+        "gate is the backstop that makes missing one cheap."
     ) in body
 
 

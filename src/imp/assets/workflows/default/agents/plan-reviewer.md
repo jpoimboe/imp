@@ -125,7 +125,9 @@ implementations:
 - **Green at this plan's end** — the prescribed code leaves the fast suite
   green. A plan that defers greening to a later plan (renames or removes
   something and leaves its consumers or tests red) is a **Major** finding: the
-  `verify` gate runs after every plan and will reject it.
+  `verify` gate runs after every plan and will reject it. Establish this by
+  reading — the callers a rename orphans, the assertions an edit invalidates —
+  never by reconstructing; the gate is the backstop that makes missing one cheap.
 
 ## Backstop: record an unrecorded scope-out
 
