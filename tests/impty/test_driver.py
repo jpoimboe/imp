@@ -961,3 +961,56 @@ def test_send_signal_copy_names_the_terminals_foreground_group() -> None:
         if "child's process group" in ln and not ln.startswith("- `close(")
     ]
     assert stale == [], stale
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_start_env_extends_the_base_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Under a sandbox a replacing env= is a footgun: one variable would drop PATH,
+    # HOME and the IMP_* variables the contract depends on. Both markers are set on
+    # the parent here, and TERM is deleted from it, so no assertion below depends on
+    # the runner's ambient environment (a runner with TERM=dumb would otherwise carry
+    # its own value through the overlay and past the session's setdefault).
+    monkeypatch.setenv("IMPTY_BASE_ONLY", "base")
+    monkeypatch.setenv("IMPTY_OVERRIDDEN", "base")
+    monkeypatch.delenv("TERM", raising=False)
+    prog = (
+        "import os\n"
+        "print('BASE=' + os.environ.get('IMPTY_BASE_ONLY', '<none>'),\n"
+        "      'OVER=' + os.environ.get('IMPTY_OVERRIDDEN', '<none>'),\n"
+        "      'TERM=' + os.environ.get('TERM', '<none>'))\n"
+    )
+    d = ImptyDriver()
+    try:
+        screen = d.start([sys.executable, "-c", prog],
+                         env={"IMPTY_OVERRIDDEN": "overlay"})
+    finally:
+        d.stop()
+    assert "BASE=base OVER=overlay TERM=xterm-256color" in screen
+
+
+def test_start_copy_states_the_env_overlay_and_the_hook() -> None:
+    doc = ImptyDriver.start.__doc__ or ""
+    assert (
+        "`env` entries are ADDED to the base environment, overriding same-named ones"
+        in doc
+    )
+    assert "with no hook it runs bare" in doc
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    # The playbook is agent-facing copy this change falsifies, and it is NOT one of
+    # the files spec §8 enumerates — so it is pinned here or nowhere.
+    playbook = (
+        Path(__file__).parents[2] / "tests" / "playbooks" / "imp-ux-playbook.md"
+    ).read_text()
+    texts = (readme, playbook,
+             *(m.__doc__ or "" for m in ImptyDriver().tool_methods()))
+    for text in texts:
+        # Normalized, like the assertion above: EVERY one of these sources wraps the
+        # claim mid-phrase today (`REPLACES the\n        inherited environment` in the
+        # docstring, `REPLACES the inherited\nenvironment` in the playbook), so a raw
+        # substring test would pass vacuously and pin nothing at all.
+        flat = " ".join(text.split())
+        assert "REPLACES the inherited environment" not in flat
+        assert "replaces the environment" not in flat

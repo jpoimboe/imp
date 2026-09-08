@@ -33,7 +33,12 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 - `cursor() -> (x, y)`, `regime() -> Regime`, `is_alt_screen() -> bool`, `rows`/`cols` (properties), `resize(rows, cols)`, `is_alive()`, `wait(timeout)`.
 
 By default the child inherits your environment with `TERM=xterm-256color` so a real
-program's color emission (and thus `cell().fg`) is deterministic; pass `env=` to override.
+program's color emission (and thus `cell().fg`) is deterministic. At the
+`TerminalSession` layer an explicit `env=` IS the child environment (plus that `TERM`
+default) — composing it is the caller's job, deliberately, so an embedding host's
+curated child env can never be polluted with `os.environ`. `ImptyDriver.start` does
+that composition for you: its `env` entries are ADDED to the base environment,
+overriding same-named ones.
 
 ## Embedding: the sandbox hook
 

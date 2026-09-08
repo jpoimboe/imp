@@ -14,6 +14,7 @@ reads); each in-process host offloads them to a thread, and this layer clamps
 from __future__ import annotations
 
 import codecs
+import os
 import re
 import signal
 import time
@@ -141,11 +142,16 @@ class ImptyDriver:
         foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shell
         wrapper is needed; pass `env` to set variables (e.g. API keys) instead of a
         `bash -lc "export …; exec …"` wrapper, which would otherwise put bash — not
-        your program — in the foreground group. `env`, when given, REPLACES the
-        inherited environment (TERM is still defaulted); merge with the parent env
-        yourself if you want to extend it. `cols`/`rows` set the terminal size (a
-        real test parameter — programs reflow by width). Waits for the program to
-        settle before returning, so the returned screen is the first thing to react to.
+        your program — in the foreground group.
+
+        `env` entries are ADDED to the base environment, overriding same-named ones
+        (TERM is still defaulted). With a sandbox hook installed by the embedding
+        host the program is spawned inside that sandbox and `cwd` is resolved in ITS
+        mount namespace; with no hook it runs bare.
+
+        `cols`/`rows` set the terminal size (a real test parameter — programs reflow
+        by width). Waits for the program to settle before returning, so the returned
+        screen is the first thing to react to.
         """
         if self._session is not None:
             if self._session.is_alive():
@@ -154,7 +160,12 @@ class ImptyDriver:
             self._session = None
         plan = None if self._sandbox is None else self._sandbox(argv, cwd, env)
         if plan is None:
-            session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
+            # The merge belongs HERE, never inside TerminalSession: a session that
+            # unioned os.environ under whatever it was handed would pour the host
+            # environment into a sandboxing host's curated child env.
+            session = TerminalSession(
+                argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
+            )
         else:
             # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
             # namespace, so a plan's cwd rides inside plan.argv instead.
@@ -349,7 +360,6 @@ class ImptyDriver:
         near-white surface instead — use it to preview an app's *light* theme, which
         tunes its accents for a pale background and so reads wrong on the dark default.
         """
-        import os
         import tempfile
 
         from impty.render import light_surface, render_screen
