@@ -1361,3 +1361,27 @@ def test_run_script_spawns_with_the_sandbox_child_env(tmp_path, monkeypatch) -> 
     run_script(_script_step("echo hi"), cwd=tmp_path, policy=pol,
                env_extra={"IMP_QUEST_ID": "realid01"})
     assert captured["env"] == {"PATH": "/usr/bin", "IMP_QUEST_ID": "realid01"}
+
+
+def test_run_spawn_passes_the_spawns_inherited_fds_to_the_child(tmp_path) -> None:
+    # A join's argv names /proc/self/fd/N, so an fd the child does not inherit makes
+    # the argv meaningless. Popen closes every non-standard fd by default, so this
+    # fails outright unless pass_fds rides along with the argv.
+    import imp.engine.gates as gatesmod
+    from imp.engine.sandbox import SandboxSpawn
+
+    r, w = os.pipe()
+    try:
+        os.write(w, b"inherited\n")
+        spawn = SandboxSpawn(
+            argv=["sh", "-c", f"head -1 /proc/self/fd/{r}"],
+            env={"PATH": os.environ["PATH"]},
+            pass_fds=(r,),
+        )
+        out = gatesmod._run_spawn(spawn, command="x", cwd=str(tmp_path),
+                                  timeout_seconds=10, abort=None)
+    finally:
+        os.close(r)
+        os.close(w)
+    assert out["exit"] == 0
+    assert out["stdout"] == "inherited"
