@@ -1543,7 +1543,18 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if isinstance(loaded, int):
         return loaded
     quest = loaded
+    from imp.engine.provider_pin import current_provider
+    provider_arg = getattr(args, "provider", None)
+    if provider_arg is not None:
+        from imp.providers import provider_choice_error
+        reason = provider_choice_error(provider_arg)
+        if reason is not None:
+            _emit_cli_error(f"--provider: {reason}")
+            return 2
     if _resume_opens_fresh(quest):
+        if (provider_arg is not None
+                and provider_arg != current_provider(quest, None)):
+            quest.set_provider(provider_arg)
         _warn_if_blocked(quest)
         return await _run_fresh_session(quest, args=args)
     state = State.load(quest.state_dir)
@@ -1553,8 +1564,18 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         _emit_cli_error(f"quest {quest.id} status is {state.status!r}; nothing to resume")
         return 2
 
+    lock_live = lock_is_live(quest.quest_dir / "lock")
+    pending_provider: str | None = None
+    if (provider_arg is not None
+            and provider_arg != current_provider(quest, state)):
+        if lock_live:
+            # A disk write behind a running engine is durable and completely
+            # inert: it is re-read only at run_quest entry.
+            pending_provider = provider_arg
+        else:
+            quest.set_provider(provider_arg)
     marker, live_notice = _resume_live_framing(
-        quest.id, lock_live=lock_is_live(quest.quest_dir / "lock"),
+        quest.id, lock_live=lock_live,
         halt_condition=state.halt_condition)
 
     watched = WatchedStream(sys.stdout)
@@ -1575,13 +1596,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, non_interactive=True,
-            leave_mode=quest.create_mode, autonomous=autonomous, stream=watched)
+            leave_mode=quest.create_mode, autonomous=autonomous,
+            provider=pending_provider, stream=watched)
     if not getattr(args, "message", None):
         question = bare_turn_end_question(quest)
         if question is not None:
             return await _resume_inert(
                 quest, question, marker=marker, notice=live_notice,
-                autonomous=autonomous)
+                autonomous=autonomous, provider=pending_provider)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
@@ -1603,7 +1625,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
-            autonomous=autonomous, stream=watched)
+            autonomous=autonomous, provider=pending_provider, stream=watched)
 
     return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
@@ -1649,7 +1671,7 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
 
 async def _resume_inert(
     quest: Quest, question: str, *, marker: str, notice: str | None,
-    autonomous: bool = False,
+    autonomous: bool = False, provider: str | None = None,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
     from imp.cli.inert_resume import make_buffered_solicit, render_inert_question, run_inert_resume
@@ -1690,7 +1712,8 @@ async def _resume_inert(
                 quest, driver=driver, coord=coord, solicit=solicit,
                 resume=True, status=status, leave_state=leave_state,
                 leave_mode=quest.create_mode,
-                title=term_title, autonomous=autonomous, stream=watched)
+                title=term_title, autonomous=autonomous,
+                provider=provider, stream=watched)
 
         return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
@@ -4019,6 +4042,10 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
                                "Requires --headless.")
+    p_resume.add_argument("--provider", metavar="NAME", default=None,
+                          help="Switch the quest to NAME for its remaining "
+                               "steps; the current step picks up from the "
+                               "event log.")
     p_resume.set_defaults(func=_cmd_resume, warm=True)
 
     p_log = sub.add_parser(

@@ -74,6 +74,7 @@ async def run_session_client(
     non_interactive: bool = False,
     autonomous: bool = False,
     model: str | None = None,
+    provider: str | None = None,
     opening_unsandboxed: bool = False,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
@@ -104,7 +105,7 @@ async def run_session_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
-                stream=stream,
+                stream=stream, provider=provider,
                 local_echo=driver.seed_pending_reply,
                 on_title=lambda new: setattr(quest, "title", new))
         except TimeoutError:

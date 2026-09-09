@@ -136,7 +136,8 @@ def test_live_waiting_threads_already_waiting_into_inert_path(
     monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, object] = {}
 
-    async def fake_inert(quest, question, *, marker, notice, autonomous=False):
+    async def fake_inert(quest, question, *, marker, notice,
+                         autonomous=False, provider=None):
         seen["marker"] = marker
         seen["notice"] = notice
         return 0

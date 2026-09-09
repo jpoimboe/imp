@@ -55,6 +55,7 @@ async def run_terminal_client(
     leave_mode: str,
     title: TerminalTitle | None = None,
     stream: WatchedStream | None = None,
+    provider: str | None = None,
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
 ) -> StreamEnding:
@@ -245,11 +246,17 @@ async def run_terminal_client(
                         from imp.remote.session.protocol import CONTROL_INTERRUPT
                         await client.send_control(CONTROL_INTERRUPT)
 
+                async def _flush_pending_provider() -> None:
+                    if provider is not None:
+                        from imp.remote.session.protocol import CONTROL_SET_PROVIDER
+                        await client.send_control(CONTROL_SET_PROVIDER, provider)
+
                 tg.start_soon(_answer_gates)
                 tg.start_soon(_watch_resolved)
                 tg.start_soon(_watch_force_quit)
                 tg.start_soon(_watch_sigquit)
                 tg.start_soon(_flush_pending_interrupt)
+                tg.start_soon(_flush_pending_provider)
                 ending = await client.receive_events()
                 tg.cancel_scope.cancel()
         finally:
