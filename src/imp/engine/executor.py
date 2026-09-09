@@ -67,6 +67,7 @@ from imp.engine.gates import (
 )
 from imp.engine.loader import load_workflow
 from imp.engine.model_override import current_provider_model
+from imp.engine.provider_pin import provider_pending
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import (
     reincarnation_seed,
@@ -109,7 +110,7 @@ from imp.engine.types import (
 from imp.providers.claude_token_refresh import login_expires_at, login_expiry_warning
 from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.memory import load_memory_snapshot
-from imp.providers.resolve import provider_from_model, resolve_run
+from imp.providers.resolve import ProviderUnavailable, provider_from_model, resolve_run
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 
@@ -384,6 +385,44 @@ def _wipe_step_scratch(quest: Quest) -> None:
     from imp.remote.session.attach import ensure_quest_tmp_dir
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     ensure_quest_tmp_dir(quest)
+
+
+def _reconcile_provider(
+    quest: Quest, state: State, workflow: Workflow,
+    on_event: EventCallback, *, step_ends: bool = False,
+) -> bool:
+    """Apply a pending provider switch to the LIVE State: re-resolve both maps
+    against a config narrowed to the pin, save, confirm. False — a no-op — when
+    the pin and the map already agree, which is every call on an unswitched run
+    and every call after this one applied. A raise refuses the switch and clears
+    the pin rather than killing the run: mid-run re-resolution is new, and a pin
+    that cannot resolve would otherwise re-raise on every later resume with no
+    escape but hand-editing quest.json."""
+    if not provider_pending(quest, state):
+        return False
+    name = quest.provider
+    assert name is not None and state.resolved_tiers is not None
+    was = next(iter(state.resolved_tiers.values())).provider
+    config = dataclasses.replace(
+        load_effective_config(control_root=quest.control_root).config,
+        providers=(name,))
+    try:
+        resolved_tiers, resolved_steps, _details = resolve_run(workflow, config)
+    except (LoadError, ProviderUnavailable) as exc:
+        quest.set_provider(None)
+        on_event({"type": "script_output", "payload": {
+            "stdout": f"couldn't switch to {name} — staying on {was}: {exc}"}})
+        return False
+    # Wholesale, not a merge: a per-step /model override left in resolved_steps
+    # names a model on the vendor being fled.
+    state.resolved_tiers = resolved_tiers
+    state.resolved_steps = resolved_steps
+    state.save(quest.state_dir)
+    tail = ("takes the next step" if step_ends
+            else "picks up this step from the event log")
+    on_event({"type": "script_output",
+              "payload": {"stdout": f"provider switched — {name} {tail}"}})
+    return True
 
 
 async def run_quest(
