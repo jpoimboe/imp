@@ -47,7 +47,8 @@ def run_mutation(
             control_root, opening=args["opening"], title=args["title"],
             workflow=args["workflow"], base=args["base"], idea=args["idea"],
             depends_on=args["depends_on"], var_flags=args["var_flags"],
-            background=args.get("background", False), parent=parent_id)
+            background=args.get("background", False), parent=parent_id,
+            provider=args.get("provider"))
         return {"returncode": rc, "message": message}
     if op == "abandon":
         from imp.cli.main import _abandon, _iter_quest_ids

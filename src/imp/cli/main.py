@@ -1005,7 +1005,8 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
-            origin="backlog", seed_opening=seed, defer_seed=True, vars=quest_vars)
+            origin="backlog", seed_opening=seed, defer_seed=True,
+            vars=quest_vars, provider=getattr(args, "provider", None))
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
@@ -1019,6 +1020,7 @@ def apply_new(
     workflow: str | None, base: str | None, idea: str | None,
     depends_on: list[str] | None, parent: str | None = None,
     background: bool = False, var_flags: list[str] | None = None,
+    provider: str | None = None,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest."""
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
@@ -1046,7 +1048,7 @@ def apply_new(
                 control, title=title or "", quest_id=quest_id,
                 base_branch=resolved_base, depends_on=deps, workflow=workflow,
                 origin="draft", seed_opening=seed, parent=parent,
-                defer_seed=True, vars=quest_vars)
+                defer_seed=True, vars=quest_vars, provider=provider)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         from imp.remote.daemon import spawn
@@ -1062,7 +1064,8 @@ def apply_new(
             Quest.create_draft(
                 control, title=idea, quest_id=quest_id, base_branch=resolved_base,
                 depends_on=deps, workflow=workflow, origin="backlog",
-                seed_opening=seed, parent=parent, defer_seed=True, vars=quest_vars)
+                seed_opening=seed, parent=parent, defer_seed=True, vars=quest_vars,
+                provider=provider)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         return 0, (f"imp: recorded backlog quest {quest_id} "
@@ -1073,7 +1076,7 @@ def apply_new(
             control, title=title or "", quest_id=quest_id,
             base_branch=resolved_base, depends_on=deps, workflow=workflow,
             origin="backlog", seed_opening=opening, parent=parent,
-            defer_seed=True, vars=quest_vars)
+            defer_seed=True, vars=quest_vars, provider=provider)
     except (LoadError, LoadErrors) as e:
         return 2, f"imp: {e}"
     return 0, (f"imp: recorded backlog quest {quest_id} "
@@ -1214,6 +1217,13 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     from imp.engine.quest import Quest, live_stems
     from imp.engine.quest_id import new_quest_id
     from imp.providers.config import validate_workflow_name
+    provider_arg = getattr(args, "provider", None)
+    if provider_arg is not None:
+        from imp.providers import provider_choice_error
+        reason = provider_choice_error(provider_arg)
+        if reason is not None:
+            _emit_cli_error(f"--provider: {reason}")
+            return 2
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
         return _emit_mutation_result(await proxy_mutation_async("new", {
             "opening": getattr(args, "opening", None),
@@ -1223,7 +1233,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             "idea": getattr(args, "idea", None),
             "depends_on": getattr(args, "depends_on", None),
             "var_flags": getattr(args, "var", None),
-            "background": getattr(args, "background", False)}))
+            "background": getattr(args, "background", False),
+            "provider": provider_arg}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -1252,7 +1263,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             base=getattr(args, "base", None), idea=None,
             depends_on=list(getattr(args, "depends_on", None) or []),
             var_flags=list(getattr(args, "var", None) or []),
-            background=True)
+            background=True, provider=provider_arg)
         print(message, file=sys.stderr if rc else sys.stdout)
         return rc
 
@@ -1285,10 +1296,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         _emit_cli_error(f"{e}")
         return 2
 
-    block = _preflight_imp_init(control_root=control)
-    if block is not None:
-        _emit_cli_error(f"{block}")
-        return 2
+    # Pinned quests resolve off their own vendor's floor, not the configured order's.
+    if provider_arg is None:
+        block = _preflight_imp_init(control_root=control)
+        if block is not None:
+            _emit_cli_error(f"{block}")
+            return 2
 
     model_arg = getattr(args, "model", None)
     if model_arg is not None:
@@ -1318,7 +1331,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
             depends_on=list(getattr(args, "depends_on", None) or []),
-            seed_opening=None, create_mode=leave_mode, vars=quest_vars)
+            seed_opening=None, create_mode=leave_mode, vars=quest_vars,
+            provider=provider_arg)
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
@@ -3955,6 +3969,9 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Run the opening step under a chosen model "
                             "(provider:model or bare model); the same override as "
                             "typing /model at the opening prompt.")
+    p_new.add_argument("--provider", metavar="NAME", default=None,
+                       help="Run this quest on NAME, whatever the configured "
+                            "provider order is.")
     p_new.set_defaults(func=_cmd_new, warm=True)
 
     p_chat = sub.add_parser(
@@ -3977,6 +3994,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Run the opening step under a chosen model "
                              "(provider:model or bare model); the same override as "
                              "typing /model at the opening prompt.")
+    p_chat.add_argument("--provider", metavar="NAME", default=None,
+                        help="Run this quest on NAME, whatever the configured "
+                             "provider order is.")
     p_chat.set_defaults(func=_cmd_chat, warm=True)
 
     p_resume = sub.add_parser(
