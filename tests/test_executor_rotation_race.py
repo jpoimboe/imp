@@ -59,7 +59,7 @@ def _rotated() -> dict[str, Any]:
             "detail": {}}
 
 
-async def _no_sleep(_delay: float, _coord: Any) -> None:
+async def _no_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
     return None
 
 

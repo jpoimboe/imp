@@ -1005,7 +1005,8 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
-            origin="backlog", seed_opening=seed, defer_seed=True, vars=quest_vars)
+            origin="backlog", seed_opening=seed, defer_seed=True,
+            vars=quest_vars, provider=getattr(args, "provider", None))
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
@@ -1019,6 +1020,7 @@ def apply_new(
     workflow: str | None, base: str | None, idea: str | None,
     depends_on: list[str] | None, parent: str | None = None,
     background: bool = False, var_flags: list[str] | None = None,
+    provider: str | None = None,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest."""
     from imp.cli.var_flags import VarFlagError, resolve_var_flags
@@ -1046,7 +1048,7 @@ def apply_new(
                 control, title=title or "", quest_id=quest_id,
                 base_branch=resolved_base, depends_on=deps, workflow=workflow,
                 origin="draft", seed_opening=seed, parent=parent,
-                defer_seed=True, vars=quest_vars)
+                defer_seed=True, vars=quest_vars, provider=provider)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         from imp.remote.daemon import spawn
@@ -1062,7 +1064,8 @@ def apply_new(
             Quest.create_draft(
                 control, title=idea, quest_id=quest_id, base_branch=resolved_base,
                 depends_on=deps, workflow=workflow, origin="backlog",
-                seed_opening=seed, parent=parent, defer_seed=True, vars=quest_vars)
+                seed_opening=seed, parent=parent, defer_seed=True, vars=quest_vars,
+                provider=provider)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         return 0, (f"imp: recorded backlog quest {quest_id} "
@@ -1073,7 +1076,7 @@ def apply_new(
             control, title=title or "", quest_id=quest_id,
             base_branch=resolved_base, depends_on=deps, workflow=workflow,
             origin="backlog", seed_opening=opening, parent=parent,
-            defer_seed=True, vars=quest_vars)
+            defer_seed=True, vars=quest_vars, provider=provider)
     except (LoadError, LoadErrors) as e:
         return 2, f"imp: {e}"
     return 0, (f"imp: recorded backlog quest {quest_id} "
@@ -1214,6 +1217,13 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     from imp.engine.quest import Quest, live_stems
     from imp.engine.quest_id import new_quest_id
     from imp.providers.config import validate_workflow_name
+    provider_arg = getattr(args, "provider", None)
+    if provider_arg is not None:
+        from imp.providers import provider_choice_error
+        reason = provider_choice_error(provider_arg)
+        if reason is not None:
+            _emit_cli_error(f"--provider: {reason}")
+            return 2
     if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
         return _emit_mutation_result(await proxy_mutation_async("new", {
             "opening": getattr(args, "opening", None),
@@ -1223,7 +1233,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             "idea": getattr(args, "idea", None),
             "depends_on": getattr(args, "depends_on", None),
             "var_flags": getattr(args, "var", None),
-            "background": getattr(args, "background", False)}))
+            "background": getattr(args, "background", False),
+            "provider": provider_arg}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -1252,7 +1263,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             base=getattr(args, "base", None), idea=None,
             depends_on=list(getattr(args, "depends_on", None) or []),
             var_flags=list(getattr(args, "var", None) or []),
-            background=True)
+            background=True, provider=provider_arg)
         print(message, file=sys.stderr if rc else sys.stdout)
         return rc
 
@@ -1285,21 +1296,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         _emit_cli_error(f"{e}")
         return 2
 
-    block = _preflight_imp_init(control_root=control)
-    if block is not None:
-        _emit_cli_error(f"{block}")
-        return 2
-
-    model_arg = getattr(args, "model", None)
-    if model_arg is not None:
-        from imp.cli.model_command import validate_model_available
-        from imp.providers.effective import load_effective_config
-        from imp.providers.resolve import available_providers
-        config = load_effective_config(control_root=control).config
-        reason = validate_model_available(
-            model_arg, available=available_providers(config))
-        if reason is not None:
-            _emit_cli_error(f"{reason}")
+    # Pinned quests resolve off their own vendor's floor, not the configured order's.
+    if provider_arg is None:
+        block = _preflight_imp_init(control_root=control)
+        if block is not None:
+            _emit_cli_error(f"{block}")
             return 2
 
     non_interactive = bool(getattr(args, "non_interactive", False))
@@ -1318,7 +1319,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
             depends_on=list(getattr(args, "depends_on", None) or []),
-            seed_opening=None, create_mode=leave_mode, vars=quest_vars)
+            seed_opening=None, create_mode=leave_mode, vars=quest_vars,
+            provider=provider_arg)
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2
@@ -1361,7 +1363,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # An empty reply falls back to the unseeded path (the opening step
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
-    opening_model = opening_model_sink.get("model") or model_arg
+    opening_model = opening_model_sink.get("model")
     opening_unsandboxed = bool(opening_sandbox_sink.get("unsandboxed"))
 
     # Persist the finalized intent so it survives any resume (including a restart
@@ -1529,7 +1531,18 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if isinstance(loaded, int):
         return loaded
     quest = loaded
+    from imp.engine.provider_pin import current_provider
+    provider_arg = getattr(args, "provider", None)
+    if provider_arg is not None:
+        from imp.providers import provider_choice_error
+        reason = provider_choice_error(provider_arg)
+        if reason is not None:
+            _emit_cli_error(f"--provider: {reason}")
+            return 2
     if _resume_opens_fresh(quest):
+        if (provider_arg is not None
+                and provider_arg != current_provider(quest, None)):
+            quest.set_provider(provider_arg)
         _warn_if_blocked(quest)
         return await _run_fresh_session(quest, args=args)
     state = State.load(quest.state_dir)
@@ -1539,8 +1552,18 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         _emit_cli_error(f"quest {quest.id} status is {state.status!r}; nothing to resume")
         return 2
 
+    lock_live = lock_is_live(quest.quest_dir / "lock")
+    pending_provider: str | None = None
+    if (provider_arg is not None
+            and provider_arg != current_provider(quest, state)):
+        if lock_live:
+            # A disk write behind a running engine is durable and completely
+            # inert: it is re-read only at run_quest entry.
+            pending_provider = provider_arg
+        else:
+            quest.set_provider(provider_arg)
     marker, live_notice = _resume_live_framing(
-        quest.id, lock_live=lock_is_live(quest.quest_dir / "lock"),
+        quest.id, lock_live=lock_live,
         halt_condition=state.halt_condition)
 
     watched = WatchedStream(sys.stdout)
@@ -1561,13 +1584,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, non_interactive=True,
-            leave_mode=quest.create_mode, autonomous=autonomous, stream=watched)
+            leave_mode=quest.create_mode, autonomous=autonomous,
+            provider=pending_provider, stream=watched)
     if not getattr(args, "message", None):
         question = bare_turn_end_question(quest)
         if question is not None:
             return await _resume_inert(
                 quest, question, marker=marker, notice=live_notice,
-                autonomous=autonomous)
+                autonomous=autonomous, provider=pending_provider)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
@@ -1589,7 +1613,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, leave_state=leave_state,
             leave_mode=quest.create_mode,
-            autonomous=autonomous, stream=watched)
+            autonomous=autonomous, provider=pending_provider, stream=watched)
 
     return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
@@ -1635,7 +1659,7 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
 
 async def _resume_inert(
     quest: Quest, question: str, *, marker: str, notice: str | None,
-    autonomous: bool = False,
+    autonomous: bool = False, provider: str | None = None,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
     from imp.cli.inert_resume import make_buffered_solicit, render_inert_question, run_inert_resume
@@ -1676,7 +1700,8 @@ async def _resume_inert(
                 quest, driver=driver, coord=coord, solicit=solicit,
                 resume=True, status=status, leave_state=leave_state,
                 leave_mode=quest.create_mode,
-                title=term_title, autonomous=autonomous, stream=watched)
+                title=term_title, autonomous=autonomous,
+                provider=provider, stream=watched)
 
         return await _clear_loop(quest.control_root, quest.base_branch, first=_first)
 
@@ -3670,16 +3695,6 @@ def _cmd_config_unset(args: argparse.Namespace) -> int:
                      control_root=_settings_root())
 
 
-def _model_arg_type(value: str) -> str:
-    """argparse type= for --model: reject malformed provider:model syntax."""
-    from imp.providers.model_arg import ModelArgError, parse_model_arg
-    try:
-        parse_model_arg(value)
-    except ModelArgError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-    return value
-
-
 class SplitAppend(argparse.Action):
     """Accumulate a repeatable list option, comma-splitting each value; blanks dropped."""
 
@@ -3951,10 +3966,9 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Base the quest on an existing BRANCH instead of "
                             "the configured default-base. BRANCH must already "
                             "exist.")
-    p_new.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
-                       help="Run the opening step under a chosen model "
-                            "(provider:model or bare model); the same override as "
-                            "typing /model at the opening prompt.")
+    p_new.add_argument("--provider", metavar="NAME", default=None,
+                       help="Run this quest on NAME, whatever the configured "
+                            "provider order is.")
     p_new.set_defaults(func=_cmd_new, warm=True)
 
     p_chat = sub.add_parser(
@@ -3973,10 +3987,9 @@ def _build_parser() -> argparse.ArgumentParser:
                              "still pause for a human. Independent of --headless.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Alias for the positional opening message.")
-    p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
-                        help="Run the opening step under a chosen model "
-                             "(provider:model or bare model); the same override as "
-                             "typing /model at the opening prompt.")
+    p_chat.add_argument("--provider", metavar="NAME", default=None,
+                        help="Run this quest on NAME, whatever the configured "
+                             "provider order is.")
     p_chat.set_defaults(func=_cmd_chat, warm=True)
 
     p_resume = sub.add_parser(
@@ -3999,6 +4012,10 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
                                "Requires --headless.")
+    p_resume.add_argument("--provider", metavar="NAME", default=None,
+                          help="Switch the quest to NAME for its remaining "
+                               "steps; the current step picks up from the "
+                               "event log.")
     p_resume.set_defaults(func=_cmd_resume, warm=True)
 
     p_log = sub.add_parser(

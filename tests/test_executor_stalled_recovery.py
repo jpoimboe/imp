@@ -115,7 +115,7 @@ async def test_stalled_retries_with_backoff_without_burning_step_attempt(
     provider = _StallThenSucceedProvider(stalls=3)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
@@ -162,7 +162,7 @@ async def test_stalled_backoff_pauses_as_retry_ceiling_on_budget_exhaustion(
     quest = _make_quest(tmp_path)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)

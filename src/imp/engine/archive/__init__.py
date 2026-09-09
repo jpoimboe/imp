@@ -163,7 +163,8 @@ def _read_user_version(control_root: Path) -> int:
         conn.close()
 
 
-# blob schema versions: 10 == final_state.outcome_history head stripped;
+# blob schema versions: 11 == quest_meta.provider backfilled;
+# 10 == final_state.outcome_history head stripped;
 # 9 == step_started round stamped;
 # 8 == query_result session_id backfilled;
 # 7 == "event" id_ns restamped "block";
@@ -171,7 +172,7 @@ def _read_user_version(control_root: Path) -> int:
 # 5 == quest_meta.workflow rename imp->default;
 # 4 == final_state.resume_target `prompt` split; 3 == final_state.status
 # realigned; 2 == started_at backfilled; 1 == triad; absent == pre-triad
-_DATA_VERSION = 10
+_DATA_VERSION = 11
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -223,6 +224,8 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     Also restamp each blob's "event" id_ns task folds as "block", backfill a
     session id onto each query_result row written before that field existed, and
     stamp `round: 1` on each step_started row written before that field existed.
+    Also backfill a null `provider` pin into each record's quest_meta, so a
+    rehydrated home carries the same key set as a live one.
     Rebuilds the index once so its derived columns match, then stamps the data-version
     marker. A triad blob with no "event" id_ns folds is left untouched (both transforms
     are no-ops on it); old blobs orphan harmlessly (nothing GCs blobs)."""
@@ -275,6 +278,10 @@ def _migrate_archive_blobs(control_root: Path) -> None:
             quest_meta = rec.get("quest_meta") or {}
             if quest_meta.get("workflow") == "imp":
                 quest_meta["workflow"] = "default"
+                rec["quest_meta"] = quest_meta
+                dirty = True
+            if quest_meta and "provider" not in quest_meta:
+                quest_meta["provider"] = None
                 rec["quest_meta"] = quest_meta
                 dirty = True
             if dirty:

@@ -2,8 +2,9 @@
 # Copyright 2026 Josh Poimboeuf
 from __future__ import annotations
 
+import contextlib
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,31 @@ from imp.remote.session.protocol import SkillRequest
 def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
     """Run the CLI Ctrl-D reader only for an interactive tty run (never headless/piped)."""
     return not non_interactive and sys.stdin.isatty()
+
+
+def build_provider_picker(quest: Quest, driver: Any, status: Any) -> Any:
+    """The picker's rendering seam: CtrlDReader has no output channel, so the
+    block is drawn here, where driver and quest are both in scope. The suspend
+    bracket spans the digit read so the 100ms footer tick cannot paint over it;
+    tty_quiesced would be wrong — the reader still owns the tty."""
+    from imp.cli.provider_command import (
+        current_provider_for,
+        picker_choices,
+        render_picker,
+        selectable_available,
+    )
+
+    @contextlib.contextmanager
+    def _open() -> Iterator[list[str | None]]:
+        names = selectable_available()
+        current = current_provider_for(quest)
+        suspend = (status.suspend() if status is not None
+                   else contextlib.nullcontext())
+        with suspend:
+            driver.emit_lines(render_picker(current, names))
+            yield picker_choices(current, names)
+
+    return _open
 
 
 @dataclass(frozen=True)
@@ -74,6 +100,7 @@ async def run_session_client(
     non_interactive: bool = False,
     autonomous: bool = False,
     model: str | None = None,
+    provider: str | None = None,
     opening_unsandboxed: bool = False,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
@@ -92,7 +119,10 @@ async def run_session_client(
         tg.start_soon(coord.run_signal_receiver)
         if _should_run_ctrl_d_reader(non_interactive=non_interactive):
             from imp.cli.signals import CtrlDReader
-            await tg.start(CtrlDReader(coord).run)
+            await tg.start(CtrlDReader(
+                coord,
+                provider_picker=build_provider_picker(
+                    quest, driver, status)).run)
         if not non_interactive:
             # Interactive tty only; headless never registers it so the ack no-ops.
             coord.set_ack_hook(driver.show_stop_ack)
@@ -104,7 +134,7 @@ async def run_session_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
-                stream=stream,
+                stream=stream, provider=provider,
                 local_echo=driver.seed_pending_reply,
                 on_title=lambda new: setattr(quest, "title", new))
         except TimeoutError:

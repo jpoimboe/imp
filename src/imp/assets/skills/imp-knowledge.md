@@ -53,7 +53,9 @@ lands stays maintainable.
   one screen, needing no provider; `--use-defaults` (with optional
   `--workflow`/`--base`/`--pythonpath`) runs it non-interactively, no-TTY
   invocations take that path automatically, and `--providers a,b` skips the
-  picker in either mode.
+  picker in either mode. One quest can override that order: `--provider NAME` on
+  `imp new` / `imp chat` / `imp resume` pins it to one vendor, and `/provider`
+  at a prompt moves a running quest to another at the next step boundary.
 - **Batteries-included, customizable.** A default workflow encoding current
   best-practice agentic engineering; author your own if you like.
 - **Beyond software.** Not limited to code — imp can drive other structured

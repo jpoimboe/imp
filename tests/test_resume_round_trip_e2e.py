@@ -12,6 +12,7 @@ from imp.engine.abandon import archive_conversation
 from imp.engine.archive.read import rehydrate_quest
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
+from imp.engine.reincarnation import write_transcript_owner
 from imp.engine.state import State
 from imp.paths import project_state_dir
 from tests.conftest import _seed_control
@@ -34,6 +35,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     tdir.mkdir(parents=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
+    write_transcript_owner(tdir, "anthropic")     # replayed, so it must own it
     # engine_message/system_prompt lets _resume_system_prompt find the stored prompt on resume
     ch.event_log().append(
         agent_id="step:p/s", type="engine_message",

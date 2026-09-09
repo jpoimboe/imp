@@ -55,6 +55,7 @@ async def run_terminal_client(
     leave_mode: str,
     title: TerminalTitle | None = None,
     stream: WatchedStream | None = None,
+    provider: str | None = None,
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
 ) -> StreamEnding:
@@ -68,6 +69,12 @@ async def run_terminal_client(
         if event.get("type") == "user_input_resolved":
             if not event.get("_replay"):
                 resolved_send.send_nowait(None)
+            return
+        if event.get("type") == "provider_marker":
+            # Transient daemon mirror; drive the marker directly, never through
+            # driver.on_event.
+            driver.set_pending_provider(
+                (event.get("payload") or {}).get("provider"))
             return
         if event.get("type") == "sandbox_marker":
             # Transient daemon mirror; drive the marker directly, never through driver.on_event.
@@ -169,7 +176,8 @@ async def run_terminal_client(
                             control = reply.strip()
                             if (control in ("/abandon", "/save", "/shelve", "/clear",
                                             "/sandbox on", "/sandbox off", "/compact")
-                                    or control.startswith("/model ")):
+                                    or control.startswith("/model ")
+                                    or control.startswith("/provider ")):
                                 driver.append_committed_reply(control)
                             if reply.strip() == "/abandon":
                                 if leave_state is not None:
@@ -209,6 +217,12 @@ async def run_terminal_client(
                                 arg = reply.strip()[len("/sandbox "):].strip()
                                 await controls.set_sandbox(arg)
                                 continue
+                            if reply.strip().startswith("/provider "):
+                                # Non-parking: the daemon writes the pin,
+                                # broadcasts the marker and re-opens the prompt.
+                                name = reply.strip()[len("/provider "):].strip()
+                                await controls.set_provider(name)
+                                continue
                             if reply.strip() == "/compact":
                                 await controls.compact()
                                 continue
@@ -245,11 +259,17 @@ async def run_terminal_client(
                         from imp.remote.session.protocol import CONTROL_INTERRUPT
                         await client.send_control(CONTROL_INTERRUPT)
 
+                async def _flush_pending_provider() -> None:
+                    if provider is not None:
+                        from imp.remote.session.protocol import CONTROL_SET_PROVIDER
+                        await client.send_control(CONTROL_SET_PROVIDER, provider)
+
                 tg.start_soon(_answer_gates)
                 tg.start_soon(_watch_resolved)
                 tg.start_soon(_watch_force_quit)
                 tg.start_soon(_watch_sigquit)
                 tg.start_soon(_flush_pending_interrupt)
+                tg.start_soon(_flush_pending_provider)
                 ending = await client.receive_events()
                 tg.cancel_scope.cancel()
         finally:

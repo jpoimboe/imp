@@ -38,6 +38,9 @@ SANDBOX_ALREADY_ON = "Sandbox is already on."
 SANDBOX_ALREADY_OFF = "Sandbox is already off."
 SANDBOX_USAGE = "Usage: /sandbox [on|off]"
 
+PROVIDER_ALREADY = "Already on {name} — nothing changed."
+PROVIDER_PINNED = "This quest will run on {name}."
+
 MATERIALIZED_LEAVE_REDIRECT = (
     "/save, /shelve, and /clear apply only before a quest is built — this one "
     "is live. Press Ctrl-D to pause it (resume with imp resume {qid}), or "
@@ -127,6 +130,30 @@ def handle_slash_line(
             output_fn(err)
             return REPROMPT
         return f"/model {args}"
+    if cmd == "provider":
+        from imp.cli.provider_command import (
+            current_provider_for,
+            print_provider_roster,
+        )
+        from imp.providers import provider_choice_error
+        err = provider_choice_error(args) if args else None
+        redundant = (bool(args) and err is None
+                     and args == current_provider_for(quest))
+        if args and err is None and not redundant and not pre_session:
+            return f"/provider {args}"
+        _echo_command(text, output_fn, color=color)
+        if not args:
+            print_provider_roster(quest=quest, output_fn=output_fn)
+        elif err is not None:
+            output_fn(err)
+        elif redundant:
+            output_fn(PROVIDER_ALREADY.format(name=args))
+        else:
+            # Pre-session: create_draft already wrote quest.json, so the durable
+            # arm is the whole gesture — there is nothing to sink.
+            quest.set_provider(args)
+            output_fn(PROVIDER_PINNED.format(name=args))
+        return REPROMPT
     if cmd == "sandbox":
         if pre_session:
             _echo_command(text, output_fn, color=color)
@@ -195,6 +222,7 @@ def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool =
         out("  /clear             Shelve this conversation and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
+    out("  /provider [name]   Show or switch the provider for this quest")
     out("  /compact           Shed old tool results to reclaim context (keeps the narrative)")
     out("  /abandon           Abandon the current quest")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")

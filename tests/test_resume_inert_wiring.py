@@ -51,7 +51,8 @@ async def test_resume_routes_to_inert_for_bare_turn_end(
     monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, str] = {}
 
-    async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
+    async def fake_inert(quest, question, *, marker=None, notice=None,
+                         autonomous=False, provider=None):
         seen["question"] = question
         return 0
 
@@ -71,7 +72,8 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: None)
 
-    async def boom_inert(quest, question, *, marker=None, notice=None, autonomous=False):
+    async def boom_inert(quest, question, *, marker=None, notice=None,
+                         autonomous=False, provider=None):
         raise AssertionError("inert branch taken for a non-bare-turn-end resume")
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert)
@@ -94,7 +96,8 @@ async def test_resume_skips_inert_when_message_supplied(
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
 
-    async def boom_inert_msg(quest, question, *, marker=None, notice=None, autonomous=False):
+    async def boom_inert_msg(quest, question, *, marker=None, notice=None,
+                             autonomous=False, provider=None):
         raise AssertionError("inert branch taken despite message being set")
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert_msg)
@@ -126,7 +129,8 @@ async def test_resume_routes_to_inert_reading_recorded_message(
     _patch_common(monkeypatch, tmp_path, ch)
     seen: dict[str, str] = {}
 
-    async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
+    async def fake_inert(quest, question, *, marker=None, notice=None,
+                         autonomous=False, provider=None):
         seen["question"] = question
         return 0
 
@@ -299,7 +303,8 @@ async def test_resume_inert_receives_autonomous(
     monkeypatch.setattr("imp.cli.inert_resume.bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, object] = {}
 
-    async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
+    async def fake_inert(quest, question, *, marker=None, notice=None,
+                         autonomous=False, provider=None):
         seen["autonomous"] = autonomous
         return 0
 
@@ -515,6 +520,52 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
     assert isinstance(seen["title"], TerminalTitle)
     assert seen["title"]._idle is True        # created idle for the wait
     assert seen["title"]._project == ch.control_root.name == tmp_path.name
+
+
+@pytest.mark.anyio
+async def test_resume_inert_forwards_provider_to_session_client(
+        monkeypatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    seen: dict[str, object] = {}
+
+    class _Drv:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def echo_submitted_reply(self, text: str) -> None:
+            pass
+
+        def install_startup_status(self) -> None:
+            pass
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_build_resume_driver", lambda **k: _Drv())
+    monkeypatch.setattr("imp.cli.live_status.LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr("imp.cli.session_run.make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr("imp.cli.inert_resume.make_buffered_solicit", lambda line, inner: None)
+
+    async def _client(*a: object, provider: object = None, **k: object) -> int:
+        seen["provider"] = provider
+        return 0
+
+    monkeypatch.setattr("imp.cli.session_run.run_session_client", _client)
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        return await launch("my answer")
+
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
+
+    async def _fake_loop(control, base, *, first):
+        return await first({})
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+
+    rc = await m._resume_inert(ch, "Which DB?", marker="resuming", notice=None,
+                               provider="codex")
+
+    assert rc == 0
+    assert seen["provider"] == "codex"
 
 
 @pytest.mark.anyio

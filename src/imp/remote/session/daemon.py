@@ -153,6 +153,9 @@ async def serve_quest_session(
     def _on_first_attach() -> None:
         attach_log.append(agent_id=None, type="cli_attached", payload={})
 
+    def _set_provider(name: str) -> None:
+        quest.set_provider(name)
+
     server = SessionServer(
         socket_path,
         coordinator=coordinator,
@@ -164,6 +167,7 @@ async def serve_quest_session(
         skill_loader=lambda name: load_user_skill(
             quest.workflow_dir / "skills", name),
         on_query=build_session_handler(quest.control_root, parent_id=quest.id),
+        set_provider=_set_provider,
     )
     # Raw broadcast, not the liveness fan-out: interrupt records must not pulse
     # note_activity().

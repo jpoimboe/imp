@@ -246,6 +246,7 @@ class InterruptCoordinator:
         # FORCE has a live runner to hard-kill. Until then the offer would be a lie.
         self._delivery_observed = False
         self._forward_retry_now: Any = None   # client retry-now forward hook (SessionControls)
+        self._forward_set_provider: Any = None  # client set-provider forward hook
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
         # True ONLY while an interactive prompt is being awaited (set/cleared by
@@ -601,6 +602,19 @@ class InterruptCoordinator:
             await fn()
             return
         self.request_retry_now()
+
+    def set_provider_hook(self, fn: Any) -> None:
+        """Register the client's set-provider forwarder. Until it is bound there
+        is nowhere to send a switch and no local latch to hold one, so the picker
+        stays shut rather than accepting a gesture it would drop."""
+        self._forward_set_provider = fn
+
+    @property
+    def provider_hook_bound(self) -> bool:
+        return self._forward_set_provider is not None
+
+    async def dispatch_set_provider(self, name: str) -> None:
+        await self._forward_set_provider(name)
 
     def set_event_log(self, log: Any) -> None:
         """Attach the EventLog so interrupt delivery is journaled."""
@@ -965,8 +979,11 @@ class InterruptCoordinator:
 class CtrlDReader:
     """Single-byte cbreak /dev/tty reader: routes a mid-run Ctrl-D (\\x04) to the leave path."""
 
-    def __init__(self, coord: InterruptCoordinator) -> None:
+    def __init__(self, coord: InterruptCoordinator, *,
+                 provider_picker: Any = None) -> None:
         self._coord = coord
+        # () -> context manager yielding the name each digit dispatches.
+        self._provider_picker = provider_picker
         self._fd: int | None = None
         self._orig_attrs: Any = None
         self._armed = False
@@ -1016,6 +1033,10 @@ class CtrlDReader:
                     # locally when no client). Keep watching so Ctrl-D still leaves.
                     await self._coord.dispatch_retry_now()
                     continue
+                if byte == b"p":
+                    if not await self._pick_provider():
+                        return
+                    continue
                 # Any other byte (incl. b"" timeout / quiesce race) → keep watching.
         finally:
             self._armed = False
@@ -1035,6 +1056,32 @@ class CtrlDReader:
                 with contextlib.suppress(OSError):
                     os.close(self._fd)
                 self._fd = None
+
+    async def _pick_provider(self) -> bool:
+        """Render the picker and read the following digit or esc from this same
+        one-byte loop. False when the picker consumed a Ctrl-D, so the reader
+        still leaves rather than swallowing it. Inert before the client's
+        forwarding hook is bound: until then there is no arming position at all."""
+        import anyio
+        if self._provider_picker is None or not self._coord.provider_hook_bound:
+            return True
+        with self._provider_picker() as choices:
+            while True:
+                if self._quiesce_depth > 0:
+                    return True          # a prompt took the tty; close the picker
+                byte = await anyio.to_thread.run_sync(
+                    self._read_one_byte, abandon_on_cancel=True)
+                if byte == b"":
+                    continue
+                if byte == b"\x04":
+                    await self._coord.leave_mid_run(reason="ctrl-d")
+                    return False
+                if byte.isdigit():
+                    idx = int(byte) - 1
+                    name = choices[idx] if 0 <= idx < len(choices) else None
+                    if name is not None:
+                        await self._coord.dispatch_set_provider(name)
+                return True
 
     def _read_one_byte(self) -> bytes:
         """Blocking one-byte read with a short select timeout; b'' on timeout or non-fatal error."""

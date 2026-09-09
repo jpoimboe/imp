@@ -99,7 +99,7 @@ quest id (`imp show`, `imp log`, `imp abandon`, `imp edit`, `imp resume`). One l
 on stderr, exit 2, no output:
 
 ```
-imp: archive data is at v11, newer than this imp (knows v10) — this checkout is behind. Fix: update imp, or Ctrl-D and `imp resume` to restart a running quest on the current install. Agents: suggest this to the user.
+imp: archive data is at v12, newer than this imp (knows v11) — this checkout is behind. Fix: update imp, or Ctrl-D and `imp resume` to restart a running quest on the current install. Agents: suggest this to the user.
 ```
 
 `archive index is at v...` is the same refusal for the index's schema floor.

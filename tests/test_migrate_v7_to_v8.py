@@ -110,4 +110,4 @@ def test_migration_leaves_no_temp_file(tmp_path: Path) -> None:
                   paused_events=[_paused("max_loops")])
     _migrate_v7_to_v8(qd)
     assert not list((qd / "state").glob(".state-*"))
-    assert LAYOUT_VERSION == 19
+    assert LAYOUT_VERSION == 20

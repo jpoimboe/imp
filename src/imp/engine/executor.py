@@ -66,8 +66,16 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
+from imp.engine.model_override import current_provider_model
+from imp.engine.provider_pin import provider_pending
 from imp.engine.quest import Quest
-from imp.engine.reincarnation import reincarnation_seed, stash_transcript
+from imp.engine.reincarnation import (
+    handoff_path_for,
+    read_transcript_owner,
+    reincarnation_seed,
+    stash_transcript,
+    write_transcript_owner,
+)
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_MAX_ATTEMPTS,
     SandboxOpenFailed,
@@ -104,7 +112,7 @@ from imp.engine.types import (
 from imp.providers.claude_token_refresh import login_expires_at, login_expiry_warning
 from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.memory import load_memory_snapshot
-from imp.providers.resolve import provider_from_model, resolve_run
+from imp.providers.resolve import ProviderUnavailable, provider_from_model, resolve_run
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 
@@ -360,6 +368,15 @@ def _reconcile_resolved_run(
     return changed
 
 
+def _pinned_config(quest: Quest, config: Config) -> Config:
+    """The config resolve sees: narrowed to the pin as it stands NOW, so a refresh
+    can't reintroduce the un-pinned vendor and a pin just cleared by a refused
+    switch is no longer forced."""
+    if quest.provider is None:
+        return config
+    return dataclasses.replace(config, providers=(quest.provider,))
+
+
 def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     """Seed any workflow-declared var whose key is absent from state.vars with its
     declared default. Vars are seeded from the workflow only at quest creation
@@ -379,6 +396,46 @@ def _wipe_step_scratch(quest: Quest) -> None:
     from imp.remote.session.attach import ensure_quest_tmp_dir
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     ensure_quest_tmp_dir(quest)
+
+
+def _reconcile_provider(
+    quest: Quest, state: State, workflow: Workflow,
+    on_event: EventCallback, *, step_ends: bool = False,
+) -> bool:
+    """Apply a pending provider switch to the LIVE State: re-resolve both maps
+    against a config narrowed to the pin, save, confirm. False — a no-op — when
+    the pin and the map already agree, which is every call on an unswitched run
+    and every call after this one applied. A raise refuses the switch and clears
+    the pin rather than killing the run: mid-run re-resolution is new, and a pin
+    that cannot resolve would otherwise re-raise on every later resume with no
+    escape but hand-editing quest.json."""
+    if not provider_pending(quest, state):
+        return False
+    name = quest.provider
+    assert name is not None and state.resolved_tiers is not None
+    was = next(iter(state.resolved_tiers.values())).provider
+    config = dataclasses.replace(
+        load_effective_config(control_root=quest.control_root).config,
+        providers=(name,))
+    try:
+        resolved_tiers, resolved_steps, _details = resolve_run(workflow, config)
+    except (LoadError, ProviderUnavailable) as exc:
+        quest.set_provider(None)
+        on_event({"type": "provider_marker", "payload": {"provider": None}})
+        on_event({"type": "script_output", "payload": {
+            "stdout": f"couldn't switch to {name} — staying on {was}: {exc}"}})
+        return False
+    # Wholesale, not a merge: a per-step /model override left in resolved_steps
+    # names a model on the vendor being fled.
+    state.resolved_tiers = resolved_tiers
+    state.resolved_steps = resolved_steps
+    state.save(quest.state_dir)
+    tail = ("takes the next step" if step_ends
+            else "picks up this step from the event log")
+    on_event({"type": "provider_marker", "payload": {"provider": None}})
+    on_event({"type": "script_output",
+              "payload": {"stdout": f"provider switched — {name} {tail}"}})
+    return True
 
 
 async def run_quest(
@@ -417,6 +474,7 @@ async def run_quest(
             _SNAPSHOT_CAPTURED.add(snapshot_key)
         else:
             workflow_refreshed = False
+        quest.reload_provider()
         config = load_effective_config(control_root=quest.control_root).config
         state = State.load(quest.state_dir)
         quest.relink_home()
@@ -479,7 +537,8 @@ async def run_quest(
         # resume, so guard on the persisted map.
         did_fresh_resolve = state.resolved_tiers is None
         if did_fresh_resolve:
-            resolved_tiers, resolved_steps, details = resolve_run(workflow, config)
+            resolved_tiers, resolved_steps, details = resolve_run(
+                workflow, _pinned_config(quest, config))
             state.resolved_tiers = resolved_tiers
             state.resolved_steps = resolved_steps
             state.max_reincarnations = config.context_max_reincarnations()
@@ -493,9 +552,18 @@ async def run_quest(
                     message=Message(role="user",
                                     content=(TextBlock(text=quest.seed_opening),)),
                     subtype="intent")
-        elif workflow_refreshed:
-            if _reconcile_resolved_run(state, workflow, config):
-                state.save(quest.state_dir)
+
+        # (a) Every switch armed before this run entered the step loop: `imp
+        # resume --provider` on a stopped quest, /provider pre-session, and
+        # /provider at a parked hold prompt (which re-enters run_quest).
+        # Ahead of the refresh merge, so an unresolvable pin is refused and
+        # cleared here rather than raising uncaught inside the merge's re-resolve.
+        _reconcile_provider(quest, state, workflow, on_event)
+
+        # fresh resolve already covered the refreshed workflow
+        if not did_fresh_resolve and workflow_refreshed and _reconcile_resolved_run(
+                state, workflow, _pinned_config(quest, config)):
+            state.save(quest.state_dir)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
@@ -606,9 +674,13 @@ async def run_quest(
                 # a different step refills by design, above.
                 state.reset_reincarnation(f"step:{step.phase}/{step.name}")
                 resumed_step = None
+            # (b) A switch armed during a non-agent step or between steps: no
+            # agent invocation may run on the fled vendor after the arm.
+            _reconcile_provider(quest, state, workflow, on_event)
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                on_event=on_event,
                 test_gates=TestGates.from_config(config),
                 pythonpath=config.pythonpath or (),
                 undecided=Undecided.from_config(config),
@@ -976,6 +1048,7 @@ async def _dispatch_step(
     state: State, log: EventLog, *, is_resume: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
+    on_event: EventCallback,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
     undecided: Undecided = ALL_DECIDED,
@@ -1019,6 +1092,7 @@ async def _dispatch_step(
         return await _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+            on_event=on_event,
             wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
             pythonpath=pythonpath,
             undecided=undecided,
@@ -1540,11 +1614,45 @@ def _enforce_clean_tree(
     return action, format_clean_tree_feedback(paths), {}
 
 
+def _retire_foreign_transcript(
+    transcript_dir: Path, step: Step, quest: Quest, state: State, log: EventLog,
+    *, is_resume: bool, resolved: str,
+) -> str | None:
+    """Retire a non-empty transcript that another vendor wrote and that THIS
+    dispatch would consume or destroy, returning the seed for the session that
+    replaces it; None when nothing is at risk, which is every ordinary dispatch.
+
+    Two limbs, one question — is an unfinished attempt about to be lost? It
+    would be replayed into the wrong vendor (the restore_rollout / mcp__imp__
+    crash class), or wiped mid-flight by the fresh path's rmtree. A step that
+    completed has current_step cleared, so a rework Goto re-runs it clean."""
+    if not _resume_replays_transcript(transcript_dir):
+        return None
+    if read_transcript_owner(transcript_dir) == resolved:
+        return None
+    in_flight = (state.current_step is not None
+                 and state.current_step.transcript_dir == transcript_dir)
+    if not (is_resume or in_flight):
+        return None
+    seed = reincarnation_seed(
+        handoff_text=None, quest_id=quest.id, step_name=step.name,
+        cause="provider_switch")
+    stash = stash_transcript(transcript_dir)
+    assert stash is not None      # both limbs require a non-empty transcript
+    note = handoff_path_for(transcript_dir)
+    if note.exists():
+        # A note left behind would be a previous generation's.
+        note.rename(stash / note.name)
+    _emit(log, "reincarnating", {"reason": "provider switched"}, agent_id=None)
+    return seed
+
+
 async def _route_agent(
     step: Step, workflow: Workflow, quest: Quest,
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
-    coordinator: Any, wrapper_text: str | None, is_resume: bool,
+    coordinator: Any, on_event: EventCallback,
+    wrapper_text: str | None, is_resume: bool,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
     undecided: Undecided = ALL_DECIDED,
@@ -1561,6 +1669,17 @@ async def _route_agent(
     agent_def = workflow.agents[step.file.stem]
     transcript_dir = quest.quest_dir / "steps" / step.phase / step.name
 
+    # The one chokepoint every dispatch and re-entry crosses. Retiring here
+    # renames the directory, so keep and balance_on_resume both recompute False
+    # and the cross-vendor replay becomes unrepresentable rather than defended.
+    retired_seed = _retire_foreign_transcript(
+        transcript_dir, step, quest, state, log, is_resume=is_resume,
+        resolved=current_provider_model(state, workflow, step.name).provider)
+    if retired_seed is not None:
+        # Overrides any value inherited from a caller: that one describes an
+        # earlier generation.
+        reincarnation_text = retired_seed
+
     # Keep (replay) the transcript on every `resume:` entry that has a non-empty
     # one. A transcript that ended before complete_step is replayed and
     # continued (the provider injects a `continue` nudge), not re-run fresh; only
@@ -1576,6 +1695,9 @@ async def _route_agent(
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
+        write_transcript_owner(
+            transcript_dir,
+            current_provider_model(state, workflow, step.name).provider)
         balance = False
         retry_wrapper: str | None = None
         # seed_opening (imp new intent) renders via run.opening in templates.
@@ -1661,6 +1783,7 @@ async def _route_agent(
                 _emit(log, "step_completed",
                       {"step": step.name, "kind": "agent",
                        "action": _action_payload(pause), "var_mutations": {}})
+                _reconcile_provider(quest, state, workflow, on_event)
                 return pause, None, {}
         backoff += 1
         # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
@@ -1683,13 +1806,24 @@ async def _route_agent(
         _emit(log, "agent_retry", retry_payload, agent_id=None)
         coordinator.begin_backoff_wait()
         try:
-            await _interruptible_sleep(delay, coordinator)
+            await _interruptible_sleep(
+                delay, coordinator,
+                wake_when=lambda: provider_pending(quest, state))
         finally:
             coordinator.end_backoff_wait()
         # Consume the retry-now latch so it doesn't leak into the next backoff sleep.
         resumed_early = coordinator.take_retry_now()
-        _emit(log, "backoff_ended",
-              {"reason": "retry_now" if resumed_early else "elapsed"}, agent_id=None)
+        # Named in the order the sleep tests them, so the bracket closes on the
+        # cause that actually ended the wait. A pause keeps today's `elapsed`.
+        if coordinator.should_pause:
+            ended = "elapsed"
+        elif resumed_early:
+            ended = "retry_now"
+        elif provider_pending(quest, state):
+            ended = "provider_switch"
+        else:
+            ended = "elapsed"
+        _emit(log, "backoff_ended", {"reason": ended}, agent_id=None)
         if hinted:
             hint_exempt_sleeps += 1
         else:
@@ -1697,7 +1831,23 @@ async def _route_agent(
         if raced:
             rotation_exempt_sleeps += 1
         if coordinator.should_pause:
+            _reconcile_provider(quest, state, workflow, on_event)
             return Pause(), None, {}
+        if _reconcile_provider(quest, state, workflow, on_event):
+            # keep/balance/restarted are computed above `while True:` — continuing
+            # the loop would re-invoke with the stale locals and drive a resumed
+            # entry into restore_rollout. A fresh entry recomputes them and
+            # crosses the retirement guard. is_resume rides unchanged: forcing it
+            # either way would defeat one of the guard's two limbs.
+            return await _route_agent(
+                step, workflow, quest, state, log,
+                user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                on_event=on_event, wrapper_text=wrapper_text,
+                is_resume=is_resume, test_gates=test_gates,
+                pythonpath=pythonpath, undecided=undecided, headless=headless,
+                autonomous=autonomous, sandbox_policy=sandbox_policy,
+                seed_opening=seed_opening,
+                reincarnation_text=reincarnation_text, memory=memory)
 
     if result.paused:
         if result.awaiting_user:
@@ -1711,6 +1861,7 @@ async def _route_agent(
         # "interrupt" token; a real interrupt (interrupt=True) or a
         # subagent-suspend unwind (awaiting_user=False) keeps reason=None and
         # still defaults to "interrupt" at the emit site.
+        _reconcile_provider(quest, state, workflow, on_event)
         return Pause(
             reason="awaiting_user" if (
                 result.awaiting_user and not result.interrupt) else None,
@@ -1740,9 +1891,11 @@ async def _route_agent(
             seed = reincarnation_seed(
                 handoff_text=handoff_text, quest_id=quest.id,
                 step_name=step.name)
+            _reconcile_provider(quest, state, workflow, on_event)
             return await _route_agent(
                 step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                on_event=on_event,
                 wrapper_text=wrapper_text, is_resume=False,
                 test_gates=test_gates, pythonpath=pythonpath, undecided=undecided,
                 headless=headless,
@@ -1755,6 +1908,7 @@ async def _route_agent(
         _emit(log, "step_completed",
               {"step": step.name, "kind": "agent",
                "action": _action_payload(pause), "var_mutations": {}})
+        _reconcile_provider(quest, state, workflow, on_event)
         return pause, None, {}
     if (result.fatal and result.error is not None
             and result.error.category == "context_window"
@@ -1769,9 +1923,11 @@ async def _route_agent(
               {"reason": "context window exceeded"}, agent_id=None)
         seed = reincarnation_seed(handoff_text=None, quest_id=quest.id,
                                   step_name=step.name)
+        _reconcile_provider(quest, state, workflow, on_event)
         return await _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+            on_event=on_event,
             wrapper_text=wrapper_text, is_resume=False,
             test_gates=test_gates, pythonpath=pythonpath, undecided=undecided, headless=headless,
             autonomous=autonomous,
@@ -1792,6 +1948,7 @@ async def _route_agent(
         _emit(log, "step_completed",
               {"step": step.name, "kind": "agent",
                "action": _action_payload(pause), "var_mutations": {}})
+        _reconcile_provider(quest, state, workflow, on_event)
         return pause, None, {}
     if result.errored or result.output is None:
         state.step_attempt += 1
@@ -1805,10 +1962,13 @@ async def _route_agent(
             _emit(log, "step_completed",
                   {"step": step.name, "kind": "agent",
                    "action": _action_payload(on_max), "var_mutations": {}})
+            _reconcile_provider(quest, state, workflow, on_event)
             return on_max, None, {}     # Pause (validator forbids Retry here)
+        _reconcile_provider(quest, state, workflow, on_event)
         return await _route_agent(step, workflow, quest, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
-                                  coordinator=coordinator, wrapper_text=wrapper_text,
+                                  coordinator=coordinator, on_event=on_event,
+                                  wrapper_text=wrapper_text,
                                   is_resume=is_resume, test_gates=test_gates,
                                   pythonpath=pythonpath,
                                   undecided=undecided,
@@ -1823,6 +1983,7 @@ async def _route_agent(
     _record_outcome(state, step.name, result.output)
     bounce = _enforce_clean_tree(step, quest, state, log)
     if bounce is not None:
+        _reconcile_provider(quest, state, workflow, on_event)
         return bounce
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
     state.vars.update(match.var_mutations)
@@ -1832,6 +1993,7 @@ async def _route_agent(
     feedback = None
     if isinstance(action, Goto) and action.feedback is not None:
         feedback = f"{action.feedback}\n{render_output_fields(result.output)}"
+    _reconcile_provider(quest, state, workflow, on_event, step_ends=True)
     return action, feedback, muts
 
 

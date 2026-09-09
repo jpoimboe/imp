@@ -69,7 +69,7 @@ def test_quest_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     assert set(meta) == {"id", "title", "base_branch", "created_at",
                          "create_mode", "depends_on", "project_root", "materialized",
                          "cur_base_head", "layout_version", "imp_commit",
-                         "workflow", "vars"}
+                         "workflow", "vars", "provider"}
 
 
 def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:

@@ -25,6 +25,7 @@ from imp.remote.session.protocol import (
     CONTROL_RETRY_NOW,
     CONTROL_SAVE,
     CONTROL_SET_MODEL,
+    CONTROL_SET_PROVIDER,
     CONTROL_SET_SANDBOX,
     SIDE_EFFECT_REASONS,
     SkillRequest,
@@ -73,6 +74,7 @@ class SessionServer:
         first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
         skill_loader: Callable[[str], str] | None = None,
         on_query: Callable[[str, dict[str, Any]], Any] | None = None,
+        set_provider: Callable[[str], None] | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
@@ -82,6 +84,7 @@ class SessionServer:
         self._on_first_attach = on_first_attach
         self._first_attach_timeout = first_attach_timeout
         self._skill_loader = skill_loader
+        self._set_provider = set_provider
         # Set on the first 0 -> 1 LEASED attach and never cleared: distinguishes
         # "no keep-alive client has arrived yet" (startup — wait) from "a
         # keep-alive client attached and left" (hibernate now) at the
@@ -463,6 +466,15 @@ class SessionServer:
                     # Re-open the parked prompt so the client's _answer_gates loop,
                     # blocked on gate_recv after set_sandbox, receives a gate.
                     self._emit(self._pending_prompt)
+        elif action == CONTROL_SET_PROVIDER and self._set_provider is not None:
+            assert reason is not None
+            self._set_provider(reason)
+            # Transient: broadcast-only via _emit, never the event log, so a
+            # later attach cannot replay a marker its reconcile already cleared.
+            self._emit({"type": "provider_marker",
+                        "payload": {"provider": reason}})
+            if self._pending_prompt is not None:
+                self._emit(self._pending_prompt)
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:

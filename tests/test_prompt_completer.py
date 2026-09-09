@@ -54,7 +54,7 @@ def test_missing_skills_dir_only_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(tmp_path / "nope")
     assert set(_texts(c, "/")) == {
         "help", "skills", "save", "shelve", "clear", "model", "sandbox",
-        "abandon", "compact"}
+        "provider", "abandon", "compact"}
 
 
 def test_async_path_delegates_to_get_completions(tmp_path: Path) -> None:

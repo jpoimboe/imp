@@ -143,6 +143,7 @@ class SlashCompleter:
 
     _BUILTINS = (
         "help", "skills", "save", "shelve", "clear", "model", "sandbox",
+        "provider",
         "compact", "abandon")
 
     def __init__(

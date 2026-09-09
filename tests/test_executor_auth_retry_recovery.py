@@ -150,7 +150,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
@@ -233,7 +233,7 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
@@ -304,7 +304,7 @@ async def test_dead_grant_probe_pauses_on_the_first_401(
 
     monkeypatch.setattr(claude_code, "refresh_canonical_token", _dead_on_force)
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
@@ -364,7 +364,7 @@ async def test_retry_after_go_live_rebinds_policy_to_the_worktree(
     quest = _seed_draft_quest(tmp_path, "gl1")
     patch_policy_builder(monkeypatch)
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
@@ -421,7 +421,7 @@ async def test_retry_without_go_live_passes_the_policy_through_unchanged(
     quest = _seed_single_agent(tmp_path)
     builds = patch_policy_builder(monkeypatch)
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)

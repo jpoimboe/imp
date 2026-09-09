@@ -30,7 +30,7 @@ async def test_backoff_loop_arms_wait_and_consumes_retry_now(
 
     seen: dict[str, Any] = {}
 
-    async def _fake_sleep(_delay: float, coord: Any) -> None:
+    async def _fake_sleep(_delay: float, coord: Any, **_kw: Any) -> None:
         # The loop must have armed the wait before sleeping (mirrors the live
         # reader firing during the countdown), and the arm survives into here.
         seen["armed_during_sleep"] = coord.backoff_wait_active
@@ -58,7 +58,7 @@ async def test_backoff_wait_disarmed_even_when_sleep_raises(
 
     seen: dict[str, Any] = {}
 
-    async def _fake_sleep(_delay: float, coord: Any) -> None:
+    async def _fake_sleep(_delay: float, coord: Any, **_kw: Any) -> None:
         seen["coord"] = coord
         coord.request_retry_now()
         raise RuntimeError("sleep interrupted by test")
@@ -83,7 +83,7 @@ async def test_backoff_ended_emitted_with_retry_now_reason(
     provider = _ScriptProvider([(True, None)])
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
 
-    async def _fake_sleep(_delay: float, coord: Any) -> None:
+    async def _fake_sleep(_delay: float, coord: Any, **_kw: Any) -> None:
         coord.request_retry_now()
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _fake_sleep)
 
@@ -110,7 +110,7 @@ async def test_backoff_ended_emitted_with_elapsed_reason_on_natural_expiry(
     provider = _ScriptProvider([(True, None)])
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
 
-    async def _fake_sleep(_delay: float, _coord: Any) -> None:
+    async def _fake_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
         return None
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _fake_sleep)
 

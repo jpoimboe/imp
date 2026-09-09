@@ -13,6 +13,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_FORCE,
     CONTROL_RETRY_NOW,
     CONTROL_SET_MODEL,
+    CONTROL_SET_PROVIDER,
     CONTROL_SET_SANDBOX,
 )
 
@@ -23,6 +24,7 @@ class SessionControls:
         coord.attach_runner(self._forward_interrupt)
         coord.set_force_forward_hook(self._forward_interrupt_force)
         coord.set_retry_now_hook(self._forward_retry_now)
+        coord.set_provider_hook(self.set_provider)
 
     async def _forward_interrupt(self) -> None:
         await self._client.send_control(CONTROL_INTERRUPT)
@@ -41,6 +43,9 @@ class SessionControls:
 
     async def set_model(self, arg: str) -> None:
         await self._client.send_control(CONTROL_SET_MODEL, arg)
+
+    async def set_provider(self, name: str) -> None:
+        await self._client.send_control(CONTROL_SET_PROVIDER, name)
 
     async def set_sandbox(self, arg: str) -> None:
         await self._client.send_control(CONTROL_SET_SANDBOX, arg)

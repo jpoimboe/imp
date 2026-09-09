@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 
 def stash_transcript(transcript_dir: Path) -> Path | None:
@@ -22,8 +23,21 @@ def stash_transcript(transcript_dir: Path) -> Path | None:
     return dest
 
 
+_SEED_OPENINGS = {
+    "context": (
+        "You are a reincarnated session: the previous attempt approached its "
+        "context limit and was restarted fresh to keep working without a silent "
+        "compaction. Pick up where it left off using the recovery sources below."),
+    "provider_switch": (
+        "You are a reincarnated session: the previous attempt ran on a different "
+        "provider and was switched at the user's request, not because anything "
+        "went wrong. Pick up where it left off using the recovery sources below."),
+}
+
+
 def reincarnation_seed(
-    *, handoff_text: str | None, quest_id: str, step_name: str
+    *, handoff_text: str | None, quest_id: str, step_name: str,
+    cause: Literal["context", "provider_switch"] = "context",
 ) -> str:
     """Recovery text for a reincarnated (reborn) session, appended last to its
     first user message.
@@ -39,11 +53,7 @@ def reincarnation_seed(
         f"`imp events {quest_id} --step {step_name} --limit N` returns the last "
         "N events of this step — everything the previous attempt did, one "
         "compact line each, in order (`--json` gives an event's exact payload)")
-    lines = [
-        "You are a reincarnated session: the previous attempt approached its "
-        "context limit and was restarted fresh to keep working without a silent "
-        "compaction. Pick up where it left off using the recovery sources below.",
-    ]
+    lines = [_SEED_OPENINGS[cause]]
     if handoff_text is not None:
         lines.append(
             "- Primary: the previous attempt's handoff note — its goal, "
@@ -66,6 +76,26 @@ def reincarnation_seed(
             "\n--- HANDOFF NOTE FROM THE PREVIOUS ATTEMPT (verbatim, to end of "
             f"message) ---\n\n{handoff_text}")
     return "\n".join(lines)
+
+
+def provider_path_for(transcript_dir: Path) -> Path:
+    """The sidecar naming the vendor that wrote this transcript — a CHILD of the
+    dir (unlike the handoff note), so it travels into a `.attempt-N` stash with
+    the transcript it describes and is wiped with a fresh entry."""
+    return transcript_dir / "provider"
+
+
+def write_transcript_owner(transcript_dir: Path, provider: str) -> None:
+    provider_path_for(transcript_dir).write_text(provider)
+
+
+def read_transcript_owner(transcript_dir: Path) -> str | None:
+    """The recorded owner, or None when the dir is unlabelled — which matches no
+    provider name."""
+    path = provider_path_for(transcript_dir)
+    if not path.exists():
+        return None
+    return path.read_text().strip() or None
 
 
 def handoff_path_for(transcript_dir: Path) -> Path:

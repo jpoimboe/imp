@@ -376,7 +376,7 @@ async def test_transient_auth_still_retries_before_it_recovers(
         [{"type": "agent_result", "payload": {"status": "Success", "outcome": "done"}}],
     ])
 
-    async def _no_sleep(_delay: float, _coordinator: object) -> None:
+    async def _no_sleep(_delay: float, _coordinator: object, **_kw: object) -> None:
         pass
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
