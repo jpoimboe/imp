@@ -139,9 +139,12 @@ def render_response(
 
 
 def send_message(token: str, chat_id: int, text: str, *, silent: bool) -> int | None:
-    """POST one sendMessage per chunk, return the last chunk's message id or None."""
+    """POST one sendMessage per chunk, return the last chunk's message id or None.
+    Telegram has no renderer, so escapes are stripped here — the single outbound seam
+    — before chunking, so the 4096-char boundaries measure the text actually sent."""
+    from imp.cli.render_text import strip_terminal_escapes
     message_id: int | None = None
-    for chunk in split_text(text):
+    for chunk in split_text(strip_terminal_escapes(text)):
         response = api_call(token, "sendMessage", send_message_params(
             chat_id, chunk, silent=silent))
         result = response.get("result") or {}

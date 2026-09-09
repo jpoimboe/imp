@@ -3,8 +3,11 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+import pytest
+
 from imp.remote.daemon import telegram_adapter
 from imp.remote.daemon.telegram_adapter import format_outbound, send_message
+from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT
 
 EVENT = {
     "type": "awaiting_user_input",
@@ -117,3 +120,84 @@ def test_format_outbound_signature_has_no_body_override() -> None:
 
 def test_adapter_no_longer_imports_compose_message() -> None:
     assert not hasattr(telegram_adapter, "_compose_message")
+
+
+def _capture(monkeypatch: Any) -> list[str]:
+    """Monkeypatch api_call and return the list that accumulates each sent text."""
+    sent: list[str] = []
+
+    def fake_api_call(token: str, method: str, params: dict) -> dict:
+        sent.append(params["text"])
+        return {"ok": True, "result": {"message_id": len(sent)}}
+
+    monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
+    return sent
+
+
+def test_send_message_strips_armed_escape_codes(monkeypatch: Any) -> None:
+    sent = _capture(monkeypatch)
+    send_message(
+        "tok", 4242, "\x1b[2m—\x1b[0m \x1b[1;33mimplement\x1b[0m", silent=True)
+    assert sent == ["— implement"]
+
+
+def test_send_message_strips_bare_sgr_as_agents_type_it(monkeypatch: Any) -> None:
+    # No ESC byte: the spelling a model actually emits, which the CLI re-arms and
+    # Telegram cannot. It must strip identically to the armed form above.
+    sent = _capture(monkeypatch)
+    send_message("tok", 4242, "[2m—[0m [1;33mimplement[0m", silent=True)
+    assert sent == ["— implement"]
+
+
+@pytest.mark.parametrize("seq", [
+    "\x1b[2J",             # CSI beyond color: erase display
+    "\x1b[?25l",           # private-mode CSI: hide cursor
+    "\x1b]0;title\x07",    # OSC, BEL-terminated
+    "\x1b]0;title\x1b\\",  # OSC, ST-terminated — the trailing backslash goes too
+    "\x1bM",               # two-character escape — the M goes with the ESC
+    "\x1b(B",              # escape with an intermediate byte (terminfo sgr0 emits it)
+    "\r",                  # stray C0 byte
+])
+def test_send_message_removes_every_escape_family(
+    monkeypatch: Any, seq: str,
+) -> None:
+    sent = _capture(monkeypatch)
+    send_message("tok", 4242, f"a{seq}b", silent=True)
+    assert sent == ["ab"]
+
+
+def test_send_message_keeps_newline_and_tab(monkeypatch: Any) -> None:
+    sent = _capture(monkeypatch)
+    send_message("tok", 4242, "a\nb\tc", silent=True)
+    assert sent == ["a\nb\tc"]
+
+
+@pytest.mark.parametrize("text", [
+    "model claude-opus-4-8[1m] chosen",   # the (?!\]) guard spares imp's model ids
+    r"write \x1b[31m to arm red",         # backslash spelling: source text, not a screen
+])
+def test_send_message_preserves_ineligible_bare_spellings(
+    monkeypatch: Any, text: str,
+) -> None:
+    sent = _capture(monkeypatch)
+    send_message("tok", 4242, text, silent=True)
+    assert sent == [text]
+
+
+def test_send_message_strips_before_chunking(monkeypatch: Any) -> None:
+    sent = _capture(monkeypatch)
+    body = ("\x1b[31m" + "a" * 4 + "\x1b[0m") * 500
+    assert len(body) > TELEGRAM_MAX_TEXT   # over the limit ONLY because of escapes
+    send_message("tok", 4242, body, silent=True)
+    assert sent == ["a" * 2000]
+
+
+def test_send_message_passes_escape_free_text_through_byte_identical(
+    monkeypatch: Any,
+) -> None:
+    sent = _capture(monkeypatch)
+    reply = ("Alerts: subscribed only\n"
+             "● @k3f9qa  Dark mode — running · plan\n"
+             "@m7x2  Telegram polish — paused · review")
+    send_message("tok", 4242, reply, silent=True)
+    assert sent == [reply]
