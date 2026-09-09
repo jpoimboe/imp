@@ -68,6 +68,26 @@ def reincarnation_seed(
     return "\n".join(lines)
 
 
+def provider_path_for(transcript_dir: Path) -> Path:
+    """The sidecar naming the vendor that wrote this transcript — a CHILD of the
+    dir (unlike the handoff note), so it travels into a `.attempt-N` stash with
+    the transcript it describes and is wiped with a fresh entry."""
+    return transcript_dir / "provider"
+
+
+def write_transcript_owner(transcript_dir: Path, provider: str) -> None:
+    provider_path_for(transcript_dir).write_text(provider)
+
+
+def read_transcript_owner(transcript_dir: Path) -> str | None:
+    """The recorded owner, or None when the dir is unlabelled — which matches no
+    provider name."""
+    path = provider_path_for(transcript_dir)
+    if not path.exists():
+        return None
+    return path.read_text().strip() or None
+
+
 def handoff_path_for(transcript_dir: Path) -> Path:
     """The on-disk handoff-note path for a session — a SIBLING of its transcript
     dir (`<name>.handoff.md`), so it survives the fresh-entry wipe that removes

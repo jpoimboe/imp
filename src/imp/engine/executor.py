@@ -66,8 +66,13 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
+from imp.engine.model_override import current_provider_model
 from imp.engine.quest import Quest
-from imp.engine.reincarnation import reincarnation_seed, stash_transcript
+from imp.engine.reincarnation import (
+    reincarnation_seed,
+    stash_transcript,
+    write_transcript_owner,
+)
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_MAX_ATTEMPTS,
     SandboxOpenFailed,
@@ -1576,6 +1581,9 @@ async def _route_agent(
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
+        write_transcript_owner(
+            transcript_dir,
+            current_provider_model(state, workflow, step.name).provider)
         balance = False
         retry_wrapper: str | None = None
         # seed_opening (imp new intent) renders via run.opening in templates.

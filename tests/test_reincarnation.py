@@ -3,9 +3,12 @@ from pathlib import Path
 from imp.engine.reincarnation import (
     handoff_instruction,
     handoff_path_for,
+    provider_path_for,
+    read_transcript_owner,
     reincarnation_seed,
     stash_transcript,
     write_handoff_note,
+    write_transcript_owner,
 )
 
 
@@ -131,3 +134,32 @@ def test_write_handoff_note_whitespace_only_writes_nothing(tmp_path: Path) -> No
     result = write_handoff_note(note, "   \n\t ")
     assert result is False
     assert not note.exists()
+
+
+def test_transcript_owner_lives_inside_the_dir_and_travels_with_it(
+        tmp_path: Path) -> None:
+    # INSIDE (not a sibling, unlike the handoff note): the label describes the
+    # transcript, so it must follow it into a stash and vanish with a wipe.
+    tx = tmp_path / "steps" / "impl" / "coder"
+    _seed(tx)
+
+    write_transcript_owner(tx, "claude_code")
+
+    assert provider_path_for(tx) == tx / "provider"
+    assert read_transcript_owner(tx) == "claude_code"
+    dest = stash_transcript(tx)
+    assert dest is not None
+    assert read_transcript_owner(dest) == "claude_code"
+    assert not tx.exists()
+
+
+def test_an_unlabelled_transcript_dir_has_no_owner(tmp_path: Path) -> None:
+    # No label and a blank label both read as None, which never matches a
+    # provider name — the safe direction for the dispatch-time check.
+    tx = tmp_path / "steps" / "impl" / "coder"
+    _seed(tx)
+    assert read_transcript_owner(tx) is None
+
+    (tx / "provider").write_text("  \n")
+
+    assert read_transcript_owner(tx) is None
