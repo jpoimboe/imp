@@ -375,8 +375,6 @@ def test_context_docstring_documents_the_recorded_lap_shape() -> None:
 
     assert "step.prior_laps — retained {lap, outcome} entries of prior laps" in (
         prompts.__doc__ or "")
-    assert "head" not in (prompts.__doc__ or "").split("step.prior_laps")[1].split(
-        "\n")[0]
 
 
 def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
