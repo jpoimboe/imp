@@ -70,6 +70,12 @@ async def run_terminal_client(
             if not event.get("_replay"):
                 resolved_send.send_nowait(None)
             return
+        if event.get("type") == "provider_marker":
+            # Transient daemon mirror; drive the marker directly, never through
+            # driver.on_event.
+            driver.set_pending_provider(
+                (event.get("payload") or {}).get("provider"))
+            return
         if event.get("type") == "sandbox_marker":
             # Transient daemon mirror; drive the marker directly, never through driver.on_event.
             driver.set_unsandboxed(

@@ -2776,6 +2776,63 @@ async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
     assert "sandbox_marker" not in seen
 
 
+@pytest.mark.anyio
+async def test_client_intercepts_provider_marker_without_routing_to_driver(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "provider_marker", "payload": {"provider": "codex"}})
+        on_event({"type": "provider_marker", "payload": {"provider": None}})
+        on_event({"type": "awaiting_user_input",
+                   "payload": {"steer_hint": "go?"}})
+        return await user_chat_input_fn("go?")
+
+    markers: list[str | None] = []
+    seen: list[str] = []
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            seen.append(event.get("type"))
+
+        def set_pending_provider(self, name: str | None) -> None:
+            markers.append(name)
+
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        return "ok"
+
+    coord = InterruptCoordinator()
+    with anyio.fail_after(30):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, leave_mode="new")
+
+            tg.start_soon(_client)
+
+    # The arm and its clear both drove the driver field...
+    assert markers == ["codex", None]
+    # ...and neither reached the scrollback tree builder, where an unhandled
+    # type renders as a FallbackLine.
+    assert "provider_marker" not in seen
+
+
 def test_run_terminal_client_leave_mode_is_required() -> None:
     import inspect
     p = inspect.signature(run_terminal_client).parameters["leave_mode"]

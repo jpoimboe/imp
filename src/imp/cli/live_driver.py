@@ -153,7 +153,8 @@ def cost_field(usage: RowUsage | None) -> str | None:
 
 
 def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
-                          now_iso: str) -> str:
+                          now_iso: str,
+                          pending_provider: str | None = None) -> str:
     """Activity line: spinner + verb + detail + block-age elapsed (always animated).
     Elapsed is the age of the activity's current live block, derived from its
     start_ts against `now_iso` (see nv.activity_elapsed)."""
@@ -174,6 +175,9 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
         parts.append(_paint("press r to retry now", "dim", color=color, over_bg=False))
     if activity.dep_wait:
         parts.append(_paint("press ctrl-d to pause", "dim", color=color, over_bg=False))
+    if pending_provider is not None:
+        parts.append(_paint(f"switching to {pending_provider} after this step",
+                            "dim", color=color, over_bg=False))
     parts.append(_paint(tail, "dim", color=color, over_bg=False))
     return f"{spin} " + rt.compose_label([p for p in parts if p])
 
@@ -411,6 +415,7 @@ class LiveDriver:
         self._startup_verb = startup_verb
         self._startup_start_iso: str | None = None   # block start for the startup block-age timer
         self._unsandboxed = False
+        self._pending_provider: str | None = None
         self._emitted_any = False
         self._emissions = 0
         self._last_header_position: str | None = None
@@ -485,6 +490,10 @@ class LiveDriver:
         self._unsandboxed = value
         self._refresh_status()
 
+    def set_pending_provider(self, name: str | None) -> None:
+        self._pending_provider = name
+        self._refresh_status()
+
     def seed_opening_intent(self, text: str) -> None:
         # Optimistic local echo at submit time; mirrors seed_pending_reply (emits via _walk).
         self._builder.seed_opening_intent(text)
@@ -508,8 +517,9 @@ class LiveDriver:
         if activity is None:
             return None
         now_iso = datetime.now(UTC).isoformat()
-        a_line = compose_activity_line(activity=activity, frame=frame,
-                                       color=self._color, now_iso=now_iso)
+        a_line = compose_activity_line(
+            activity=activity, frame=frame, color=self._color, now_iso=now_iso,
+            pending_provider=self._pending_provider)
         root = self._builder.tree.root
         w = term_width()
         p_row = compose_position_row(
