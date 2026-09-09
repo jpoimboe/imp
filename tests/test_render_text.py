@@ -6,10 +6,12 @@ import re as _re
 import unittest.mock
 from pathlib import Path
 
+from imp.agents.transcript import ContinuationNote, deliver_continuation_reply
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
+from imp.engine.state import InMemoryEventLog
 from tests._event_fixtures import ev
 
 _MAX_LOOPS_COPY = (
@@ -2584,6 +2586,28 @@ def test_engine_continuation_renders_injected_message_in_full_only() -> None:
     assert "continuation:" not in lean
     assert "continuation:" in full
     assert "continue from where you left off" in full
+
+
+def test_continuation_note_renders_as_continuation_never_as_a_human_turn() -> None:
+    # End-to-end over the real journaling: a ContinuationNote delivered with the
+    # human=True every provider hard-codes must stay out of lean `imp log`, show
+    # under --full behind the `continuation:` label, and NEVER carry the `>`
+    # caret the renderer reserves for a genuine human turn.
+    note_text = "The user has disabled the sandbox."
+    elog = InMemoryEventLog()
+    elog.append(agent_id=None, type="step_started",
+                payload={"step": "a", "kind": "agent", "phase": "p", "model": "m"})
+    deliver_continuation_reply(
+        [], None, elog, "step:p/a", ContinuationNote(text=note_text), human=True)
+    tree = nv.build_tree(list(elog.read()))
+    lean = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    full = "\n".join(render_tree(tree, full=True, color=False, width=80))
+    assert note_text not in lean
+    assert "continuation:" not in lean
+    assert "continuation:" in full
+    assert note_text in full
+    assert f"> {note_text}" not in full
+    assert f"> {note_text}" not in lean
 
 
 def test_begin_kickoff_never_replays_as_human_turn_from_events_jsonl(tmp_path) -> None:
