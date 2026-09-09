@@ -144,6 +144,41 @@ async def test_the_picker_reports_the_ctrl_d_so_the_reader_leaves(
     assert (sent, len(opened)) == ([], 1)
 
 
+def test_the_seam_renders_the_block_inside_a_suspend_bracket(
+    tmp_path: Path, floor_availability,
+) -> None:
+    # The 100ms footer tick would paint over an unsuspended block, and the
+    # suspend must still be held when the digit is read.
+    from imp.cli.provider_command import render_picker
+    from imp.cli.session_run import build_provider_picker
+    from tests.test_provider_reconcile import _seed
+
+    quest, _state, _wf = _seed(tmp_path)
+    floor_availability({"claude_code", "codex"})
+    trace: list[str] = []
+
+    class _Driver:
+        def emit_lines(self, lines: list[str]) -> None:
+            trace.append("emit")
+            trace.extend(lines)
+
+    class _Status:
+        @contextlib.contextmanager
+        def suspend(self):
+            trace.append("enter")
+            try:
+                yield
+            finally:
+                trace.append("exit")
+
+    with build_provider_picker(quest, _Driver(), _Status())() as choices:
+        trace.append("read")
+
+    assert choices == [None, "codex"]        # the resolved vendor arms nothing
+    block = render_picker("claude_code", ["claude_code", "codex"])
+    assert trace == ["enter", "emit", *block, "read", "exit"]
+
+
 def test_the_coordinator_holds_no_provider_latch() -> None:
     # AC 8d: the durable pin is the only state; a second in-memory copy would
     # need its own set/clear/lifetime rules. _backoff_wait_depth is untouched.

@@ -494,6 +494,10 @@ class LiveDriver:
         self._pending_provider = name
         self._refresh_status()
 
+    def emit_lines(self, lines: list[str]) -> None:
+        """Commit plain lines straight to scrollback, outside the narrative tree."""
+        self._print_lines(lines)
+
     def seed_opening_intent(self, text: str) -> None:
         # Optimistic local echo at submit time; mirrors seed_pending_reply (emits via _walk).
         self._builder.seed_opening_intent(text)
