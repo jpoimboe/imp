@@ -89,13 +89,16 @@ _FENCE_CLOSE_RE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*$")
 _BARE_SGR_RE = re.compile(
     r"(?<!\x1b)(?<!\^\[)(?<!\\e)(?<!\\[xX]1[bB])(?<!\\033)\[[0-9][0-9;]*m(?!\])")
 
-# Longest form first: a CSI or OSC must be consumed whole before the catch-all rule
-# sees its ESC, and an ST-terminated OSC must take its `\x1b\\` with it. The catch-all
-# spans intermediates plus any final byte, so `\x1b(B` (terminfo sgr0) and `\x1b7` go
-# whole rather than losing the ESC and stranding the payload as visible junk.
+# Longest form first: a CSI or a string-type escape (OSC/DCS/SOS/PM/APC) must be
+# consumed whole before the catch-all rule sees its ESC, and an ST-terminated one must
+# take its `\x1b\\` with it. The catch-all spans intermediates plus any final byte, so
+# `\x1b(B` (terminfo sgr0) and `\x1b7` go whole rather than losing the ESC and
+# stranding the payload as visible junk. An unterminated string escape runs to end of
+# line — bounding the swallow to one line, since no real one spans a newline — rather
+# than surrendering its payload to the catch-all as visible text.
 _ESC_SEQ_RE = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]"
-    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+    r"|\x1b[\]P^_X][^\x07\x1b\n]*(?:\x07|\x1b\\)?"
     r"|\x1b[ -/]*[0-~]")
 _C0_STRIP_RE = re.compile(r"[\x00-\x08\x0b-\x1f]")
 

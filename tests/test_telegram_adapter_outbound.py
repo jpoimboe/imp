@@ -154,6 +154,10 @@ def test_send_message_strips_bare_sgr_as_agents_type_it(monkeypatch: Any) -> Non
     "\x1b[?25l",           # private-mode CSI: hide cursor
     "\x1b]0;title\x07",    # OSC, BEL-terminated
     "\x1b]0;title\x1b\\",  # OSC, ST-terminated — the trailing backslash goes too
+    "\x1bPq###\x1b\\",     # DCS string escape — payload goes with it, not visible
+    "\x1b_apc\x1b\\",      # APC string escape
+    "\x1b^pm\x1b\\",       # PM string escape
+    "\x1bXsos\x1b\\",      # SOS string escape
     "\x1bM",               # two-character escape — the M goes with the ESC
     "\x1b(B",              # escape with an intermediate byte (terminfo sgr0 emits it)
     "\r",                  # stray C0 byte
@@ -164,6 +168,26 @@ def test_send_message_removes_every_escape_family(
     sent = _capture(monkeypatch)
     send_message("tok", 4242, f"a{seq}b", silent=True)
     assert sent == ["ab"]
+
+
+@pytest.mark.parametrize("opener", ["\x1b]0;", "\x1bP", "\x1b_", "\x1b^", "\x1bX"])
+def test_send_message_swallows_an_unterminated_string_escape(
+    monkeypatch: Any, opener: str,
+) -> None:
+    # No BEL or ST arrives: the payload must go with the opener rather than land in
+    # the chat as visible text.
+    sent = _capture(monkeypatch)
+    send_message("tok", 4242, f"a{opener}title", silent=True)
+    assert sent == ["a"]
+
+
+def test_send_message_bounds_an_unterminated_string_escape_to_its_line(
+    monkeypatch: Any,
+) -> None:
+    # The swallow stops at the newline, so prose on later lines survives.
+    sent = _capture(monkeypatch)
+    send_message("tok", 4242, "a\x1b]0;title\nnext line", silent=True)
+    assert sent == ["a\nnext line"]
 
 
 def test_send_message_keeps_newline_and_tab(monkeypatch: Any) -> None:
