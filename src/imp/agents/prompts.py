@@ -12,7 +12,7 @@ Seven namespaces (spec §7.5):
       recommendation-bearing gates (bool); a missing attr under run raises
       (strict-within), like quest
   step.lap — this step's 1-based lap number (1 = first forward pass);
-      step.prior_laps — retained {lap, outcome, head} entries of prior laps
+      step.prior_laps — retained {lap, outcome} entries of prior laps
   docs.path — absolute path to imp's repo-root docs/ corpus, resolved in
       place relative to the install (readable in any project via bash/read_file)
   project.undecided — the stack-dependent settings this project never decided,

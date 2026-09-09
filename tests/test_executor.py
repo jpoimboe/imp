@@ -2320,19 +2320,24 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
 
 
 def test_record_outcome_appends_and_bounds_to_k() -> None:
+    import inspect
+
     from imp.engine.executor import OUTCOME_HISTORY_K, _record_outcome
 
     state = State(id="c1", step="writer", step_attempt=0, status="running")
     for i in range(6):
-        _record_outcome(state, "writer", {"outcome": f"lap{i}"}, head=f"sha{i}")
+        _record_outcome(state, "writer", {"outcome": f"lap{i}"})
     hist = state.outcome_history["writer"]
     assert OUTCOME_HISTORY_K == 4
     assert len(hist) == 4
     # Oldest two evicted; laps stay monotonic across eviction.
     assert [e["lap"] for e in hist] == [3, 4, 5, 6]
     assert [e["outcome"] for e in hist] == ["lap2", "lap3", "lap4", "lap5"]
-    # Each entry carries the worktree HEAD sha recorded at completion.
-    assert [e["head"] for e in hist] == ["sha2", "sha3", "sha4", "sha5"]
+    # An entry is exactly the lap and the outcome — no HEAD sha, and no
+    # default-valued head parameter left behind for a caller to fill.
+    assert all(set(e) == {"lap", "outcome"} for e in hist)
+    assert list(inspect.signature(_record_outcome).parameters) == [
+        "state", "step_name", "output"]
 
 
 @pytest.mark.anyio
@@ -2346,8 +2351,7 @@ async def test_run_quest_records_step_outcome(tmp_path: Path) -> None:
     from imp.engine.archive import read as archive_read
     archive_read.rehydrate_quest(quest.control_root, quest.id)  # home reaped on done
     state = State.load(quest.state_dir)
-    assert state.outcome_history["w"] == [
-        {"lap": 1, "outcome": "did the thing", "head": ""}]
+    assert state.outcome_history["w"] == [{"lap": 1, "outcome": "did the thing"}]
     # outcome is never promoted into the rule-evaluation var environment.
     assert "outcome" not in state.vars
 

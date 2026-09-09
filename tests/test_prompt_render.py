@@ -337,14 +337,13 @@ def test_step_namespace_lap_is_last_recorded_plus_one(tmp_path: Path) -> None:
     ctx = build_context(
         quest_title="t", event_log=log,
         prior_laps=[
-            {"lap": 2, "outcome": "first draft", "head": "cafe1234"},
-            {"lap": 3, "outcome": "reworked", "head": "beef5678"},
+            {"lap": 2, "outcome": "first draft"},
+            {"lap": 3, "outcome": "reworked"},
         ],
     )
     # lap is last-recorded + 1 (3 + 1 = 4), NOT len + 1 (which would be 3).
     assert render_prompt("{{ step.lap }}", ctx) == "4"
-    # prior_laps carries the recorded entries; templates can read the last head.
-    assert render_prompt("{{ step.prior_laps[-1].head }}", ctx) == "beef5678"
+    # prior_laps carries the recorded entries; templates can read the last outcome.
     assert render_prompt("{{ step.prior_laps[-1].outcome }}", ctx) == "reworked"
     assert render_prompt("{{ step.prior_laps | length }}", ctx) == "2"
 
@@ -359,14 +358,25 @@ def test_step_namespace_lap_tracks_recorded_lap_not_list_length(tmp_path: Path) 
     ctx = build_context(
         quest_title="t", event_log=log,
         prior_laps=[
-            {"lap": 3, "outcome": "l3", "head": "aaa3"},
-            {"lap": 4, "outcome": "l4", "head": "aaa4"},
-            {"lap": 5, "outcome": "l5", "head": "aaa5"},
-            {"lap": 6, "outcome": "l6", "head": "aaa6"},
+            {"lap": 3, "outcome": "l3"},
+            {"lap": 4, "outcome": "l4"},
+            {"lap": 5, "outcome": "l5"},
+            {"lap": 6, "outcome": "l6"},
         ],
     )
     assert render_prompt("{{ step.lap }}", ctx) == "7"
     assert render_prompt("{{ step.prior_laps | length }}", ctx) == "4"
+
+
+def test_context_docstring_documents_the_recorded_lap_shape() -> None:
+    # The namespace docstring is the contract readers of step.prior_laps go by;
+    # it must not advertise a key the executor no longer records.
+    from imp.agents import prompts
+
+    assert "step.prior_laps — retained {lap, outcome} entries of prior laps" in (
+        prompts.__doc__ or "")
+    assert "head" not in (prompts.__doc__ or "").split("step.prior_laps")[1].split(
+        "\n")[0]
 
 
 def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
