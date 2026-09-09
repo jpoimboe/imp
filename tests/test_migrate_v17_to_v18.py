@@ -78,7 +78,7 @@ def test_the_migration_adds_round_only(tmp_path: Path) -> None:
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 20
+    assert LAYOUT_VERSION == 21
     assert quest_mod._MIGRATIONS[(17, 18)] is _migrate_v17_to_v18
 
 
