@@ -45,6 +45,7 @@ import select
 import shlex
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
 import time
@@ -456,6 +457,10 @@ _KEEPER_NS_KINDS = ("user", "mnt", "pid", "uts", "ipc")   # + net iff policy iso
 
 _NS_GET_USERNS = 0xB701   # ioctl(ns_fd) -> fd on the user namespace that OWNS it
 
+# Python's termios exports neither: the devpts slave-node unlock and the pty number.
+TIOCSPTLCK = 0x40045431
+TIOCGPTN = 0x80045430
+
 _JOIN_SCRIPT = (
     'cd "$IMP_CWD" || exit 1\n'
     'cmd=$IMP_COMMAND\n'
@@ -661,6 +666,26 @@ class SandboxNamespace:
         return SandboxSpawn(argv=spawn_argv,
                             env=_spawn_child_env(self.policy, engine_env),
                             pass_fds=pass_fds)
+
+    def open_pty(self) -> tuple[int, int]:
+        """Allocate a pty from the KEEPER's devpts rather than imp's own, so the
+        slave's node exists inside the namespace and the driven program can name
+        its tty. Binding /dev/pts into the sandbox instead is forbidden: bwrap's
+        --dev makes /dev/ptmx a SYMLINK into its own instance, so any bind there
+        repoints ptmx at the host's ptmxmode=000 instance and breaks openpty() for
+        everything in the sandbox. Allocation goes through the PINNED dirfd, never
+        a re-resolved /proc/<pid>/root path — same pid-reuse window ns_fds avoids."""
+        if self.closed:
+            raise AssertionError("open_pty on a closed SandboxNamespace")
+        master = os.open("ptmx", os.O_RDWR | os.O_NOCTTY, dir_fd=self.devpts_fd)
+        try:
+            fcntl.ioctl(master, TIOCSPTLCK, struct.pack("i", 0))
+            n = struct.unpack("i", fcntl.ioctl(master, TIOCGPTN, struct.pack("i", 0)))[0]
+            slave = os.open(str(n), os.O_RDWR | os.O_NOCTTY, dir_fd=self.devpts_fd)
+        except OSError:
+            os.close(master)   # the ptmx open already made the node; this reclaims it
+            raise
+        return master, slave
 
     @classmethod
     def open(cls, *, policy: SandboxPolicy, engine_env: Mapping[str, str],

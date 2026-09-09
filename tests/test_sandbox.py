@@ -3183,6 +3183,15 @@ def test_join_on_a_closed_namespace_is_refused():
         ns.join("x", cwd="/wt", engine_env={})
 
 
+def test_open_pty_on_a_closed_namespace_is_refused():
+    # The devpts dirfd number is recycled after close(); allocating through it would
+    # openat WHATEVER now holds that number.
+    ns = _ns()
+    ns.closed = True
+    with pytest.raises(AssertionError):
+        ns.open_pty()
+
+
 def test_open_retries_the_whole_spawn_budget_and_reports_each_attempt(monkeypatch):
     attempts = []
 
