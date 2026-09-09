@@ -21,6 +21,8 @@ from typing import Any
 DEFAULT_WINDOW = 200_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_000
 DEFAULT_CHECKPOINT_FRACTION = 0.8
+# Handoff ceiling: a 1M window is headroom for the handoff, not budget to spend.
+DEFAULT_CHECKPOINT_CEILING = 160_000
 
 
 @dataclass(frozen=True)
@@ -185,8 +187,8 @@ def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | Non
     if not window or window <= 0:
         return None
     cap = info.soft_cap if info else None
-    if cap is None:
-        return DEFAULT_CHECKPOINT_FRACTION
+    cap = (DEFAULT_CHECKPOINT_CEILING if cap is None
+           else min(DEFAULT_CHECKPOINT_CEILING, cap))
     return min(DEFAULT_CHECKPOINT_FRACTION, cap / window)
 
 

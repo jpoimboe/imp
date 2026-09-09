@@ -92,39 +92,47 @@ def test_context_threshold_crossed_without_usage_never_fires() -> None:
     assert context_threshold_crossed({}, "anthropic", "sonnet") is False
 
 
-def test_gpt_5_6_crosses_at_the_260k_soft_cap_on_both_providers() -> None:
+def test_gpt_5_6_crosses_at_the_ceiling_on_both_providers() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # The whole point of the quest: 260k, not 0.8 * 1.05M = 840k.
+    # The 160k ceiling is lower than the retained 260k billing cap, so it is
+    # what fires; 259k, which used to sit just under the cap, now crosses.
     for provider in ("openai", "codex"):
         for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
             assert context_threshold_crossed(
-                {"input_tokens": 261_000}, provider, model) is True
+                {"input_tokens": 161_000}, provider, model) is True
             assert context_threshold_crossed(
-                {"input_tokens": 259_000}, provider, model) is False
-            # deep into the old cutoff's territory, but still under 840k
+                {"input_tokens": 259_000}, provider, model) is True
             assert context_threshold_crossed(
-                {"input_tokens": 800_000}, provider, model) is True
+                {"input_tokens": 159_000}, provider, model) is False
 
 
-def test_claude_opus_5_1m_keeps_its_800k_crossing() -> None:
+def test_claude_opus_5_1m_crosses_at_the_ceiling_not_at_800k() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # 0.8 of the 1M window; the OpenAI cap must not leak across providers.
+    # 160k of the 1M window: the crossing the 0.8 fraction put at 800k now
+    # fires five times earlier, and the OpenAI cap still must not leak across.
     for provider in ("anthropic", "claude_code"):
         assert context_threshold_crossed(
-            {"input_tokens": 810_000}, provider, "claude-opus-5[1m]") is True
+            {"input_tokens": 160_000}, provider, "claude-opus-5[1m]") is True
         assert context_threshold_crossed(
-            {"input_tokens": 790_000}, provider, "claude-opus-5[1m]") is False
+            {"input_tokens": 300_000}, provider, "claude-opus-5[1m]") is True
         assert context_threshold_crossed(
-            {"input_tokens": 300_000}, provider, "claude-opus-5[1m]") is False
+            {"input_tokens": 159_000}, provider, "claude-opus-5[1m]") is False
 
 
-def test_sdk_crossed_applies_the_model_soft_cap() -> None:
+def test_sdk_crossed_applies_the_absolute_ceiling() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    # Same 260k cap, measured against the SDK's own live window.
+    # Measured against the SDK's own live window, the ceiling binds, not 260k.
     assert sdk_context_threshold_crossed(
-        261_000, 1_050_000, "openai", "gpt-5.6-sol") is True
+        160_000, 1_050_000, "openai", "gpt-5.6-sol") is True
     assert sdk_context_threshold_crossed(
-        259_000, 1_050_000, "openai", "gpt-5.6-sol") is False
+        259_000, 1_050_000, "openai", "gpt-5.6-sol") is True
+    assert sdk_context_threshold_crossed(
+        159_000, 1_050_000, "openai", "gpt-5.6-sol") is False
+    # The claude_code path on a live 1M window.
+    assert sdk_context_threshold_crossed(
+        160_000, 1_000_000, "claude_code", "claude-opus-5[1m]") is True
+    assert sdk_context_threshold_crossed(
+        159_000, 1_000_000, "claude_code", "claude-opus-5[1m]") is False
 
 
 def test_sdk_crossed_uncapped_model_uses_the_default_fraction() -> None:
@@ -389,16 +397,33 @@ def test_limits_for_is_case_sensitive() -> None:
     assert limits_for("anthropic", "Opus") is None
 
 
-def test_checkpoint_cutoff_caps_at_the_soft_cap() -> None:
-    # 260k of a 1.05M window ~= 0.248 — far below the 0.8 default share.
+def test_checkpoint_ceiling_is_the_absolute_handoff_budget() -> None:
+    from imp.providers.catalog import DEFAULT_CHECKPOINT_CEILING
+    # A budget choice, not a measured degradation onset. It is also exactly
+    # 0.8 * 200_000, so every 200k-window model's trigger is unchanged.
+    assert DEFAULT_CHECKPOINT_CEILING == 160_000
+
+
+def test_checkpoint_cutoff_clamps_to_the_ceiling_but_a_smaller_cap_still_binds() -> None:
+    # The ceiling wins over a LARGER soft cap: 160k of a 1.05M window, not 260k.
     info = OPENAI["gpt-5.6-sol"]
-    assert checkpoint_cutoff(info, info.window) == 260_000 / 1_050_000
+    assert checkpoint_cutoff(info, info.window) == 160_000 / 1_050_000
+    # A cap BELOW the ceiling still binds — the formula keeps reading soft_cap,
+    # so the retained OpenAI billing entries bite again if the ceiling rises.
+    assert checkpoint_cutoff(
+        ModelInfo(window=200_000, soft_cap=100_000), 200_000) == 0.5
 
 
-def test_checkpoint_cutoff_without_a_soft_cap_is_the_default_fraction() -> None:
+def test_checkpoint_cutoff_without_a_soft_cap_is_the_ceiling_or_the_fraction() -> None:
     assert DEFAULT_CHECKPOINT_FRACTION == 0.8
-    assert checkpoint_cutoff(ANTHROPIC["claude-opus-5[1m]"], 1_000_000) == 0.8
+    # The fraction binds only while it is the lower of the two — at or below a
+    # 200k window; above that the absolute ceiling takes over.
     assert checkpoint_cutoff(None, 200_000) == 0.8
+    assert checkpoint_cutoff(ModelInfo(window=100_000), 100_000) == 0.8
+    assert checkpoint_cutoff(ANTHROPIC["claude-opus-5[1m]"], 1_000_000) == 0.16
+    assert checkpoint_cutoff(ModelInfo(window=400_000), 400_000) == 0.4
+    assert checkpoint_cutoff(ModelInfo(), 0) is None
+    assert checkpoint_cutoff(ModelInfo(), None) is None
 
 
 def test_checkpoint_cutoff_never_loosens_the_default_share() -> None:
@@ -432,23 +457,23 @@ def test_gpt_5_5_and_5_4_carry_the_1m_window_and_the_260k_soft_cap() -> None:
         assert info.window == 1_050_000
         assert info.max_output_tokens == 128_000
         assert info.soft_cap == 260_000
-        # 260k of a 1.05M window ~= 0.248 — the handoff lands far under the 0.8
-        # default share, and so under the 272k billing breakpoint.
-        assert checkpoint_cutoff(info, info.window) == 260_000 / 1_050_000
+        # The absolute ceiling clamps below both the retained 260k billing cap
+        # and the 0.8 default share: 160k of a 1.05M window ~= 0.152.
+        assert checkpoint_cutoff(info, info.window) == 160_000 / 1_050_000
         assert checkpoint_cutoff(info, info.window) < DEFAULT_CHECKPOINT_FRACTION
 
 
-def test_gpt_5_5_and_5_4_cross_the_threshold_at_the_soft_cap() -> None:
+def test_gpt_5_5_and_5_4_cross_the_threshold_at_the_ceiling() -> None:
     from imp.providers.catalog import context_threshold_crossed
     for provider in ("openai", "codex"):
         for model in ("gpt-5.5", "gpt-5.4"):
             assert context_threshold_crossed(
-                {"input_tokens": 261_000}, provider, model) is True
+                {"input_tokens": 161_000}, provider, model) is True
+            # past the ceiling, still under the retained 260k billing cap
             assert context_threshold_crossed(
-                {"input_tokens": 259_000}, provider, model) is False
-            # deep past the old 320k cutoff, still far under 0.8 * 1.05M
+                {"input_tokens": 259_000}, provider, model) is True
             assert context_threshold_crossed(
-                {"input_tokens": 700_000}, provider, model) is True
+                {"input_tokens": 159_000}, provider, model) is False
 
 
 def test_the_uncapped_openai_models_keep_the_400k_window() -> None:
