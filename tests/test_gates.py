@@ -60,12 +60,12 @@ def _fake_keeper(monkeypatch, policy) -> list:
     SandboxNamespace is a slots dataclass. Returns the list close() appends to."""
     from imp.engine.sandbox import SandboxNamespace
 
-    fds = [os.open(os.devnull, os.O_RDONLY) for _ in range(6)]
+    fds = [os.open(os.devnull, os.O_RDONLY) for _ in range(7)]
     ns = SandboxNamespace(
         policy=policy, base_policy=policy,
         ns_fds=(("user", fds[0]), ("mnt", fds[1]), ("pid", fds[2]),
                 ("uts", fds[3]), ("ipc", fds[4])),
-        outer_user_fd=None, ns_init_pid=0, err_fd=fds[5],
+        outer_user_fd=None, devpts_fd=fds[6], ns_init_pid=0, err_fd=fds[5],
         proc=subprocess.Popen(["true"]))
     closed: list = []
     real_close = SandboxNamespace.close

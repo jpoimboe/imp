@@ -155,7 +155,7 @@ def _unopened_ns(ctx: ToolContext):
     ctx.sandbox_ns = SandboxNamespace(
         policy=pol, base_policy=pol,
         ns_fds=(("user", 71), ("mnt", 72), ("pid", 73), ("uts", 74), ("ipc", 75)),
-        outer_user_fd=None, ns_init_pid=0, err_fd=-1, proc=None)
+        outer_user_fd=None, devpts_fd=76, ns_init_pid=0, err_fd=-1, proc=None)
     return ctx.sandbox_ns
 
 

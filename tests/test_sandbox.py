@@ -3074,7 +3074,7 @@ def _ns(*, network: bool = True, outer_user_fd: int | None = None) -> SandboxNam
     return SandboxNamespace(
         policy=pol, base_policy=pol,
         ns_fds=tuple((k, 10 + i) for i, k in enumerate(kinds)),
-        outer_user_fd=outer_user_fd,
+        outer_user_fd=outer_user_fd, devpts_fd=99,
         ns_init_pid=4242, err_fd=98, proc=None)
 
 

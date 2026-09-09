@@ -513,13 +513,15 @@ def _await_sentinel(fd: int, deadline: float) -> str:
 
 
 def _abandon_keeper(proc: subprocess.Popen[bytes], ns_fds: list[tuple[str, int]],
-                    err_fd: int) -> None:
+                    err_fd: int, devpts_fd: int | None) -> None:
     """Tear down a keeper that never became usable, closing everything a live
     namespace would have owned. SIGTERM first: bwrap's monitor handles it and takes
     the sandbox with it, where a SIGKILL to the monitor would leave the ns-init
     alive and the namespace still joinable."""
     for _kind, fd in ns_fds:
         os.close(fd)
+    if devpts_fd is not None:
+        os.close(devpts_fd)
     os.close(err_fd)
     proc.terminate()
     try:
@@ -564,11 +566,16 @@ class SandboxNamespace:
     `ns_fds` pins /proc/<ns-init>/ns/* as open fds and the join names them as
     /proc/self/fd/N rather than `--target <pid>`: no pid-reuse window, and it fails
     CLOSED once the ns-init dies (`nsenter: fork failed: Cannot allocate memory`),
-    where a recycled --target pid would fail open."""
+    where a recycled --target pid would fail open.
+
+    `devpts_fd` pins the keeper's OWN /dev/pts the same way, and for the same
+    reason — but deliberately outside `ns_fds`, which is spread onto nsenter's
+    --<kind>= argv and into pass_fds, where this fd belongs in neither."""
     policy: SandboxPolicy
     base_policy: SandboxPolicy
     ns_fds: tuple[tuple[str, int], ...]
     outer_user_fd: int | None
+    devpts_fd: int       # O_PATH dirfd on the keeper's own /dev/pts
     ns_init_pid: int     # pid 1 of the keeper's pid namespace, as seen from imp
     err_fd: int          # read end of the keeper's stderr; the keeper holds the write end for life
     proc: subprocess.Popen[bytes]
@@ -719,6 +726,7 @@ class SandboxNamespace:
         deadline = time.monotonic() + _KEEPER_READY_TIMEOUT_S
         ns_fds: list[tuple[str, int]] = []
         outer_user_fd: int | None = None
+        devpts_fd: int | None = None
         try:
             info = _read_to_eof(info_r, deadline)
             stderr = _await_sentinel(err_r, deadline)
@@ -735,12 +743,14 @@ class SandboxNamespace:
                 kinds.append("net")
             for kind in kinds:
                 ns_fds.append((kind, os.open(f"/proc/{child_pid}/ns/{kind}", os.O_RDONLY)))
+            devpts_fd = os.open(f"/proc/{child_pid}/root/dev/pts",
+                                os.O_PATH | os.O_DIRECTORY)
             outer_user_fd = _ns_owner_fd(dict(ns_fds))
         except SandboxOpenFailed:
-            _abandon_keeper(proc, ns_fds, err_r)
+            _abandon_keeper(proc, ns_fds, err_r, devpts_fd)
             raise
         except (OSError, ValueError, LookupError) as exc:
-            _abandon_keeper(proc, ns_fds, err_r)
+            _abandon_keeper(proc, ns_fds, err_r, devpts_fd)
             raise SandboxOpenFailed(str(exc)) from exc
         finally:
             os.close(info_r)     # bwrap has closed its end; nothing writes here again
@@ -748,7 +758,7 @@ class SandboxNamespace:
         # end for its whole life, so closing the read end here would make any later
         # write by the bwrap monitor raise EPIPE and take the whole namespace down.
         return cls(policy=prepared, base_policy=policy, ns_fds=tuple(ns_fds),
-                   outer_user_fd=outer_user_fd,
+                   outer_user_fd=outer_user_fd, devpts_fd=devpts_fd,
                    ns_init_pid=child_pid, err_fd=err_r, proc=proc)
 
     def _is_ns_init(self) -> bool:
@@ -779,6 +789,7 @@ class SandboxNamespace:
             os.close(fd)
         if self.outer_user_fd is not None:
             os.close(self.outer_user_fd)
+        os.close(self.devpts_fd)
         os.close(self.err_fd)
         try:
             self.proc.wait(timeout=_KEEPER_REAP_TIMEOUT_S)

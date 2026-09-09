@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine import sandbox as sandbox_mod
 from imp.engine.sandbox import (
     HomeLayer,
     SandboxNamespace,
@@ -579,5 +580,57 @@ def test_join_exec_refuses_a_closed_namespace():
         ns.close()
         with pytest.raises(AssertionError):
             ns.join_exec(["true"], cwd=str(root), engine_env={})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _open_fds() -> set[str]:
+    """The process's currently-open fd numbers. The transient dirfd this listing
+    itself opens takes the lowest free number in every snapshot, so it cancels out
+    between two snapshots taken with the same fd table."""
+    return set(os.listdir("/proc/self/fd"))
+
+
+def test_open_pins_the_keepers_own_devpts_and_close_releases_it() -> None:
+    """AC 6(b). The pin must name the KEEPER's devpts instance: a pin on imp's own
+    /dev/pts would allocate ptys whose nodes do not exist inside the namespace,
+    which is exactly today's broken state."""
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        pinned = ns.devpts_fd
+        try:
+            got = os.fstat(pinned)
+            want = os.stat(f"/proc/{ns.ns_init_pid}/root/dev/pts")
+            assert (got.st_dev, got.st_ino) == (want.st_dev, want.st_ino)
+            assert got.st_dev != os.stat("/dev/pts").st_dev
+        finally:
+            ns.close()
+        with pytest.raises(OSError):
+            os.fstat(pinned)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.parametrize("failure", [SandboxOpenFailed("boom"), OSError(5, "boom")],
+                         ids=["sandbox_open_failed", "oserror"])
+def test_an_open_that_fails_after_the_devpts_pin_leaks_no_fd(monkeypatch, failure) -> None:
+    """AC 6(c). devpts_fd lives OUTSIDE ns_fds, so _abandon_keeper cannot close it as
+    a side effect of walking that tuple — both call sites have to hand it over.
+    _ns_owner_fd is the statement right after the pin, so failing it exercises the
+    exact window where the fd is open and the namespace is not yet built.
+    _open_once is called directly: open() would retry the whole spawn budget."""
+    root = _make_root()
+    try:
+        def boom(fds: dict[str, int]) -> int | None:
+            raise failure
+
+        monkeypatch.setattr(sandbox_mod, "_ns_owner_fd", boom)
+        before = _open_fds()
+        with pytest.raises(SandboxOpenFailed):
+            SandboxNamespace._open_once(policy=_policy_for(root), engine_env={},
+                                        environ=os.environ)
+        assert _open_fds() - before == set()
     finally:
         shutil.rmtree(root, ignore_errors=True)
