@@ -130,11 +130,6 @@ Report `findings` as classified prose, grouped by severity. If there are no issu
 state so explicitly (e.g., "No findings. Plan is complete and ready for
 implementation.").
 
-End `findings` with `Verified at <sha>:` — the sha from `git -C "$IMP_PROJECT_ROOT" rev-parse HEAD`
-— and the tree facts you checked this lap: paths, signatures, what existing code does, each with
-its `file:line`. The next lap reads this instead of re-opening those files; a check you don't
-record is a check it pays for again.
-
 Report `critical`, `major`, and `minor` as the number of findings you listed at each
 severity. **Nits are never counted** — a plan whose only findings are cosmetic Nits
 reports `minor = 0`.
@@ -148,11 +143,11 @@ Finish with one of:
 
 ```
 # Clean, with Minor findings worth integrating:
-complete_step(findings="No Critical/Major findings. Minor: … Verified at <sha>: …", critical=0, major=0, minor=2)
+complete_step(findings="No Critical/Major findings. Minor: …", critical=0, major=0, minor=2)
 
 # Clean, nothing actionable (no findings, or Nit-only):
-complete_step(findings="No findings. Plan is complete and ready for implementation. Verified at <sha>: …", critical=0, major=0, minor=0)
+complete_step(findings="No findings. Plan is complete and ready for implementation.", critical=0, major=0, minor=0)
 
 # Blocking issues:
-complete_step(findings="Critical: … / Major: … Verified at <sha>: …", critical=1, major=2, minor=0)
+complete_step(findings="Critical: … / Major: …", critical=1, major=2, minor=0)
 ```

@@ -710,45 +710,45 @@ def test_plan_reviewer_later_lap_lists_outcomes_and_no_sha(tmp_path) -> None:
     assert "aaaa1111" not in out
 
 
-_VERIFIED_TAIL = (
-    "End `findings` with `Verified at <sha>:` — the sha from "
-    '`git -C "$IMP_PROJECT_ROOT" rev-parse HEAD`\n'
-    "— and the tree facts you checked this lap: paths, signatures, "
-    "what existing code does, each with\n"
-    "its `file:line`. The next lap reads this instead of re-opening those files; "
-    "a check you don't\n"
-    "record is a check it pays for again."
-)
-
-
-def test_plan_reviewer_findings_must_end_with_a_verified_facts_tail() -> None:
+def test_plan_reviewer_finish_exemplars_are_tail_free() -> None:
     body = _agent_prompt("plan-reviewer")
-    assert _VERIFIED_TAIL in body
-    # It sits in `## Severity & output`, right after the findings-format sentence
-    # and before the counting rule — so it is part of the output contract.
-    assert body.index("## Severity & output") < body.index(_VERIFIED_TAIL)
-    assert body.index("Report `findings` as classified prose") < body.index(_VERIFIED_TAIL)
-    assert body.index(_VERIFIED_TAIL) < body.index("Report `critical`, `major`, and `minor`")
-
-
-def test_plan_reviewer_finish_exemplars_carry_the_verified_tail() -> None:
-    body = _agent_prompt("plan-reviewer")
-    # The clean exemplars are the copy a reviewer imitates last; leaving them
-    # tail-less would undercut the instruction on exactly the clean lap whose
-    # facts the following verification round needs.
     exemplars = body[body.index("Finish with one of:"):]
     assert (
-        'complete_step(findings="No Critical/Major findings. Minor: … '
-        'Verified at <sha>: …", critical=0, major=0, minor=2)'
+        'complete_step(findings="No Critical/Major findings. Minor: …", '
+        'critical=0, major=0, minor=2)'
     ) in exemplars
     assert (
         'complete_step(findings="No findings. Plan is complete and ready for '
-        'implementation. Verified at <sha>: …", critical=0, major=0, minor=0)'
+        'implementation.", critical=0, major=0, minor=0)'
     ) in exemplars
     assert (
-        'complete_step(findings="Critical: … / Major: … Verified at <sha>: …", '
+        'complete_step(findings="Critical: … / Major: …", '
         'critical=1, major=2, minor=0)'
     ) in exemplars
+    assert "Verified at" not in exemplars
+
+
+_RETIRED_LAP_MEMORY = (
+    "## Earlier laps",
+    "Verified at",
+    "rev-parse HEAD",
+    "refs/imp/artifacts",
+    "floor, not a ceiling",
+    "verification effort, not judgement",
+    "--type agent_result",
+)
+
+
+def test_plan_reviewer_render_drops_the_retired_lap_memory(tmp_path) -> None:
+    for laps in (None,
+                 [{"lap": 1, "outcome": "reworked"},
+                  {"lap": 2, "outcome": "minors integrated"}]):
+        out = _render_plan_reviewer(tmp_path, prior_laps=laps)
+        for fragment in _RETIRED_LAP_MEMORY:
+            assert fragment not in out, fragment
+        # Orient's plain provenance bullet survives — it carries no flags, so
+        # the `--type agent_result` pin above does not reach it
+        assert "`imp events abc` — the provenance record" in out
 
 
 def test_plan_reviewer_output_schema_is_status_findings_and_counts() -> None:
