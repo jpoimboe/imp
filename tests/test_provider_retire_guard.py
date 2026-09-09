@@ -525,9 +525,14 @@ async def test_the_clean_tree_bounce_re_dispatch_retires_a_foreign_transcript(
             return _Runner(self.model)
 
     floor_availability({"claude_code", "codex"}, factory=lambda mo: _P(mo))
+    events: list[dict[str, Any]] = []
 
-    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
 
+    # AC 9d(c): the bounce re-runs the step, and _enforce_clean_tree already cleared current_step.
+    lines = [e["payload"]["stdout"] for e in events if e["type"] == "script_output"]
+    assert "provider switched — codex picks up this step from the event log" in lines
+    assert "provider switched — codex takes the next step" not in lines
     first, bounced = seen
     assert first["model"] == BUILTIN_FLOOR["claude_code"].tier_defaults["medium"]
     # The bounce re-dispatch runs on the new vendor, and the guard retired the

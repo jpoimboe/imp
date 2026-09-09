@@ -1770,6 +1770,7 @@ async def _route_agent(
                 _emit(log, "step_completed",
                       {"step": step.name, "kind": "agent",
                        "action": _action_payload(pause), "var_mutations": {}})
+                _reconcile_provider(quest, state, workflow, on_event)
                 return pause, None, {}
         backoff += 1
         # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
@@ -1806,6 +1807,7 @@ async def _route_agent(
         if raced:
             rotation_exempt_sleeps += 1
         if coordinator.should_pause:
+            _reconcile_provider(quest, state, workflow, on_event)
             return Pause(), None, {}
 
     if result.paused:
@@ -1820,6 +1822,7 @@ async def _route_agent(
         # "interrupt" token; a real interrupt (interrupt=True) or a
         # subagent-suspend unwind (awaiting_user=False) keeps reason=None and
         # still defaults to "interrupt" at the emit site.
+        _reconcile_provider(quest, state, workflow, on_event)
         return Pause(
             reason="awaiting_user" if (
                 result.awaiting_user and not result.interrupt) else None,
@@ -1865,6 +1868,7 @@ async def _route_agent(
         _emit(log, "step_completed",
               {"step": step.name, "kind": "agent",
                "action": _action_payload(pause), "var_mutations": {}})
+        _reconcile_provider(quest, state, workflow, on_event)
         return pause, None, {}
     if (result.fatal and result.error is not None
             and result.error.category == "context_window"
@@ -1903,6 +1907,7 @@ async def _route_agent(
         _emit(log, "step_completed",
               {"step": step.name, "kind": "agent",
                "action": _action_payload(pause), "var_mutations": {}})
+        _reconcile_provider(quest, state, workflow, on_event)
         return pause, None, {}
     if result.errored or result.output is None:
         state.step_attempt += 1
@@ -1916,6 +1921,7 @@ async def _route_agent(
             _emit(log, "step_completed",
                   {"step": step.name, "kind": "agent",
                    "action": _action_payload(on_max), "var_mutations": {}})
+            _reconcile_provider(quest, state, workflow, on_event)
             return on_max, None, {}     # Pause (validator forbids Retry here)
         return await _route_agent(step, workflow, quest, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
@@ -1935,6 +1941,7 @@ async def _route_agent(
     _record_outcome(state, step.name, result.output)
     bounce = _enforce_clean_tree(step, quest, state, log)
     if bounce is not None:
+        _reconcile_provider(quest, state, workflow, on_event)
         return bounce
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
     state.vars.update(match.var_mutations)
