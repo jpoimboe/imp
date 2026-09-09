@@ -1852,6 +1852,7 @@ async def _route_agent(
             seed = reincarnation_seed(
                 handoff_text=handoff_text, quest_id=quest.id,
                 step_name=step.name)
+            _reconcile_provider(quest, state, workflow, on_event)
             return await _route_agent(
                 step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -1883,6 +1884,7 @@ async def _route_agent(
               {"reason": "context window exceeded"}, agent_id=None)
         seed = reincarnation_seed(handoff_text=None, quest_id=quest.id,
                                   step_name=step.name)
+        _reconcile_provider(quest, state, workflow, on_event)
         return await _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -1923,6 +1925,7 @@ async def _route_agent(
                    "action": _action_payload(on_max), "var_mutations": {}})
             _reconcile_provider(quest, state, workflow, on_event)
             return on_max, None, {}     # Pause (validator forbids Retry here)
+        _reconcile_provider(quest, state, workflow, on_event)
         return await _route_agent(step, workflow, quest, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, on_event=on_event,

@@ -171,3 +171,111 @@ async def test_a_pause_after_the_backoff_sleep_applies_the_switch_on_its_way_out
     assert {"type": "script_output", "payload": {"stdout": _PICKS_UP}} in events
     assert [e["payload"]["reason"]
             for e in events if e["type"] == "backoff_ended"] == ["elapsed"]
+
+
+_SWITCH_SENTENCE = "was switched at the user's request"
+
+
+def _first_message(inv: AgentInvocation) -> str:
+    return (inv.initial_messages[0].content[0].text
+            if inv.initial_messages else "")
+
+
+@pytest.mark.anyio
+async def test_a_tier_a_reincarnation_re_enters_on_the_new_vendor(
+    tmp_path: Path, floor_availability,
+) -> None:
+    quest, _phase, _step = _seed_minimal_workflow(tmp_path)
+    _floor_config(tmp_path)
+    seen: list[str] = []
+    firsts: list[str] = []
+
+    def _script(n: int, inv: AgentInvocation) -> list[Event]:
+        firsts.append(_first_message(inv))
+        if n == 1:
+            _persist_initial(inv)
+            hp = handoff_path_for(inv.transcript_dir)
+            hp.write_text("# handoff\nnote body kept\n")
+            return [{"type": "handoff", "payload": {"handoff_path": str(hp)}}]
+        return [{"type": "agent_result",
+                 "payload": {"outcome": "ok", "status": "Success"}}]
+
+    floor_availability({"claude_code", "codex"},
+                       factory=_factory(seen, quest, arm_on=1, script=_script))
+    _pre_resolved(quest, "claude_code")
+    events: list[dict[str, Any]] = []
+
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+                    BUILTIN_FLOOR["codex"].tier_defaults["low"]]
+    assert [e["payload"]["reason"]
+            for e in events if e["type"] == "reincarnating"] == [
+        "context threshold crossed"]
+    assert "note body kept" in firsts[1]
+    assert _SWITCH_SENTENCE not in firsts[1]
+    assert {"type": "script_output", "payload": {"stdout": _PICKS_UP}} in events
+
+
+@pytest.mark.anyio
+async def test_a_tier_b_reincarnation_re_enters_on_the_new_vendor(
+    tmp_path: Path, floor_availability,
+) -> None:
+    quest, _phase, _step = _seed_minimal_workflow(tmp_path)
+    _floor_config(tmp_path)
+    seen: list[str] = []
+
+    def _script(n: int, inv: AgentInvocation) -> list[Event]:
+        if n == 1:
+            _persist_initial(inv)
+            return _error("context_window", "prompt_too_long")
+        return [{"type": "agent_result",
+                 "payload": {"outcome": "ok", "status": "Success"}}]
+
+    floor_availability({"claude_code", "codex"},
+                       factory=_factory(seen, quest, arm_on=1, script=_script))
+    _pre_resolved(quest, "claude_code")
+    events: list[dict[str, Any]] = []
+
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+                    BUILTIN_FLOOR["codex"].tier_defaults["low"]]
+    assert [e["payload"]["reason"]
+            for e in events if e["type"] == "reincarnating"] == [
+        "context window exceeded"]
+    assert {"type": "script_output", "payload": {"stdout": _PICKS_UP}} in events
+
+
+@pytest.mark.anyio
+async def test_the_guards_seed_beats_a_seed_inherited_by_the_errored_retry(
+    tmp_path: Path, floor_availability,
+) -> None:
+    quest, _phase, _step = _seed_minimal_workflow(tmp_path)
+    _floor_config(tmp_path)
+    seen: list[str] = []
+    firsts: list[str] = []
+
+    def _script(n: int, inv: AgentInvocation) -> list[Event]:
+        firsts.append(_first_message(inv))
+        _persist_initial(inv)
+        if n == 1:
+            hp = handoff_path_for(inv.transcript_dir)
+            hp.write_text("# handoff\nearlier generation note\n")
+            return [{"type": "handoff", "payload": {"handoff_path": str(hp)}}]
+        if n == 2:
+            return _error("agent_output_missing", "missing")
+        return [{"type": "agent_result",
+                 "payload": {"outcome": "ok", "status": "Success"}}]
+
+    floor_availability({"claude_code", "codex"},
+                       factory=_factory(seen, quest, arm_on=2, script=_script))
+    _pre_resolved(quest, "claude_code")
+    events: list[dict[str, Any]] = []
+
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    assert seen[2] == BUILTIN_FLOOR["codex"].tier_defaults["low"]
+    assert "earlier generation note" in firsts[1]
+    assert _SWITCH_SENTENCE in firsts[2]
+    assert "earlier generation note" not in firsts[2]
