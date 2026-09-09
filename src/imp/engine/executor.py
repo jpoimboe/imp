@@ -423,6 +423,9 @@ async def run_quest(
         else:
             workflow_refreshed = False
         config = load_effective_config(control_root=quest.control_root).config
+        if quest.provider is not None:
+            # Resolve and reconcile read this local; refresh can't reintroduce the un-pinned vendor.
+            config = dataclasses.replace(config, providers=(quest.provider,))
         state = State.load(quest.state_dir)
         quest.relink_home()
         if state.halt_condition is not None:
