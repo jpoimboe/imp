@@ -682,71 +682,32 @@ def _render_plan_reviewer(tmp_path, prior_laps=None) -> str:
     )
 
 
-def test_plan_reviewer_first_lap_names_lap_one_and_omits_recovery(tmp_path) -> None:
+_LAP_LINE_TAIL = (
+    "Outcomes only, not prior findings: judge the plan yourself, and use the "
+    "laps only to notice an area that keeps returning."
+)
+
+
+def test_plan_reviewer_first_lap_names_lap_one_in_orient_item_four(tmp_path) -> None:
     out = _render_plan_reviewer(tmp_path)
-    # the whole earlier-laps body collapses to the one sentence, with no
-    # leftover whitespace from the stripped {% if %}
-    assert ("## Earlier laps\n\nThis is review lap 1.\n\n"
-            "## Review the prescribed code like a diff (primary)") in out
-    assert "Prior laps ended" not in out
-    assert "imp events abc --step plan-reviewer" not in out
-    assert "refs/imp/artifacts/abc" not in out
-    assert "floor, not a ceiling" not in out
-    # the sha instruction reaches lap 1 from `## Severity & output`, not from
-    # the collapsed earlier-laps body — an unstamped lap-1 report is ignored by lap 2
-    assert 'git -C "$IMP_PROJECT_ROOT" rev-parse HEAD' in out
+    assert f"4. This is review lap 1. {_LAP_LINE_TAIL}" in out.splitlines()
+    assert "Prior laps ended" not in out       # no clause, no empty-list artifact
+    assert "This is review lap ." not in out
+    assert "## Earlier laps" not in out
 
 
-def test_plan_reviewer_later_lap_carries_the_recovery_protocol(tmp_path) -> None:
+def test_plan_reviewer_later_lap_lists_outcomes_and_no_sha(tmp_path) -> None:
     out = _render_plan_reviewer(tmp_path, prior_laps=[
         {"lap": 1, "outcome": "reworked", "head": "aaaa1111bbbb2222"},
         {"lap": 2, "outcome": "minors integrated", "head": "cccc3333dddd4444"},
     ])
-    # (a) per-lap outcome list, each stamped with its recorded head (8 chars)
-    assert "This is review lap 3." in out
-    assert ("Prior laps ended — 1: reworked (at aaaa1111); "
-            "2: minors integrated (at cccc3333).") in out
-    # (b) the findings-recovery command
-    assert "imp events abc --step plan-reviewer --type agent_result --json" in out
-    # (c) both artifact-ref commands, with P as the tree-root path, not quest.home
-    assert 'P=plans/abc-plan-<N>.md' in out
-    assert "not its `.imp/quests/abc` path, which matches nothing" in out
-    # the assignment ships INSIDE the block: each bash call is a fresh shell, so a
-    # block that only referenced $P would expand to an empty pathspec and abort
-    assert ('  P=plans/abc-plan-<N>.md\n'
-            '  git -C "$IMP_PROJECT_ROOT" log --oneline refs/imp/artifacts/abc'
-            ' -- "$P"\n'
-            '  git -C "$IMP_PROJECT_ROOT" diff <second-newest> <newest>'
-            ' -- "$P"\n') in out
-    # (d) effort, not judgement
-    assert "This scopes **verification effort, not judgement**." in out
-    # (e) the floor/ceiling calibration
-    assert ("Prior findings are a floor, not a ceiling: an area no\nearlier lap "
-            "mentioned is not thereby clean.") in out
-    # the lap summary and the recovery instruction stay separate paragraphs
-    # (trim_blocks eats the newline after the inline {% endif %} closing the lap
-    # sentence, so the break has to come from inside the {% if %})
-    assert ("2: minors integrated (at cccc3333).\n\n"
-            'Run `git -C "$IMP_PROJECT_ROOT" rev-parse HEAD` first.') in out
-    # (f) the sha rule, including the no-sha case
-    assert "**One rule sorts every earlier lap:\nits sha against your HEAD.**" in out
-    assert ("a lap\nstamped with a different sha — or with no sha at all — reviewed "
-            "an earlier plan or an\nearlier tree; ignore it wholesale") in out
-    # (g) the in-band stamp is authoritative, because the outcome list truncates
-    assert "Every report ends with its\n  own `Verified at <sha>:` line" in out
-    assert ("That in-band stamp is\n  authoritative: the outcome list above keeps "
-            "only the last few laps") in out
-
-
-def test_plan_reviewer_later_lap_renders_without_a_head_key(tmp_path) -> None:
-    out = _render_plan_reviewer(tmp_path, prior_laps=[
-        {"lap": 1, "outcome": "reworked"},
-        {"lap": 2, "outcome": "reworked"},
-    ])
-    assert "This is review lap 3." in out
-    line = next(ln for ln in out.splitlines() if "Prior laps ended" in ln)
-    assert line == "This is review lap 3. Prior laps ended — 1: reworked; 2: reworked."
-    assert " (at " not in line        # unstamped legacy entries degrade, never raise
+    assert (
+        "4. This is review lap 3. Prior laps ended — 1: reworked; "
+        f"2: minors integrated. {_LAP_LINE_TAIL}"
+    ) in out.splitlines()
+    # a head-bearing entry renders no sha segment at all, like spec-reviewer's
+    assert "(at " not in out
+    assert "aaaa1111" not in out
 
 
 _VERIFIED_TAIL = (
@@ -811,17 +772,17 @@ def test_plan_reviewer_output_schema_is_status_findings_and_counts() -> None:
     ) in body
 
 
-def test_plan_reviewer_orient_stays_intact_above_earlier_laps(tmp_path) -> None:
+def test_plan_reviewer_orient_item_four_precedes_the_read_constraint(tmp_path) -> None:
     out = _render_plan_reviewer(tmp_path, prior_laps=[
         {"lap": 1, "outcome": "reworked", "head": "aaaa1111bbbb2222"},
     ])
     orient = out.index("## Orient")
-    earlier = out.index("## Earlier laps")
-    diff_review = out.index("## Review the prescribed code like a diff (primary)")
+    provenance = out.index("`imp events abc` — the provenance record")
+    item_four = out.index("4. This is review lap 2.")
     constraint = out.index(
         "Read exactly these two artifacts — the newest plan and the spec. Do not "
         "read prior or future\nplan files")
     deferred = out.index(
         "You may write exactly one file of record — `.imp/quests/abc/deferred.md`")
-    assert orient < constraint < earlier < diff_review
-    assert orient < deferred < earlier
+    diff_review = out.index("## Review the prescribed code like a diff (primary)")
+    assert orient < provenance < item_four < constraint < deferred < diff_review
