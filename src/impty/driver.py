@@ -21,8 +21,10 @@ import signal
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from impty import TerminalSession
+from impty.journal import Journal
 from impty.session import (
     DEFAULT_CHANGE_HARD,
     DEFAULT_SETTLE_HARD,
@@ -102,9 +104,21 @@ class ImptyDriver:
     spawns bare. impty imports nothing from the embedding host — the sandbox arrives
     as this callable or not at all."""
 
-    def __init__(self, sandbox: SandboxHook | None = None) -> None:
+    def __init__(
+        self, sandbox: SandboxHook | None = None, journal_dir: Path | None = None,
+    ) -> None:
         self._session: TerminalSession | None = None
         self._sandbox = sandbox
+        self._journal_dir = journal_dir
+        self._sessions = 0
+
+    def _new_journal(self) -> Journal | None:
+        """Per-driver numbering: a step that start/stop/starts writes pty-1.* then
+        pty-2.*, so the second session cannot overwrite the first."""
+        if self._journal_dir is None:
+            return None
+        self._sessions += 1
+        return Journal(self._journal_dir, self._sessions)
 
     def _require(self) -> TerminalSession:
         if self._session is None:
@@ -164,19 +178,21 @@ class ImptyDriver:
             self._session.close()
             self._session = None
         plan = None if self._sandbox is None else self._sandbox(argv, cwd, env)
+        journal = self._new_journal()
         if plan is None:
             # The merge belongs HERE, never inside TerminalSession: a session that
             # unioned os.environ under whatever it was handed would pour the host
             # environment into a sandboxing host's curated child env.
             session = TerminalSession(
                 argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
+                journal=journal,
             )
         else:
             # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
             # namespace, so a plan's cwd rides inside plan.argv instead.
             session = TerminalSession(
                 plan.argv, cwd=None, cols=cols, rows=rows,
-                env=plan.env, pass_fds=plan.pass_fds,
+                env=plan.env, pass_fds=plan.pass_fds, journal=journal,
                 openpty=pty.openpty if plan.openpty is None else plan.openpty,
             )
         try:

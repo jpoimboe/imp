@@ -991,6 +991,75 @@ def test_start_env_extends_the_base_environment(
     assert "BASE=base OVER=overlay TERM=xterm-256color" in screen
 
 
+_JOURNAL_CHILD = (
+    "import os, sys, time\n"
+    "os.write(1, sys.argv[1].encode())\n"
+    "time.sleep(30)\n"
+)
+
+_COOKED_CHILD = (
+    "import sys, time\n"
+    "sys.stdout.write('READY\\n')\n"
+    "sys.stdout.flush()\n"
+    "line = sys.stdin.readline()\n"
+    "sys.stdout.write('GOT=%d\\n' % len(line))\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(30)\n"
+)
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_each_session_of_one_driver_gets_its_own_numbered_journal(
+    tmp_path: Path,
+) -> None:
+    d = ImptyDriver(journal_dir=tmp_path)
+    try:
+        d.start([sys.executable, "-c", _JOURNAL_CHILD, "FIRST-RUN"])
+        d.stop()
+        d.start([sys.executable, "-c", _JOURNAL_CHILD, "SECOND-RUN"])
+        d.stop()
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "pty-1.jsonl", "pty-1.raw", "pty-2.jsonl", "pty-2.raw",
+        ]
+        first = (tmp_path / "pty-1.raw").read_bytes()
+        second = (tmp_path / "pty-2.raw").read_bytes()
+        assert b"FIRST-RUN" in first and b"SECOND-RUN" not in first
+        assert b"SECOND-RUN" in second and b"FIRST-RUN" not in second
+    finally:
+        d.close()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_driver_with_no_journal_dir_writes_no_journal_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _JOURNAL_CHILD, "PLAIN-RUN"])
+    try:
+        assert "PLAIN-RUN" in d.view()
+    finally:
+        d.stop()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_an_unwritable_journal_dir_leaves_the_drive_working(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory\n")
+    d = ImptyDriver(journal_dir=blocker / "steps")
+    screen = d.start([sys.executable, "-c", _COOKED_CHILD])
+    try:
+        assert "READY" in screen
+        d.send("hello\r", wait=False)
+        # Poll rather than settle: the cooked-mode echo of the keystroke is itself
+        # output, so a wait() could go quiet on the echo before GOT= lands.
+        assert _poll(lambda: "GOT=6" in d.view(), timeout=E2E_POLL_TIMEOUT)
+    finally:
+        assert d.stop().startswith("[stopped: exit=")
+    assert [p.name for p in tmp_path.iterdir()] == ["blocker"]
+
+
 def test_start_copy_states_the_env_overlay_and_the_hook() -> None:
     doc = ImptyDriver.start.__doc__ or ""
     assert (
