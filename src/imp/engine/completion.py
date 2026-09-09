@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from imp.agents.transcript import SkillReply
+    from imp.agents.transcript import SolicitReply
 
 from imp.agents.runner import Message, TextBlock
 from imp.engine.feedback import COMPLETION_NUDGE
@@ -61,7 +61,7 @@ def _cancelled_exc() -> type[BaseException]:
 
 def build_inline_solicit(
     *,
-    user_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]] | None = None,
+    user_input_fn: Callable[[str], SolicitReply | Awaitable[SolicitReply]] | None = None,
     coordinator: Any = None,
     event_log: Any = None,
     agent_id: str | None = None,
@@ -69,7 +69,7 @@ def build_inline_solicit(
     interrupt: bool = False,
     halt_writer: Callable[[], None] | None = None,
     halt_clearer: Callable[[], None] | None = None,
-) -> Callable[[str], Awaitable[str | SkillReply]]:
+) -> Callable[[str], Awaitable[SolicitReply]]:
     """The turn-end yield-to-human tail, shared by BOTH the bare-turn-end
     continuation (build_continuation_fn) and the cooperative-interrupt steer.
     Emits awaiting_user_input, then either solicits the human inline — freezing
@@ -93,7 +93,7 @@ def build_inline_solicit(
         if coordinator is not None:
             coordinator.note_yield()
 
-    async def _solicit() -> str | SkillReply:
+    async def _solicit() -> SolicitReply:
         assert user_input_fn is not None
         reply = user_input_fn("")
         if inspect.isawaitable(reply):
@@ -110,11 +110,11 @@ def build_inline_solicit(
             finally:
                 if coordinator is not None:
                     coordinator.end_solicit_watchdog()
-        from imp.agents.transcript import SkillReply
-        assert isinstance(reply, (str, SkillReply))
+        from imp.agents.transcript import ContinuationNote, SkillReply
+        assert isinstance(reply, (str, SkillReply, ContinuationNote))
         return reply
 
-    async def _inline(last_text: str) -> str | SkillReply:
+    async def _inline(last_text: str) -> SolicitReply:
         # Emit so codex resume reads this pause as AWAITING_USER, not MISSING_COMPLETE_STEP.
         _emit_awaiting(last_text)
         if user_input_fn is not None:
@@ -140,7 +140,7 @@ def build_inline_solicit(
 
 def build_continuation_fn(
     *,
-    user_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]] | None = None,
+    user_input_fn: Callable[[str], SolicitReply | Awaitable[SolicitReply]] | None = None,
     coordinator: Any = None,
     event_log: Any = None,
     agent_id: str | None = None,
@@ -149,7 +149,7 @@ def build_continuation_fn(
     has_schema: bool = False,
     halt_writer: Callable[[], None] | None = None,
     halt_clearer: Callable[[], None] | None = None,
-) -> Callable[[str], tuple[str | SkillReply | Awaitable[str | SkillReply], bool]]:
+) -> Callable[[str], tuple[SolicitReply | Awaitable[SolicitReply], bool]]:
     """End-of-turn handler for a bare turn-end (assistant text, no
     complete_step). Whether that is a question to the human or a forgotten
     complete_step is indistinguishable, so resolution turns on WHO can take the
@@ -204,7 +204,7 @@ def build_continuation_fn(
     nudged = False
     pre_nudge_text = ""
 
-    def _cont(last_text: str) -> tuple[str | SkillReply | Awaitable[str | SkillReply], bool]:
+    def _cont(last_text: str) -> tuple[SolicitReply | Awaitable[SolicitReply], bool]:
         nonlocal nudged, pre_nudge_text
         if coordinator is not None:
             pending: str | None = coordinator.drain_interject()

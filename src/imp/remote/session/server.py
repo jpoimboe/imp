@@ -12,7 +12,7 @@ import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from imp.agents.skills import SkillError
-from imp.agents.transcript import SkillReply
+from imp.agents.transcript import SkillReply, SolicitReply
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
@@ -166,7 +166,7 @@ class SessionServer:
             self._last_gate_event = event
         self._socket.broadcast(event)
 
-    async def _chat(self, _query: str) -> str | SkillReply:
+    async def _chat(self, _query: str) -> SolicitReply:
         self.set_pending_prompt(self._last_gate_event)
         # Arm the input latch for the whole solicit: a reply arriving between the
         # prompt and next_input() opening the gate is latched, not dropped.
