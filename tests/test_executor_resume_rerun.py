@@ -11,6 +11,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, Text
 from imp.agents.transcript import Transcript
 from imp.engine.executor import RunResult, _resume_replays_transcript, run_quest
 from imp.engine.quest import Quest
+from imp.engine.reincarnation import write_transcript_owner
 from imp.engine.state import State
 from imp.paths import project_state_dir
 
@@ -109,6 +110,8 @@ async def test_resume_truncated_autonomous_replays_and_advances(
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
+    # Own the transcript: an unlabelled one is retired at dispatch, not replayed.
+    write_transcript_owner(tdir, "fake")
     # Seed the engine_message/system_prompt event so _resume_system_prompt
     # finds the stored prompt (in production this is always present when a
     # transcript exists).

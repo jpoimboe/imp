@@ -5,11 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
-from imp.agents.transcript import Transcript
+from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.executor import RunResult, run_quest
-from imp.engine.reincarnation import read_transcript_owner, write_transcript_owner
-from imp.engine.state import State
+from imp.engine.reincarnation import read_transcript_owner
 from tests.test_executor_resume_rerun import _seed_single_agent
 
 
@@ -57,32 +55,3 @@ async def test_a_fresh_dispatch_labels_the_transcript_with_its_resolved_vendor(
 
     assert result is RunResult.COMPLETED
     assert seen == ["fake"]        # labelled before the session it describes ran
-
-
-@pytest.mark.anyio
-async def test_a_replayed_transcript_keeps_the_owner_that_wrote_it(
-        tmp_path: Path, provider_registry) -> None:
-    # The kept branch writes no label: the sidecar describes the transcript on
-    # disk, so a replay must not relabel a foreign one as its own. A relabelling
-    # implementation records "fake" here.
-    quest = _seed_single_agent(tmp_path)
-    state = State.load(quest.state_dir)
-    state.resume_pending = state.step
-    state.save(quest.state_dir)
-    tdir = quest.quest_dir / "steps" / "only" / "w"
-    tdir.mkdir(parents=True, exist_ok=True)
-    Transcript(tdir / "transcript.jsonl").append(
-        Message(role="assistant", content=(TextBlock(text="still working"),)))
-    write_transcript_owner(tdir, "claude_code")
-    quest.event_log().append(
-        agent_id="step:only/w", type="engine_message",
-        payload={"role": "system", "subtype": "system_prompt",
-                 "content": [{"type": "text", "text": "test"}]})
-    seen: list[str | None] = []
-    provider_registry("fake", env_check=lambda: True,
-                      factory=_recording_factory(tdir, seen))
-
-    result = await run_quest(quest)
-
-    assert result is RunResult.COMPLETED
-    assert seen == ["claude_code"]

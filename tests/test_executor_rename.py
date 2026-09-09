@@ -15,6 +15,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
+from imp.engine.reincarnation import write_transcript_owner
 from imp.engine.state import State
 from imp.paths import project_state_dir
 from tests.conftest import _git
@@ -240,6 +241,7 @@ async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
     s1_dir.mkdir(parents=True, exist_ok=True)
     Transcript(s1_dir / "transcript.jsonl").append(
         Message(role="user", content=(TextBlock(text="prior turn"),)))
+    write_transcript_owner(s1_dir, "anthropic")   # replayed, so it must own it
     ch.event_log().append_step_context(
         agent_id="step:p/s1", provider="anthropic", model="m",
         tools_schema=[], params={}, max_tool_calls=None)

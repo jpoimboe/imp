@@ -70,6 +70,8 @@ from imp.engine.model_override import current_provider_model
 from imp.engine.provider_pin import provider_pending
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import (
+    handoff_path_for,
+    read_transcript_owner,
     reincarnation_seed,
     stash_transcript,
     write_transcript_owner,
@@ -1596,6 +1598,39 @@ def _enforce_clean_tree(
     return action, format_clean_tree_feedback(paths), {}
 
 
+def _retire_foreign_transcript(
+    transcript_dir: Path, step: Step, quest: Quest, state: State, log: EventLog,
+    *, is_resume: bool, resolved: str,
+) -> str | None:
+    """Retire a non-empty transcript that another vendor wrote and that THIS
+    dispatch would consume or destroy, returning the seed for the session that
+    replaces it; None when nothing is at risk, which is every ordinary dispatch.
+
+    Two limbs, one question — is an unfinished attempt about to be lost? It
+    would be replayed into the wrong vendor (the restore_rollout / mcp__imp__
+    crash class), or wiped mid-flight by the fresh path's rmtree. A step that
+    completed has current_step cleared, so a rework Goto re-runs it clean."""
+    if not _resume_replays_transcript(transcript_dir):
+        return None
+    if read_transcript_owner(transcript_dir) == resolved:
+        return None
+    in_flight = (state.current_step is not None
+                 and state.current_step.transcript_dir == transcript_dir)
+    if not (is_resume or in_flight):
+        return None
+    seed = reincarnation_seed(
+        handoff_text=None, quest_id=quest.id, step_name=step.name,
+        cause="provider_switch")
+    stash = stash_transcript(transcript_dir)
+    assert stash is not None      # both limbs require a non-empty transcript
+    note = handoff_path_for(transcript_dir)
+    if note.exists():
+        # A note left behind would be a previous generation's.
+        note.rename(stash / note.name)
+    _emit(log, "reincarnating", {"reason": "provider switched"}, agent_id=None)
+    return seed
+
+
 async def _route_agent(
     step: Step, workflow: Workflow, quest: Quest,
     state: State, log: EventLog, *,
@@ -1616,6 +1651,17 @@ async def _route_agent(
     assert step.file is not None, "agent step must have a file this milestone"
     agent_def = workflow.agents[step.file.stem]
     transcript_dir = quest.quest_dir / "steps" / step.phase / step.name
+
+    # The one chokepoint every dispatch and re-entry crosses. Retiring here
+    # renames the directory, so keep and balance_on_resume both recompute False
+    # and the cross-vendor replay becomes unrepresentable rather than defended.
+    retired_seed = _retire_foreign_transcript(
+        transcript_dir, step, quest, state, log, is_resume=is_resume,
+        resolved=current_provider_model(state, workflow, step.name).provider)
+    if retired_seed is not None:
+        # Overrides any value inherited from a caller: that one describes an
+        # earlier generation.
+        reincarnation_text = retired_seed
 
     # Keep (replay) the transcript on every `resume:` entry that has a non-empty
     # one. A transcript that ended before complete_step is replayed and
