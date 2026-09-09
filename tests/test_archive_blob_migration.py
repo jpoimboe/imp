@@ -615,10 +615,10 @@ def test_a_forced_second_pass_leaves_the_backfilled_blob_alone(
     assert len(set(_session_costs(tmp_path, "qr002"))) == 2
 
 
-# 9, spelled out: the marker every existing install already carries. Deriving it as
+# 10, spelled out: the marker every existing install already carries. Deriving it as
 # _DATA_VERSION - 1 would sit below the constant whatever the constant is, so the
 # test would pass with the bump reverted — the literal is what pins it.
-_PREV_DATA_VERSION = 9
+_PREV_DATA_VERSION = 10
 
 
 def _started(round_: int | None = None, eid: str = "ss1") -> dict:
