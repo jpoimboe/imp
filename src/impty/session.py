@@ -129,29 +129,36 @@ class TerminalSession:
         self._stream = TerminalStream(self._screen)
         # A callable, not a pre-made fd pair, so the session owns both fds from birth.
         self._master, slave = openpty()
-        # Forward pyte's terminal-query replies (CPR, device attributes) to the
-        # program's stdin, exactly as a real terminal does.
-        self._screen.reply = self._write_reply
-        _set_winsize(slave, rows, cols)
-        # Default TERM so color emission (and thus cell().fg) is deterministic
-        # across machines/CI where TERM may be unset or minimal. An explicit
-        # env= with its own TERM wins via setdefault.
-        child_env = dict(os.environ if env is None else env)
-        child_env.setdefault("TERM", "xterm-256color")
-        self._proc = subprocess.Popen(
-            list(argv),
-            cwd=cwd,
-            env=child_env,
-            stdin=slave,
-            stdout=slave,
-            stderr=slave,
-            start_new_session=True,
-            # An embedding host's fds (e.g. pinned namespace fds a join names as
-            # /proc/self/fd/N) must survive the fork; Popen closes all others.
-            pass_fds=pass_fds,
-            preexec_fn=_make_controlling_tty,
-        )
-        os.close(slave)
+        # A failed spawn must not strand these fds; with an injected allocator
+        # the slave is a node in someone else's devpts namespace until teardown.
+        try:
+            # Forward pyte's terminal-query replies (CPR, device attributes) to the
+            # program's stdin, exactly as a real terminal does.
+            self._screen.reply = self._write_reply
+            _set_winsize(slave, rows, cols)
+            # Default TERM so color emission (and thus cell().fg) is deterministic
+            # across machines/CI where TERM may be unset or minimal. An explicit
+            # env= with its own TERM wins via setdefault.
+            child_env = dict(os.environ if env is None else env)
+            child_env.setdefault("TERM", "xterm-256color")
+            self._proc = subprocess.Popen(
+                list(argv),
+                cwd=cwd,
+                env=child_env,
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                start_new_session=True,
+                # An embedding host's fds (e.g. pinned namespace fds a join names as
+                # /proc/self/fd/N) must survive the fork; Popen closes all others.
+                pass_fds=pass_fds,
+                preexec_fn=_make_controlling_tty,
+            )
+        except BaseException:
+            os.close(self._master)
+            raise
+        finally:
+            os.close(slave)
         self._exit_code: int | None = None
         # One reader of the master at a time. wait_idle/run_to_completion hold
         # this for their whole duration; the background drainer (below) holds it

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import inspect
 import os
 import pty
@@ -1027,3 +1028,22 @@ def test_an_injected_allocator_supplies_the_sessions_pty() -> None:
         text = "\n".join(s.lines())
     assert len(made) == 1
     assert f"TTY={made[0]}" in text
+
+
+def test_failed_spawn_closes_both_pty_fds() -> None:
+    fds: list[tuple[int, int]] = []
+
+    def allocator() -> tuple[int, int]:
+        master, slave = pty.openpty()
+        fds.append((master, slave))
+        return master, slave
+
+    with pytest.raises(FileNotFoundError):
+        TerminalSession(["/nonexistent/impty-no-such-program"], openpty=allocator)
+
+    assert len(fds) == 1
+    master, slave = fds[0]
+    with pytest.raises(OSError):
+        fcntl.fcntl(master, fcntl.F_GETFD)
+    with pytest.raises(OSError):
+        fcntl.fcntl(slave, fcntl.F_GETFD)
