@@ -2247,10 +2247,14 @@ def test_a_sandboxed_command_can_still_allocate_a_pty() -> None:
 def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
     """AC 10: nsenter faithfully re-raises the child's terminating signal on
     itself, so a joined session's returncode keeps the negative-signal shape the
-    providers' tool_killed detection reads — never 128+n, never nsenter's own."""
+    providers' tool_killed detection reads — never 128+n, never nsenter's own.
+
+    Allocated from the keeper's devpts like the hook does, so the exit-status axis
+    is measured on the pty production actually uses: the first case prints its
+    ttyname first, which on imp's own devpts raises ENODEV and would report 1."""
     root = _make_root()
     cases = [
-        ("import sys; sys.exit(7)", 7),
+        ("import os, sys; print('TTY=' + os.ttyname(0)); sys.exit(7)", 7),
         ("import os, signal; os.kill(os.getpid(), signal.SIGKILL)", -9),
         ("import os, signal; os.kill(os.getpid(), signal.SIGTERM)", -15),
     ]
@@ -2258,12 +2262,17 @@ def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
         ns = SandboxNamespace.open(policy=_active_policy(root), engine_env={},
                                    environ=os.environ)
         try:
-            for prog, expected in cases:
+            first_screen = ""
+            for i, (prog, expected) in enumerate(cases):
                 spawn = ns.join_exec([sys.executable, "-c", prog],
                                      cwd=str(root), engine_env={})
                 with TerminalSession(spawn.argv, cwd=None, env=spawn.env,
-                                     pass_fds=spawn.pass_fds) as s:
+                                     pass_fds=spawn.pass_fds,
+                                     openpty=ns.open_pty) as s:
                     assert s.run_to_completion(hard=30.0) == expected, prog
+                    if i == 0:
+                        first_screen = "\n".join(s.lines())
+            assert re.search(r"TTY=/dev/pts/\d+", first_screen), first_screen
         finally:
             ns.close()
     finally:
