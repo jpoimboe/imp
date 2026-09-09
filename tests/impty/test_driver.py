@@ -1075,3 +1075,14 @@ def test_a_plan_without_an_allocator_keeps_the_default(
         d.stop()
     assert seen["openpty"] is pty.openpty
     assert re.search(r"TTY=/dev/pts/\d+", screen)
+
+
+def test_readme_documents_the_pty_spawn_openpty_field() -> None:
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    # Whitespace-normalized (the repo idiom): the paragraph hard-wraps mid-phrase, so
+    # a raw substring test would pin nothing.
+    flat = " ".join(readme.split())
+    assert "`PtySpawn(argv, env, pass_fds, openpty)`" in flat
+    assert "the host's own pty allocator" in flat
+    assert "`TerminalSession(openpty=…)`" in flat
