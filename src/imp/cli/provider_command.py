@@ -46,10 +46,13 @@ def render_provider_roster(current: str | None, names: list[str]) -> list[str]:
 
 
 def current_provider_for(quest: Any) -> str | None:
-    """The vendor this quest runs on. State is read only where it exists: the
-    pre-session opening prompt runs on a draft that has none."""
+    """The vendor this quest runs on. Reloads the pin first — another process
+    may have written it since the client loaded the quest. State is read only
+    where it exists: the pre-session opening prompt runs on a draft that has
+    none."""
     from imp.engine.provider_pin import current_provider
     from imp.engine.state import State
+    quest.reload_provider()
     state_dir = quest.state_dir
     state = (State.load(state_dir) if (state_dir / "state.json").exists()
              else None)

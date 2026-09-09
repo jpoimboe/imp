@@ -98,3 +98,26 @@ def test_current_reads_the_config_when_there_is_no_state(
     floor_availability({"claude_code", "codex"})
     (quest.state_dir / "state.json").unlink()
     assert current_provider_for(quest) == "claude_code"
+
+
+def test_current_reflects_pin_written_by_another_process(
+    tmp_path: Path, floor_availability,
+) -> None:
+    # Guards the arm→reconcile window: the daemon writes the pin OOP while the
+    # client still holds the original in-memory Quest.
+    quest, state, _wf = _seed(tmp_path)
+    floor_availability({"claude_code", "codex"})
+    # state already resolved to claude_code — ensures the reload, not the
+    # fallback, is what surfaces "codex".
+    state.resolved_tiers = _tiers("claude_code")
+    state.save(quest.state_dir)
+    # Simulate out-of-process write by patching quest.json directly (as the
+    # daemon's set_provider callback would do from another process).
+    import json
+    meta_path = quest.quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["provider"] = "codex"
+    meta_path.write_text(json.dumps(meta))
+    # The first instance's in-memory pin is still None (pre-arm).
+    assert quest.provider is None
+    assert current_provider_for(quest) == "codex"
