@@ -539,6 +539,7 @@ class Quest:
     parent: str | None = None  # parent quest id (create_draft provenance); None when standalone
     depends_on: list[str] = field(default_factory=list)  # dependency quest ids (gates go-live)
     vars: dict[str, object] = field(default_factory=dict)  # per-quest workflow var overrides
+    provider: str | None = None  # per-quest provider pin; None = follow configured order
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite quest.json in the
@@ -598,6 +599,13 @@ class Quest:
         meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["seed_opening"] = text
+        _write_quest_json(meta_path, meta)
+
+    def set_provider(self, provider: str | None) -> None:
+        self.provider = provider
+        meta_path = self.quest_dir / "quest.json"
+        meta = json.loads(meta_path.read_text())
+        meta["provider"] = provider
         _write_quest_json(meta_path, meta)
 
     def set_title(self, name: str) -> None:
@@ -717,6 +725,7 @@ class Quest:
             "imp_commit": _imp_commit(control_root),
             "workflow": workflow,
             "vars": {},
+            "provider": None,
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -765,6 +774,7 @@ class Quest:
         origin: str = "draft", seed_opening: str | None = None,
         parent: str | None = None, defer_seed: bool = False,
         create_mode: str = "new", vars: Mapping[str, object] | None = None,
+        provider: str | None = None,
     ) -> Quest:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -797,6 +807,7 @@ class Quest:
             "seed_opening": seed_opening,
             "parent": parent,
             "vars": dict(vars or {}),
+            "provider": provider,
         }, indent=2, sort_keys=True))
 
         if defer_seed:
@@ -839,6 +850,7 @@ class Quest:
             seed_opening=seed_opening, parent=parent,
             depends_on=list(depends_on or []),
             vars=dict(vars or {}),
+            provider=provider,
         )
         quest.event_log().append(
             agent_id=None, type="quest_created",
@@ -882,4 +894,5 @@ class Quest:
             parent=meta.get("parent"),
             depends_on=list(meta.get("depends_on") or []),
             vars=dict(meta.get("vars") or {}),
+            provider=meta.get("provider"),
         )
