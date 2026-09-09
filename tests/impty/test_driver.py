@@ -6,6 +6,7 @@ import pty
 import re
 import signal
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -991,6 +992,177 @@ def test_start_env_extends_the_base_environment(
     assert "BASE=base OVER=overlay TERM=xterm-256color" in screen
 
 
+_JOURNAL_CHILD = (
+    "import os, sys, time\n"
+    "os.write(1, sys.argv[1].encode())\n"
+    "time.sleep(30)\n"
+)
+
+_COOKED_CHILD = (
+    "import sys, time\n"
+    "sys.stdout.write('READY\\n')\n"
+    "sys.stdout.flush()\n"
+    "line = sys.stdin.readline()\n"
+    "sys.stdout.write('GOT=%d\\n' % len(line))\n"
+    "sys.stdout.flush()\n"
+    "time.sleep(30)\n"
+)
+
+
+def _next_free_fd() -> int:
+    fd = os.open(os.devnull, os.O_RDONLY)
+    os.close(fd)
+    return fd
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_repeated_failing_start_leaks_no_fds(tmp_path: Path) -> None:
+    d = ImptyDriver(journal_dir=tmp_path)
+    exceptions: list[BaseException] = []
+    try:
+        baseline = _next_free_fd()
+        for _ in range(5):
+            with pytest.raises(FileNotFoundError) as ei:
+                d.start([str(tmp_path / "nonexistent-binary")])
+            exceptions.append(ei.value)  # keep tracebacks alive; see comment below
+        after = _next_free_fd()
+        # Slack of 5 tolerates incidental fd churn while a real 4-fd-per-attempt
+        # leak over 5 attempts would produce ~20.
+        assert after - baseline < 5
+    finally:
+        d.close()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_failing_start_with_no_journal_dir_raises_file_not_found(tmp_path: Path) -> None:
+    d = ImptyDriver()
+    with pytest.raises(FileNotFoundError):
+        d.start([str(tmp_path / "nonexistent-binary")])
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_each_session_of_one_driver_gets_its_own_numbered_journal(
+    tmp_path: Path,
+) -> None:
+    d = ImptyDriver(journal_dir=tmp_path)
+    try:
+        d.start([sys.executable, "-c", _JOURNAL_CHILD, "FIRST-RUN"])
+        d.stop()
+        d.start([sys.executable, "-c", _JOURNAL_CHILD, "SECOND-RUN"])
+        d.stop()
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "pty-1.jsonl", "pty-1.raw", "pty-2.jsonl", "pty-2.raw",
+        ]
+        first = (tmp_path / "pty-1.raw").read_bytes()
+        second = (tmp_path / "pty-2.raw").read_bytes()
+        assert b"FIRST-RUN" in first and b"SECOND-RUN" not in first
+        assert b"SECOND-RUN" in second and b"FIRST-RUN" not in second
+    finally:
+        d.close()
+
+
+def test_last_session_index_unit(tmp_path: Path) -> None:
+    from impty.driver import _last_session_index
+
+    # absent or non-directory -> 0
+    assert _last_session_index(tmp_path / "nonexistent") == 0
+
+    # empty dir -> 0
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert _last_session_index(empty) == 0
+
+    # unrelated filenames ignored
+    d = tmp_path / "mixed"
+    d.mkdir()
+    (d / "stderr.log").write_bytes(b"")
+    (d / "transcript.jsonl").write_bytes(b"")
+    assert _last_session_index(d) == 0
+
+    # pty-1.raw, pty-1.jsonl, pty-2.raw.1 -> max is 2
+    (d / "pty-1.raw").write_bytes(b"")
+    (d / "pty-1.jsonl").write_bytes(b"")
+    (d / "pty-2.raw.1").write_bytes(b"")
+    assert _last_session_index(d) == 2
+
+    # not-a-directory: parent is a regular file -> 0
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"")
+    assert _last_session_index(blocker / "steps") == 0
+
+    # unlistable directory (mode 0o000) -> 0, not a PermissionError
+    if os.geteuid() != 0:
+        unlistable = tmp_path / "unlistable"
+        unlistable.mkdir()
+        (unlistable / "pty-3.raw").write_bytes(b"")
+        unlistable.chmod(0o000)
+        try:
+            assert _last_session_index(unlistable) == 0
+        finally:
+            unlistable.chmod(0o755)
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resumed_step_driver_numbers_from_next_session(tmp_path: Path) -> None:
+    """A second ImptyDriver over the same journal dir (resumed-step case) must start
+    at N+1, not 1, so it can't truncate the first driver's pty-1.raw."""
+    da = ImptyDriver(journal_dir=tmp_path)
+    try:
+        da.start([sys.executable, "-c", _JOURNAL_CHILD, "DRIVER-A"])
+        da.stop()
+    finally:
+        da.close()
+
+    raw1_bytes = (tmp_path / "pty-1.raw").read_bytes()
+    assert b"DRIVER-A" in raw1_bytes
+
+    db = ImptyDriver(journal_dir=tmp_path)
+    try:
+        db.start([sys.executable, "-c", _JOURNAL_CHILD, "DRIVER-B"])
+        db.stop()
+    finally:
+        db.close()
+
+    # B wrote into pty-2.*, not pty-1.*
+    assert (tmp_path / "pty-2.raw").exists()
+    assert b"DRIVER-B" in (tmp_path / "pty-2.raw").read_bytes()
+    # A's journal is byte-intact
+    assert (tmp_path / "pty-1.raw").read_bytes() == raw1_bytes
+    # B wrote nothing into pty-1.*
+    assert b"DRIVER-B" not in (tmp_path / "pty-1.raw").read_bytes()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_driver_with_no_journal_dir_writes_no_journal_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _JOURNAL_CHILD, "PLAIN-RUN"])
+    try:
+        assert "PLAIN-RUN" in d.view()
+    finally:
+        d.stop()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_an_unwritable_journal_dir_leaves_the_drive_working(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory\n")
+    d = ImptyDriver(journal_dir=blocker / "steps")
+    screen = d.start([sys.executable, "-c", _COOKED_CHILD])
+    try:
+        assert "READY" in screen
+        d.send("hello\r", wait=False)
+        # Poll rather than settle: the cooked-mode echo of the keystroke is itself
+        # output, so a wait() could go quiet on the echo before GOT= lands.
+        assert _poll(lambda: "GOT=6" in d.view(), timeout=E2E_POLL_TIMEOUT)
+    finally:
+        assert d.stop().startswith("[stopped: exit=")
+    assert [p.name for p in tmp_path.iterdir()] == ["blocker"]
+
+
 def test_start_copy_states_the_env_overlay_and_the_hook() -> None:
     doc = ImptyDriver.start.__doc__ or ""
     assert (
@@ -1086,3 +1258,63 @@ def test_readme_documents_the_pty_spawn_openpty_field() -> None:
     assert "`PtySpawn(argv, env, pass_fds, openpty)`" in flat
     assert "the host's own pty allocator" in flat
     assert "`TerminalSession(openpty=…)`" in flat
+
+
+def _wrote_path(reply: str) -> Path:
+    assert reply.startswith("[wrote ") and reply.endswith("]"), reply
+    return Path(reply[len("[wrote "):-1])
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_snapshot_defaults_into_the_configured_dir_creating_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    systmp = tmp_path / "systmp"
+    systmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
+    snaps = tmp_path / "quest" / "snapshots"  # does not exist yet
+    d = ImptyDriver(snapshot_dir=snaps)
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        written = _wrote_path(d.snapshot())
+        explicit = tmp_path / "explicit.png"
+        assert _wrote_path(d.snapshot(path=str(explicit))) == explicit
+    finally:
+        d.stop()
+    assert written.parent == snaps
+    assert written.stat().st_size > 0
+    assert list(systmp.iterdir()) == []
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_snapshot_without_a_configured_dir_lands_in_the_system_temp_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    systmp = tmp_path / "systmp"
+    systmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        written = _wrote_path(d.snapshot())
+    finally:
+        d.stop()
+    assert written.parent == systmp
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_snapshot_dir_that_cannot_be_created_falls_back_to_the_system_temp_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    systmp = tmp_path / "systmp"
+    systmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory\n")
+    d = ImptyDriver(snapshot_dir=blocker / "snapshots")  # must not raise
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        written = _wrote_path(d.snapshot())
+    finally:
+        d.stop()
+    assert written.parent == systmp

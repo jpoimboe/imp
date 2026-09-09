@@ -21,14 +21,31 @@ import signal
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from impty import TerminalSession
+from impty.journal import Journal
 from impty.session import (
     DEFAULT_CHANGE_HARD,
     DEFAULT_SETTLE_HARD,
     DEFAULT_SETTLE_IDLE,
     MAX_CALL_HARD,
 )
+
+_JOURNAL_RE = re.compile(r"pty-(\d+)\.")
+
+
+def _last_session_index(directory: Path) -> int:
+    """Highest existing pty-N.* index: a resumed step reuses its transcript dir,
+    and Journal opens "wb" — numbering must continue, not truncate the pre-restart
+    attempt (stderr.log opens "ab" for the same reason)."""
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return 0
+    return max((int(m.group(1)) for p in entries
+                if (m := _JOURNAL_RE.match(p.name))), default=0)
+
 
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
@@ -102,9 +119,28 @@ class ImptyDriver:
     spawns bare. impty imports nothing from the embedding host — the sandbox arrives
     as this callable or not at all."""
 
-    def __init__(self, sandbox: SandboxHook | None = None) -> None:
+    def __init__(
+        self, sandbox: SandboxHook | None = None, journal_dir: Path | None = None,
+        snapshot_dir: Path | None = None,
+    ) -> None:
         self._session: TerminalSession | None = None
         self._sandbox = sandbox
+        self._journal_dir = journal_dir
+        self._sessions = 0 if journal_dir is None else _last_session_index(journal_dir)
+        self._snapshot_dir = snapshot_dir
+        if snapshot_dir is not None:
+            try:
+                snapshot_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                self._snapshot_dir = None
+
+    def _new_journal(self) -> Journal | None:
+        """Per-driver numbering: a step that start/stop/starts writes pty-1.* then
+        pty-2.*, so the second session cannot overwrite the first."""
+        if self._journal_dir is None:
+            return None
+        self._sessions += 1
+        return Journal(self._journal_dir, self._sessions)
 
     def _require(self) -> TerminalSession:
         if self._session is None:
@@ -164,21 +200,28 @@ class ImptyDriver:
             self._session.close()
             self._session = None
         plan = None if self._sandbox is None else self._sandbox(argv, cwd, env)
-        if plan is None:
-            # The merge belongs HERE, never inside TerminalSession: a session that
-            # unioned os.environ under whatever it was handed would pour the host
-            # environment into a sandboxing host's curated child env.
-            session = TerminalSession(
-                argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
-            )
-        else:
-            # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
-            # namespace, so a plan's cwd rides inside plan.argv instead.
-            session = TerminalSession(
-                plan.argv, cwd=None, cols=cols, rows=rows,
-                env=plan.env, pass_fds=plan.pass_fds,
-                openpty=pty.openpty if plan.openpty is None else plan.openpty,
-            )
+        journal = self._new_journal()
+        try:
+            if plan is None:
+                # The merge belongs HERE, never inside TerminalSession: a session that
+                # unioned os.environ under whatever it was handed would pour the host
+                # environment into a sandboxing host's curated child env.
+                session = TerminalSession(
+                    argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
+                    journal=journal,
+                )
+            else:
+                # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
+                # namespace, so a plan's cwd rides inside plan.argv instead.
+                session = TerminalSession(
+                    plan.argv, cwd=None, cols=cols, rows=rows,
+                    env=plan.env, pass_fds=plan.pass_fds, journal=journal,
+                    openpty=pty.openpty if plan.openpty is None else plan.openpty,
+                )
+        except BaseException:
+            if journal is not None:
+                journal.close()
+            raise
         try:
             session.wait_idle()  # inherit the library settle policy
         except BaseException:
@@ -372,7 +415,8 @@ class ImptyDriver:
 
         session = self._require()
         if path is None:
-            fd, path = tempfile.mkstemp(prefix="impty-", suffix=".png")
+            fd, path = tempfile.mkstemp(
+                prefix="impty-", suffix=".png", dir=self._snapshot_dir)
             os.close(fd)
         bg, fg = light_surface() if light else (None, None)
         with session.paused():  # freeze pyte while render reads the raw screen buffer

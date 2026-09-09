@@ -23,6 +23,7 @@ from imp.agents.tools.errors import PermissionDenied
 from imp.engine.sandbox import SandboxOpenFailed, SandboxPolicy, SandboxSpawn
 from imp.paths import project_state_dir
 from tests.conftest import _pid_gone_or_zombie
+from tests.impty.e2e_support import can_pty
 
 
 def _await_death(pid: int, complaint: str) -> None:
@@ -1075,7 +1076,7 @@ def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(
     closed: list[str] = []
 
     async def _main() -> object:
-        driver = attach_impty_driver(ctx)
+        driver = attach_impty_driver(ctx, journal_dir=tmp_path)
         assert ctx.impty_driver is driver
         # The hook is live: it plans a join rather than declining.
         plan = await asyncio.to_thread(lambda: driver._sandbox(["true"], None, None))
@@ -1089,6 +1090,67 @@ def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(
     # The DRIVER survives its session: close() clears only the session, so a later
     # start() opens one in whichever namespace is current.
     assert ctx.impty_driver is driver
+
+
+_JOURNAL_CHILD = (
+    "import os, time\n"
+    "os.write(1, b'JOURNAL-MARKER\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_the_attached_driver_journals_into_the_step_dir_and_snapshots_into_the_quest(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.runner import QuestContext
+    from imp.agents.tools.context import attach_impty_driver
+
+    quest_dir = tmp_path / "quests" / "q1"
+    transcript = quest_dir / "steps" / "implement" / "coder"   # what both providers pass
+    transcript.mkdir(parents=True)
+    (quest_dir / "artifacts").mkdir()
+    ctx = _ctx(tmp_path)
+    ctx.quest_context = QuestContext(
+        title="T", project_root=tmp_path, workflow_dir=tmp_path, quest_dir=quest_dir)
+
+    async def _main() -> str:
+        driver = attach_impty_driver(ctx, journal_dir=transcript)
+        try:
+            await asyncio.to_thread(
+                lambda: driver.start([sys.executable, "-c", _JOURNAL_CHILD]))
+            return await asyncio.to_thread(driver.snapshot)
+        finally:
+            await asyncio.to_thread(driver.close)
+
+    reply = asyncio.run(_main())
+    png = Path(reply[len("[wrote "):-1])
+    assert png.parent == quest_dir / "snapshots"
+    assert png.stat().st_size > 0
+    assert b"JOURNAL-MARKER" in (transcript / "pty-1.raw").read_bytes()
+    # quest_dir/artifacts/** is the ONLY git-committed location (_harvest_artifacts
+    # walks it into refs/imp/artifacts/<id>), so a real drive must leave it untouched.
+    assert list((quest_dir / "artifacts").rglob("*")) == []
+
+
+def test_a_context_with_no_quest_dir_gets_no_snapshot_dir(tmp_path: Path) -> None:
+    # The detached-agent path builds a QuestContext with neither quest_dir nor
+    # quest_home, so tool_quest_dir yields None. That is the snapshot_dir=None the
+    # driver already models (temp-file snapshots), not a new case — and not a raise.
+    from imp.agents.runner import QuestContext
+    from imp.agents.tools.context import attach_impty_driver, tool_quest_dir
+
+    ctx = _ctx(tmp_path)
+    ctx.quest_context = QuestContext(
+        title="T", project_root=tmp_path, workflow_dir=tmp_path)
+    assert tool_quest_dir(ctx) is None
+
+    async def _main() -> object:
+        return attach_impty_driver(ctx, journal_dir=tmp_path)
+
+    driver = asyncio.run(_main())
+    assert driver._snapshot_dir is None
+    assert [p.name for p in tmp_path.iterdir()] == []
 
 
 def test_a_failing_pty_close_still_reaps_the_keeper(tmp_path: Path) -> None:
@@ -1140,5 +1202,7 @@ def test_both_providers_attach_the_driver_through_the_context() -> None:
     from imp.providers import claude_code, codex_runner
     for mod in (claude_code, codex_runner):
         src = _Path(mod.__file__).read_text()
-        assert "attach_impty_driver(ctx)" in src, mod.__name__
+        assert "attach_impty_driver(" in src, mod.__name__
+        # …and with THIS step's transcript dir, which is where the pty journal lands.
+        assert "journal_dir=invocation.transcript_dir" in src, mod.__name__
         assert "ImptyDriver()" not in src, mod.__name__

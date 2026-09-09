@@ -60,6 +60,113 @@ The cwd is then the host's to resolve inside its own argv, so the session is spa
 `None` — or passing no hook at all, as `python -m impty.mcp` does — spawns the program
 bare, exactly as it always did.
 
+## The pty journal (evidence that outlives the screen)
+
+pyte keeps only the live screen plus `history` rows of scrollback — and none at all
+in the alt-screen regime — so what a program actually emitted is gone the moment it
+scrolls past. A host that wants that evidence passes a directory:
+
+```python
+ImptyDriver(journal_dir=step_dir, snapshot_dir=quest_home / "snapshots")
+TerminalSession(argv, journal=Journal(step_dir, 1))   # the layer underneath
+```
+
+Per session, numbered by a per-driver counter (a step that start/stop/starts writes
+`pty-1.*` then `pty-2.*`):
+
+```
+pty-1.raw      exactly the bytes read off the pty master
+pty-1.raw.1    the rotated predecessor
+pty-1.jsonl    the sidecar
+```
+
+Both files are opened unbuffered, so a chunk reaches the fd on the read that produced
+it and the journal survives a `SIGKILL` of the host process — the wedged-daemon case
+where it is worth most. Any `OSError`, the initial `open()` included, disables that
+session's journal and logs one warning; it never propagates into the drive. With no
+`journal_dir` (the standalone `python -m impty.mcp` server) nothing is written.
+
+**The recording boundary is the master read, never the child's `write()`.** `.raw`
+holds what `os.read` returned from the master — what a real terminal would have
+received — and the slave's line discipline sits in between, which impty never
+reconfigures. So for a cooked-mode child `.raw` legitimately contains bytes the
+program never wrote:
+
+- **echo** — keystrokes sent with `send()` reappear on the read side and are
+  journaled like any other output;
+- **`ONLCR`** — every `\n` the child writes is delivered, and recorded, as `\r\n`.
+
+A TUI that puts its tty in raw mode does neither, which is the common case for the
+drives this exists for.
+
+Purity is a property of the *writer*: the single write path into `.raw` is the one
+`chunk` variable in `TerminalSession._read_step`, so nothing the journal itself adds
+— framing, markers, a copy of sent keystrokes, pyte's CPR/DA replies — can appear
+there. That is what makes `cat pty-1.raw` in a real terminal replay the drive in full
+color with zero tooling, and the line discipline's transformations are *why* it
+replays, since a real terminal expects the `\r\n` form. There is no reader in this
+package by design: `cat` reads the `.raw`, and every sidecar line is plain JSON. A
+recording bakes in its record-time width (wrapped lines, absolute cursor
+addressing), so it is faithful at the geometry it was recorded at and nowhere else.
+Anything that would violate purity belongs in the sidecar.
+
+### The sidecar
+
+`pty-N.jsonl`, one JSON object per line. Every record carries `t` (seconds since
+session start, 3 decimals), `off` (the logical byte offset into the whole output
+stream — it keeps counting across rotation, so it names a position even in bytes that
+are no longer on disk) and `ev`:
+
+```json
+{"t":0.0,"off":0,"ev":"start","argv":["imp","list"],"cols":80,"rows":24}
+{"t":1.234,"off":4096,"ev":"resize","cols":120,"rows":40}
+{"t":2.5,"off":8192,"ev":"send","len":1}
+{"t":7.75,"off":4210688,"ev":"rotate","dropped":0}
+{"t":15.5,"off":8409088,"ev":"rotate","dropped":4210688}
+{"t":19.9,"off":8450000,"ev":"end","exit":0}
+```
+
+- `start` — the argv as spawned and the initial geometry, written at construction.
+- `resize` — the new geometry, on every `resize()`. Load-bearing: SIGWINCH is out of
+  band, so a resize leaves no trace whatever in the byte stream.
+- `send` — `len` only, never the content. It exists to segment turns, and the typed
+  bytes are already in the caller's own transcript. Not a secrecy boundary: under
+  cooked-mode echo those same keystrokes are in `.raw`.
+- `rotate` — one per rollover (see below).
+- `end` — the child's raw exit code, negative for a signal death, written once on the
+  first `close()`; `close()` is idempotent and so is the record.
+
+### Rotation
+
+`.raw` is bounded tail-first. A chunk is always written whole — it is the atomic unit
+of what was read — and only *after* it lands is the segment measured: at 4 MB or more
+`pty-N.raw` is renamed to `pty-N.raw.1`, replacing any prior one, and a fresh `.raw`
+is opened. A segment therefore lands in `[4 MB, 4 MB + 65535]` and the retained bound
+is `2 x (4 MB + 64 KiB)` — the whole-chunk overshoot, not a flat 8 MB. A cap that
+stopped recording would discard the end of the stream, which is exactly where a
+failure is.
+
+`dropped` is the cumulative size of the segments no longer reachable in any retained
+file. A rotation discards a segment only by overwriting the previous `.raw.1`, so the
+**first** rotation reports `"dropped":0` — both segments are still on disk — the
+second reports the size of the first segment, and so on. The sidecar does not rotate:
+it gets one record per tool call.
+
+### Where imp puts it
+
+imp passes the step transcript dir, `<quest_home>/steps/<phase>/<step>/`, so the
+journal sits beside that step's `stderr.log`: never committed (only `artifacts/` is
+harvested into the quest's artifact ref), reaped with the quest, archived only for a
+shelved quest you mean to resume, and masked from both the sandboxed program and any
+agent's `read_file` — the right containment for raw bytes that may carry a token.
+
+`snapshot()`'s default PNG goes to `<quest_home>/snapshots/`, created by the driver,
+instead of accumulating in the system temp dir forever; it stays readable through the
+agent's `read_file`, an explicit `snapshot(path=...)` is unaffected, and with no
+`snapshot_dir` the default is a temp file exactly as before. Both directories live
+under the quest home rather than `/tmp`, so a future `/tmp` rebind inside the sandbox
+namespace (quest `jibu68`) leaves them where they are.
+
 ## Sequences pyte can't parse (the `TerminalStream` filter)
 
 Child output goes through `impty.stream.TerminalStream` before pyte's parser. It

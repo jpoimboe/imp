@@ -670,13 +670,24 @@ def make_impty_sandbox_hook(ctx: ToolContext) -> SandboxHook:
     return hook
 
 
-def attach_impty_driver(ctx: ToolContext) -> ImptyDriver:
+def attach_impty_driver(ctx: ToolContext, *, journal_dir: Path) -> ImptyDriver:
     """This run's ImptyDriver: spawning through ctx's sandbox AND registered on
     ctx so both namespace-destroying sites can end its session. One call does
     both — a driver hooked but unregistered would outlive its own namespace, and
     one registered but unhooked would spawn on the host. Must be called on the
-    run's event loop (make_impty_sandbox_hook captures it)."""
+    run's event loop (make_impty_sandbox_hook captures it).
+
+    `journal_dir` is the step transcript dir: the pty journal lands beside
+    stderr.log, which is masked from agents, reaped with the quest and never
+    harvested into the artifact ref. Snapshots instead go to <quest_dir>/snapshots
+    in the quest state dir, since read_file must still reach the PNG path returned
+    — and to the system temp dir on a context with no quest (the detached-agent
+    path)."""
     from impty.driver import ImptyDriver
 
-    ctx.impty_driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+    quest_dir = tool_quest_dir(ctx)
+    ctx.impty_driver = ImptyDriver(
+        sandbox=make_impty_sandbox_hook(ctx), journal_dir=journal_dir,
+        snapshot_dir=None if quest_dir is None else quest_dir / "snapshots",
+    )
     return ctx.impty_driver
