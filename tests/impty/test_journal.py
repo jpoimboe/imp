@@ -425,3 +425,61 @@ def test_a_session_without_a_journal_writes_nothing(tmp_path: Path) -> None:
         s.run_to_completion(hard=30.0)
         assert "ALPHA-BETA-GAMMA" in "\n".join(s.lines())
     assert list(tmp_path.iterdir()) == []
+
+
+# Re-emits the sentinel rather than sleeping: the rotation check runs after a chunk
+# lands, so a one-shot sentinel can be rotated into .raw.1 and never reappear.
+_FLOOD_CHILD = r"""
+import os, sys, time
+blob = b"F" * 8192
+for _ in range(int(sys.argv[1])):
+    os.write(1, blob)
+while True:
+    os.write(1, b"TAIL-SENTINEL")
+    time.sleep(0.05)
+"""
+
+
+def test_the_segment_limit_is_four_megabytes() -> None:
+    assert impty.journal._SEGMENT_LIMIT == 4 * 1024 * 1024
+
+
+def test_a_flood_rotates_preserving_the_tail_within_the_retained_bound(tmp_path: Path) -> None:
+    j = Journal(tmp_path, 1)
+    j.start(["prog"], cols=80, rows=24)
+    chunk = b"Z" * 60000
+    for _ in range(210):
+        j.output(chunk)
+    j.output(b"TAIL-SENTINEL")
+    j.end(0)
+    raw = tmp_path / "pty-1.raw"
+    prev = tmp_path / "pty-1.raw.1"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "pty-1.jsonl", "pty-1.raw", "pty-1.raw.1",
+    ]
+    assert raw.read_bytes().endswith(b"TAIL-SENTINEL")
+    assert prev.stat().st_size == 4200000
+    assert raw.stat().st_size + prev.stat().st_size <= 2 * (4 * 1024 * 1024 + 65536)
+    rots = [r for r in _records(tmp_path / "pty-1.jsonl") if r["ev"] == "rotate"]
+    # dropped accumulates: a third rotation distinguishes a running total from
+    # "the size of the segment this roll overwrote".
+    assert [(r["off"], r["dropped"]) for r in rots] == [
+        (4200000, 0), (8400000, 4200000), (12600000, 8400000),
+    ]
+
+
+@_needs_pty
+def test_rotation_happens_on_the_real_drain_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(impty.journal, "_SEGMENT_LIMIT", 16384)
+    raw = tmp_path / "pty-1.raw"
+    with TerminalSession(
+        [sys.executable, "-c", _FLOOD_CHILD, "16"], journal=Journal(tmp_path, 1),
+    ):
+        assert _poll(lambda: b"TAIL-SENTINEL" in raw.read_bytes(), timeout=_JOURNAL_POLL)
+    assert (tmp_path / "pty-1.raw.1").exists()
+    rots = [r for r in _records(tmp_path / "pty-1.jsonl") if r["ev"] == "rotate"]
+    assert len(rots) >= 2
+    assert rots[0]["dropped"] == 0
+    assert rots[1]["dropped"] > 0
