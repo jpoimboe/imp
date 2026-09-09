@@ -11,17 +11,21 @@ never import from imp.engine.executor, imp.agents.*, or imp.providers.*.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import anyio
 
 
 async def interruptible_sleep(delay: float, coordinator: Any, *,
-                              tick: float = 0.1) -> None:
+                              tick: float = 0.1,
+                              wake_when: Callable[[], bool] | None = None) -> None:
     """Sleep up to `delay`, returning early (within one `tick`) if the
     coordinator requests a pause (§10) or a live retry-now (`r` keypress)
-    during a backoff wait. Without this, a long unbounded backoff would swallow
-    Ctrl-C — and the retry-now gesture — until it woke."""
+    during a backoff wait, or if the caller's own `wake_when` predicate turns
+    true. Without this, a long unbounded backoff would swallow Ctrl-C — and the
+    retry-now gesture — until it woke. `wake_when` is per-call-site on purpose:
+    callers that cannot act on the condition must not wake on it."""
     remaining = delay
     while remaining > 0:
         if coordinator is not None:
@@ -29,6 +33,8 @@ async def interruptible_sleep(delay: float, coordinator: Any, *,
                 return
             if getattr(coordinator, "retry_now_requested", False):
                 return
+        if wake_when is not None and wake_when():
+            return
         step = min(tick, remaining)
         await anyio.sleep(step)
         remaining -= step
