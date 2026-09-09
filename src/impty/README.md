@@ -185,10 +185,10 @@ drops exactly two classes of sequence whole, and nothing else:
   them and draws the payload as screen text (a kitty-graphics app splatters
   base64 across the grid).
 
-OSC (`ESC ]`) and `?`-prefixed CSI are deliberately left to pyte, which handles
-both correctly — and `?` carries the DECSET alt-screen switch `regime()` depends
-on. The filter is a byte-level state machine, not a regex, so it is safe across
-chunk boundaries and holds at most two bytes.
+OSC (`ESC ]`) and `?`-prefixed CSI are deliberately left to pyte — `?` carries the
+DECSET alt-screen switch `regime()` depends on, and `TerminalScreen` guards the few
+`?` forms pyte mis-dispatches (below). The filter is a byte-level state machine, not
+a regex, so it is safe across chunk boundaries and holds at most two bytes.
 
 Nothing is answered in a dropped sequence's place. A query impty does not
 genuinely emulate gets silence, never a fabricated reply, so a program falls back
@@ -196,7 +196,10 @@ to conservative defaults instead of being told about capabilities impty cannot
 render; `TerminalScreen` follows the same rule for private device-status queries
 (`ESC[?996n`, `ESC[?6n`), and ignores a multi-parameter device-attributes
 response echoed back by a raw-mode child rather than crashing on its arity, while
-plain CPR (`ESC[6n`) still gets its real answer. If a sequence still trips pyte,
+plain CPR (`ESC[6n`) still gets its real answer. A private-parameter SGR (`ESC[?4m`,
+which vim emits at startup) is dropped for the same reason: pyte's SGR handler takes
+no `private` argument, and the resulting error used to cost the whole read chunk. If
+a sequence still trips pyte,
 the chunk is dropped and logged rather than propagating out of a read — a
 degraded screen, not a dead session.
 

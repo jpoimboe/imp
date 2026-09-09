@@ -85,6 +85,13 @@ class TerminalScreen(pyte.HistoryScreen):
             return
         super().report_device_attributes(*modes, **kwargs)
 
+    def select_graphic_rendition(self, *attrs: int, **kwargs: Any) -> None:
+        # pyte's handler has no `private` parameter: vim's ESC[?4m raised out of
+        # feed() and cost the whole read chunk.
+        if kwargs.get("private"):
+            return
+        super().select_graphic_rendition(*attrs)
+
     # --- alt-screen entry / exit ------------------------------------------
     def set_mode(self, *modes: int, **kwargs: Any) -> None:
         if kwargs.get("private") and _ALT_MODES & set(modes):
