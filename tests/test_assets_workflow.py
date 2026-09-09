@@ -1113,7 +1113,16 @@ def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
     assert "never commit" in low
     assert "never ship" in low
     # parks a durable copy under the change-home spike dir (survives teardown)
-    assert "{{ quest.home }}/artifacts/spike/" in text
+    assert "{{ quest.home }}/spike/" in text
+
+
+def test_no_bundled_workflow_asset_names_the_retired_spike_path() -> None:
+    # `artifacts/` means committed; spike evidence is the sibling `spike/`. A
+    # dispatch site that hardcodes the old path would park into the artifact ref.
+    workflows_root = bundled_workflow_dir("default").parent
+    for path in sorted(workflows_root.rglob("*")):
+        if path.suffix in (".md", ".yaml", ".yml"):
+            assert "artifacts/spike" not in path.read_text(), path
 
 
 def test_spiker_prose_documents_copy_on_write_home() -> None:
@@ -1295,7 +1304,7 @@ _SPIKER_PARAGRAPH = (
     "Dispatch a **`spiker`** when a claim can only be settled by running code rather "
     "than reading it — runtime ordering, what a provider actually emits, whether a "
     "seam carries the value you assume. It works in a disposable worktree and parks "
-    "its script and output under `{{ quest.home }}/artifacts/spike/`; cite that "
+    "its script and output under `{{ quest.home }}/spike/`; cite that "
     "evidence in the spec so the reviewer checks it instead of re-deriving it."
 )
 
@@ -1322,7 +1331,7 @@ def test_spec_finalizer_prompt_renders_clean_in_any_lap_context(tmp_path: Path) 
             quest_home=".imp/quests/abc",
             vars={"fast_path": False, "task_total": 0}, prior_laps=laps),
             workflow_dir=bundled_workflow_dir("default"))
-        assert ".imp/quests/abc/artifacts/spike/" in out
+        assert ".imp/quests/abc/spike/" in out
         assert "{{" not in out
 
 
