@@ -258,8 +258,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_ten() -> None:
-    assert archive._DATA_VERSION == 10
+def test_data_version_bumped_to_eleven() -> None:
+    assert archive._DATA_VERSION == 11
 
 
 def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:
@@ -615,10 +615,10 @@ def test_a_forced_second_pass_leaves_the_backfilled_blob_alone(
     assert len(set(_session_costs(tmp_path, "qr002"))) == 2
 
 
-# 8, spelled out: the marker every existing install already carries. Deriving it as
+# 9, spelled out: the marker every existing install already carries. Deriving it as
 # _DATA_VERSION - 1 would sit below the constant whatever the constant is, so the
 # test would pass with the bump reverted — the literal is what pins it.
-_PREV_DATA_VERSION = 8
+_PREV_DATA_VERSION = 9
 
 
 def _started(round_: int | None = None, eid: str = "ss1") -> dict:
@@ -673,3 +673,74 @@ def test_archiving_a_post_change_quest_keeps_its_real_rounds(tmp_path: Path) -> 
 
     assert [e["payload"]["round"] for e in _events_of(tmp_path, "rnd03")
             if e["type"] == "step_started"] == [1, 2, 3]
+
+
+def test_ensure_current_backfills_a_null_provider_pin(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "pv01", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+         "workflow": "default"},
+        {"id": "pv01", "status": "merged", "step": "finalize"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+    assert not archive.data_version_path(tmp_path).exists()   # pre-migration
+
+    archive.ensure_current(tmp_path)
+
+    migrated = record.read_record(archive.records_root(tmp_path), "pv01")
+    assert migrated is not None
+    # Present and null, so a rehydrated home has the same shape as a live one and
+    # readers need no fallback.
+    assert "provider" in migrated["quest_meta"]
+    assert migrated["quest_meta"]["provider"] is None
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_an_archive_at_the_previous_data_version_gets_the_pin_backfilled(
+    tmp_path: Path,
+) -> None:
+    # The steady state of every existing install: the marker is ALREADY stamped at
+    # the old version. Without the bump it equals _DATA_VERSION, ensure_current
+    # fast-paths, and every such archive silently skips the pass.
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "pv03", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+         "workflow": "default"},
+        {"id": "pv03", "status": "merged", "step": "finalize"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+    archive.data_version_path(tmp_path).write_text(str(_PREV_DATA_VERSION))
+
+    archive.ensure_current(tmp_path)
+
+    migrated = record.read_record(archive.records_root(tmp_path), "pv03")
+    assert migrated is not None
+    assert migrated["quest_meta"]["provider"] is None
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_an_archived_pin_survives_the_hop(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "pv02", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+         "workflow": "default", "provider": "codex"},
+        {"id": "pv02", "status": "merged", "step": "finalize"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+
+    archive.ensure_current(tmp_path)
+
+    migrated = record.read_record(archive.records_root(tmp_path), "pv02")
+    assert migrated is not None
+    assert migrated["quest_meta"]["provider"] == "codex"
