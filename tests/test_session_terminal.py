@@ -2563,16 +2563,17 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
 
 
 @pytest.mark.anyio
-async def test_sandbox_toggle_reprompts_with_confirmation_after_caret(
+async def test_sandbox_off_resolves_the_parked_gate_without_reprompting(
     tmp_path: Path,
 ) -> None:
-    from imp.remote.session.server import SANDBOX_OFF_CONFIRMED
+    from imp.agents.transcript import ContinuationNote
+    from imp.remote.session.server import SANDBOX_OFF_CONFIRMED, SANDBOX_OFF_NOTE
 
     sock = str(tmp_path / "s.sock")
     server_coord = InterruptCoordinator()
     server = SessionServer(sock, hibernate=False, coordinator=server_coord)
 
-    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input",
                    "payload": {"steer_hint": "reply?"}})
@@ -2588,6 +2589,8 @@ async def test_sandbox_toggle_reprompts_with_confirmation_after_caret(
         await client.connect()
         return client
 
+    # "done" is deliberately never consumed: a regression to the re-prompt would
+    # solicit twice, return "done", and fail on both asserts below.
     replies = iter(["/sandbox off", "done"])
     solicit_calls: list[str] = []
 
@@ -2613,7 +2616,7 @@ async def test_sandbox_toggle_reprompts_with_confirmation_after_caret(
         def set_unsandboxed(self, value: bool) -> None: ...
 
     result: dict[str, Any] = {}
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
 
@@ -2628,13 +2631,12 @@ async def test_sandbox_toggle_reprompts_with_confirmation_after_caret(
                     coord=coord, solicit=_solicit, quest_id="c1", leave_mode="new")
 
             tg.start_soon(_client)
-            await wait_until(lambda: "ret" in result)
+            await wait_until(lambda: "ret" in result and len(log) == 2)
             tg.cancel_scope.cancel()
 
-    # The run only returns once the SECOND solicit's real reply resolved the gate —
-    # proving the toggle re-opened the prompt instead of hanging on a stray spinner.
-    assert result["ret"] == "done"
-    assert solicit_calls == ["reply?", "reply?"]
+    # The run returned on the injected note alone — no send_input, no second reply.
+    assert result["ret"] == ContinuationNote(text=SANDBOX_OFF_NOTE)
+    assert solicit_calls == ["reply?"]
     # Caret echo is committed before the daemon's confirmation lands.
     assert log == ["caret:/sandbox off", "confirm:" + SANDBOX_OFF_CONFIRMED]
     assert server_coord.unsandboxed is True
