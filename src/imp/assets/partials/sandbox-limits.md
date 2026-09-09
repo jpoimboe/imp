@@ -25,8 +25,9 @@ the user to type `/sandbox off` at the prompt: it drops the sandbox for this
 interactive session and the subagents it dispatches,
 so shell, file **and terminal** tools run as the user, with secrets and every masked
 path readable and writes unconfined. It is human-only — only the user can type it, and
-no agent or tool path reaches it. It re-enables itself when the step ends; remind the
-user they can type `/sandbox on` to re-confine sooner.
+no agent or tool path reaches it. Ask and end your turn — typing it resumes your step
+automatically with a note that the sandbox is off. It re-enables itself when the step ends;
+remind the user they can type `/sandbox on` to re-confine sooner.
 
 **Stack-dumping a wedged imp process needs `/sandbox off`.** Introspecting imp's *own*
 long-lived processes — especially a session daemon whose event loop looks wedged —

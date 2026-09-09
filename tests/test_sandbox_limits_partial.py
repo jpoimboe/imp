@@ -59,6 +59,15 @@ def test_partial_documents_the_pid_namespace_and_routes_usr1_through_sandbox_off
     assert "any process outside its own command" not in flat
 
 
+def test_partial_tells_the_agent_the_toggle_resumes_its_step() -> None:
+    flat = _flat(PARTIAL.read_text())
+    resumes = ("Ask and end your turn — typing it resumes your step "
+               "automatically with a note that the sandbox is off.")
+    # It lands right after the human-only clause — where the agent has just been
+    # told to ask — not stranded at the end of the section.
+    assert "no agent or tool path reaches it. " + resumes in flat
+
+
 def test_no_source_or_test_file_references_the_old_partial_name() -> None:
     assert not (PARTIAL.parent / f"{_OLD_NAME}.md").exists()
     hits = [
