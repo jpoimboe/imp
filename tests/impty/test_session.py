@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import os
+import pty
+import re
 import shutil
 import signal
 import subprocess
@@ -995,3 +998,32 @@ def test_close_reaps_the_direct_child_under_a_shells_job_control(
         if job_pid is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(job_pid, signal.SIGKILL)
+
+
+def test_the_default_allocator_is_the_stdlib_openpty() -> None:
+    # A default argument is bound at def time, so monkeypatching pty.openpty could
+    # never reach it — the default is pinned by identity here and by a real tty below.
+    default = inspect.signature(TerminalSession.__init__).parameters["openpty"].default
+    assert default is pty.openpty
+    prog = "import os; print('TTY=' + os.ttyname(0))"
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        assert s.run_to_completion(hard=30.0) == 0
+        assert re.search(r"TTY=/dev/pts/\d+", "\n".join(s.lines()))
+
+
+def test_an_injected_allocator_supplies_the_sessions_pty() -> None:
+    # The child's own ttyname is the proof: a session that ignored the injected
+    # callable would be on a DIFFERENT pts number, since this one stays open.
+    made: list[str] = []
+
+    def allocator() -> tuple[int, int]:
+        master, slave = pty.openpty()
+        made.append(os.ttyname(slave))  # the session owns both fds from here on
+        return master, slave
+
+    prog = "import os; print('TTY=' + os.ttyname(0))"
+    with TerminalSession([sys.executable, "-c", prog], openpty=allocator) as s:
+        assert s.run_to_completion(hard=30.0) == 0
+        text = "\n".join(s.lines())
+    assert len(made) == 1
+    assert f"TTY={made[0]}" in text

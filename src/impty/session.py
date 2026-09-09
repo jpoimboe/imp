@@ -123,10 +123,12 @@ class TerminalSession:
         env: Mapping[str, str] | None = None,
         pass_fds: tuple[int, ...] = (),
         history: int = 2000,
+        openpty: Callable[[], tuple[int, int]] = pty.openpty,
     ) -> None:
         self._screen = TerminalScreen(cols, rows, history=history, ratio=0.5)
         self._stream = TerminalStream(self._screen)
-        self._master, slave = pty.openpty()
+        # A callable, not a pre-made fd pair, so the session owns both fds from birth.
+        self._master, slave = openpty()
         # Forward pyte's terminal-query replies (CPR, device attributes) to the
         # program's stdin, exactly as a real terminal does.
         self._screen.reply = self._write_reply
