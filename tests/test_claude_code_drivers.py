@@ -87,13 +87,17 @@ async def test_run_closes_the_impty_session_in_teardown(
 ) -> None:
     (tmp_path / "step").mkdir(parents=True, exist_ok=True)
     closed: list[bool] = []
+    journal_dirs: list[Path | None] = []
 
     class _SpyDriver:
         # Mirrors ImptyDriver's real signature: the provider builds it through
-        # attach_impty_driver, which passes the run's sandbox hook.
-        def __init__(self, sandbox: Any = None) -> None:
+        # attach_impty_driver, which passes the run's sandbox hook, this step's
+        # transcript dir as the journal dir, and a quest-scoped snapshot dir.
+        def __init__(self, sandbox: Any = None, journal_dir: Any = None,
+                     snapshot_dir: Any = None) -> None:
             self._closed = False
             self._sandbox = sandbox
+            journal_dirs.append(journal_dir)
 
         def tool_methods(self) -> list[Any]:
             return []  # no impty tools needed for the teardown assertion
@@ -121,3 +125,5 @@ async def test_run_closes_the_impty_session_in_teardown(
     # finally still closes the driver. The real ImptyDriver.close() clears only
     # its session, so the second call is a no-op.
     assert closed == [True, True]
+    # The journal lands in THIS step's transcript dir, beside its stderr.log.
+    assert journal_dirs == [tmp_path / "step"]

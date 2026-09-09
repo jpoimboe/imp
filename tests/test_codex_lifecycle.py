@@ -167,6 +167,7 @@ async def test_codex_teardown_closes_impty_session(
 
     shutdown_calls: list[int] = []
     close_calls: list[int] = []
+    journal_dirs: list[Path | None] = []
 
     class _FakeHandle:
         url = "http://127.0.0.1:19999"
@@ -218,10 +219,12 @@ async def test_codex_teardown_closes_impty_session(
     with (
         patch("imp.providers.codex_runner.start_impty_server",
               new=_fake_start_impty),
-        # sandbox=: the provider builds the driver through attach_impty_driver,
-        # which passes the run's sandbox hook.
+        # The provider builds the driver through attach_impty_driver, which passes
+        # the run's sandbox hook, this step's transcript dir as the journal dir,
+        # and a quest-scoped snapshot dir.
         patch("impty.driver.ImptyDriver",
-              new=lambda sandbox=None: fake_driver),
+              new=lambda sandbox=None, journal_dir=None, snapshot_dir=None: (
+                  journal_dirs.append(journal_dir) or fake_driver)),
     ):
         [ev async for ev in runner.run(inv)]
 
@@ -231,3 +234,5 @@ async def test_codex_teardown_closes_impty_session(
     # lives in. The real ImptyDriver.close() clears only its session, so whichever
     # lands second is a no-op.
     assert close_calls == [1, 1], "impty_driver.close() must be called in teardown"
+    # The journal lands in THIS step's transcript dir, beside its stderr.log.
+    assert journal_dirs == [tmp_path / "tx"]

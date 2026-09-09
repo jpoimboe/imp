@@ -45,6 +45,7 @@ from imp.agents.tools.context import (
     teardown_tool_context,
     terminate_running_processes,
 )
+from imp.agents.tools.errors import PermissionDenied
 from imp.engine import worktree as wt
 from imp.engine.sandbox import (
     SandboxConfig,
@@ -1526,6 +1527,58 @@ def test_quest_steps_masked_but_artifacts_readable() -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
+def test_the_snapshot_png_is_agent_readable_while_the_pty_journal_is_masked() -> None:
+    """snapshot() returns a path the agent must be able to open, so <quest_home>/
+    snapshots/ has to stay outside every mask — while the pty journal beside
+    stderr.log stays inside the masked steps/ subtree, which is what contains raw
+    bytes that may carry a token."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-snap-reach-"))
+    try:
+        _init_repo(control)
+        wt_path = wt.create_worktree(control, "q1", "main")
+
+        state = project_state_dir(control)
+        quest_dir = state / "quests" / "q1"
+        step_dir = quest_dir / "steps" / "phase1" / "coder"
+        step_dir.mkdir(parents=True)
+        journal = step_dir / "pty-1.raw"
+        journal.write_bytes(b"RAW-PTY-BYTES\n")
+        snaps = quest_dir / "snapshots"
+        snaps.mkdir()
+        png = snaps / "impty-abc123.png"
+        png.write_bytes(b"\x89PNG\r\n")
+
+        pol = resolve_policy(
+            worktree=wt_path,
+            control_root=control,
+            quest_id="q1",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(wt_path)},
+            environ=os.environ,
+            available=True,
+            quest_dir=quest_dir,
+        )
+        ctx = ToolContext(
+            project_root=wt_path,
+            events_path=wt_path / "events.jsonl",
+        )
+        ctx.quest_context = QuestContext(
+            title="Snapshot Reach Test",
+            project_root=wt_path,
+            workflow_dir=wt_path / ".imp" / "wf",
+        )
+        ctx.base_sandbox_policy = pol
+        own_tool_context(ctx)
+
+        # authorize_fs is the single gate every fs tool funnels through, read_file
+        # included — so this IS the agent's reachability of the returned PNG.
+        assert ctx.authorize_fs(("read",), str(png)) == png
+        with pytest.raises(PermissionDenied):
+            ctx.authorize_fs(("read",), str(journal))
+    finally:
+        shutil.rmtree(control, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # B10.11  Siblings + archive invisible in-sandbox; own home read/write (AC 8)
 # ---------------------------------------------------------------------------
@@ -2496,7 +2549,7 @@ def test_teardown_closes_the_pty_session_before_the_namespace(
 
     async def _main() -> None:
         ctx = _ctx(root, _active_policy(root))
-        driver = attach_impty_driver(ctx)
+        driver = attach_impty_driver(ctx, journal_dir=root)
         real_driver_close = driver.close
 
         def spy_driver_close() -> None:
@@ -2539,7 +2592,7 @@ def test_a_namespace_rebuild_closes_the_pty_session_before_the_stale_namespace(
 
     async def _main() -> None:
         ctx = _ctx(root, _active_policy(root))
-        driver = attach_impty_driver(ctx)
+        driver = attach_impty_driver(ctx, journal_dir=root)
         real_driver_close = driver.close
 
         def spy_driver_close() -> None:
@@ -2583,7 +2636,7 @@ def test_after_a_rebuild_the_driver_reports_no_session_and_rejoins_the_new_one()
 
     async def _main() -> None:
         ctx = _ctx(root, _active_policy(root))
-        driver = attach_impty_driver(ctx)
+        driver = attach_impty_driver(ctx, journal_dir=root)
         await asyncio.to_thread(
             lambda: driver.start([sys.executable, "-c", _SLEEPER]))
         ctx.base_sandbox_policy = dataclasses.replace(
@@ -2631,7 +2684,7 @@ def test_teardown_reaps_a_setsid_grandchild_of_a_pty_program() -> None:
 
     async def _main() -> None:
         ctx = _ctx(root, _active_policy(root))
-        driver = attach_impty_driver(ctx)
+        driver = attach_impty_driver(ctx, journal_dir=root)
         screen = await asyncio.to_thread(
             lambda: driver.start([sys.executable, "-c", _SPAWNS_A_GRANDCHILD, marker]))
         assert "PTY-READY" in screen, screen
