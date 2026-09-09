@@ -258,8 +258,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_nine() -> None:
-    assert archive._DATA_VERSION == 9
+def test_data_version_bumped_to_ten() -> None:
+    assert archive._DATA_VERSION == 10
 
 
 def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:
@@ -400,6 +400,98 @@ def test_stripping_project_facts_is_idempotent(tmp_path: Path) -> None:
     fs = _final_state_of(tmp_path, "pf02")
     assert "project_facts" not in fs
     assert fs["status"] == "merged"
+
+
+_HEAD_HISTORY = {
+    "plan-writer": [
+        {"lap": 1, "outcome": "wrote plan-1", "head": "aaaa1111bbbb2222"},
+        {"lap": 2, "outcome": "revised plan-1", "head": "cccc3333dddd4444"},
+    ],
+    "plan-reviewer": [{"lap": 1, "outcome": "sent back", "head": "eeee5555ffff6666"}],
+}
+
+
+def _seed_head_bearing_record(control: Path, cid: str) -> None:
+    """An archived record whose final_state.outcome_history entries still carry the
+    pre-removal `head` sha — the shape 12 of this install's 29 records hold."""
+    store = LocalBlobStore(archive.blobs_root(control))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": cid, "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
+        {"id": cid, "status": "merged", "step": "finalize",
+         "vars": {"plan_index": 2},
+         "outcome_history": json.loads(json.dumps(_HEAD_HISTORY))},
+        events_hash)
+    record.write_record(archive.records_root(control), rec)
+    archive.rebuild_index(control)
+
+
+def test_migrate_strips_head_from_outcome_history(tmp_path: Path) -> None:
+    _seed_head_bearing_record(tmp_path, "oh01")
+
+    archive.ensure_current(tmp_path)
+
+    fs = _final_state_of(tmp_path, "oh01")
+    assert fs["outcome_history"] == {
+        "plan-writer": [
+            {"lap": 1, "outcome": "wrote plan-1"},
+            {"lap": 2, "outcome": "revised plan-1"},
+        ],
+        "plan-reviewer": [{"lap": 1, "outcome": "sent back"}],
+    }
+    assert fs["status"] == "merged"                  # nothing else disturbed
+    assert fs["vars"] == {"plan_index": 2}
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_stripping_outcome_history_head_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_head_bearing_record(tmp_path, "oh02")
+    archive._migrate_archive_blobs(tmp_path)
+
+    # write_record is sort_keys-stable, so equal bytes would not prove the record
+    # was left alone — count the writes instead.
+    writes: list[str] = []
+    real_write = record.write_record
+
+    def _spy(records_dir: Path, rec: dict) -> Path:
+        writes.append(rec["id"])
+        return real_write(records_dir, rec)
+
+    monkeypatch.setattr(record, "write_record", _spy)
+
+    archive._migrate_archive_blobs(tmp_path)         # forced re-run, marker bypassed
+
+    assert writes == []                              # nothing left to change
+    fs = _final_state_of(tmp_path, "oh02")
+    assert all("head" not in e
+               for laps in fs["outcome_history"].values() for e in laps)
+    assert [e["lap"] for e in fs["outcome_history"]["plan-writer"]] == [1, 2]
+
+
+# 9, spelled out: the marker every existing install carries today. Without the bump
+# it equals _DATA_VERSION, ensure_current fast-paths, and every such archive skips
+# the strip entirely.
+_HEAD_ERA_DATA_VERSION = 9
+
+
+def test_an_archive_at_the_head_era_version_still_gets_stripped(
+    tmp_path: Path,
+) -> None:
+    _seed_head_bearing_record(tmp_path, "oh03")
+    archive.data_version_path(tmp_path).write_text(str(_HEAD_ERA_DATA_VERSION))
+
+    archive.ensure_current(tmp_path)
+
+    fs = _final_state_of(tmp_path, "oh03")
+    assert fs["outcome_history"]["plan-reviewer"] == [{"lap": 1, "outcome": "sent back"}]
+    assert all("head" not in e
+               for laps in fs["outcome_history"].values() for e in laps)
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
 
 
 _EVENT_KEYED = [

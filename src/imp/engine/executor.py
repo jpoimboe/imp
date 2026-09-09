@@ -120,14 +120,12 @@ OUTCOME_HISTORY_K = 4
 _SNAPSHOT_CAPTURED: set[str] = set()
 
 
-def _record_outcome(
-    state: State, step_name: str, output: dict[str, Any], head: str,
-) -> None:
+def _record_outcome(state: State, step_name: str, output: dict[str, Any]) -> None:
     outcome = output.get("outcome")
     assert isinstance(outcome, str), f"outcome must be str; got {outcome!r}"
     hist = state.outcome_history.setdefault(step_name, [])
     next_lap = hist[-1]["lap"] + 1 if hist else 1
-    hist.append({"lap": next_lap, "outcome": outcome, "head": head})
+    hist.append({"lap": next_lap, "outcome": outcome})
     del hist[:-OUTCOME_HISTORY_K]
 
 
@@ -1818,7 +1816,7 @@ async def _route_agent(
                                   memory=memory)
 
     state.step_attempt = 0
-    _record_outcome(state, step.name, result.output, _worktree_head(quest))
+    _record_outcome(state, step.name, result.output)
     bounce = _enforce_clean_tree(step, quest, state, log)
     if bounce is not None:
         return bounce

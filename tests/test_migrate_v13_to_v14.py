@@ -94,4 +94,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     assert "project_facts" not in st
     assert st["memory"] == {"all.md": "n"}
     assert not list((qd / "state").glob(".state-*")) and not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 18
+    assert LAYOUT_VERSION == 19

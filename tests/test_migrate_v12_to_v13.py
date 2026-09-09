@@ -62,4 +62,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     assert _meta(qd)["workflow"] == "default"
     assert _meta(qd)["layout_version"] == 13
     assert not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 18
+    assert LAYOUT_VERSION == 19

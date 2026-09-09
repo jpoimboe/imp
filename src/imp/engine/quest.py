@@ -37,7 +37,7 @@ from imp.engine.state import (
 from imp.engine.types import SourceLoc
 from imp.paths import project_state_dir
 
-LAYOUT_VERSION = 18  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 19  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -457,6 +457,29 @@ def _migrate_v17_to_v18(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v18_to_v19(quest_dir: Path) -> None:
+    """v18->v19: outcome_history entries dropped the `head` sha (zenu96) — the plan
+    reviewer's lap-memory sha rule was its only reader. Strip the key from every
+    entry of a live home's state.json, since State.load round-trips those entries as
+    opaque dicts and would otherwise re-save the stale key forever. The state rewrite
+    precedes the version stamp so a partial failure leaves the home at v18 and the hop
+    re-runs; a home whose entries carry no head is left byte-identical. A home without
+    state.json (un-materialized seed) advances only the version stamp. The archive
+    migrates separately via _DATA_VERSION 9->10."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text())
+        entries = [e for hist in data.get("outcome_history", {}).values() for e in hist]
+        if any("head" in e for e in entries):
+            for entry in entries:
+                entry.pop("head", None)
+            _rewrite_state_json(state_path, data)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 19
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -475,6 +498,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (15, 16): _migrate_v15_to_v16,
     (16, 17): _migrate_v16_to_v17,
     (17, 18): _migrate_v17_to_v18,
+    (18, 19): _migrate_v18_to_v19,
 }
 
 

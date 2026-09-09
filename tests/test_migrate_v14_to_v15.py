@@ -60,4 +60,4 @@ def test_load_migrates_a_v14_home_end_to_end(tmp_path: Path) -> None:
     quest = Quest.load(tmp_path, "mv4")    # triggers the migration chain on load
     assert quest.vars == {}
     assert _meta(qd)["layout_version"] == LAYOUT_VERSION
-    assert LAYOUT_VERSION == 18
+    assert LAYOUT_VERSION == 19
