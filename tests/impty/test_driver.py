@@ -6,6 +6,7 @@ import pty
 import re
 import signal
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -1155,3 +1156,63 @@ def test_readme_documents_the_pty_spawn_openpty_field() -> None:
     assert "`PtySpawn(argv, env, pass_fds, openpty)`" in flat
     assert "the host's own pty allocator" in flat
     assert "`TerminalSession(openpty=…)`" in flat
+
+
+def _wrote_path(reply: str) -> Path:
+    assert reply.startswith("[wrote ") and reply.endswith("]"), reply
+    return Path(reply[len("[wrote "):-1])
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_snapshot_defaults_into_the_configured_dir_creating_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    systmp = tmp_path / "systmp"
+    systmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
+    snaps = tmp_path / "quest" / "snapshots"  # does not exist yet
+    d = ImptyDriver(snapshot_dir=snaps)
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        written = _wrote_path(d.snapshot())
+        explicit = tmp_path / "explicit.png"
+        assert _wrote_path(d.snapshot(path=str(explicit))) == explicit
+    finally:
+        d.stop()
+    assert written.parent == snaps
+    assert written.stat().st_size > 0
+    assert list(systmp.iterdir()) == []
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_snapshot_without_a_configured_dir_lands_in_the_system_temp_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    systmp = tmp_path / "systmp"
+    systmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        written = _wrote_path(d.snapshot())
+    finally:
+        d.stop()
+    assert written.parent == systmp
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_snapshot_dir_that_cannot_be_created_falls_back_to_the_system_temp_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    systmp = tmp_path / "systmp"
+    systmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(systmp))
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory\n")
+    d = ImptyDriver(snapshot_dir=blocker / "snapshots")  # must not raise
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        written = _wrote_path(d.snapshot())
+    finally:
+        d.stop()
+    assert written.parent == systmp

@@ -106,11 +106,18 @@ class ImptyDriver:
 
     def __init__(
         self, sandbox: SandboxHook | None = None, journal_dir: Path | None = None,
+        snapshot_dir: Path | None = None,
     ) -> None:
         self._session: TerminalSession | None = None
         self._sandbox = sandbox
         self._journal_dir = journal_dir
         self._sessions = 0
+        self._snapshot_dir = snapshot_dir
+        if snapshot_dir is not None:
+            try:
+                snapshot_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                self._snapshot_dir = None
 
     def _new_journal(self) -> Journal | None:
         """Per-driver numbering: a step that start/stop/starts writes pty-1.* then
@@ -388,7 +395,8 @@ class ImptyDriver:
 
         session = self._require()
         if path is None:
-            fd, path = tempfile.mkstemp(prefix="impty-", suffix=".png")
+            fd, path = tempfile.mkstemp(
+                prefix="impty-", suffix=".png", dir=self._snapshot_dir)
             os.close(fd)
         bg, fg = light_surface() if light else (None, None)
         with session.paused():  # freeze pyte while render reads the raw screen buffer
