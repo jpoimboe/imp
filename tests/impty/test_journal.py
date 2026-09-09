@@ -483,3 +483,34 @@ def test_rotation_happens_on_the_real_drain_path(
     assert len(rots) >= 2
     assert rots[0]["dropped"] == 0
     assert rots[1]["dropped"] > 0
+
+
+def _fail_rename_to(suffix: str) -> Callable[[Path, Any], Path]:
+    real = Path.replace
+
+    def failing(self: Path, target: Any) -> Path:
+        if str(target).endswith(suffix):
+            raise OSError("simulated EXDEV")
+        return real(self, target)
+
+    return failing
+
+
+def test_a_failed_rotation_rename_disables_the_journal_without_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(impty.journal, "_SEGMENT_LIMIT", 16384)
+    j = Journal(tmp_path, 1)
+    j.start(["prog"], cols=80, rows=24)
+    j.output(b"A" * 8192)
+    monkeypatch.setattr(Path, "replace", _fail_rename_to(".raw.1"))
+    with caplog.at_level("WARNING", logger="impty.journal"):
+        j.output(b"B" * 8192)   # trips the threshold; the rename fails
+        j.output(b"C" * 8192)   # journal is dark now
+        j.end(0)
+    assert not (tmp_path / "pty-1.raw.1").exists()
+    assert (tmp_path / "pty-1.raw").read_bytes() == b"A" * 8192 + b"B" * 8192
+    assert [r["ev"] for r in _records(tmp_path / "pty-1.jsonl")] == ["start"]
+    warnings = [r for r in caplog.records if r.name == "impty.journal"]
+    assert len(warnings) == 1
+    assert "pty-1.raw" in warnings[0].getMessage()

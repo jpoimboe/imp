@@ -75,9 +75,15 @@ class Journal:
     def _rotate(self, raw: BinaryIO) -> None:
         # The check runs after a whole chunk is written, never mid-chunk: the chunk is
         # the atomic unit of what was read.
-        raw.close()
-        self._raw_path.replace(self._prev_path)
-        self._raw = self._raw_path.open("wb", buffering=0)
+        # Cleared up front: a failed roll then lands in the same disabled state as a failed open.
+        self._raw = None
+        try:
+            raw.close()
+            self._raw_path.replace(self._prev_path)
+            self._raw = self._raw_path.open("wb", buffering=0)
+        except OSError as exc:
+            self._disable(self._raw_path, exc)
+            return
         self._dropped += self._prev_seg  # the predecessor this roll overwrote
         self._prev_seg = self._seg
         self._seg = 0
