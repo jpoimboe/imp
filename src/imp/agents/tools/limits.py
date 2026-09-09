@@ -77,24 +77,27 @@ BG_WAIT_MAX_S = 1200.0                   # 20 min wait budget per bash_output ca
 # --- Control-dir + VCS exclusion (structured nav tools only) ----------------
 EXCLUDED_DIRS = frozenset({".imp", ".git"})
 
+# The quest-home subdirs the nav carve-out surfaces through that exclusion.
+VISIBLE_QUEST_SUBDIRS = frozenset({"artifacts", "spike"})
 
-def within_artifacts(rel: Path) -> bool:
-    """True when `rel` (worktree-relative) IS a quest's artifacts subtree or sits
-    inside it: .imp/quests/<id>/artifacts[/...]."""
+
+def within_visible_quest_subtree(rel: Path) -> bool:
+    """True when `rel` (worktree-relative) IS one of a quest's visible subtrees or
+    sits inside it: .imp/quests/<id>/{artifacts,spike}[/...]."""
     parts = rel.parts
     return (len(parts) >= 4 and parts[0] == ".imp"
-            and parts[1] == "quests" and parts[3] == "artifacts")
+            and parts[1] == "quests" and parts[3] in VISIBLE_QUEST_SUBDIRS)
 
 
-def leads_to_or_within_artifacts(rel: Path) -> bool:
-    """`within_artifacts` plus the ancestor dirs (.imp, .imp/quests,
-    .imp/quests/<id>) that lead down to a quest's artifacts subtree."""
+def leads_to_or_within_visible_quest_subtree(rel: Path) -> bool:
+    """`within_visible_quest_subtree` plus the ancestor dirs (.imp, .imp/quests,
+    .imp/quests/<id>) that lead down to a quest's visible subtrees."""
     parts = rel.parts
     if parts in {(".imp",), (".imp", "quests")}:
         return True
     if len(parts) == 3 and parts[0] == ".imp" and parts[1] == "quests":
         return True
-    return within_artifacts(rel)
+    return within_visible_quest_subtree(rel)
 
 
 class ToolAborted(Exception):

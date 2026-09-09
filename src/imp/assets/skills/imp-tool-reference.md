@@ -19,8 +19,8 @@ of a file is read or scanned.
 
 `grep` and `glob` both skip paths git ignores (build artifacts, caches,
 `.venv`, etc.) and the `.git/` dir; a quest worktree's `.imp/quests/<id>/artifacts/`
-subtree stays visible, and explicitly targeting an ignored path searches it
-anyway.
+and `.imp/quests/<id>/spike/` subtrees stay visible, and explicitly targeting an
+ignored path searches it anyway.
 
 ## read_file
 
