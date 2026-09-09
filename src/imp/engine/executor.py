@@ -1793,13 +1793,24 @@ async def _route_agent(
         _emit(log, "agent_retry", retry_payload, agent_id=None)
         coordinator.begin_backoff_wait()
         try:
-            await _interruptible_sleep(delay, coordinator)
+            await _interruptible_sleep(
+                delay, coordinator,
+                wake_when=lambda: provider_pending(quest, state))
         finally:
             coordinator.end_backoff_wait()
         # Consume the retry-now latch so it doesn't leak into the next backoff sleep.
         resumed_early = coordinator.take_retry_now()
-        _emit(log, "backoff_ended",
-              {"reason": "retry_now" if resumed_early else "elapsed"}, agent_id=None)
+        # Named in the order the sleep tests them, so the bracket closes on the
+        # cause that actually ended the wait. A pause keeps today's `elapsed`.
+        if coordinator.should_pause:
+            ended = "elapsed"
+        elif resumed_early:
+            ended = "retry_now"
+        elif provider_pending(quest, state):
+            ended = "provider_switch"
+        else:
+            ended = "elapsed"
+        _emit(log, "backoff_ended", {"reason": ended}, agent_id=None)
         if hinted:
             hint_exempt_sleeps += 1
         else:
@@ -1809,6 +1820,21 @@ async def _route_agent(
         if coordinator.should_pause:
             _reconcile_provider(quest, state, workflow, on_event)
             return Pause(), None, {}
+        if _reconcile_provider(quest, state, workflow, on_event):
+            # keep/balance/restarted are computed above `while True:` — continuing
+            # the loop would re-invoke with the stale locals and drive a resumed
+            # entry into restore_rollout. A fresh entry recomputes them and
+            # crosses the retirement guard. is_resume rides unchanged: forcing it
+            # either way would defeat one of the guard's two limbs.
+            return await _route_agent(
+                step, workflow, quest, state, log,
+                user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                on_event=on_event, wrapper_text=wrapper_text,
+                is_resume=is_resume, test_gates=test_gates,
+                pythonpath=pythonpath, undecided=undecided, headless=headless,
+                autonomous=autonomous, sandbox_policy=sandbox_policy,
+                seed_opening=seed_opening,
+                reincarnation_text=reincarnation_text, memory=memory)
 
     if result.paused:
         if result.awaiting_user:

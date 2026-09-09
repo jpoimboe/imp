@@ -1110,7 +1110,7 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
 ) -> None:
     from imp.engine import executor
     # §10: no _BACKOFF_SCHEDULE; patch the interruptible sleep to be instant.
-    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+    async def _instant_sleep(delay, coordinator, **_kw):  # type: ignore[misc]
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
@@ -1151,7 +1151,7 @@ async def test_retry_budget_pauses_with_retry_ceiling(
     from imp.engine import executor
     # Tiny budget so the first retry delay (1.0s) exceeds it on attempt 1.
     monkeypatch.setattr(executor, "budget_for", lambda category: 0.5)
-    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+    async def _instant_sleep(delay, coordinator, **_kw):  # type: ignore[misc]
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
@@ -1194,7 +1194,7 @@ async def test_auth_budget_exhaustion_pauses_with_reauth_needed(
     from imp.engine import executor
     # Tiny budget so the first retry delay (1.0s) exceeds it on attempt 1.
     monkeypatch.setattr(executor, "budget_for", lambda category: 0.5)
-    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+    async def _instant_sleep(delay, coordinator, **_kw):  # type: ignore[misc]
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
@@ -1234,7 +1234,7 @@ async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
     cumulative delay crosses 120 s (123 s after 7 retries) keeps retrying and
     completes. Under the old 120 s budget this run paused at attempt 7."""
     from imp.engine import executor
-    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+    async def _instant_sleep(delay, coordinator, **_kw):  # type: ignore[misc]
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
@@ -5463,7 +5463,7 @@ async def test_step_level_sticky_retry_rides_out_unknown(
     tmp_path: Path, monkeypatch,
 ) -> None:
     from imp.engine import executor
-    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+    async def _instant_sleep(delay, coordinator, **_kw):  # type: ignore[misc]
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
@@ -5516,7 +5516,7 @@ async def test_step_level_sticky_flap_gives_up_at_budget(
     # Budget admits the 1.0s network retry (cum 1.0) and the 2.0s sticky retry
     # (cum 3.0), then caps the 4.0s third delay (3.0 + 4.0 = 7.0 > 3.5).
     monkeypatch.setattr(executor, "budget_for", lambda category: 3.5)
-    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+    async def _instant_sleep(delay, coordinator, **_kw):  # type: ignore[misc]
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 

@@ -122,7 +122,7 @@ async def test_backoff_persists_resume_continue_before_sleep(
 
     seen_on_disk: list[tuple[str | None, bool]] = []
 
-    async def _capture_sleep(_delay: float, _coord: Any) -> None:
+    async def _capture_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
         st = State.load(quest.state_dir)
         seen_on_disk.append((st.resume_pending, st.resume_should_continue))
 
@@ -164,7 +164,7 @@ async def test_backoff_respawn_receives_resume_should_continue(
     provider = _RecordingProvider(stalls=1)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
 
-    async def _no_sleep(_delay: float, _coord: Any) -> None:
+    async def _no_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
@@ -251,7 +251,7 @@ async def test_completion_clears_resume_pair(
         "fake", env_check=lambda: True,
         factory=lambda _m: _prov)
 
-    async def _no_sleep(_delay: float, _coord: Any) -> None:
+    async def _no_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)

@@ -111,7 +111,7 @@ async def test_subagent_after_go_live_retry_inherits_the_reconciled_policy(
     script_path.write_text(json.dumps(script))
     monkeypatch.setenv("IMP_SCRIPTED_SCRIPT", str(script_path))
 
-    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
         return None
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)

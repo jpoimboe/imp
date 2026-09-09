@@ -72,7 +72,7 @@ async def test_hinted_delay_is_budget_exempt_and_completes(
     provider = _ScriptProvider([(True, 7200.0), (True, 7200.0), (True, 7200.0)])
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
 
-    async def _no_sleep(_delay: float, _coord: Any) -> None:
+    async def _no_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
         return None
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
@@ -98,7 +98,7 @@ async def test_fourth_hinted_sleep_falls_back_to_budgeted(
     provider = _ScriptProvider([(True, 7200.0)] * 6)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
 
-    async def _no_sleep(_delay: float, _coord: Any) -> None:
+    async def _no_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
         return None
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
@@ -129,7 +129,7 @@ async def test_blind_retries_after_hinted_sleep_still_reach_ceiling(
 
     monkeypatch.setattr("imp.engine.executor.budget_for", lambda _category: 5.0)
 
-    async def _no_sleep(_delay: float, _coord: Any) -> None:
+    async def _no_sleep(_delay: float, _coord: Any, **_kw: Any) -> None:
         return None
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
