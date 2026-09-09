@@ -1303,18 +1303,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             _emit_cli_error(f"{block}")
             return 2
 
-    model_arg = getattr(args, "model", None)
-    if model_arg is not None:
-        from imp.cli.model_command import validate_model_available
-        from imp.providers.effective import load_effective_config
-        from imp.providers.resolve import available_providers
-        config = load_effective_config(control_root=control).config
-        reason = validate_model_available(
-            model_arg, available=available_providers(config))
-        if reason is not None:
-            _emit_cli_error(f"{reason}")
-            return 2
-
     non_interactive = bool(getattr(args, "non_interactive", False))
     autonomous = bool(getattr(args, "autonomous", False))
 
@@ -1375,7 +1363,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # An empty reply falls back to the unseeded path (the opening step
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
-    opening_model = opening_model_sink.get("model") or model_arg
+    opening_model = opening_model_sink.get("model")
     opening_unsandboxed = bool(opening_sandbox_sink.get("unsandboxed"))
 
     # Persist the finalized intent so it survives any resume (including a restart
@@ -3707,16 +3695,6 @@ def _cmd_config_unset(args: argparse.Namespace) -> int:
                      control_root=_settings_root())
 
 
-def _model_arg_type(value: str) -> str:
-    """argparse type= for --model: reject malformed provider:model syntax."""
-    from imp.providers.model_arg import ModelArgError, parse_model_arg
-    try:
-        parse_model_arg(value)
-    except ModelArgError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-    return value
-
-
 class SplitAppend(argparse.Action):
     """Accumulate a repeatable list option, comma-splitting each value; blanks dropped."""
 
@@ -3988,10 +3966,6 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Base the quest on an existing BRANCH instead of "
                             "the configured default-base. BRANCH must already "
                             "exist.")
-    p_new.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
-                       help="Run the opening step under a chosen model "
-                            "(provider:model or bare model); the same override as "
-                            "typing /model at the opening prompt.")
     p_new.add_argument("--provider", metavar="NAME", default=None,
                        help="Run this quest on NAME, whatever the configured "
                             "provider order is.")
@@ -4013,10 +3987,6 @@ def _build_parser() -> argparse.ArgumentParser:
                              "still pause for a human. Independent of --headless.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Alias for the positional opening message.")
-    p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
-                        help="Run the opening step under a chosen model "
-                             "(provider:model or bare model); the same override as "
-                             "typing /model at the opening prompt.")
     p_chat.add_argument("--provider", metavar="NAME", default=None,
                         help="Run this quest on NAME, whatever the configured "
                              "provider order is.")

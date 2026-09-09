@@ -35,7 +35,7 @@ def _ns(**over: object) -> argparse.Namespace:
     base = dict(
         base=None, workflow=None, idea=None, title=None,
         non_interactive=True, autonomous=False, message=None,
-        opening="do a thing", depends_on=None, model=None, provider=None)
+        opening="do a thing", depends_on=None, provider=None)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -261,3 +261,22 @@ def test_apply_new_background_records_the_pin_and_calls_spawn(
     (quest_id,) = main._iter_quest_ids(tmp_path)
     assert Quest.load(tmp_path, quest_id).provider == "codex"
     assert spawned, "spawn.start_quest was not called"
+
+
+def test_new_parser_rejects_the_removed_model_flag(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main._build_parser().parse_args(
+            ["new", "x", "--model", "anthropic:claude-fable-5"])
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: --model" in capsys.readouterr().err
+
+
+def test_chat_parser_rejects_the_removed_model_flag(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main._build_parser().parse_args(["chat", "--model", "claude-fable-5"])
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: --model" in capsys.readouterr().err
+
+
+def test_the_model_arg_type_validator_is_gone() -> None:
+    assert not hasattr(main, "_model_arg_type")
