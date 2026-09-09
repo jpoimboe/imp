@@ -86,7 +86,10 @@ so a mockup keeps its colors and a short sample can sit inline. An agent cannot
 emit the ESC byte, so a bare `[1;33m` in either place has the escape restored
 first — never after a `^[`, which is a defused code being shown as itself.
 Every other control byte, and any real escape outside a fence, still renders as
-`^[`. Color-off output and the `--md`/`--html` exports strip SGR entirely.
+`^[`. Color-off output and the `--md`/`--html` exports strip SGR entirely, as does
+the Telegram relay — with no renderer to re-arm anything, it strips *all* terminal
+escapes at the outbound seam (`render_text.strip_terminal_escapes`), bare spellings
+and cursor moves included.
 
 ## See also
 
