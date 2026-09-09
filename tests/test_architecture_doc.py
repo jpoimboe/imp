@@ -657,6 +657,15 @@ def _phase_section(text: str, phase: str) -> str:
     return text.split(f"### Phase {phase}", 1)[1].split("\n### ", 1)[0]
 
 
+def test_architecture_states_the_artifacts_means_committed_boundary() -> None:
+    text = ARCH.read_text()
+    assert ("| `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, "
+            "`artifacts/`, `spike/`, `progress.md`, and the `workflow/` snapshot |") in text
+    assert "`artifacts/` means committed: everything under it is journaled by the engine" in text
+    assert ("Throwaway spiker evidence is deliberately outside that boundary, in the sibling "
+            "`spike/`, which the engine never journals — it dies with the quest home.") in text
+
+
 def test_architecture_documents_lane_eviction_and_restore() -> None:
     # the phase prose is hard-wrapped; compare against a whitespace-flattened copy.
     # Flatten AFTER _phase_section, which bounds the section on "\n### ".

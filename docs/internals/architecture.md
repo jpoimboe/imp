@@ -26,7 +26,7 @@ A project's runtime state lives **outside** its checkout, in a per-project state
 
 | Under the state directory | Holds |
 |---|---|
-| `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, `artifacts/`, `progress.md`, and the `workflow/` snapshot |
+| `quests/<id>/` | the quest home — `quest.json`, `state/`, `events.jsonl`, `artifacts/`, `spike/`, `progress.md`, and the `workflow/` snapshot |
 | `worktrees/<id>/` | the quest's git worktree, on branch `imp/<id>` |
 | `archive/` | completed quests: content-addressed blobs, immutable records, SQLite index |
 | `config.yaml` | the local config layer (`imp config set --local`) |
@@ -368,7 +368,7 @@ These are dispatched via `subagents:` frontmatter and are **never** a workflow s
 
 ### Data files
 
-These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. Everything under `artifacts/` is journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*), which is what keeps it readable after the worktree is pruned.
+These live in the quest home under the state directory (see *Where state lives*); an agent in a worktree reaches them through `.imp/quests/<id>/`. `artifacts/` means committed: everything under it is journaled by the engine to the quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*), which is what keeps it readable after the worktree is pruned. Throwaway spiker evidence is deliberately outside that boundary, in the sibling `spike/`, which the engine never journals — it dies with the quest home.
 
 The columns list the **principal** writers and readers, not an exhaustive census —
 `deferred.md` in particular is appended to by many agents (any agent may file a
