@@ -2980,3 +2980,33 @@ def test_tty_and_a_write_to_it_work_in_a_joined_session() -> None:
         assert "WROTE=0" in joined, joined
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_killing_the_ns_init_under_a_joined_session_ends_it_like_an_eof() -> None:
+    """tty-naming AC 5(b): the pinned devpts dirfd keeps the keeper's devpts SUPERBLOCK alive
+    after the ns-init dies, so the pty does not vanish under a live session — the
+    payload dies of the pid namespace's SIGKILL, the master goes EIO, and impty
+    already maps that to EOF. Same end state as before the pty moved into the
+    keeper, which is what makes this a lifetime regression test rather than a new
+    guarantee."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _COOKED]
+    try:
+        ctx = _ctx(root, _active_policy(root))
+
+        def _drive(d: ImptyDriver) -> str:
+            d.start(argv)
+            _await_screen(d, "COOKED-READY")  # polled: never settle on a silent payload
+            ns = ctx.sandbox_ns
+            assert ns is not None
+            os.kill(ns.ns_init_pid, signal.SIGKILL)
+            _poll(lambda: "alive=False" in d.view(),
+                  what="the joined payload dying with its pid namespace")
+            return d.stop()
+
+        screen = _drive_joined(ctx, _drive)
+        assert screen.splitlines()[0] == "[stopped: exit=SIGKILL]", screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
