@@ -25,6 +25,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from impty import view
+from impty.journal import Journal
 from impty.screen import Regime, TerminalScreen
 from impty.stream import TerminalStream
 from impty.view import Cell
@@ -124,6 +125,7 @@ class TerminalSession:
         pass_fds: tuple[int, ...] = (),
         history: int = 2000,
         openpty: Callable[[], tuple[int, int]] = pty.openpty,
+        journal: Journal | None = None,
     ) -> None:
         self._screen = TerminalScreen(cols, rows, history=history, ratio=0.5)
         self._stream = TerminalStream(self._screen)
@@ -154,6 +156,9 @@ class TerminalSession:
                 pass_fds=pass_fds,
                 preexec_fn=_make_controlling_tty,
             )
+            self._journal = journal
+            if journal is not None:
+                journal.start(argv, cols, rows)
         except BaseException:
             os.close(self._master)
             raise
@@ -349,6 +354,8 @@ class TerminalSession:
             raise
         if not chunk:
             return _StepResult.EOF
+        if self._journal is not None:
+            self._journal.output(chunk)
         try:
             self._stream.feed(chunk)
         except Exception:
@@ -574,6 +581,8 @@ class TerminalSession:
         # master-touching method on its documented post-close no-op / EBADF path.
         self._master = -1
         self._exit_code = self._proc.wait()
+        if self._journal is not None:
+            self._journal.end(self._exit_code)
         return self._exit_code
 
     def __enter__(self) -> TerminalSession:

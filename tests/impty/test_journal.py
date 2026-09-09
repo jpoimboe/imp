@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from pathlib import Path
@@ -9,7 +10,48 @@ from typing import Any
 import pytest
 
 import impty.journal
+from impty import TerminalSession
 from impty.journal import Journal
+from tests.impty.e2e_support import _poll, can_pty
+
+_needs_pty = pytest.mark.skipif(not can_pty(), reason="pty not available")
+
+# Generous enough never to false-fire under a saturated -n auto run, and well
+# inside the 60 s per-test outer timeout that catches a genuine hang.
+_JOURNAL_POLL = 30.0
+
+_NEUTRAL_CHILD = r"""
+import os
+os.write(1, b"ALPHA-BETA-GAMMA")
+"""
+
+_NEWLINE_CHILD = r"""
+import os
+os.write(1, b"hello\nworld\n")
+"""
+
+_FILTERED_CHILD = r"""
+import os, time
+os.write(1, b"\x1b[>4;2mVISIBLE\r\n")
+time.sleep(30)
+"""
+
+# Emits SECOND only once the test creates the flag file — so SECOND cannot exist
+# while any session call is reading, whatever the scheduler does under load.
+_FLAGGED_CHILD = r"""
+import os, sys, time
+os.write(1, b"FIRST\r\n")
+while not os.path.exists(sys.argv[1]):
+    time.sleep(0.02)
+os.write(1, b"SECOND\r\n")
+time.sleep(30)
+"""
+
+_MARKER_CHILD = r"""
+import os, time
+os.write(1, b"MARKER\r\n")
+time.sleep(30)
+"""
 
 
 def _records(path: Path) -> list[dict[str, Any]]:
@@ -110,3 +152,82 @@ def test_an_output_in_flight_when_end_arrives_is_serialized_not_torn(
     # end waited for the chunk, so it names the offset past it.
     last = _records(tmp_path / "pty-1.jsonl")[-1]
     assert (last["ev"], last["off"]) == ("end", 4)
+
+
+@_needs_pty
+def test_start_record_matches_the_spawn(tmp_path: Path) -> None:
+    argv = [sys.executable, "-c", _NEUTRAL_CHILD]
+    with TerminalSession(argv, cols=100, rows=30, journal=Journal(tmp_path, 1)) as s:
+        s.run_to_completion(hard=30.0)
+    first = _records(tmp_path / "pty-1.jsonl")[0]
+    assert first["ev"] == "start"
+    assert first["argv"] == argv
+    assert (first["cols"], first["rows"]) == (100, 30)
+
+
+@_needs_pty
+def test_raw_is_byte_exact_for_a_line_discipline_neutral_payload(tmp_path: Path) -> None:
+    with TerminalSession(
+        [sys.executable, "-c", _NEUTRAL_CHILD], journal=Journal(tmp_path, 1),
+    ) as s:
+        s.run_to_completion(hard=30.0)
+    assert (tmp_path / "pty-1.raw").read_bytes() == b"ALPHA-BETA-GAMMA"
+
+
+@_needs_pty
+def test_onlcr_expansion_is_recorded_as_delivered(tmp_path: Path) -> None:
+    # The master delivers what the line discipline produced, not the child's
+    # write() buffer: every \n arrives as \r\n and is journaled that way.
+    with TerminalSession(
+        [sys.executable, "-c", _NEWLINE_CHILD], journal=Journal(tmp_path, 1),
+    ) as s:
+        s.run_to_completion(hard=30.0)
+    assert (tmp_path / "pty-1.raw").read_bytes() == b"hello\r\nworld\r\n"
+
+
+@_needs_pty
+def test_raw_holds_the_bytes_the_stream_filter_drops(tmp_path: Path) -> None:
+    with TerminalSession(
+        [sys.executable, "-c", _FILTERED_CHILD], journal=Journal(tmp_path, 1),
+    ) as s:
+        assert s.wait_idle(idle=0.2, hard=30.0)
+        text = "\n".join(s.lines())
+    assert b"\x1b[>4;2m" in (tmp_path / "pty-1.raw").read_bytes()
+    assert "VISIBLE" in text
+    assert "4;2m" not in text
+
+
+@_needs_pty
+def test_bytes_the_background_drainer_reads_are_journaled(tmp_path: Path) -> None:
+    raw = tmp_path / "pty-1.raw"
+    flag = tmp_path / "go"
+    with TerminalSession(
+        [sys.executable, "-c", _FLAGGED_CHILD, str(flag)], journal=Journal(tmp_path, 1),
+    ) as s:
+        assert s.wait_idle(idle=0.2, hard=30.0)
+        assert b"FIRST" in raw.read_bytes()
+        # Released only now, after the last session call returned: nothing but the
+        # background drainer can read SECOND, so capture must sit at the shared
+        # drain point rather than in a caller.
+        flag.touch()
+        assert _poll(lambda: b"SECOND" in raw.read_bytes(), timeout=_JOURNAL_POLL)
+
+
+@_needs_pty
+def test_output_and_start_record_are_on_disk_before_close(tmp_path: Path) -> None:
+    raw = tmp_path / "pty-1.raw"
+    with TerminalSession(
+        [sys.executable, "-c", _MARKER_CHILD], journal=Journal(tmp_path, 1),
+    ) as s:
+        # Each poll opens a fresh handle sharing no buffer with the writer.
+        assert _poll(lambda: b"MARKER" in raw.read_bytes(), timeout=_JOURNAL_POLL)
+        assert [r["ev"] for r in _records(tmp_path / "pty-1.jsonl")] == ["start"]
+        assert s.is_alive()
+
+
+@_needs_pty
+def test_a_session_without_a_journal_writes_nothing(tmp_path: Path) -> None:
+    with TerminalSession([sys.executable, "-c", _NEUTRAL_CHILD], journal=None) as s:
+        s.run_to_completion(hard=30.0)
+        assert "ALPHA-BETA-GAMMA" in "\n".join(s.lines())
+    assert list(tmp_path.iterdir()) == []
