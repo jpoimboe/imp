@@ -654,6 +654,27 @@ def provider_registry():
     return register
 
 
+@pytest.fixture
+def floor_availability():
+    """Re-register every BUILTIN_FLOOR provider with a controlled env_check,
+    keeping its real tier table so the merged config still carries the floor's
+    models; `factory` replaces every vendor's runner factory when given. The
+    autouse _reset_provider_registry fixture owns teardown."""
+    from imp.providers import BUILTIN_FLOOR, register_builtin_providers, resolve
+
+    def apply(available, factory=None):
+        resolve.reset_providers_for_tests()
+        register_builtin_providers()
+        for name, entry in BUILTIN_FLOOR.items():
+            real_factory = resolve._PROVIDERS[name][1]
+            resolve.register_provider(
+                name, env_check=lambda n=name: n in available,
+                factory=factory or real_factory,
+                tier_defaults=entry.tier_defaults, env_var=entry.env_var)
+
+    return apply
+
+
 def _spin_hold_lock(lock_path: str, release_flag: str, ready_flag: str) -> None:
     from imp.engine.state import ProjectLock
     with ProjectLock(Path(lock_path)).acquire():

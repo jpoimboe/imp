@@ -97,6 +97,31 @@ def auth_hint_lines(names: Iterable[str]) -> list[str]:
     return [f"  {n} — {BUILTIN_FLOOR[n].auth_hint}" for n in names if n in BUILTIN_FLOOR]
 
 
+def selectable_providers() -> list[str]:
+    """Floor entries a quest can be pinned to, in floor order: a full tier table
+    is what keeps a pinned resolve from failing at the tier map."""
+    return [n for n, e in BUILTIN_FLOOR.items() if e.tier_defaults is not None]
+
+
+def provider_choice_error(name: str) -> str | None:
+    """None when NAME is selectable and available; otherwise the line to show the
+    user. The surface adds its own prefix (`--provider: ` for the flag, none for
+    the slash command)."""
+    from imp.providers.resolve import provider_is_available
+
+    selectable = selectable_providers()
+    if name not in selectable:
+        here = [n for n in selectable if provider_is_available(n)]
+        setup = [n for n in selectable if n not in here]
+        groups = f"available here: {', '.join(here)}"
+        if setup:
+            groups += f"; needs setup: {', '.join(setup)}"
+        return f"unknown provider {name!r} ({groups})"
+    if not provider_is_available(name):
+        return f"{name} is not available — {BUILTIN_FLOOR[name].auth_hint}"
+    return None
+
+
 def _thunks(module: str) -> tuple[Callable[[], bool], Callable[[str], Provider]]:
     """Import-on-call thunks: env_check and factory look up module attributes per call."""
     def env_check() -> bool:

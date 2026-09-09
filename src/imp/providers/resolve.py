@@ -149,6 +149,15 @@ def available_providers(config: Config) -> list[str]:
     return out
 
 
+def provider_is_available(name: str) -> bool:
+    """One registered vendor's env_check, asked by name. Unlike
+    available_providers this ignores config.providers: a per-quest pin reaches a
+    vendor the configured order never names."""
+    _ensure_builtins()
+    entry = _PROVIDERS.get(name)
+    return entry is not None and entry[0]()
+
+
 def _differ_tier(candidate_provider: str, candidate_model: str,
                  tgt_provider: str, tgt_model: str) -> int:
     """1 = different vendor (best), 2 = same vendor different model,
