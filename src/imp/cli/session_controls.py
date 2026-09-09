@@ -13,6 +13,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_FORCE,
     CONTROL_RETRY_NOW,
     CONTROL_SET_MODEL,
+    CONTROL_SET_PROVIDER,
     CONTROL_SET_SANDBOX,
 )
 
@@ -41,6 +42,9 @@ class SessionControls:
 
     async def set_model(self, arg: str) -> None:
         await self._client.send_control(CONTROL_SET_MODEL, arg)
+
+    async def set_provider(self, name: str) -> None:
+        await self._client.send_control(CONTROL_SET_PROVIDER, name)
 
     async def set_sandbox(self, arg: str) -> None:
         await self._client.send_control(CONTROL_SET_SANDBOX, arg)

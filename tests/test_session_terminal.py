@@ -3278,3 +3278,84 @@ async def test_no_watchdog_thread_outlives_a_normal_leased_attach(
     assert len(spawned) == 1              # it really was armed during the attach
     assert not any(t.is_alive() for t in spawned)
     assert watched.on_terminal_gone is None
+
+
+@pytest.mark.anyio
+async def test_provider_switch_reprompts_and_reaches_the_daemon(
+    tmp_path: Path,
+) -> None:
+    # AC 21: a non-parking control typed at a solicit would otherwise leave the
+    # client blocked on gate_recv for a prompt frame that never arrives.
+    sock = str(tmp_path / "s.sock")
+    pinned: list[str] = []
+    server = SessionServer(sock, hibernate=False,
+                           coordinator=InterruptCoordinator(),
+                           set_provider=pinned.append)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input",
+                   "payload": {"steer_hint": "reply?"}})
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    replies = iter(["/provider codex", "done"])
+    solicit_calls: list[str] = []
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        solicit_calls.append(_prompt)
+        try:
+            return next(replies)
+        except StopIteration:
+            await anyio.sleep_forever()
+
+    log: list[str] = []
+    markers: list[str | None] = []
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            log.append("event:" + str(event.get("type")))
+
+        def finish(self) -> None: ...
+
+        def append_committed_reply(self, text: str) -> None:
+            log.append("caret:" + text)
+
+        def set_pending_provider(self, name: str | None) -> None:
+            markers.append(name)
+
+    result: dict[str, Any] = {}
+    with anyio.fail_after(30):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+
+            async def _run() -> None:
+                result["ret"] = await server.serve(run_fn)
+
+            tg.start_soon(_run)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, quest_id="c1",
+                    leave_mode="new")
+
+            tg.start_soon(_client)
+            await wait_until(lambda: "ret" in result)
+            tg.cancel_scope.cancel()
+
+    assert result["ret"] == "done"
+    assert solicit_calls == ["reply?", "reply?"]   # the prompt re-opened
+    assert pinned == ["codex"]
+    assert "caret:/provider codex" in log
+    # The marker drove the driver field and was NOT routed into the tree builder.
+    assert markers == ["codex"]
+    assert "event:provider_marker" not in log

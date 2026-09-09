@@ -176,7 +176,8 @@ async def run_terminal_client(
                             control = reply.strip()
                             if (control in ("/abandon", "/save", "/shelve", "/clear",
                                             "/sandbox on", "/sandbox off", "/compact")
-                                    or control.startswith("/model ")):
+                                    or control.startswith("/model ")
+                                    or control.startswith("/provider ")):
                                 driver.append_committed_reply(control)
                             if reply.strip() == "/abandon":
                                 if leave_state is not None:
@@ -215,6 +216,12 @@ async def run_terminal_client(
                             if reply.strip() in ("/sandbox on", "/sandbox off"):
                                 arg = reply.strip()[len("/sandbox "):].strip()
                                 await controls.set_sandbox(arg)
+                                continue
+                            if reply.strip().startswith("/provider "):
+                                # Non-parking: the daemon writes the pin,
+                                # broadcasts the marker and re-opens the prompt.
+                                name = reply.strip()[len("/provider "):].strip()
+                                await controls.set_provider(name)
                                 continue
                             if reply.strip() == "/compact":
                                 await controls.compact()
