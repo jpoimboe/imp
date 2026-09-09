@@ -239,8 +239,9 @@ def sdk_context_threshold_crossed(
     the checkpoint cutoff — claude_code's `get_context_usage()`, or codex's
     rollout `token_count` record. Unlike context_threshold_crossed (which sums
     prompt tokens against the static catalog window), this divides the
-    provider's live context_tokens / context_window, and applies the model's
-    soft cap to that window. Returns False whenever a live number is
+    provider's live context_tokens / context_window against the
+    `checkpoint_cutoff` clamp — `DEFAULT_CHECKPOINT_CEILING`, or a lower model
+    soft cap when one is set. Returns False whenever a live number is
     unavailable — the watch never fires rather than guessing.
     """
     frac = checkpoint_cutoff(limits_for(provider, model), context_window)
