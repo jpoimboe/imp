@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from imp.agents.runner import AgentInvocation, AgentRunner, Event
+from imp.engine.executor import RunResult, run_quest
+from imp.engine.quest import Quest
+from imp.providers import BUILTIN_FLOOR
+from tests.test_executor import _seed_minimal_workflow
+from tests.test_executor_provider_pin import _floor_config, _reopen
+from tests.test_provider_reconcile_points import _TWO_STEPS, _pre_resolved
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+_NEXT_STEP = "provider switched — codex takes the next step"
+
+
+def _factory(seen: list[str], quest: Quest, *, arm_on: int,
+             script: Callable[[int, AgentInvocation], list[Event]]):
+    """A provider whose runner records the model it resolved to, arms the pin
+    from inside invocation `arm_on` (what the daemon's set_provider callback
+    does to the live Quest), and then yields whatever `script` returns."""
+
+    class _Runner:
+        # Public attribute only — see tests/test_no_private_reachthroughs.py.
+        def __init__(self, model: str) -> None:
+            self.model = model
+
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            n = len(seen) + 1
+            seen.append(self.model)
+            if n == arm_on:
+                quest.set_provider("codex")
+            for event in script(n, inv):
+                yield event
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "x"
+
+        def __init__(self, model: str) -> None:
+            self.model = model
+
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner(self.model)
+
+    return lambda model: _P(model)
+
+
+@pytest.mark.anyio
+async def test_a_completed_step_confirms_the_switch_takes_the_next_step(
+    tmp_path: Path, floor_availability,
+) -> None:
+    quest, _phase, _step = _seed_minimal_workflow(tmp_path)
+    _floor_config(tmp_path)
+    (tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(_TWO_STEPS)
+    seen: list[str] = []
+    stashed: list[list[str]] = []
+
+    def _script(_n: int, _inv: AgentInvocation) -> list[Event]:
+        stashed.append(sorted(
+            p.name for p in (quest.quest_dir / "steps" / "only").glob("*.attempt-*")))
+        return [{"type": "agent_result",
+                 "payload": {"outcome": "ok", "status": "Success"}}]
+
+    floor_availability({"claude_code", "codex"},
+                       factory=_factory(seen, quest, arm_on=1, script=_script))
+    _pre_resolved(quest, "claude_code")
+    events: list[dict[str, Any]] = []
+
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    assert seen == [BUILTIN_FLOOR["claude_code"].tier_defaults["low"],
+                    BUILTIN_FLOOR["codex"].tier_defaults["low"]]
+    assert {"type": "script_output", "payload": {"stdout": _NEXT_STEP}} in events
+    assert not [e for e in events if e["type"] == "reincarnating"]
+    assert stashed == [[], []]
+    assert {pm.provider for pm in _reopen(quest).resolved_tiers.values()} == {"codex"}

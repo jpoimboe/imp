@@ -667,6 +667,7 @@ async def run_quest(
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                on_event=on_event,
                 test_gates=TestGates.from_config(config),
                 pythonpath=config.pythonpath or (),
                 undecided=Undecided.from_config(config),
@@ -1034,6 +1035,7 @@ async def _dispatch_step(
     state: State, log: EventLog, *, is_resume: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
+    on_event: EventCallback,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
     undecided: Undecided = ALL_DECIDED,
@@ -1077,6 +1079,7 @@ async def _dispatch_step(
         return await _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+            on_event=on_event,
             wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
             pythonpath=pythonpath,
             undecided=undecided,
@@ -1635,7 +1638,8 @@ async def _route_agent(
     step: Step, workflow: Workflow, quest: Quest,
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
-    coordinator: Any, wrapper_text: str | None, is_resume: bool,
+    coordinator: Any, on_event: EventCallback,
+    wrapper_text: str | None, is_resume: bool,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
     undecided: Undecided = ALL_DECIDED,
@@ -1848,6 +1852,7 @@ async def _route_agent(
             return await _route_agent(
                 step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                on_event=on_event,
                 wrapper_text=wrapper_text, is_resume=False,
                 test_gates=test_gates, pythonpath=pythonpath, undecided=undecided,
                 headless=headless,
@@ -1877,6 +1882,7 @@ async def _route_agent(
         return await _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+            on_event=on_event,
             wrapper_text=wrapper_text, is_resume=False,
             test_gates=test_gates, pythonpath=pythonpath, undecided=undecided, headless=headless,
             autonomous=autonomous,
@@ -1913,7 +1919,8 @@ async def _route_agent(
             return on_max, None, {}     # Pause (validator forbids Retry here)
         return await _route_agent(step, workflow, quest, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
-                                  coordinator=coordinator, wrapper_text=wrapper_text,
+                                  coordinator=coordinator, on_event=on_event,
+                                  wrapper_text=wrapper_text,
                                   is_resume=is_resume, test_gates=test_gates,
                                   pythonpath=pythonpath,
                                   undecided=undecided,
@@ -1937,6 +1944,7 @@ async def _route_agent(
     feedback = None
     if isinstance(action, Goto) and action.feedback is not None:
         feedback = f"{action.feedback}\n{render_output_fields(result.output)}"
+    _reconcile_provider(quest, state, workflow, on_event, step_ends=True)
     return action, feedback, muts
 
 
