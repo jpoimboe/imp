@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf
+"""One session's pty journal: `pty-N.raw` holds exactly the bytes read off the
+pty master, `pty-N.jsonl` the out-of-band facts the byte stream cannot carry —
+spawn geometry, resize, send boundaries, exit."""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import threading
+import time
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, BinaryIO
+
+
+def _write_all(fh: BinaryIO, data: bytes) -> None:
+    # Unbuffered: one write(2) per call, which the kernel is free to cut short.
+    written = 0
+    while written < len(data):
+        written += fh.write(data[written:])
+
+
+class Journal:
+    """The single write path into `.raw` is output(), so nothing the journal
+    itself produces — framing, sent keystrokes, pyte's terminal-query replies —
+    can ever appear there. Everything else goes to the sidecar."""
+
+    def __init__(self, directory: Path, index: int) -> None:
+        # close() writes `end` after releasing the session's _io_lock, so that lock does not cover
+        # every call site; this leaf lock does.
+        self._lock = threading.Lock()
+        self._t0 = time.monotonic()
+        self._off = 0
+        self._raw_path = directory / f"pty-{index}.raw"
+        self._jsonl_path = directory / f"pty-{index}.jsonl"
+        self._raw: BinaryIO | None = self._raw_path.open("wb", buffering=0)
+        self._jsonl: BinaryIO | None = self._jsonl_path.open("wb", buffering=0)
+
+    def output(self, chunk: bytes) -> None:
+        """Journal one chunk read off the master."""
+        with self._lock:
+            if self._raw is None:
+                return
+            _write_all(self._raw, chunk)
+            self._off += len(chunk)
+
+    def start(self, argv: Sequence[str], cols: int, rows: int) -> None:
+        with self._lock:
+            self._record("start", argv=list(argv), cols=cols, rows=rows)
+
+    def resize(self, rows: int, cols: int) -> None:
+        with self._lock:
+            self._record("resize", cols=cols, rows=rows)
+
+    def send(self, nbytes: int) -> None:
+        """Length only, never the content — the boundary is for turn segmentation."""
+        with self._lock:
+            self._record("send", len=nbytes)
+
+    def end(self, exit_code: int) -> None:
+        with self._lock:
+            self._record("end", exit=exit_code)
+            self._close()
+
+    # _record and _close run with _lock held.
+    def _record(self, ev: str, **fields: Any) -> None:
+        if self._jsonl is None:
+            return
+        rec: dict[str, Any] = {
+            "t": round(time.monotonic() - self._t0, 3), "off": self._off, "ev": ev,
+        }
+        rec.update(fields)
+        _write_all(self._jsonl, json.dumps(rec, separators=(",", ":")).encode() + b"\n")
+
+    def _close(self) -> None:
+        for fh in (self._raw, self._jsonl):
+            if fh is not None:
+                with contextlib.suppress(OSError):
+                    fh.close()
+        self._raw = None
+        self._jsonl = None
