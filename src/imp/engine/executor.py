@@ -368,6 +368,15 @@ def _reconcile_resolved_run(
     return changed
 
 
+def _pinned_config(quest: Quest, config: Config) -> Config:
+    """The config resolve sees: narrowed to the pin as it stands NOW, so a refresh
+    can't reintroduce the un-pinned vendor and a pin just cleared by a refused
+    switch is no longer forced."""
+    if quest.provider is None:
+        return config
+    return dataclasses.replace(config, providers=(quest.provider,))
+
+
 def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     """Seed any workflow-declared var whose key is absent from state.vars with its
     declared default. Vars are seeded from the workflow only at quest creation
@@ -467,9 +476,6 @@ async def run_quest(
             workflow_refreshed = False
         quest.reload_provider()
         config = load_effective_config(control_root=quest.control_root).config
-        if quest.provider is not None:
-            # Resolve and reconcile read this local; refresh can't reintroduce the un-pinned vendor.
-            config = dataclasses.replace(config, providers=(quest.provider,))
         state = State.load(quest.state_dir)
         quest.relink_home()
         if state.halt_condition is not None:
@@ -531,7 +537,8 @@ async def run_quest(
         # resume, so guard on the persisted map.
         did_fresh_resolve = state.resolved_tiers is None
         if did_fresh_resolve:
-            resolved_tiers, resolved_steps, details = resolve_run(workflow, config)
+            resolved_tiers, resolved_steps, details = resolve_run(
+                workflow, _pinned_config(quest, config))
             state.resolved_tiers = resolved_tiers
             state.resolved_steps = resolved_steps
             state.max_reincarnations = config.context_max_reincarnations()
@@ -545,14 +552,18 @@ async def run_quest(
                     message=Message(role="user",
                                     content=(TextBlock(text=quest.seed_opening),)),
                     subtype="intent")
-        elif workflow_refreshed:
-            if _reconcile_resolved_run(state, workflow, config):
-                state.save(quest.state_dir)
 
         # (a) Every switch armed before this run entered the step loop: `imp
         # resume --provider` on a stopped quest, /provider pre-session, and
         # /provider at a parked hold prompt (which re-enters run_quest).
+        # Ahead of the refresh merge, so an unresolvable pin is refused and
+        # cleared here rather than raising uncaught inside the merge's re-resolve.
         _reconcile_provider(quest, state, workflow, on_event)
+
+        # fresh resolve already covered the refreshed workflow
+        if not did_fresh_resolve and workflow_refreshed and _reconcile_resolved_run(
+                state, workflow, _pinned_config(quest, config)):
+            state.save(quest.state_dir)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}

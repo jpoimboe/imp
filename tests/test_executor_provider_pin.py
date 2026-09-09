@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -106,3 +107,43 @@ async def test_a_workflow_refresh_resolves_new_steps_on_the_pinned_vendor(
     # Reconcile point (a) re-points the whole map to the pin at run entry, so
     # the refresh's new step and the standing tiers agree on the pinned vendor.
     assert state.resolved_tiers["low"].provider == "codex"
+
+
+@pytest.mark.anyio
+async def test_an_unresolvable_pin_is_refused_before_a_workflow_refresh_merge(
+    tmp_path: Path, floor_availability,
+) -> None:
+    # The refresh merge must not out-run the refusal: it re-resolves against the
+    # pin too, so a pin that can no longer resolve would raise there and kill the
+    # resume instead of being refused and cleared.
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _floor_config(tmp_path)
+    floor_availability({"claude_code", "codex"}, factory=_ok_factory)
+    await run_quest(quest, on_event=lambda _e: None)     # resolves onto claude_code
+    _reopen(quest)
+    quest.set_provider("codex")
+    floor_availability({"claude_code"}, factory=_ok_factory)
+
+    (tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+        "      - {name: w2, file: agents/writer.md, tier: high, differ_from: w}\n"
+    )
+    executor_mod._SNAPSHOT_CAPTURED.clear()
+
+    events: list[dict] = []
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    assert quest.provider is None
+    state = _reopen(quest)
+    assert state.resolved_steps["w2"].provider == "claude_code"
+    assert json.loads((quest.quest_dir / "quest.json").read_text())["provider"] is None
+    assert any(
+        e["type"] == "script_output"
+        and e["payload"]["stdout"].startswith(
+            "couldn't switch to codex — staying on claude_code")
+        for e in events)
