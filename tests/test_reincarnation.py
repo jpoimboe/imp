@@ -100,7 +100,7 @@ def test_handoff_path_is_sibling_of_transcript_dir() -> None:
 
 
 def test_handoff_instruction_tells_agent_to_reply_and_stop() -> None:
-    instr = handoff_instruction(Path("/x/steps/impl/coder.handoff.md"))
+    instr = handoff_instruction()
     assert "write_file" not in instr
     assert "context limit" in instr
     assert "stop" in instr.lower()

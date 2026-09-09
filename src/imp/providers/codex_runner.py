@@ -643,7 +643,7 @@ class CodexSession(ObserveSession):
                 and sdk_context_threshold_crossed(
                     tokens, window,
                     invocation.provider_name, self.runner.model)):
-            instr = handoff_instruction(self._handoff_path_obj)
+            instr = handoff_instruction()
             self.elog.append_engine_message(
                 agent_id=self.aid,
                 message=Message(role="user", content=(TextBlock(text=instr),)),

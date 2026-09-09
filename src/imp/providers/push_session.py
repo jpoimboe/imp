@@ -355,7 +355,7 @@ class PushSession:
             # Approaching the window: inject the agent-authored handoff
             # instruction as the next user turn (the same user-message append
             # interjects use), then capture the note on the following turn.
-            instr = handoff_instruction(self._handoff_path)
+            instr = handoff_instruction()
             hmsg = Message(role="user", content=(TextBlock(text=instr),))
             self.messages.append(hmsg)
             self.transcript.append(hmsg)
