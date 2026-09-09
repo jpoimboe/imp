@@ -461,6 +461,7 @@ async def run_quest(
             _SNAPSHOT_CAPTURED.add(snapshot_key)
         else:
             workflow_refreshed = False
+        quest.reload_provider()
         config = load_effective_config(control_root=quest.control_root).config
         if quest.provider is not None:
             # Resolve and reconcile read this local; refresh can't reintroduce the un-pinned vendor.
@@ -543,6 +544,11 @@ async def run_quest(
         elif workflow_refreshed:
             if _reconcile_resolved_run(state, workflow, config):
                 state.save(quest.state_dir)
+
+        # (a) Every switch armed before this run entered the step loop: `imp
+        # resume --provider` on a stopped quest, /provider pre-session, and
+        # /provider at a parked hold prompt (which re-enters run_quest).
+        _reconcile_provider(quest, state, workflow, on_event)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
@@ -653,6 +659,9 @@ async def run_quest(
                 # a different step refills by design, above.
                 state.reset_reincarnation(f"step:{step.phase}/{step.name}")
                 resumed_step = None
+            # (b) A switch armed during a non-agent step or between steps: no
+            # agent invocation may run on the fled vendor after the arm.
+            _reconcile_provider(quest, state, workflow, on_event)
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,

@@ -650,6 +650,14 @@ class Quest:
         meta["provider"] = provider
         _write_quest_json(meta_path, meta)
 
+    def reload_provider(self) -> None:
+        """Re-read the pin onto THIS instance. Another process may have written
+        it since we were loaded, and the daemon's set_provider callback mutates
+        this same object — rebinding to a freshly loaded Quest would strand both
+        the reconcile points and the wake predicate on a copy nobody writes."""
+        meta = json.loads((self.quest_dir / "quest.json").read_text())
+        self.provider = meta.get("provider")
+
     def set_title(self, name: str) -> None:
         """Metadata-only rename: set title, rewrite quest.json, emit no event."""
         self.title = name

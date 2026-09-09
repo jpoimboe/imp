@@ -103,5 +103,6 @@ async def test_a_workflow_refresh_resolves_new_steps_on_the_pinned_vendor(
 
     state = _reopen(quest)
     assert state.resolved_steps["w2"].provider == "codex"
-    # The reconcile merges only absent keys, so the already-resolved tiers stand.
-    assert state.resolved_tiers["low"].provider == "claude_code"
+    # Reconcile point (a) re-points the whole map to the pin at run entry, so
+    # the refresh's new step and the standing tiers agree on the pinned vendor.
+    assert state.resolved_tiers["low"].provider == "codex"
