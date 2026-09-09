@@ -25,6 +25,7 @@ from imp.engine.event_migrations import (
     migrate_events,
     migrate_id_ns_event_to_block,
 )
+from imp.engine.reincarnation import write_transcript_owner
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import (
     JsonlEventLog,
@@ -37,7 +38,7 @@ from imp.engine.state import (
 from imp.engine.types import SourceLoc
 from imp.paths import project_state_dir
 
-LAYOUT_VERSION = 19  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 20  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -480,6 +481,46 @@ def _migrate_v18_to_v19(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _backfill_transcript_owners(quest_dir: Path) -> None:
+    """Label every live step transcript with the provider state.json resolves for
+    it. `steps/<phase>/<step>/` is the only dispatch layout, so the two-level glob
+    reaches exactly those directories and not the subagent transcripts nested
+    below them; `.attempt-N` stashes are never read back. resolve_run picks one
+    winner for the whole tier map, so any tier entry names the run's vendor, and a
+    per-step override names the one that actually ran that step. A home naming no
+    vendor is left unlabelled, which the dispatch-time owner check treats as not
+    matching — a fresh session rather than a foreign replay."""
+    try:
+        raw = json.loads((quest_dir / "state" / "state.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    steps = raw.get("resolved_steps") or {}
+    tiers = raw.get("resolved_tiers") or {}
+    fallback = next((pm["provider"] for pm in tiers.values()), None)
+    for tx in sorted((quest_dir / "steps").glob("*/*/transcript.jsonl")):
+        step_dir = tx.parent
+        if ".attempt-" in step_dir.name or tx.stat().st_size == 0:
+            continue
+        owner = (steps.get(step_dir.name) or {}).get("provider") or fallback
+        if owner is not None:
+            write_transcript_owner(step_dir, owner)
+
+
+def _migrate_v19_to_v20(quest_dir: Path) -> None:
+    """v19->v20: quest.json gained `provider` (the per-quest pin, null until one is
+    set) and every live step transcript records the vendor that wrote it. Backfill
+    both — every live directory, not just the one current_step names, since a
+    `resume:` edge can replay a step that finished earlier. The sidecars land
+    before the version stamp, so a partial failure leaves the home at v19 and the
+    hop re-runs; both halves are idempotent."""
+    _backfill_transcript_owners(quest_dir)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta.setdefault("provider", None)
+    meta["layout_version"] = 20
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -499,6 +540,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (16, 17): _migrate_v16_to_v17,
     (17, 18): _migrate_v17_to_v18,
     (18, 19): _migrate_v18_to_v19,
+    (19, 20): _migrate_v19_to_v20,
 }
 
 
