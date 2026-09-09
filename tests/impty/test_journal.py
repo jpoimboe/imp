@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
@@ -50,6 +51,39 @@ time.sleep(30)
 _MARKER_CHILD = r"""
 import os, time
 os.write(1, b"MARKER\r\n")
+time.sleep(30)
+"""
+
+_SLEEPER = "import time; time.sleep(30)"
+
+_HUNDRED_CHILD = r"""
+import os, time
+os.write(1, b"X" * 100)
+time.sleep(30)
+"""
+
+_COOKED_CHILD = r"""
+import sys, time
+sys.stdout.write("READY\n")
+sys.stdout.flush()
+line = sys.stdin.readline()
+sys.stdout.write("GOT=%d\n" % len(line))
+sys.stdout.flush()
+time.sleep(30)
+"""
+
+# Raw mode: no ECHO, no OPOST. The child proves the CPR reply reached it by
+# reporting the reply's LENGTH rather than echoing it, so a reply found in
+# .raw could only have been put there by the journal itself.
+_RAW_MODE_CHILD = r"""
+import os, select, time, tty
+tty.setraw(0)
+os.write(1, b"READY\r\n")
+os.write(1, b"\x1b[6n")
+reply = os.read(0, 32) if select.select([0], [], [], 20.0)[0] else b""
+os.write(1, b"CPR=%d\r\n" % len(reply))
+typed = os.read(0, 64) if select.select([0], [], [], 20.0)[0] else b""
+os.write(1, b"TYPED=%d\r\n" % len(typed))
 time.sleep(30)
 """
 
@@ -223,6 +257,79 @@ def test_output_and_start_record_are_on_disk_before_close(tmp_path: Path) -> Non
         assert _poll(lambda: b"MARKER" in raw.read_bytes(), timeout=_JOURNAL_POLL)
         assert [r["ev"] for r in _records(tmp_path / "pty-1.jsonl")] == ["start"]
         assert s.is_alive()
+
+
+@_needs_pty
+def test_cooked_echo_lands_in_raw_while_the_sidecar_records_only_the_length(
+    tmp_path: Path,
+) -> None:
+    raw = tmp_path / "pty-1.raw"
+    sidecar = tmp_path / "pty-1.jsonl"
+    with TerminalSession(
+        [sys.executable, "-c", _COOKED_CHILD], journal=Journal(tmp_path, 1),
+    ) as s:
+        assert s.wait_idle(idle=0.2, hard=30.0)
+        s.send("SECRETKEYSTROKE\r")
+        assert _poll(lambda: b"GOT=16" in raw.read_bytes(), timeout=_JOURNAL_POLL)
+    sends = [r for r in _records(sidecar) if r["ev"] == "send"]
+    assert [r["len"] for r in sends] == [16]
+    assert "SECRETKEYSTROKE" not in sidecar.read_text()
+    # The line discipline echoes it, so a faithful .raw MUST contain it: this is
+    # the pin against a future change stripping echo in the name of "purity".
+    assert b"SECRETKEYSTROKE" in raw.read_bytes()
+
+
+@_needs_pty
+def test_a_raw_mode_session_journals_neither_sent_nor_reply_bytes(tmp_path: Path) -> None:
+    raw = tmp_path / "pty-1.raw"
+    with TerminalSession(
+        [sys.executable, "-c", _RAW_MODE_CHILD], journal=Journal(tmp_path, 1),
+    ) as s:
+        assert _poll(lambda: b"CPR=" in raw.read_bytes(), timeout=_JOURNAL_POLL)
+        s.send(b"SECRETKEYSTROKE")
+        assert _poll(lambda: b"TYPED=" in raw.read_bytes(), timeout=_JOURNAL_POLL)
+    data = raw.read_bytes()
+    assert b"CPR=0" not in data  # pyte really did answer the query
+    assert b"SECRETKEYSTROKE" not in data
+    assert re.search(rb"\x1b\[\d+;\d+R", data) is None
+
+
+@_needs_pty
+def test_resize_appends_the_new_geometry(tmp_path: Path) -> None:
+    with TerminalSession(
+        [sys.executable, "-c", _SLEEPER], cols=80, rows=24, journal=Journal(tmp_path, 1),
+    ) as s:
+        s.resize(40, 120)
+    resizes = [r for r in _records(tmp_path / "pty-1.jsonl") if r["ev"] == "resize"]
+    assert [(r["cols"], r["rows"]) for r in resizes] == [(120, 40)]
+
+
+@_needs_pty
+def test_a_record_offset_counts_the_output_bytes_journaled_before_it(
+    tmp_path: Path,
+) -> None:
+    raw = tmp_path / "pty-1.raw"
+    with TerminalSession(
+        [sys.executable, "-c", _HUNDRED_CHILD], journal=Journal(tmp_path, 1),
+    ) as s:
+        assert _poll(lambda: raw.stat().st_size == 100, timeout=_JOURNAL_POLL)
+        s.resize(40, 120)
+    recs = _records(tmp_path / "pty-1.jsonl")
+    assert recs[0]["off"] == 0  # start, before any output
+    assert next(r for r in recs if r["ev"] == "resize")["off"] == 100
+
+
+@_needs_pty
+def test_close_appends_exactly_one_end_record_with_the_exit_code(tmp_path: Path) -> None:
+    sidecar = tmp_path / "pty-1.jsonl"
+    s = TerminalSession([sys.executable, "-c", _SLEEPER], journal=Journal(tmp_path, 1))
+    code = s.close()
+    assert code < 0  # signal death from close()'s stop ladder
+    recs = _records(sidecar)
+    assert recs[-1]["ev"] == "end"
+    assert recs[-1]["exit"] == code
+    assert s.close() == code
+    assert [r["ev"] for r in _records(sidecar)].count("end") == 1
 
 
 @_needs_pty

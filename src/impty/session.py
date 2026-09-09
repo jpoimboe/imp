@@ -274,6 +274,8 @@ class TerminalSession:
         # drainer's read slice is fine.
         with self._io_lock:
             os.write(self._master, data)
+            if self._journal is not None:
+                self._journal.send(len(data))
 
     def send_signal(self, sig: int = signal.SIGINT) -> None:
         """Deliver a real signal to the TERMINAL'S FOREGROUND process group, bypassing
@@ -511,6 +513,8 @@ class TerminalSession:
         with self._io_lock:
             _set_winsize(self._master, rows, cols)
             self._screen.resize(lines=rows, columns=cols)
+            if self._journal is not None:
+                self._journal.resize(rows, cols)
 
     # --- lifecycle -------------------------------------------------------
     @property
