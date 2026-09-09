@@ -154,7 +154,7 @@ to score).
     **auto-detected silently** (no prompt; under a non-truecolor pty it picks `ansi`).
   - `imp new -h` — the flag surface (`--backlog`, `--background`, `--depends-on`,
     `--workflow`, `--var`, `--autonomous`, `--headless`/`--message`, `--base`,
-    `--model`): can a new user tell which they need?
+    `--provider`): can a new user tell which they need?
   - `imp chat` — the conversation surface (own item below).
   - `imp list` — the overview: zones (in-flight / backlog / merged) legible? ids vs
     titles? Then `imp show <id>` (detail card) and the artifact view `imp show <id> spec`
@@ -178,9 +178,10 @@ to score).
 - **Slash commands at the interactive prompt** — at any imp prompt, including the opening
   `imp new` / `imp chat` intent prompt and the post-`/clear` prompt. The live `/help` is
   authoritative (read it and check it matches reality). The real client-side set is smaller
-  than a "full nine": `/help`, `/skills`, `/model <m>`, `/sandbox [on|off]`, `/compact`,
-  `/abandon`, and `/<skill>` at **every** prompt; `imp chat` (and any pre-materialized
-  conversation) additionally has `/save`, `/shelve`, `/clear`. **There is no `/list`,
+  than a "full nine": `/help`, `/skills`, `/model <m>`, `/sandbox [on|off]`,
+  `/provider [name]`, `/compact`, `/abandon`, and `/<skill>` at **every** prompt;
+  `imp chat` (and any pre-materialized conversation) additionally has `/save`,
+  `/shelve`, `/clear`. **There is no `/list`,
   `/search`, or `/resume`** client-side. Each is handled without spending a model turn; Tab
   completion covers them (`send("/sk\t")` → `/skills`), an unambiguous prefix fills and an
   ambiguous one lists candidates; Up-arrow recalls previous input; Alt+Enter (`send("\x1b\r")`)
