@@ -1009,6 +1009,37 @@ _COOKED_CHILD = (
 )
 
 
+def _next_free_fd() -> int:
+    fd = os.open(os.devnull, os.O_RDONLY)
+    os.close(fd)
+    return fd
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_repeated_failing_start_leaks_no_fds(tmp_path: Path) -> None:
+    d = ImptyDriver(journal_dir=tmp_path)
+    exceptions: list[BaseException] = []
+    try:
+        baseline = _next_free_fd()
+        for _ in range(5):
+            with pytest.raises(FileNotFoundError) as ei:
+                d.start([str(tmp_path / "nonexistent-binary")])
+            exceptions.append(ei.value)  # keep tracebacks alive; see comment below
+        after = _next_free_fd()
+        # Slack of 5 tolerates incidental fd churn while a real 4-fd-per-attempt
+        # leak over 5 attempts would produce ~20.
+        assert after - baseline < 5
+    finally:
+        d.close()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_failing_start_with_no_journal_dir_raises_file_not_found(tmp_path: Path) -> None:
+    d = ImptyDriver()
+    with pytest.raises(FileNotFoundError):
+        d.start([str(tmp_path / "nonexistent-binary")])
+
+
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_each_session_of_one_driver_gets_its_own_numbered_journal(
     tmp_path: Path,

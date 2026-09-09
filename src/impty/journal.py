@@ -107,6 +107,12 @@ class Journal:
             self._record("end", exit=exit_code)
             self._close()
 
+    def close(self) -> None:
+        """Release the fds of a journal whose session never came up: no `end`
+        record, since no session ever ran."""
+        with self._lock:
+            self._close()
+
     # _record and _close run with _lock held; _disable too, except from __init__.
     def _record(self, ev: str, **fields: Any) -> None:
         if self._jsonl is None:

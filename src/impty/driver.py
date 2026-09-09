@@ -201,22 +201,27 @@ class ImptyDriver:
             self._session = None
         plan = None if self._sandbox is None else self._sandbox(argv, cwd, env)
         journal = self._new_journal()
-        if plan is None:
-            # The merge belongs HERE, never inside TerminalSession: a session that
-            # unioned os.environ under whatever it was handed would pour the host
-            # environment into a sandboxing host's curated child env.
-            session = TerminalSession(
-                argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
-                journal=journal,
-            )
-        else:
-            # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
-            # namespace, so a plan's cwd rides inside plan.argv instead.
-            session = TerminalSession(
-                plan.argv, cwd=None, cols=cols, rows=rows,
-                env=plan.env, pass_fds=plan.pass_fds, journal=journal,
-                openpty=pty.openpty if plan.openpty is None else plan.openpty,
-            )
+        try:
+            if plan is None:
+                # The merge belongs HERE, never inside TerminalSession: a session that
+                # unioned os.environ under whatever it was handed would pour the host
+                # environment into a sandboxing host's curated child env.
+                session = TerminalSession(
+                    argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
+                    journal=journal,
+                )
+            else:
+                # cwd=None is load-bearing: Popen's cwd= resolves in the CALLER's mount
+                # namespace, so a plan's cwd rides inside plan.argv instead.
+                session = TerminalSession(
+                    plan.argv, cwd=None, cols=cols, rows=rows,
+                    env=plan.env, pass_fds=plan.pass_fds, journal=journal,
+                    openpty=pty.openpty if plan.openpty is None else plan.openpty,
+                )
+        except BaseException:
+            if journal is not None:
+                journal.close()
+            raise
         try:
             session.wait_idle()  # inherit the library settle policy
         except BaseException:

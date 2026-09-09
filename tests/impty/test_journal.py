@@ -496,6 +496,22 @@ def _fail_rename_to(suffix: str) -> Callable[[Path, Any], Path]:
     return failing
 
 
+def test_journal_close_is_safe_and_idempotent(tmp_path: Path) -> None:
+    j = Journal(tmp_path, 1)
+    j.start(["prog"], cols=80, rows=24)
+    j.output(b"some data")
+    raw_before = (tmp_path / "pty-1.raw").read_bytes()
+    jsonl_before = (tmp_path / "pty-1.jsonl").read_bytes()
+    j.close()
+    # Calls after close must not raise and must not modify files.
+    j.output(b"more data")
+    j.send(9)
+    assert (tmp_path / "pty-1.raw").read_bytes() == raw_before
+    assert (tmp_path / "pty-1.jsonl").read_bytes() == jsonl_before
+    # Second close is also safe.
+    j.close()
+
+
 def test_a_failed_rotation_rename_disables_the_journal_without_raising(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
