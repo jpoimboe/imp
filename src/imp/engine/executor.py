@@ -412,6 +412,7 @@ def _reconcile_provider(
         resolved_tiers, resolved_steps, _details = resolve_run(workflow, config)
     except (LoadError, ProviderUnavailable) as exc:
         quest.set_provider(None)
+        on_event({"type": "provider_marker", "payload": {"provider": None}})
         on_event({"type": "script_output", "payload": {
             "stdout": f"couldn't switch to {name} — staying on {was}: {exc}"}})
         return False
@@ -422,6 +423,7 @@ def _reconcile_provider(
     state.save(quest.state_dir)
     tail = ("takes the next step" if step_ends
             else "picks up this step from the event log")
+    on_event({"type": "provider_marker", "payload": {"provider": None}})
     on_event({"type": "script_output",
               "payload": {"stdout": f"provider switched — {name} {tail}"}})
     return True

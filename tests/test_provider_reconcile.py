@@ -104,8 +104,10 @@ def test_the_confirmation_names_the_vendor_and_the_disposition(
 
     _reconcile_provider(quest, state, workflow, events.append)
 
-    assert events == [{"type": "script_output", "payload": {
-        "stdout": "provider switched — codex picks up this step from the event log"}}]
+    assert events == [
+        {"type": "provider_marker", "payload": {"provider": None}},
+        {"type": "script_output", "payload": {
+            "stdout": "provider switched — codex picks up this step from the event log"}}]
 
 
 def test_step_ends_selects_the_next_step_confirmation(
@@ -118,7 +120,8 @@ def test_step_ends_selects_the_next_step_confirmation(
 
     _reconcile_provider(quest, state, workflow, events.append, step_ends=True)
 
-    assert events[0]["payload"]["stdout"] == (
+    assert events[0] == {"type": "provider_marker", "payload": {"provider": None}}
+    assert events[1]["payload"]["stdout"] == (
         "provider switched — codex takes the next step")
 
 
@@ -150,9 +153,11 @@ def test_a_raising_re_resolve_refuses_the_switch_and_keeps_the_run(
         quest, state, workflow, events.append) is False
 
     assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude_code"}
-    assert events == [{"type": "script_output", "payload": {"stdout": (
-        "couldn't switch to codex — staying on claude_code: "
-        "tier 'deep' has no model configured for provider 'codex'")}}]
+    assert events == [
+        {"type": "provider_marker", "payload": {"provider": None}},
+        {"type": "script_output", "payload": {"stdout": (
+            "couldn't switch to codex — staying on claude_code: "
+            "tier 'deep' has no model configured for provider 'codex'")}}]
 
 
 def test_a_refused_switch_clears_the_pin_so_it_cannot_wedge_a_resume(
@@ -186,5 +191,6 @@ def test_an_unavailable_pinned_vendor_is_refused_the_same_way(
         quest, state, workflow, events.append) is False
     assert {pm.provider for pm in state.resolved_tiers.values()} == {"claude_code"}
     assert quest.provider is None
-    assert events[0]["payload"]["stdout"].startswith(
+    assert events[0] == {"type": "provider_marker", "payload": {"provider": None}}
+    assert events[1]["payload"]["stdout"].startswith(
         "couldn't switch to codex — staying on claude_code: ")

@@ -469,6 +469,10 @@ class SessionServer:
         elif action == CONTROL_SET_PROVIDER and self._set_provider is not None:
             assert reason is not None
             self._set_provider(reason)
+            # Transient: broadcast-only via _emit, never the event log, so a
+            # later attach cannot replay a marker its reconcile already cleared.
+            self._emit({"type": "provider_marker",
+                        "payload": {"provider": reason}})
             if self._pending_prompt is not None:
                 self._emit(self._pending_prompt)
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:

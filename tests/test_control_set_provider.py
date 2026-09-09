@@ -70,7 +70,9 @@ async def test_the_handler_re_opens_a_parked_prompt(
 
     await server._dispatch_control(CONTROL_SET_PROVIDER, "codex")
 
-    assert broadcasts == [prompt]
+    assert broadcasts == [
+        {"type": "provider_marker", "payload": {"provider": "codex"}},
+        prompt]
 
 
 @pytest.mark.anyio
