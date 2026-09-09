@@ -596,10 +596,14 @@ async def run_quest(
             if last_dispatched is not None and last_dispatched != step.name:
                 # Genuine advance to a different step: start it with a clean TMPDIR.
                 _wipe_step_scratch(quest)
+                # ...and a fresh reincarnation budget: the cap counts crossings
+                # within one continuous engagement, not across the whole quest.
+                state.reset_reincarnation(f"step:{step.phase}/{step.name}")
             last_dispatched = step.name
             if (resumed_step is not None and step.name == resumed_step
                     and step.kind == "agent"):
-                # Single-shot: nulled below so no in-process re-arm refills the budget.
+                # Process-entry single-shot: nulled below; an in-process advance to
+                # a different step refills by design, above.
                 state.reset_reincarnation(f"step:{step.phase}/{step.name}")
                 resumed_step = None
             action, feedback_text, _var_mutations = await _dispatch_step(
