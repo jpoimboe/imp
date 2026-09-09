@@ -48,8 +48,10 @@ def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
+    # A red window also pulls the switch hint onto the tail (AC 19).
     assert _row(auth_mode="subscription", quota=both).endswith(
-        "session 92% (40m left) · week 96% (2d left)")
+        "session 92% (40m left) · week 96% (2d left)"
+        " · press p to switch provider")
 
 
 # AC 9
@@ -75,7 +77,9 @@ def test_the_bands_are_evaluated_on_the_displayed_integer() -> None:
 # AC 13
 def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
     # Percentage-independent, now that the band gates nothing: calm and red alike.
-    for pct, shown in ((92.0, "session 92%"), (34.0, "session 34%")):
+    # A red window additionally pulls the switch hint onto the tail (AC 19).
+    for pct, shown in ((92.0, "session 92% · press p to switch provider"),
+                       (34.0, "session 34%")):
         null_reset = _reading(QuotaWindow("5h", pct, None))
         assert _row(auth_mode="subscription", quota=null_reset).endswith(shown)
 
@@ -142,3 +146,36 @@ def test_a_calm_window_with_a_known_reset_still_shows_its_countdown() -> None:
     assert quota_field(calm_future, now_epoch=_NOW, color=True, over_bg=False) == (
         "session \x1b[32m34%\x1b[0m \x1b[90m(3h left)\x1b[0m"
         " · week \x1b[32m7%\x1b[0m \x1b[90m(5d left)\x1b[0m")
+
+
+# AC 19
+def test_the_switch_hint_joins_the_tail_only_once_a_window_turns_red() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import SWITCH_HINT
+
+    under = _reading(QuotaWindow("5h", float(pal.QUOTA_RED_AT) - 1, None))
+    assert SWITCH_HINT not in _row(auth_mode="subscription", quota=under)
+    at = _reading(QuotaWindow("5h", float(pal.QUOTA_RED_AT), None))
+    assert _row(auth_mode="subscription", quota=at).endswith(
+        f"session {pal.QUOTA_RED_AT}% · {SWITCH_HINT}")
+    # Metered accounts show cost, not quota, so the hint has no tail to join.
+    assert SWITCH_HINT not in _row(auth_mode="apikey",
+                                   cost=RowUsage(dollars=4.21, priced=3))
+
+
+# AC 19
+def test_a_narrow_row_sheds_the_hint_before_the_quota() -> None:
+    from imp.cli.live_driver import SWITCH_HINT
+
+    red = _reading(QuotaWindow("5h", 92.0, None))
+
+    def at(width: int) -> str:
+        return compose_position_row(
+            activity=_act(), quest_id=None, title="", prompt_tokens=None,
+            color=False, width=width, context_pct=44.0, now_epoch=_NOW,
+            auth_mode="subscription", quota=red)
+
+    assert at(200).endswith(f"session 92% · {SWITCH_HINT}")
+    narrow = at(90)
+    assert SWITCH_HINT not in narrow and narrow.endswith("session 92%")
+    assert pal.display_width(narrow) <= 88
