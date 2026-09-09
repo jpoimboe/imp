@@ -10,6 +10,7 @@ from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
     RESUME_DURABILITY_NOTE,
     REWORK_RESULT_FRAME,
+    ContinuationNote,
     SkillReply,
     Transcript,
     balance_success_on_resume,
@@ -858,6 +859,39 @@ def test_deliver_continuation_reply_skill_string_model_skips_append() -> None:
         ("user_message", "step:coder", "/refactor src/foo.py", "reply"),
         ("skill_load", None, {"name": "refactor", "source": "human"}),
         ("engine_message", "step:coder", "BODY\n\nsrc/foo.py\n", "continuation"),
+    ]
+
+
+def test_deliver_continuation_reply_note_journals_engine_message_despite_human() -> None:
+    # Providers hard-code human=True; a ContinuationNote must still journal as a
+    # framework injection, never as the user's words.
+    elog = _FakeElog()
+    messages: list = []
+    tr = _FakeTranscript()
+    note = ContinuationNote(text="The user has disabled the sandbox.")
+    out = deliver_continuation_reply(
+        messages, tr, elog, "step:coder", note, human=True)
+    assert out == "The user has disabled the sandbox."
+    assert elog.events == [
+        ("engine_message", "step:coder",
+         "The user has disabled the sandbox.", "continuation"),
+    ]
+    assert [m.content[0].text for m in messages] == [
+        "The user has disabled the sandbox."]
+    assert [m.content[0].text for m in tr.msgs] == [
+        "The user has disabled the sandbox."]
+
+
+def test_deliver_continuation_reply_note_string_model_skips_append() -> None:
+    # codex's string-prompt model passes messages=None, transcript=None.
+    elog = _FakeElog()
+    note = ContinuationNote(text="The user has disabled the sandbox.")
+    out = deliver_continuation_reply(
+        None, None, elog, "step:coder", note, human=True)
+    assert out == "The user has disabled the sandbox."
+    assert elog.events == [
+        ("engine_message", "step:coder",
+         "The user has disabled the sandbox.", "continuation"),
     ]
 
 

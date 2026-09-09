@@ -99,6 +99,17 @@ class SkillReply:
     body: str
 
 
+@dataclass(frozen=True, slots=True)
+class ContinuationNote:
+    """A framework-authored line injected into a parked solicit. Distinct from a
+    plain str so the delivery helper can journal it as an engine_message rather
+    than putting words in the human's mouth."""
+    text: str
+
+
+SolicitReply = str | SkillReply | ContinuationNote
+
+
 class Transcript:
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -477,7 +488,7 @@ def deliver_continuation_reply(
     transcript: Transcript | None,
     elog: EventLog,
     agent_id: str,
-    reply: str | SkillReply,
+    reply: SolicitReply,
     *,
     human: bool,
 ) -> str:
@@ -485,7 +496,9 @@ def deliver_continuation_reply(
 
     A plain str reply journals a user_message/reply (human=True) or
     engine_message/continuation (human=False) and appends it to
-    messages/transcript. A SkillReply journals the command as user_message/reply
+    messages/transcript. A ContinuationNote is a framework injection: it always
+    journals engine_message/continuation, whatever `human` the provider passed.
+    A SkillReply journals the command as user_message/reply
     (event-only, step agent_id) + a skill_load(source="human") event + the body
     as engine_message/continuation, appending ONLY the body — so the command
     provenance renders `>` and consumes the awaiting-reply arm while the body
@@ -510,16 +523,18 @@ def deliver_continuation_reply(
         elog.append_engine_message(
             agent_id=agent_id, message=body_msg, subtype="continuation")
         return reply.body
-    msg = Message(role="user", content=(TextBlock(text=reply),))
+    text = reply.text if isinstance(reply, ContinuationNote) else reply
+    msg = Message(role="user", content=(TextBlock(text=text),))
     if messages is not None:
         messages.append(msg)
     if transcript is not None:
         transcript.append(msg)
-    if human:
+    # A framework note is never the human's words, whatever `human` providers pass.
+    if human and not isinstance(reply, ContinuationNote):
         elog.append_user_message(agent_id=agent_id, message=msg, subtype="reply")
     else:
         elog.append_engine_message(agent_id=agent_id, message=msg, subtype="continuation")
-    return reply
+    return text
 
 
 def deliver_engine_continuation(
