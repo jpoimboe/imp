@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import os
 import shlex
 import signal
@@ -758,12 +759,14 @@ def test_the_conftest_owner_closes_a_registered_contexts_keeper(tmp_path: Path) 
 
 class _FakeNamespace:
     """Stands in for the run's keeper: join_exec's real signature and a
-    recognisable argv/env/pass_fds triple. No bwrap host, and no keeper to leak —
-    what is under test here is the adapter's composition, not the join's shape
-    (tests/test_sandbox_namespace.py owns that)."""
+    recognisable argv/env/pass_fds triple, plus open_pty's fd pair. No bwrap host,
+    and no keeper to leak — what is under test here is the adapter's composition,
+    not the join's shape (tests/test_sandbox_namespace.py owns that)."""
 
-    def __init__(self) -> None:
+    def __init__(self, pty_error: OSError | None = None) -> None:
         self.calls: list[tuple[list[str], str]] = []
+        self.pty_calls = 0
+        self._pty_error = pty_error
 
     def join_exec(self, argv, *, cwd, engine_env):
         self.calls.append((list(argv), cwd))
@@ -771,6 +774,12 @@ class _FakeNamespace:
             argv=["nsenter", f"--wdns={cwd}", "--", *argv],
             env={"PATH": "/sandbox/bin", "HOME": "/sandbox/home", **dict(engine_env)},
             pass_fds=(7, 9))
+
+    def open_pty(self) -> tuple[int, int]:
+        self.pty_calls += 1
+        if self._pty_error is not None:
+            raise self._pty_error
+        return (31, 32)     # recognisable, never handed to a real session
 
 
 def _stub_ensure_namespace(monkeypatch: pytest.MonkeyPatch, ns: object,
@@ -998,6 +1007,57 @@ def test_a_timed_out_namespace_acquire_surfaces_as_the_terminal_diagnostic(
 
     assert len(error) == 1
     assert str(error[0]).startswith("sandbox could not start the terminal session:")
+
+
+def test_the_impty_hook_supplies_the_keepers_own_pty_allocator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A plan whose openpty stayed None would leave the session on imp's OWN
+    # devpts, whose nodes do not exist inside the keeper — the unnamed tty this
+    # quest exists to fix. An allocator rather than a pre-made fd pair, so the
+    # session owns both fds from birth and a failed start cannot leak them.
+    ns = _FakeNamespace()
+    _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    plan = _hook_from_worker(ctx, ["vim", "notes.txt"])
+    assert plan is not None
+    assert ns.pty_calls == 0            # planning allocates nothing
+    assert plan.openpty is not None
+    assert plan.openpty() == (31, 32)   # the NAMESPACE's pty, not pty.openpty()'s
+    assert ns.pty_calls == 1
+
+
+def test_a_failed_pty_allocation_surfaces_as_the_terminal_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # tty-naming AC 11 (this file's older "AC 12" cites a different spec): the
+    # allocator runs inside TerminalSession.__init__, DOWNSTREAM of the
+    # acquisition wrapper, so only the hook's own closure can frame it. Unframed,
+    # the rarest of the three terminal-start failures would be the only one
+    # reaching the agent as a bare OSError with no idea what failed.
+    from impty.driver import ImptyDriver
+
+    ns = _FakeNamespace(pty_error=OSError(errno.ENOSPC, "No space left on device"))
+    _stub_ensure_namespace(monkeypatch, ns)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    async def _main() -> str:
+        driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+        try:
+            await asyncio.to_thread(lambda: driver.start(["true"]))
+            return "no error raised"
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+        finally:
+            await asyncio.to_thread(driver.close)
+
+    got = asyncio.run(_main())
+    assert got.startswith(
+        "RuntimeError: sandbox could not start the terminal session: "), got
+    assert "No space left on device" in got, got
+    assert ns.pty_calls == 1
 
 
 def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(

@@ -49,13 +49,16 @@ the driven program confined injects one callable:
 ImptyDriver(sandbox=hook)   # hook(argv, cwd, env) -> PtySpawn | None
 ```
 
-Returning `PtySpawn(argv, env, pass_fds)` replaces the spawn wholesale: the host's own
-argv (e.g. a namespace join that execs the caller's argv), the child environment it
-computed, and the fds that must survive the fork — which `TerminalSession(pass_fds=…)`
-forwards to `Popen`. The cwd is then the host's to resolve inside its own argv, so the
-session is spawned with `cwd=None` (`Popen`'s `cwd=` would resolve in the *caller's*
-mount namespace). Returning `None` — or passing no hook at all, as `python -m impty.mcp`
-does — spawns the program bare, exactly as it always did.
+Returning `PtySpawn(argv, env, pass_fds, openpty)` replaces the spawn wholesale: the
+host's own argv (e.g. a namespace join that execs the caller's argv), the child
+environment it computed, the fds that must survive the fork — which
+`TerminalSession(pass_fds=…)` forwards to `Popen` — and, optionally, the host's own pty
+allocator, for a host that needs the pty to come from somewhere other than the caller's
+devpts; it is forwarded as `TerminalSession(openpty=…)` and defaults to `pty.openpty`.
+The cwd is then the host's to resolve inside its own argv, so the session is spawned with
+`cwd=None` (`Popen`'s `cwd=` would resolve in the *caller's* mount namespace). Returning
+`None` — or passing no hook at all, as `python -m impty.mcp` does — spawns the program
+bare, exactly as it always did.
 
 ## Sequences pyte can't parse (the `TerminalStream` filter)
 

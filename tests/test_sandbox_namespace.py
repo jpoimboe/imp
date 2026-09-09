@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import select
 import shutil
 import signal
 import subprocess
@@ -20,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine import sandbox as sandbox_mod
 from imp.engine.sandbox import (
     HomeLayer,
     SandboxNamespace,
@@ -579,5 +581,146 @@ def test_join_exec_refuses_a_closed_namespace():
         ns.close()
         with pytest.raises(AssertionError):
             ns.join_exec(["true"], cwd=str(root), engine_env={})
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _open_fds() -> set[str]:
+    """The process's currently-open fd numbers. The transient dirfd this listing
+    itself opens takes the lowest free number in every snapshot, so it cancels out
+    between two snapshots taken with the same fd table."""
+    return set(os.listdir("/proc/self/fd"))
+
+
+def test_open_pins_the_keepers_own_devpts_and_close_releases_it() -> None:
+    """AC 6(b). The pin must name the KEEPER's devpts instance: a pin on imp's own
+    /dev/pts would allocate ptys whose nodes do not exist inside the namespace,
+    which is exactly today's broken state."""
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        pinned = ns.devpts_fd
+        try:
+            got = os.fstat(pinned)
+            want = os.stat(f"/proc/{ns.ns_init_pid}/root/dev/pts")
+            assert (got.st_dev, got.st_ino) == (want.st_dev, want.st_ino)
+            assert got.st_dev != os.stat("/dev/pts").st_dev
+        finally:
+            ns.close()
+        with pytest.raises(OSError):
+            os.fstat(pinned)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.parametrize("failure", [SandboxOpenFailed("boom"), OSError(5, "boom")],
+                         ids=["sandbox_open_failed", "oserror"])
+def test_an_open_that_fails_after_the_devpts_pin_leaks_no_fd(monkeypatch, failure) -> None:
+    """AC 6(c). devpts_fd lives OUTSIDE ns_fds, so _abandon_keeper cannot close it as
+    a side effect of walking that tuple — both call sites have to hand it over.
+    _ns_owner_fd is the statement right after the pin, so failing it exercises the
+    exact window where the fd is open and the namespace is not yet built.
+    _open_once is called directly: open() would retry the whole spawn budget."""
+    root = _make_root()
+    try:
+        def boom(fds: dict[str, int]) -> int | None:
+            raise failure
+
+        monkeypatch.setattr(sandbox_mod, "_ns_owner_fd", boom)
+        before = _open_fds()
+        with pytest.raises(SandboxOpenFailed):
+            SandboxNamespace._open_once(policy=_policy_for(root), engine_env={},
+                                        environ=os.environ)
+        assert _open_fds() - before == set()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _pts_inside(ns: SandboxNamespace, cwd: str) -> set[str]:
+    """What /dev/pts holds as seen from INSIDE the keeper — `ptmx` alone until
+    something allocates from the namespace's own devpts."""
+    done = _join(ns, "ls /dev/pts", cwd=cwd)
+    assert done.returncode == 0, done.stderr
+    return set(done.stdout.split())
+
+
+def test_open_pty_allocates_a_working_pty_from_the_keepers_devpts() -> None:
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            master, slave = ns.open_pty()
+            try:
+                assert os.isatty(master) and os.isatty(slave)
+                # Provenance, and the whole point: the slave's node lives in the
+                # KEEPER's devpts superblock. A pty.openpty() here would put it in
+                # imp's, where the namespace cannot see it.
+                assert os.fstat(slave).st_dev == os.fstat(ns.devpts_fd).st_dev
+                assert os.fstat(slave).st_dev != os.stat("/dev/pts").st_dev
+                # ...and it is a real line-disciplined pty, not just a pair of fds.
+                os.write(master, b"ping\n")
+                ready, _, _ = select.select([slave], [], [], _SIGNAL_BUDGET_S)
+                assert ready, "the slave never saw what was written to the master"
+                assert os.read(slave, 64) == b"ping\n"
+            finally:
+                os.close(slave)
+                os.close(master)
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_two_allocations_get_distinct_numbers_and_closing_one_frees_it() -> None:
+    """AC 6(a). The numbers are read from INSIDE the namespace, which is also the
+    proof the nodes are there at all — today /dev/pts holds ptmx and nothing else."""
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            assert _pts_inside(ns, str(root)) == {"ptmx"}
+            m1, s1 = ns.open_pty()
+            first = _pts_inside(ns, str(root)) - {"ptmx"}
+            m2, s2 = ns.open_pty()
+            try:
+                both = _pts_inside(ns, str(root)) - {"ptmx"}
+                assert len(first) == 1
+                assert len(both) == 2 and first < both
+                second = both - first
+                os.close(s1)
+                os.close(m1)
+                _poll(lambda: _pts_inside(ns, str(root)) - {"ptmx"} == second,
+                      what=f"{first} freed inside the namespace, {second} kept")
+            finally:
+                os.close(s2)
+                os.close(m2)
+        finally:
+            ns.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_failed_allocation_strands_neither_an_fd_nor_a_node(monkeypatch) -> None:
+    """Opening ptmx already allocates the index and creates the slave node, before
+    open_pty can learn its number — so an ioctl that fails in between must close the
+    master, which is what makes the kernel take that node back. 0xDEAD is in no
+    tty ioctl range, so the driver answers ENOTTY and nothing else happens."""
+    root = _make_root()
+    try:
+        ns = SandboxNamespace.open(policy=_policy_for(root), engine_env={},
+                                   environ=os.environ)
+        try:
+            monkeypatch.setattr(sandbox_mod, "TIOCGPTN", 0x0000DEAD)
+            before = _open_fds()
+            with pytest.raises(OSError):
+                ns.open_pty()
+            assert _open_fds() - before == set()
+            _poll(lambda: _pts_inside(ns, str(root)) == {"ptmx"},
+                  what="the half-allocated node reclaimed inside the namespace")
+        finally:
+            ns.close()
     finally:
         shutil.rmtree(root, ignore_errors=True)

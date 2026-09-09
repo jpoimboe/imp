@@ -3074,7 +3074,7 @@ def _ns(*, network: bool = True, outer_user_fd: int | None = None) -> SandboxNam
     return SandboxNamespace(
         policy=pol, base_policy=pol,
         ns_fds=tuple((k, 10 + i) for i, k in enumerate(kinds)),
-        outer_user_fd=outer_user_fd,
+        outer_user_fd=outer_user_fd, devpts_fd=99,
         ns_init_pid=4242, err_fd=98, proc=None)
 
 
@@ -3181,6 +3181,15 @@ def test_join_on_a_closed_namespace_is_refused():
     ns.closed = True
     with pytest.raises(AssertionError):
         ns.join("x", cwd="/wt", engine_env={})
+
+
+def test_open_pty_on_a_closed_namespace_is_refused():
+    # The devpts dirfd number is recycled after close(); allocating through it would
+    # openat WHATEVER now holds that number.
+    ns = _ns()
+    ns.closed = True
+    with pytest.raises(AssertionError):
+        ns.open_pty()
 
 
 def test_open_retries_the_whole_spawn_budget_and_reports_each_attempt(monkeypatch):

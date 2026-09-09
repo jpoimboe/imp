@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import pty
 import re
 import signal
 import sys
@@ -1014,3 +1015,74 @@ def test_start_copy_states_the_env_overlay_and_the_hook() -> None:
         flat = " ".join(text.split())
         assert "REPLACES the inherited environment" not in flat
         assert "replaces the environment" not in flat
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_plans_allocator_supplies_the_sessions_pty(tmp_path: Path) -> None:
+    # The sandbox's shape: the host hands the driver the pty itself, and the driven
+    # program must land on THAT pts, not on one the session made for itself.
+    made: list[str] = []
+
+    def allocator() -> tuple[int, int]:
+        master, slave = pty.openpty()
+        made.append(os.ttyname(slave))
+        return master, slave
+
+    plan_argv = [sys.executable, "-c", "import os; print('TTY=' + os.ttyname(0))"]
+
+    def hook(
+        argv: Sequence[str], cwd: str | None, env: Mapping[str, str] | None,
+    ) -> PtySpawn | None:
+        return PtySpawn(argv=plan_argv, env={"PATH": os.environ["PATH"]},
+                        openpty=allocator)
+
+    d = ImptyDriver(sandbox=hook)
+    try:
+        d.start([sys.executable, "-c", "print('NEVER')"], cwd=str(tmp_path))
+        # Poll for the marker the payload prints: start()'s settle can return before a
+        # loaded box has exec'd it, and settling on silence is exactly the flake shape.
+        assert _poll(lambda: "TTY=" in d.view(), timeout=E2E_POLL_TIMEOUT), \
+            "the planned payload never printed its tty"
+        screen = d.view()
+    finally:
+        d.stop()
+    assert len(made) == 1
+    assert f"TTY={made[0]}" in screen
+    assert "NEVER" not in screen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_plan_without_an_allocator_keeps_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # /sandbox on, but a host with nothing special to say about the pty: the session
+    # must get the stdlib allocator, never a None the hook left unset.
+    seen = _spy_spawn(monkeypatch)
+    plan_argv = [sys.executable, "-c", "import os; print('TTY=' + os.ttyname(0))"]
+
+    def hook(
+        argv: Sequence[str], cwd: str | None, env: Mapping[str, str] | None,
+    ) -> PtySpawn | None:
+        return PtySpawn(argv=plan_argv, env={"PATH": os.environ["PATH"]})
+
+    d = ImptyDriver(sandbox=hook)
+    try:
+        d.start([sys.executable, "-c", "print('NEVER')"], cwd=str(tmp_path))
+        assert _poll(lambda: "TTY=" in d.view(), timeout=E2E_POLL_TIMEOUT), \
+            "the planned payload never printed its tty"
+        screen = d.view()
+    finally:
+        d.stop()
+    assert seen["openpty"] is pty.openpty
+    assert re.search(r"TTY=/dev/pts/\d+", screen)
+
+
+def test_readme_documents_the_pty_spawn_openpty_field() -> None:
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    # Whitespace-normalized (the repo idiom): the paragraph hard-wraps mid-phrase, so
+    # a raw substring test would pin nothing.
+    flat = " ".join(readme.split())
+    assert "`PtySpawn(argv, env, pass_fds, openpty)`" in flat
+    assert "the host's own pty allocator" in flat
+    assert "`TerminalSession(openpty=…)`" in flat

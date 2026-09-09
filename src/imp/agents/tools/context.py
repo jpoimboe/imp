@@ -637,7 +637,10 @@ def make_impty_sandbox_hook(ctx: ToolContext) -> SandboxHook:
     toggle needs nothing to remember it. The caller's env is overlaid ON the
     sandbox's curated child env rather than replacing it, and the cwd rides on the
     join's --wdns, which is the only place it resolves in the right mount
-    namespace."""
+    namespace.
+
+    The plan also carries the KEEPER's pty allocator, so the slave's node exists
+    inside the namespace and the driven program can name its tty."""
     loop = asyncio.get_running_loop()
 
     def hook(argv: Sequence[str], cwd: str | None,
@@ -650,8 +653,19 @@ def make_impty_sandbox_hook(ctx: ToolContext) -> SandboxHook:
         eng = tool_engine_env(ctx)
         ns = _namespace_from_worker(ctx, loop, eng, shlex.join(argv))
         spawn = ns.join_exec(argv, cwd=cwd or str(ctx.project_root), engine_env=eng)
+
+        def open_pty() -> tuple[int, int]:
+            # Framed HERE because this runs inside TerminalSession.__init__, past
+            # everything _namespace_from_worker can catch.
+            try:
+                return ns.open_pty()
+            except OSError as exc:
+                raise RuntimeError(
+                    "sandbox could not start the terminal session: could not "
+                    f"allocate a pty in the keeper: {exc}") from exc
+
         return PtySpawn(argv=spawn.argv, env={**spawn.env, **(env or {})},
-                        pass_fds=spawn.pass_fds)
+                        pass_fds=spawn.pass_fds, openpty=open_pty)
 
     return hook
 

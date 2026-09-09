@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import codecs
 import os
+import pty
 import re
 import signal
 import time
@@ -77,11 +78,15 @@ def _fixed_settle(wait: float) -> tuple[float, str]:
 class PtySpawn:
     """An embedding host's replacement for the spawn `start()` would have made
     itself: the argv to exec, the child environment as-is, and the fds that must
-    survive the fork. The cwd is the host's to resolve and rides inside `argv`."""
+    survive the fork. The cwd is the host's to resolve and rides inside `argv`.
+    `openpty`, when given, is the host's own pty allocator — for a host whose pty
+    must come from somewhere other than this process's devpts; `None` leaves the
+    session on `pty.openpty()`."""
 
     argv: list[str]
     env: dict[str, str]
     pass_fds: tuple[int, ...] = ()
+    openpty: Callable[[], tuple[int, int]] | None = None
 
 
 SandboxHook = Callable[
@@ -172,6 +177,7 @@ class ImptyDriver:
             session = TerminalSession(
                 plan.argv, cwd=None, cols=cols, rows=rows,
                 env=plan.env, pass_fds=plan.pass_fds,
+                openpty=pty.openpty if plan.openpty is None else plan.openpty,
             )
         try:
             session.wait_idle()  # inherit the library settle policy

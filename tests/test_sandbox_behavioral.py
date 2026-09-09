@@ -16,6 +16,7 @@ import contextlib
 import dataclasses
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -2246,10 +2247,14 @@ def test_a_sandboxed_command_can_still_allocate_a_pty() -> None:
 def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
     """AC 10: nsenter faithfully re-raises the child's terminating signal on
     itself, so a joined session's returncode keeps the negative-signal shape the
-    providers' tool_killed detection reads — never 128+n, never nsenter's own."""
+    providers' tool_killed detection reads — never 128+n, never nsenter's own.
+
+    Allocated from the keeper's devpts like the hook does, so the exit-status axis
+    is measured on the pty production actually uses: the first case prints its
+    ttyname first, which on imp's own devpts raises ENODEV and would report 1."""
     root = _make_root()
     cases = [
-        ("import sys; sys.exit(7)", 7),
+        ("import os, sys; print('TTY=' + os.ttyname(0)); sys.exit(7)", 7),
         ("import os, signal; os.kill(os.getpid(), signal.SIGKILL)", -9),
         ("import os, signal; os.kill(os.getpid(), signal.SIGTERM)", -15),
     ]
@@ -2257,12 +2262,17 @@ def test_a_joined_pty_session_keeps_the_exit_status_shape() -> None:
         ns = SandboxNamespace.open(policy=_active_policy(root), engine_env={},
                                    environ=os.environ)
         try:
-            for prog, expected in cases:
+            first_screen = ""
+            for i, (prog, expected) in enumerate(cases):
                 spawn = ns.join_exec([sys.executable, "-c", prog],
                                      cwd=str(root), engine_env={})
                 with TerminalSession(spawn.argv, cwd=None, env=spawn.env,
-                                     pass_fds=spawn.pass_fds) as s:
+                                     pass_fds=spawn.pass_fds,
+                                     openpty=ns.open_pty) as s:
                     assert s.run_to_completion(hard=30.0) == expected, prog
+                    if i == 0:
+                        first_screen = "\n".join(s.lines())
+            assert re.search(r"TTY=/dev/pts/\d+", first_screen), first_screen
         finally:
             ns.close()
     finally:
@@ -2904,5 +2914,108 @@ def test_start_env_overlays_the_joined_child_env() -> None:
         ctx = _ctx(root, _active_policy(root))
         screen = _drive_joined(ctx, lambda d: d.start(argv, env={"FOO": "1"}))
         assert "FOO=1 PATH?True HOME-IS-POLICY?True" in screen, screen
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_TTY_NAME = (
+    "import os\n"
+    "for fd in (0, 1, 2):\n"
+    "    try:\n"
+    "        print('TTY%d=%s' % (fd, os.ttyname(fd)))\n"
+    "    except OSError as exc:\n"
+    "        print('TTY%d-DENIED %d' % (fd, exc.errno))\n"
+    "print('PTS=' + ' '.join(sorted(os.listdir('/dev/pts'))))\n"
+    "print('INIT=' + open('/proc/1/comm').read().strip())\n"
+    "print('DONE')\n"
+)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_joined_pty_session_can_name_its_own_tty() -> None:
+    """tty-naming AC 1(b), 2, 7(b): the pty is allocated from the KEEPER's devpts, so the
+    slave's node exists inside the namespace — ttyname() on all three fds resolves
+    to the same /dev/pts/N and `ls /dev/pts` lists that number beside ptmx. On the
+    old allocator every fd answers ENODEV (19) and /dev/pts holds ptmx alone,
+    which is exactly the bug; naming it changes nothing about the confinement, so
+    pid 1 of the session is still bwrap's."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _TTY_NAME]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv)
+        _await_screen(d, "DONE")   # the payload's own last marker, polled
+        return d.view()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        joined = _drive_joined(ctx, _drive)
+        names = re.findall(r"TTY\d=(/dev/pts/\d+)", joined)
+        assert len(names) == 3, joined
+        assert len(set(names)) == 1, joined      # one terminal, not three
+        number = names[0].rsplit("/", 1)[1]
+        # The node is in the namespace's OWN devpts, listed beside ptmx.
+        assert f"PTS={number} ptmx" in joined, joined
+        assert "INIT=bwrap" in joined, joined
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not installed")
+def test_tty_and_a_write_to_it_work_in_a_joined_session() -> None:
+    """tty-naming AC 1(a): the user-visible half. tty(1) prints a path and exits 0 where it
+    printed `not a tty` and exited 1 before, and `echo > $(tty)` — the other thing
+    an agent actually does — lands on the driven screen through the named node."""
+    root = _make_root()
+    script = ("tty; echo TTY-EXIT=$?; echo BACK-ON-MY-OWN-TTY > $(tty); "
+              "echo WROTE=$?; echo DONE")
+    argv = ["bash", "--norc", "--noprofile", "-c", script]
+
+    def _drive(d: ImptyDriver) -> str:
+        d.start(argv)
+        _await_screen(d, "DONE")
+        return d.view()
+
+    try:
+        ctx = _ctx(root, _active_policy(root))
+        joined = _drive_joined(ctx, _drive)
+        assert re.search(r"/dev/pts/\d+", joined), joined
+        assert "TTY-EXIT=0" in joined, joined
+        assert "not a tty" not in joined, joined
+        assert "BACK-ON-MY-OWN-TTY" in joined, joined   # the write reached the screen
+        assert "WROTE=0" in joined, joined
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_killing_the_ns_init_under_a_joined_session_ends_it_like_an_eof() -> None:
+    """tty-naming AC 5(b): the pinned devpts dirfd keeps the keeper's devpts SUPERBLOCK alive
+    after the ns-init dies, so the pty does not vanish under a live session — the
+    payload dies of the pid namespace's SIGKILL, the master goes EIO, and impty
+    already maps that to EOF. Same end state as before the pty moved into the
+    keeper, which is what makes this a lifetime regression test rather than a new
+    guarantee."""
+    root = _make_root()
+    argv = [sys.executable, "-c", _COOKED]
+    try:
+        ctx = _ctx(root, _active_policy(root))
+
+        def _drive(d: ImptyDriver) -> str:
+            d.start(argv)
+            _await_screen(d, "COOKED-READY")  # polled: never settle on a silent payload
+            ns = ctx.sandbox_ns
+            assert ns is not None
+            os.kill(ns.ns_init_pid, signal.SIGKILL)
+            _poll(lambda: "alive=False" in d.view(),
+                  what="the joined payload dying with its pid namespace")
+            return d.stop()
+
+        screen = _drive_joined(ctx, _drive)
+        assert screen.splitlines()[0] == "[stopped: exit=SIGKILL]", screen
     finally:
         shutil.rmtree(root, ignore_errors=True)
