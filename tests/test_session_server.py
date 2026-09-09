@@ -20,7 +20,7 @@ from imp.remote.session.protocol import (
     parse_event,
 )
 from imp.remote.session.server import SessionServer
-from tests.async_wait import wait_until
+from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
 @pytest.fixture
@@ -1614,6 +1614,8 @@ def test_sandbox_toggle_confirmations_verbatim() -> None:
     assert server.SANDBOX_ON_FROM_OFF == (
         "Sandbox on. Shell and file tools are confined to the worktree again. "
         "Processes already started while unsandboxed keep their current access.")
+    # Agent-facing, visible only under `imp log --full`.
+    assert server.SANDBOX_OFF_NOTE == "The user has disabled the sandbox."
 
 
 @pytest.mark.anyio
@@ -1638,7 +1640,44 @@ async def test_set_sandbox_emits_confirmation_scrollback(
 
 
 @pytest.mark.anyio
-async def test_set_sandbox_reemits_pending_prompt_after_confirmation(
+async def test_set_sandbox_off_resolves_the_parked_solicit_with_a_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.agents.transcript import ContinuationNote
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+    from imp.remote.session.server import SANDBOX_OFF_NOTE
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    # Seed the gate the solicit parks on, then start recording broadcasts so the
+    # assertions below see only what the toggle emits.
+    server._emit({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+    broadcasts: list[dict[str, Any]] = []
+    monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
+    got: list[Any] = []
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            async def _park() -> None:
+                got.append(await server._chat("reply?"))
+
+            tg.start_soon(_park)
+            await wait_until(lambda: server._pending_prompt is not None)
+            await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+            await wait_until(lambda: got)
+
+    # The parked solicit resolved on its own — no client sent input.
+    assert got == [ContinuationNote(text=SANDBOX_OFF_NOTE)]
+    assert coord.unsandboxed is True
+    types = [e.get("type") for e in broadcasts]
+    assert types.index("sandbox_marker") < types.index("script_output")
+    # ...and the prompt was NOT re-opened; the old behavior re-emitted it here.
+    assert "awaiting_user_input" not in types
+
+
+@pytest.mark.anyio
+async def test_set_sandbox_on_reemits_pending_prompt_and_injects_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from imp.cli.signals import InterruptCoordinator
@@ -1648,15 +1687,20 @@ async def test_set_sandbox_reemits_pending_prompt_after_confirmation(
     server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
     gate = {"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}}
     server.set_pending_prompt(gate)
+    # Armed exactly as a live solicit arms it, so an injection would be latched
+    # and visible rather than silently dropped.
+    server._socket.arm_input()
     broadcasts: list[dict[str, Any]] = []
     monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
 
-    await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
 
     types = [e.get("type") for e in broadcasts]
     assert types.index("sandbox_marker") < types.index("script_output")
     assert types.index("script_output") < types.index("awaiting_user_input")
     assert broadcasts[types.index("awaiting_user_input")] is gate
+    assert server._socket._pending_input is None   # `on` never injects
+    assert coord.unsandboxed is False
 
 
 @pytest.mark.anyio
@@ -1669,6 +1713,7 @@ async def test_set_sandbox_emits_no_prompt_when_pending_none(
     coord = InterruptCoordinator()
     server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
     assert server._pending_prompt is None
+    server._socket.arm_input()   # armed, so an injection would be latched and visible
     broadcasts: list[dict[str, Any]] = []
     monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
 
@@ -1676,6 +1721,9 @@ async def test_set_sandbox_emits_no_prompt_when_pending_none(
 
     assert not any(e.get("type") == "awaiting_user_input" for e in broadcasts)
     assert any(e.get("type") == "script_output" for e in broadcasts)
+    # Nothing is parked, so nothing is injected — identical to today.
+    assert server._socket._pending_input is None
+    assert coord.unsandboxed is True
 
 
 def test_attach_pulse_seeds_marker_when_unsandboxed(tmp_path: Path) -> None:

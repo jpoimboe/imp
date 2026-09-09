@@ -488,6 +488,16 @@ def test_inline_solicit_passes_skill_reply_through_async() -> None:
     assert result == reply_obj
 
 
+def test_inline_solicit_passes_continuation_note_through() -> None:
+    import anyio
+
+    from imp.agents.transcript import ContinuationNote
+    note = ContinuationNote(text="The user has disabled the sandbox.")
+    inline = build_inline_solicit(user_input_fn=lambda _p: note)
+    result = anyio.run(inline, "last")
+    assert result == note
+
+
 def test_inline_solicit_no_channel_invokes_halt_writer() -> None:
     from imp.engine.completion import build_inline_solicit
     calls: list[int] = []

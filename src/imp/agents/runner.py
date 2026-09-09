@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
-    from imp.agents.transcript import SkillReply
+    from imp.agents.transcript import SolicitReply
 
 from imp.engine.env import ALL_DECIDED, TestGates, Undecided
 from imp.engine.types import AgentDef, ResumeCause
@@ -153,15 +153,15 @@ class AgentInvocation:
     max_tool_calls: int | None = None
     # The bare-turn-end / AWAITING_USER resume input channel. Wired for attended
     # top-level agents; None for subagents (their bare-turn-end pause is headless).
-    # May return a str, SkillReply, or an Awaitable thereof; call-sites await-if-awaitable.
-    user_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]] | None = None
+    # May return a SolicitReply or an Awaitable thereof; call-sites await-if-awaitable.
+    user_input_fn: Callable[[str], SolicitReply | Awaitable[SolicitReply]] | None = None
     # Set by the executor for the END-OF-TURN nudge — distinct from
     # user_input_fn, which serves the bare-turn-end / AWAITING_USER resume path.
     # Called with the agent's last text; returns the next user-message text to
     # inject and continue. None means "no end-of-turn nudge wired"
     # (legacy/test); providers then emit the immediate no_complete_step behavior.
     continuation_fn: (
-        Callable[[str], tuple[str | SkillReply | Awaitable[str | SkillReply], bool]]
+        Callable[[str], tuple[SolicitReply | Awaitable[SolicitReply], bool]]
         | None
     ) = None
     # Stable identity of this agent invocation (step/gate/subagent), used as

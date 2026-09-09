@@ -12,7 +12,7 @@ import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from imp.agents.skills import SkillError
-from imp.agents.transcript import SkillReply
+from imp.agents.transcript import ContinuationNote, SkillReply, SolicitReply
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
@@ -29,7 +29,7 @@ from imp.remote.session.protocol import (
     SIDE_EFFECT_REASONS,
     SkillRequest,
 )
-from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
+from imp.remote.session.socket_server import InputPayload, ReplaySnapshot, SessionSocket
 
 _log = logging.getLogger("imp.remote.session.server")
 
@@ -46,6 +46,8 @@ SANDBOX_OFF_CONFIRMED = (
 SANDBOX_ON_FROM_OFF = (
     "Sandbox on. Shell and file tools are confined to the worktree again. "
     "Processes already started while unsandboxed keep their current access.")
+# Injected into the parked solicit on `off`, so the step that asked for it resumes itself.
+SANDBOX_OFF_NOTE = "The user has disabled the sandbox."
 
 # Startup grace: how long a hibernation gate waits for the FIRST client to attach
 # before falling back to hibernation. The spawning client (interactive or remote
@@ -166,7 +168,7 @@ class SessionServer:
             self._last_gate_event = event
         self._socket.broadcast(event)
 
-    async def _chat(self, _query: str) -> str | SkillReply:
+    async def _chat(self, _query: str) -> SolicitReply:
         self.set_pending_prompt(self._last_gate_event)
         # Arm the input latch for the whole solicit: a reply arriving between the
         # prompt and next_input() opening the gate is latched, not dropped.
@@ -219,10 +221,10 @@ class SessionServer:
         if self._first_leased_attach_fired or not await self._await_first_attach():
             raise AwaitingUserInput()
 
-    async def _hibernation_gate(self) -> str | SkillRequest:
+    async def _hibernation_gate(self) -> InputPayload:
         from imp.engine.awaiting_user_input import AwaitingUserInput
 
-        holder: dict[str, str | SkillRequest] = {}
+        holder: dict[str, InputPayload] = {}
         async with anyio.create_task_group() as tg:
             async def _await_input() -> None:
                 holder["text"] = await self._socket.next_input()
@@ -452,10 +454,15 @@ class SessionServer:
             self._emit({"type": "script_output",
                         "payload": {"stdout": SANDBOX_OFF_CONFIRMED if reason == "off"
                                     else SANDBOX_ON_FROM_OFF}})
-            # Re-open the parked between-turns prompt so the client's _answer_gates loop,
-            # blocked on gate_recv after set_sandbox, receives a gate — no stray spinner.
             if self._pending_prompt is not None:
-                self._emit(self._pending_prompt)
+                if reason == "off":
+                    # The user typed `off` because an agent asked them to: resume the
+                    # parked solicit rather than making them type a throwaway reply.
+                    self._socket.inject_input(ContinuationNote(text=SANDBOX_OFF_NOTE))
+                else:
+                    # Re-open the parked prompt so the client's _answer_gates loop,
+                    # blocked on gate_recv after set_sandbox, receives a gate.
+                    self._emit(self._pending_prompt)
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:

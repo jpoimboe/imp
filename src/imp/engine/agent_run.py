@@ -58,7 +58,7 @@ from imp.engine.env import ALL_DECIDED, TestGates, Undecided
 from imp.engine.types import AgentDef, OutputField, ResumeCause
 
 if TYPE_CHECKING:
-    from imp.agents.transcript import SkillReply
+    from imp.agents.transcript import SolicitReply
 
 # Injected into the system prompt of every agent that holds any filesystem tool
 # (see build_agent_invocation / _FILESYSTEM_TOOLS). This is a PROPERTY OF HOLDING
@@ -342,7 +342,7 @@ def continuation_nudge(cause: ResumeCause) -> str:
 
 async def _resolve_wait_reply(
     coordinator: Any,
-    user_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]],
+    user_input_fn: Callable[[str], SolicitReply | Awaitable[SolicitReply]],
     resume_should_continue: bool = False,
     *,
     elog: Any,
@@ -352,7 +352,7 @@ async def _resolve_wait_reply(
     last_agent_message: str = "",
     halt_writer: Callable[[], None] | None = None,
     halt_clearer: Callable[[], None] | None = None,
-) -> tuple[str | SkillReply, str]:
+) -> tuple[SolicitReply, str]:
     """Satisfy a bare-turn-end / AWAITING_USER yield on resume, returning
     (reply, source) where source is
     'interject' | 'pending_reply' | 'nudge' | 'solicited'.
@@ -377,7 +377,7 @@ async def _resolve_wait_reply(
     import inspect
     joined = _join_pending_interjects(coordinator)
     if joined is not None:
-        reply: str | SkillReply
+        reply: SolicitReply
         reply, source = joined, "interject"
     elif pending_reply is not None:
         reply, source = pending_reply, "pending_reply"
@@ -476,7 +476,7 @@ def build_agent_invocation(
     system_prompt_override: str | None = None,
     initial_messages: tuple[Message, ...],
     quest_context: QuestContext,
-    user_chat_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]] | None,
+    user_chat_input_fn: Callable[[str], SolicitReply | Awaitable[SolicitReply]] | None,
     transcript_dir: Path,
     events_path: Path,
     subagent_defs: dict[str, AgentDef],
