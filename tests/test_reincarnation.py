@@ -163,3 +163,40 @@ def test_an_unlabelled_transcript_dir_has_no_owner(tmp_path: Path) -> None:
     (tx / "provider").write_text("  \n")
 
     assert read_transcript_owner(tx) is None
+
+
+_CONTEXT_OPENING = (
+    "You are a reincarnated session: the previous attempt approached its "
+    "context limit and was restarted fresh to keep working without a silent "
+    "compaction. Pick up where it left off using the recovery sources below.")
+
+_SWITCH_OPENING = (
+    "You are a reincarnated session: the previous attempt ran on a different "
+    "provider and was switched at the user's request, not because anything went "
+    "wrong. Pick up where it left off using the recovery sources below.")
+
+
+def test_the_switch_cause_opens_with_the_pinned_sentence() -> None:
+    seed = reincarnation_seed(
+        handoff_text=None, quest_id="q7", step_name="coder",
+        cause="provider_switch")
+    assert seed.splitlines()[0] == _SWITCH_OPENING
+    assert "context limit" not in seed
+
+
+def test_the_default_cause_still_opens_with_the_context_sentence() -> None:
+    # The Tier A/B callers pass no cause and must be byte-identical to today.
+    seed = reincarnation_seed(handoff_text=None, quest_id="q7", step_name="coder")
+    assert seed.splitlines()[0] == _CONTEXT_OPENING
+    assert "switched at the user's request" not in seed
+
+
+def test_only_the_opening_sentence_differs_between_causes() -> None:
+    # The recovery sources are the same record whatever ended the last session.
+    switched = reincarnation_seed(
+        handoff_text=None, quest_id="q7", step_name="coder",
+        cause="provider_switch").splitlines()
+    context = reincarnation_seed(
+        handoff_text=None, quest_id="q7", step_name="coder").splitlines()
+    assert switched[1:] == context[1:]
+    assert switched[0] != context[0]
