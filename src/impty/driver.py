@@ -32,6 +32,21 @@ from impty.session import (
     MAX_CALL_HARD,
 )
 
+_JOURNAL_RE = re.compile(r"pty-(\d+)\.")
+
+
+def _last_session_index(directory: Path) -> int:
+    """Highest existing pty-N.* index: a resumed step reuses its transcript dir,
+    and Journal opens "wb" — numbering must continue, not truncate the pre-restart
+    attempt (stderr.log opens "ab" for the same reason)."""
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return 0
+    return max((int(m.group(1)) for p in entries
+                if (m := _JOURNAL_RE.match(p.name))), default=0)
+
+
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
 # and lone backslashes — passes through untouched.
@@ -111,7 +126,7 @@ class ImptyDriver:
         self._session: TerminalSession | None = None
         self._sandbox = sandbox
         self._journal_dir = journal_dir
-        self._sessions = 0
+        self._sessions = 0 if journal_dir is None else _last_session_index(journal_dir)
         self._snapshot_dir = snapshot_dir
         if snapshot_dir is not None:
             try:

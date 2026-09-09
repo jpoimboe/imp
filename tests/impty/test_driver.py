@@ -1030,6 +1030,77 @@ def test_each_session_of_one_driver_gets_its_own_numbered_journal(
         d.close()
 
 
+def test_last_session_index_unit(tmp_path: Path) -> None:
+    from impty.driver import _last_session_index
+
+    # absent or non-directory -> 0
+    assert _last_session_index(tmp_path / "nonexistent") == 0
+
+    # empty dir -> 0
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert _last_session_index(empty) == 0
+
+    # unrelated filenames ignored
+    d = tmp_path / "mixed"
+    d.mkdir()
+    (d / "stderr.log").write_bytes(b"")
+    (d / "transcript.jsonl").write_bytes(b"")
+    assert _last_session_index(d) == 0
+
+    # pty-1.raw, pty-1.jsonl, pty-2.raw.1 -> max is 2
+    (d / "pty-1.raw").write_bytes(b"")
+    (d / "pty-1.jsonl").write_bytes(b"")
+    (d / "pty-2.raw.1").write_bytes(b"")
+    assert _last_session_index(d) == 2
+
+    # not-a-directory: parent is a regular file -> 0
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"")
+    assert _last_session_index(blocker / "steps") == 0
+
+    # unlistable directory (mode 0o000) -> 0, not a PermissionError
+    if os.geteuid() != 0:
+        unlistable = tmp_path / "unlistable"
+        unlistable.mkdir()
+        (unlistable / "pty-3.raw").write_bytes(b"")
+        unlistable.chmod(0o000)
+        try:
+            assert _last_session_index(unlistable) == 0
+        finally:
+            unlistable.chmod(0o755)
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resumed_step_driver_numbers_from_next_session(tmp_path: Path) -> None:
+    """A second ImptyDriver over the same journal dir (resumed-step case) must start
+    at N+1, not 1, so it can't truncate the first driver's pty-1.raw."""
+    da = ImptyDriver(journal_dir=tmp_path)
+    try:
+        da.start([sys.executable, "-c", _JOURNAL_CHILD, "DRIVER-A"])
+        da.stop()
+    finally:
+        da.close()
+
+    raw1_bytes = (tmp_path / "pty-1.raw").read_bytes()
+    assert b"DRIVER-A" in raw1_bytes
+
+    db = ImptyDriver(journal_dir=tmp_path)
+    try:
+        db.start([sys.executable, "-c", _JOURNAL_CHILD, "DRIVER-B"])
+        db.stop()
+    finally:
+        db.close()
+
+    # B wrote into pty-2.*, not pty-1.*
+    assert (tmp_path / "pty-2.raw").exists()
+    assert b"DRIVER-B" in (tmp_path / "pty-2.raw").read_bytes()
+    # A's journal is byte-intact
+    assert (tmp_path / "pty-1.raw").read_bytes() == raw1_bytes
+    # B wrote nothing into pty-1.*
+    assert b"DRIVER-B" not in (tmp_path / "pty-1.raw").read_bytes()
+
+
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_a_driver_with_no_journal_dir_writes_no_journal_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
