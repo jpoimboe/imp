@@ -10,6 +10,7 @@ import pytest
 from anyio.abc import SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
+from imp.agents.transcript import ContinuationNote
 from imp.engine.state import JsonlEventLog
 from imp.remote.session.protocol import (
     _MAX_FRAME,
@@ -216,6 +217,40 @@ def test_disarm_input_drops_an_unconsumed_latched_frame() -> None:
     # A frame arriving while disarmed (type-ahead during a run) is not latched,
     # so it can never leak into a later, unrelated gate.
     session._dispatch(SimpleNamespace(), Input("stale"))
+    assert session._pending_input is None
+
+
+@pytest.mark.anyio
+async def test_inject_input_resolves_an_open_gate() -> None:
+    # The server's path for a framework note: no client, no wire frame — the
+    # parked next_input() must resolve to exactly what was injected.
+    session = SessionSocket("/unused.sock")
+    got: list[object] = []
+
+    async def _gate() -> None:
+        got.append(await session.next_input())
+
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_gate)
+            await wait_until(lambda: session._input_send is not None)
+            session.inject_input(ContinuationNote(text="the framework speaks"))
+            await wait_until(lambda: got)
+
+    assert got == [ContinuationNote(text="the framework speaks")]
+
+
+def test_inject_input_latches_when_armed_before_the_gate_opens() -> None:
+    session = SessionSocket("/unused.sock")
+    session.arm_input()
+    session.inject_input(ContinuationNote(text="the framework speaks"))
+    assert session._pending_input == ContinuationNote(text="the framework speaks")
+
+
+def test_inject_input_outside_a_gate_and_unarmed_is_dropped() -> None:
+    # Nothing is soliciting: an injection must not queue for a later, unrelated gate.
+    session = SessionSocket("/unused.sock")
+    session.inject_input(ContinuationNote(text="nobody is listening"))
     assert session._pending_input is None
 
 

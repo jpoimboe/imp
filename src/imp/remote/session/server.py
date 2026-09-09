@@ -29,7 +29,7 @@ from imp.remote.session.protocol import (
     SIDE_EFFECT_REASONS,
     SkillRequest,
 )
-from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
+from imp.remote.session.socket_server import InputPayload, ReplaySnapshot, SessionSocket
 
 _log = logging.getLogger("imp.remote.session.server")
 
@@ -219,10 +219,10 @@ class SessionServer:
         if self._first_leased_attach_fired or not await self._await_first_attach():
             raise AwaitingUserInput()
 
-    async def _hibernation_gate(self) -> str | SkillRequest:
+    async def _hibernation_gate(self) -> InputPayload:
         from imp.engine.awaiting_user_input import AwaitingUserInput
 
-        holder: dict[str, str | SkillRequest] = {}
+        holder: dict[str, InputPayload] = {}
         async with anyio.create_task_group() as tg:
             async def _await_input() -> None:
                 holder["text"] = await self._socket.next_input()

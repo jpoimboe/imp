@@ -22,6 +22,7 @@ from anyio.abc import SocketListener, SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
+from imp.agents.transcript import ContinuationNote
 from imp.remote.session.protocol import (
     _MAX_FRAME,
     Attach,
@@ -35,6 +36,9 @@ from imp.remote.session.protocol import (
     encode_result_error,
     parse_client_message,
 )
+
+# What the input channel carries: a client reply, a client skill request, or a server-injected note.
+InputPayload = str | SkillRequest | ContinuationNote
 
 _CLIENT_BUFFER = 256  # per-client send-stream depth; overflow drops that one client
 _FLUSH_TIMEOUT = 5.0   # teardown backstop: a dead client can't wedge the flush
@@ -108,10 +112,10 @@ class SessionSocket:
         self._client_buffer = client_buffer
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
-        self._input_send: MemoryObjectSendStream[str | SkillRequest] | None = None
+        self._input_send: MemoryObjectSendStream[InputPayload] | None = None
         # Single-slot latch for a reply that arrives after a solicit armed but
         # before next_input() opened the gate. Armed only while soliciting.
-        self._pending_input: str | SkillRequest | None = None
+        self._pending_input: InputPayload | None = None
         self._input_armed: bool = False
         self._serve_scope: anyio.CancelScope | None = None
         self._serve_done: anyio.Event | None = None
@@ -224,11 +228,11 @@ class SessionSocket:
         self._input_armed = False
         self._pending_input = None
 
-    async def next_input(self) -> str | SkillRequest:
+    async def next_input(self) -> InputPayload:
         if self._input_send is not None:
             raise RuntimeError("next_input called while gate is already open")
         # capacity-1 stream + WouldBlock drop: first write wins, loser not queued for next gate
-        send, recv = anyio.create_memory_object_stream[str | SkillRequest](max_buffer_size=1)
+        send, recv = anyio.create_memory_object_stream[InputPayload](max_buffer_size=1)
         self._input_send = send
         if self._pending_input is not None:
             # A reply latched between arm and gate-open; deliver it to this gate.
@@ -241,15 +245,18 @@ class SessionSocket:
             send.close()
             recv.close()
 
+    def inject_input(self, payload: InputPayload) -> None:
+        """Deliver a payload to the open gate, else latch it if a solicit is armed, else drop it."""
+        if self._input_send is not None:
+            with contextlib.suppress(anyio.WouldBlock):
+                self._input_send.send_nowait(payload)
+        elif self._input_armed and self._pending_input is None:
+            # Latch the first pre-gate reply (first-wins, like the open gate).
+            self._pending_input = payload
+
     def _dispatch(self, client: _Client, message: object) -> None:
         if isinstance(message, (Input, SkillRequest)):
-            payload = message.text if isinstance(message, Input) else message
-            if self._input_send is not None:
-                with contextlib.suppress(anyio.WouldBlock):
-                    self._input_send.send_nowait(payload)
-            elif self._input_armed and self._pending_input is None:
-                # Latch the first pre-gate reply (first-wins, like the open gate).
-                self._pending_input = payload
+            self.inject_input(message.text if isinstance(message, Input) else message)
         elif isinstance(message, Control) and self._on_control is not None:
             self._on_control(message.action, message.reason)
         elif isinstance(message, SetLease):
