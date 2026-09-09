@@ -77,11 +77,11 @@ def handoff_path_for(transcript_dir: Path) -> Path:
     return transcript_dir.parent / f"{transcript_dir.name}.handoff.md"
 
 
-def handoff_instruction(handoff_path: Path) -> str:
+def handoff_instruction() -> str:
     """The user-turn text that elicits a handoff when a session approaches its
     context limit (Tier A proactive handoff). The agent emits the handoff as its
     final reply text (plain text, no tool calls) and stops; the provider persists
-    that text to `handoff_path` and the engine reincarnates the session from it."""
+    that text and the engine reincarnates the session from it."""
     return (
         "You are approaching the context limit. Stop new work now. Your final "
         "reply must be a compact handoff note — plain text, no tool calls — "

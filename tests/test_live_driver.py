@@ -1716,34 +1716,41 @@ def test_context_bar_bands_are_relative_to_the_cutoff() -> None:
 # AC 9(a)
 def test_context_bar_bands_follow_a_capped_model_down() -> None:
     from imp.cli.live_driver import context_bar
-    # The regression this quest exists for: gpt-5.6-sol hands off at 260k of a
-    # 1.05M window (~24.8%), so 30% and 50% are RED (they rendered green before,
-    # because the old green band was tested first and swallowed any lower mark).
-    at_30 = context_bar("openai", "gpt-5.6-sol", 315_000, color=True, over_bg=False)
+    # gpt-5.6-sol now hands off at the 160k ceiling of its 1.05M window
+    # (~15.2%), so 19%, 30% and 50% are all RED and amber starts at
+    # 0.75 * 160k = 120k. Fill and percentage stay occupancy-of-window.
     at_50 = context_bar("openai", "gpt-5.6-sol", 525_000, color=True, over_bg=False)
+    at_30 = context_bar("openai", "gpt-5.6-sol", 315_000, color=True, over_bg=False)
     at_19 = context_bar("openai", "gpt-5.6-sol", 199_500, color=True, over_bg=False)
-    at_10 = context_bar("openai", "gpt-5.6-sol", 105_000, color=True, over_bg=False)
-    assert at_30 is not None and at_50 is not None
-    assert at_19 is not None and at_10 is not None
-    assert "\x1b[31m" in at_30 and at_30.endswith("30%\x1b[0m")
+    at_cutoff = context_bar("openai", "gpt-5.6-sol", 160_000, color=True, over_bg=False)
+    amber = context_bar("openai", "gpt-5.6-sol", 130_000, color=True, over_bg=False)
+    green = context_bar("openai", "gpt-5.6-sol", 105_000, color=True, over_bg=False)
+    assert at_50 is not None and at_30 is not None and at_19 is not None
+    assert at_cutoff is not None and amber is not None and green is not None
     assert "\x1b[31m" in at_50
-    assert "\x1b[33m" in at_19 and "\x1b[31m" not in at_19   # 19% >= 0.75 * 24.8%
-    assert "\x1b[32m" in at_10
+    assert "\x1b[31m" in at_30 and at_30.endswith("30%\x1b[0m")
+    assert "\x1b[31m" in at_19                              # was amber at 24.8%
+    assert "\x1b[31m" in at_cutoff                          # the cutoff itself
+    assert "\x1b[33m" in amber and "\x1b[31m" not in amber  # 12.4% of the window
+    assert "\x1b[32m" in green                              # 10%
 
 
 # AC 9(b)
-def test_context_bar_uncapped_1m_model_keeps_the_default_bands() -> None:
+def test_context_bar_1m_model_bands_follow_the_ceiling() -> None:
     from imp.cli.live_driver import context_bar
-    green = context_bar("anthropic", "claude-opus-5[1m]", 500_000,
+    # claude-opus-5[1m] carries no soft cap, so its cutoff is the 160k ceiling
+    # — 16% of its 1M window — and amber starts at 0.75 * 160k = 120k. Red
+    # therefore reads at a low percentage; the bar marks the real handoff point.
+    green = context_bar("anthropic", "claude-opus-5[1m]", 100_000,
                         color=True, over_bg=False)
-    amber = context_bar("anthropic", "claude-opus-5[1m]", 700_000,
+    amber = context_bar("anthropic", "claude-opus-5[1m]", 130_000,
                         color=True, over_bg=False)
-    red = context_bar("anthropic", "claude-opus-5[1m]", 800_000,
+    red = context_bar("anthropic", "claude-opus-5[1m]", 160_000,
                       color=True, over_bg=False)
     assert green is not None and amber is not None and red is not None
-    assert "\x1b[32m" in green                     # 50%: the OpenAI cap must not leak
-    assert "\x1b[33m" in amber                     # 70%
-    assert "\x1b[31m" in red                       # 80% = the handoff point
+    assert "\x1b[32m" in green                              # 10%
+    assert "\x1b[33m" in amber and "\x1b[31m" not in amber  # 13%
+    assert "\x1b[31m" in red and red.endswith("16%\x1b[0m")
 
 
 def test_context_bar_midrange_fill_is_wordmark_under_dark_theme() -> None:

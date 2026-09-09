@@ -3499,17 +3499,16 @@ async def test_reincarnation_cap_still_fires_without_resume(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_resume_reincarnation_reset_is_single_shot(tmp_path):
-    """The resume reset fires EXACTLY once per process (process-entry dispatch of
-    the resumed step); a later in-process re-arm (a workflow `resume:` edge — the
-    same arm_step_resume the clean-tree bounce uses) does NOT re-trigger it.
+async def test_budget_accumulates_in_engagement_then_refills_on_step_change(tmp_path):
+    """A genuine resume enters `w` with the counter at the cap; the process-entry
+    reset zeroes it; `w` reincarnates once (counter -> 1) WITHIN that engagement;
+    then the `route` step runs and its `resume: w` edge re-enters `w` from a
+    different step, which refills.
 
-    A genuine resume enters `w` with the counter at the cap; the process-entry
-    reset zeroes it; `w` reincarnates once (counter -> 1); a `resume: w` edge
-    re-enters `w` at the loop top. The counter observed at each `w` invocation
-    must be [0, 1, 1]: 0 proves the entry reset fired, and the final 1 proves the
-    in-process re-arm did NOT re-fire it (a per-iteration or is_resume-gated reset
-    would observe 0 there)."""
+    The counter observed at each `w` invocation must be [0, 1, 0]: the 0 then 1
+    prove the process-entry reset fires once and the counter then accumulates
+    inside the engagement (a per-iteration reset would observe 0 there), and the
+    final 0 is the step-entry seam refilling on the cross-step edge."""
     from imp.providers import resolve
 
     wf = tmp_path / "imp" / "workflows" / "imp"
@@ -3588,7 +3587,7 @@ async def test_resume_reincarnation_reset_is_single_shot(tmp_path):
     result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
-    assert recorded == [0, 1, 1], recorded
+    assert recorded == [0, 1, 0], recorded
 
 
 @pytest.mark.anyio
@@ -3669,6 +3668,206 @@ async def test_clean_tree_bounce_does_not_refill_reincarnation_budget(tmp_path):
     assert result is RunResult.PAUSED
     assert recorded == [1], recorded      # bounce did NOT refill the budget
 
+
+def _seed_review_loop_workflow(root: Path, *, max_reincarnations: int) -> None:
+    """The default workflow's review-loop shape: `finalizer` is a resume target,
+    `reviewer` is reached ONLY by a forward `continue:` and resumes back to
+    `finalizer` for two laps, continuing on the third."""
+    wf = root / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    for name in ("finalizer", "reviewer"):
+        (wf / "agents" / f"{name}.md").write_text(
+            f"---\nname: {name}\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+        )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "vars: {lap1: {type: bool, default: false},"
+        " lap2: {type: bool, default: false}}\n"
+        "defaults: {max_retries: 1, max_loops: 8}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: finalizer\n"
+        "        file: agents/finalizer.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: 'lap2', continue: true}\n"
+        "          - {if: 'lap1', resume: finalizer, set: {lap2: true}}\n"
+        "          - {else: true, resume: finalizer, set: {lap1: true}}\n"
+        "  - name: done\n"
+        "    steps: []\n"
+    )
+    (root / "imp" / "config.yaml").write_text(
+        "default-workflow: imp\n"
+        f"context:\n  max_reincarnations: {max_reincarnations}\n")
+    (project_state_dir(root) / "config.yaml").write_text(_FAKE_CONFIG)
+
+
+def _register_context_window_fake(
+        step_name: str, *, every_entry: bool = False) -> dict[str, int]:
+    """Register the `fake` provider whose `step_name` step yields a Tier B
+    context_window error on its odd-numbered entries — the first entry of each
+    lap — or on EVERY entry when `every_entry`, completing otherwise. An
+    unconditional error would exhaust the cap inside the first engagement and
+    never reach the navigation edge under test. Returns the live entry counter."""
+    from imp.providers import resolve
+
+    entries = {step_name: 0}
+
+    class _Runner:
+        def __init__(self, invocation: AgentInvocation) -> None:
+            self._name = invocation.agent_def.name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            if self._name == step_name:
+                entries[step_name] += 1
+                if every_entry or entries[step_name] % 2 == 1:
+                    yield {"type": "error", "payload": {
+                        "category": "context_window", "kind": "prompt_too_long",
+                        "message": "prompt is too long"}}
+                    return
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner(invocation)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+    return entries
+
+
+@pytest.mark.anyio
+async def test_step_entry_clears_only_the_entered_steps_budget(tmp_path):
+    """Entering a DIFFERENT step pops that step's counter and nothing else — on a
+    forward `continue:` (finalizer -> reviewer) and on a backward `resume:`
+    (reviewer -> finalizer) alike. The process's FIRST dispatch pops nothing
+    (`last_dispatched is None`), so restarting a cap-paused quest cannot silently
+    refill the budget."""
+    from imp.providers import resolve
+
+    _seed_review_loop_workflow(tmp_path, max_reincarnations=2)
+    quest = _make_quest(tmp_path)
+    fin, rev, other = "step:work/finalizer", "step:work/reviewer", "step:elsewhere/x"
+
+    state = State.load(quest.state_dir)
+    state.reincarnations = {fin: 2, rev: 2, other: 5}
+    state.save(quest.state_dir)
+
+    observed: list[dict[str, int]] = []
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            observed.append(dict(State.load(quest.state_dir).reincarnations))
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
+    # finalizer, reviewer, finalizer, reviewer, finalizer, reviewer.
+    assert observed == [
+        {fin: 2, rev: 2, other: 5},   # process entry: nothing popped
+        {fin: 2, other: 5},           # forward continue: only reviewer's entry
+        {other: 5},                   # backward resume: only finalizer's entry
+        {other: 5},
+        {other: 5},
+        {other: 5},
+    ], observed
+
+
+@pytest.mark.anyio
+async def test_forward_entered_step_gets_a_fresh_budget_each_lap(tmp_path):
+    """`reviewer` is reached ONLY by a forward `continue:` — the shape no
+    resume-edge reset would ever reach. With max_reincarnations=1 and one
+    crossing per lap, three laps COMPLETE (three reincarnations) instead of
+    exhausting a quest-scoped budget and pausing during lap 2."""
+    _seed_review_loop_workflow(tmp_path, max_reincarnations=1)
+    quest = _make_quest(tmp_path)
+    entries = _register_context_window_fake("reviewer")
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    assert len([e for e in events if e["type"] == "reincarnating"]) == 3
+    assert entries["reviewer"] == 6      # one crossing + one reborn entry per lap
+
+
+@pytest.mark.anyio
+async def test_resume_target_gets_a_fresh_budget_each_lap(tmp_path):
+    """The same shape for a resume TARGET: `finalizer` is re-entered by a
+    `resume:` originating from a DIFFERENT step (`reviewer`), so the seam fires
+    and its budget refills each lap. (A self-resume leaves
+    `last_dispatched == step.name` and correctly does not refill — pinned by
+    test_clean_tree_bounce_does_not_refill_reincarnation_budget.)"""
+    _seed_review_loop_workflow(tmp_path, max_reincarnations=1)
+    quest = _make_quest(tmp_path)
+    entries = _register_context_window_fake("finalizer")
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    assert len([e for e in events if e["type"] == "reincarnating"]) == 3
+    assert entries["finalizer"] == 6
+
+
+@pytest.mark.anyio
+async def test_cap_still_fires_within_one_engagement(tmp_path):
+    """Within ONE engagement the cap does its real job: a step that crosses on
+    every entry, with no intervening navigation, reincarnates exactly
+    max_reincarnations times and then pauses with its counter retained. The
+    pause carries reason="context_window" and the fake's own error kind — the
+    `reincarnation_cap` kind is built only on the Tier A handoff branch."""
+    _seed_review_loop_workflow(tmp_path, max_reincarnations=1)
+    quest = _make_quest(tmp_path)
+    entries = _register_context_window_fake("reviewer", every_entry=True)
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    assert len([e for e in events if e["type"] == "reincarnating"]) == 1
+    paused = [e["payload"] for e in events if e["type"] == "workflow_paused"]
+    assert paused[-1]["reason"] == "context_window"
+    assert paused[-1]["kind"] == "prompt_too_long"
+    assert State.load(quest.state_dir).reincarnation_count("step:work/reviewer") == 1
+    assert entries["reviewer"] == 2       # the crossing plus the reborn entry
 
 
 @pytest.mark.anyio

@@ -1851,7 +1851,7 @@ class ClaudeCodeSession(ObserveSession):
                 repair_dangling_tool_use_on_resume(
                     self.messages, self.transcript,
                     captured=_load_captured_tool_results(invocation.transcript_dir))
-                instr = handoff_instruction(self._handoff_path_obj)
+                instr = handoff_instruction()
                 instr_msg = Message(
                     role="user", content=(TextBlock(text=instr),))
                 self.messages.append(instr_msg)

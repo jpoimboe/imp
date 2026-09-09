@@ -21,6 +21,8 @@ from typing import Any
 DEFAULT_WINDOW = 200_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_000
 DEFAULT_CHECKPOINT_FRACTION = 0.8
+# Handoff ceiling: a 1M window is headroom for the handoff, not budget to spend.
+DEFAULT_CHECKPOINT_CEILING = 160_000
 
 
 @dataclass(frozen=True)
@@ -185,8 +187,8 @@ def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | Non
     if not window or window <= 0:
         return None
     cap = info.soft_cap if info else None
-    if cap is None:
-        return DEFAULT_CHECKPOINT_FRACTION
+    cap = (DEFAULT_CHECKPOINT_CEILING if cap is None
+           else min(DEFAULT_CHECKPOINT_CEILING, cap))
     return min(DEFAULT_CHECKPOINT_FRACTION, cap / window)
 
 
@@ -237,8 +239,9 @@ def sdk_context_threshold_crossed(
     the checkpoint cutoff — claude_code's `get_context_usage()`, or codex's
     rollout `token_count` record. Unlike context_threshold_crossed (which sums
     prompt tokens against the static catalog window), this divides the
-    provider's live context_tokens / context_window, and applies the model's
-    soft cap to that window. Returns False whenever a live number is
+    provider's live context_tokens / context_window against the
+    `checkpoint_cutoff` clamp — `DEFAULT_CHECKPOINT_CEILING`, or a lower model
+    soft cap when one is set. Returns False whenever a live number is
     unavailable — the watch never fires rather than guessing.
     """
     frac = checkpoint_cutoff(limits_for(provider, model), context_window)
