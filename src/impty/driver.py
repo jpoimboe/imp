@@ -390,14 +390,26 @@ class ImptyDriver:
         """
         return self._render(self._require(), full=full)
 
-    def send(self, data: str, wait: bool | float = True) -> str:
-        """Send raw keystrokes to the program. When waiting, return a changed-row diff,
-        `[no text change]`, or `[full screen]` followed by the complete screen.
+    def send(
+        self, data: str = "", keys: list[str] | None = None, wait: bool | float = True,
+    ) -> str:
+        """Send text and/or named keys to the program. When waiting, return a changed-row
+        diff, `[no text change]`, or `[full screen]` followed by the complete screen.
 
-        `data` is literal bytes the program receives — NOT a description. Common keys:
-        Enter=`\\r`, Tab=`\\t`, Ctrl-C=`\\x03`, Backspace=`\\x7f`,
-        Up=`\\x1b[A` Down=`\\x1b[B` Right=`\\x1b[C` Left=`\\x1b[D`.
-        So answering a prompt "foo" then Enter = data="foo\\r".
+        `data` is literal text the program receives — NOT a description. Escape
+        mnemonics in it are decoded: Enter=`\\r`, Tab=`\\t`, Ctrl-C=`\\x03`,
+        Backspace=`\\x7f`, Up=`\\x1b[A` Down=`\\x1b[B` Right=`\\x1b[C` Left=`\\x1b[D`.
+
+        `keys` is a list of KEY NAMES, sent after `data` in list order — the safe way
+        to send a non-printing key: a mistyped escape in `data` is silently typed into
+        the program as text, while a mistyped key NAME is an error that sends nothing.
+        So answering a prompt "foo" then Enter = data="foo", keys=["enter"]. Names:
+        enter, tab, shift-tab, escape, space, backspace, delete, insert, up, down,
+        left, right, home, end, pageup, pagedown, f1-f12, ctrl-<a-z>, alt-<key>
+        (spelling is forgiving — `ctrl-c`, `Ctrl+C` and `CTRL_C` are one key). Pass at
+        least one of `data` / `keys`; both reach the program in a single write, so
+        nothing can land between your text and the key that commits it. For a key the
+        list doesn't name, pass its raw bytes in `data`.
 
         `wait` controls how long to settle before rendering:
         - True (default): wait for the program to react and go QUIET — type-then-look
@@ -411,12 +423,17 @@ class ImptyDriver:
           blocks longer — and the reply's first line then reads `[waited 240s call cap
           (600s requested)]`; send again or call `wait()` to keep watching.
         """
+        if not data and not keys:
+            raise ValueError("send needs data= text, keys=[...], or both")
+        # Resolve the WHOLE list before the first write: an unknown name must deliver
+        # nothing at all, half a key list being a state neither side can reason about.
+        payload = _decode_keys(data) + "".join(_resolve_key(k) for k in keys or ())
         session = self._require()
         # Mark the type-then-look boundary just before the keystroke so wait_idle
         # settles on the REACTION, not on a stale pre-send screen the drainer last
         # touched seconds ago.
         since = time.monotonic()
-        session.send(_decode_keys(data))
+        session.send(payload)
         # `is False` / `is True`: bool is an int subclass, so a numeric `wait` must
         # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
         if wait is False:

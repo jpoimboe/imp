@@ -83,6 +83,24 @@ _RESIZE_CHILD = (
     "time.sleep(30)\n"
 )
 
+_ECHO_CHILD = (
+    "import os, sys, tty\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "buf = b''\n"
+    "while True:\n"
+    "    c = os.read(sys.stdin.fileno(), 1)\n"
+    "    if not c: break\n"
+    "    buf += c\n"
+    "    os.write(1, b'GOT ' + buf.hex().encode() + b'\\r\\n')\n"
+)
+
+
+def _received(driver: ImptyDriver) -> str:
+    """Hex of everything the echo child has received so far — its last GOT line."""
+    got = [ln for ln in driver.view().splitlines() if ln.startswith("GOT ")]
+    return got[-1].split(" ", 1)[1].strip() if got else ""
+
 
 def test_decodes_carriage_return_so_enter_submits() -> None:
     assert _decode_keys("foo\\r") == "foo\r"
@@ -365,6 +383,85 @@ def test_send_wait_true_returns_screen_not_sent_marker() -> None:
         assert result.startswith("[")  # status header
     finally:
         d.stop()
+
+
+def test_send_with_neither_data_nor_keys_is_an_error() -> None:
+    with pytest.raises(ValueError) as exc:
+        ImptyDriver().send()
+    assert str(exc.value) == "send needs data= text, keys=[...], or both"
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_delivers_data_then_the_named_keys_in_order() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        d.send(data="foo", keys=["enter"])
+        assert _poll(lambda: _received(d) == b"foo\r".hex(), E2E_POLL_TIMEOUT)
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_writes_data_and_keys_in_a_single_pty_write() -> None:
+    # One write, or pyte's CPR/DA reply writer could land between the typed text and
+    # the key that commits it.
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        session = d._require()
+        writes: list[str] = []
+        real = session.send
+
+        def spy(payload: bytes | str) -> None:
+            writes.append(str(payload))
+            real(payload)
+
+        session.send = spy
+        d.send(data="hi", keys=["space", "enter"])
+        assert writes == ["hi \r"]
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_unknown_key_name_delivers_nothing_to_the_program() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        with pytest.raises(ValueError) as exc:
+            d.send(data="foo", keys=["contrl-c"])
+        assert str(exc.value) == _UNKNOWN_KEY_MESSAGE
+        # A probe the child DOES get proves the failed call wrote nothing: its
+        # cumulative buffer is the probe alone, not "foo" followed by the probe.
+        d.send(keys=["tab"])
+        assert _poll(lambda: _received(d) == b"\t".hex(), E2E_POLL_TIMEOUT)
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_bad_key_later_in_the_list_sends_none_of_the_earlier_ones() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        with pytest.raises(ValueError):
+            d.send(keys=["space", "nope"])
+        d.send(keys=["tab"])
+        assert _poll(lambda: _received(d) == b"\t".hex(), E2E_POLL_TIMEOUT)
+    finally:
+        d.stop()
+
+
+def test_send_docstring_teaches_the_key_vocabulary() -> None:
+    doc = ImptyDriver.send.__doc__ or ""
+    assert 'keys=["enter"]' in doc
+    assert "ctrl-<a-z>" in doc
+    assert "single write" in doc
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
