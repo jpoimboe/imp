@@ -103,6 +103,80 @@ def _decode_keys(data: str) -> str:
     return _ESCAPE_RE.sub(lambda m: codecs.decode(m.group(0), "unicode_escape"), data)
 
 
+# The named-key vocabulary send(keys=[...]) resolves. Bytes are the normal-cursor
+# (non-DECCKM) xterm forms, matching the TERM=xterm-256color the session defaults to.
+_KEY_TABLE: dict[str, str] = {
+    "enter": "\r", "return": "\r", "tab": "\t", "shift-tab": "\x1b[Z",
+    "escape": "\x1b", "esc": "\x1b", "space": " ", "backspace": "\x7f",
+    "delete": "\x1b[3~", "insert": "\x1b[2~",
+    "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
+    "home": "\x1b[H", "end": "\x1b[F", "pageup": "\x1b[5~", "pagedown": "\x1b[6~",
+    "f1": "\x1bOP", "f2": "\x1bOQ", "f3": "\x1bOR", "f4": "\x1bOS",
+    "f5": "\x1b[15~", "f6": "\x1b[17~", "f7": "\x1b[18~", "f8": "\x1b[19~",
+    "f9": "\x1b[20~", "f10": "\x1b[21~", "f11": "\x1b[23~", "f12": "\x1b[24~",
+}
+
+# ctrl-<char> is computed, not tabulated: the control byte is the character's code
+# minus 0x40, which covers a-z and the [ \ ] ^ _ punctuation with one rule.
+_CTRL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz[\\]^_")
+
+_KEY_VOCABULARY = (
+    "enter, tab, shift-tab, escape, space, backspace, delete, insert, up, down, "
+    "left, right, home, end, pageup, pagedown, f1-f12, ctrl-<a-z>, alt-<key>"
+)
+
+
+def _resolve_named(name: str, raw: str) -> str | None:
+    """One exact spelling (`name`, normalized; `raw` the same name as the caller wrote
+    it) to its bytes, or None when it names nothing: a table row, the computed
+    `ctrl-<char>` form, or `alt-<rest>` — which prefixes ESC to the remainder's OWN
+    staged resolution, falling back to a lone printable char.
+
+    The alt- remainder is taken from `raw`: name-folding may only fold key NAMES, and
+    a literal char passed through it would change byte (`alt-A` → ESC a, `alt-+` → ESC
+    -) — silently, which is the failure this whole feature removes. Stages 1-2 are
+    index-preserving so `raw[4:]` is that remainder, and stage 3 strips the `alt-`
+    prefix itself, so this branch never sees a stage-3 candidate."""
+    if (found := _KEY_TABLE.get(name)) is not None:
+        return found
+    if name.startswith("ctrl-") and name[5:] in _CTRL_CHARS:
+        return chr(ord(name[5].upper()) - 0x40)
+    if name.startswith("alt-"):
+        rest = raw[4:]
+        body = _resolve_spelling(rest)
+        if body is None and len(rest) == 1 and rest.isprintable():
+            body = rest
+        return None if body is None else f"\x1b{body}"
+    return None
+
+
+def _resolve_spelling(name: str) -> str | None:
+    """Try up to three progressively more aggressive spellings, stopping at the first
+    that resolves. Staged rather than one pass because no single rule keeps `ctrl-_`
+    addressable (an unconditional `_`→`-` destroys it) while still folding `CTRL_C`
+    (an unconditional `_`-strip yields the unresolvable `ctrlc`)."""
+    lowered = name.lower().replace("+", "-")
+    dashed = lowered.replace("_", "-")
+    for candidate in (lowered, dashed, dashed.replace("-", "")):
+        if (found := _resolve_named(candidate, name)) is not None:
+            return found
+    return None
+
+
+def _resolve_key(name: str) -> str:
+    """A `send(keys=[...])` name to the bytes a real terminal sends for that key.
+
+    Raises ValueError naming the key AS THE CALLER WROTE IT — an unknown name has to
+    be recognizable to whoever typed it, and the message carries the whole vocabulary
+    plus the `data=` escape hatch, since this is the one moment an agent needs both."""
+    if (found := _resolve_spelling(name)) is not None:
+        return found
+    raise ValueError(
+        f"unknown key name '{name}' — valid: {_KEY_VOCABULARY};"
+        " for anything else pass the raw bytes in data="
+    )
+
+
 def _format_exit(code: int) -> str:
     """The agent-facing spelling of a raw `Popen` returncode: a plain number for a
     normal exit, the signal's NAME for a signal death — never a bare negative. A

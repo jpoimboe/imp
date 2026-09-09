@@ -17,7 +17,13 @@ import pytest
 from PIL import Image
 
 from impty import TerminalSession
-from impty.driver import ImptyDriver, PtySpawn, _decode_keys, _format_exit
+from impty.driver import (
+    ImptyDriver,
+    PtySpawn,
+    _decode_keys,
+    _format_exit,
+    _resolve_key,
+)
 from impty.render import _MAX_DIM
 from impty.session import (
     DEFAULT_CHANGE_HARD,
@@ -94,6 +100,77 @@ def test_leaves_plain_text_and_unicode_untouched() -> None:
 
 def test_leaves_unrecognized_backslash_literal() -> None:
     assert _decode_keys("a\\z b") == "a\\z b"
+
+
+# The key table exactly as the spec pins it; the resolver is checked against THIS,
+# never the other way round.
+_PINNED_KEY_BYTES = {
+    "enter": "\r", "return": "\r", "tab": "\t", "shift-tab": "\x1b[Z",
+    "escape": "\x1b", "esc": "\x1b", "space": " ", "backspace": "\x7f",
+    "delete": "\x1b[3~", "insert": "\x1b[2~",
+    "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
+    "home": "\x1b[H", "end": "\x1b[F", "pageup": "\x1b[5~", "pagedown": "\x1b[6~",
+    "f1": "\x1bOP", "f2": "\x1bOQ", "f3": "\x1bOR", "f4": "\x1bOS",
+    "f5": "\x1b[15~", "f6": "\x1b[17~", "f7": "\x1b[18~", "f8": "\x1b[19~",
+    "f9": "\x1b[20~", "f10": "\x1b[21~", "f11": "\x1b[23~", "f12": "\x1b[24~",
+    "ctrl-[": "\x1b", "ctrl-\\": "\x1c", "ctrl-]": "\x1d", "ctrl-^": "\x1e",
+    "ctrl-_": "\x1f",
+}
+
+_UNKNOWN_KEY_MESSAGE = (
+    "unknown key name 'contrl-c' — valid: enter, tab, shift-tab, escape, space, "
+    "backspace, delete, insert, up, down, left, right, home, end, pageup, pagedown, "
+    "f1-f12, ctrl-<a-z>, alt-<key>; for anything else pass the raw bytes in data="
+)
+
+
+@pytest.mark.parametrize(("name", "expected"), sorted(_PINNED_KEY_BYTES.items()))
+def test_key_names_resolve_to_the_pinned_bytes(name: str, expected: str) -> None:
+    assert _resolve_key(name) == expected
+
+
+def test_ctrl_letter_range_is_the_ascii_control_codes() -> None:
+    # ctrl-a..ctrl-z are \x01..\x1a — the ASCII definition, not a table lookup.
+    assert [_resolve_key(f"ctrl-{c}") for c in "abcdefghijklmnopqrstuvwxyz"] == [
+        chr(i) for i in range(1, 27)
+    ]
+
+
+def test_alt_prefixes_escape_onto_the_resolved_remainder() -> None:
+    assert _resolve_key("alt-enter") == "\x1b\r"
+    assert _resolve_key("alt-x") == "\x1bx"
+    assert _resolve_key("alt-_") == "\x1b_"
+    # The remainder folds through its OWN stages: page_up -> pageup.
+    assert _resolve_key("Alt+Page_Up") == "\x1b\x1b[5~"
+    # A bare-char remainder is sent AS WRITTEN: name-folding must not rewrite the
+    # literal byte, or alt-A would silently deliver ESC a and alt-+ would deliver ESC -.
+    assert _resolve_key("alt-A") == "\x1bA"
+    assert _resolve_key("alt-+") == "\x1b+"
+    assert _resolve_key("Alt_A") == "\x1bA"
+
+
+def test_name_normalization_folds_spellings_and_keeps_ctrl_underscore() -> None:
+    assert _resolve_key("Ctrl+C") == "\x03"
+    assert _resolve_key("ctrl-c") == "\x03"
+    assert _resolve_key("CTRL_C") == "\x03"
+    assert _resolve_key("Page_Up") == "\x1b[5~"
+    assert _resolve_key("PageUp") == "\x1b[5~"
+    assert _resolve_key("pageup") == "\x1b[5~"
+    # The pair no single-stage rule can satisfy at once.
+    assert _resolve_key("shift_tab") == "\x1b[Z"
+    assert _resolve_key("ctrl-_") == "\x1f"
+
+
+def test_unknown_key_name_message_quotes_the_name_as_written() -> None:
+    with pytest.raises(ValueError) as exc:
+        _resolve_key("contrl-c")
+    assert str(exc.value) == _UNKNOWN_KEY_MESSAGE
+
+
+def test_keys_is_a_closed_vocabulary_so_a_bare_char_is_not_a_key() -> None:
+    # A lone printable char is only meaningful after alt-; on its own it belongs in data=.
+    with pytest.raises(ValueError):
+        _resolve_key("x")
 
 
 def test_tool_methods_expose_the_eight_tools_in_order() -> None:
