@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +92,91 @@ time.sleep(30)
 
 def _records(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def _fail_writes_to(suffix: str) -> Callable[[Any, bytes], None]:
+    """A _write_all that raises on one of the two files, as a full disk would."""
+    real = impty.journal._write_all
+
+    def failing(fh: Any, data: bytes) -> None:
+        if fh.name.endswith(suffix):
+            raise OSError("simulated ENOSPC")
+        real(fh, data)
+
+    return failing
+
+
+def test_an_unopenable_dir_disables_the_journal_and_logs_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A non-existent parent, not mode bits: uid 0 writes into a 0o500 dir, and
+    # imp's own gates run as root inside the sandbox.
+    missing = tmp_path / "nope" / "deeper"
+    with caplog.at_level(logging.WARNING, logger="impty.journal"):
+        j = Journal(missing, 1)
+        j.start(["prog"], cols=80, rows=24)
+        j.output(b"data")
+        j.send(4)
+        j.end(0)
+    assert not missing.exists()
+    assert list(tmp_path.iterdir()) == []
+    assert len([r for r in caplog.records if r.name == "impty.journal"]) == 1
+
+
+@_needs_pty
+def test_an_unopenable_journal_dir_leaves_the_session_working(tmp_path: Path) -> None:
+    missing = tmp_path / "nope" / "deeper"
+    with TerminalSession(
+        [sys.executable, "-c", _COOKED_CHILD], journal=Journal(missing, 1),
+    ) as s:
+        assert s.wait_idle(idle=0.2, hard=30.0)
+        s.send("hello\r")
+        s.resize(40, 120)
+        assert _poll(
+            lambda: "GOT=6" in "\n".join(s.lines()), timeout=_JOURNAL_POLL,
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_sidecar_write_failure_is_contained_and_logged_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    j = Journal(tmp_path, 1)
+    j.start(["prog"], cols=80, rows=24)
+    monkeypatch.setattr(impty.journal, "_write_all", _fail_writes_to(".jsonl"))
+    with caplog.at_level(logging.WARNING, logger="impty.journal"):
+        j.send(4)  # the failing write
+        j.output(b"more")
+        j.resize(40, 120)
+        j.end(0)
+    assert [r["ev"] for r in _records(tmp_path / "pty-1.jsonl")] == ["start"]
+    assert (tmp_path / "pty-1.raw").read_bytes() == b""  # disabled, not just sidecar
+    warnings = [r for r in caplog.records if r.name == "impty.journal"]
+    assert len(warnings) == 1
+    assert "pty-1.jsonl" in warnings[0].getMessage()
+
+
+@_needs_pty
+def test_a_raw_write_failure_mid_drive_leaves_the_session_working(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw = tmp_path / "pty-1.raw"
+    with (
+        caplog.at_level(logging.WARNING, logger="impty.journal"),
+        TerminalSession(
+            [sys.executable, "-c", _COOKED_CHILD], journal=Journal(tmp_path, 1),
+        ) as s,
+    ):
+        assert s.wait_idle(idle=0.2, hard=30.0)
+        assert b"READY" in raw.read_bytes()  # journaling until the fault is injected
+        monkeypatch.setattr(impty.journal, "_write_all", _fail_writes_to(".raw"))
+        s.send("hello\r")
+        # The drive is untouched: the child still receives its keystrokes and pyte
+        # still receives the output, though the journal has gone dark.
+        assert _poll(lambda: "GOT=6" in "\n".join(s.lines()), timeout=_JOURNAL_POLL)
+    warnings = [r for r in caplog.records if r.name == "impty.journal"]
+    assert len(warnings) == 1
+    assert "pty-1.raw" in warnings[0].getMessage()
 
 
 def test_the_index_names_both_files(tmp_path: Path) -> None:

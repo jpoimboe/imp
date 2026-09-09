@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, BinaryIO
+
+_log = logging.getLogger(__name__)
 
 
 def _write_all(fh: BinaryIO, data: bytes) -> None:
@@ -35,15 +38,28 @@ class Journal:
         self._off = 0
         self._raw_path = directory / f"pty-{index}.raw"
         self._jsonl_path = directory / f"pty-{index}.jsonl"
-        self._raw: BinaryIO | None = self._raw_path.open("wb", buffering=0)
-        self._jsonl: BinaryIO | None = self._jsonl_path.open("wb", buffering=0)
+        self._raw: BinaryIO | None = None
+        self._jsonl: BinaryIO | None = None
+        try:
+            self._raw = self._raw_path.open("wb", buffering=0)
+        except OSError as exc:
+            self._disable(self._raw_path, exc)
+            return
+        try:
+            self._jsonl = self._jsonl_path.open("wb", buffering=0)
+        except OSError as exc:
+            self._disable(self._jsonl_path, exc)
 
     def output(self, chunk: bytes) -> None:
         """Journal one chunk read off the master."""
         with self._lock:
             if self._raw is None:
                 return
-            _write_all(self._raw, chunk)
+            try:
+                _write_all(self._raw, chunk)
+            except OSError as exc:
+                self._disable(self._raw_path, exc)
+                return
             self._off += len(chunk)
 
     def start(self, argv: Sequence[str], cols: int, rows: int) -> None:
@@ -64,7 +80,7 @@ class Journal:
             self._record("end", exit=exit_code)
             self._close()
 
-    # _record and _close run with _lock held.
+    # _record and _close run with _lock held; _disable too, except from __init__.
     def _record(self, ev: str, **fields: Any) -> None:
         if self._jsonl is None:
             return
@@ -72,7 +88,15 @@ class Journal:
             "t": round(time.monotonic() - self._t0, 3), "off": self._off, "ev": ev,
         }
         rec.update(fields)
-        _write_all(self._jsonl, json.dumps(rec, separators=(",", ":")).encode() + b"\n")
+        line = json.dumps(rec, separators=(",", ":")).encode() + b"\n"
+        try:
+            _write_all(self._jsonl, line)
+        except OSError as exc:
+            self._disable(self._jsonl_path, exc)
+
+    def _disable(self, path: Path, exc: OSError) -> None:
+        _log.warning("impty: pty journal disabled (%s): %s", path, exc)
+        self._close()
 
     def _close(self) -> None:
         for fh in (self._raw, self._jsonl):
