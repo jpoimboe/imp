@@ -44,6 +44,33 @@ def _pin_of(quest_dir: Path) -> object:
     return json.loads((quest_dir / "quest.json").read_text())["provider"]
 
 
+def _subparser(name: str) -> argparse.ArgumentParser:
+    parser = main._build_parser()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices[name]
+    raise AssertionError("no subparsers")
+
+
+def _provider_help(name: str) -> str:
+    sp = _subparser(name)
+    for action in sp._actions:
+        if "--provider" in (action.option_strings or []):
+            return action.help
+    raise AssertionError(f"no --provider action on {name!r}")
+
+
+def test_provider_flag_help_strings_are_verbatim() -> None:
+    # The spec pins these strings verbatim and nothing else asserts them.
+    shared = "Run this quest on NAME, whatever the configured provider order is."
+    assert _provider_help("new") == shared
+    assert _provider_help("chat") == shared
+    assert _provider_help("resume") == (
+        "Switch the quest to NAME for its remaining steps; "
+        "the current step picks up from the event log."
+    )
+
+
 def test_new_parser_accepts_the_provider_flag() -> None:
     args = main._build_parser().parse_args(["new", "x", "--provider", "codex"])
     assert args.provider == "codex"
