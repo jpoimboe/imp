@@ -867,22 +867,96 @@ def _spy_spawn(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
-def test_start_with_no_hook_spawns_the_callers_argv_bare(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("cwd_case", ["omitted", "relative", "absolute"])
+def test_start_with_no_hook_preserves_host_cwd_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cwd_case: str,
 ) -> None:
-    # The shape `python -m impty.mcp` and every direct library user get: the caller's
-    # own argv, no pinned fds, and the caller's cwd handed straight to Popen.
+    monkeypatch.chdir(tmp_path)
+    relative = tmp_path / "relative"
+    absolute = tmp_path / "absolute"
+    relative.mkdir()
+    absolute.mkdir()
+    requested = {
+        "omitted": None,
+        "relative": "relative",
+        "absolute": str(absolute),
+    }[cwd_case]
+    expected = str(tmp_path if requested is None else tmp_path / requested)
     seen = _spy_spawn(monkeypatch)
-    argv = [sys.executable, "-c", "import os; print(os.path.basename(os.getcwd()))"]
+    argv = [
+        sys.executable, "-c",
+        "import os, sys; print('CWD-OK' if os.getcwd() == sys.argv[1] else 'CWD-BAD')",
+        expected,
+    ]
     d = ImptyDriver()
     try:
-        screen = d.start(argv, cwd=str(tmp_path))
+        screen = d.start(argv) if cwd_case == "omitted" else d.start(argv, cwd=requested)
     finally:
         d.stop()
     assert seen["argv"] == argv
-    assert seen["cwd"] == str(tmp_path)
+    assert seen["cwd"] == requested
     assert seen.get("pass_fds", ()) == ()
-    assert tmp_path.name in screen
+    assert "CWD-OK" in screen
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+@pytest.mark.parametrize("planned", [False, True])
+@pytest.mark.parametrize("cwd_case", ["omitted", "empty", "dot", "relative", "absolute"])
+def test_cwd_resolver_runs_before_bare_or_planned_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, planned: bool, cwd_case: str,
+) -> None:
+    relative = tmp_path / "relative"
+    absolute = tmp_path / "absolute"
+    resolved = tmp_path / "resolved"
+    relative.mkdir()
+    absolute.mkdir()
+    resolved.mkdir()
+    requested = {
+        "omitted": None,
+        "empty": "",
+        "dot": ".",
+        "relative": "relative",
+        "absolute": f"{tmp_path}//absolute",
+    }[cwd_case]
+    resolver_calls: list[str | None] = []
+    hook_cwds: list[str | None] = []
+    seen = _spy_spawn(monkeypatch)
+
+    def resolve_cwd(cwd: str | None) -> str | None:
+        resolver_calls.append(cwd)
+        return str(resolved)
+
+    def hook(
+        argv: Sequence[str], cwd: str | None, env: Mapping[str, str] | None,
+    ) -> PtySpawn | None:
+        hook_cwds.append(cwd)
+        if not planned:
+            return None
+        return PtySpawn(
+            argv=[
+                sys.executable, "-c",
+                "import os, sys; os.chdir(sys.argv[1]); "
+                "print('CWD-OK' if os.getcwd() == sys.argv[1] and os.environ.get('PATH') "
+                "else 'CWD-BAD')",
+                cwd or "",
+            ],
+            env={"PATH": os.environ["PATH"]},
+        )
+
+    argv = [
+        sys.executable, "-c",
+        "import os, sys; print('CWD-OK' if os.getcwd() == sys.argv[1] else 'CWD-BAD')",
+        str(resolved),
+    ]
+    d = ImptyDriver(sandbox=hook, cwd_resolver=resolve_cwd)
+    try:
+        screen = d.start(argv, cwd=requested)
+    finally:
+        d.stop()
+    assert resolver_calls == [requested]
+    assert hook_cwds == [str(resolved)]
+    assert seen["cwd"] is None if planned else seen["cwd"] == str(resolved)
+    assert "CWD-OK" in screen
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
@@ -1205,6 +1279,21 @@ def test_start_copy_states_the_env_overlay_and_the_hook() -> None:
         flat = " ".join(text.split())
         assert "REPLACES the inherited environment" not in flat
         assert "replaces the environment" not in flat
+
+
+def test_readme_documents_the_optional_cwd_resolver_contract() -> None:
+    import impty
+
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    section = readme.split("## Embedding: the sandbox hook", 1)[1].split("\n## ", 1)[0]
+    copy = " ".join(section.split())
+    assert "ImptyDriver(cwd_resolver=...)" in copy
+    assert "on every `start()` before the sandbox hook or bare spawn is selected" in copy
+    assert "the transformed cwd is passed to either route" in copy
+    assert (
+        "omitted, relative, and absolute cwd values retain the host process's normal "
+        "`Popen` handling"
+    ) in copy
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
