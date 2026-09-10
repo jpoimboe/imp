@@ -24,9 +24,12 @@ def test_bash_paths_note_carries_project_root_env() -> None:
 
 
 def test_bash_paths_note_describes_relative_path_model() -> None:
-    low = _BASH_VIRTUAL_PATHS_NOTE.lower()
-    assert "relative" in low
-    assert "project root" in low
+    note = " ".join(_BASH_VIRTUAL_PATHS_NOTE.split())
+
+    assert (
+        "`cwd` defaults to the project root. Relative values are resolved from "
+        "that root; absolute values are used as written."
+    ) in note
 
 
 def test_coder_holds_bash_so_it_receives_the_note() -> None:

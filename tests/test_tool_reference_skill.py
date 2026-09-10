@@ -22,6 +22,17 @@ def test_tool_reference_describes_bash_promotion() -> None:
     assert "promoted to a background task" in body
 
 
+def test_tool_reference_documents_project_root_cwd_resolution() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-tool-reference")
+    bash_section = body.split("## bash", 1)[1].split("\n## ", 1)[0]
+    normalized = " ".join(bash_section.split())
+
+    assert (
+        "`cwd` defaults to the project root. Relative values are resolved from "
+        "that root; absolute values are used as written."
+    ) in normalized
+
+
 def test_tool_reference_holds_relocated_reference_detail() -> None:
     body = load_internal_skill(_skills_dir(), "imp-tool-reference")
     # One sentinel per tool whose description relocated detail here (AC 3):
