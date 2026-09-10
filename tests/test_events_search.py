@@ -359,16 +359,33 @@ def test_main_events_search_rejects_invalid_output_controls_before_lookup(
     assert control_root_calls == 0
 
 
-def test_cmd_events_search_default_rich_is_bounded(monkeypatch, capsys, tmp_path: Path) -> None:
+def test_cmd_events_search_default_rich_is_bounded(
+        monkeypatch, capsys, tmp_path: Path) -> None:
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: _bounded_hits())
 
     rc = m._cmd_events_search(_search_ns("GREPTARGET"), tmp_path)
 
     out = capsys.readouterr().out
+    lines = out.splitlines()
+    act_new_line = next(
+        line for line in lines if line.startswith("act_new · Active New · active · "))
+    act_old_index = next(
+        index for index, line in enumerate(lines)
+        if line.startswith("act_old · Active Old · active · "))
+    act_new_index = lines.index(act_new_line)
+    age = act_new_line.rsplit(" · ", 1)[1]
+
     assert rc == 0
     assert '21 matches in 5 quests for "GREPTARGET"' in out
-    assert out.index("act_new · Active New · active") < out.index(
-        "act_old · Active Old · active") < out.index("bkl001 · Backlog One · backlog")
+    assert act_new_index < act_old_index < next(
+        index for index, line in enumerate(lines)
+        if line.startswith("bkl001 · Backlog One · backlog · "))
+    assert age[:-1].isdigit() and age[-1] in {"s", "m", "h", "d"}
+    assert [
+        line.split()[0]
+        for line in lines[act_new_index + 1:act_old_index]
+        if line.startswith("  #")
+    ] == ["#1", "#2", "#3"]
     assert "arc_new" not in out and "arc_old" not in out
     assert "#4" not in out
     assert out.count("  … +2 more") == 2
@@ -381,17 +398,26 @@ def test_cmd_events_search_human_presentation_and_spacing(
         def isatty(self) -> bool:
             return True
 
-    monkeypatch.setattr(m, "_events_search", lambda *a, **k: _bounded_hits())
+    hits = _bounded_hits()
+    hits[3] = hits[3]._replace(title="GREPTARGET Active New")
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: hits)
     monkeypatch.setattr(m, "should_use_color", lambda stream: True)
     out = _Tty()
     monkeypatch.setattr(m.sys, "stdout", out)
 
     assert m._cmd_events_search(_search_ns("GREPTARGET"), tmp_path) == 0
     rich = out.getvalue()
+    act_new_heading = next(
+        line for line in rich.splitlines()
+        if line.startswith("\x1b[33mact_new\x1b[0m · "))
     assert "\x1b[2m21 matches in 5 quests for \"GREPTARGET\"\x1b[0m" in rich
-    assert "\x1b[33mact_new\x1b[0m" in rich
-    assert "\x1b[1m\x1b[33mGREPTARGET\x1b[0m" in rich
+    assert act_new_heading.startswith(
+        "\x1b[33mact_new\x1b[0m · "
+        "\x1b[1m\x1b[33mGREPTARGET\x1b[0m Active New · "
+        "\x1b[2mactive · "
+    )
     assert "\x1b[2m  … +2 more\x1b[0m" in rich
+    assert "\x1b[2m… +2 more quests\x1b[0m" in rich
     assert rich.endswith("\n\n") and not rich.endswith("\n\n\n")
 
     out.seek(0)
@@ -399,6 +425,17 @@ def test_cmd_events_search_human_presentation_and_spacing(
     assert m._cmd_events_search(
         _search_ns("GREPTARGET", list=True), tmp_path) == 0
     listed = out.getvalue()
+    assert listed.removesuffix("\n\n").splitlines() == [
+        (
+            "\x1b[33mact_new\x1b[0m · "
+            "\x1b[1m\x1b[33mGREPTARGET\x1b[0m Active New · "
+            "\x1b[2mactive\x1b[0m"
+        ),
+        "\x1b[33mact_old\x1b[0m · Active Old · \x1b[2mactive\x1b[0m",
+        "\x1b[33mbkl001\x1b[0m · Backlog One · \x1b[2mbacklog\x1b[0m",
+        "\x1b[33marc_new\x1b[0m · Archive New · \x1b[2marchive\x1b[0m",
+        "\x1b[33marc_old\x1b[0m · Archive Old · \x1b[2marchive\x1b[0m",
+    ]
     assert listed.endswith("\n\n") and not listed.endswith("\n\n\n")
 
 
