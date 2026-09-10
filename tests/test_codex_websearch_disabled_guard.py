@@ -29,12 +29,15 @@ def test_runner_options_build_the_production_argv_with_no_web_search_flag() -> N
         assert not any("web_search" in a for a in args), args
 
 
-@pytest.mark.parametrize("tier", ["medium", "high"])
-def test_thinking_tiers_pin_high_reasoning_effort(tier: str) -> None:
-    """Matches the anthropic/claude_code per-tier posture: medium and high both
-    run at effort 'high', so the tier picks the model, not the effort."""
-    opts = CodexAgentRunner(model_name="gpt-5.6-terra")._build_thread_options(tier)
+@pytest.mark.parametrize(
+    ("tier", "model"),
+    [("medium", "gpt-5.6-terra"), ("high", "gpt-6-astra")],
+)
+def test_thinking_tiers_pin_high_reasoning_effort(tier: str, model: str) -> None:
+    opts = CodexAgentRunner(model_name=model)._build_thread_options(tier)
+    assert opts.model == model
     assert opts.model_reasoning_effort == "high"
+    assert opts.model_reasoning_effort not in {"xhigh", "max", "ultra"}
 
 
 @pytest.mark.parametrize("tier", ["low", None])

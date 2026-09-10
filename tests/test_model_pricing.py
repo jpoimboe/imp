@@ -20,6 +20,7 @@ def test_anthropic_rates_match_the_published_table() -> None:
 
 
 def test_openai_rates_match_the_published_table() -> None:
+    assert prices_for("gpt-6-astra") == ModelPrices(10.00, 50.00, 1.00, 12.50, 272_000)
     assert prices_for("gpt-5.6-sol") == ModelPrices(4.00, 20.00, 0.40, 5.00, 272_000)
     assert prices_for("gpt-5.6-terra") == ModelPrices(2.00, 12.00, 0.20, 2.50, 272_000)
     assert prices_for("gpt-5.6-luna") == ModelPrices(0.20, 1.20, 0.02, 0.25, 272_000)
@@ -31,8 +32,8 @@ def test_openai_rates_match_the_published_table() -> None:
     assert prices_for("gpt-5") == ModelPrices(1.25, 10.00, 0.125, 1.25)
 
 
-def test_cache_write_takes_the_1_25x_premium_only_on_the_5_6_family() -> None:
-    for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
+def test_cache_write_takes_the_1_25x_premium_on_astra_and_5_6() -> None:
+    for model in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
         prices = prices_for(model)
         assert prices.cache_write == pytest.approx(prices.input * 1.25)
     for model in ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5"):
@@ -56,6 +57,7 @@ def test_lookup_strips_the_bracket_suffix_and_longest_prefix_matches() -> None:
     assert prices_for("gpt-5").input == 1.25
     # longest prefix, not first hit: a date-stamped id matches `gpt-5.6-sol`,
     # `gpt-5.6` and `gpt-5` alike, and must take the longest.
+    assert prices_for("gpt-6-astra-2026-09-10") == prices_for("gpt-6-astra")
     assert prices_for("gpt-5.6-sol-20261201").input == 4.00
     assert prices_for("gpt-5.6-20261201").input == 4.00
     # `gpt-5.4-mini` must not collapse onto the capped `gpt-5.4`
@@ -71,8 +73,8 @@ def test_an_unknown_model_resolves_to_no_prices() -> None:
 
 
 def test_only_the_surcharged_models_carry_a_long_context_threshold() -> None:
-    for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6",
-                  "gpt-5.5", "gpt-5.4"):
+    for model in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+                  "gpt-5.6", "gpt-5.5", "gpt-5.4"):
         assert prices_for(model).long_context_threshold == 272_000
     for model in ("gpt-5.4-mini", "gpt-5.3-codex", "gpt-5", "claude-opus-5",
                   "claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6",
@@ -87,7 +89,8 @@ _MIXED = BillingUsage(fresh_input=1000, cached_input=2000,
 
 
 @pytest.mark.parametrize(("model", "expected"), [
-    ("gpt-5.6-sol", 0.0998),     # 4000 +   800 + 15000 +  80000 per million
+    ("gpt-6-astra", 0.2495),     # 10000 +  2000 + 37500 + 200000 per million
+    ("gpt-5.6-sol", 0.0998),     #  4000 +   800 + 15000 +  80000
     ("gpt-5.6-terra", 0.0579),   # 2000 +   400 +  7500 +  48000
     ("gpt-5.6-luna", 0.00579),   #  200 +    40 +   750 +   4800
     ("gpt-5.6", 0.0998),         # alias -> sol
@@ -169,6 +172,13 @@ def test_the_long_context_surcharge_reprices_the_whole_request() -> None:
     #   2*800000 + 2*40000 + 2*50000 + 1.5*200000 per million = $2.08
     assert cost_usd("gpt-5.6-sol", _LONG,
                     prompt_tokens=310_000) == pytest.approx(2.08)
+
+
+def test_astra_long_context_surcharge_uses_the_strict_272k_boundary() -> None:
+    # Standard: 2.0 fresh + 0.1 cached + 0.125 cache write + 0.5 output.
+    assert cost_usd("gpt-6-astra", _LONG, prompt_tokens=272_000) == pytest.approx(2.725)
+    # Surcharged: 4.0 fresh + 0.2 cached + 0.25 cache write + 0.75 output.
+    assert cost_usd("gpt-6-astra", _LONG, prompt_tokens=272_001) == pytest.approx(5.20)
 
 
 def test_the_surcharge_boundary_is_strictly_above_272k() -> None:

@@ -18,6 +18,7 @@ from imp.engine.feedback import COMPLETION_BACKSTOP
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
+from imp.providers.config import ProviderModel
 from tests._faultlog import fault_lines
 from tests.conftest import _git, _init_repo
 
@@ -254,6 +255,7 @@ def _seed_minimal_workflow(
     phase_name: str = "only",
     step_name: str = "w",
     agent_stem: str = "writer",
+    tier: str = "low",
 ) -> tuple[Quest, str, str]:
     """Create a minimal single-step workflow on disk and snapshot it into a
     Quest. Returns ``(change, phase_name, step_name)``."""
@@ -270,7 +272,7 @@ def _seed_minimal_workflow(
         "phases:\n"
         f"  - name: {phase_name}\n"
         "    steps:\n"
-        f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: low}}\n"
+        f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: {tier}}}\n"
     )
     _write_fake_config(root)
     quest = _make_quest(root)
@@ -1555,6 +1557,62 @@ async def test_resume_reuses_resolved_tiers_no_second_event(tmp_path):
     captured: list[dict] = []
     await run_quest(quest, on_event=captured.append)
     assert [e for e in captured if e["type"] == "tiers_resolved"] == []
+
+
+@pytest.mark.anyio
+async def test_noncompleting_run_reuses_persisted_codex_model(tmp_path: Path) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path, tier="high")
+    captured: list[tuple[str, str]] = []
+
+    class _PauseRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            yield {
+                "type": "error",
+                "payload": {
+                    "category": "api",
+                    "kind": "api_error",
+                    "message": "stop before completion",
+                },
+            }
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _PinnedCodexProvider:
+        name = "codex"
+
+        def __init__(self, model: str) -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            captured.append((self.name, self.model))
+            return _PauseRunner()
+
+    from imp.providers import resolve
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "codex",
+        env_check=lambda: True,
+        factory=lambda model: _PinnedCodexProvider(model),
+    )
+    persisted_tiers = {
+        "low": ProviderModel("codex", "gpt-5.6-luna"),
+        "medium": ProviderModel("codex", "gpt-5.6-terra"),
+        "high": ProviderModel("codex", "gpt-5.6-sol"),
+    }
+    state = State.load(quest.state_dir)
+    state.resolved_tiers = persisted_tiers
+    state.resolved_steps = {}
+    state.save(quest.state_dir)
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+
+    assert result is RunResult.PAUSED
+    assert captured == [("codex", "gpt-5.6-sol")]
+    reloaded = State.load(quest.state_dir)
+    assert reloaded.resolved_tiers == persisted_tiers
+    assert reloaded.resolved_steps == {}
 
 
 @pytest.fixture

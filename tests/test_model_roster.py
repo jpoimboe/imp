@@ -54,6 +54,13 @@ def test_non_claude_provider_ignores_claude_options(monkeypatch) -> None:
     assert "cache-only-model" not in list(rosters[0].entries)
 
 
+def test_shared_openai_catalog_exposes_astra_to_both_providers(monkeypatch) -> None:
+    monkeypatch.setattr(mod, "available_providers", lambda config: ["openai", "codex"])
+    rosters = discover_roster(_config({}), claude_options=[])
+    assert [roster.provider for roster in rosters] == ["openai", "codex"]
+    assert all("gpt-6-astra" in roster.entries for roster in rosters)
+
+
 def test_returns_bare_string_entries(monkeypatch) -> None:
     monkeypatch.setattr(mod, "available_providers", lambda config: ["anthropic"])
     rosters = discover_roster(_config({}), claude_options=[])

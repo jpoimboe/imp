@@ -1863,9 +1863,9 @@ def test_context_bar_bands_are_relative_to_the_cutoff() -> None:
 
 
 # AC 9(a)
-def test_context_bar_bands_follow_a_capped_model_down() -> None:
+def test_context_bar_bands_follow_the_default_ceiling() -> None:
     from imp.cli.live_driver import context_bar
-    # gpt-5.6-sol now hands off at the 160k ceiling of its 1.05M window
+    # gpt-5.6-sol hands off at the preserved 160k default ceiling of its 1.05M window
     # (~15.2%), so 19%, 30% and 50% are all RED and amber starts at
     # 0.75 * 160k = 120k. Fill and percentage stay occupancy-of-window.
     at_50 = context_bar("openai", "gpt-5.6-sol", 525_000, color=True, over_bg=False)
@@ -2258,7 +2258,7 @@ def test_verb_step_label_push_emits_no_header() -> None:
 def test_position_row_bands_the_bar_from_the_activity_provider() -> None:
     from imp.cli.live_driver import compose_position_row
     # Same model, same occupancy (30% of the 1.05M window): with the provider
-    # the cap resolves and the bar is red; without it nothing resolves and the
+    # the 160k default cutoff resolves and the bar is red; without it nothing resolves and the
     # tokens path draws no bar at all.
     banded = compose_position_row(
         activity=nv.Activity(kind="agent", model="gpt-5.6-sol", provider="openai",
@@ -2290,7 +2290,7 @@ def test_subagent_row_bands_identically_to_its_step_row() -> None:
              usage={"input_tokens": 315_000, "output_tokens": 5}))
     rows = compose_subagent_rows(b, color=True, width=200,
                                  now_iso="2026-01-01T00:00:05+00:00")
-    # 315000 / 1.05M = 30%, past the 260k cap -> red on the subagent row too.
+    # 315000 / 1.05M = 30%, past the 160k default ceiling -> red on the subagent row too.
     assert "30%" in rows[0]
     assert "\x1b[31m" in rows[0]
 
@@ -3941,22 +3941,20 @@ def test_driver_without_project_renders_todays_bands_unchanged() -> None:
 # AC 5(a)
 def test_context_bar_prefers_a_provider_reported_window() -> None:
     from imp.cli.live_driver import context_bar
-    # codex reports 258400 for gpt-5.6-*; the catalog's 1.05M would draw 20%.
-    # 206720/258400 = 0.80 = the handoff cutoff (soft_cap 260k > window, so the
-    # cutoff is the 0.8 default) -> eight red cells.
-    bar = context_bar("codex", "gpt-5.6-sol", 206_720, context_window=258_400,
+    # Codex reports 258400 for gpt-5.6-*; 160k reaches the preserved default cutoff.
+    bar = context_bar("codex", "gpt-5.6-sol", 160_000, context_window=258_400,
                       color=True, over_bg=False)
     assert bar is not None
-    assert bar.endswith("80%\x1b[0m")
+    assert bar.endswith("62%\x1b[0m")
     assert "\x1b[31m" in bar
 
 
 # AC 5(b)
 def test_context_bar_without_a_reported_window_falls_back_to_the_catalog() -> None:
     from imp.cli.live_driver import context_bar
-    # Same call, no reading: unchanged behavior — 206720/1_050_000 = 20%.
-    assert context_bar("codex", "gpt-5.6-sol", 206_720,
-                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
+    # Without a live window, the preserved 160k cutoff uses the catalog window.
+    assert context_bar("codex", "gpt-5.6-sol", 160_000,
+                       color=False, over_bg=False) == "██░░░░░░░░ 15%"
 
 
 # AC 8

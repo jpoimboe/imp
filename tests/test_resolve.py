@@ -19,8 +19,9 @@ from imp.engine.types import (
     Workflow,
     WorkflowDefaults,
 )
-from imp.providers import resolve
+from imp.providers import BUILTIN_FLOOR, resolve
 from imp.providers.config import Config, ProviderModel
+from imp.providers.effective import load_effective_config
 from imp.providers.resolve import ProviderUnavailable, resolve_run
 
 _SRC = SourceLoc(file=Path("w.yaml"), line=1)
@@ -86,6 +87,32 @@ def _cfg(providers=("claude_code", "openai")) -> Config:
             "high":   {"claude_code": "opus",   "openai": "gpt-5.5"},
         },
     )
+
+
+def test_codex_high_resolves_astra_from_builtin_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir()
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    codex_floor = BUILTIN_FLOOR["codex"]
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "codex",
+        env_check=lambda: True,
+        factory=lambda model: _FakeProvider("codex", model),
+        tier_defaults=codex_floor.tier_defaults,
+        env_var=codex_floor.env_var,
+    )
+    floor_config = load_effective_config().config
+    config = Config(providers=("codex",), tiers=floor_config.tiers)
+    workflow = _wf([_step("writer", "high", "writer")], {"writer": _agent("writer")})
+
+    tiers, steps, details = resolve_run(workflow, config)
+
+    assert tiers["high"] == ProviderModel("codex", "gpt-6-astra")
+    assert steps == {}
+    assert details["tiers"]["high"]["model"] == "gpt-6-astra"
 
 
 def test_tier_map_first_available_wins_with_both_envs() -> None:

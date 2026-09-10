@@ -21,7 +21,7 @@ from typing import Any
 DEFAULT_WINDOW = 200_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_000
 DEFAULT_CHECKPOINT_FRACTION = 0.8
-# Handoff ceiling: a 1M window is headroom for the handoff, not budget to spend.
+# Default handoff ceiling for models without a model-specific soft cap.
 DEFAULT_CHECKPOINT_CEILING = 160_000
 
 
@@ -32,8 +32,7 @@ class ModelInfo:
     cli_model: str | None = None
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     supports_vision: bool = True
-    # Absolute prompt-token handoff ceiling (a billing breakpoint), beside the
-    # hard cap `window`. None -> the default window fraction applies.
+    # Model-specific prompt-token handoff ceiling. None uses the default ceiling.
     soft_cap: int | None = None
 
 
@@ -101,30 +100,27 @@ ANTHROPIC: dict[str, ModelInfo] = {
 }
 
 OPENAI: dict[str, ModelInfo] = {
-    # 5.6 flavors (imp.providers.BUILTIN_FLOOR): one generation, three sizes —
-    # luna < terra < sol. All four share a 1.05M window and a 128k output cap.
+    # OpenAI and Codex share this catalog. Astra's explicit handoff cap retains
+    # headroom below the 272k billing breakpoint.
+    "gpt-6-astra": ModelInfo(
+        window=1_050_000,
+        max_output_tokens=128_000,
+        soft_cap=260_000,
+    ),
+    # 5.6 flavors: one generation, three sizes — luna < terra < sol.
+    # All four share a 1.05M window and a 128k output cap.
     # The bare `gpt-5.6` alias routes to Sol; it is here only so limits
     # resolution can cap it, and is hidden from the /model roster
     # (model_command._HIDDEN_ALIASES) because an operator writing it into a
     # `tiers:` block would get the flagship at every tier.
-    # `soft_cap` is deliberate headroom UNDER the 272k billing breakpoint, not
-    # the breakpoint itself: handing off at 260k keeps the whole request below
-    # the point where it would bill at 2x input / 1.5x output.
-    "gpt-5.6-sol": ModelInfo(
-        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
-    "gpt-5.6-terra": ModelInfo(
-        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
-    "gpt-5.6-luna": ModelInfo(
-        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
-    "gpt-5.6": ModelInfo(
-        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
+    "gpt-5.6-sol": ModelInfo(window=1_050_000, max_output_tokens=128_000),
+    "gpt-5.6-terra": ModelInfo(window=1_050_000, max_output_tokens=128_000),
+    "gpt-5.6-luna": ModelInfo(window=1_050_000, max_output_tokens=128_000),
+    "gpt-5.6": ModelInfo(window=1_050_000, max_output_tokens=128_000),
     "gpt-5": ModelInfo(window=400_000),
-    # 5.5 and 5.4 share the 1.05M window, the 128k output cap and the same 272k
-    # breakpoint as the 5.6 family, so they take the same handoff headroom.
-    "gpt-5.5": ModelInfo(
-        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
-    "gpt-5.4": ModelInfo(
-        window=1_050_000, max_output_tokens=128_000, soft_cap=260_000),
+    # 5.5 and 5.4 share the 1.05M window and 128k output cap.
+    "gpt-5.5": ModelInfo(window=1_050_000, max_output_tokens=128_000),
+    "gpt-5.4": ModelInfo(window=1_050_000, max_output_tokens=128_000),
     "gpt-5.4-mini": ModelInfo(window=400_000),
     "gpt-5.3-codex": ModelInfo(window=400_000),
 }
@@ -186,9 +182,8 @@ def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | Non
     """The handoff cutoff as a fraction of `window`; None without a usable window."""
     if not window or window <= 0:
         return None
-    cap = info.soft_cap if info else None
-    cap = (DEFAULT_CHECKPOINT_CEILING if cap is None
-           else min(DEFAULT_CHECKPOINT_CEILING, cap))
+    cap = (info.soft_cap if info is not None and info.soft_cap is not None
+           else DEFAULT_CHECKPOINT_CEILING)
     return min(DEFAULT_CHECKPOINT_FRACTION, cap / window)
 
 
@@ -239,10 +234,9 @@ def sdk_context_threshold_crossed(
     the checkpoint cutoff — claude_code's `get_context_usage()`, or codex's
     rollout `token_count` record. Unlike context_threshold_crossed (which sums
     prompt tokens against the static catalog window), this divides the
-    provider's live context_tokens / context_window against the
-    `checkpoint_cutoff` clamp — `DEFAULT_CHECKPOINT_CEILING`, or a lower model
-    soft cap when one is set. Returns False whenever a live number is
-    unavailable — the watch never fires rather than guessing.
+    provider's live context_tokens / context_window against `checkpoint_cutoff`:
+    a model-specific cap when present, otherwise `DEFAULT_CHECKPOINT_CEILING`,
+    always bounded by the default 80%. Returns False without a live number.
     """
     frac = checkpoint_cutoff(limits_for(provider, model), context_window)
     if (frac is None or not context_window or context_window <= 0
@@ -279,8 +273,11 @@ MODEL_PRICES: dict[str, ModelPrices] = {
     "opus": ModelPrices(5.00, 25.00, 0.50, 6.25),
     "sonnet": ModelPrices(3.00, 15.00, 0.30, 3.75),
     "haiku": ModelPrices(1.00, 5.00, 0.10, 1.25),
-    # OpenAI: cache write is 1.25x input on the 5.6 family and the plain input
-    # rate everywhere else. Sol's rate is promotional through 2026-11-21.
+    # OpenAI: cache write is 1.25x input on Astra and the 5.6 family, and the
+    # plain input rate everywhere else. Sol's rate is promotional through
+    # 2026-11-21.
+    "gpt-6-astra": ModelPrices(
+        10.00, 50.00, 1.00, 12.50, LONG_CONTEXT_BREAKPOINT),
     "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
     "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, LONG_CONTEXT_BREAKPOINT),
     "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, LONG_CONTEXT_BREAKPOINT),

@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import pytest
+
 from imp.engine.model_override import apply_model_override, current_provider_model
 from imp.providers.config import ProviderModel
 
@@ -113,3 +115,21 @@ def test_resolve_current_model_resolves_tiers_when_unresolved(monkeypatch) -> No
             {"high": ProviderModel("anthropic", "claude-fable-5[1m]")}, {}, {}))
     assert resolve_current_model(st, wf, object(), "brainstorm") == ProviderModel(
         "anthropic", "claude-fable-5[1m]")
+
+
+@pytest.mark.parametrize("provider", ["openai", "codex"])
+def test_apply_astra_selection_persists_the_exact_provider_model(
+        monkeypatch, provider: str) -> None:
+    import imp.engine.model_override as mod
+
+    monkeypatch.setattr(
+        mod, "load_workflow", lambda *a, **k: _Workflow([_Step("brainstorm", "high")]))
+    monkeypatch.setattr(mod.State, "save", lambda self, d: None)
+    state = _state({}, {"high": ProviderModel("claude_code", "opus")})
+    quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
+
+    apply_model_override(
+        quest, state, f"{provider}:gpt-6-astra", step_name="brainstorm")
+
+    assert state.resolved_steps["brainstorm"] == ProviderModel(
+        provider, "gpt-6-astra")
