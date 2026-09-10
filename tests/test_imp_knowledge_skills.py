@@ -294,13 +294,17 @@ def test_knowledge_list_bullet_names_done_completions() -> None:
     assert "the backlog, and merged\n  quests;" not in body
 
 
-def test_knowledge_cheatsheet_documents_events_search() -> None:
+def test_knowledge_cheatsheet_documents_bounded_events_search() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    # the new cheat-sheet bullet for the structured-event search command
-    assert "imp events search <query>" in body
-    assert "content (tool calls, results, reasoning) across all quests, reaching what" in body
-    assert "(prose only) can't; `--type` / `--agent` narrow it." in body
-    # the imp search bullet now names conversation content as its match target
+    flat = " ".join(body.split())
+    assert "`imp events search <query>`" in body
+    assert "structured-event search is bounded by default" in flat
+    assert "`--type` / `--agent` narrow it." in body[
+        body.index("- `imp events search <query>") : body.index("- `imp edit <id>")
+    ]
+    assert "`--list` to scan every matched quest" in flat
+    assert "`imp events <id> ... --json` for exact payloads" in flat
+    assert "`--all` only for exhaustive search output" in flat
     assert "backlog, and archived quests' conversation content." in body
 
 

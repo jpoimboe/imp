@@ -80,9 +80,10 @@ bookkeeping. Ask the CLI instead:
   lives: bare prints an index (steps, subagents, types); add a leaf selector
   (`--limit N`, `--type`, `--agent <handle>`, a range, `--all`) for one compact
   line per event, `--step <name>` to scope, `--json` for exact payloads.
-- `imp events search <query>` — the same substring search over structured event
-  content (tool calls, results, reasoning) across all quests, reaching what `imp
-  search` (prose only) can't; `--type` / `--agent` narrow it.
+- `imp events search <query>` — structured-event search is bounded by default;
+  `--type` / `--agent` narrow it. Use `--list` to scan every matched quest,
+  `imp events <id> ... --json` for exact payloads, and `--all` only for exhaustive
+  search output.
 - `imp edit <id>` — link or annotate a quest that hasn't run yet: `--append-intent
   "[<quest>] <note>"` cross-links a note onto another quest's opening intent (only
   while that quest is still an untouched draft — rejected once it's been built or even
