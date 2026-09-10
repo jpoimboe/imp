@@ -20,14 +20,14 @@ import json
 import os
 import shutil
 import stat
-import tempfile
-from collections.abc import Callable, Iterator
-from contextlib import suppress
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from imp.engine import durable
 from imp.engine.resume_state import (
+    RESUME_STATE_NAME,
     InvalidResumeState,
     NativeResumeState,
     encode_native_resume_state,
@@ -35,7 +35,7 @@ from imp.engine.resume_state import (
 )
 from imp.providers.quota import QuotaReading, QuotaWindow
 
-_ROLLOUT_SLOTS = ("codex-rollout-a.jsonl", "codex-rollout-b.jsonl")
+CODEX_ROLLOUT_SLOTS = ("codex-rollout-a.jsonl", "codex-rollout-b.jsonl")
 
 
 def _newest_matching_rollout(codex_home: Path, thread_id: str) -> Path | None:
@@ -391,42 +391,7 @@ class CodexResumeState:
     rollout_slot: str
 
 
-def _fsync_file(stream: BinaryIO, path: Path) -> None:
-    stream.flush()
-    os.fsync(stream.fileno())
-
-
-def _fsync_directory(path: Path) -> None:
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    fd = os.open(path, flags)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def _durable_replace(
-    path: Path,
-    writer: Callable[[BinaryIO], object],
-) -> None:
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temp_path = Path(temp_name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            writer(stream)
-            _fsync_file(stream, temp_path)
-        os.replace(temp_path, path)
-        _fsync_directory(path.parent)
-    except BaseException:
-        with suppress(FileNotFoundError):
-            temp_path.unlink()
-        raise
-
-
-def _validate_codex_resume_state(
-    resume_state: NativeResumeState,
-    transcript_dir: Path,
-) -> CodexResumeState:
+def parse_codex_resume_state(resume_state: object) -> CodexResumeState:
     if not isinstance(resume_state, NativeResumeState):
         raise InvalidResumeState()
     if resume_state.provider != "codex":
@@ -450,17 +415,39 @@ def _validate_codex_resume_state(
         raise InvalidResumeState()
     if components[0] != "sessions" or not components[-1].endswith(".jsonl"):
         raise InvalidResumeState()
-    if rollout_slot not in _ROLLOUT_SLOTS:
-        raise InvalidResumeState()
-
-    selected = transcript_dir / rollout_slot
-    if not stat.S_ISREG(selected.lstat().st_mode):
+    if rollout_slot not in CODEX_ROLLOUT_SLOTS:
         raise InvalidResumeState()
     return CodexResumeState(
         thread_id=thread_id,
         restore_path=restore_path,
         rollout_slot=rollout_slot,
     )
+
+
+def make_codex_resume_state(
+    *,
+    thread_id: object,
+    restore_path: object,
+    rollout_slot: object,
+) -> NativeResumeState:
+    resume_state = NativeResumeState(provider="codex", state={
+        "thread_id": thread_id,
+        "restore_path": restore_path,
+        "rollout_slot": rollout_slot,
+    })
+    parse_codex_resume_state(resume_state)
+    return resume_state
+
+
+def _validate_codex_resume_state(
+    resume_state: NativeResumeState,
+    transcript_dir: Path,
+) -> CodexResumeState:
+    selected = parse_codex_resume_state(resume_state)
+    slot = transcript_dir / selected.rollout_slot
+    if not stat.S_ISREG(slot.lstat().st_mode):
+        raise InvalidResumeState()
+    return selected
 
 
 def persist_rollout(*, codex_home: Path, thread_id: str, transcript_dir: Path) -> bool:
@@ -472,30 +459,27 @@ def persist_rollout(*, codex_home: Path, thread_id: str, transcript_dir: Path) -
     transcript_dir.mkdir(parents=True, exist_ok=True)
     previous = read_native_resume_state(transcript_dir)
     if previous is None:
-        rollout_slot = _ROLLOUT_SLOTS[0]
+        rollout_slot = CODEX_ROLLOUT_SLOTS[0]
     else:
         selected = _validate_codex_resume_state(previous, transcript_dir)
         rollout_slot = (
-            _ROLLOUT_SLOTS[1]
-            if selected.rollout_slot == _ROLLOUT_SLOTS[0]
-            else _ROLLOUT_SLOTS[0]
+            CODEX_ROLLOUT_SLOTS[1]
+            if selected.rollout_slot == CODEX_ROLLOUT_SLOTS[0]
+            else CODEX_ROLLOUT_SLOTS[0]
         )
 
     def write_rollout(stream: BinaryIO) -> None:
         with rollout.open("rb") as source:
             shutil.copyfileobj(source, stream)
 
-    _durable_replace(transcript_dir / rollout_slot, write_rollout)
-    resume_state = NativeResumeState(provider="codex", state={
-        "thread_id": thread_id,
-        "restore_path": rollout.relative_to(codex_home).as_posix(),
-        "rollout_slot": rollout_slot,
-    })
-    encoded = encode_native_resume_state(resume_state)
-    _durable_replace(
-        transcript_dir / "resume-state.json",
-        lambda stream: stream.write(encoded),
+    durable.durable_replace(transcript_dir / rollout_slot, write_rollout)
+    resume_state = make_codex_resume_state(
+        thread_id=thread_id,
+        restore_path=rollout.relative_to(codex_home).as_posix(),
+        rollout_slot=rollout_slot,
     )
+    encoded = encode_native_resume_state(resume_state)
+    durable.durable_replace_bytes(transcript_dir / RESUME_STATE_NAME, encoded)
     return True
 
 

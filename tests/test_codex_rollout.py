@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from imp.engine import durable
 from imp.engine.resume_state import (
     InvalidResumeState,
     NativeResumeState,
@@ -21,6 +22,8 @@ from imp.providers.codex_rollout import (
     RolloutTelemetry,
     RolloutUsage,
     compaction_seen,
+    make_codex_resume_state,
+    parse_codex_resume_state,
     persist_rollout,
     quota_from_rate_limits,
     restore_rollout,
@@ -79,6 +82,46 @@ def _published_state(transcript_dir: Path) -> NativeResumeState:
     state = read_native_resume_state(transcript_dir)
     assert state is not None
     return state
+
+
+def test_make_codex_resume_state_validates_without_a_selected_slot(tmp_path: Path) -> None:
+    state = make_codex_resume_state(
+        thread_id=_THREAD_ID,
+        restore_path=_RESTORE_PATH,
+        rollout_slot=_SLOT_A,
+    )
+
+    assert parse_codex_resume_state(state) == codex_rollout.CodexResumeState(
+        thread_id=_THREAD_ID,
+        restore_path=_RESTORE_PATH,
+        rollout_slot=_SLOT_A,
+    )
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("thread_id", "restore_path", "rollout_slot"),
+    [
+        (1, _RESTORE_PATH, _SLOT_A),
+        (_THREAD_ID, 1, _SLOT_A),
+        (_THREAD_ID, _RESTORE_PATH, "rollout.jsonl"),
+    ],
+    ids=["non-string-thread", "non-string-path", "invalid-slot"],
+)
+def test_make_codex_resume_state_rejects_invalid_inputs_without_filesystem_entry(
+    tmp_path: Path,
+    thread_id: object,
+    restore_path: object,
+    rollout_slot: object,
+) -> None:
+    with pytest.raises(InvalidResumeState):
+        make_codex_resume_state(
+            thread_id=thread_id,
+            restore_path=restore_path,
+            rollout_slot=rollout_slot,
+        )
+
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_persist_publishes_exact_manifest_and_first_slot(tmp_path: Path) -> None:
@@ -205,6 +248,15 @@ _INVALID_STATES: list[tuple[str, NativeResumeState]] = [
 
 
 @pytest.mark.parametrize(("case", "state"), _INVALID_STATES, ids=lambda value: str(value))
+def test_parse_codex_resume_state_rejects_invalid_payload(
+    case: str,
+    state: NativeResumeState,
+) -> None:
+    with pytest.raises(InvalidResumeState):
+        parse_codex_resume_state(state)
+
+
+@pytest.mark.parametrize(("case", "state"), _INVALID_STATES, ids=lambda value: str(value))
 def test_restore_rejects_invalid_state_before_home_mutation(
     tmp_path: Path,
     case: str,
@@ -264,9 +316,9 @@ def test_republish_failure_preserves_published_pair(
     old_manifest = (tx / "resume-state.json").read_bytes()
     rollout.write_text("NEW")
 
-    real_fsync_file = codex_rollout._fsync_file
-    real_fsync_directory = codex_rollout._fsync_directory
-    real_replace = os.replace
+    real_fsync_file = durable._fsync_file
+    real_fsync_directory = durable.fsync_directory
+    real_replace = durable.os.replace
     file_fsync_count = 0
     directory_fsync_count = 0
 
@@ -291,9 +343,9 @@ def test_republish_failure_preserves_published_pair(
             raise OSError("injected")
         real_replace(src, dest)
 
-    monkeypatch.setattr(codex_rollout, "_fsync_file", fail_file_fsync)
-    monkeypatch.setattr(codex_rollout, "_fsync_directory", fail_directory_fsync)
-    monkeypatch.setattr(codex_rollout.os, "replace", fail_replace)
+    monkeypatch.setattr(durable, "_fsync_file", fail_file_fsync)
+    monkeypatch.setattr(durable, "fsync_directory", fail_directory_fsync)
+    monkeypatch.setattr(durable.os, "replace", fail_replace)
 
     with pytest.raises(OSError, match="injected"):
         persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
@@ -313,9 +365,9 @@ def test_first_publish_failure_never_publishes_manifest(
     _plant_rollout(home, _THREAD_ID, "NEW")
     tx = tmp_path / "tx"
 
-    real_fsync_file = codex_rollout._fsync_file
-    real_fsync_directory = codex_rollout._fsync_directory
-    real_replace = os.replace
+    real_fsync_file = durable._fsync_file
+    real_fsync_directory = durable.fsync_directory
+    real_replace = durable.os.replace
 
     def fail_file_fsync(stream: Any, path: Path) -> None:
         if failure_point == "slot_file_fsync":
@@ -332,9 +384,9 @@ def test_first_publish_failure_never_publishes_manifest(
             raise OSError("injected")
         real_replace(src, dest)
 
-    monkeypatch.setattr(codex_rollout, "_fsync_file", fail_file_fsync)
-    monkeypatch.setattr(codex_rollout, "_fsync_directory", fail_directory_fsync)
-    monkeypatch.setattr(codex_rollout.os, "replace", fail_replace)
+    monkeypatch.setattr(durable, "_fsync_file", fail_file_fsync)
+    monkeypatch.setattr(durable, "fsync_directory", fail_directory_fsync)
+    monkeypatch.setattr(durable.os, "replace", fail_replace)
 
     with pytest.raises(OSError, match="injected"):
         persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
@@ -350,9 +402,9 @@ def test_publish_durability_call_order(
     _plant_rollout(home, _THREAD_ID)
     tx = tmp_path / "tx"
     calls: list[str] = []
-    real_fsync_file = codex_rollout._fsync_file
-    real_fsync_directory = codex_rollout._fsync_directory
-    real_replace = os.replace
+    real_fsync_file = durable._fsync_file
+    real_fsync_directory = durable.fsync_directory
+    real_replace = durable.os.replace
 
     def record_file_fsync(stream: Any, path: Path) -> None:
         calls.append("slot file-fsync" if not calls else "manifest file-fsync")
@@ -368,9 +420,9 @@ def test_publish_durability_call_order(
         calls.append("dir-fsync")
         real_fsync_directory(path)
 
-    monkeypatch.setattr(codex_rollout, "_fsync_file", record_file_fsync)
-    monkeypatch.setattr(codex_rollout.os, "replace", record_replace)
-    monkeypatch.setattr(codex_rollout, "_fsync_directory", record_directory_fsync)
+    monkeypatch.setattr(durable, "_fsync_file", record_file_fsync)
+    monkeypatch.setattr(durable.os, "replace", record_replace)
+    monkeypatch.setattr(durable, "fsync_directory", record_directory_fsync)
 
     persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
 
@@ -389,7 +441,7 @@ def test_manifest_directory_fsync_failure_leaves_selected_pair_usable(
     tx = tmp_path / "tx"
     persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
     rollout.write_text("NEW")
-    real_fsync_directory = codex_rollout._fsync_directory
+    real_fsync_directory = durable.fsync_directory
     calls = 0
 
     def fail_second_directory_fsync(path: Path) -> None:
@@ -400,7 +452,7 @@ def test_manifest_directory_fsync_failure_leaves_selected_pair_usable(
         real_fsync_directory(path)
 
     monkeypatch.setattr(
-        codex_rollout, "_fsync_directory", fail_second_directory_fsync)
+        durable, "fsync_directory", fail_second_directory_fsync)
 
     with pytest.raises(OSError, match="injected"):
         persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)

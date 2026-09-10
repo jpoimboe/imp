@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from imp.engine import worktree
+from imp.engine import durable, worktree
 from imp.engine.env import quest_var_tmp_root
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
 from imp.engine.event_migrations import (
@@ -42,18 +42,8 @@ LAYOUT_VERSION = 21  # bump in the SAME commit as any breaking quest-home layout
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
-    """Atomically rewrite quest.json (tmp file, fsync, os.replace); mirrors State.save."""
-    fd, tmp_name = tempfile.mkstemp(prefix=".quest-", dir=meta_path.parent)
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(meta, f, indent=2, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_name, meta_path)
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(tmp_name)
-        raise
+    encoded = json.dumps(meta, indent=2, sort_keys=True).encode()
+    durable.durable_replace_bytes(meta_path, encoded)
 
 
 def _fold_phantom(phantom: Path, home: Path) -> None:
