@@ -25,7 +25,7 @@ def _ev(eid: str | None, etype: str, agent_id: str | None = None,
 def _search_ns(query: str, **over: object) -> argparse.Namespace:
     base: dict[str, object] = dict(
         query=query, active=False, backlog=False, archived=False,
-        type=None, agent=None, limit=None, list=False, json=False, no_pager=True)
+        type=None, agent=None, limit=None, all=False, list=False, json=False, no_pager=True)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -296,6 +296,67 @@ def test_cmd_events_search_empty_message(monkeypatch, capsys, tmp_path: Path) ->
     out = capsys.readouterr().out
     assert rc == 0
     assert '0 matches for "zzz"' in out
+
+
+def test_cmd_events_search_no_match_json_is_empty_array(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: [])
+
+    assert m._cmd_events_search(_search_ns("zzz", json=True), tmp_path) == 0
+
+    assert capsys.readouterr().out == "[]\n"
+
+
+def test_cmd_events_search_all_is_exhaustive_in_every_view(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: _bounded_hits())
+    quest_ids = ("act_new", "act_old", "bkl001", "arc_new", "arc_old")
+
+    assert m._cmd_events_search(_search_ns("GREPTARGET", all=True), tmp_path) == 0
+    rich = capsys.readouterr().out
+    assert all(quest_id in rich for quest_id in quest_ids)
+    assert "#5" in rich
+    assert "more quests" not in rich
+    assert "\n  … +" not in rich
+
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", list=True, all=True), tmp_path) == 0
+    listed = capsys.readouterr().out
+    assert all(quest_id in listed for quest_id in quest_ids)
+
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", json=True, all=True), tmp_path) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert [hit["quest_id"] for hit in payload] == list(quest_ids)
+    assert [len(hit["events"]) for hit in payload] == [5, 5, 0, 5, 5]
+
+
+@pytest.mark.parametrize(
+    ("options", "error"),
+    [
+        (["--limit", "0"], "imp: --limit must be a positive integer\n"),
+        (["--limit", "-2"], "imp: --limit must be a positive integer\n"),
+        (["--all", "--limit", "0"], "imp: --limit must be a positive integer\n"),
+        (["--all", "--limit", "2"], "imp: --all and --limit cannot be used together\n"),
+    ],
+)
+def test_main_events_search_rejects_invalid_output_controls_before_lookup(
+        monkeypatch, capsys, tmp_path: Path, options: list[str], error: str) -> None:
+    control_root_calls = 0
+
+    def _record_control_root() -> Path:
+        nonlocal control_root_calls
+        control_root_calls += 1
+        return tmp_path
+
+    monkeypatch.setattr(m, "_control_root", _record_control_root)
+
+    assert main(["events", "search", "GREPTARGET", *options]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == error
+    assert control_root_calls == 0
 
 
 def test_cmd_events_search_default_rich_is_bounded(monkeypatch, capsys, tmp_path: Path) -> None:

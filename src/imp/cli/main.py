@@ -3589,7 +3589,7 @@ def _events_search_list_line(
 
 def _render_events_search_hit(
     hit: EventSearchHit, query: str, *, now: datetime, color: bool,
-    width: int, limit: int = 3,
+    width: int, limit: int | None = 3,
 ) -> list[str]:
     from imp.cli.store import SearchHit
     from imp.engine import events_index as ei
@@ -3597,25 +3597,35 @@ def _render_events_search_hit(
         SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity),
         query=query, now=now, color=color)
     lines = [spine]
-    for ordinal, event in hit.events[:limit]:
+    events = hit.events if limit is None else hit.events[:limit]
+    for ordinal, event in events:
         digest = ei.digest_line(ordinal, event, hit.handle_map, width=width)
         lines.append("  " + _highlight(digest, query, color=color))
-    extra = len(hit.events) - limit
-    if extra > 0:
+    extra = len(hit.events) - len(events)
+    if limit is not None and extra > 0:
         lines.append(pal.ansi(f"  … +{extra} more", "dim", enabled=color))
     return lines
 
 
 def _events_search_json(
-    hits: list[EventSearchHit], *, event_limit: int = 3,
+    hits: list[EventSearchHit], *, event_limit: int | None = 3,
 ) -> list[dict[str, Any]]:
     from imp.engine import events_index as ei
     return [
         {"quest_id": h.quest_id, "title": h.title, "zone": h.zone,
          "last_activity": h.last_activity,
-         "events": ei.events_json(h.events[:event_limit])}
+         "events": ei.events_json(
+             h.events if event_limit is None else h.events[:event_limit])}
         for h in hits
     ]
+
+
+def _events_search_output_control_error(args: argparse.Namespace) -> str | None:
+    if args.limit is not None and args.limit <= 0:
+        return "--limit must be a positive integer"
+    if args.all and args.limit is not None:
+        return "--all and --limit cannot be used together"
+    return None
 
 
 def _cmd_events_search(
@@ -3624,25 +3634,34 @@ def _cmd_events_search(
     if args.query is None:
         args.parser.print_help(sys.stderr)
         return 2
+    if error := _events_search_output_control_error(args):
+        _emit_cli_error(error)
+        return 2
     control = _control if _control is not None else _control_root()
     types = set(args.type) if args.type else None
     agents = set(args.agent) if args.agent else None
     zones = _selected_events_search(args)
     hits = _events_search(control, args.query, zones, types=types, agents=agents)
     if not hits:
-        _emit_human([f'0 matches for "{args.query}"'])
+        if args.json:
+            _page_or_print(["[]"], no_pager=args.no_pager)
+        else:
+            _emit_human([f'0 matches for "{args.query}"'])
         return 0
     color = should_use_color(sys.stdout)
     zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}
     hits.sort(key=lambda h: h.last_activity or "", reverse=True)
     hits.sort(key=lambda h: zone_order[h.zone])
-    quest_limit = args.limit
-    if quest_limit is None and (args.json or not args.list):
-        quest_limit = 3
+    if args.all or (args.list and not args.json and args.limit is None):
+        quest_limit = None
+    else:
+        quest_limit = args.limit if args.limit is not None else 3
+    event_limit = None if args.all else 3
     selected_hits = hits[:quest_limit]
     if args.json:
         _page_or_print(
-            json.dumps(_events_search_json(selected_hits), indent=2).splitlines(),
+            json.dumps(_events_search_json(
+                selected_hits, event_limit=event_limit), indent=2).splitlines(),
             no_pager=args.no_pager)
         return 0
     if args.list:
@@ -3662,7 +3681,8 @@ def _cmd_events_search(
     for h in selected_hits:
         lines.append("")
         lines.extend(_render_events_search_hit(
-            h, args.query, now=now, color=color, width=width))
+            h, args.query, now=now, color=color, width=width,
+            limit=event_limit))
     extra = len(hits) - len(selected_hits)
     if extra > 0:
         lines.append("")
@@ -3842,6 +3862,8 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
         "--agent", action=SplitAppend, default=None,
         help="Keep only these authors: step name, subagent handle, or sub:<id> "
              "(repeatable / comma-joined).")
+    p.add_argument("--all", action="store_true",
+                   help="Show every matched quest and matching event; conflicts with --limit.")
     p.add_argument("--limit", type=int, default=None,
                    help="Raise the matched-quest cap above the default 3.")
     p.add_argument("-l", "--list", action="store_true", dest="list",
@@ -4452,13 +4474,19 @@ def main(argv: list[str] | None = None) -> int:
     from imp.engine import worktree
     from imp.engine.errors import LoadError, LoadErrors
     _init_logging()
-    with contextlib.suppress(Exception):
-        install_stack_dumper(
-            project_state_dir(_control_root())
-            / f"cli.{os.getpid()}.stack-dump.txt")
     args = sys.argv[1:] if argv is None else argv
     parser = _build_parser()
     try:
+        events_search = len(args) >= 2 and args[0] == "events" and args[1] == "search"
+        if events_search:
+            ns = _build_events_search_parser().parse_args(args[2:])
+            if error := _events_search_output_control_error(ns):
+                _emit_cli_error(error)
+                return 2
+        with contextlib.suppress(Exception):
+            install_stack_dumper(
+                project_state_dir(_control_root())
+                / f"cli.{os.getpid()}.stack-dump.txt")
         result = _dispatch_meta(args, parser)
         if result is not None:
             # _dispatch_meta may have printed the overview/unknown-command
@@ -4466,9 +4494,7 @@ def main(argv: list[str] | None = None) -> int:
             # for the same buffered-pipe reason as the command path below.
             sys.stdout.flush()
             return result
-        if len(args) >= 2 and args[0] == "events" and args[1] == "search":
-            ns = _build_events_search_parser().parse_args(args[2:])
-        else:
+        if not events_search:
             ns = parser.parse_args(args)
         if getattr(ns, "warm", False):
             # Import the graph up front so an on-disk update can't splice into a long run.
