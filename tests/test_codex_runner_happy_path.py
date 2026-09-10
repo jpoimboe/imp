@@ -5,7 +5,9 @@ from unittest.mock import patch as _patch
 
 import pytest
 
+import imp.providers.codex_runner as cr
 from imp.agents.runner import AgentInvocation, QuestContext
+from imp.agents.tools.context import ToolContext
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import (
     AgentDef,
@@ -13,10 +15,13 @@ from imp.engine.types import (
     OutputSchema,
     SourceLoc,
 )
-from imp.providers.codex_runner import CodexAgentRunner
+from imp.providers.codex_mcp import RunState
+from imp.providers.codex_rollout import RolloutCursor, RolloutReadings, RolloutUsage
+from imp.providers.codex_runner import CodexAgentRunner, CodexSession
 from tests.async_wait import wait_until
 from tests.codex_fakes import (
     FakeCodex,
+    FakeStreamedTurn,
     agent_message,
     mcp_call,
     thread_started,
@@ -437,6 +442,116 @@ async def test_codex_run_aclose_cascades_to_run_agent_loop(
 
 
 @pytest.mark.anyio
+async def test_session_real_resolver_forwards_state_before_event_emission(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ScriptedThread:
+        def __init__(self) -> None:
+            self.turns = [
+                [thread_started("thr-1"), agent_message("first"),
+                 turn_completed(input_tokens=11, cached_input_tokens=3,
+                                cache_write_input_tokens=1, output_tokens=5,
+                                reasoning_output_tokens=2)],
+                [agent_message("second"),
+                 turn_completed(input_tokens=22, cached_input_tokens=6,
+                                cache_write_input_tokens=2, output_tokens=10,
+                                reasoning_output_tokens=4)],
+            ]
+            self.order: list[str] = []
+
+        async def run_streamed(self, prompt: object,
+                               options: object = None) -> FakeStreamedTurn:
+            self.order.append(f"run:{prompt}")
+            return FakeStreamedTurn(self.turns.pop(0))
+
+    class _Telemetry:
+        def __init__(self) -> None:
+            self.thread_id: str | None = None
+            self.begin_thread_ids: list[str | None] = []
+            self.cursors = [
+                RolloutCursor((), discovery_complete=True),
+                RolloutCursor((), discovery_complete=False),
+            ]
+
+        def begin_turn(self) -> RolloutCursor:
+            self.begin_thread_ids.append(self.thread_id)
+            thread.order.append(f"begin:{self.thread_id}")
+            return self.cursors.pop(0)
+
+    class _Task:
+        def done(self) -> bool:
+            return False
+
+    class _ServerHandle:
+        task = _Task()
+
+    thread = _ScriptedThread()
+    telemetry = _Telemetry()
+    expected_cursors = list(telemetry.cursors)
+    resolved: list[tuple[object, RolloutCursor, RolloutUsage]] = []
+    returned = [
+        RolloutReadings(context=(111, 1000), quota=None),
+        RolloutReadings(context=(222, 1000), quota=None),
+    ]
+
+    async def wait(current_telemetry: object, cursor: RolloutCursor,
+                   usage: RolloutUsage) -> RolloutReadings:
+        resolved.append((current_telemetry, cursor, usage))
+        return returned.pop(0)
+
+    monkeypatch.setattr(cr, "_wait_for_current_readings", wait)
+    elog = InMemoryEventLog()
+    invocation = _build_invocation(tmp_path, event_log=elog)
+    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner._server_handle = _ServerHandle()
+    runner._codex_home = tmp_path
+    session = CodexSession(invocation, runner)
+    session.elog = elog
+    session.aid = "step:t"
+    session.ctx = ToolContext(project_root=tmp_path,
+                              events_path=tmp_path / "events.jsonl")
+    session._state = RunState(cap=100, agent_id="step:t")
+    session._thread = thread
+    session._next_prompt = "first"
+    session._requery_pending = False
+    session._proc_state = {
+        "thread_id": None,
+        "rollout_telemetry": telemetry,
+        "rollout_cursor": RolloutCursor((), discovery_complete=True),
+        "auth_mode": "chatgpt",
+        "context_reading": None,
+        "context_canary_emitted": False,
+        "quota_reading": None,
+        "turn_output_tokens": None,
+        "compaction_canary_emitted": False,
+        "turn_tool_outcomes": [],
+        "last_agent_text": "",
+    }
+
+    async def drive_turn() -> None:
+        async for raw in session._receive():
+            async for _ in session._message_to_items(raw):
+                pass
+
+    await drive_turn()
+    session._next_prompt = "second"
+    await drive_turn()
+
+    assert thread.order == ["begin:None", "run:first", "begin:thr-1", "run:second"]
+    assert telemetry.begin_thread_ids == [None, "thr-1"]
+    assert [cursor for _, cursor, _ in resolved] == expected_cursors
+    assert expected_cursors[0] != expected_cursors[1]
+    assert [current for current, _, _ in resolved] == [telemetry, telemetry]
+    assert [usage for _, _, usage in resolved] == [
+        RolloutUsage(11, 3, 1, 5, 2),
+        RolloutUsage(22, 6, 2, 10, 4),
+    ]
+    messages = [event["payload"] for event in elog.read()
+                if event["type"] == "agent_message"]
+    assert [(message["context_tokens"], message["context_window"])
+            for message in messages] == [(111, 1000), (222, 1000)]
+
+
+@pytest.mark.anyio
 async def test_receive_aclose_cascades_to_events(tmp_path: Path) -> None:
     """Closing CodexSession._receive mid-stream must synchronously aclose() the
     inner request_bracketed(streamed.events) generator via _receive's aclosing
@@ -447,6 +562,7 @@ async def test_receive_aclose_cascades_to_events(tmp_path: Path) -> None:
 
     from imp.agents.tools.context import ToolContext
     from imp.engine.state import InMemoryEventLog
+    from imp.providers.codex_rollout import RolloutCursor, RolloutTelemetry
     from imp.providers.codex_runner import _SERVER_DIED, CodexSession
 
     aclose_called: list[bool] = []
@@ -486,6 +602,11 @@ async def test_receive_aclose_cascades_to_events(tmp_path: Path) -> None:
                               events_path=tmp_path / "events.jsonl")
     session._thread = _FakeThread()
     session._next_prompt = "go"
+    session._proc_state = {
+        "rollout_telemetry": RolloutTelemetry(tmp_path, None),
+        "rollout_cursor": RolloutCursor((), discovery_complete=True),
+        "thread_id": None,
+    }
 
     gen = session._receive()
     first = await gen.__anext__()

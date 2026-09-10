@@ -10,10 +10,9 @@ that file across the pause: copy it (and the thread_id) into the durable
 `transcript_dir` on pause, restore it into the fresh CODEX_HOME on resume, then
 call `Codex.resume_thread(thread_id)`.
 
-The same file is also the only place codex reports live context occupancy and
-its rate-limit level, so `latest_readings` reads both in place — no stdout JSON
-mode emits them — and the only place codex records that it compacted history
-(`compaction_seen`).
+The same file is also the only place `RolloutTelemetry` reads turn-correlated
+context occupancy and rate limits — no stdout JSON mode emits them — and the
+only place codex records that it compacted history (`compaction_seen`).
 """
 from __future__ import annotations
 
@@ -359,36 +358,6 @@ class RolloutTelemetry:
     ) -> None:
         if cursor.discovery_complete and not matched:
             self._pending.append(usage)
-
-
-def latest_readings(codex_home: Path, thread_id: str) -> RolloutReadings:
-    """codex's own live context occupancy and rate-limit level, from one pass
-    over the rollout — the only place either is reported. Both halves are
-    absent when the rollout is missing or carries no usable `token_count`."""
-    rollout = _newest_matching_rollout(codex_home, thread_id)
-    if rollout is None:
-        return RolloutReadings(context=None, quota=None)
-    context: tuple[int, int] | None = None
-    quota: QuotaReading | None = None
-    with rollout.open(encoding="utf-8", errors="replace") as f:
-        for line in f:
-            # Pre-filter: rollouts run to megabytes, few lines are token_count.
-            if "token_count" not in line:
-                continue
-            try:
-                rec = json.loads(line)
-                payload = rec["payload"]
-                if rec["type"] != "event_msg" or payload["type"] != "token_count":
-                    continue
-            except (ValueError, KeyError, TypeError):
-                continue
-            reading = _context_from_info(payload.get("info"))
-            if reading is not None:
-                context = reading
-            block = quota_from_rate_limits(payload.get("rate_limits"))
-            if block is not None:
-                quota = block
-    return RolloutReadings(context=context, quota=quota)
 
 
 def compaction_seen(codex_home: Path, thread_id: str) -> bool:

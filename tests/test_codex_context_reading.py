@@ -4,17 +4,36 @@ import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import anyio
 import pytest
 
 import imp.providers.codex_runner as cr
 from imp.engine.state import InMemoryEventLog
-from imp.providers.codex_rollout import RolloutReadings
-from imp.providers.codex_runner import process_event
+from imp.providers.codex_rollout import (
+    CorrelatedReadings,
+    RolloutCursor,
+    RolloutReadings,
+    RolloutTelemetry,
+    RolloutUsage,
+    quota_from_rate_limits,
+)
+from imp.providers.codex_runner import _rollout_usage, process_event
 from tests.codex_fakes import agent_message, turn_completed
 
 _WINDOW = 258_400
+
+
+def test_rollout_usage_normalizes_all_completed_usage_fields() -> None:
+    usage = _rollout_usage(SimpleNamespace(
+        input_tokens=8, cached_input_tokens=None, cache_write_input_tokens=2,
+        output_tokens=None, reasoning_output_tokens=3,
+    ))
+    assert (usage.input_tokens, usage.cached_input_tokens,
+            usage.cache_write_input_tokens, usage.output_tokens,
+            usage.reasoning_output_tokens) == (8, 0, 2, 0, 3)
 
 
 def _codex_home(tmp_path: Path, *, records: list[tuple[int, int]],
@@ -34,8 +53,14 @@ def _codex_home(tmp_path: Path, *, records: list[tuple[int, int]],
             "payload": {
                 "type": "token_count",
                 "info": {
-                    "total_token_usage": {"input_tokens": 82628,
-                                          "total_tokens": 82956},
+                    "total_token_usage": {
+                        "input_tokens": 82628,
+                        "cached_input_tokens": 20992,
+                        "cache_write_input_tokens": 0,
+                        "output_tokens": 328,
+                        "reasoning_output_tokens": 70,
+                        "total_tokens": 82956,
+                    },
                     "last_token_usage": {"input_tokens": 22290,
                                          "cached_input_tokens": 20992,
                                          "total_tokens": tokens},
@@ -66,7 +91,8 @@ def test_turn_completed_lands_the_rollout_reading(tmp_path: Path) -> None:
         turn_completed(input_tokens=82_628, output_tokens=99,
                        cached_input_tokens=20_992, reasoning_output_tokens=70),
         elog=elog, agent_id="step:a", state=state, provider="codex",
-        model="gpt-5.6-luna", codex_home=home)
+        model="gpt-5.6-luna", codex_home=home,
+        rollout_readings=_readings(22_389))
     payload = next(e for e in elog.read()
                    if e["type"] == "agent_message")["payload"]
     # Occupancy comes from codex's own per-request record, NOT from the turn's
@@ -100,33 +126,6 @@ def test_turn_completed_without_a_reading_omits_context_fields(
     assert state["context_reading"] is None
 
 
-def test_unreadable_rollout_does_not_kill_the_turn(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """codex writes the rollout from another process while imp reads it, so the
-    locator's rglob->stat window can lose the file. A gauge read must never take
-    the turn down with it."""
-    def _boom(codex_home: Path, thread_id: str) -> RolloutReadings:
-        raise OSError("rollout vanished mid-turn")
-
-    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
-    monkeypatch.setattr(cr, "latest_readings", _boom)
-    elog = InMemoryEventLog()
-    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    process_event(agent_message("done"), elog=elog, agent_id="step:a",
-                  state=state, provider="codex", model="gpt-5.6-luna",
-                  codex_home=home)
-    process_event(
-        turn_completed(input_tokens=82_628, output_tokens=99),
-        elog=elog, agent_id="step:a", state=state, provider="codex",
-        model="gpt-5.6-luna", codex_home=home)
-    payload = next(e for e in elog.read()
-                   if e["type"] == "agent_message")["payload"]
-    # The turn still records its billing usage; only occupancy is missing.
-    assert payload["usage"]["output_tokens"] == 99
-    assert "context_tokens" not in payload
-    assert state["context_reading"] is None
-
-
 _CANARY = ("no codex context reading in the rollout; context gauge and "
            "handoff watch inactive for this turn (warned once per run)")
 
@@ -138,14 +137,62 @@ class _UsagelessTurn:
     usage: None = None
 
 
+def _readings(tokens: object, window: object = _WINDOW,
+              rate_limits: object = None) -> RolloutReadings:
+    context = ((tokens, window)
+               if (isinstance(tokens, int) and not isinstance(tokens, bool) and tokens > 0
+                   and isinstance(window, int) and not isinstance(window, bool) and window > 0)
+               else None)
+    return RolloutReadings(context=context, quota=quota_from_rate_limits(rate_limits))
+
+
+def _completed_usage(
+    *, input_tokens: int = 34_552, cached_input_tokens: int = 26_112,
+    cache_write_input_tokens: int = 0, output_tokens: int = 85,
+    reasoning_output_tokens: int = 29,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        input_tokens=input_tokens, cached_input_tokens=cached_input_tokens,
+        cache_write_input_tokens=cache_write_input_tokens,
+        output_tokens=output_tokens, reasoning_output_tokens=reasoning_output_tokens,
+    )
+
+
+def _append_token_count(
+    home: Path, usage: SimpleNamespace, occupancy: int, *, rate_limits: object = None,
+    window: object = _WINDOW,
+) -> None:
+    rollout = next((home / "sessions").rglob("*.jsonl"))
+    with rollout.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": {
+                        "input_tokens": usage.input_tokens,
+                        "cached_input_tokens": usage.cached_input_tokens,
+                        "cache_write_input_tokens": usage.cache_write_input_tokens,
+                        "output_tokens": usage.output_tokens,
+                        "reasoning_output_tokens": usage.reasoning_output_tokens,
+                    },
+                    "last_token_usage": {"total_tokens": occupancy},
+                    "model_context_window": window,
+                },
+                "rate_limits": rate_limits,
+            },
+        }) + "\n")
+
+
 def _drive_turn(elog: InMemoryEventLog, state: dict[str, Any],
-                home: Path) -> None:
+                home: Path, readings: RolloutReadings) -> None:
     process_event(agent_message("working"), elog=elog, agent_id="step:a",
                   state=state, provider="codex", model="gpt-5.6-luna",
                   codex_home=home)
     process_event(turn_completed(input_tokens=10), elog=elog,
                   agent_id="step:a", state=state, provider="codex",
-                  model="gpt-5.6-luna", codex_home=home)
+                  model="gpt-5.6-luna", codex_home=home,
+                  rollout_readings=readings)
 
 
 def test_missing_reading_emits_exactly_one_canary_per_run(
@@ -153,8 +200,8 @@ def test_missing_reading_emits_exactly_one_canary_per_run(
     home = _codex_home(tmp_path, records=[])
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    _drive_turn(elog, state, home)
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(None))
+    _drive_turn(elog, state, home, _readings(None))
     warns = [e["payload"]["message"] for e in elog.read()
              if e["type"] == "runner_warning"]
     assert warns == [_CANARY]
@@ -164,7 +211,7 @@ def test_present_reading_emits_no_canary(tmp_path: Path) -> None:
     home = _codex_home(tmp_path, records=[(22_389, _WINDOW)])
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389))
     assert [e for e in elog.read() if e["type"] == "runner_warning"] == []
 
 
@@ -209,8 +256,8 @@ def test_compacted_rollout_emits_exactly_one_canary_per_run(
     _compact(home)
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    _drive_turn(elog, state, home)
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389))
+    _drive_turn(elog, state, home, _readings(22_389))
     warns = [e["payload"]["message"] for e in elog.read()
              if e["type"] == "runner_warning"]
     assert warns == [_COMPACTION_CANARY]
@@ -226,7 +273,7 @@ def test_non_compacted_rollout_warns_only_about_the_missing_reading(
     home = _codex_home(tmp_path, records=[])
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(None))
     warns = [e["payload"]["message"] for e in elog.read()
              if e["type"] == "runner_warning"]
     assert warns == [_CANARY]
@@ -248,7 +295,7 @@ def test_unreadable_rollout_does_not_kill_the_compaction_check(
     monkeypatch.setattr(cr, "compaction_seen", _boom)
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389))
     assert [e for e in elog.read() if e["type"] == "runner_warning"] == []
     payload = next(e for e in elog.read()
                    if e["type"] == "agent_message")["payload"]
@@ -259,8 +306,8 @@ def test_repeated_turns_record_one_quota_reading(tmp_path: Path) -> None:
     home = _codex_home(tmp_path, records=[(22_389, _WINDOW)], rate_limits=_LIMITS)
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    _drive_turn(elog, state, home)
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389, rate_limits=_LIMITS))
+    _drive_turn(elog, state, home, _readings(22_389, rate_limits=_LIMITS))
     quota = [e for e in elog.read() if e["type"] == "quota_reading"]
     assert len(quota) == 1
     assert quota[0]["payload"]["plan"] == "plus"
@@ -275,10 +322,10 @@ def test_a_moved_reading_records_a_second_quota_event(tmp_path: Path) -> None:
     home = _codex_home(tmp_path, records=[(22_389, _WINDOW)], rate_limits=_LIMITS)
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt"}
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389, rate_limits=_LIMITS))
     moved = {**_LIMITS, "primary": {**_LIMITS["primary"], "used_percent": 36.0}}
     _codex_home(tmp_path, records=[(22_500, _WINDOW)], rate_limits=moved)
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_500, rate_limits=moved))
     pcts = [e["payload"]["windows"][0]["used_pct"] for e in elog.read()
             if e["type"] == "quota_reading"]
     assert pcts == [34.0, 36.0]
@@ -289,28 +336,10 @@ def test_turn_completed_lands_the_quota_reading_in_proc_state(tmp_path: Path) ->
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
                             "quota_reading": None}
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389, rate_limits=_LIMITS))
     assert state["quota_reading"].windows[0].label == "5h"
     # Still held on the repeat turn, where nothing is appended.
-    _drive_turn(elog, state, home)
-    assert state["quota_reading"].windows[0].used_pct == 34.0
-
-
-def test_a_lost_rollout_read_keeps_the_last_quota_reading(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """codex writes the rollout from another process, so a read can lose the
-    file. A lost read is not a reading of zero: the last one stands, so a
-    rate-limit rejection right after one still has a reset time to wait on."""
-    def _boom(codex_home: Path, thread_id: str) -> RolloutReadings:
-        raise OSError("rollout vanished mid-turn")
-
-    home = _codex_home(tmp_path, records=[(22_389, _WINDOW)], rate_limits=_LIMITS)
-    elog = InMemoryEventLog()
-    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
-                            "quota_reading": None}
-    _drive_turn(elog, state, home)
-    monkeypatch.setattr(cr, "latest_readings", _boom)
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389, rate_limits=_LIMITS))
     assert state["quota_reading"].windows[0].used_pct == 34.0
 
 
@@ -319,7 +348,7 @@ def test_a_rollout_without_rate_limits_records_no_quota_event(tmp_path: Path) ->
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
                             "quota_reading": None}
-    _drive_turn(elog, state, home)
+    _drive_turn(elog, state, home, _readings(22_389))
     assert [e for e in elog.read() if e["type"] == "quota_reading"] == []
     assert state["quota_reading"] is None
     payload = next(e for e in elog.read()
@@ -327,10 +356,229 @@ def test_a_rollout_without_rate_limits_records_no_quota_event(tmp_path: Path) ->
     assert payload["context_tokens"] == 22_389
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_wait_selects_immediate_current_record_and_stops_without_quota(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = _codex_home(tmp_path, records=[(12_000, _WINDOW)])
+    telemetry = RolloutTelemetry(home, "thr-1")
+    cursor = telemetry.begin_turn()
+    usage = _rollout_usage(_completed_usage())
+    _append_token_count(home, _completed_usage(), 17_447)
+
+    async def no_sleep(_: float) -> None:
+        raise AssertionError("immediate reading must not poll")
+
+    monkeypatch.setattr(cr.asyncio, "sleep", no_sleep)
+
+    readings = await cr._wait_for_current_readings(telemetry, cursor, usage)
+
+    assert (readings.context, readings.quota) == ((17_447, _WINDOW), None)
+
+
+@pytest.mark.anyio
+async def test_wait_observes_record_on_third_poll_then_stops_on_that_scan(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = _codex_home(tmp_path, records=[])
+    telemetry = RolloutTelemetry(home, "thr-1")
+    cursor = telemetry.begin_turn()
+    usage = _rollout_usage(_completed_usage())
+    now = [10.0]
+    scans: list[float] = []
+    delays: list[float] = []
+    third_poll = anyio.Event()
+    appended = anyio.Event()
+    scan_current = telemetry.scan_current
+
+    def scan(_: RolloutTelemetry, cursor: RolloutCursor,
+             current: RolloutUsage) -> CorrelatedReadings:
+        scans.append(now[0])
+        return scan_current(cursor, current)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+        now[0] += delay
+        if len(delays) == 3:
+            third_poll.set()
+            await appended.wait()
+
+    async def writer() -> None:
+        await third_poll.wait()
+        _append_token_count(home, _completed_usage(), 17_447, rate_limits=_LIMITS)
+        appended.set()
+
+    monkeypatch.setattr(RolloutTelemetry, "scan_current", scan)
+    monkeypatch.setattr(cr.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(cr.asyncio, "sleep", sleep)
+
+    with anyio.fail_after(30):
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(writer)
+            readings = await cr._wait_for_current_readings(telemetry, cursor, usage)
+
+    assert readings.context == (17_447, _WINDOW)
+    assert readings.quota is not None and readings.quota.raw == _LIMITS
+    assert scans == pytest.approx([10.0, 10.025, 10.05, 10.075])
+    assert delays == pytest.approx([0.025, 0.025, 0.025])
+    assert now[0] == pytest.approx(10.075)
+
+
+@pytest.mark.anyio
+async def test_wait_never_retries_at_or_after_two_second_deadline(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = _codex_home(tmp_path, records=[])
+    telemetry = RolloutTelemetry(home, "thr-1")
+    cursor = telemetry.begin_turn()
+    usage = _rollout_usage(_completed_usage())
+    now = [10.0]
+    scans: list[float] = []
+    delays: list[float] = []
+    finished: list[tuple[RolloutCursor, RolloutUsage, bool]] = []
+    scan_current = telemetry.scan_current
+    finish_turn = telemetry.finish_turn
+
+    def scan(_: RolloutTelemetry, current_cursor: RolloutCursor,
+             current_usage: RolloutUsage) -> CorrelatedReadings:
+        scans.append(now[0])
+        result = scan_current(current_cursor, current_usage)
+        if len(scans) == 1:
+            now[0] += 0.4
+        return result
+
+    def finish(_: RolloutTelemetry, current_cursor: RolloutCursor,
+               current_usage: RolloutUsage, matched: bool) -> None:
+        finished.append((current_cursor, current_usage, matched))
+        finish_turn(current_cursor, current_usage, matched)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+        now[0] += delay
+
+    monkeypatch.setattr(RolloutTelemetry, "scan_current", scan)
+    monkeypatch.setattr(RolloutTelemetry, "finish_turn", finish)
+    monkeypatch.setattr(cr.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(cr.asyncio, "sleep", sleep)
+
+    readings = await cr._wait_for_current_readings(telemetry, cursor, usage)
+
+    assert readings == RolloutReadings(context=None, quota=None)
+    assert scans[0] == 10.0
+    assert scans[1] == pytest.approx(10.425)
+    assert len(scans) > 3
+    assert all(scan_time < 12.0 for scan_time in scans[1:])
+    assert sum(delays) == pytest.approx(1.6)
+    assert now[0] == pytest.approx(12.0)
+    assert finished == [(cursor, usage, False)]
+
+
+@pytest.mark.anyio
+async def test_tool_turn_matches_cumulative_usage_but_uses_last_occupancy(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = _codex_home(tmp_path, records=[])
+    telemetry = RolloutTelemetry(home, "thr-1")
+    cursor = telemetry.begin_turn()
+    usage = _completed_usage()
+    _append_token_count(home, _completed_usage(
+        input_tokens=17_122, cached_input_tokens=9_984, cache_write_input_tokens=0,
+        output_tokens=68, reasoning_output_tokens=21), 17_190)
+    _append_token_count(home, usage, 17_447)
+
+    async def no_sleep(_: float) -> None:
+        raise AssertionError("matching record was immediately available")
+
+    monkeypatch.setattr(cr.asyncio, "sleep", no_sleep)
+
+    readings = await cr._wait_for_current_readings(telemetry, cursor, _rollout_usage(usage))
+
+    assert readings.context == (17_447, _WINDOW)
+
+
+def test_quota_free_current_turn_preserves_prior_valid_quota(tmp_path: Path) -> None:
+    home = _codex_home(tmp_path, records=[])
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
+                             "quota_reading": None}
+    _drive_turn(elog, state, home, _readings(22_389, rate_limits=_LIMITS))
+    prior = state["quota_reading"]
+    _drive_turn(elog, state, home, _readings(22_500))
+
+    messages = [event["payload"] for event in elog.read()
+                if event["type"] == "agent_message"]
+    quota_events = [event for event in elog.read() if event["type"] == "quota_reading"]
+    assert state["context_reading"] == (22_500, _WINDOW)
+    assert state["quota_reading"] is prior
+    assert [message["context_tokens"] for message in messages] == [22_389, 22_500]
+    assert len(quota_events) == 1
+    assert quota_events[0]["payload"]["plan"] == "plus"
+    assert quota_events[0]["payload"]["raw"] is _LIMITS
+
+
+@pytest.mark.anyio
+async def test_unreadable_rollout_is_nonfatal_and_preserves_prior_quota(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = _codex_home(tmp_path, records=[])
+    telemetry = RolloutTelemetry(home, "thr-1")
+    cursor = telemetry.begin_turn()
+    usage = _rollout_usage(_completed_usage())
+    now = [10.0]
+    scans: list[float] = []
+    delays: list[float] = []
+
+    def unreadable(_: RolloutTelemetry, current_cursor: RolloutCursor,
+                   current_usage: RolloutUsage) -> CorrelatedReadings:
+        scans.append(now[0])
+        if len(scans) == 1:
+            now[0] += 0.4
+        raise OSError("rollout vanished")
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+        now[0] += delay
+
+    monkeypatch.setattr(RolloutTelemetry, "scan_current", unreadable)
+    monkeypatch.setattr(cr.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(cr.asyncio, "sleep", sleep)
+
+    readings = await cr._wait_for_current_readings(telemetry, cursor, usage)
+
+    assert readings == RolloutReadings(context=None, quota=None)
+    assert len(scans) > 3
+    assert all(scan_time < 12.0 for scan_time in scans[1:])
+    assert sum(delays) == pytest.approx(1.6)
+    assert now[0] == pytest.approx(12.0)
+
+    prior = quota_from_rate_limits(_LIMITS)
+    assert prior is not None
+    elog = InMemoryEventLog()
+    state: dict[str, Any] = {"thread_id": "thr-1", "auth_mode": "chatgpt",
+                             "quota_reading": prior}
+    process_event(agent_message("done"), elog=elog, agent_id="step:a", state=state,
+                  provider="codex", model="gpt-5.6-luna", codex_home=home)
+    process_event(turn_completed(input_tokens=34_552, cached_input_tokens=26_112,
+                                 cache_write_input_tokens=0, output_tokens=85,
+                                 reasoning_output_tokens=29), elog=elog, agent_id="step:a",
+                  state=state, provider="codex", model="gpt-5.6-luna", codex_home=home,
+                  rollout_readings=readings)
+
+    payload = next(event["payload"] for event in elog.read()
+                   if event["type"] == "agent_message")
+    warnings = [event["payload"]["message"] for event in elog.read()
+                if event["type"] == "runner_warning"]
+    assert payload["usage"]["output_tokens"] == 85
+    assert "context_tokens" not in payload and "context_window" not in payload
+    assert state["context_reading"] is None
+    assert state["quota_reading"] is prior
+    assert warnings == [_CANARY]
+
+
 def test_proc_state_seeds_the_canary_latches_and_the_quota_slot() -> None:
-    # `_enter` provisions an MCP server and a codex subprocess, so the seed is
-    # pinned at the source (the repo's established idiom for unreachable structure).
     src = inspect.getsource(cr.CodexSession._enter)
     assert '"context_canary_emitted": False' in src
     assert '"compaction_canary_emitted": False' in src
     assert '"quota_reading": None' in src
+    assert 'RolloutTelemetry(codex_home, None)' in src
+    assert 'RolloutCursor((), discovery_complete=True)' in src

@@ -14,7 +14,6 @@ from imp.providers.codex_rollout import (
     RolloutTelemetry,
     RolloutUsage,
     compaction_seen,
-    latest_readings,
     persist_rollout,
     quota_from_rate_limits,
     restore_rollout,
@@ -505,90 +504,6 @@ def test_unusable_correlated_record_leaves_no_late_claim(tmp_path: Path) -> None
 
     assert (unusable.matched, result.matched, result.readings.context) == (
         True, True, (26000, _WINDOW))
-
-
-def test_latest_readings_returns_occupancy_and_window(tmp_path: Path) -> None:
-    home = _home_with(tmp_path, _token_count_line(total_tokens=22389))
-    assert latest_readings(home, "thr-1").context == (22389, _WINDOW)
-
-
-def test_latest_readings_takes_the_last_record(tmp_path: Path) -> None:
-    body = "".join(_token_count_line(total_tokens=t)
-                   for t in (20115, 22389, 21223))
-    home = _home_with(tmp_path, body)
-    assert latest_readings(home, "thr-1").context == (21223, _WINDOW)
-
-
-def test_latest_readings_returns_none_when_rollout_absent(tmp_path: Path) -> None:
-    home = tmp_path / "codex_home"
-    (home / "sessions").mkdir(parents=True)  # exists but empty
-    readings = latest_readings(home, "thr-1")
-    assert readings.context is None
-    assert readings.quota is None
-
-
-def test_latest_readings_returns_none_without_token_count_record(
-        tmp_path: Path) -> None:
-    body = (json.dumps({"type": "session_meta", "payload": {"id": "thr-1"}}) + "\n"
-            + json.dumps({"type": "event_msg",
-                          "payload": {"type": "agent_message",
-                                      "message": "hi"}}) + "\n")
-    home = _home_with(tmp_path, body)
-    assert latest_readings(home, "thr-1").context is None
-
-
-@pytest.mark.parametrize("window", [None, 0, -1])
-def test_latest_readings_returns_none_for_unusable_window(
-        tmp_path: Path, window: object) -> None:
-    home = _home_with(tmp_path, _token_count_line(window=window))
-    assert latest_readings(home, "thr-1").context is None
-
-
-@pytest.mark.parametrize("total_tokens", [None, 0, -1])
-def test_latest_readings_returns_none_for_unusable_tokens(
-        tmp_path: Path, total_tokens: object) -> None:
-    home = _home_with(tmp_path, _token_count_line(total_tokens=total_tokens))
-    assert latest_readings(home, "thr-1").context is None
-
-
-def test_latest_readings_skips_a_trailing_unusable_record(tmp_path: Path) -> None:
-    # A later drifted record must not erase an earlier complete reading.
-    body = (_token_count_line(total_tokens=22389)
-            + _token_count_line(total_tokens=22500, window=None))
-    home = _home_with(tmp_path, body)
-    assert latest_readings(home, "thr-1").context == (22389, _WINDOW)
-
-
-def test_latest_readings_returns_none_when_usage_missing(tmp_path: Path) -> None:
-    body = json.dumps({
-        "type": "event_msg",
-        "payload": {"type": "token_count",
-                    "info": {"model_context_window": _WINDOW}},
-    }) + "\n"
-    home = _home_with(tmp_path, body)
-    assert latest_readings(home, "thr-1").context is None
-
-
-def test_latest_readings_returns_both_readings_from_one_pass(tmp_path: Path) -> None:
-    home = _home_with(tmp_path, _token_count_line(rate_limits=_RATE_LIMITS))
-    readings = latest_readings(home, "thr-1")
-    assert readings.context == (22389, _WINDOW)
-    assert readings.quota is not None
-    assert [(w.label, w.used_pct) for w in readings.quota.windows] == [
-        ("5h", 12.0), ("7d", 14.0)]
-
-
-def test_latest_readings_takes_the_last_valid_of_each_independently(
-        tmp_path: Path) -> None:
-    # `rate_limits` can be null on a record whose token counts are valid: the
-    # newer record advances the context reading without erasing the quota one.
-    body = (_token_count_line(total_tokens=22389, rate_limits=_RATE_LIMITS)
-            + _token_count_line(total_tokens=22500, rate_limits=None))
-    home = _home_with(tmp_path, body)
-    readings = latest_readings(home, "thr-1")
-    assert readings.context == (22500, _WINDOW)
-    assert readings.quota is not None
-    assert readings.quota.plan == "plus"
 
 
 def _compacted_line() -> str:
