@@ -9,10 +9,45 @@ import pytest
 from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 
+_TEMP_HOME_WARNING = (
+    "WARNING: proceeding, even though we could not create PATH aliases: "
+    'Refusing to create helper binaries under temporary dir "/tmp" '
+    '(codex_home: AbsolutePathBuf("/tmp/imp-1000/dagu48/imp-codex-123-deadbeef"))\n'
+)
+
 
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_codex_failure_tail_preserves_temp_home_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = CodexAgentRunner(model_name="gpt-5.5")
+    emitted: list[str] = []
+
+    async def _boom(invocation: Any, session: Any):
+        sink = StderrSink(tmp_path / "stderr.log", on_warning=emitted.append, source="codex")
+        sink.feed(_TEMP_HOME_WARNING)
+        runner._stderr_sink = sink
+        token = current_stderr_sink.set(sink)
+        try:
+            if False:
+                yield {}
+            raise RuntimeError("Codex Exec exited with code 1")
+        finally:
+            current_stderr_sink.reset(token)
+
+    monkeypatch.setattr("imp.providers.codex_runner.run_agent_loop",
+                        lambda invocation, session: _boom(invocation, session))
+    runner._cancel = False
+
+    events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
+
+    assert events[0]["payload"]["detail"]["stderr_tail"] == _TEMP_HOME_WARNING
+    assert emitted == []
 
 
 @pytest.mark.anyio

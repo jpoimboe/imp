@@ -3,8 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from imp.engine.state import InMemoryEventLog
 from imp.providers.stderr_sink import StderrSink, build_stderr_sink
+
+_TEMP_HOME_WARNING = (
+    "WARNING: proceeding, even though we could not create PATH aliases: "
+    'Refusing to create helper binaries under temporary dir "/tmp" '
+    '(codex_home: AbsolutePathBuf("/tmp/imp-1000/dagu48/imp-codex-123-deadbeef"))\n'
+)
 
 
 def _collect(tmp_path: Path, text: str, *, source: str = "claude") -> list[str]:
@@ -93,6 +101,49 @@ def _sink_for(tmp_path: Path, step: str, elog: InMemoryEventLog) -> StderrSink:
 def _warnings_of(elog: InMemoryEventLog) -> list[str]:
     return [e["payload"]["message"] for e in elog.read()
             if e["type"] == "runner_warning"]
+
+
+def test_codex_temp_home_warning_is_hidden_but_persisted(tmp_path: Path) -> None:
+    elog = InMemoryEventLog()
+    log = tmp_path / "stderr.log"
+    sink = build_stderr_sink(log, elog=elog, aid="step:p/s", source="codex")
+    sink.feed(_TEMP_HOME_WARNING)
+    sink.close()
+    assert _warnings_of(elog) == []
+    assert log.read_bytes() == _TEMP_HOME_WARNING.encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("source", "warning"),
+    [
+        (
+            "codex",
+            (
+                "WARNING: proceeding, even though we could not create PATH aliases: "
+                "permission denied\n"
+            ),
+        ),
+        ("codex", _TEMP_HOME_WARNING.replace(
+            "/tmp/imp-1000/dagu48/imp-codex-123-deadbeef", "/home/alice/.codex")),
+        ("codex", _TEMP_HOME_WARNING.replace(
+            "/tmp/imp-1000/dagu48/imp-codex-123-deadbeef", "/tmp/../home/alice/.codex")),
+        ("codex", "Warning: unrelated Codex warning\n"),
+        ("claude", _TEMP_HOME_WARNING),
+    ],
+    ids=[
+        "generic-path-alias-permission-failure",
+        "canonical-home",
+        "path-traversal-home",
+        "unrelated-warning",
+        "claude-source",
+    ],
+)
+def test_codex_temp_home_warning_filter_is_narrow(
+    tmp_path: Path, source: str, warning: str,
+) -> None:
+    assert _collect(tmp_path, warning, source=source) == [
+        f"{source} stderr: {' '.join(warning.split())}"
+    ]
 
 
 def test_same_warning_from_two_steps_emits_one_event(tmp_path: Path) -> None:
