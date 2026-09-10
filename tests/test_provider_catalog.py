@@ -333,6 +333,39 @@ def test_legacy_openai_models_use_the_default_ceiling() -> None:
         assert checkpoint_cutoff(info, info.window) == 160_000 / 1_050_000
 
 
+def test_astra_catalog_and_dated_limits_are_shared_by_openai_and_codex() -> None:
+    expected = ModelInfo(
+        window=1_050_000,
+        max_output_tokens=128_000,
+        soft_cap=260_000,
+    )
+    assert OPENAI["gpt-6-astra"] == expected
+    for provider in ("openai", "codex"):
+        assert limits_for(provider, "gpt-6-astra") == expected
+        assert limits_for(provider, "gpt-6-astra-2026-09-10") == expected
+        assert "gpt-6-astra" in catalog_aliases(provider)
+
+
+def test_astra_push_handoff_boundary_is_260k() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+
+    info = OPENAI["gpt-6-astra"]
+    assert checkpoint_cutoff(info, info.window) == 260_000 / 1_050_000
+    assert context_threshold_crossed(
+        {"input_tokens": 259_999}, "openai", "gpt-6-astra") is False
+    assert context_threshold_crossed(
+        {"input_tokens": 260_000}, "openai", "gpt-6-astra") is True
+
+
+def test_astra_sdk_handoff_boundary_is_260k() -> None:
+    from imp.providers.catalog import sdk_context_threshold_crossed
+
+    assert sdk_context_threshold_crossed(
+        259_999, 1_050_000, "codex", "gpt-6-astra") is False
+    assert sdk_context_threshold_crossed(
+        260_000, 1_050_000, "codex", "gpt-6-astra") is True
+
+
 def test_soft_cap_defaults_to_none_for_anthropic_models() -> None:
     assert ModelInfo().soft_cap is None
     assert all(info.soft_cap is None for info in ANTHROPIC.values())

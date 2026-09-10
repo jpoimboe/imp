@@ -282,3 +282,59 @@ async def test_low_or_absent_reading_suppresses_handoff_on_a_huge_turn_sum(
     assert not [e for e in events if e["type"] == "handoff"]
     outs = [e for e in events if e["type"] == "agent_result"]
     assert len(outs) == 1 and outs[0]["payload"] == {"answer": "42"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("context_tokens", "expects_handoff"), [
+    (259_999, False),
+    (260_000, True),
+])
+async def test_astra_rollout_reading_uses_the_260k_handoff_boundary(
+        tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings],
+        context_tokens: int, expects_handoff: bool) -> None:
+    _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    hp = handoff_path_for(tmp_path / "tx")
+    fake_codex_rollout_readings[0] = RolloutReadings(
+        context=(context_tokens, 1_050_000), quota=None)
+
+    from tests.codex_fakes import mcp_call
+    if expects_handoff:
+        scripted = [
+            [thread_started("thr-1"), agent_message("working"),
+             turn_completed(input_tokens=1_000)],
+            [agent_message("astra handoff"), turn_completed(input_tokens=1_000)],
+        ]
+    else:
+        scripted = [
+            [thread_started("thr-1"), agent_message("still working"),
+             turn_completed(input_tokens=1_000)],
+            [agent_message("done"),
+             mcp_call(name="complete_step", args={"answer": "42"},
+                      result="ok", item_id="cs-1"),
+             turn_completed(input_tokens=1_000)],
+        ]
+    runner = CodexAgentRunner(
+        model_name="gpt-6-astra",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="codex", model_name="gpt-6-astra",
+        system_prompt="you are a test agent", initial_messages=(),
+        quest_context=QuestContext(title="t", project_root=tmp_path,
+                                   workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
+        agent_id="step:t", event_log=elog,
+        continuation_fn=build_continuation_fn(headless=True, has_schema=True))
+
+    events = [ev async for ev in runner.run(inv)]
+
+    handoffs = [event for event in events if event["type"] == "handoff"]
+    if expects_handoff:
+        assert len(handoffs) == 1
+        assert handoffs[0]["payload"]["handoff_path"] == str(hp)
+        assert hp.read_text() == "astra handoff"
+    else:
+        assert not handoffs
+        assert any(event["type"] == "agent_result" for event in events)

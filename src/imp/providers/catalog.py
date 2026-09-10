@@ -100,6 +100,13 @@ ANTHROPIC: dict[str, ModelInfo] = {
 }
 
 OPENAI: dict[str, ModelInfo] = {
+    # OpenAI and Codex share this catalog. Astra's explicit handoff cap retains
+    # headroom below the 272k billing breakpoint.
+    "gpt-6-astra": ModelInfo(
+        window=1_050_000,
+        max_output_tokens=128_000,
+        soft_cap=260_000,
+    ),
     # 5.6 flavors (imp.providers.BUILTIN_FLOOR): one generation, three sizes —
     # luna < terra < sol. All four share a 1.05M window and a 128k output cap.
     # The bare `gpt-5.6` alias routes to Sol; it is here only so limits
@@ -266,8 +273,11 @@ MODEL_PRICES: dict[str, ModelPrices] = {
     "opus": ModelPrices(5.00, 25.00, 0.50, 6.25),
     "sonnet": ModelPrices(3.00, 15.00, 0.30, 3.75),
     "haiku": ModelPrices(1.00, 5.00, 0.10, 1.25),
-    # OpenAI: cache write is 1.25x input on the 5.6 family and the plain input
-    # rate everywhere else. Sol's rate is promotional through 2026-11-21.
+    # OpenAI: cache write is 1.25x input on Astra and the 5.6 family, and the
+    # plain input rate everywhere else. Sol's rate is promotional through
+    # 2026-11-21.
+    "gpt-6-astra": ModelPrices(
+        10.00, 50.00, 1.00, 12.50, LONG_CONTEXT_BREAKPOINT),
     "gpt-5.6-sol": ModelPrices(4.00, 20.00, 0.40, 5.00, LONG_CONTEXT_BREAKPOINT),
     "gpt-5.6-terra": ModelPrices(2.00, 12.00, 0.20, 2.50, LONG_CONTEXT_BREAKPOINT),
     "gpt-5.6-luna": ModelPrices(0.20, 1.20, 0.02, 0.25, LONG_CONTEXT_BREAKPOINT),
