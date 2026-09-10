@@ -24,11 +24,19 @@ import asyncio
 import contextlib
 import json
 import socket
+import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from imp.agents.parallel import max_parallel_tasks
-from imp.agents.runner import ContentPart, ImagePart, TextPart
+from imp.agents.runner import (
+    ContentPart,
+    ImagePart,
+    TextPart,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, suspend_inactivity_watchdog
@@ -66,6 +74,74 @@ def _readonly_annotations() -> Any | None:
 
 
 @dataclass
+class _TaskStartTicket:
+    sequence: int
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+    registration_turn: asyncio.Event = field(default_factory=asyncio.Event)
+    released: bool = False
+
+
+class TaskStartCoordinator:
+    def __init__(self) -> None:
+        self._next_ticket = 0
+        self._next_start = 0
+        self._next_registration = 0
+        self._tickets: dict[int, _TaskStartTicket] = {}
+
+    @property
+    def reserved_count(self) -> int:
+        return self._next_ticket
+
+    @property
+    def pending_count(self) -> int:
+        return len(self._tickets)
+
+    def reserve(self) -> _TaskStartTicket:
+        sequence = self._next_ticket
+        self._next_ticket += 1
+        ticket = _TaskStartTicket(sequence=sequence)
+        if sequence < self._next_start:
+            ticket.started.set()
+        if sequence == self._next_registration:
+            ticket.registration_turn.set()
+        self._tickets[sequence] = ticket
+        return ticket
+
+    async def wait_for_registration(self, ticket: _TaskStartTicket) -> None:
+        await ticket.started.wait()
+        await ticket.registration_turn.wait()
+
+    def release(self, ticket: _TaskStartTicket) -> None:
+        if ticket.released:
+            return
+        ticket.released = True
+        while True:
+            current = self._tickets.get(self._next_registration)
+            if current is None or not current.released:
+                break
+            self._next_registration += 1
+            if current.started.is_set():
+                self._tickets.pop(current.sequence, None)
+        successor = self._tickets.get(self._next_registration)
+        if successor is not None:
+            successor.registration_turn.set()
+
+    def task_started(self) -> None:
+        sequence = self._next_start
+        self._next_start += 1
+        ticket = self._tickets.get(sequence)
+        if ticket is None:
+            return
+        ticket.started.set()
+        if ticket.released:
+            self._tickets.pop(sequence, None)
+
+
+_TASK_TICKET: ContextVar[_TaskStartTicket | None] = ContextVar(
+    "codex_task_ticket", default=None)
+
+
+@dataclass
 class RunState:
     """Shared state between the MCP tool wrappers and the runner's consume loop.
 
@@ -88,6 +164,7 @@ class RunState:
     fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
+    task_starts: TaskStartCoordinator = field(default_factory=TaskStartCoordinator)
     # Runner's event loop, recorded at runner entry. start_server raises on a
     # foreign loop (same-loop topology pin). None disables the check.
     runner_loop: Any = None
@@ -141,23 +218,57 @@ async def dispatch_tool(
         state.complete_step_args = args
         return "step complete"
     if tool.name == "sub_agent":
-        # task special-case: never goes through async_invoke (its _invoke raises
-        # TaskMustBeAwaited by design). Run the subagent and return its structured
-        # output JSON. dispatch_tool does NOT touch the event log for the task
-        # tool_call/result pair — process_event owns that lifecycle, keyed on the
-        # codex item id (item.started opens the fold, item.completed closes it). Any
-        # exception propagates out of this handler; FastMCP wraps it as an isError
-        # tool result, so a batched child cannot pause the run. A suspend/interrupt
-        # arrives as a RuntimeError whose body already carries the bracketed
-        # [suspended] / [interrupted] marker the renderer classifies on — the result
-        # text is the only channel codex controls here.
         from imp.agents.subagents import dispatch_task
-        return await dispatch_task(
-            ctx,
-            args["subagent_name"],
-            args["task_description"],
-            tier=args.get("tier"),
+
+        if ctx.event_log is None:
+            raise RuntimeError("sub_agent dispatch requires an event log")
+        ticket = _TASK_TICKET.get()
+        if ticket is None:
+            raise RuntimeError("sub_agent dispatch requires an admitted request ticket")
+        task_input = {
+            "subagent_name": args["subagent_name"],
+            "task_description": args["task_description"],
+        }
+        if args.get("tier") is not None:
+            task_input["tier"] = args["tier"]
+        await state.task_starts.wait_for_registration(ticket)
+        block_id = uuid.uuid4().hex
+        sub_def = ctx.subagent_defs.get(args["subagent_name"])
+        label = sub_def.label if sub_def is not None else None
+        call_event = ctx.event_log.append_tool_call(
+            agent_id=state.agent_id,
+            block=ToolUseBlock(id=block_id, name="sub_agent", input=task_input),
+            label=label,
+            id_ns="block",
         )
+        state.task_starts.release(ticket)
+        try:
+            result = await dispatch_task(
+                ctx,
+                args["subagent_name"],
+                args["task_description"],
+                tool_call_event_id=call_event["id"],
+                tier=args.get("tier"),
+            )
+        except BaseException as exc:
+            ctx.event_log.append_tool_result(
+                agent_id=state.agent_id,
+                block=ToolResultBlock(
+                    tool_use_id=block_id,
+                    content=f"{type(exc).__name__}: {exc}",
+                    is_error=True,
+                ),
+                id_ns="block",
+                kind="interrupted" if isinstance(exc, asyncio.CancelledError) else None,
+            )
+            raise
+        ctx.event_log.append_tool_result(
+            agent_id=state.agent_id,
+            block=ToolResultBlock(
+                tool_use_id=block_id, content=result, is_error=False),
+            id_ns="block",
+        )
+        return result
     try:
         with suspend_inactivity_watchdog(ctx):
             raw = await tool.async_invoke(ctx, args)
@@ -366,8 +477,22 @@ def _register_tool(
     async def _impl(**kwargs: Any) -> Any:
         return await dispatch_tool(tool=tool_ref, args=kwargs, ctx=ctx, state=state)
 
+    class _TaskMCPTool(MCPTool):
+        async def run(
+            self, arguments: dict[str, Any], context: Any = None,
+            convert_result: bool = False,
+        ) -> Any:
+            ticket = state.task_starts.reserve()
+            token = _TASK_TICKET.set(ticket)
+            try:
+                return await super().run(arguments, context, convert_result)
+            finally:
+                _TASK_TICKET.reset(token)
+                state.task_starts.release(ticket)
+
     # ── Register directly so FastMCP sees the original input_schema ───────────
-    mcp_tool = MCPTool(
+    mcp_tool_cls = _TaskMCPTool if tool.name == "sub_agent" else MCPTool
+    mcp_tool = mcp_tool_cls(
         fn=_impl,
         name=tool.name,
         title=None,

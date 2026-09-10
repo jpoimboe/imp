@@ -2381,30 +2381,35 @@ def test_intent_stays_at_root_across_resume_reentry() -> None:
     assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
 
 
-def test_lost_task_result_resume_closed_at_step_completed() -> None:
-    # Backstop: a `task` fold opens, the parent streams a mid-turn chunk (no
-    # terminal stop_reason) so Task 1's guard keeps the fold open, and NO task
-    # tool_result ever arrives. step_completed must close the still-open fold so
-    # the live cursor advances off the dead subagent, stamping the step-end ts.
+def test_nested_lost_result_step_completed_closes_post_order_and_salvages_by_owner() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
-             model="m", provider="anthropic",
-             timestamp="2026-06-19T11:00:00+00:00"))
-    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
-             input={"subagent_name": "reviewer", "task_description": "go"},
-             timestamp="2026-06-19T11:00:01+00:00"))
-    step = b._step_stack[-1]
-    fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
-    b.add(ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic",
-             model="m", stop_reason=None, usage={},
-             raw={"content": [{"type": "text", "text": "working"}]},
-             timestamp="2026-06-19T11:00:02+00:00"))
-    assert fold.running is True                       # Task 1 keeps it open
+    for event in [
+        ev("st", "step_started", step="s", kind="agent", phase="p"),
+        ev("tk1", "tool_call", agent_id="step:p/s", id="shared", name="sub_agent",
+           input={"subagent_name": "parent"}),
+        ev("tk2", "tool_call", agent_id="sub:tk1", id="shared", name="sub_agent",
+           input={"subagent_name": "grandchild"}),
+    ]:
+        b.add(event)
+    parent = b._descendant_builders["sub:tk1"]._owner_fold
+    grandchild = b._descendant_builders["sub:tk2"]._owner_fold
+    assert parent is not None and grandchild is not None
+
     b.add(ev("sc", "step_completed", step="s", kind="agent",
              action={"verb": "continue"}, var_mutations={},
              timestamp="2026-06-19T11:00:30+00:00"))
-    assert fold.running is False                      # backstop closed it
-    assert fold.end_ts == "2026-06-19T11:00:30+00:00"  # stamped the step-end ts
+    assert (parent.running, grandchild.running) == (False, False)
+    assert parent.end_ts == grandchild.end_ts == "2026-06-19T11:00:30+00:00"
+    assert parent.outcome is None and grandchild.outcome is None
+    assert set(b._salvage_result_owners) >= {
+        ("step:p/s", "shared"), ("sub:tk1", "shared")}
+
+    b.add(ev("late-grand", "tool_result", agent_id="sub:tk1", id="shared",
+             id_ns="block", content="grand done", error=False))
+    b.add(ev("late-parent", "tool_result", agent_id="step:p/s", id="shared",
+             id_ns="block", content="parent done", error=False))
+    assert grandchild.outcome == "grand done"
+    assert parent.outcome == "parent done"
 
 
 def test_step_node_command_populated_from_payload_fresh_node() -> None:
@@ -3379,6 +3384,272 @@ def test_current_activity_carries_the_step_provider_beside_the_model() -> None:
     act = b.current_activity()
     assert act is not None
     assert (act.provider, act.model) == ("openai", "gpt-5.6-sol")
+
+
+def _open_three_level_builder() -> tuple[
+    nv.NarrativeBuilder, nv.SubagentFold, nv.SubagentFold, nv.SubagentFold
+]:
+    b = nv.NarrativeBuilder()
+    for event in [
+        ev("st", "step_started", None, step="s", kind="agent", phase="p"),
+        ev("parent", "tool_call", "step:p/s", id="parent-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "parent"}),
+        ev("sibling", "tool_call", "step:p/s", id="sibling-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "sibling"}),
+        ev("grandchild", "tool_call", "sub:parent", id="grandchild-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "grandchild"}),
+    ]:
+        b.add(event)
+    parent = b._sub_by_agent_id["sub:parent"]
+    sibling = b._sub_by_agent_id["sub:sibling"]
+    grandchild = parent.nested._sub_by_agent_id["sub:grandchild"]
+    return b, parent, sibling, grandchild
+
+
+@pytest.mark.parametrize(("error", "kind", "terminal"), [
+    (False, None, None),
+    (True, None, None),
+    (True, "interrupted", "interrupted"),
+])
+def test_grandchild_task_result_closes_only_grandchild(
+    error: bool, kind: str | None, terminal: str | None,
+) -> None:
+    b, parent, sibling, grandchild = _open_three_level_builder()
+    b.add(ev("grandchild-done", "tool_result", "sub:parent", id="grandchild-block",
+             id_ns="block", content="done", error=error, kind=kind))
+
+    assert (grandchild.running, grandchild.is_error, grandchild.terminal_state) == (
+        False, error, terminal)
+    assert parent.running is True and sibling.running is True
+    assert "sub:grandchild" not in b._descendant_builders
+    assert b._retired_descendant_builders["sub:grandchild"] is grandchild.nested
+    assert "sub:parent" in b._descendant_builders
+    assert "sub:sibling" in b._descendant_builders
+
+
+def test_active_nested_stamped_miss_surfaces_at_root() -> None:
+    from imp.cli.render_text import render_tree
+
+    b = nv.NarrativeBuilder()
+    for event in [
+        ev("st", "step_started", None, step="s", kind="agent", phase="p"),
+        ev("parent-call", "tool_call", "step:p/s", id="parent-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "parent"}),
+        ev("child-call", "tool_call", "sub:parent-call", id="child-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "child"}),
+    ]:
+        b.add(event)
+    parent = b._sub_by_agent_id["sub:parent-call"]
+    child = parent.nested._sub_by_agent_id["sub:child-call"]
+    b.add(ev("child-done", "tool_result", "sub:parent-call", id="child-block",
+             id_ns="block", content="child done", error=False))
+    salvage_before = dict(b._salvage_result_owners)
+    b.add(ev("child-duplicate", "tool_result", "sub:parent-call", id="child-block",
+             id_ns="block", content="duplicate", error=False))
+    step = b._step_stack[-1]
+    warning = (
+        "parent [sub:parent-call]: task result 'child-block' "
+        "(id_ns='block') matched no open fold"
+    )
+    before_close = [n.message for n in step.children if isinstance(n, nv.ErrorNode)]
+
+    b.add(ev("parent-done", "tool_result", "step:p/s", id="parent-block",
+             id_ns="block", content="parent done", error=False))
+    root_warnings = [n for n in step.children if isinstance(n, nv.ErrorNode)]
+    parent_warnings = [n for n in parent.tree.root.children if isinstance(n, nv.ErrorNode)]
+    child_warnings = [n for n in child.tree.root.children if isinstance(n, nv.ErrorNode)]
+    lean = "\n".join(render_tree(b.tree, full=False, color=False))
+    full = "\n".join(render_tree(b.tree, full=True, color=False))
+
+    assert (
+        before_close,
+        [(n.message, n.is_warning) for n in root_warnings],
+        parent_warnings,
+        child_warnings,
+        child.outcome,
+        parent.outcome,
+        set(b._retired_descendant_builders),
+        b._salvage_result_owners,
+        parent.nested._closed_sub_by_block,
+        f"warning: {warning}" in lean,
+        f"warning: {warning}" in full,
+    ) == (
+        [warning],
+        [(warning, True)],
+        [],
+        [],
+        "child done",
+        "parent done",
+        {"sub:parent-call", "sub:child-call"},
+        salvage_before,
+        {},
+        True,
+        True,
+    )
+
+
+def test_settled_child_stays_settled_when_open_sibling_is_paused() -> None:
+    b, parent, sibling, grandchild = _open_three_level_builder()
+    b.add(ev("sibling-done", "tool_result", "step:p/s", id="sibling-block",
+             id_ns="block", content="settled", error=False))
+    b.add(ev("ask", "awaiting_user_input", None, prompt="continue?"))
+    b.add(ev("pause", "workflow_paused", None, reason="awaiting_user"))
+
+    assert (sibling.outcome, sibling.is_error, sibling.terminal_state) == (
+        "settled", False, None)
+    assert parent.terminal_state == "interrupted"
+    assert grandchild.terminal_state == "interrupted"
+
+
+def test_normal_completion_retires_every_descendant_and_suppresses_stale_prose() -> None:
+    b, parent, sibling, grandchild = _open_three_level_builder()
+    b.add(ev("parent-done", "tool_result", "step:p/s", id="parent-block",
+             id_ns="block", content="parent done", error=False))
+    b.add(ev("sibling-done", "tool_result", "step:p/s", id="sibling-block",
+             id_ns="block", content="sibling done", error=False))
+    children_before = list(grandchild.tree.root.children)
+    b.add(ev("stale", "agent_message", "sub:grandchild", provider="codex", usage={},
+             raw={"content": [{"type": "text", "text": "too late"}]}))
+
+    assert b._descendant_builders == {}
+    assert set(b._retired_descendant_builders) == {
+        "sub:parent", "sub:sibling", "sub:grandchild"}
+    assert grandchild.tree.root.children == children_before
+    assert parent.outcome == "parent done" and sibling.outcome == "sibling done"
+
+
+@pytest.mark.parametrize(("etype", "payload", "expected", "warning"), [
+    ("runner_warning", {"message": "runner slipped", "detail": "detail", "category": "runner"},
+     "grandchild [sub:grandchild]: runner slipped", True),
+    ("warning", {"message": "heads up", "detail": "detail", "category": "notice"},
+     "grandchild [sub:grandchild]: heads up", True),
+    ("sandbox_overlay_unavailable", {"reason": "overlay lost", "detail": "detail",
+                                     "category": "sandbox"},
+     "grandchild [sub:grandchild]: overlay lost", True),
+    ("error", {"message": "boom", "detail": {"full_summary": "detail"},
+               "category": "unknown"},
+     "grandchild [sub:grandchild]: boom", False),
+])
+def test_retired_descendant_diagnostic_surfaces_at_root(
+    etype: str, payload: dict, expected: str, warning: bool,
+) -> None:
+    b, _, _, grandchild = _open_three_level_builder()
+    b.add(ev("parent-done", "tool_result", "step:p/s", id="parent-block",
+             id_ns="block", content="done", error=False))
+    before = list(grandchild.tree.root.children)
+    b.add(ev("diagnostic", etype, "sub:grandchild", **payload))
+    nodes = [n for n in b._step_stack[-1].children if isinstance(n, nv.ErrorNode)]
+
+    assert nodes[-1].message == expected
+    assert nodes[-1].is_warning is warning
+    assert nodes[-1].category == payload.get("category")
+    assert nodes[-1].detail == "detail"
+    assert grandchild.tree.root.children == before
+
+
+def test_crash_resume_recursively_retires_once_and_salvages_late_results() -> None:
+    b, parent, sibling, grandchild = _open_three_level_builder()
+    b.add(ev("resume", "workflow_resumed", None, timestamp="2026-01-01T00:00:05+00:00"))
+    retired = dict(b._retired_descendant_builders)
+    salvage = dict(b._salvage_result_owners)
+    b.add(ev("resume-again", "workflow_resumed", None,
+             timestamp="2026-01-01T00:00:06+00:00"))
+    assert b._retired_descendant_builders == retired
+    assert b._salvage_result_owners == salvage
+    assert all(f.terminal_state == "interrupted" for f in (parent, sibling, grandchild))
+
+    b.add(ev("grand-late", "tool_result", "sub:parent", id="grandchild-block",
+             id_ns="block", content="late grand", error=False))
+    assert grandchild.outcome == "late grand"
+    assert parent.outcome is None and sibling.outcome is None
+
+
+def test_awaiting_user_then_pause_uses_owner_qualified_late_result_salvage() -> None:
+    b = nv.NarrativeBuilder()
+    for event in [
+        ev("st", "step_started", None, step="s", kind="agent", phase="p"),
+        ev("parent", "tool_call", "step:p/s", id="parent-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "parent"}),
+        ev("sibling", "tool_call", "step:p/s", id="sibling-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "sibling"}),
+        ev("grand-a", "tool_call", "sub:parent", id="shared", id_ns="block",
+           name="sub_agent", input={"subagent_name": "grand-a"}),
+        ev("grand-b", "tool_call", "sub:sibling", id="shared", id_ns="block",
+           name="sub_agent", input={"subagent_name": "grand-b"}),
+    ]:
+        b.add(event)
+    grand_a = b._descendant_builders["sub:grand-a"]._owner_fold
+    grand_b = b._descendant_builders["sub:grand-b"]._owner_fold
+    assert grand_a is not None and grand_b is not None
+
+    b.add(ev("ask", "awaiting_user_input", None, prompt="continue?"))
+    assert not grand_a.running and not grand_b.running
+    assert grand_a.outcome is None and grand_b.outcome is None
+    assert "sub:grand-a" in b._descendant_builders
+    b.add(ev("pause", "workflow_paused", None, reason="awaiting_user"))
+    assert "sub:grand-a" not in b._descendant_builders
+    assert set(b._salvage_result_owners) >= {
+        ("sub:parent", "shared"), ("sub:sibling", "shared")}
+
+    b.add(ev("wrong", "tool_result", "sub:grand-a", id="shared", id_ns="block",
+             content="wrong", error=False))
+    assert grand_a.outcome is None and grand_b.outcome is None
+    errors = [n for n in b._step_stack[-1].children if isinstance(n, nv.ErrorNode)]
+    assert errors[-1].message == (
+        "grand-a [sub:grand-a]: task result 'shared' (id_ns='block') matched no open fold")
+    b.add(ev("late-a", "tool_result", "sub:parent", id="shared", id_ns="block",
+             content="late a", error=False))
+    b.add(ev("late-b", "tool_result", "sub:sibling", id="shared", id_ns="block",
+             content="late b", error=False))
+    assert grand_a.outcome == "late a" and grand_b.outcome == "late b"
+    b.add(ev("duplicate", "tool_result", "sub:parent", id="shared", id_ns="block",
+             content="duplicate", error=False))
+    errors = [n for n in b._step_stack[-1].children if isinstance(n, nv.ErrorNode)]
+    assert errors[-1].message == (
+        "parent [sub:parent]: task result 'shared' (id_ns='block') matched no open fold")
+    assert grand_a.outcome == "late a" and grand_b.outcome == "late b"
+
+
+def test_recursive_subagent_events_route_to_the_immediate_owner() -> None:
+    b = nv.NarrativeBuilder()
+    events = [
+        ev("st", "step_started", None, step="s", kind="agent", phase="p"),
+        ev("root-tool", "tool_call", "step:p/s", id="tool-1", name="bash", input={}),
+        ev("root-result", "tool_result", "step:p/s", id="tool-1", content="root"),
+        ev("parent", "tool_call", "step:p/s", id="parent-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "parent"}),
+        ev("sibling", "tool_call", "step:p/s", id="sibling-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "sibling"}),
+        ev("parent-tool", "tool_call", "sub:parent", id="tool-1", name="bash", input={}),
+        ev("parent-tool-result", "tool_result", "sub:parent", id="tool-1", content="parent"),
+        ev("grandchild", "tool_call", "sub:parent", id="grandchild-block", id_ns="block",
+           name="sub_agent", input={"subagent_name": "grandchild"}),
+        ev("deep-prose", "agent_message", "sub:grandchild", provider="codex", usage={},
+           raw={"content": [{"type": "text", "text": "deep finding"}]}),
+        ev("grand-tool", "tool_call", "sub:grandchild", id="tool-1", name="bash", input={}),
+        ev("grand-result", "tool_result", "sub:grandchild", id="tool-1", content="deep"),
+        ev("sibling-tool", "tool_call", "sub:sibling", id="tool-1", name="bash", input={}),
+        ev("sibling-result", "tool_result", "sub:sibling", id="tool-1", content="sibling"),
+        ev("grandchild-done", "tool_result", "sub:parent", id="grandchild-block",
+           id_ns="block", content="grandchild done", error=False),
+        ev("parent-done", "tool_result", "step:p/s", id="parent-block", id_ns="block",
+           content="parent done", error=False),
+        ev("sibling-done", "tool_result", "step:p/s", id="sibling-block", id_ns="block",
+           content="sibling done", error=False),
+    ]
+    for event in events:
+        b.add(event)
+
+    parent = b._retired_descendant_builders["sub:parent"]._owner_fold
+    sibling = b._retired_descendant_builders["sub:sibling"]._owner_fold
+    assert parent is not None and sibling is not None
+    grandchild = next(f for f in parent.tree.root.children
+                      if isinstance(f, nv.SubagentFold))
+    assert (
+        parent.running, sibling.running, grandchild.running,
+        [c.text for c in grandchild.tree.root.children if isinstance(c, nv.AgentTextNode)],
+        parent.outcome, sibling.outcome, grandchild.outcome,
+    ) == (False, False, False, ["deep finding"], "parent done", "sibling done", "grandchild done")
 
 
 def test_current_activity_keeps_the_provider_while_a_subagent_runs() -> None:

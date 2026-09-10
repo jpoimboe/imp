@@ -47,17 +47,20 @@ def test_the_builder_holds_one_quota_reading_per_provider() -> None:
     assert b.quota_for("codex") == newer                # latest wins
 
 
-def test_a_subagents_reading_still_reaches_the_top_level_builder() -> None:
-    # The level is account-wide, so retention must happen above the subagent
-    # delegation that hides everything else a dispatched agent emits.
+def test_a_retired_subagents_reading_still_reaches_the_top_level_builder() -> None:
     b = NarrativeBuilder()
     _codex_step(b)
-    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1", id_ns="block",
              name="sub_agent", input={"subagent_name": "coder"}))
+    b.add(ev("done", "tool_result", agent_id="step:p/s", id="blk-t1", id_ns="block",
+             content="done", error=False))
+    step = b.tree.root.children[0].children[0]
+    children_before = list(step.children)
     reading = _reading("codex", QuotaWindow("5h", 44.0, None))
     b.add(ev("q1", "quota_reading", agent_id="sub:t1", **reading.to_payload()))
 
     assert b.quota_for("codex") == reading
+    assert step.children == children_before
 
 
 def test_the_builder_holds_one_auth_mode_per_provider() -> None:

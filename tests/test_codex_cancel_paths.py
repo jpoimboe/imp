@@ -226,125 +226,34 @@ async def test_killed_tools_drained_to_tool_killed_events(tmp_path: Path) -> Non
 _TASK_ARGS = {"subagent_name": "explorer", "task_description": "go look"}
 
 
-def _cancel_after(runner: CodexAgentRunner, monkeypatch: pytest.MonkeyPatch,
-                  event_type: str) -> None:
-    """Flip the interrupt flag right after `event_type` is journaled; the stream
-    loop's next iteration then converts to _CANCEL and abandons the turn."""
+@pytest.mark.anyio
+async def test_interrupt_after_sdk_task_start_adds_no_sdk_lifecycle(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    auth = _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    from tests.codex_fakes import mcp_call, mcp_started, thread_started, turn_completed
+    scripted = [[thread_started("t"),
+                 mcp_started("sub_agent", args=_TASK_ARGS, item_id="sub-1"),
+                 mcp_call(name="sub_agent", args=_TASK_ARGS,
+                          result='{"r":"A"}', item_id="sub-1"),
+                 turn_completed(output_tokens=1)]]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = auth
     import imp.providers.codex_runner as cr
-    orig = cr.process_event
+    original = cr.process_event
 
-    def _patched(event: Any, **kw: Any) -> None:
-        orig(event, **kw)
-        if getattr(event, "type", None) == event_type:
+    def _cancel_after_start(event: Any, **kwargs: Any) -> None:
+        original(event, **kwargs)
+        if getattr(event, "type", None) == "item.started":
             runner._cancel = True
 
-    monkeypatch.setattr(cr, "process_event", _patched)
-
-
-def _results_by_id(elog: InMemoryEventLog) -> dict[str, dict[str, Any]]:
-    return {e["payload"]["id"]: e["payload"]
-            for e in elog.read() if e["type"] == "tool_result"}
-
-
-def _unpaired_sub_calls(elog: InMemoryEventLog) -> set[str]:
-    records = list(elog.read())
-    calls = {e["payload"]["id"] for e in records
-             if e["type"] == "tool_call" and e["payload"]["name"] == "sub_agent"}
-    results = {e["payload"]["id"] for e in records if e["type"] == "tool_result"}
-    return calls - results
-
-
-@pytest.mark.anyio
-async def test_interrupt_mid_dispatch_closes_the_open_fold(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    auth = _seed_git_and_auth(tmp_path)
-    elog = InMemoryEventLog()
-    from tests.codex_fakes import mcp_call, mcp_started, thread_started, turn_completed
-    # The item.completed is scripted but must never be consumed: the interrupt
-    # lands as soon as item.started is journaled.
-    scripted = [[thread_started("t"),
-                 mcp_started("sub_agent", args=_TASK_ARGS, item_id="sub-1"),
-                 mcp_call(name="sub_agent", args=_TASK_ARGS,
-                          result='{"r":"A"}', item_id="sub-1"),
-                 turn_completed(output_tokens=1)]]
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-    _cancel_after(runner, monkeypatch, "item.started")
-
+    monkeypatch.setattr(cr, "process_event", _cancel_after_start)
     [ev async for ev in runner.run(_invocation(tmp_path, event_log=elog))]
 
-    assert _unpaired_sub_calls(elog) == set()
-    closer = _results_by_id(elog)["sub-1"]
-    assert closer["error"] is True
-    assert closer["kind"] == "interrupted"
-    assert closer["id_ns"] == "block"
-    assert closer["content"].startswith("[interrupted]")
-
-
-@pytest.mark.anyio
-async def test_completed_dispatch_gets_no_synthetic_closer(tmp_path: Path) -> None:
-    auth = _seed_git_and_auth(tmp_path)
-    elog = InMemoryEventLog()
-    from tests.codex_fakes import mcp_call, mcp_started, thread_started, turn_completed
-    scripted = [[thread_started("t"),
-                 mcp_started("sub_agent", args=_TASK_ARGS, item_id="sub-1"),
-                 mcp_call(name="sub_agent", args=_TASK_ARGS,
-                          result='{"r":"A"}', item_id="sub-1"),
-                 mcp_call(name="complete_step", args={"answer": "done"},
-                          result="step complete", item_id="cs"),
-                 turn_completed(output_tokens=1)]]
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-
-    [ev async for ev in runner.run(_invocation(tmp_path, event_log=elog))]
-
-    for_sub = [e for e in elog.read()
-               if e["type"] == "tool_result" and e["payload"]["id"] == "sub-1"]
-    assert len(for_sub) == 1
-    assert for_sub[0]["payload"]["content"] == '{"r":"A"}'
-    assert for_sub[0]["payload"]["error"] is False
-    assert not any(e["payload"].get("kind") == "interrupted"
-                   for e in elog.read() if e["type"] == "tool_result")
-
-
-@pytest.mark.anyio
-async def test_only_the_still_open_fold_is_closed(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    auth = _seed_git_and_auth(tmp_path)
-    elog = InMemoryEventLog()
-    from tests.codex_fakes import mcp_call, mcp_started, thread_started, turn_completed
-    # Two concurrent dispatches; only sub-2 completes before the interrupt.
-    scripted = [[thread_started("t"),
-                 mcp_started("sub_agent", args=_TASK_ARGS, item_id="sub-1"),
-                 mcp_started("sub_agent", args=_TASK_ARGS, item_id="sub-2"),
-                 mcp_call(name="sub_agent", args=_TASK_ARGS,
-                          result='{"r":"B"}', item_id="sub-2"),
-                 turn_completed(output_tokens=1)]]
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-    _cancel_after(runner, monkeypatch, "item.completed")
-
-    [ev async for ev in runner.run(_invocation(tmp_path, event_log=elog))]
-
-    assert _unpaired_sub_calls(elog) == set()
-    results = _results_by_id(elog)
-    assert results["sub-2"]["content"] == '{"r":"B"}'
-    assert "kind" not in results["sub-2"]
-    assert results["sub-1"]["kind"] == "interrupted"
-    assert results["sub-1"]["content"].startswith("[interrupted]")
-    interrupted = [e for e in elog.read()
-                   if e["type"] == "tool_result"
-                   and e["payload"].get("kind") == "interrupted"]
-    assert len(interrupted) == 1
+    assert not [e for e in elog.read()
+                if e["type"] in ("tool_call", "tool_result")]
 
 
 @pytest.mark.anyio

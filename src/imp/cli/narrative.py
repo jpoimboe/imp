@@ -466,14 +466,22 @@ class NarrativeBuilder:
       0. update latest_prompt_tokens (the context-bar value) for THIS builder's
          own agent: the top-level builder (own_agent_id None) records its non-sub:
          turns, a nested builder records the sub: turns of the subagent it
-         represents; a turn that belongs to a registered child does not move this
+         represents; a turn that belongs to a registered descendant does not move this
          builder's bar. Token and cost totals are not this builder's job — the
          accounting path in imp.cli.accounting owns them.
-      1. if agent_id is a registered child subagent fold → delegate down.
+      1. if agent_id is a registered descendant → delegate to its builder.
       2. else dispatch by event type at the current open scope.
     """
 
-    def __init__(self, *, own_agent_id: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        own_agent_id: str | None = None,
+        descendant_builders: dict[str, NarrativeBuilder] | None = None,
+        retired_descendant_builders: dict[str, NarrativeBuilder] | None = None,
+        salvage_result_owners: dict[tuple[str | None, str], NarrativeBuilder] | None = None,
+        owner_builder: NarrativeBuilder | None = None,
+    ) -> None:
         self._root = WorkflowNode()
         self._warnings: list[str] = []
         self._warnings_flushed: bool = False
@@ -491,6 +499,14 @@ class NarrativeBuilder:
         # THIS builder's context gauge: the top level records its own (non-sub:) turns;
         # a nested builder records the turns of the subagent it stands for.
         self._own_agent_id = own_agent_id
+        self._owner_builder = owner_builder
+        self._owner_fold: SubagentFold | None = None
+        self._descendant_builders = (
+            descendant_builders if descendant_builders is not None else {})
+        self._retired_descendant_builders = (
+            retired_descendant_builders if retired_descendant_builders is not None else {})
+        self._salvage_result_owners = (
+            salvage_result_owners if salvage_result_owners is not None else {})
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -511,7 +527,6 @@ class NarrativeBuilder:
         # within-stretch prose/thinking/tool bursts. Distinct from _span_start_ts (resets on prose).
         self._stretch_start_ts: str | None = None
         self._stretch_backoff_base: float = 0.0
-        # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
         # Two-dict open-fold registry. By block id (NON-EMPTY block ids only) and by
         # tool_call event id (always present, unique per mint). Every writer stamps
@@ -519,14 +534,6 @@ class NarrativeBuilder:
         # probe that closes a legacy unstamped log.
         self._open_sub_by_block: dict[str, SubagentFold] = {}
         self._open_sub_by_event: dict[str, SubagentFold] = {}
-        # Folds closed PROVISIONALLY by a salvage path (resume-close fallback or
-        # pause/resume finalize) before their canonical task tool_result arrived.
-        # Keyed by block id like the open registry so a late stamped result can
-        # recognise its already-closed fold (benign race) instead of warning
-        # "matched no open fold". The late result is then the AUTHORITATIVE close:
-        # it upgrades the outcome-free salvage close. Only salvage paths populate
-        # this — a normal close never does, so a true duplicate canonical result
-        # (which the providers suppress) still surfaces as a malformed-log warning.
         self._closed_sub_by_block: dict[str, SubagentFold] = {}
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
@@ -791,47 +798,67 @@ class NarrativeBuilder:
         """Append a committed interactive reply without arming _pending_reply_node."""
         self._append(UserMessageNode(text=text, interactive=True))
 
-    def _resume_close_folds(self, agent_id: str, event: Any) -> None:
-        """Close every still-open fold opened by `agent_id` (the resuming parent).
-        Outcome-free close — there is no task tool_result to read — so the fold
-        renders as `running=False` with no glyph. Matches opener_agent_id EXACTLY;
-        skips folds opened by a different parent (single-level routing means there
-        is at most one today, but the loop is robust to future nesting).
+    def _outermost_builder(self) -> NarrativeBuilder:
+        builder = self
+        while builder._owner_builder is not None:
+            builder = builder._owner_builder
+        return builder
 
-        SKIPS block-tracked folds (awaits_result): their authoritative id_ns="block"
-        tool_result WILL close them, so a non-blocking dispatch's opener can keep
-        emitting its own events while the subagent runs without freezing the fold's
-        row at a near-instant end_ts. A genuine resume still finalizes them as
-        interrupted via _h_workflow_resumed's own loop, not this fallback."""
+    def _resume_close_folds(self, agent_id: str, event: Any) -> None:
         ts = event.get("timestamp") if isinstance(event, dict) else None
-        to_close = [
-            fold for fold in self._open_sub_by_event.values()
-            if fold.running and fold.opener_agent_id == agent_id
-            and not fold.awaits_result
-        ]
-        for fold in to_close:
-            self._open_sub_by_block.pop(fold.block_id, None)
-            self._open_sub_by_event.pop(fold.event_id, None)
-            self._remember_salvage_closed(fold)
-            _close_subagent_fold(fold, {}, ts)
+        for fold in list(self._sub_by_agent_id.values()):
+            if fold.opener_agent_id == agent_id and not fold.awaits_result:
+                self._provisionally_close_subtree(fold, ts)
 
     def _remember_salvage_closed(self, fold: SubagentFold) -> None:
-        """Record a provisionally-closed fold so its late canonical tool_result is
-        recognised (benign race) rather than warned on. Mirrors the open registry's
-        keying: block id only, and only when non-empty."""
         if fold.block_id:
             self._closed_sub_by_block[fold.block_id] = fold
+            self._salvage_result_owners[(fold.opener_agent_id, fold.block_id)] = self
 
-    def _close_open_folds_at_step_end(self, ts: str | None) -> None:
-        for fold in list(self._open_sub_by_event.values()):
-            if not fold.running:
-                continue
-            self._open_sub_by_block.pop(fold.block_id, None)
-            self._open_sub_by_event.pop(fold.event_id, None)
-            self._remember_salvage_closed(fold)
-            _close_subagent_fold(fold, {}, ts)
+    def _mark_descendant_subtree_interrupted(self, fold: SubagentFold) -> None:
+        for child in list(fold.nested._sub_by_agent_id.values()):
+            fold.nested._mark_descendant_subtree_interrupted(child)
+        fold.running = False
+        fold.terminal_state = "interrupted"
 
-    def add(self, event: Any) -> None:
+    def _mark_direct_descendant_subtrees_interrupted(self) -> None:
+        for fold in list(self._sub_by_agent_id.values()):
+            self._mark_descendant_subtree_interrupted(fold)
+
+    def _retire_descendant_subtree(self, fold: SubagentFold) -> None:
+        child_agent_id = f"sub:{fold.event_id}"
+        for child in list(fold.nested._sub_by_agent_id.values()):
+            fold.nested._retire_descendant_subtree(child)
+        self._sub_by_agent_id.pop(child_agent_id, None)
+        self._descendant_builders.pop(child_agent_id, None)
+        self._retired_descendant_builders[child_agent_id] = fold.nested
+
+    def _provisionally_close_subtree(
+        self,
+        fold: SubagentFold,
+        ts: str | None,
+        terminal_state: str | None = None,
+    ) -> None:
+        fold.nested._finalize_direct_descendant_subtrees(ts, terminal_state)
+        fold.nested._release_pending_error_prose()
+        self._open_sub_by_block.pop(fold.block_id, None)
+        self._open_sub_by_event.pop(fold.event_id, None)
+        fold.running = False
+        fold.end_ts = ts
+        if terminal_state is not None:
+            fold.terminal_state = terminal_state
+        self._remember_salvage_closed(fold)
+        self._retire_descendant_subtree(fold)
+
+    def _finalize_direct_descendant_subtrees(
+        self,
+        ts: str | None,
+        terminal_state: str | None = None,
+    ) -> None:
+        for fold in list(self._sub_by_agent_id.values()):
+            self._provisionally_close_subtree(fold, ts, terminal_state)
+
+    def add(self, event: Any, *, _routed_salvage: bool = False) -> None:
         if not isinstance(event, dict) or "type" not in event:
             self._append(ErrorNode(message=_malformed_text(event), is_warning=False))
             return
@@ -843,17 +870,6 @@ class NarrativeBuilder:
 
         etype = event["type"]
         agent_id = event.get("agent_id")
-        had_running = bool(self.running_subagents())
-
-        if etype in _RESUMES_WAIT:
-            if self._backoff_wait_start is not None:
-                span = elapsed_seconds(self._backoff_wait_start, event.get("timestamp")) or 0.0
-                self._backoff_wait_accum += span
-                if self._step_stack:
-                    self._step_stack[-1].backoff_wait_s += span
-                self._backoff_wait_start = None
-            self._reset_wait = None
-            self._dep_wait = None
 
         # 0. context-bar update: latest_prompt_tokens tracks THIS builder's own agent.
         #    Token and cost totals are the accounting path's job (imp.cli.accounting).
@@ -905,25 +921,74 @@ class NarrativeBuilder:
             from imp.providers.quota import QuotaReading
             self._quota_by_provider[str(payload["provider"])] = (
                 QuotaReading.from_payload(payload))
-        # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
-        #    a nested builder's own events carry a sub: id that is NOT one of
-        #    its registered children; only delegate ids we actually registered).
-        if isinstance(agent_id, str) and agent_id in self._sub_by_agent_id:
-            fold = self._sub_by_agent_id[agent_id]
-            fold.nested.add(event)
-            fold.event_count += 1
-            if etype == "agent_retry":
-                # the lean render hides fold contents, so mirror a long wait onto the parent
-                cat = payload.get("category", "?")
-                secs = payload.get("backoff_seconds", "?")
-                hinted = bool(payload.get("hinted")) or (
-                    isinstance(secs, (int, float)) and secs >= 120)
-                if hinted and isinstance(secs, (int, float)):
-                    self._append(ErrorNode(
-                        message=(f"[{cat}] {fold.subagent_name} waiting for limit reset"
-                                 f" — retry {payload.get('attempt', '?')} in {_fmt_hm(secs)}"),
-                        category=cat, is_warning=True))
+        if (not _routed_salvage and etype == "tool_result"
+                and payload.get("id_ns") == "block"):
+            salvage_owner = self._salvage_result_owners.pop(
+                (agent_id if isinstance(agent_id, str) else None,
+                 str(payload.get("id", ""))), None)
+            if salvage_owner is not None:
+                salvage_owner.add(event, _routed_salvage=True)
+                return
+
+        if (not _routed_salvage and isinstance(agent_id, str)
+                and agent_id in self._retired_descendant_builders):
+            retired = self._retired_descendant_builders[agent_id]
+            fold = retired._owner_fold
+            root = self._outermost_builder()
+            prefix = (
+                f"{fold.subagent_name} [{agent_id}]: "
+                if fold is not None else f"[{agent_id}]: ")
+            if etype in ("runner_warning", "warning"):
+                warned = dict(payload)
+                warned["message"] = prefix + str(payload.get("message", "?"))
+                root._HANDLERS[etype](root, event, warned)
+            elif etype == "sandbox_overlay_unavailable":
+                warned = dict(payload)
+                warned["reason"] = prefix + str(payload.get("reason", "?"))
+                root._HANDLERS[etype](root, event, warned)
+            elif etype == "error":
+                node = _error_node(payload, prefix=prefix)
+                if node is not None:
+                    root._append(node)
+            elif etype == "tool_result" and payload.get("id_ns") is not None:
+                rid = str(payload.get("id", ""))
+                root._append(ErrorNode(
+                    message=(prefix + f"task result {rid!r} "
+                             f"(id_ns={payload.get('id_ns')!r}) matched no open fold"),
+                    is_warning=True))
             return
+
+        if (not _routed_salvage and isinstance(agent_id, str)
+                and agent_id != self._own_agent_id
+                and agent_id in self._descendant_builders):
+            descendant = self._descendant_builders[agent_id]
+            descendant.add(event)
+            fold = descendant._owner_fold
+            if fold is not None:
+                fold.event_count += 1
+                if etype == "agent_retry":
+                    cat = payload.get("category", "?")
+                    secs = payload.get("backoff_seconds", "?")
+                    hinted = bool(payload.get("hinted")) or (
+                        isinstance(secs, (int, float)) and secs >= 120)
+                    if hinted and isinstance(secs, (int, float)):
+                        self._outermost_builder()._append(ErrorNode(
+                            message=(f"[{cat}] {fold.subagent_name} waiting for limit reset"
+                                     f" — retry {payload.get('attempt', '?')} in {_fmt_hm(secs)}"),
+                            category=cat, is_warning=True))
+            return
+
+        had_running = bool(self.running_subagents())
+
+        if etype in _RESUMES_WAIT:
+            if self._backoff_wait_start is not None:
+                span = elapsed_seconds(self._backoff_wait_start, event.get("timestamp")) or 0.0
+                self._backoff_wait_accum += span
+                if self._step_stack:
+                    self._step_stack[-1].backoff_wait_s += span
+                self._backoff_wait_start = None
+            self._reset_wait = None
+            self._dep_wait = None
 
         # 1b. resume-close fallback. When the PARENT that opened a fold emits its
         #     next event — control has returned from the synchronous
@@ -1019,9 +1084,8 @@ class NarrativeBuilder:
         self._flush_pending_rename()
         # A tag never outlives its stream: still pending at the end means released.
         self._release_pending_error_prose()
-        # One level deep because subagent routing is single-level (no sub-sub-agents).
-        for fold in self._sub_by_agent_id.values():
-            fold.nested._release_pending_error_prose()
+        for descendant in self._descendant_builders.values():
+            descendant._release_pending_error_prose()
         if self._root.status == "paused" and self._pause_outcome_shown:
             self._flush_warnings_summary()
 
@@ -1424,7 +1488,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_pending_rename()
     self._flush_burst()
-    self._close_open_folds_at_step_end(event.get("timestamp"))
+    self._finalize_direct_descendant_subtrees(event.get("timestamp"))
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))
     if node is not None:
@@ -1488,13 +1552,9 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     self._flush_pending_rename()
     self._flush_burst()
     self._root.status = "paused"
+    self._finalize_direct_descendant_subtrees(event.get("timestamp"), "interrupted")
     reason = p.get("interrupt_reason") or p.get("reason")
     if reason:
-        # Unblock the live DFS walk to the nested pause; narrower than the resume
-        # loop (no membership/salvage mutation).
-        for fold in self._open_sub_by_event.values():
-            fold.running = False
-            fold.terminal_state = "interrupted"
         # A genuine your-turn yield is a normal solicit, not an interrupt: the
         # agent's prose and the eventual reply already carry it, so the pause
         # line is redundant. Finalize folds and mark paused above, but append no
@@ -1513,23 +1573,7 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._root.status = "running"
-    # Finalize the prior attempt's dangling folds (the unsettled subset; settled
-    # siblings already closed via their logged tool_results) as interrupted so
-    # they stop accumulating events and stop shadowing current_activity().
-    for fold in self._open_sub_by_event.values():
-        fold.nested._release_pending_error_prose()
-        fold.running = False
-        fold.terminal_state = "interrupted"
-        # Drop the interrupted fold's membership entry too — otherwise a late
-        # `sub:` event for it would still route in (exact-membership above) and
-        # keep accumulating onto an interrupted fold, the very thing this
-        # finalize exists to stop. Settled pre-pause folds keep their entries.
-        self._sub_by_agent_id.pop(f"sub:{fold.event_id}", None)
-        # Remember it: a task whose dispatch outlived the pause may still log its
-        # canonical result after resume; recognise it then instead of warning.
-        self._remember_salvage_closed(fold)
-    self._open_sub_by_block.clear()
-    self._open_sub_by_event.clear()
+    self._finalize_direct_descendant_subtrees(event.get("timestamp"), "interrupted")
     self._resuming = True                # open the re-entry window
     self._warnings_flushed = False       # let the next terminal flush a fresh summary
     self._pause_outcome_shown = False    # a resumed run is no longer a reasoned pause
@@ -1566,17 +1610,7 @@ def _h_awaiting_user_input(
     # boundary, so flush unconditionally. Mirrors the un-hold loop below and the
     # flush in _h_agent_message / _h_user_message.
     self._flush_burst()
-    # Settle any still-open subagent fold the same narrow way _h_workflow_paused
-    # does: a Ctrl-C interrupt of a running subagent solicits here while its fold
-    # is still running=True (no tool_result ever closed it), which keeps
-    # _is_final False and stalls the live _walk ahead of the freshly-seeded reply
-    # node, so the optimistic echo only paints once a later event flips the fold.
-    # Unconditional: a no-op on a normal your-turn yield (no subagent can be open
-    # then). Narrow settle only — no membership/salvage mutation (that is
-    # _h_workflow_resumed's job).
-    for fold in self._open_sub_by_event.values():
-        fold.running = False
-        fold.terminal_state = "interrupted"
+    self._mark_direct_descendant_subtrees_interrupted()
     # Un-hold any held narration in the current container: the prose carried by
     # the agent_message context the human must read to answer, and the agent is now blocked
     # settled, NOT a trailing narration that could still fold into a step
@@ -1980,7 +2014,9 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # an arbitrary fold close; unstamped legacy results take the ordered probe.
     fold, status = _take_subagent_fold(self, rid, p.get("id_ns"))
     if fold is not None:
+        fold.nested._finalize_direct_descendant_subtrees(ts)
         _close_subagent_fold(fold, p, ts)
+        self._retire_descendant_subtree(fold)
         return
     if status == "stamped_miss":
         # Before warning: is this the AUTHORITATIVE result for a fold a salvage
@@ -1991,9 +2027,14 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         if late is not None:
             _close_subagent_fold(late, p, ts)
             return
-        self._append(ErrorNode(
-            message=f"task result {rid!r} (id_ns={p.get('id_ns')!r}) matched no open fold",
-            is_warning=True))
+        message = f"task result {rid!r} (id_ns={p.get('id_ns')!r}) matched no open fold"
+        target = self
+        if self._owner_builder is not None:
+            owner = self._owner_fold
+            assert owner is not None and self._own_agent_id is not None
+            message = f"{owner.subagent_name} [{self._own_agent_id}]: {message}"
+            target = self._outermost_builder()
+        target._append(ErrorNode(message=message, is_warning=True))
         return
 
     # Normal burst result: pair with the matching open call.
@@ -2118,27 +2159,11 @@ def _h_step_label_updated(
 NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
 
 
-def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _error_node(p: dict[str, Any], prefix: str = "") -> ErrorNode | None:
     if p.get("audit"):
-        # Audit-only record: stay fully silent (pre-burst return, no node).
-        return
-    self._flush_burst()
+        return None
     if p.get("category") == "config" and p.get("kind") == "interrupted":
-        if self._step_stack:
-            self._step_stack[-1].interrupted = True
-        return
-    if p.get("category") == "stalled":
-        # Calm stall teardown warning; lazy import keeps narrative.py module-level-import-free.
-        from imp.agents.timeouts import AGENT_INACTIVITY_TIMEOUT_S
-        self._append(ErrorNode(
-            message=(f"no response for {AGENT_INACTIVITY_TIMEOUT_S:.0f}s"
-                     " — resuming; work already saved is preserved"),
-            category="stalled", is_warning=True))
-        return
-    from imp.engine.error_policy import is_retry_with_backoff
-    if is_retry_with_backoff(str(p.get("category") or "")):
-        # Transient backoff retry: the agent_retry breadcrumb is the only surface.
-        return
+        return None
     detail = ""
     d = p.get("detail")
     if isinstance(d, dict):
@@ -2147,16 +2172,34 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
         elif d.get("stderr_tail"):
             tail = str(d["stderr_tail"])
             exit_code = d.get("exit_code")
-            detail = (
-                f"exit code {exit_code}\n{tail}"
-                if isinstance(exit_code, int)
-                else tail
-            )
+            detail = f"exit code {exit_code}\n{tail}" if isinstance(exit_code, int) else tail
         elif d.get("last_agent_text"):
             detail = str(d["last_agent_text"])
-    self._append(ErrorNode(
-        message=str(p.get("message", "?")), category=p.get("category"),
-        is_warning=False, detail=detail))
+    if p.get("category") == "stalled":
+        from imp.agents.timeouts import AGENT_INACTIVITY_TIMEOUT_S
+        return ErrorNode(
+            message=(prefix + f"no response for {AGENT_INACTIVITY_TIMEOUT_S:.0f}s"
+                     " — resuming; work already saved is preserved"),
+            category="stalled", is_warning=True, detail=detail)
+    from imp.engine.error_policy import is_retry_with_backoff
+    if is_retry_with_backoff(str(p.get("category") or "")):
+        return None
+    return ErrorNode(
+        message=prefix + str(p.get("message", "?")), category=p.get("category"),
+        is_warning=False, detail=detail)
+
+
+def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    if p.get("audit"):
+        return
+    self._flush_burst()
+    if p.get("category") == "config" and p.get("kind") == "interrupted":
+        if self._step_stack:
+            self._step_stack[-1].interrupted = True
+        return
+    node = _error_node(p)
+    if node is not None:
+        self._append(node)
 
 
 def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -2164,7 +2207,7 @@ def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     # for a dropped block; flushing would split an otherwise-contiguous run).
     message = str(p.get("message", "?"))
     self._warnings.append(message)
-    self._append(ErrorNode(message=message, is_warning=True,
+    self._append(ErrorNode(message=message, category=p.get("category"), is_warning=True,
                            detail=str(p.get("detail", ""))))
 
 
@@ -2172,7 +2215,8 @@ def _h_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any])
     # Non-terminal: does NOT flush the burst (same invariant as _h_runner_warning).
     message = str(p.get("message", "?"))
     self._warnings.append(message)
-    self._append(ErrorNode(message=message, is_warning=True))
+    self._append(ErrorNode(message=message, category=p.get("category"), is_warning=True,
+                           detail=str(p.get("detail", ""))))
 
 
 def _h_sandbox_overlay_unavailable(
@@ -2181,7 +2225,8 @@ def _h_sandbox_overlay_unavailable(
     # Non-terminal (same invariant as _h_warning): surface + tally, do not flush the burst.
     message = str(p.get("reason", "?"))
     self._warnings.append(message)
-    self._append(ErrorNode(message=message, is_warning=True))
+    self._append(ErrorNode(message=message, category=p.get("category"), is_warning=True,
+                           detail=str(p.get("detail", ""))))
 
 
 def _fmt_hm(seconds: float) -> str:
@@ -2359,35 +2404,33 @@ NarrativeBuilder._HANDLERS["tiers_resolved"] = _h_tiers_resolved
 
 
 def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    """A `task` tool_call opens a SubagentFold (never part of a burst — §5.3
-    rule 2). Routing key is "sub:" + the tool_call EVENT id; the closing
-    `task` tool_result is matched by the tool_use BLOCK id (payload['id']).
-
-    NOTE: routing is SINGLE-LEVEL. A grandchild's `sub:<id2>` events are not
-    delegated into this fold's nested builder (the top builder only knows its
-    own registered child ids). This is currently safe because only `task-lead`
-    declares `task` in its tools; its subagents (coder, reviewers) declare
-    no subagents of their own, so `child_subagent_defs` in `dispatch_task` is
-    empty for them, and the dispatch guard rejects any undeclared name. The
-    depth ceiling (`MAX_SUBAGENT_DEPTH`) provides a hard backstop. If the engine
-    ever enables nesting, routing must become recursive/prefix-aware and a
-    nested-subagent fixture added."""
     self._flush_burst()
     event_id = str(event.get("id", ""))
     block_id = str(p.get("id", ""))
     agent_id = event.get("agent_id")
     inp = p.get("input") or {}
+    child_agent_id = f"sub:{event_id}"
+    nested = NarrativeBuilder(
+        own_agent_id=child_agent_id,
+        descendant_builders=self._descendant_builders,
+        retired_descendant_builders=self._retired_descendant_builders,
+        salvage_result_owners=self._salvage_result_owners,
+        owner_builder=self,
+    )
     fold = SubagentFold(
         subagent_name=str(inp.get("subagent_name", "?")),
         event_id=event_id, block_id=block_id,
-        nested=NarrativeBuilder(own_agent_id=f"sub:{event_id}"),
+        nested=nested,
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
         start_ts=event.get("timestamp"),
         awaits_result=p.get("id_ns") == "block",
         label=p.get("label"),
         task_description=str(inp["task_description"]) if inp.get("task_description") else None)
+    nested._owner_fold = fold
     self._append(fold)
-    self._sub_by_agent_id[f"sub:{event_id}"] = fold
+    self._sub_by_agent_id[child_agent_id] = fold
+    self._descendant_builders[child_agent_id] = nested
+    self._retired_descendant_builders.pop(child_agent_id, None)
     # Register in both dicts: always by event id (unique per mint), by block id
     # only when non-empty (empty block ids would collide on "").
     self._open_sub_by_event[event_id] = fold

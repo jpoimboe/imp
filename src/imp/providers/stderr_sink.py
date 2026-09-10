@@ -26,6 +26,21 @@ _TRUNCATION_MARKER = b"\n[stderr truncated]\n"
 _WARNING_SIGNATURES = ("Warning:", "Error:")
 _SIGNATURE_RE = re.compile(
     "|".join(re.escape(sig) for sig in _WARNING_SIGNATURES), re.IGNORECASE)
+_CODEX_TEMP_HOME_PATH_ALIAS_WARNING_RE = re.compile(
+    r"WARNING: proceeding, even though we could not create PATH aliases: "
+    r'Refusing to create helper binaries under temporary dir "/tmp" '
+    r'\(codex_home: AbsolutePathBuf\("(?P<codex_home>/[^"]+)"\)\)'
+)
+
+
+def _is_codex_temp_home_path_alias_warning(source: str, warning: str) -> bool:
+    if source != "codex":
+        return False
+    match = _CODEX_TEMP_HOME_PATH_ALIAS_WARNING_RE.fullmatch(warning)
+    if match is None:
+        return False
+    home_parts = Path(match.group("codex_home")).parts
+    return len(home_parts) > 2 and home_parts[:2] == ("/", "tmp") and ".." not in home_parts
 
 
 def _extract_warning_spans(text: str) -> list[str]:
@@ -138,6 +153,8 @@ class StderrSink:
         for span in _extract_warning_spans(text):
             normalized = " ".join(span.split())  # collapse whitespace, strip
             if not normalized or normalized in seen:
+                continue
+            if _is_codex_temp_home_path_alias_warning(self._source, normalized):
                 continue
             seen.add(normalized)  # within-step dedup
             label = f"{self._source} stderr: " if self._source else ""

@@ -39,6 +39,68 @@ def _render_body(events, cats: frozenset[str] = frozenset()) -> list[str]:
     return list(render_tree(tree, show=cats, color=False, width=80))
 
 
+def _three_level_stream() -> list[dict]:
+    return [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design"),
+        ev("parent", "tool_call", agent_id="step:design/spec", id="parent-block",
+           id_ns="block", name="sub_agent", input={"subagent_name": "parent"}),
+        ev("grandchild", "tool_call", agent_id="sub:parent", id="grandchild-block",
+           id_ns="block", name="sub_agent", input={"subagent_name": "grandchild"}),
+        ev("deep", "agent_message", agent_id="sub:grandchild", provider="codex", usage={},
+           raw={"content": [{"type": "text", "text": "deep finding"}]}),
+        ev("grandchild-done", "tool_result", agent_id="sub:parent", id="grandchild-block",
+           id_ns="block", content="grandchild done", error=False),
+        ev("parent-done", "tool_result", agent_id="step:design/spec", id="parent-block",
+           id_ns="block", content="parent done", error=False),
+        ev("done", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+
+
+def _walk_semantic_tree(node):
+    yield node
+    for child in getattr(node, "children", ()):
+        yield from _walk_semantic_tree(child)
+    if isinstance(node, nv.SubagentFold):
+        yield from _walk_semantic_tree(node.tree.root)
+
+
+def _assert_three_level_stream_closed(drv: LiveDriver, out: _Pipe) -> None:
+    parent_builder = drv._builder._retired_descendant_builders["sub:parent"]
+    grandchild_builder = (
+        drv._builder._retired_descendant_builders["sub:grandchild"]
+    )
+    parent = parent_builder._owner_fold
+    grandchild = grandchild_builder._owner_fold
+
+    assert parent is not None and grandchild is not None
+    assert any(child is grandchild for child in parent.tree.root.children)
+    assert drv._builder._descendant_builders == {}
+    assert drv._builder._salvage_result_owners == {}
+    for owner in (drv._builder, parent_builder, grandchild_builder):
+        assert owner._open_sub_by_block == {}
+        assert owner._open_sub_by_event == {}
+    assert (parent.running, grandchild.running) == (False, False)
+    assert (parent.outcome, grandchild.outcome) == (
+        "parent done",
+        "grandchild done",
+    )
+    tree_wide_deep = [
+        node
+        for node in _walk_semantic_tree(drv._builder.tree.root)
+        if isinstance(node, nv.AgentTextNode) and node.text == "deep finding"
+    ]
+    grandchild_deep = [
+        node
+        for node in _walk_semantic_tree(grandchild.tree.root)
+        if isinstance(node, nv.AgentTextNode) and node.text == "deep finding"
+    ]
+    assert len(tree_wide_deep) == 1
+    assert tree_wide_deep == grandchild_deep
+    assert "matched no open fold" not in out.getvalue()
+
+
 def _cats_body(events, cats: frozenset[str]) -> list[str]:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
@@ -394,11 +456,98 @@ def test_background_subagent_row_keeps_duration_in_live() -> None:
     assert "10s" in reviewer_row, f"duration dropped from live row: {reviewer_row!r}"
 
 
-# NOTE: there is intentionally NO doubly-nested (sub-subagent) live test. Routing
-# is single-level (narrative.py:763-770) and spawned subagents get
-# `subagent_defs={}`, so a sub-subagent's events misroute and the inner fold stays
-# empty — the scenario is unreachable until the engine enables nesting. See the
-# matching note in tests/test_render_text.py.
+def test_three_level_stream_live_matches_replay() -> None:
+    events = _three_level_stream()
+    drv, out = _driver()
+    for event in events:
+        drv.on_event(event)
+    drv.finish()
+
+    _assert_three_level_stream_closed(drv, out)
+    assert _body(out) == _render_body(events)
+
+
+def test_replayed_three_level_stream_stays_balanced() -> None:
+    events = _three_level_stream()
+    drv, out = _driver()
+    for event in events:
+        drv.on_event({**event, "_replay": True})
+    drv.finish()
+
+    _assert_three_level_stream_closed(drv, out)
+    assert _body(out) == _render_body(events)
+
+
+def test_nested_pause_resume_salvages_late_results_and_suppresses_stale_prose() -> None:
+    events = [*_three_level_stream()[:5],
+        ev("ask", "awaiting_user_input", prompt="continue?"),
+        ev("pause", "workflow_paused", reason="awaiting_user"),
+        ev("stale", "agent_message", agent_id="sub:grandchild", provider="codex", usage={},
+           raw={"content": [{"type": "text", "text": "stale prose"}]}),
+        ev("resume", "workflow_resumed"),
+        ev("grandchild-late", "tool_result", agent_id="sub:parent", id="grandchild-block",
+           id_ns="block", content="grandchild late", error=False),
+        ev("parent-late", "tool_result", agent_id="step:design/spec", id="parent-block",
+           id_ns="block", content="parent late", error=False),
+    ]
+    drv, out = _driver()
+    for event in events:
+        drv.on_event(event)
+    drv.finish()
+    parent = drv._builder._retired_descendant_builders["sub:parent"]._owner_fold
+    grandchild = drv._builder._retired_descendant_builders["sub:grandchild"]._owner_fold
+    assert parent is not None and grandchild is not None
+    assert (parent.outcome, grandchild.outcome) == ("parent late", "grandchild late")
+    assert "stale prose" not in out.getvalue()
+    assert _body(out) == _render_body(events)
+
+
+def test_settled_child_stays_settled_when_live_sibling_is_paused() -> None:
+    events = [*_three_level_stream()[:3],
+        ev("sibling", "tool_call", agent_id="step:design/spec", id="sibling-block",
+           id_ns="block", name="sub_agent", input={"subagent_name": "sibling"}),
+        ev("sibling-done", "tool_result", agent_id="step:design/spec", id="sibling-block",
+           id_ns="block", content="settled", error=False),
+        ev("pause", "workflow_paused", reason="ctrl-c"),
+    ]
+    drv, _ = _driver()
+    for event in events:
+        drv.on_event(event)
+    sibling = drv._builder._retired_descendant_builders["sub:sibling"]._owner_fold
+    parent = drv._builder._retired_descendant_builders["sub:parent"]._owner_fold
+    assert sibling is not None and parent is not None
+    assert (sibling.outcome, sibling.terminal_state) == ("settled", None)
+    assert parent.terminal_state == "interrupted"
+
+
+def test_post_success_descendant_diagnostic_is_root_visible() -> None:
+    events = [*_three_level_stream()[:-1],
+        ev("warning", "runner_warning", agent_id="sub:grandchild",
+           message="late warning", detail="detail"),
+        ev("miss", "tool_result", agent_id="sub:grandchild", id="missing",
+           id_ns="block", content="orphan"),
+    ]
+    drv, out = _driver()
+    for event in events:
+        drv.on_event(event)
+    drv.finish()
+    text = out.getvalue()
+    assert "grandchild [sub:grandchild]: late warning" in text
+    assert ("grandchild [sub:grandchild]: task result 'missing' "
+            "(id_ns='block') matched no open fold") in text
+
+
+def test_nested_retry_breadcrumb_is_root_visible_once() -> None:
+    events = [*_three_level_stream()[:4],
+        ev("retry", "agent_retry", agent_id="sub:grandchild", category="rate_limit",
+           attempt=1, backoff_seconds=1800.0, hinted=True),
+    ]
+    drv, out = _driver()
+    for event in events:
+        drv.on_event(event)
+    drv.finish()
+    assert out.getvalue().count(
+        "[rate_limit] grandchild waiting for limit reset — retry 1 in 30m") == 1
 
 
 def test_nested_subagent_io_never_leaks() -> None:

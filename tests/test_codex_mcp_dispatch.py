@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import types
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 
 from imp.agents.runner import ImagePart, TextPart
@@ -11,8 +13,10 @@ from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.state import InMemoryEventLog
-from imp.providers.codex_mcp import RunState, dispatch_tool
+from imp.providers.codex_mcp import RunState, TaskStartCoordinator, dispatch_tool
+from imp.providers.codex_runner import process_event
 from tests._codex_mcp import call_protocol, call_via_mcp
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -158,86 +162,327 @@ def test_complete_step_preserves_non_none_optional_arg(tmp_path: Path) -> None:
 # ── task tool special-case tests ─────────────────────────────────────────────
 
 
-def test_task_dispatch_returns_output_and_appends_no_tool_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """quest 2: dispatch_tool runs the subagent and returns its output; it does
-    NOT touch the event log for the task tool_call/result pair (process_event owns
-    that now)."""
+@pytest.mark.anyio
+async def test_task_start_before_request_admits_reserved_ticket() -> None:
+    starts = TaskStartCoordinator()
+    starts.task_started()
+
+    ticket = starts.reserve()
+    await starts.wait_for_registration(ticket)
+
+    assert starts.reserved_count == 1
+
+
+_TASK_ARGS = {"subagent_name": "impl", "task_description": "x"}
+
+
+def _task_ctx(tmp_path: Path) -> tuple[ToolContext, InMemoryEventLog]:
+    ctx = _ctx(tmp_path)
     elog = InMemoryEventLog()
-    ctx = _ctx(tmp_path)
-    ctx.event_log = elog  # type: ignore[attr-defined]
-
-    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
-        return '{"status": "Success"}'
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
-    state = RunState(cap=100)
-    out = asyncio.run(dispatch_tool(
-        tool=make_task_tool(),
-        args={"subagent_name": "impl", "task_description": "x"},
-        ctx=ctx, state=state))
-    assert out == '{"status": "Success"}'
-    assert [e for e in elog.read() if e["type"] == "tool_call"] == []
+    ctx.event_log = elog
+    ctx.subagent_defs = {"impl": types.SimpleNamespace(label="implementing")}
+    return ctx, elog
 
 
-def test_task_dispatch_suspension_propagates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _task_sdk_event(kind: str, arguments: dict[str, Any]) -> Any:
+    return types.SimpleNamespace(
+        type=kind,
+        item=types.SimpleNamespace(
+            type="mcp_tool_call", tool="sub_agent", id="sdk-task",
+            arguments=arguments, result="sdk result", error=None,
+            status="completed" if kind == "item.completed" else "in_progress"),
+    )
+
+
+def _process_task_sdk_event(
+    kind: str, *, elog: InMemoryEventLog, state: RunState,
+    proc_state: dict[str, Any], arguments: dict[str, Any] = _TASK_ARGS,
 ) -> None:
-    """A subagent handback propagates out of dispatch_tool so FastMCP wraps it as an
-    isError tool result — dispatch_tool no longer captures it."""
-    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
-        raise RuntimeError("subagent 'impl' was suspended before finishing — "
-                           "its provider or retry budget ran out. [suspended]")
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    state = RunState(cap=100)
-    with pytest.raises(RuntimeError):
-        asyncio.run(dispatch_tool(
-            tool=make_task_tool(),
-            args={"subagent_name": "impl", "task_description": "x"},
-            ctx=ctx, state=state))
+    process_event(
+        _task_sdk_event(kind, arguments), elog=elog, agent_id=state.agent_id,
+        state=proc_state, provider="codex", model="gpt-5.5", run_state=state)
 
 
-def test_task_dispatch_suspension_marks_interrupted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.anyio
+@pytest.mark.parametrize("start_first", [False, True])
+async def test_task_handler_owns_canonical_lifecycle_in_both_arrival_orders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_first: bool,
 ) -> None:
-    """The handback body's [interrupted] marker propagates UNCHANGED so FastMCP
-    surfaces it for renderer classification — the handler no longer adds it."""
-    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
-        raise RuntimeError("subagent 'impl' was interrupted before finishing — "
-                           "the run was paused. [interrupted]")
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=100, agent_id="step:parent")
+    proc_state: dict[str, Any] = {"prose_buffer": ["dispatching now"]}
+    forwarded: list[str] = []
+
+    async def _fake(
+        ctx2: Any, name: str, desc: str, *, tool_call_event_id: str, tier: Any = None,
+    ) -> str:
+        forwarded.append(tool_call_event_id)
+        elog.append(agent_id=f"sub:{tool_call_event_id}", type="child_event", payload={})
+        return '{"status":"Success"}'
 
     monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    state = RunState(cap=100)
-    with pytest.raises(RuntimeError) as ei:
-        asyncio.run(dispatch_tool(
-            tool=make_task_tool(),
-            args={"subagent_name": "impl", "task_description": "x"},
-            ctx=ctx, state=state))
-    assert str(ei.value).count("[interrupted]") == 1
+    with anyio.fail_after(120):
+        if start_first:
+            _process_task_sdk_event(
+                "item.started", elog=elog, state=state, proc_state=proc_state)
+        request = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 1)
+        if not start_first:
+            _process_task_sdk_event(
+                "item.started", elog=elog, state=state, proc_state=proc_state)
+        assert await request == '{"status":"Success"}'
+
+    before_completion = list(elog.read())
+    _process_task_sdk_event(
+        "item.completed", elog=elog, state=state, proc_state=proc_state)
+    records = list(elog.read())
+    lifecycle = [e for e in records if e["type"] in ("tool_call", "tool_result")]
+    assert [e["type"] for e in before_completion] == [
+        "agent_message", "tool_call", "child_event", "tool_result"]
+    assert records == before_completion
+    assert len(lifecycle) == 2
+    assert lifecycle[0]["payload"]["id"] == lifecycle[1]["payload"]["id"]
+    assert lifecycle[0]["payload"]["id_ns"] == "block"
+    assert lifecycle[1]["payload"]["id_ns"] == "block"
+    assert lifecycle[0]["payload"]["label"] == "implementing"
+    assert forwarded == [lifecycle[0]["id"]]
 
 
-def test_task_dispatch_generic_failure_propagates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.anyio
+async def test_invalid_request_releases_ticket_and_consumes_its_late_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A subagent failure propagates out of dispatch_tool (FastMCP → isError)."""
-    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
-        raise RuntimeError("subagent 'impl' failed (api)")
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=100)
+    proc_state: dict[str, Any] = {}
+
+    async def _fake(*args: Any, **kwargs: Any) -> str:
+        return "done"
 
     monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    with anyio.fail_after(120):
+        invalid = await call_protocol(
+            make_task_tool(), ctx=ctx, state=state,
+            arguments={"subagent_name": "impl"})
+        assert invalid.isError is True
+        assert state.task_starts.pending_count == 1
+
+        valid_task = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 2)
+        _process_task_sdk_event(
+            "item.started", elog=elog, state=state, proc_state=proc_state,
+            arguments={"subagent_name": "impl"})
+        assert valid_task.done() is False
+        _process_task_sdk_event(
+            "item.started", elog=elog, state=state, proc_state=proc_state)
+        assert await valid_task == "done"
+
+
+@pytest.mark.anyio
+async def test_over_cap_request_releases_registration_for_later_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=0)
+    proc_state: dict[str, Any] = {}
+
+    async def _fake(*args: Any, **kwargs: Any) -> str:
+        return "done"
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    with anyio.fail_after(120):
+        _process_task_sdk_event(
+            "item.started", elog=elog, state=state, proc_state=proc_state)
+        rejected = await call_protocol(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS)
+        assert "tool_call_ceiling_exceeded" in rejected.content[0].text
+        state.cap = 10
+        later = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 2)
+        _process_task_sdk_event(
+            "item.started", elog=elog, state=state, proc_state=proc_state)
+        assert await later == "done"
+
+
+@pytest.mark.anyio
+async def test_task_cancellation_before_start_releases_ticket(tmp_path: Path) -> None:
+    ctx, _ = _task_ctx(tmp_path)
     state = RunState(cap=100)
-    with pytest.raises(RuntimeError):
-        asyncio.run(dispatch_tool(
-            tool=make_task_tool(),
-            args={"subagent_name": "impl", "task_description": "x"},
-            ctx=ctx, state=state))
+    with anyio.fail_after(120):
+        request = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 1)
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        assert state.task_starts.pending_count == 1
+        state.task_starts.task_started()
+        assert state.task_starts.pending_count == 0
+
+
+@pytest.mark.anyio
+async def test_task_cancellation_while_waiting_for_registration_releases_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx, _ = _task_ctx(tmp_path)
+    state = RunState(cap=100)
+    first_can_register = asyncio.Event()
+    second_is_waiting = asyncio.Event()
+    original_wait = state.task_starts.wait_for_registration
+
+    async def _controlled_wait(ticket: Any) -> None:
+        await ticket.started.wait()
+        if ticket.sequence == 0:
+            await first_can_register.wait()
+        else:
+            second_is_waiting.set()
+        await ticket.registration_turn.wait()
+
+    state.task_starts.wait_for_registration = _controlled_wait  # type: ignore[method-assign]
+
+    async def _fake(*args: Any, **kwargs: Any) -> str:
+        return "done"
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    with anyio.fail_after(120):
+        first = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        second = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 2)
+        state.task_starts.task_started()
+        state.task_starts.task_started()
+        await second_is_waiting.wait()
+        second.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second
+        first_can_register.set()
+        assert await first == "done"
+    state.task_starts.wait_for_registration = original_wait  # type: ignore[method-assign]
+
+
+@pytest.mark.anyio
+async def test_committed_cancellation_closes_only_cancelled_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=100)
+    gates = [asyncio.Event(), asyncio.Event()]
+    entered: list[str] = []
+
+    async def _fake(
+        ctx2: Any, name: str, desc: str, *, tool_call_event_id: str, tier: Any = None,
+    ) -> str:
+        index = len(entered)
+        entered.append(tool_call_event_id)
+        await gates[index].wait()
+        return f"done-{index}"
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    with anyio.fail_after(120):
+        requests = [asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+            for _ in range(2)]
+        await wait_until(lambda: state.task_starts.reserved_count == 2)
+        state.task_starts.task_started()
+        state.task_starts.task_started()
+        await wait_until(lambda: len(entered) == 2)
+        requests[0].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await requests[0]
+        gates[1].set()
+        assert await requests[1] == "done-1"
+
+    results = [e["payload"] for e in elog.read() if e["type"] == "tool_result"]
+    assert sorted((r["error"], r.get("kind")) for r in results) == [
+        (False, None), (True, "interrupted")]
+
+
+@pytest.mark.anyio
+async def test_same_argument_requests_register_in_order_and_execute_concurrently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=100)
+    finish = [asyncio.Event(), asyncio.Event()]
+    entered: list[str] = []
+
+    async def _fake(
+        ctx2: Any, name: str, desc: str, *, tool_call_event_id: str, tier: Any = None,
+    ) -> str:
+        index = len(entered)
+        entered.append(tool_call_event_id)
+        await finish[index].wait()
+        return f"done-{index}"
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    with anyio.fail_after(120):
+        first = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 1)
+        second = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 2)
+        state.task_starts.task_started()
+        state.task_starts.task_started()
+        await wait_until(lambda: len(entered) == 2)
+        calls = [e for e in elog.read() if e["type"] == "tool_call"]
+        assert entered == [e["id"] for e in calls]
+        assert calls[0]["payload"]["id"] != calls[1]["payload"]["id"]
+        finish[1].set()
+        assert await second == "done-1"
+        finish[0].set()
+        assert await first == "done-0"
+        results = [
+            event for event in elog.read()
+            if event["type"] == "tool_result"
+        ]
+        assert sorted(
+            (result["payload"]["id"], result["payload"]["content"])
+            for result in results
+        ) == sorted(
+            (calls[index]["payload"]["id"], f"done-{index}")
+            for index in range(2)
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exc", [
+    RuntimeError("subagent suspended [suspended]"),
+    RuntimeError("subagent interrupted [interrupted]"),
+    ValueError("subagent failed"),
+])
+async def test_task_failure_returns_protocol_error_and_journals_canonical_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc: Exception,
+) -> None:
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=100)
+    forwarded: list[str] = []
+
+    async def _fake(
+        ctx2: Any, name: str, desc: str, *, tool_call_event_id: str, tier: Any = None,
+    ) -> str:
+        forwarded.append(tool_call_event_id)
+        raise exc
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    state.task_starts.task_started()
+    with anyio.fail_after(120):
+        response = await call_protocol(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS)
+
+    call = next(e for e in elog.read() if e["type"] == "tool_call")
+    result = next(e for e in elog.read() if e["type"] == "tool_result")
+    expected = f"{type(exc).__name__}: {exc}"
+    assert response.isError is True
+    assert response.content[0].text == f"Error executing tool sub_agent: {exc}"
+    assert result["payload"]["content"] == expected
+    assert result["payload"]["error"] is True
+    assert "kind" not in result["payload"]
+    assert forwarded == [call["id"]]
 
 
 def test_fatal_tool_error_captured_on_state(tmp_path: Path) -> None:
