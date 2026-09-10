@@ -1385,6 +1385,7 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
       - OAuth refresh-token reuse ("already used" / "log out and sign in") → ``AuthError``
       - HTTP 400 "model … not supported … ChatGPT account" → ``ConfigError``
       - model context overflow → ``ContextWindowError`` (Tier B reincarnation)
+      - selected model capacity exhaustion → ``NetworkError``
       - subprocess network/timeout → ``NetworkError``
       - any other → ``ApiError`` (terminal; maps to Pause).
 
@@ -1408,6 +1409,8 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
             "context_length_exceeded", "maximum context length",
             "context window", "too many tokens")):
         return perr.ContextWindowError(f"codex: {message[:200]}")
+    if "selected model is at capacity. please try a different model." in message.lower():
+        return perr.NetworkError(f"codex: {message[:200]}")
     if kind == "network" or "timeout" in message.lower() or "network" in message.lower():
         return perr.NetworkError(f"codex: {message[:200]}")
     return perr.ApiError(f"codex: {message[:200]}")

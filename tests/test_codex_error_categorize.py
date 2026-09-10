@@ -26,6 +26,32 @@ def test_subprocess_network_timeout_maps_to_network() -> None:
     assert isinstance(err, perr.NetworkError)
 
 
+CAPACITY_MESSAGE = "Selected model is at capacity. Please try a different model."
+
+
+@pytest.mark.parametrize("message", [
+    CAPACITY_MESSAGE,
+    "Request failed: SELECTED MODEL IS AT CAPACITY. PLEASE TRY A DIFFERENT MODEL. Retry later.",
+])
+def test_model_capacity_maps_to_network(message: str) -> None:
+    err = categorize_turn_failed({"message": message})
+    assert isinstance(err, perr.NetworkError)
+    assert err.category == "network"
+    assert str(err) == f"codex: {message}"
+
+
+@pytest.mark.parametrize(("error", "category"), [
+    ({"status": 401, "message": f"Unauthorized: {CAPACITY_MESSAGE}"}, "auth"),
+    ({"status": 400, "message": "unsupported ChatGPT account/model config; "
+                                f"{CAPACITY_MESSAGE}"}, "config"),
+    ({"message": f"context window exceeded; {CAPACITY_MESSAGE}"}, "context_window"),
+])
+def test_model_capacity_does_not_override_earlier_categories(
+    error: dict[str, object], category: str,
+) -> None:
+    assert categorize_turn_failed(error).category == category
+
+
 def test_unknown_error_falls_back_to_api() -> None:
     err = categorize_turn_failed({"status": 418, "message": "I'm a teapot"})
     assert isinstance(err, perr.ApiError)
