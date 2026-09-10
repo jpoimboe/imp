@@ -436,6 +436,17 @@ async def test_same_argument_requests_register_in_order_and_execute_concurrently
         assert await second == "done-1"
         finish[0].set()
         assert await first == "done-0"
+        results = [
+            event for event in elog.read()
+            if event["type"] == "tool_result"
+        ]
+        assert sorted(
+            (result["payload"]["id"], result["payload"]["content"])
+            for result in results
+        ) == sorted(
+            (calls[index]["payload"]["id"], f"done-{index}")
+            for index in range(2)
+        )
 
 
 @pytest.mark.anyio
