@@ -1,13 +1,20 @@
-"""Unit tests for codex rollout persist/restore (Fix 1 core mechanics)."""
+"""Unit tests for codex rollout persistence, restore, and live readings."""
 from __future__ import annotations
 
 import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from imp.engine.resume_state import (
+    InvalidResumeState,
+    NativeResumeState,
+    read_native_resume_state,
+)
+from imp.providers import codex_rollout
 from imp.providers.codex_rollout import (
     CorrelatedReadings,
     RolloutCursor,
@@ -19,6 +26,14 @@ from imp.providers.codex_rollout import (
     restore_rollout,
 )
 
+_THREAD_ID = "01991f4d-3dc2-7c90-a41f-3cbbd120a941"
+_RESTORE_PATH = (
+    "sessions/2026/09/10/rollout-2026-09-10T00-00-00-"
+    f"{_THREAD_ID}.jsonl"
+)
+_SLOT_A = "codex-rollout-a.jsonl"
+_SLOT_B = "codex-rollout-b.jsonl"
+
 
 def _plant_rollout(codex_home: Path, thread_id: str,
                    body: str = '{"codeword": "MANGO-5512"}\n') -> Path:
@@ -29,75 +44,371 @@ def _plant_rollout(codex_home: Path, thread_id: str,
     return dest
 
 
-def test_persist_copies_rollout_and_writes_thread_json(tmp_path: Path) -> None:
+def _resume_state(
+    *,
+    provider: object = "codex",
+    state: dict[str, object] | None = None,
+) -> NativeResumeState:
+    return NativeResumeState(
+        provider=provider,  # type: ignore[arg-type]
+        state=state or {
+            "thread_id": _THREAD_ID,
+            "restore_path": _RESTORE_PATH,
+            "rollout_slot": _SLOT_A,
+        },
+    )
+
+
+def _seed_slot(
+    transcript_dir: Path,
+    *,
+    slot: str = _SLOT_A,
+    body: bytes = b'{"id":"old"}\n',
+) -> NativeResumeState:
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    state = _resume_state(state={
+        "thread_id": _THREAD_ID,
+        "restore_path": _RESTORE_PATH,
+        "rollout_slot": slot,
+    })
+    (transcript_dir / slot).write_bytes(body)
+    return state
+
+
+def _published_state(transcript_dir: Path) -> NativeResumeState:
+    state = read_native_resume_state(transcript_dir)
+    assert state is not None
+    return state
+
+
+def test_persist_publishes_exact_manifest_and_first_slot(tmp_path: Path) -> None:
     home = tmp_path / "codex_home"
-    home.mkdir()
-    _plant_rollout(home, "thr-1")
+    rollout = _plant_rollout(home, _THREAD_ID)
     tx = tmp_path / "tx"
-    tx.mkdir()
 
-    ok = persist_rollout(codex_home=home, thread_id="thr-1", transcript_dir=tx)
+    assert persist_rollout(
+        codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx) is True
 
-    assert ok is True
-    meta = json.loads((tx / "codex_thread.json").read_text())
-    assert meta["thread_id"] == "thr-1"
-    saved = tx / "codex_rollout" / meta["rollout_relpath"]
-    assert saved.exists()
-    assert "MANGO-5512" in saved.read_text()
-
-
-def test_persist_returns_false_when_no_rollout(tmp_path: Path) -> None:
-    home = tmp_path / "codex_home"
-    (home / "sessions").mkdir(parents=True)  # exists but empty
-    tx = tmp_path / "tx"
-    tx.mkdir()
-    assert persist_rollout(codex_home=home, thread_id="thr-1", transcript_dir=tx) is False
+    assert _published_state(tx) == NativeResumeState(provider="codex", state={
+        "thread_id": _THREAD_ID,
+        "restore_path": rollout.relative_to(home).as_posix(),
+        "rollout_slot": _SLOT_A,
+    })
+    assert (tx / _SLOT_A).read_bytes() == rollout.read_bytes()
+    assert not (tx / "codex_rollout").exists()
     assert not (tx / "codex_thread.json").exists()
 
 
-def test_restore_round_trips_into_fresh_home_and_returns_thread_id(tmp_path: Path) -> None:
-    # Simulate: persist out of home_a, tear it down, restore into fresh home_b.
-    home_a = tmp_path / "home_a"
-    home_a.mkdir()
-    rollout = _plant_rollout(home_a, "thr-1")
-    rel = rollout.relative_to(home_a)
+def test_persist_ignores_sole_rollout_for_another_thread(tmp_path: Path) -> None:
+    home = tmp_path / "codex_home"
+    _plant_rollout(home, "another-thread")
     tx = tmp_path / "tx"
     tx.mkdir()
-    persist_rollout(codex_home=home_a, thread_id="thr-1", transcript_dir=tx)
 
-    home_b = tmp_path / "home_b"
-    home_b.mkdir()
+    assert persist_rollout(
+        codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx) is False
+    assert list(tx.iterdir()) == []
+
+
+def test_republish_alternates_slots_and_bounds_storage(tmp_path: Path) -> None:
+    home = tmp_path / "codex_home"
+    rollout = _plant_rollout(home, _THREAD_ID, "OLD")
+    tx = tmp_path / "tx"
+
+    assert persist_rollout(
+        codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx) is True
+    rollout.write_text("NEW")
+    assert persist_rollout(
+        codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx) is True
+
+    assert (tx / _SLOT_A).read_bytes() == b"OLD"
+    assert (tx / _SLOT_B).read_bytes() == b"NEW"
+    assert _published_state(tx).state["rollout_slot"] == _SLOT_B
+    assert {path.name for path in tx.iterdir()} == {
+        _SLOT_A, _SLOT_B, "resume-state.json"}
+
+
+def test_restore_copies_selected_bytes_to_exact_path(tmp_path: Path) -> None:
+    tx = tmp_path / "tx"
+    state = _seed_slot(tx, slot=_SLOT_B, body=b'{"selected":true}\n')
+    home = tmp_path / "codex_home"
+
     thread_id = restore_rollout(
-        codex_home=home_b, transcript_dir=tx)
+        codex_home=home, transcript_dir=tx, resume_state=state)
 
-    assert thread_id == "thr-1"
-    restored = home_b / rel
-    assert restored.exists()
-    assert "MANGO-5512" in restored.read_text()
+    assert thread_id == _THREAD_ID
+    assert (home / _RESTORE_PATH).read_bytes() == b'{"selected":true}\n'
 
 
-def test_restore_fails_loudly_when_thread_json_missing(tmp_path: Path) -> None:
-    home = tmp_path / "home"
+def test_restore_rejects_destination_resolving_outside_home(
+    tmp_path: Path,
+) -> None:
+    tx = tmp_path / "tx"
+    state = _seed_slot(tx)
+    home = tmp_path / "codex_home"
+    outside = tmp_path / "outside"
     home.mkdir()
+    outside.mkdir()
+    (home / "sessions").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(InvalidResumeState):
+        restore_rollout(codex_home=home, transcript_dir=tx, resume_state=state)
+
+    assert list(outside.iterdir()) == []
+
+
+_INVALID_STATES: list[tuple[str, NativeResumeState]] = [
+    ("missing key", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": _RESTORE_PATH})),
+    ("extra key", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": _RESTORE_PATH,
+        "rollout_slot": _SLOT_A, "extra": True})),
+    ("empty thread", _resume_state(state={
+        "thread_id": "", "restore_path": _RESTORE_PATH, "rollout_slot": _SLOT_A})),
+    ("non-string thread", _resume_state(state={
+        "thread_id": 1, "restore_path": _RESTORE_PATH, "rollout_slot": _SLOT_A})),
+    ("empty path", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "", "rollout_slot": _SLOT_A})),
+    ("non-string path", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": 1, "rollout_slot": _SLOT_A})),
+    ("absolute path", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "/sessions/x.jsonl",
+        "rollout_slot": _SLOT_A})),
+    ("double slash", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "sessions//x.jsonl",
+        "rollout_slot": _SLOT_A})),
+    ("dot component", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "sessions/./x.jsonl",
+        "rollout_slot": _SLOT_A})),
+    ("dotdot component", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "sessions/../x.jsonl",
+        "rollout_slot": _SLOT_A})),
+    ("backslash", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "sessions\\x.jsonl",
+        "rollout_slot": _SLOT_A})),
+    ("nul", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "sessions/x\0.jsonl",
+        "rollout_slot": _SLOT_A})),
+    ("wrong root", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "other/x.jsonl",
+        "rollout_slot": _SLOT_A})),
+    ("wrong suffix", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": "sessions/x.json",
+        "rollout_slot": _SLOT_A})),
+    ("invalid slot", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": _RESTORE_PATH,
+        "rollout_slot": "rollout.jsonl"})),
+    ("non-string slot", _resume_state(state={
+        "thread_id": _THREAD_ID, "restore_path": _RESTORE_PATH, "rollout_slot": 1})),
+    ("wrong provider", _resume_state(provider="claude_code")),
+]
+
+
+@pytest.mark.parametrize(("case", "state"), _INVALID_STATES, ids=lambda value: str(value))
+def test_restore_rejects_invalid_state_before_home_mutation(
+    tmp_path: Path,
+    case: str,
+    state: NativeResumeState,
+) -> None:
+    tx = tmp_path / "tx"
+    _seed_slot(tx)
+    home = tmp_path / "codex_home"
+
+    with pytest.raises(InvalidResumeState):
+        restore_rollout(codex_home=home, transcript_dir=tx, resume_state=state)
+
+    assert not home.exists(), case
+
+
+@pytest.mark.parametrize(
+    ("selected_kind", "error"),
+    [("missing", FileNotFoundError), ("directory", InvalidResumeState),
+     ("symlink", InvalidResumeState)],
+)
+def test_restore_rejects_non_regular_selected_slot_before_home_mutation(
+    tmp_path: Path,
+    selected_kind: str,
+    error: type[Exception],
+) -> None:
     tx = tmp_path / "tx"
     tx.mkdir()
-    with pytest.raises(FileNotFoundError):
+    selected = tx / _SLOT_A
+    if selected_kind == "directory":
+        selected.mkdir()
+    elif selected_kind == "symlink":
+        target = tx / "target.jsonl"
+        target.write_bytes(b"target")
+        selected.symlink_to(target)
+    home = tmp_path / "codex_home"
+
+    with pytest.raises(error):
         restore_rollout(
-            codex_home=home, transcript_dir=tx)
+            codex_home=home, transcript_dir=tx, resume_state=_resume_state())
+
+    assert not home.exists()
 
 
-def test_restore_fails_loudly_when_rollout_bytes_missing(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
+@pytest.mark.parametrize(
+    "failure_point",
+    ["slot_replace", "slot_dir_fsync", "manifest_file_fsync", "manifest_replace"],
+)
+def test_republish_failure_preserves_published_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    home = tmp_path / "codex_home"
+    rollout = _plant_rollout(home, _THREAD_ID, "OLD")
     tx = tmp_path / "tx"
-    tx.mkdir()
-    # thread.json present but the rollout file was never copied.
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-1",
-                    "rollout_relpath": "sessions/x/rollout-thr-1.jsonl"}))
-    with pytest.raises(FileNotFoundError):
-        restore_rollout(
-            codex_home=home, transcript_dir=tx)
+    persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
+    old_manifest = (tx / "resume-state.json").read_bytes()
+    rollout.write_text("NEW")
+
+    real_fsync_file = codex_rollout._fsync_file
+    real_fsync_directory = codex_rollout._fsync_directory
+    real_replace = os.replace
+    file_fsync_count = 0
+    directory_fsync_count = 0
+
+    def fail_file_fsync(stream: Any, path: Path) -> None:
+        nonlocal file_fsync_count
+        file_fsync_count += 1
+        if failure_point == "manifest_file_fsync" and file_fsync_count == 2:
+            raise OSError("injected")
+        real_fsync_file(stream, path)
+
+    def fail_directory_fsync(path: Path) -> None:
+        nonlocal directory_fsync_count
+        directory_fsync_count += 1
+        if failure_point == "slot_dir_fsync" and directory_fsync_count == 1:
+            raise OSError("injected")
+        real_fsync_directory(path)
+
+    def fail_replace(src: Path, dest: Path) -> None:
+        if failure_point == "slot_replace" and Path(dest).name == _SLOT_B:
+            raise OSError("injected")
+        if failure_point == "manifest_replace" and Path(dest).name == "resume-state.json":
+            raise OSError("injected")
+        real_replace(src, dest)
+
+    monkeypatch.setattr(codex_rollout, "_fsync_file", fail_file_fsync)
+    monkeypatch.setattr(codex_rollout, "_fsync_directory", fail_directory_fsync)
+    monkeypatch.setattr(codex_rollout.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="injected"):
+        persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
+
+    assert (tx / "resume-state.json").read_bytes() == old_manifest
+    assert (tx / _SLOT_A).read_bytes() == b"OLD"
+
+
+@pytest.mark.parametrize(
+    "failure_point", ["slot_file_fsync", "slot_replace", "slot_dir_fsync"])
+def test_first_publish_failure_never_publishes_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    home = tmp_path / "codex_home"
+    _plant_rollout(home, _THREAD_ID, "NEW")
+    tx = tmp_path / "tx"
+
+    real_fsync_file = codex_rollout._fsync_file
+    real_fsync_directory = codex_rollout._fsync_directory
+    real_replace = os.replace
+
+    def fail_file_fsync(stream: Any, path: Path) -> None:
+        if failure_point == "slot_file_fsync":
+            raise OSError("injected")
+        real_fsync_file(stream, path)
+
+    def fail_directory_fsync(path: Path) -> None:
+        if failure_point == "slot_dir_fsync":
+            raise OSError("injected")
+        real_fsync_directory(path)
+
+    def fail_replace(src: Path, dest: Path) -> None:
+        if failure_point == "slot_replace":
+            raise OSError("injected")
+        real_replace(src, dest)
+
+    monkeypatch.setattr(codex_rollout, "_fsync_file", fail_file_fsync)
+    monkeypatch.setattr(codex_rollout, "_fsync_directory", fail_directory_fsync)
+    monkeypatch.setattr(codex_rollout.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="injected"):
+        persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
+
+    assert not (tx / "resume-state.json").exists()
+
+
+def test_publish_durability_call_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "codex_home"
+    _plant_rollout(home, _THREAD_ID)
+    tx = tmp_path / "tx"
+    calls: list[str] = []
+    real_fsync_file = codex_rollout._fsync_file
+    real_fsync_directory = codex_rollout._fsync_directory
+    real_replace = os.replace
+
+    def record_file_fsync(stream: Any, path: Path) -> None:
+        calls.append("slot file-fsync" if not calls else "manifest file-fsync")
+        real_fsync_file(stream, path)
+
+    def record_replace(src: Path, dest: Path) -> None:
+        calls.append(
+            "manifest replace" if Path(dest).name == "resume-state.json"
+            else "slot replace")
+        real_replace(src, dest)
+
+    def record_directory_fsync(path: Path) -> None:
+        calls.append("dir-fsync")
+        real_fsync_directory(path)
+
+    monkeypatch.setattr(codex_rollout, "_fsync_file", record_file_fsync)
+    monkeypatch.setattr(codex_rollout.os, "replace", record_replace)
+    monkeypatch.setattr(codex_rollout, "_fsync_directory", record_directory_fsync)
+
+    persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
+
+    assert calls == [
+        "slot file-fsync", "slot replace", "dir-fsync",
+        "manifest file-fsync", "manifest replace", "dir-fsync",
+    ]
+
+
+def test_manifest_directory_fsync_failure_leaves_selected_pair_usable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "codex_home"
+    rollout = _plant_rollout(home, _THREAD_ID, "OLD")
+    tx = tmp_path / "tx"
+    persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
+    rollout.write_text("NEW")
+    real_fsync_directory = codex_rollout._fsync_directory
+    calls = 0
+
+    def fail_second_directory_fsync(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected")
+        real_fsync_directory(path)
+
+    monkeypatch.setattr(
+        codex_rollout, "_fsync_directory", fail_second_directory_fsync)
+
+    with pytest.raises(OSError, match="injected"):
+        persist_rollout(codex_home=home, thread_id=_THREAD_ID, transcript_dir=tx)
+
+    state = _published_state(tx)
+    assert state.state["rollout_slot"] == _SLOT_B
+    assert (tx / _SLOT_A).read_bytes() == b"OLD"
+    assert (tx / _SLOT_B).read_bytes() == b"NEW"
 
 
 _WINDOW = 258400

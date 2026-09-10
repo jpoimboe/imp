@@ -258,16 +258,19 @@ async def test_interrupt_after_sdk_task_start_adds_no_sdk_lifecycle(
 
 @pytest.mark.anyio
 async def test_awaiting_user_resume_injects_reply_not_system_prompt(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path) -> None:
     """A paused codex wait_for_user (journaled awaiting_user_input, no
     complete_step) derives AWAITING_USER; the runner solicits via user_input_fn
     and injects the reply as the FIRST resumed prompt, not the system prompt."""
     import json
     auth = _seed_git_and_auth(tmp_path)
-    # restore_rollout runs unconditionally on balance_on_resume and needs a real
-    # persisted rollout; stub it so the test exercises the prompt-selection branch.
-    monkeypatch.setattr(
-        "imp.providers.codex_rollout.restore_rollout", lambda **k: "thr-1")
+    from tests.codex_fakes import seed_codex_resume_state
+    thread_id = "thr-awaiting-user-1"
+    native_resume_state = seed_codex_resume_state(
+        tmp_path / "tx",
+        thread_id=thread_id,
+        restore_path="sessions/awaiting-user.jsonl",
+    )
     # Pre-seed events.jsonl: a tail agent_message (agent asked a question) plus the
     # awaiting_user_input event the wait_for_user tool journals before pausing.
     (tmp_path / "events.jsonl").write_text(
@@ -300,6 +303,7 @@ async def test_awaiting_user_resume_injects_reply_not_system_prompt(
                       user_input_fn=_solicit)
     # Mark this as a resume.
     object.__setattr__(inv, "balance_on_resume", True)
+    object.__setattr__(inv, "native_resume_state", native_resume_state)
     [ev async for ev in runner.run(inv)]
 
     # The first resumed turn's prompt is the user's reply, not the system prompt.

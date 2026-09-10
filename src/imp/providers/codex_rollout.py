@@ -19,32 +19,35 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from collections.abc import Iterator
+import stat
+import tempfile
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
+from imp.engine.resume_state import (
+    InvalidResumeState,
+    NativeResumeState,
+    encode_native_resume_state,
+    read_native_resume_state,
+)
 from imp.providers.quota import QuotaReading, QuotaWindow
 
-_THREAD_JSON = "codex_thread.json"
-_ROLLOUT_SUBDIR = "codex_rollout"
+_ROLLOUT_SLOTS = ("codex-rollout-a.jsonl", "codex-rollout-b.jsonl")
 
 
 def _newest_matching_rollout(codex_home: Path, thread_id: str) -> Path | None:
-    """The rollout file for `thread_id`. codex names it
-    `rollout-<ts>-<thread_id>.jsonl`; prefer the newest name-match (a chained
-    resume may write a fresh rollout for the same thread), else the sole rollout.
-    """
+    """The newest codex rollout whose filename identifies `thread_id` exactly."""
     sessions = codex_home / "sessions"
     if not sessions.exists():
         return None
-    rollouts = list(sessions.rglob("*.jsonl"))
-    matches = [p for p in rollouts if thread_id in p.name]
-    if matches:
-        return max(matches, key=lambda p: p.stat().st_mtime)
-    if len(rollouts) == 1:
-        return rollouts[0]
-    return None
+    suffix = f"-{thread_id}.jsonl"
+    matches = [
+        path for path in sessions.rglob("rollout-*.jsonl")
+        if path.name.endswith(suffix)
+    ]
+    return max(matches, key=lambda path: path.stat().st_mtime) if matches else None
 
 
 def _window_label(minutes: int) -> str:
@@ -380,48 +383,136 @@ def compaction_seen(codex_home: Path, thread_id: str) -> bool:
     return False
 
 
+@dataclass(frozen=True, slots=True)
+class CodexResumeState:
+    thread_id: str
+    restore_path: str
+    rollout_slot: str
+
+
+def _fsync_file(stream: BinaryIO, path: Path) -> None:
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(path, flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _durable_replace(
+    path: Path,
+    writer: Callable[[BinaryIO], object],
+) -> None:
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            writer(stream)
+            _fsync_file(stream, temp_path)
+        os.replace(temp_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _validate_codex_resume_state(
+    resume_state: NativeResumeState,
+    transcript_dir: Path,
+) -> CodexResumeState:
+    if not isinstance(resume_state, NativeResumeState):
+        raise InvalidResumeState()
+    if resume_state.provider != "codex":
+        raise InvalidResumeState()
+    state = resume_state.state
+    if not isinstance(state, dict) or set(state) != {
+        "thread_id", "restore_path", "rollout_slot"}:
+        raise InvalidResumeState()
+
+    thread_id = state["thread_id"]
+    restore_path = state["restore_path"]
+    rollout_slot = state["rollout_slot"]
+    if not isinstance(thread_id, str) or not thread_id:
+        raise InvalidResumeState()
+    if not isinstance(restore_path, str) or not restore_path:
+        raise InvalidResumeState()
+    if "\0" in restore_path or "\\" in restore_path:
+        raise InvalidResumeState()
+    components = restore_path.split("/")
+    if any(component in {"", ".", ".."} for component in components):
+        raise InvalidResumeState()
+    if components[0] != "sessions" or not components[-1].endswith(".jsonl"):
+        raise InvalidResumeState()
+    if rollout_slot not in _ROLLOUT_SLOTS:
+        raise InvalidResumeState()
+
+    selected = transcript_dir / rollout_slot
+    if not stat.S_ISREG(selected.lstat().st_mode):
+        raise InvalidResumeState()
+    return CodexResumeState(
+        thread_id=thread_id,
+        restore_path=restore_path,
+        rollout_slot=rollout_slot,
+    )
+
+
 def persist_rollout(*, codex_home: Path, thread_id: str, transcript_dir: Path) -> bool:
-    """Copy codex's rollout out of the ephemeral CODEX_HOME into `transcript_dir`
-    and record `thread_id` + the rollout's relative path. Call BEFORE
-    `teardown_codex_home`. Returns True iff a rollout was persisted (False when
-    codex wrote none yet — e.g. a run that failed before its first turn)."""
+    """Durably publish codex's current rollout for a later native resume."""
     rollout = _newest_matching_rollout(codex_home, thread_id)
     if rollout is None:
         return False
-    rel = rollout.relative_to(codex_home)  # sessions/…/rollout-….jsonl
-    dest = transcript_dir / _ROLLOUT_SUBDIR / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(rollout, dest)
-    (transcript_dir / _THREAD_JSON).write_text(
-        json.dumps({"thread_id": thread_id, "rollout_relpath": str(rel)}))
+
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    previous = read_native_resume_state(transcript_dir)
+    if previous is None:
+        rollout_slot = _ROLLOUT_SLOTS[0]
+    else:
+        selected = _validate_codex_resume_state(previous, transcript_dir)
+        rollout_slot = (
+            _ROLLOUT_SLOTS[1]
+            if selected.rollout_slot == _ROLLOUT_SLOTS[0]
+            else _ROLLOUT_SLOTS[0]
+        )
+
+    def write_rollout(stream: BinaryIO) -> None:
+        with rollout.open("rb") as source:
+            shutil.copyfileobj(source, stream)
+
+    _durable_replace(transcript_dir / rollout_slot, write_rollout)
+    resume_state = NativeResumeState(provider="codex", state={
+        "thread_id": thread_id,
+        "restore_path": rollout.relative_to(codex_home).as_posix(),
+        "rollout_slot": rollout_slot,
+    })
+    encoded = encode_native_resume_state(resume_state)
+    _durable_replace(
+        transcript_dir / "resume-state.json",
+        lambda stream: stream.write(encoded),
+    )
     return True
 
 
 def restore_rollout(
-    *, codex_home: Path, transcript_dir: Path,
+    *,
+    codex_home: Path,
+    transcript_dir: Path,
+    resume_state: NativeResumeState,
 ) -> str:
-    """Restore the persisted rollout into the fresh CODEX_HOME and return the
-    saved thread_id. Call AFTER provisioning the fresh CODEX_HOME and BEFORE
-    `Codex.resume_thread`. Fails loudly (`FileNotFoundError`) if the thread
-    metadata or rollout bytes are missing — converting otherwise-silent amnesia
-    (teardown ran too early, ephemeral CI, cross-host) into a real error.
-    """
-    meta_path = transcript_dir / _THREAD_JSON
-    if not meta_path.exists():
-        raise FileNotFoundError(
-            f"codex resume: no {_THREAD_JSON} in {transcript_dir} — "
-            "rollout was not persisted on pause")
-    meta = json.loads(meta_path.read_text())
-    thread_id: str = meta["thread_id"]
-    rel: str = meta["rollout_relpath"]
-    saved = transcript_dir / _ROLLOUT_SUBDIR / rel
-    if not saved.exists():
-        raise FileNotFoundError(
-            f"codex resume: persisted rollout missing at {saved}")
-    dest = codex_home / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(saved, dest)
-    if not dest.exists():  # the spec's explicit "assert it exists" guard
-        raise FileNotFoundError(
-            f"codex resume: rollout restore failed at {dest}")
-    return thread_id
+    """Restore one validated native rollout into a fresh CODEX_HOME."""
+    selected = _validate_codex_resume_state(resume_state, transcript_dir)
+    destination = codex_home.joinpath(*selected.restore_path.split("/"))
+    resolved_home = codex_home.resolve()
+    if not destination.resolve().is_relative_to(resolved_home):
+        raise InvalidResumeState()
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(transcript_dir / selected.rollout_slot, destination)
+    return selected.thread_id

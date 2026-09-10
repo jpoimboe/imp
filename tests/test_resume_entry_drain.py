@@ -506,6 +506,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
         FakeCodex,
         agent_message,
         mcp_call,
+        seed_codex_resume_state,
         thread_started,
         turn_completed,
     )
@@ -516,13 +517,10 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
     tx = tmp_path / "tx"
     tx.mkdir(exist_ok=True)
 
-    # Pre-seed a rollout (so restore_rollout succeeds on the balance_on_resume path).
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-drain-1.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-drain-1", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-drain-1"}\n')
+    thread_id = "thr-drain-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    native_resume_state = seed_codex_resume_state(
+        tx, thread_id=thread_id, restore_path=rel)
 
     # Seed events.jsonl with a complete_step tool_call so derive_codex_resume_state
     # returns SEND_TO_LLM (not AWAITING_USER, not MISSING_COMPLETE_STEP).
@@ -562,7 +560,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
 
     # Scripted: one turn, completes with complete_step.
     scripted = [[
-        thread_started("thr-drain-1"),
+        thread_started(thread_id),
         agent_message("resuming"),
         mcp_call(name="complete_step", args={"answer": "ok"}, result="done", item_id="cs-1"),
         turn_completed(input_tokens=1, output_tokens=1),
@@ -590,6 +588,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
         event_log=log,
         coordinator=coord,
         balance_on_resume=True,
+        native_resume_state=native_resume_state,
     )
 
     events = [e async for e in runner.run(inv)]

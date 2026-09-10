@@ -423,16 +423,15 @@ class CodexSession(ObserveSession):
         proc_state["web_search_enabled"] = web_enabled
         thread_options = runner._build_thread_options(invocation.tier)
         if invocation.balance_on_resume:
-            # Resume edge (Fix 1): restore codex's rollout into the fresh
-            # CODEX_HOME, then resume the native thread by id instead of starting a
-            # new one. restore_rollout fails loudly if the rollout is missing.
+            from imp.engine.resume_state import InvalidResumeState
             from imp.providers.codex_rollout import restore_rollout
+            if invocation.native_resume_state is None:
+                raise InvalidResumeState()
             thread_id = restore_rollout(
                 codex_home=codex_home,
-                transcript_dir=invocation.transcript_dir)
-            # Seed thread_id now so a subsequent pause persists the resumed thread
-            # even if codex does not re-emit thread.started on resume
-            # (process_event overwrites this with the same id if it does).
+                transcript_dir=invocation.transcript_dir,
+                resume_state=invocation.native_resume_state,
+            )
             proc_state["thread_id"] = thread_id
             thread = client.resume_thread(thread_id, thread_options)
         else:

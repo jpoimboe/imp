@@ -197,6 +197,7 @@ class AgentInvocation:
     # is_resume (a `resume:` edge). retry_feedback (above) now means "optional
     # wrapper text appended on that balancing user turn"; None = balance only.
     balance_on_resume: bool = False
+    native_resume_state: Any = None
     # True when a resume/respawn should deliver the continuation nudge (computed
     # by the executor from State.resume_should_continue) rather than solicit
     # an empty reply and park.
