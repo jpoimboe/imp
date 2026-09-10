@@ -160,6 +160,7 @@ class ImptyDriver:
         snapshot_dir: Path | None = None,
     ) -> None:
         self._session: TerminalSession | None = None
+        self._shown: list[str] | None = None
         self._sandbox = sandbox
         self._journal_dir = journal_dir
         self._sessions = 0 if journal_dir is None else _last_session_index(journal_dir)
@@ -183,14 +184,16 @@ class ImptyDriver:
             raise RuntimeError("no session — call start(argv=[...]) first")
         return self._session
 
-    def _render(self, session: TerminalSession, *, full: bool = False) -> str:
-        """A one-line status header plus the screen text. Default body is the
-        CURRENT screen window (lines(limit=rows)) — NOT the whole strip — since
-        these tools are called constantly while driving. full=True returns the
-        whole history+screen strip. The cursor is screen-local and bounded, so a
-        small y near the bottom is the cheap 'parked = waiting for input' tell.
-        Once the child is gone the header carries its exit status in an `exit=`
-        field right after `alive=False`; while it runs there is no such field."""
+    def _frame(
+        self, session: TerminalSession, *, full: bool = False
+    ) -> tuple[str, list[str], str]:
+        """One consistent read: the status header, the CURRENT screen rows
+        (lines(limit=rows)), and the body — that window, or the whole
+        history+screen strip with full=True. The cursor is screen-local and
+        bounded, so a small y near the bottom is the cheap 'parked = waiting for
+        input' tell. Once the child is gone the header carries its exit status in
+        an `exit=` field right after `alive=False`; while it runs there is no
+        such field."""
         with session.paused():
             cx, cy = session.cursor()
             # One poll, two fields: alive= and exit= can never disagree.
@@ -200,8 +203,31 @@ class ImptyDriver:
                 f"[alive={code is None}{exit_field} "
                 f"regime={session.regime().value} cursor=({cx},{cy})]"
             )
-            body = session.lines() if full else session.lines(limit=session.rows)
-        return f"{status}\n" + "\n".join(body)
+            rows = session.lines(limit=session.rows)
+            body = "\n".join(session.lines() if full else rows)
+        return status, rows, body
+
+    def _render(self, session: TerminalSession, *, full: bool = False) -> str:
+        """The complete screen (or the whole strip), and the baseline moves onto
+        it: the agent has now seen these rows."""
+        status, rows, body = self._frame(session, full=full)
+        self._shown = rows
+        return f"{status}\n{body}"
+
+    def _render_diff(self, session: TerminalSession) -> str:
+        """The text change since the last screen the agent was shown.
+        Unchanged text uses its marker; changed rows fall back to a marked full
+        screen when their diff is not shorter."""
+        status, rows, full_body = self._frame(session)
+        if self._shown is None:
+            body = f"{_FULL_SCREEN}\n{full_body}"
+        elif self._shown == rows:
+            body = _NO_TEXT_CHANGE
+        else:
+            diff = _diff_body(self._shown, rows)
+            body = diff if len(diff) < len(full_body) else f"{_FULL_SCREEN}\n{full_body}"
+        self._shown = rows
+        return f"{status}\n{body}"
 
     def start(
         self,
@@ -266,7 +292,9 @@ class ImptyDriver:
             session.close(grace=0.0)
             raise
         self._session = session
-        return self._render(session)
+        # Reused drivers must not diff unrelated sessions.
+        self._shown = None
+        return self._render_diff(session)
 
     def view(self, full: bool = False) -> str:
         """Read the screen without sending anything.
@@ -319,7 +347,7 @@ class ImptyDriver:
         else:
             settle, note = _fixed_settle(wait)
             time.sleep(settle)  # fixed settle; drainer updates pyte
-        return f"{note}{self._render(session)}"
+        return f"{note}{self._render_diff(session)}"
 
     def send_signal(self, sig: int = signal.SIGINT) -> str:
         """Deliver a real signal to the terminal's foreground process group, then
@@ -341,7 +369,7 @@ class ImptyDriver:
         since = time.monotonic()
         session.send_signal(sig)
         session.wait_idle(since=since)  # inherit the library settle policy
-        return self._render(session)
+        return self._render_diff(session)
 
     def resize(self, rows: int, cols: int, wait: bool | float = True) -> str:
         """Resize the live terminal and return the new screen. The child receives
@@ -379,7 +407,7 @@ class ImptyDriver:
         else:
             settle, note = _fixed_settle(wait)
             time.sleep(settle)  # fixed settle; drainer updates pyte
-        return f"{note}{self._render(session)}"
+        return f"{note}{self._render_diff(session)}"
 
     def wait(
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float | None = None,
@@ -427,7 +455,7 @@ class ImptyDriver:
                     " — call wait() again to keep watching]")
             else:
                 header = f"[{kind} after {capped:g}s hard cap]"
-        return f"{header}\n{self._render(session)}"
+        return f"{header}\n{self._render_diff(session)}"
 
     def snapshot(
         self, path: str | None = None, full: bool = False, light: bool = False,

@@ -168,6 +168,10 @@ def test_start_replaces_a_session_whose_program_exited() -> None:
         screen = d.start(
             [sys.executable, "-c", "import time; print('SECOND'); time.sleep(30)"])
         assert screen.splitlines()[0].startswith("[alive=True")
+        # start() cleared the baseline, so this render is a full screen. This
+        # integration assertion is load-safe; the pty-free two-session test is
+        # the deterministic mutation guard for the reset itself.
+        assert screen.splitlines()[1] == "[full screen]"
         assert d._require().pid != first_pid
         # Same 3s-cap hazard: settle explicitly, then read the marker off view().
         assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
@@ -292,17 +296,16 @@ def test_resize_delivers_sigwinch_and_child_sees_new_width() -> None:
     d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
     try:
         d.wait(idle=0.2, hard=30.0)  # wait for READY
-        screen = d.resize(30, 100)  # rows=30, cols=100
+        d.resize(30, 100)  # rows=30, cols=100
         # The live session reflects the new geometry.
         assert d._require().cols == 100
         assert d._require().rows == 30
-        # The child observed SIGWINCH and rendered its new width; poll like the
-        # send_signal e2e test since the reaction can land a beat after settle.
-        deadline = time.monotonic() + 5.0
-        while "WIDTH=100" not in screen and time.monotonic() < deadline:
-            time.sleep(0.02)
-            screen = d.view(full=True)
-        assert "WIDTH=100" in screen
+        # Poll only through the full-screen path: this test is about SIGWINCH
+        # delivery, not about the drive calls' diff format.
+        assert _poll(
+            lambda: "WIDTH=100" in d.view(full=True),
+            timeout=E2E_POLL_TIMEOUT,
+        ), "child never reported resized width"
     finally:
         d.stop()
 
@@ -337,9 +340,17 @@ def test_resize_numeric_wait_settles_fixed_time() -> None:
     try:
         d.wait(idle=0.2, hard=30.0)  # wait for READY
         t = time.monotonic()
-        screen = d.resize(30, 100, wait=0.5)  # rows=30, cols=100
+        rendered = d.resize(30, 100, wait=0.5)  # rows=30, cols=100
         dt = time.monotonic() - t
-        assert "WIDTH=100" in screen
+        # Before the asynchronous handler paints WIDTH=100, the six-row insertion
+        # is shorter; afterward the length rule falls back to the full screen.
+        body = rendered.partition("\n")[2]
+        assert body.splitlines()[0] in {"[rows 24-29 inserted]", "[full screen]"}
+        # Poll child output separately from the fixed-settle return.
+        assert _poll(
+            lambda: "WIDTH=100" in d.view(full=True),
+            timeout=E2E_POLL_TIMEOUT,
+        ), "child never reported resized width"
         assert dt < 3.0
     finally:
         d.stop()
@@ -351,9 +362,16 @@ def test_wait_for_change_blocks_until_new_output_arrives(tmp_path: Path) -> None
     d = ImptyDriver()
     d.start([sys.executable, "-c", _POLL_FOR_FILE_CHILD, str(flag)])
     try:
+        # start()'s settle caps at 3s, so a saturated runner can leave READY out
+        # of the baseline. Settle on a generous explicit hard and read READY off
+        # view(), which normalizes the baseline to the whole screen — only then
+        # does a settled wait have a stable "nothing new" reading.
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "READY" in d.view()
         quiet = d.wait(idle=0.2, hard=5.0)
         assert quiet.startswith("[settled]")
-        assert "READY" in quiet
+        # The agent has already been shown READY, so a settled wait reports no rows.
+        assert quiet.splitlines()[2:] == ["[no text change]"]
         assert "PROGRESS" not in quiet
         # Arm the touch and only THEN call the wait, so the new output cannot
         # possibly predate the `since` stamp the call takes.
