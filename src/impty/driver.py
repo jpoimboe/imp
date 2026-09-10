@@ -14,6 +14,7 @@ reads); each in-process host offloads them to a thread, and this layer clamps
 from __future__ import annotations
 
 import codecs
+import difflib
 import os
 import pty
 import re
@@ -33,6 +34,41 @@ from impty.session import (
 )
 
 _JOURNAL_RE = re.compile(r"pty-(\d+)\.")
+
+_FULL_SCREEN = "[full screen]"
+_NO_TEXT_CHANGE = "[no text change]"
+
+
+def _rows_phrase(n: int) -> str:
+    return "1 row" if n == 1 else f"{n} rows"
+
+
+def _range_phrase(j1: int, j2: int) -> str:
+    return f"row {j1}" if j2 - j1 == 1 else f"rows {j1}-{j2 - 1}"
+
+
+def _diff_body(prev: list[str], cur: list[str]) -> str:
+    """The rows that changed, each hunk labelled with the rows it emits AND the
+    rows it consumed, so `prev + body` always rebuilds `cur`. Sequence-aware, not
+    index-wise: once the screen scrolls, an index diff reports 23 of 24 rows
+    changed on every step forever — worse than sending the whole screen."""
+    parts: list[str] = []
+    matcher = difflib.SequenceMatcher(None, prev, cur, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "delete":
+            parts.append(f"[{_rows_phrase(i2 - i1)} deleted at row {j1}]")
+            continue
+        where = _range_phrase(j1, j2)
+        if tag == "insert":
+            parts.append(f"[{where} inserted]")
+        elif i2 - i1 == j2 - j1:
+            parts.append(f"[{where}]")
+        else:
+            parts.append(f"[{where} replacing {_rows_phrase(i2 - i1)}]")
+        parts.extend(cur[j1:j2])
+    return "\n".join(parts) if parts else _NO_TEXT_CHANGE
 
 
 def _last_session_index(directory: Path) -> int:
