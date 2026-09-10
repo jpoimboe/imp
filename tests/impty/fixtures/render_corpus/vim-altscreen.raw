@@ -1,0 +1,70 @@
+[?1049h[22;0;0t[>4;2m[?1h=[?2004h[?1004h[1;24r[?12h[?12l[22;2t[22;1t[27m[23m[29m[m[H[2J[?25l[24;1H"src/impty/driver.py" 524L, 25090B[2;1H▽[6n[2;1H  [3;1HPzz\[0%m[6n[3;1H           [1;1H[>c]10;?]11;?[1;1H# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf[2;32H[K[3;1H"""Transport-neutral driver for one interactive program over an impty[3;70H[K[4;1H`TerminalSession`. Owns the session and exposes the eight tool bodies (start,
+view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The method
+docstrings are the FULL tool descriptions, surfaced only by the standalone stdio[7;1Hserver; both provider hosts (claude_code SDK tools, codex FastMCP) show the
+one-line `THIN_DESCRIPTIONS` in `impty.mcp` instead, so agent-facing wording has[9;1Hto be kept in step across the two. Calls are blocking (wait_idle, time.sleep, ptt[10;1Hy
+reads); each in-process host offloads them to a thread, and this layer clamps
+`wait` and a numeric `send`/`resize` settle to `MAX_CALL_HARD`.
+"""
+
+from __future__ import annotations
+
+import codecs
+import difflib
+import os
+import pty
+import re
+import signal
+import time[24;63H1,1[11CTop[?25h[1;1H[?4m[?25l[24;63H2[2;1H[?25h[?25l[24;63H3[3;1H[?25h[?25l[24;63H4[4;1H[?25h[?25l[24;63H5[5;1H[?25h[?25l[24;53H~@k[5;1H[24;53H   [6;1H[24;63H6[6;1H[?25h[?25l[24;63H7[7;1H[?25h[?25l[24;63H8[8;1H[?25h[?25l[24;63H9[9;1H[?25h[?25l[24;63H10,1[11;1H[?25h[?25l[24;53H~@k[11;1H[24;53H   [12;1H[24;64H1[12;1H[?25h[?25l[24;53HG[12;1H[24;53H [23;9H[1;1H        if session is None:[1;28H[K[2;1H            return "[no session]"
+        code = session.close()[3;31H[K[4;1H        self._session = None[4;29H[K[5;1H        body = "\n".join(session.lines(limit=session.rows))[5;61H[K[6;1H        return f"[stopped: exit={_format_exit(code)}]\n{body}"[6;63H[K[7;1H[K[8;1H    def close(self) -> None:[8;30H[K[9;1H        """Teardown entry point for the runner: end the session if one is live.[9;80H[K[10;1H [7CIdempotent. Distinct from the `stop` tool —[10;53H`close` returns nothing and  [11;1His[11;3H[K[12;1H        called from provider teardown, not by the agent."""[12;60H[K[13;1H        if self._session is not None:[14;13Hself._session.close()
+            self._session = None[15;33H[K[17;1H    def tool_methods(self) -> list[Callable[..., str]]:
+        """The bound tool methods, in a fixed order, for the host adapters to
+        register. The single enumeration point shared by all three hosts."""
+        return [
+            self.start, self.view, self.send, self.send_signal, self.resize,
+            self.wait, self.snapshot, self.stop,
+        ][23;10H[K[?25h[?25l[24;63H524,9[9CBot[23;9H[?25h[?25l[24;53Hgg[23;9H[24;53H  [1;1H# SPDX-License-Identifier: MIT
+# Copyright 2026 Josh Poimboeuf[2;32H[K[3;1H"""Transport-neutral driver for one interactive program over an impty
+`TerminalSession`. Owns the session and exposes the eight tool bodies (start,
+view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The method
+docstrings are the FULL tool descriptions, surfaced only by the standalone stdio[7;1Hserver; both provider hosts (claude_code SDK tools, codex FastMCP) show the
+one-line `THIN_DESCRIPTIONS` in `impty.mcp` instead, so agent-facing wording has[9;1Hto be kept in step across the two. Calls are blocking (wait_idle, time.sleep, ptt[10;1Hy[10;9H[K[11;1Hreads); each in-process host offloads them to a thread, and this layer clamps
+`wait` and a numeric `send`/`resize` settle to `MAX_CALL_HARD`.
+"""[13;9H[K[14;13H[K[15;1Hfrom __future__ import annotations
+
+import codecs[17;14H[K[18;1Himport difflib[18;16H[K[19;1Himport os[19;10H[K[20;1Himport pty[20;11H[K[21;1Himport re[21;13H[K[22;1Himport signal[22;14H[K[23;1Himport time[?25h[?25l[24;63H1,1  [9CTop[1;1H[?25h[?25l[24;1H[K[24;1H/def _render[1;1H            # One poll, two fields: alive= and exit= can never disagree.
+            code = session.returncode
+            exit_field = "" if code is None else f" exit={_format_exit(code)}"
+            status = ([4;23H[K[5;1H                f"[alive={code is None}{exit_field} "[5;54H[K[6;1H                f"regime={session.regime().value} cursor=({cx},{cy})]"[6;71H[K[7;1H            )[7;14H[K[8;1H            rows = session.lines(limit=session.rows)[8;54H[K[9;1H            body = "\n".join(session.lines() if full else rows)[9;64H[K[10;1H [7Creturn status, rows, body[11;1H[K[12;1H    def _render(self, session: TerminalSession, *, full: bool = False) -> str:
+        """The complete screen (or the whole strip), and the baseline moves onto[14;9Hit: the agent has now seen these rows."""
+        status, rows, body = self._frame(session, full=full)[16;9Hself._shown = rows
+        return f"{status}\n{body}"[18;1H[K[19;1H    def _render_diff(self, session: TerminalSession) -> str:
+        """The text change since the last screen the agent was shown.
+        Unchanged text uses its marker; changed rows fall back to a marked full
+        screen when their diff is not shorter."""
+        status, rows, full_body = self._frame(session)[24;63H210,5[9C39%[?25h[12;5H[?25l[24;53Hn[12;5H[24;53H[K[24;1H[19;5H[24;63H217,5[9C39%[19;5H[?25h[?25l[24;53HN[19;5H[24;1H?[24;53H[K[24;1H[12;5H[24;63H210,5[9C39%[12;5H[?25h[?25l[24;53H^F[12;5H[24;53H  [1;9H[27m[23m[29m[m[1;1H        screen when their diff is not shorter."""[1;50H[K[2;1H        status, rows, full_body = self._frame(session)[2;55H[K[3;1H        if self._shown is None:[3;32H[K[4;1H            body = f"{_FULL_SCREEN}\n{full_body}"[4;50H[K[5;1H        elif self._shown == rows:[5;34H[K[6;1H            body = _NO_TEXT_CHANGE[6;35H[K[7;1H        else:[7;14H[K[8;1H            diff = _diff_body(self._shown, rows)[8;49H[K[9;1H            body = diff if len(diff) < len(full_body) else f"{_FULL_SCREEN}\n{fuu[10;1Hll_body}"[10;10H[K[11;1H        self._shown = rows[11;27H[K[12;1H        return f"{status}\n{body}"[12;35H[K[13;1H[K[14;1H    def start([14;15H[K[15;1H        self,[15;14H[K[16;1H        argv: list[str],[16;25H[K[17;1H        cwd: str | None = None,[17;32H[K[18;1H        cols: int = 80,[18;24H[K[19;1H        rows: int = 24,[19;24H[K[20;1H        env: dict[str, str] | None = None,[20;43H[K[21;1H    ) -> str:[21;14H[K[22;1H        """Spawn an interactive program on a fresh pty and return its first scree[23;1Hen.[23;4H[K[24;1H[K[24;63H220,9[9C43%[?25h[1;9H[?25l[24;53H^F[1;9H[24;53H  [1;9H[27m[23m[29m[m[1;1H        """Spawn an interactive program on a fresh pty and return its first scree[2;1Hen.[2;4H[K[3;1H[K[4;1H        Refuses while a program is still running —[4;51H call stop() first. A session  [5;1Hwhose[5;6H[K[6;1H        program has exited is replaced. `argv` is the command + args, e.g.[6;75H[K[7;1H        ["imp", "new", "my-quest"] —[7;37H spawned directly, so the program is the[7;77H[K[8;1H        foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shee[9;1Hll[9;3H[K[10;1H        wrapper is needed; pass `env` to set variables (e.g. API keys) instead oo[11;1Hf a[11;4H[K[12;1H        `bash -lc "export …[12;28H; exec …[12;36H"` wrapper, which would otherwise put bash —[12;80H  [13;1Hnot[13;4H[K[14;1H        your program —[14;23H in the foreground group.[14;48H[K[15;1H[K[16;1H        `env` entries are ADDED to the base environment, overriding same-named oo[17;1Hnes[17;4H[K[18;1H        (TERM is still defaulted). With a sandbox hook installed by the embeddinn[19;1Hg[19;2H[K[20;1H        host the program is spawned inside that sandbox and `cwd` is resolved inn[21;1H ITS[21;5H[K[22;1H        mount namespace; with no hook it runs bare.[22;52H[K[23;1H[K[24;1H[K[24;63H240,9[9C46%[?25h[1;9H[?25l[24;53H^B[1;9H[24;53H  [22;9H[1;9Hscreen when their diff is not shorter."""[1;50H[K[2;1H        status, rows, full_body = self._frame(session)[3;9Hif self._shown is None:[4;9H    body = f"{_FULL_SCREEN}\n{full_body}"[4;50H[K[5;1H        elif self._shown == rows:[6;9H    body = _NO_TEXT_CHANGE[6;35H[K[7;9Helse:[7;14H[K[8;9H    diff = _diff_body(self._shown, rows)[8;49H[K[9;1H  [10Cbody = diff if len(diff) < len(full_body) else f"{_FULL_SCREEN}\n{fuu[10;1Hll_body}"[10;10H[K[11;1H        self._shown = rows[12;9Hreturn f"{status}\n{body}"[12;35H[K[13;1H[K[14;5Hdef start([14;15H[K[15;9Hself,[16;9Hargv: list[str],[16;25H[K[17;1H        cwd: str | None = None,[18;9Hcols: int = 80,[18;24H[K[19;1H [7Crows: int = 24,[20;9Henv: dict[str, str] | None = None,[20;44H[K[21;2H   ) -> str:[22;9H"""Spawn an interactive program on a fresh pty and return its first scree[23;1Hen.[24;78H3[?25h[22;9H[?25l[1;23r[23;1H
+[1;24r[24;63H[K[24;63H241,0-1[7C43%[?25h[23;1H[?25l[1;23r[1;1H[2M[1;24r[22;9HRefuses while a program is still running —[22;52Hcall stop() first. A session  [23;1Hwhose[24;63H[K[24;63H242,9[9C44%[?25h[22;9H[?25l[1;23r[23;1H
+[1;24r[23;9Hprogram has exited is replaced. `argv` is the command + args, e.g.[24;63H[K[24;63H243,9[9C44%[?25h[23;9H[?25l[24;53Hj[23;9H[24;53H [23;9H[1;23r[23;1H
+[1;24r[23;9H["imp", "new", "my-quest"] —[23;38Hspawned directly, so the program is the[24;63H[K[24;63H244,9[9C44%[?25h[23;9H[?25l[24;53H0[23;9H[24;53H [23;1H[24;67H1[23;1H[?25h[?25l[24;53H$[23;1H[24;53H [23;76H[24;67H78-76[23;76H[?25h[?25l[24;53Hi[23;76H[24;53H [23;76H
+[1m-- INSERT --[m[24;63H[K[24;63H244,78-76     44%[23;76H[?25h[?25l[1;23r[23;1H
+[1;24r[22;76Hspikee[23;1He[24;63H[K[24;63H244,83-81     44%[?25h[23;1H[24;1H[K[22;80H[?25l[24;53H^[[22;80H[?25h[?25l[24;53H  [23;1H[24;63H244,82-80     44%[22;80H[?25h[?25l[24;53Hu[22;80H
+
+1 change; before #1  1 second ago[24;53H[K[22;76He[22;77H[K[23;1H [7Cforeground, controlling-tty session leader (Ctrl-C/ESC reach it). No she[23;1H[94m@                                                                               [m[24;63H244,78-76     44%[?25h[?25l[24;63H[K[24;63H244,78-76     44%[22;76H[?25h[?25l[24;1H[K[24;1H:set number[1;1H[38;5;130m226 [m        else:
+[38;5;130m227 [m[8C    diff = _diff_body(self._shown, rows)
+[38;5;130m228 [m[8C    body = diff if len(diff) < len(full_body) else f"{_FULL_SCREEN}\\[4;1H[38;5;130m    [mn{full_body}"
+[38;5;130m229 [m        self._shown = rows
+[38;5;130m230 [m        return f"{status}\n{body}"
+[38;5;130m231 
+232 [m    def start(
+[38;5;130m233 [m        self,
+[38;5;130m234 [m        argv: list[str],
+[38;5;130m235 [m        cwd: str | None = None,
+[38;5;130m236 [m        cols: int = 80,
+[38;5;130m237 [m        rows: int = 24,
+[38;5;130m238 [m        env: dict[str, str] | None = None,
+[38;5;130m239 [m    ) -> str:
+[38;5;130m240 [m        """Spawn an interactive program on a fresh pty and return its first  [17;1H[38;5;130m    [mscreen.
+[38;5;130m241 
+242 [m        Refuses while a program is still running —[19;55H call stop() first. A sesss[20;1H[38;5;130m    [mion whose
+[38;5;130m243 [m        program has exited is replaced. `argv` is the command + args, e.g.
+[38;5;130m244 [m        ["imp", "new", "my-quest"] —[22;41H spawned directly, so the program is the[23;1H[38;5;130m245 [m        foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No[23;1H[38;5;130m    [m[94m@                                                                           [m[24;63H244,78-76     44%[?25h[22;80H[?25l[24;1H[K[24;1H:set nonumber[1;1H        else:[1;14H[K[2;1H    [8Cdiff = _diff_body(self._shown, rows)[2;49H[K[3;1H    [8Cbody = diff if len(diff) < len(full_body) else f"{_FULL_SCREEN}\n{fuu[4;1Hll_body}"[4;10H[K[5;1H        self._shown = rows[5;27H[K[6;1H        return f"{status}\n{body}"[6;35H[K[7;1H[K[8;1H    def start([8;15H[K[9;1H        self,[9;14H[K[10;1H        argv: list[str],[10;25H[K[11;1H        cwd: str | None = None,[11;32H[K[12;1H        cols: int = 80,[12;25H[K[13;1H        rows: int = 24,[13;25H[K[14;1H        env: dict[str, str] | None = None,[14;43H[K[15;1H    ) -> str:[15;14H[K[16;1H        """Spawn an interactive program on a fresh pty and return its first scree[17;1Hen.[17;4H[K[18;1H[K[19;1H        Refuses while a program is still running —[19;51H call stop() first. A session  [20;1Hwhose[20;6H[K[21;1H        program has exited is replaced. `argv` is the command + args, e.g.[21;75H[K[22;1H        ["imp", "new", "my-quest"] —[22;37H spawned directly, so the program is the[22;78H[K[23;1H        foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No she[23;1H[94m@                                                                               [m[24;63H244,78-76     44%[?25h[22;76H[?25l[24;53Hzz[22;76H[24;53H  [11;76H[1;23r[1;1H[11M[1;24r[12;1H        foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shee[13;1Hll[14;9Hwrapper is needed; pass `env` to set variables (e.g. API keys) instead oo[15;1Hf a[16;9H`bash -lc "export …[16;28H; exec …[16;36H"` wrapper, which would otherwise put bash —[16;80H  [17;1Hnot[18;9Hyour program —[18;24Hin the foreground group.[20;9H`env` entries are ADDED to the base environment, overriding same-named oo[21;1Hnes[22;9H(TERM is still defaulted). With a sandbox hook installed by the embeddinn[23;1Hg[24;1H[K[24;63H244,78-76     46%[?25h[11;76H[?25l[24;53H~@k[11;76H[24;53H   [11;76H[?25h[?25l[24;53Hx[11;76H[24;53H [11;76H[24;53Hdl[11;76H[24;53H  [11;75H[11;76H[K[?25h[?25l[24;68H7-75[11;75H[?25h[?25l[24;63H[K[24;1H:q![?2004l[>4;m[23;2t[23;1t[24;1H[K[24;1H[?1004l[?2004l[?1l>[?1049l[23;0;0t[?25h[>4;m

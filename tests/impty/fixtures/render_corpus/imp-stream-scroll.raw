@@ -1,0 +1,63 @@
+
+[38;2;255;154;60m── spec phase ───[0m
+
+[1m[38;2;112;144;176mspec-writer[0m[38;2;85;87;83m · opus[0m
+
+[1m• [0mWhat change would you like to make?
+
+[38;2;255;154;60m>[0m [48;2;67;56;40mAdd a top-level `--version` flag (with a `-V` short alias) to the `imp` CLI[0m
+  [48;2;67;56;40mthat prints the installed imp version and exits 0, without requiring a[0m
+  [48;2;67;56;40msubcommand. Read the version from the installed package metadata[0m
+  [48;2;67;56;40m(importlib.metadata) so it stays in sync with pyproject.toml.[0m
+
+[1m• [0mLet me explore the CLI structure before proposing a design.
+
+[38;2;85;87;83m  2 calls · ToolSearch · 8s[0m
+
+[1m• [0mLet me explore the CLI structure.
+
+[38;2;85;87;83m  2 calls · grep · glob · 3s[0m
+
+[1m• [0mLet me look at the main parser setup and how the package is named.
+
+[38;2;85;87;83m  1 call · read_file · 5s[0m
+
+[1m• [0mLet me check the package metadata and any existing version handling/tests.
+
+[38;2;85;87;83m  2 calls · read_file · grep · 29s[0m
+
+[1m• [0mThe codebase is clear. The package is named [36mimp[0m (version [36m0.0.1[0m in
+  [36mpyproject.toml[0m), and the CLI is a single [36margparse[0m parser in
+  [36msrc/imp/cli/main.py[0m with [36mrequired=True[0m subparsers.
+
+  Here's my proposed design:
+
+  [1m • [0mAdd [36mparser.add_argument("--version", "-V", action="version", version=f"imp [0m
+  [1m   [0m[36m{<version>}")[0m to the [1mtop-level[0m parser in [36mmain()[0m. Argparse's [36mversion[0m action
+  [1m   [0mfires during [36mparse_args[0m and exits 0 [3mbefore[0m the required-subparser check, so
+  [1m   [0m[36mimp --version[0m / [36mimp -V[0m work with no subcommand — no special-casing needed.
+  [1m • [0mRead the version via a small helper using
+  [1m   [0m[36mimportlib.metadata.version("imp")[0m.
+  [1m • [0mOutput format: [36mimp 0.0.1[0m (one line, to stdout, exit 0) — the argparse
+  [1m   [0m[36mversion[0m action default.
+  [1m • [0mAdd a CLI test asserting [36mimp --version[0m and [36mimp -V[0m print the metadata
+  [1m   [0mversion and exit 0.
+
+  One decision worth your call: [1mif the package metadata can't be found[0m
+  ([36mPackageNotFoundError[0m — e.g. running from a source checkout that was never
+  installed), should [36m--version[0m (a) print a fallback like [36mimp unknown[0m and still
+  exit 0, or (b) let it error out? I lean toward (a) so [36m--version[0m never crashes.
+
+  Does this look right, and which fallback do you want?
+
+[38;2;255;154;60m>[0m [48;2;67;56;40mDesign looks right. Go with (a): on PackageNotFoundError, print `imp unknown`[0m
+  [48;2;67;56;40mand still exit 0 so --version never crashes. Please also assert that fallback[0m
+  [48;2;67;56;40mpath in the test.[0m
+
+[1m• [0mNaming this [36madd-version-flag[0m.
+
+[38;2;85;87;83m  4 calls · rename_change · write_file · bash · complete_step · 25s[0m
+
+[1m• [0mSpec written and committed as [36mimp/specs/2026-06-06-add-version-flag.md[0m. It
+  captures the top-level [36m--version[0m/[36m-V[0m flag, version resolution via
+  [36mimportlib.metadata.version("imp")[0m, the [36mimp unknown[0m fallback on

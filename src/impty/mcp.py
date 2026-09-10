@@ -38,16 +38,34 @@ from impty.driver import ImptyDriver
 # so a tool added/removed without a matching entry fails the suite. The standalone
 # stdio server keeps the full docstrings.
 THIN_DESCRIPTIONS: dict[str, str] = {
-    "start": "Spawn a program on a fresh pseudo-terminal and return its first screen.",
-    "view": "Read the current terminal screen as text without sending anything.",
-    "send": "Send raw keystrokes to the program, then return the new screen.",
+    "start": (
+        "Spawn a program on a fresh pseudo-terminal; wait until it settles, exits, or the "
+        "3s settle deadline elapses, then return `[full screen]` followed by "
+        "the complete screen accumulated so far."
+    ),
+    "view": (
+        "Read the complete current screen without a diff or `[full screen]` marker; "
+        "resynchronizes changed-row responses."
+    ),
+    "send": (
+        "Send raw keystrokes; `wait=False` returns `[sent]` without rendering, otherwise "
+        "return a changed-row diff, `[no text change]`, or `[full screen]` plus the "
+        "complete screen."
+    ),
     "send_signal": (
         "Send a real signal (default SIGINT) to the terminal's foreground process group."
     ),
-    "resize": "Resize the terminal (SIGWINCH) and return the reflowed screen.",
+    "resize": (
+        "Resize the terminal (SIGWINCH); `wait=False` returns `[resized]` without "
+        "rendering, otherwise return a changed-row diff, `[no text change]`, or `[full "
+        "screen]` plus the complete screen."
+    ),
     "wait": (
-        "Wait for a still-working program to settle, or for new output "
-        "(for_change=True). Each call is capped at 240s; call again to keep watching."
+        "Wait until there is an idle window after qualifying output, the process exits, or "
+        "`hard` elapses; then return a changed-row diff, `[no text change]`, or `[full "
+        "screen]` plus the complete screen. Output already read qualifies by default; "
+        "`for_change=True` requires new output. `hard` defaults to 3s (30s with "
+        "`for_change=True`), and values over 240s are capped; call again to keep watching."
     ),
     "snapshot": (
         "Render the current screen to a PNG (color, bold, box-drawing) and return its path."

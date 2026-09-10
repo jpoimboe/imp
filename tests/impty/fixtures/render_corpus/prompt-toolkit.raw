@@ -1,0 +1,30 @@
+  …assistant output above…
+[?12l[?25h[6n[?2004h[?1l[?25l[0m[?7l[0m[J[0;38;2;255;154;60m> [2D[2C[?7h[0m[?12l[?25h[?25l[?7l[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[0m [22A[2C[?7h[0m[?12l[?25h[?25l[?7l[0mAdd a top-level[C[?7h[0m[?12l[?25h[?25l[?7l[0m--version[?7h[0m[?12l[?25h[?25l[?7l[C[0mflag[?7h[0m[?12l[?25h[?25l[?7l[C[0mto the imp CLI[?7h[0m[?12l[?25h[?25l[?7l[4D[0m[K[C[?7h[0m[?12l[?25h[?25l[?7l[0mCLI so it prints[?7h[0m[?12l[?25h[?25l[?7l[C[0mthe installed[?7h[0m[?12l[?25h[?25l[?7l[74D[0;38;2;255;154;60m> [0mAdd a top-level --version flag to the imp CLI so it prints the installed veri[79Cs[0m
+[0m  on[?7h[0m[?12l[?25h[?25l[?7l[A[4D[0;38;2;255;154;60m> [0mAdd a top-level --version flag to the imp CLI so it prints the installed v[0m[K[0m
+[0m [0m[K[A[75C[?7h[0m[?12l[?25h[?25l[?7l[76D[0;38;2;255;154;60m> [0mAdd a top-level --version flag to the imp CLI so it prints the installed vver[79Cs[0m
+[0m  ion and exits 0[?7h[0m[?12l[?25h[?25l[?7l[A[15D[?7h[0m[?12l[?25h[?25l[?7l[3C[?7h[0m[?12l[?25h[?25l[?7l[0mPLEASE  a top[Clevel --version flag[Cto the imp[CCLI so it[Cprints [Che install[79Ce[0m
+[2C[0md vversion and exits 0[A[12D[?7h[0m[?12l[?25h[?25l[?7l[7D[0m a top-level [C-version flag to the[Cimp CLI so[Cit prints[Cthe ins[Called vver[79Cs[0m
+[2C[0mion and exits 0[0m[K[A[12D[?7h[0m[?12l[?25h[?25l[?7l[0m
+[17C[?7h[0m[?12l[?25h[?25l[?7l[C[0mand add a -V alias[?7h[0m[?12l[?25h[?25l[?7l[C[0mthat behaves identically for scripts[?7h[0m[?12l[?25h[?25l[?7l[4D[?7h[0m[?12l[?25h[?25l[?7l[0mipts[0m[K[4D[?7h[0m[?12l[?25h[?25l[?7l[0mXipts[4D[?7h[0m[?12l[?25h[69D[A[J[0m[?7h[?2004l

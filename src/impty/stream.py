@@ -8,8 +8,9 @@ as if it were unprefixed, so a secondary DA (`ESC[>c`) answers as a primary DA a
 the surplus reply is typed into the pane, and XTMODKEYS (`ESC[>4;2m`) lands as SGR
 4;2 and underlines everything after it. pyte also does not implement string
 sequences at all, drawing a DCS/SOS/PM/APC payload onto the grid as text. OSC and
-`?`-prefixed CSI are deliberately left alone: pyte handles both correctly, and `?`
-carries the DECSET alt-screen switch TerminalScreen's regime tracking depends on.
+`?`-prefixed CSI are deliberately left alone: `?` carries the DECSET alt-screen
+switch TerminalScreen's regime tracking depends on, and TerminalScreen guards the
+few `?` forms pyte mis-dispatches (device status, and SGR).
 """
 
 from __future__ import annotations

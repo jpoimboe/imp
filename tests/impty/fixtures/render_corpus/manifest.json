@@ -1,0 +1,579 @@
+{
+  "cols": 80,
+  "rows": 24,
+  "full_body_bytes": 74413,
+  "changed_body_bytes": 29658,
+  "saving_fraction": 0.6014406085,
+  "corpora": [
+    {
+      "name": "1a-imp-live-tty",
+      "raw": "imp-live-tty.raw",
+      "steps": [
+        {
+          "label": "start",
+          "offset": 36290,
+          "render": "diff"
+        },
+        {
+          "label": "wait#0",
+          "offset": 43085,
+          "render": "diff"
+        },
+        {
+          "label": "wait#1",
+          "offset": 50637,
+          "render": "diff"
+        },
+        {
+          "label": "wait#2",
+          "offset": 59070,
+          "render": "diff"
+        },
+        {
+          "label": "wait#3",
+          "offset": 68426,
+          "render": "diff"
+        },
+        {
+          "label": "wait#4",
+          "offset": 76838,
+          "render": "diff"
+        },
+        {
+          "label": "wait#5",
+          "offset": 84897,
+          "render": "diff"
+        },
+        {
+          "label": "wait#6",
+          "offset": 91964,
+          "render": "diff"
+        },
+        {
+          "label": "wait#7",
+          "offset": 99980,
+          "render": "diff"
+        },
+        {
+          "label": "wait#8",
+          "offset": 108162,
+          "render": "diff"
+        },
+        {
+          "label": "wait#9",
+          "offset": 116339,
+          "render": "diff"
+        },
+        {
+          "label": "wait#10",
+          "offset": 124525,
+          "render": "diff"
+        },
+        {
+          "label": "wait#11",
+          "offset": 132915,
+          "render": "diff"
+        },
+        {
+          "label": "wait#12",
+          "offset": 140481,
+          "render": "diff"
+        },
+        {
+          "label": "wait#13",
+          "offset": 148123,
+          "render": "diff"
+        },
+        {
+          "label": "wait#14",
+          "offset": 156221,
+          "render": "diff"
+        },
+        {
+          "label": "wait#15",
+          "offset": 157807,
+          "render": "diff"
+        },
+        {
+          "label": "wait#16",
+          "offset": 157807,
+          "render": "diff"
+        },
+        {
+          "label": "wait#17",
+          "offset": 157807,
+          "render": "diff"
+        },
+        {
+          "label": "wait#18",
+          "offset": 157807,
+          "render": "diff"
+        },
+        {
+          "label": "wait#19",
+          "offset": 157807,
+          "render": "diff"
+        },
+        {
+          "label": "wait#20",
+          "offset": 157807,
+          "render": "diff"
+        },
+        {
+          "label": "wait#21",
+          "offset": 157807,
+          "render": "diff"
+        }
+      ]
+    },
+    {
+      "name": "1b-imp-stream-scroll",
+      "raw": "imp-stream-scroll.raw",
+      "steps": [
+        {
+          "label": "start",
+          "offset": 55,
+          "render": "diff"
+        },
+        {
+          "label": "wait#0",
+          "offset": 174,
+          "render": "diff"
+        },
+        {
+          "label": "wait#1",
+          "offset": 391,
+          "render": "diff"
+        },
+        {
+          "label": "wait#2",
+          "offset": 566,
+          "render": "diff"
+        },
+        {
+          "label": "wait#3",
+          "offset": 692,
+          "render": "diff"
+        },
+        {
+          "label": "wait#4",
+          "offset": 743,
+          "render": "diff"
+        },
+        {
+          "label": "wait#5",
+          "offset": 878,
+          "render": "diff"
+        },
+        {
+          "label": "wait#6",
+          "offset": 931,
+          "render": "diff"
+        },
+        {
+          "label": "wait#7",
+          "offset": 1080,
+          "render": "diff"
+        },
+        {
+          "label": "wait#8",
+          "offset": 1260,
+          "render": "diff"
+        },
+        {
+          "label": "wait#9",
+          "offset": 1364,
+          "render": "diff"
+        },
+        {
+          "label": "wait#10",
+          "offset": 1591,
+          "render": "diff"
+        },
+        {
+          "label": "wait#11",
+          "offset": 1865,
+          "render": "diff"
+        },
+        {
+          "label": "wait#12",
+          "offset": 2067,
+          "render": "diff"
+        },
+        {
+          "label": "wait#13",
+          "offset": 2206,
+          "render": "diff"
+        },
+        {
+          "label": "wait#14",
+          "offset": 2473,
+          "render": "diff"
+        },
+        {
+          "label": "wait#15",
+          "offset": 2623,
+          "render": "diff"
+        },
+        {
+          "label": "wait#16",
+          "offset": 2849,
+          "render": "diff"
+        },
+        {
+          "label": "wait#17",
+          "offset": 2944,
+          "render": "diff"
+        },
+        {
+          "label": "wait#18",
+          "offset": 3042,
+          "render": "diff"
+        },
+        {
+          "label": "wait#19",
+          "offset": 3309,
+          "render": "diff"
+        }
+      ]
+    },
+    {
+      "name": "2-prompt-toolkit",
+      "raw": "prompt-toolkit.raw",
+      "steps": [
+        {
+          "label": "start",
+          "offset": 251,
+          "render": "diff"
+        },
+        {
+          "label": "send#0:'Add a top-level '",
+          "offset": 305,
+          "render": "diff"
+        },
+        {
+          "label": "send#1:'--version'",
+          "offset": 350,
+          "render": "diff"
+        },
+        {
+          "label": "send#2:' flag'",
+          "offset": 393,
+          "render": "diff"
+        },
+        {
+          "label": "send#3:' to the imp CLI'",
+          "offset": 446,
+          "render": "diff"
+        },
+        {
+          "label": "send#4:'\\x7f\\x7f\\x7f'",
+          "offset": 492,
+          "render": "diff"
+        },
+        {
+          "label": "send#5:'CLI so it prints'",
+          "offset": 544,
+          "render": "diff"
+        },
+        {
+          "label": "send#6:' the installed'",
+          "offset": 596,
+          "render": "diff"
+        },
+        {
+          "label": "send#7:' verison'",
+          "offset": 758,
+          "render": "diff"
+        },
+        {
+          "label": "send#8:'\\x7f\\x7f\\x7f\\x7f\\x7f\\x7f'",
+          "offset": 931,
+          "render": "diff"
+        },
+        {
+          "label": "send#9:'version and exits 0'",
+          "offset": 1106,
+          "render": "diff"
+        },
+        {
+          "label": "send#10:'\\x01'",
+          "offset": 1146,
+          "render": "diff"
+        },
+        {
+          "label": "send#11:'\\x1b[C\\x1b[C\\x1b[C'",
+          "offset": 1182,
+          "render": "diff"
+        },
+        {
+          "label": "send#12:'PLEASE '",
+          "offset": 1354,
+          "render": "diff"
+        },
+        {
+          "label": "send#13:'\\x7f\\x7f\\x7f\\x7f\\x7f\\x7f\\x7f'",
+          "offset": 1530,
+          "render": "diff"
+        },
+        {
+          "label": "send#14:'\\x05'",
+          "offset": 1574,
+          "render": "diff"
+        },
+        {
+          "label": "send#15:' and add a -V alias'",
+          "offset": 1631,
+          "render": "diff"
+        },
+        {
+          "label": "send#16:' that behaves identically for scripts'",
+          "offset": 1706,
+          "render": "diff"
+        },
+        {
+          "label": "send#17:'\\x1b[D\\x1b[D\\x1b[D\\x1b[D'",
+          "offset": 1742,
+          "render": "diff"
+        },
+        {
+          "label": "send#18:'\\x7f'",
+          "offset": 1794,
+          "render": "diff"
+        },
+        {
+          "label": "send#19:'X'",
+          "offset": 1839,
+          "render": "diff"
+        },
+        {
+          "label": "send#20:'\\x05\\r'",
+          "offset": 1867,
+          "render": "diff"
+        }
+      ]
+    },
+    {
+      "name": "3-vim-altscreen",
+      "raw": "vim-altscreen.raw",
+      "steps": [
+        {
+          "label": "start",
+          "offset": 1221,
+          "render": "diff"
+        },
+        {
+          "label": "send#0:'\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\x1b[B'",
+          "offset": 1390,
+          "render": "diff"
+        },
+        {
+          "label": "send#1:'\\x1b[B\\x1b[B\\x1b[B\\x1b[B\\x1b[B'",
+          "offset": 1566,
+          "render": "diff"
+        },
+        {
+          "label": "send#2:'G'",
+          "offset": 2813,
+          "render": "diff"
+        },
+        {
+          "label": "send#3:'gg'",
+          "offset": 3961,
+          "render": "diff"
+        },
+        {
+          "label": "send#4:'/def _render\\r'",
+          "offset": 5313,
+          "render": "diff"
+        },
+        {
+          "label": "send#5:'n'",
+          "offset": 5393,
+          "render": "diff"
+        },
+        {
+          "label": "send#6:'N'",
+          "offset": 5481,
+          "render": "diff"
+        },
+        {
+          "label": "send#7:'\\x06'",
+          "offset": 6674,
+          "render": "diff"
+        },
+        {
+          "label": "send#8:'\\x06'",
+          "offset": 8030,
+          "render": "diff"
+        },
+        {
+          "label": "send#9:'\\x02'",
+          "offset": 8981,
+          "render": "diff"
+        },
+        {
+          "label": "send#10:'jjjj'",
+          "offset": 9566,
+          "render": "diff"
+        },
+        {
+          "label": "send#11:'0'",
+          "offset": 9626,
+          "render": "diff"
+        },
+        {
+          "label": "send#12:'$'",
+          "offset": 9692,
+          "render": "diff"
+        },
+        {
+          "label": "send#13:'i'",
+          "offset": 9803,
+          "render": "diff"
+        },
+        {
+          "label": "send#14:'spike'",
+          "offset": 9903,
+          "render": "diff"
+        },
+        {
+          "label": "send#15:'\\x1b'",
+          "offset": 9951,
+          "render": "diff"
+        },
+        {
+          "label": "send#16:'u'",
+          "offset": 10370,
+          "render": "diff"
+        },
+        {
+          "label": "send#17:':set number\\r'",
+          "offset": 11810,
+          "render": "diff"
+        },
+        {
+          "label": "send#18:':set nonumber\\r'",
+          "offset": 13123,
+          "render": "diff"
+        },
+        {
+          "label": "send#19:'zz'",
+          "offset": 13779,
+          "render": "diff"
+        },
+        {
+          "label": "send#20:'\\x1b[C\\x1b[C\\x1b[C\\x1b[C\\x1b[C\\x1b[C\\x1b[C\\x1b[C'",
+          "offset": 13830,
+          "render": "diff"
+        },
+        {
+          "label": "send#21:'x'",
+          "offset": 13955,
+          "render": "diff"
+        },
+        {
+          "label": "view",
+          "offset": 13955,
+          "render": "view"
+        },
+        {
+          "label": "stop",
+          "offset": 14080,
+          "render": "diff"
+        }
+      ]
+    },
+    {
+      "name": "4-top-altscreen",
+      "raw": "top-altscreen.raw",
+      "steps": [
+        {
+          "label": "start",
+          "offset": 2122,
+          "render": "diff"
+        },
+        {
+          "label": "wait#0",
+          "offset": 3115,
+          "render": "diff"
+        },
+        {
+          "label": "wait#1",
+          "offset": 4112,
+          "render": "diff"
+        },
+        {
+          "label": "wait#2",
+          "offset": 4998,
+          "render": "diff"
+        },
+        {
+          "label": "wait#3",
+          "offset": 5995,
+          "render": "diff"
+        },
+        {
+          "label": "wait#4",
+          "offset": 6469,
+          "render": "diff"
+        },
+        {
+          "label": "wait#5",
+          "offset": 8039,
+          "render": "diff"
+        },
+        {
+          "label": "wait#6",
+          "offset": 8925,
+          "render": "diff"
+        },
+        {
+          "label": "wait#7",
+          "offset": 9922,
+          "render": "diff"
+        },
+        {
+          "label": "wait#8",
+          "offset": 10808,
+          "render": "diff"
+        },
+        {
+          "label": "wait#9",
+          "offset": 11805,
+          "render": "diff"
+        },
+        {
+          "label": "wait#10",
+          "offset": 12691,
+          "render": "diff"
+        },
+        {
+          "label": "wait#11",
+          "offset": 14261,
+          "render": "diff"
+        },
+        {
+          "label": "wait#12",
+          "offset": 14838,
+          "render": "diff"
+        },
+        {
+          "label": "wait#13",
+          "offset": 15835,
+          "render": "diff"
+        },
+        {
+          "label": "wait#14",
+          "offset": 16309,
+          "render": "diff"
+        },
+        {
+          "label": "wait#15",
+          "offset": 17306,
+          "render": "diff"
+        }
+      ]
+    }
+  ]
+}

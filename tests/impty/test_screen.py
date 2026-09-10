@@ -4,6 +4,7 @@ import pyte
 import pytest
 
 from impty.screen import Regime, TerminalScreen
+from impty.stream import TerminalStream
 
 
 def _ts(cols: int = 20, rows: int = 6, history: int = 100):
@@ -159,3 +160,30 @@ def test_plain_primary_device_attributes_still_answers() -> None:
 )
 def test_multi_parameter_device_attributes_is_ignored(seq: bytes) -> None:
     assert _replies(seq) == []
+
+
+def _filtered(cols: int = 20, rows: int = 6):
+    """The production pair: the byte filter passes `?`-prefixed CSI untouched."""
+    screen = TerminalScreen(cols, rows, history=100, ratio=0.5)
+    return screen, TerminalStream(screen)
+
+
+def test_private_sgr_is_dropped_and_the_rest_of_the_chunk_survives() -> None:
+    # `vim -u NONE` emits ESC[?4m at startup. pyte's select_graphic_rendition
+    # takes no `private` kwarg, and the TypeError cost the whole read chunk.
+    screen, stream = _filtered()
+    stream.feed(b"\x1b[?4m" + b"hello")
+    assert screen.display[0].rstrip() == "hello"
+    cell = screen.buffer[0][0]
+    assert not cell.underscore
+    assert not cell.bold
+    assert not cell.reverse
+
+
+def test_plain_sgr_still_applies_attributes() -> None:
+    screen, stream = _filtered()
+    stream.feed(b"\x1b[4munder\x1b[0m\x1b[1mbold")
+    assert screen.display[0].rstrip() == "underbold"
+    assert screen.buffer[0][0].underscore     # "u" of "under"
+    assert screen.buffer[0][5].bold           # "b" of "bold"
+    assert not screen.buffer[0][5].underscore  # ESC[0m reset held
