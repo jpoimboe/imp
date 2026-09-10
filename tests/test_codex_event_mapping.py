@@ -1,17 +1,13 @@
 # tests/test_codex_event_mapping.py
 from __future__ import annotations
 
-import dataclasses
-import json
+import asyncio
 import types as _types
-from pathlib import Path
 from typing import Any
 
-from imp.cli import narrative as nv
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_mcp import RunState
-from imp.providers.codex_runner import close_open_task_folds, process_event
+from imp.providers.codex_runner import process_event
 from tests.codex_fakes import (
     FakeAgentMessageItem,
     FakeItemEvent,
@@ -39,71 +35,6 @@ def _completed(sdk_id: str, args: dict, *, result: str = "{}", tool: str = "sub_
 def _pe_kwargs(elog: Any, run_state: Any, state: Any) -> dict:
     return dict(elog=elog, agent_id="step:p/s", state=state, provider="codex",
                 model="m", run_state=run_state)
-
-
-def test_task_item_started_opens_fold_keyed_on_sdk_id() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    args = {"subagent_name": "impl", "task_description": "x"}
-    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, {}))
-    calls = [e for e in elog.read() if e["type"] == "tool_call"]
-    assert len(calls) == 1
-    assert calls[0]["payload"]["id"] == "item_1"
-    assert calls[0]["payload"]["name"] == "sub_agent"
-    # Block-tracked: the renderer reads awaits_result from the CALL, so an
-    # unstamped call leaves the fold vulnerable to an early resume-close.
-    assert calls[0]["payload"]["id_ns"] == "block"
-    assert [e for e in elog.read() if e["type"] == "tool_result"] == []
-
-
-def test_task_item_completed_closes_fold_same_id_id_ns_block() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    args = {"subagent_name": "impl", "task_description": "x"}
-    st: dict = {}
-    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
-    process_event(_completed("item_1", args, result='{"status":"Success"}'),
-                  **_pe_kwargs(elog, run_state, st))
-    calls = [e for e in elog.read() if e["type"] == "tool_call"]
-    results = [e for e in elog.read() if e["type"] == "tool_result"]
-    assert len(calls) == 1                              # completed does NOT re-open
-    assert len(results) == 1
-    assert results[0]["payload"]["id"] == "item_1"      # pairs to the started id
-    assert results[0]["payload"]["id_ns"] == "block"    # same namespace as the call
-    assert calls[0]["payload"]["id_ns"] == "block"      # symmetric stamp
-    assert results[0]["payload"]["error"] is False
-
-
-def test_two_task_calls_pair_by_sdk_id_out_of_order() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    a = {"subagent_name": "A", "task_description": "x"}
-    b = {"subagent_name": "B", "task_description": "y"}
-    st: dict = {}
-    kw = _pe_kwargs(elog, run_state, st)
-    process_event(_started("item_1", a), **kw)
-    process_event(_started("item_2", b), **kw)
-    process_event(_completed("item_2", b, result='{"r":"B"}'), **kw)   # out of order
-    process_event(_completed("item_1", a, result='{"r":"A"}'), **kw)
-    results = {e["payload"]["id"]: e["payload"]["content"]
-               for e in elog.read() if e["type"] == "tool_result"}
-    assert results["item_2"] == '{"r":"B"}'
-    assert results["item_1"] == '{"r":"A"}'
-
-
-def test_task_completed_without_started_emits_lone_result() -> None:
-    """AC5 no-pair path: a task item.completed with no prior item.started emits a
-    lone keyed tool_result (no re-opened call, no crash)."""
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    a = {"subagent_name": "A", "task_description": "x"}
-    process_event(_completed("item_9", a, result="ceiling"),
-                  **_pe_kwargs(elog, run_state, {}))
-    rows = list(elog.read())
-    assert [e for e in rows if e["type"] == "tool_call"] == []
-    res = [e for e in rows if e["type"] == "tool_result"]
-    assert len(res) == 1 and res[0]["payload"]["id"] == "item_9"
-    assert res[0]["payload"]["id_ns"] == "block"
 
 
 def test_non_task_item_completed_still_emits_call_and_result() -> None:
@@ -195,24 +126,26 @@ def test_prose_less_turn_emits_empty_prose_usage_carrier() -> None:
     assert llms[0]["payload"]["usage"]                      # usage attached to it
 
 
-def test_preamble_before_subagent_dispatch_leads_tool_call() -> None:
+def test_task_sdk_events_only_flush_prose_sequence_start_and_record_outcome() -> None:
     elog = InMemoryEventLog()
     run_state = RunState(cap=100)
     args = {"subagent_name": "impl", "task_description": "x"}
     st: dict = {"web_search_enabled": False}
     kw = _pe_kwargs(elog, run_state, st)
-    msg = FakeItemEvent(type="item.completed",
-                        item=FakeAgentMessageItem(text="dispatching impl"))
-    process_event(msg, **kw)
-    process_event(_started("item_1", args), **kw)   # task tool_call opens HERE
+    process_event(FakeItemEvent(
+        type="item.completed", item=FakeAgentMessageItem(text="dispatching impl")), **kw)
+
+    process_event(_started("item_1", args), **kw)
+
+    assert [e["type"] for e in elog.read()] == ["agent_message"]
+    ticket = run_state.task_starts.reserve()
+    asyncio.run(run_state.task_starts.wait_for_registration(ticket))
+    run_state.task_starts.release(ticket)
+
     process_event(_completed("item_1", args, result='{"status":"Success"}'), **kw)
-    process_event(FakeTurnCompletedEvent(
-        usage=FakeUsage(input_tokens=5, output_tokens=1)), **kw)
-    types = [e["type"] for e in elog.read()]
-    assert types.index("agent_message") < types.index("tool_call")
-    llms = [e for e in elog.read() if e["type"] == "agent_message"]
-    assert len(llms) == 1
-    assert llms[0]["payload"]["raw"]["content"] == [{"type": "text", "text": "dispatching impl"}]
+
+    assert not [e for e in elog.read() if e["type"] in ("tool_call", "tool_result")]
+    assert [outcome.name for outcome in st["turn_tool_outcomes"]] == ["sub_agent"]
 
 
 def test_non_task_mcp_result_is_unstamped() -> None:
@@ -225,125 +158,3 @@ def test_non_task_mcp_result_is_unstamped() -> None:
         provider="codex", model="gpt-5.5", run_state=RunState(cap=10, agent_id="step:t"))
     result = next(e for e in elog.read() if e["type"] == "tool_result")
     assert "id_ns" not in result["payload"]
-
-
-def _labeled_def(name: str, label: str) -> Any:
-    base = AgentDef(
-        name=name, description="", tools=frozenset(), subagents=(),
-        output_schema=OutputSchema(
-            fields=(OutputField(name="status", type="enum",
-                                values=("Success", "Error"), required=True),),
-            source=SourceLoc(file=Path("a.md"), line=1)),
-        prompt_template_source="hi", source_path=Path("a.md"),
-        source=SourceLoc(file=Path("a.md"), line=1))
-    return dataclasses.replace(base, label=label)
-
-
-def test_task_item_started_stamps_subagent_label() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    args = {"subagent_name": "explorer", "task_description": "x"}
-    process_event(
-        _started("item_1", args),
-        **_pe_kwargs(elog, run_state, {}),
-        subagent_defs={"explorer": _labeled_def("explorer", "exploring codebase")})
-    call = next(e for e in elog.read() if e["type"] == "tool_call")
-    assert call["payload"]["name"] == "sub_agent"
-    assert call["payload"]["label"] == "exploring codebase"
-
-
-def test_task_item_started_omits_label_when_def_unknown() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    args = {"subagent_name": "ghost", "task_description": "x"}
-    process_event(
-        _started("item_1", args),
-        **_pe_kwargs(elog, run_state, {}),
-        subagent_defs={})
-    call = next(e for e in elog.read() if e["type"] == "tool_call")
-    assert "label" not in call["payload"]
-
-
-def test_task_item_started_handles_string_arguments() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    args = json.dumps({"subagent_name": "explorer", "task_description": "x"})
-    process_event(
-        _started("item_1", args),
-        **_pe_kwargs(elog, run_state, {}),
-        subagent_defs={"explorer": _labeled_def("explorer", "exploring codebase")})
-    call = next(e for e in elog.read() if e["type"] == "tool_call")
-    assert call["payload"]["label"] == "exploring codebase"
-
-
-def test_task_item_started_records_the_open_fold() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    st: dict = {}
-    args = {"subagent_name": "explorer", "task_description": "go look"}
-    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
-    # Keyed to the agent the tool_call was journaled under, so the closer needs
-    # no extra plumbing to know where to write the result.
-    assert st["open_task_ids"] == {"item_1": "step:p/s"}
-
-
-def test_task_item_completed_pops_the_open_fold() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    st: dict = {}
-    args = {"subagent_name": "explorer", "task_description": "go look"}
-    kw = _pe_kwargs(elog, run_state, st)
-    process_event(_started("item_1", args), **kw)
-    process_event(_completed("item_1", args, result='{"r":"A"}'), **kw)
-    assert st["open_task_ids"] == {}
-    # A normally-closed dispatch leaves nothing for the closer to write.
-    close_open_task_folds(elog, st)
-    results = [e for e in elog.read() if e["type"] == "tool_result"]
-    assert len(results) == 1
-    assert results[0]["payload"]["content"] == '{"r":"A"}'
-    assert "kind" not in results[0]["payload"]
-
-
-def test_close_open_task_folds_pairs_the_dangling_call_and_drains() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    st: dict = {}
-    args = {"subagent_name": "explorer", "task_description": "go look"}
-    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
-
-    close_open_task_folds(elog, st)
-
-    records = list(elog.read())
-    call_ids = {e["payload"]["id"] for e in records if e["type"] == "tool_call"}
-    result_ids = {e["payload"]["id"] for e in records if e["type"] == "tool_result"}
-    assert call_ids - result_ids == set()
-    closer = next(e for e in records if e["type"] == "tool_result")
-    assert closer["agent_id"] == "step:p/s"
-    assert closer["payload"]["error"] is True
-    assert closer["payload"]["kind"] == "interrupted"
-    assert closer["payload"]["id_ns"] == "block"
-    assert closer["payload"]["content"].startswith("[interrupted]")
-    # Idempotent: the dict is drained, so a second call writes nothing.
-    close_open_task_folds(elog, st)
-    assert len([e for e in elog.read() if e["type"] == "tool_result"]) == 1
-
-
-def test_closed_fold_renders_interrupted_without_a_resume_sweep() -> None:
-    elog = InMemoryEventLog()
-    run_state = RunState(cap=100)
-    st: dict = {}
-    args = {"subagent_name": "explorer", "task_description": "go look"}
-    process_event(_started("item_1", args), **_pe_kwargs(elog, run_state, st))
-    close_open_task_folds(elog, st)
-
-    b = nv.NarrativeBuilder()
-    b.add({"id": "st", "agent_id": None, "type": "step_started",
-           "payload": {"step": "s", "kind": "agent", "phase": "p",
-                       "model": "m", "provider": "codex"}})
-    for rec in elog.read():
-        b.add(rec)
-
-    fold = next(c for c in b._step_stack[-1].children
-                if isinstance(c, nv.SubagentFold))
-    assert fold.running is False
-    assert fold.terminal_state == "interrupted"

@@ -42,15 +42,11 @@ from imp.agents.tools.context import (
     terminate_tool_processes,
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.transcript import (
-    _synthetic_tool_result_content,
-    deliver_continuation_reply,
-)
+from imp.agents.transcript import deliver_continuation_reply
 from imp.engine.agent_run import _resolve_wait_reply, continuation_nudge
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.env import quest_scratch_root
 from imp.engine.state import JsonlEventLog
-from imp.engine.types import AgentDef
 from imp.providers import errors as perr
 from imp.providers.codex_config import (
     AuthMode,
@@ -64,6 +60,7 @@ from imp.providers.codex_exec import Codex, CodexOptions, ThreadOptions
 from imp.providers.codex_mcp import (
     CODEX_APPROVAL_POLICY,
     RunState,
+    TaskStartCoordinator,
     start_impty_server,
     start_server,
 )
@@ -578,7 +575,6 @@ class CodexSession(ObserveSession):
                       state=self._proc_state,
                       provider=self.invocation.provider_name,
                       model=self.runner.model, run_state=state,
-                      subagent_defs=self.invocation.subagent_defs,
                       codex_home=self.runner._codex_home)
 
         # Mirror complete_step_args from the shared state into proc_state so the
@@ -714,6 +710,7 @@ class CodexSession(ObserveSession):
         state = self._state
         state.complete_step_called = False
         state.complete_step_args = {}
+        state.task_starts = TaskStartCoordinator()
 
 
 class CodexAgentRunner:
@@ -801,15 +798,6 @@ class CodexAgentRunner:
             # is wrapped so a rollout-IO failure never skips the auth-shredding
             # teardown_codex_home.
             try:
-                if self._ctx is not None:
-                    # Stream is definitively closed here, so no race with a late
-                    # item.completed; covers every abnormal exit, not just cancel.
-                    try:
-                        close_open_task_folds(self._ctx.event_log, self._proc_state)
-                    except Exception as exc:  # fold-close must not skip teardown
-                        _logger.warning(
-                            "codex: closing open sub_agent folds failed (events.jsonl"
-                            " may carry a dangling tool_call): %s", exc)
                 if self._stderr_token is not None:
                     current_stderr_sink.reset(self._stderr_token)
                 if self._stderr_sink is not None:
@@ -1062,22 +1050,9 @@ def _flush_codex_prose(
     state["turn_had_llm"] = True
 
 
-def close_open_task_folds(elog: Any, state: dict[str, Any]) -> None:
-    """Emit closing tool_result for any sub_agent fold whose item.completed never arrived."""
-    for item_id, agent_id in state.pop("open_task_ids", {}).items():
-        elog.append_tool_result(
-            agent_id=agent_id,
-            block=ToolResultBlock(
-                tool_use_id=item_id,
-                content=_synthetic_tool_result_content("sub_agent"),
-                is_error=True),
-            id_ns="block", kind="interrupted")
-
-
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str, run_state: Any = None,
-    subagent_defs: dict[str, AgentDef] | None = None,
     codex_home: Path | None = None,
 ) -> None:
     """Translate one codex ThreadEvent into imp EventLog records.
@@ -1109,47 +1084,17 @@ def process_event(
         state["thread_id"] = getattr(event, "thread_id", None)
         return
 
-    # `item.started` — open the task fold keyed on the codex item id (quest 2).
-    # codex emits item.started (status="in_progress") for an mcp_tool_call
-    # before item.completed, carrying the SAME id; opening the task tool_call here
-    # lets out-of-order sibling completion pair by id with no re-key. Non-task
-    # item.started carries no final content and is intentionally ignored.
     if etype == "item.started":
         item = getattr(event, "item", None)
         name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
         if getattr(item, "type", None) == "mcp_tool_call" and name == "sub_agent":
-            item_id = getattr(item, "id", "") or ""
-            args = getattr(item, "arguments", None) or {}
-            # `arguments` may be a JSON string; mirror the item.completed guard.
-            if isinstance(args, str):
-                try:
-                    parsed = json.loads(args)
-                except (ValueError, TypeError):
-                    parsed = None
-                lookup = parsed if isinstance(parsed, dict) else {}
-            elif isinstance(args, dict):
-                lookup = args
-            else:
-                lookup = {}
-            defs = subagent_defs or {}
-            sn = lookup.get("subagent_name")
-            sub_def = defs.get(sn) if isinstance(sn, str) else None
-            label = sub_def.label if sub_def is not None else None
-            # text->tool transition: a preamble before a sub_agent dispatch must
-            # lead its tool_call, and the task tool_call opens HERE (not at
-            # item.completed), so flush the prose buffer now.
             _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
                                model=model, state=state, output_tokens=None)
-            elog.append_tool_call(
-                agent_id=agent_id,
-                block=ToolUseBlock(id=item_id, name="sub_agent", input=args),
-                label=label, id_ns="block")
-            state.setdefault("open_task_ids", {})[item_id] = agent_id
+            if run_state is not None:
+                run_state.task_starts.task_started()
         return
 
     # `item.completed` — dispatch on the item's own type.
-    # (A task `item.started` is handled just above — it opens the fold; only its
-    # `item.completed` carries the final content that closes it.)
     if etype == "item.completed":
         item = getattr(event, "item", None)
         itype = getattr(item, "type", None)
@@ -1174,8 +1119,8 @@ def process_event(
             return
         if itype == "mcp_tool_call":
             # text->tool transition: a preamble's prose must lead this call's
-            # tool_call. For a task (sub_agent) whose call already opened at
-            # item.started the buffer is already empty here (no-op).
+            # tool_call. For a task (sub_agent), item.started already flushed the
+            # buffer, so this completion-side flush is a no-op.
             _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
                                model=model, state=state, output_tokens=None)
             # codex's `McpToolCallItem` exposes `tool` + `server`, NOT `name`;
@@ -1207,28 +1152,17 @@ def process_event(
             else:
                 content = _serialize_mcp_result(getattr(item, "result", None))
             call_id = item_id
-            task_id_ns: str | None
-            if name == "sub_agent":
-                # quest 2: the task tool_call was opened at item.started keyed on
-                # this same codex id and stamped id_ns="block"; close the fold here
-                # with the matching result. A task item with no prior item.started
-                # (the no-pair path) still emits a lone keyed result.
-                task_id_ns = "block"
-                state.get("open_task_ids", {}).pop(item_id, None)
-            else:
-                # Non-task tool: emit the tool_call/result pair keyed on the codex id.
-                task_id_ns = None
+            if name != "sub_agent":
                 elog.append_tool_call(
                     agent_id=agent_id,
                     block=ToolUseBlock(id=call_id, name=name, input=args),
                 )
-            elog.append_tool_result(
-                agent_id=agent_id,
-                block=ToolResultBlock(
-                    tool_use_id=call_id, content=content, is_error=is_error,
-                ),
-                id_ns=task_id_ns,
-            )
+                elog.append_tool_result(
+                    agent_id=agent_id,
+                    block=ToolResultBlock(
+                        tool_use_id=call_id, content=content, is_error=is_error,
+                    ),
+                )
             if name == "complete_step":
                 # Fallback capture from the RAW codex item args. When the
                 # in-process wrapper's RunState capture ran, the consume loop's
