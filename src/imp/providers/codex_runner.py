@@ -942,12 +942,10 @@ class CodexAgentRunner:
         """The design's exact production flags. Lives in its own method so the
         test seam can replace it without touching `CodexSession._enter`.
 
-        `tier` sets `model_reasoning_effort` to match the claude providers'
-        per-tier posture (see anthropic._anthropic_thinking_posture): medium and
-        high both run at 'high', low and an untiered invocation leave it unset so
-        codex keeps its own default. `tier` defaults to None so the arg-less test
-        seam keeps working. Note codex's effort ladder tops out at 'high' —
-        Sol's 'max' / ultra mode is not reachable through this field.
+        `medium` and `high` set `model_reasoning_effort` to 'high'. `low` and an
+        untiered invocation leave it unset so Codex keeps its own default. `tier`
+        defaults to None so the arg-less test seam works. Imp deliberately selects
+        no effort above 'high'.
 
         There is deliberately no web-search field: codex >=0.137 deprecated the
         `features.web_search_request` flag (it no longer disables and emits a

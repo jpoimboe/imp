@@ -107,8 +107,8 @@ OPENAI: dict[str, ModelInfo] = {
         max_output_tokens=128_000,
         soft_cap=260_000,
     ),
-    # 5.6 flavors (imp.providers.BUILTIN_FLOOR): one generation, three sizes —
-    # luna < terra < sol. All four share a 1.05M window and a 128k output cap.
+    # 5.6 flavors: one generation, three sizes — luna < terra < sol.
+    # All four share a 1.05M window and a 128k output cap.
     # The bare `gpt-5.6` alias routes to Sol; it is here only so limits
     # resolution can cap it, and is hidden from the /model roster
     # (model_command._HIDDEN_ALIASES) because an operator writing it into a

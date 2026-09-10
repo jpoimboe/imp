@@ -7,6 +7,7 @@ from imp.paths import project_state_dir
 from imp.providers import register_builtin_providers, resolve
 from imp.providers.config import parse_config_layer
 from imp.providers.effective import (
+    FLOOR_SRC,
     load_effective_config,
     resolve_default_workflow,
 )
@@ -22,13 +23,63 @@ def _registry() -> None:
 
 
 def test_floor_only_populates_all_tiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("IMP_HOME", str(tmp_path / "imphome"))  # no global config
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir()
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
     eff = load_effective_config()
     cfg = eff.config
-    assert cfg.tiers["high"]["anthropic"] == "claude-opus-5[1m]"
+    assert cfg.tiers["low"]["codex"] == "gpt-5.6-luna"
+    assert cfg.tiers["medium"]["codex"] == "gpt-5.6-terra"
+    assert cfg.tiers["high"]["codex"] == "gpt-6-astra"
     assert cfg.tiers["high"]["openai"] == "gpt-5.6-sol"
-    # Floor provenance points at provider code.
-    assert "provider code" in str(eff.provenance[("tiers", "high", "anthropic")].file)
+    assert eff.provenance[("tiers", "high", "codex")].file == FLOOR_SRC.file
+
+
+@pytest.mark.parametrize("layer", ["project", "global", "local"])
+def test_codex_high_model_override_from_each_layer(
+    layer: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir()
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    control = tmp_path / "control"
+    project_path = control / "imp" / "config.yaml"
+    project_path.parent.mkdir(parents=True)
+    override_paths = {
+        "project": project_path,
+        "global": imp_home / "config.yaml",
+        "local": project_state_dir(control) / "config.yaml",
+    }
+    override_path = override_paths[layer]
+    override_path.write_text(
+        f"tiers:\n  high: {{codex: {layer}-astra-override}}\n"
+    )
+
+    eff = load_effective_config(control_root=control)
+
+    assert eff.config.tiers["high"]["codex"] == f"{layer}-astra-override"
+    assert eff.provenance[("tiers", "high", "codex")].file == override_path
+
+
+def test_codex_high_local_override_beats_global_and_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir()
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    control = tmp_path / "control"
+    project_path = control / "imp" / "config.yaml"
+    project_path.parent.mkdir(parents=True)
+    global_path = imp_home / "config.yaml"
+    local_path = project_state_dir(control) / "config.yaml"
+    project_path.write_text("tiers:\n  high: {codex: project-astra}\n")
+    global_path.write_text("tiers:\n  high: {codex: global-astra}\n")
+    local_path.write_text("tiers:\n  high: {codex: local-astra}\n")
+
+    eff = load_effective_config(control_root=control)
+
+    assert eff.config.tiers["high"]["codex"] == "local-astra"
+    assert eff.provenance[("tiers", "high", "codex")].file == local_path
 
 
 def test_project_leaf_override_is_additive_over_floor(

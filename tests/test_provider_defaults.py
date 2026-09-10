@@ -160,7 +160,11 @@ _EXPECTED_FLOOR: dict[str, tuple[dict[str, str] | None, str | None]] = {
         None,
     ),
     "codex": (
-        {"low": "gpt-5.6-luna", "medium": "gpt-5.6-terra", "high": "gpt-5.6-sol"},
+        {
+            "low": "gpt-5.6-luna",
+            "medium": "gpt-5.6-terra",
+            "high": "gpt-6-astra",
+        },
         None,
     ),
     "scripted": (None, "IMP_SCRIPTED_SCRIPT"),

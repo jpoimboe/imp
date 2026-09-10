@@ -45,6 +45,27 @@ def test_render_shows_floor_provenance(tmp_path: Path, monkeypatch: pytest.Monke
     assert "theme" in text and "light" in text  # user-set leaf shown
 
 
+def test_render_shows_astra_as_codex_high_provider_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    imp_home = tmp_path / "imphome"
+    imp_home.mkdir()
+    (imp_home / "config.yaml").write_text("providers: [codex]\n")
+    monkeypatch.setenv("IMP_HOME", str(imp_home))
+    eff = load_effective_config()
+    out = io.StringIO()
+
+    render_config(eff, out, state_dir=None, color=False)
+
+    row = next(
+        line.strip()
+        for line in out.getvalue().splitlines()
+        if line.strip().startswith("high codex ")
+    )
+    assert row.split()[:3] == ["high", "codex", "gpt-6-astra"]
+    assert row.endswith("[provider default]")
+
+
 def test_render_shows_test_cmd_unset_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
