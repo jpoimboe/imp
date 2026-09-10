@@ -384,9 +384,11 @@ async def test_wait_selects_immediate_current_record_and_stops_without_quota(
 async def test_wait_observes_record_on_third_poll_then_stops_on_that_scan(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = _codex_home(tmp_path, records=[])
+    raw_usage = _completed_usage()
+    _append_token_count(home, raw_usage, 12_000)
     telemetry = RolloutTelemetry(home, "thr-1")
     cursor = telemetry.begin_turn()
-    usage = _rollout_usage(_completed_usage())
+    usage = _rollout_usage(raw_usage)
     now = [10.0]
     scans: list[float] = []
     delays: list[float] = []
@@ -408,11 +410,11 @@ async def test_wait_observes_record_on_third_poll_then_stops_on_that_scan(
 
     async def writer() -> None:
         await third_poll.wait()
-        _append_token_count(home, _completed_usage(), 17_447, rate_limits=_LIMITS)
+        _append_token_count(home, raw_usage, 17_447, rate_limits=_LIMITS)
         appended.set()
 
     monkeypatch.setattr(RolloutTelemetry, "scan_current", scan)
-    monkeypatch.setattr(cr.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(cr, "time", SimpleNamespace(monotonic=lambda: now[0]))
     monkeypatch.setattr(cr.asyncio, "sleep", sleep)
 
     with anyio.fail_after(30):

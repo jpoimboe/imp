@@ -427,7 +427,13 @@ def test_late_record_before_next_cursor_clears_pending_turn(tmp_path: Path) -> N
     with rollout.open("a") as stream:
         stream.write(_token_count_line())
     second_cursor = telemetry.begin_turn()
-    current_usage = _usage(output_tokens=900)
+
+    assert telemetry._pending == []
+    assert [frontier for _, _, frontier in second_cursor.entries] == [
+        rollout.stat().st_size,
+    ]
+
+    current_usage = _USAGE
     with rollout.open("a") as stream:
         stream.write(_token_count_line(usage=current_usage, total_tokens=25000))
 
