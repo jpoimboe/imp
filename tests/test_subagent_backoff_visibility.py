@@ -51,18 +51,19 @@ def _lead_inv(tmp_path: Path, fake: Any) -> AgentInvocation:
 
 
 @pytest.mark.anyio
-async def test_subagent_backoff_emits_agent_retry(
+async def test_subagent_capacity_backoff_preserves_retry_diagnostic(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         provider_registry) -> None:
-    """A subagent backoff respawn emits one agent_retry under the subagent's agent_id."""
     from imp.providers.anthropic import AnthropicAgentRunner
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    diagnostic = "codex: Selected model is at capacity. Please try a different model."
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
         return None
     monkeypatch.setattr("imp.agents.subagents._interruptible_sleep", _no_sleep)
 
-    class _RateLimitThenOkRunner:
+    class _CapacityThenOkRunner:
         def __init__(self, fail: bool) -> None:
             self.fail = fail
 
@@ -72,8 +73,8 @@ async def test_subagent_backoff_emits_agent_retry(
                 Message(role="user", content=(TextBlock(text="work"),)))
             if self.fail:
                 yield {"type": "error", "payload": {
-                    "category": "rate_limit", "kind": "rate_limit",
-                    "message": "429 rate limited"}}
+                    "category": "network", "kind": "NetworkError",
+                    "message": diagnostic, "detail": {}}}
             else:
                 yield {"type": "agent_result",
                        "payload": {"status": "Success", "outcome": "done"}}
@@ -88,9 +89,9 @@ async def test_subagent_backoff_emits_agent_retry(
         model = "m"
 
         def create_runner(self, _inv):
-            i = spawns["n"]
+            fail = spawns["n"] == 0
             spawns["n"] += 1
-            return _RateLimitThenOkRunner(fail=(i == 0))
+            return _CapacityThenOkRunner(fail)
 
     provider_registry("fake", lambda: True, lambda _m: _SubProvider())
 
@@ -108,14 +109,33 @@ async def test_subagent_backoff_emits_agent_retry(
     events = [json.loads(line)
               for line in (tmp_path / "events.jsonl").read_text().splitlines()
               if line]
-    retries = [e for e in events if e["type"] == "agent_retry"]
-    assert len(retries) == 1
-    assert retries[0]["payload"]["category"] == "rate_limit"
-    assert retries[0]["payload"]["attempt"] == 1
-    # error_policy.decide for prior_backoff_attempts=0 yields min(60, max(2**0, 0)) = 1.0.
-    assert retries[0]["payload"]["backoff_seconds"] == 1.0
-    # Folds under the subagent, not the parent step.
-    assert retries[0]["agent_id"].startswith("sub:")
+    retry_index, retry = next(
+        (index, event) for index, event in enumerate(events)
+        if event["type"] == "agent_retry")
+    assert [event for event in events if event["type"] == "agent_retry"] == [retry]
+    assert retry["payload"] == {
+        "category": "network",
+        "attempt": 1,
+        "backoff_seconds": 1.0,
+        "message": diagnostic,
+    }
+    assert retry["agent_id"].startswith("sub:")
+
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import render_tree
+
+    narrative_events = [
+        {**event, "payload": {**event["payload"], "provider": "anthropic"}}
+        if event["type"] == "agent_message" else event
+        for event in events[:retry_index + 1]
+    ]
+    builder = nv.NarrativeBuilder()
+    for event in narrative_events:
+        builder.add(event)
+    assert builder.current_activity().verb == "network - waiting to retry"
+    rendered = "\n".join(render_tree(
+        nv.build_tree(narrative_events), full=True, color=False, width=160))
+    assert f"[network] retry 1 (1.0s) — {diagnostic}" in rendered
 
 
 @pytest.mark.anyio

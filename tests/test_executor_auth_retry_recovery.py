@@ -203,6 +203,76 @@ async def test_auth_retry_recovers_through_backoff_loop(
 
 
 @pytest.mark.anyio
+async def test_network_retry_preserves_capacity_diagnostic(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+    diagnostic = "codex: Selected model is at capacity. Please try a different model."
+
+    class _Runner:
+        def __init__(self, fail: bool) -> None:
+            self.fail = fail
+
+        async def run(self, _inv: AgentInvocation):
+            if self.fail:
+                yield {"type": "error", "payload": {
+                    "category": "network", "kind": "NetworkError",
+                    "message": diagnostic, "detail": {}}}
+            else:
+                yield {"type": "agent_result",
+                       "payload": {"status": "Success", "outcome": "done"}}
+
+        async def interrupt(self) -> None:
+            ...
+
+    spawns = {"n": 0}
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> _Runner:
+            fail = spawns["n"] == 0
+            spawns["n"] += 1
+            return _Runner(fail)
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    async def _no_sleep(_delay: float, _coordinator: Any, **_kw: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    from imp.engine.archive import read as archive_read
+    archive_read.rehydrate_quest(quest.control_root, quest.id)
+    events = list(quest.event_log().read())
+    retry_index, retry = next(
+        (index, event) for index, event in enumerate(events)
+        if event["type"] == "agent_retry")
+    assert retry["payload"] == {
+        "category": "network",
+        "attempt": 1,
+        "backoff_seconds": 1.0,
+        "message": diagnostic,
+        "kind": "NetworkError",
+    }
+
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import render_tree
+
+    builder = nv.NarrativeBuilder()
+    for event in events[:retry_index + 1]:
+        builder.add(event)
+    assert builder.current_activity().verb == "network - waiting to retry"
+    rendered = "\n".join(render_tree(
+        nv.build_tree(events[:retry_index + 1]), full=True, color=False, width=160))
+    assert f"[network] retry 1 (1.0s) — {diagnostic}" in rendered
+
+
+
+@pytest.mark.anyio
 async def test_concurrency_400_retry_recovers_through_backoff_loop(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
