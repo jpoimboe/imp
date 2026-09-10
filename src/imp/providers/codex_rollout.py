@@ -84,8 +84,8 @@ def quota_from_rate_limits(block: Any) -> QuotaReading | None:
 
 @dataclass(frozen=True, slots=True)
 class RolloutReadings:
-    """Both readings one rollout pass yields. Each is the last VALID of its own
-    kind: `rate_limits` can be null on a record whose token counts are good."""
+    """Correlated context and quota from one `token_count` record. Quota may be
+    absent or null when context is valid."""
 
     context: tuple[int, int] | None
     quota: QuotaReading | None
