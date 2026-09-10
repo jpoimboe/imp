@@ -58,6 +58,49 @@ def _three_level_stream() -> list[dict]:
     ]
 
 
+def _walk_semantic_tree(node):
+    yield node
+    for child in getattr(node, "children", ()):
+        yield from _walk_semantic_tree(child)
+    if isinstance(node, nv.SubagentFold):
+        yield from _walk_semantic_tree(node.tree.root)
+
+
+def _assert_three_level_stream_closed(drv: LiveDriver, out: _Pipe) -> None:
+    parent_builder = drv._builder._retired_descendant_builders["sub:parent"]
+    grandchild_builder = (
+        drv._builder._retired_descendant_builders["sub:grandchild"]
+    )
+    parent = parent_builder._owner_fold
+    grandchild = grandchild_builder._owner_fold
+
+    assert parent is not None and grandchild is not None
+    assert any(child is grandchild for child in parent.tree.root.children)
+    assert drv._builder._descendant_builders == {}
+    assert drv._builder._salvage_result_owners == {}
+    for owner in (drv._builder, parent_builder, grandchild_builder):
+        assert owner._open_sub_by_block == {}
+        assert owner._open_sub_by_event == {}
+    assert (parent.running, grandchild.running) == (False, False)
+    assert (parent.outcome, grandchild.outcome) == (
+        "parent done",
+        "grandchild done",
+    )
+    tree_wide_deep = [
+        node
+        for node in _walk_semantic_tree(drv._builder.tree.root)
+        if isinstance(node, nv.AgentTextNode) and node.text == "deep finding"
+    ]
+    grandchild_deep = [
+        node
+        for node in _walk_semantic_tree(grandchild.tree.root)
+        if isinstance(node, nv.AgentTextNode) and node.text == "deep finding"
+    ]
+    assert len(tree_wide_deep) == 1
+    assert tree_wide_deep == grandchild_deep
+    assert "matched no open fold" not in out.getvalue()
+
+
 def _cats_body(events, cats: frozenset[str]) -> list[str]:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
@@ -419,6 +462,8 @@ def test_three_level_stream_live_matches_replay() -> None:
     for event in events:
         drv.on_event(event)
     drv.finish()
+
+    _assert_three_level_stream_closed(drv, out)
     assert _body(out) == _render_body(events)
 
 
@@ -428,6 +473,8 @@ def test_replayed_three_level_stream_stays_balanced() -> None:
     for event in events:
         drv.on_event({**event, "_replay": True})
     drv.finish()
+
+    _assert_three_level_stream_closed(drv, out)
     assert _body(out) == _render_body(events)
 
 
