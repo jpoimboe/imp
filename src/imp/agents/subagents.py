@@ -487,6 +487,8 @@ async def dispatch_task(
                         "attempt": backoff,
                         "backoff_seconds": result.delay,
                     }
+                    if result.error is not None and result.error.message:
+                        retry_payload["message"] = result.error.message
                     if hinted:
                         retry_payload["hinted"] = True
                     ctx.event_log.append(
