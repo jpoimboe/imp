@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from imp.engine import durable
 from imp.engine.archive import record
 
 
@@ -48,6 +49,44 @@ def test_write_then_read_record_roundtrips(tmp_path: Path) -> None:
     path = record.write_record(records_dir, rec)
     assert path == records_dir / "alpha.json"
     assert record.read_record(records_dir, "alpha") == rec
+
+
+def test_write_record_replaces_before_fsyncing_records_directory(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    records_dir = tmp_path / "records"
+    rec = record.build_record(_quest_meta(), _final_state(), "hash123")
+    calls: list[tuple[str, Path]] = []
+    real_fsync_file = durable._fsync_file
+    real_replace = durable.os.replace
+    real_fsync_directory = durable.fsync_directory
+
+    def fsync_file(stream, path: Path) -> None:
+        calls.append(("file", path.parent))
+        real_fsync_file(stream, path)
+
+    def replace(src, target) -> None:
+        calls.append(("replace", Path(target)))
+        real_replace(src, target)
+
+    def fsync_directory(path: Path) -> None:
+        calls.append(("directory", path))
+        real_fsync_directory(path)
+
+    monkeypatch.setattr(durable, "_fsync_file", fsync_file)
+    monkeypatch.setattr(durable.os, "replace", replace)
+    monkeypatch.setattr(durable, "fsync_directory", fsync_directory)
+
+    path = record.write_record(records_dir, rec)
+
+    assert (calls, record.read_record(records_dir, "alpha")) == (
+        [
+            ("file", records_dir),
+            ("replace", path),
+            ("directory", records_dir),
+        ],
+        rec,
+    )
 
 
 def test_read_record_absent_returns_none(tmp_path: Path) -> None:

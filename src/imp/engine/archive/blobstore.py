@@ -10,10 +10,10 @@ content, so writing identical bytes is deterministic and dedup'ing.
 from __future__ import annotations
 
 import hashlib
-import os
-import tempfile
 from pathlib import Path
 from typing import Protocol
+
+from imp.engine import durable
 
 
 def hash_content(content: bytes) -> str:
@@ -41,16 +41,15 @@ class LocalBlobStore:
     def put(self, content: bytes) -> str:
         digest = hash_content(content)
         dest = self._path_for(digest)
+        self.root.mkdir(parents=True, exist_ok=True)
+        dest.parent.mkdir(exist_ok=True)
         if dest.exists():
-            return digest
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=dest.parent)
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(content)
-            os.replace(tmp, dest)
-        finally:
-            Path(tmp).unlink(missing_ok=True)
+            durable.fsync_file(dest)
+            durable.fsync_directory(dest.parent)
+        else:
+            durable.durable_replace_bytes(dest, content)
+        durable.fsync_directory(self.root)
+        durable.fsync_directory(self.root.parent)
         return digest
 
     def has(self, digest: str) -> bool:

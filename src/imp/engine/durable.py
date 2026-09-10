@@ -17,6 +17,11 @@ def _fsync_file(stream: BinaryIO, path: Path) -> None:
     os.fsync(stream.fileno())
 
 
+def fsync_file(path: Path) -> None:
+    with path.open("rb") as stream:
+        _fsync_file(stream, path)
+
+
 def fsync_directory(path: Path) -> None:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     fd = os.open(path, flags)

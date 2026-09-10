@@ -37,13 +37,7 @@ def _reject_json_constant(value: str) -> None:
     raise InvalidResumeState()
 
 
-def read_native_resume_state(state_dir: Path) -> NativeResumeState | None:
-    path = state_dir / RESUME_STATE_NAME
-    try:
-        raw = path.read_bytes()
-    except FileNotFoundError:
-        return None
-
+def parse_native_resume_state(raw: bytes) -> NativeResumeState:
     try:
         data = json.loads(
             raw.decode("utf-8"),
@@ -64,6 +58,15 @@ def read_native_resume_state(state_dir: Path) -> NativeResumeState | None:
     if not isinstance(state, dict):
         raise InvalidResumeState()
     return NativeResumeState(provider=provider, state=state)
+
+
+def read_native_resume_state(state_dir: Path) -> NativeResumeState | None:
+    path = state_dir / RESUME_STATE_NAME
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    return parse_native_resume_state(raw)
 
 
 def encode_native_resume_state(resume_state: NativeResumeState) -> bytes:

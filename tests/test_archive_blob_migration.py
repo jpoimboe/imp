@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine import archive
+from imp.engine import archive, durable
 from imp.engine.archive import record
 from imp.engine.archive.blobstore import LocalBlobStore
 
@@ -260,6 +260,43 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
 
 def test_data_version_bumped_to_eleven() -> None:
     assert archive._DATA_VERSION == 11
+
+
+def test_write_data_version_durably_replaces_exact_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = archive.data_version_path(tmp_path)
+    calls: list[tuple[str, Path]] = []
+    real_fsync_file = durable._fsync_file
+    real_replace = durable.os.replace
+    real_fsync_directory = durable.fsync_directory
+
+    def fsync_file(stream, path: Path) -> None:
+        calls.append(("file", path.parent))
+        real_fsync_file(stream, path)
+
+    def replace(src, target) -> None:
+        calls.append(("replace", Path(target)))
+        real_replace(src, target)
+
+    def fsync_directory(path: Path) -> None:
+        calls.append(("directory", path))
+        real_fsync_directory(path)
+
+    monkeypatch.setattr(durable, "_fsync_file", fsync_file)
+    monkeypatch.setattr(durable.os, "replace", replace)
+    monkeypatch.setattr(durable, "fsync_directory", fsync_directory)
+
+    archive._write_data_version(tmp_path, 12)
+
+    assert (calls, marker.read_bytes()) == (
+        [
+            ("file", marker.parent),
+            ("replace", marker),
+            ("directory", marker.parent),
+        ],
+        b"12",
+    )
 
 
 def test_ensure_current_rewrites_imp_workflow_to_default(tmp_path: Path) -> None:

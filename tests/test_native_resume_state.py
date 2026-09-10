@@ -7,6 +7,7 @@ from imp.engine.resume_state import (
     InvalidResumeState,
     NativeResumeState,
     encode_native_resume_state,
+    parse_native_resume_state,
     read_native_resume_state,
 )
 from imp.providers.resolve import provider_is_available, provider_is_registered
@@ -14,6 +15,23 @@ from imp.providers.resolve import provider_is_available, provider_is_registered
 
 def test_missing_native_resume_state_returns_none(tmp_path) -> None:
     assert read_native_resume_state(tmp_path) is None
+
+
+def test_parse_native_resume_state_accepts_valid_raw_bytes() -> None:
+    raw = b'{"schema_version":1,"provider":"codex","state":{"thread_id":"thread-archive"}}'
+
+    assert parse_native_resume_state(raw) == NativeResumeState(
+        provider="codex", state={"thread_id": "thread-archive"})
+
+
+def test_duplicate_schema_version_is_rejected_by_parser_and_reader(tmp_path) -> None:
+    raw = b'{"schema_version":1,"schema_version":1,"provider":"codex","state":{}}'
+    (tmp_path / RESUME_STATE_NAME).write_bytes(raw)
+
+    with pytest.raises(InvalidResumeState):
+        parse_native_resume_state(raw)
+    with pytest.raises(InvalidResumeState):
+        read_native_resume_state(tmp_path)
 
 
 def test_native_resume_state_round_trips_opaque_nested_state(tmp_path) -> None:

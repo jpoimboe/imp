@@ -16,6 +16,7 @@ from typing import Any
 
 import filelock
 
+from imp.engine import durable
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.errors import ArchiveMismatch
@@ -146,7 +147,10 @@ def rebuild_index(control_root: Path) -> None:
                     index.ingest(conn, rec, events)
         finally:
             conn.close()
+        with open(tmp, "rb") as stream:
+            os.fsync(stream.fileno())
         os.replace(tmp, index_path(control_root))
+        durable.fsync_directory(archive_root(control_root))
     finally:
         Path(tmp).unlink(missing_ok=True)
 
@@ -193,18 +197,8 @@ def _read_data_version(control_root: Path) -> int:
 
 def _write_data_version(control_root: Path, version: int) -> None:
     archive_root(control_root).mkdir(parents=True, exist_ok=True)
-    path = data_version_path(control_root)
-    fd, tmp = tempfile.mkstemp(prefix=".data_version-", dir=archive_root(control_root))
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(str(version))
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(tmp)
-        raise
+    durable.durable_replace_bytes(
+        data_version_path(control_root), str(version).encode("ascii"))
 
 
 def _serialize_events(events: list[dict[str, Any]]) -> bytes:
