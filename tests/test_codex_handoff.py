@@ -49,24 +49,22 @@ def _agent_def() -> AgentDef:
 @pytest.mark.anyio
 async def test_threshold_crossing_elicits_codex_handoff(
         tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
-    """A codex turn whose reported occupancy crosses the model cutoff,
-    260000 / 400000 = 0.65 against the live SDK window, without completing the
-    step elicits the handoff instruction as the next prompt; the following turn
-    yields the terminal `handoff` event."""
+    """A codex turn at the 160000/400000 = 0.40 cutoff elicits the
+    handoff instruction; the following turn yields the terminal event."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
     fake_codex_rollout_readings[0] = RolloutReadings(
-        context=(350_000, 400_000), quota=None)
+        context=(160_000, 400_000), quota=None)
 
     scripted = [
-        # Turn 1: the reading crosses (350000/400000 = 0.875), no complete_step.
+        # Turn 1 reaches the cutoff (160000/400000 = 0.40), no complete_step.
         [thread_started("thr-1"), agent_message("working on it"),
-         turn_completed(input_tokens=350_000)],
+         turn_completed(input_tokens=1_000)],
         # Turn 2: the agent writes the handoff as instructed (no complete_step);
         # the runner emits the terminal `handoff` at this turn's boundary.
         [agent_message("wrote the handoff"),
-         turn_completed(input_tokens=350_000)],
+         turn_completed(input_tokens=1_000)],
     ]
     runner = CodexAgentRunner(
         model_name="gpt-5.5",
@@ -103,14 +101,14 @@ async def test_silent_handoff_turn_does_not_write_note(
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
     fake_codex_rollout_readings[0] = RolloutReadings(
-        context=(350_000, 400_000), quota=None)
+        context=(160_000, 400_000), quota=None)
 
     scripted = [
-        # Turn 1: the reading crosses (350000/400000 = 0.875).
+        # Turn 1 reaches the cutoff (160000/400000 = 0.40).
         [thread_started("thr-1"), agent_message("working on it"),
-         turn_completed(input_tokens=350_000)],
+         turn_completed(input_tokens=1_000)],
         # Turn 2: agent is completely silent (no agent_message).
-        [turn_completed(input_tokens=350_000)],
+        [turn_completed(input_tokens=1_000)],
     ]
     runner = CodexAgentRunner(
         model_name="gpt-5.5",
@@ -166,25 +164,25 @@ async def test_below_threshold_does_not_elicit_codex_handoff(tmp_path: Path) -> 
 
 
 @pytest.mark.anyio
-async def test_completing_turn_above_threshold_completes_not_handoff(
+async def test_completing_turn_at_threshold_completes_not_handoff(
         tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
-    """Completion wins over a mere crossing: a turn whose reading crosses the
-    threshold (350000/400000 = 0.875) AND calls complete_step yields
+    """Completion wins at the threshold: a turn whose reading reaches the
+    cutoff (160000/400000 = 0.40) AND calls complete_step yields
     agent_result, never a handoff. Pins the ordering invariant (complete_step
     check precedes crossing detection) against a reordering regression — so the
     crossing must be real, not absent."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     fake_codex_rollout_readings[0] = RolloutReadings(
-        context=(350_000, 400_000), quota=None)
+        context=(160_000, 400_000), quota=None)
 
     from tests.codex_fakes import mcp_call
     scripted = [[
         thread_started("thr-1"), agent_message("done"),
         mcp_call(name="complete_step", args={"answer": "42"},
                  result="ok", item_id="cs-1"),
-        # 350000/400000 = 0.875 >= 0.65 -> crosses, but the turn completes.
-        turn_completed(input_tokens=350_000),
+        # 160000/400000 = 0.40 reaches the cutoff, but the turn completes.
+        turn_completed(input_tokens=1_000),
     ]]
     runner = CodexAgentRunner(
         model_name="gpt-5.5",
@@ -208,13 +206,13 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
 @pytest.mark.anyio
 async def test_rollout_reading_at_cutoff_elicits_handoff(
         tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
-    """The watch runs on codex's own reading: 206720/258400 = 0.80 hits the
-    cutoff even though this turn's billing sum (1000) is nowhere near it."""
+    """The watch uses Codex's live reading: 160000/258400 reaches the preserved
+    160k default-ceiling cutoff while this turn's 1,000-token billing sum does not."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
     fake_codex_rollout_readings[0] = RolloutReadings(
-        context=(206_720, 258_400), quota=None)
+        context=(160_000, 258_400), quota=None)
 
     scripted = [
         [thread_started("thr-1"), agent_message("working on it"),
@@ -248,9 +246,9 @@ async def test_rollout_reading_at_cutoff_elicits_handoff(
 async def test_low_or_absent_reading_suppresses_handoff_on_a_huge_turn_sum(
         tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings],
         reading: tuple[int, int] | None) -> None:
-    """Regression pin. A 300k turn sum crosses the OLD test (300000/1050000 >=
-    the 260000/1050000 soft-cap fraction for gpt-5.6-luna), but real occupancy
-    is 30000/258400 — so no handoff fires and the agent finishes its work."""
+    """A 300k aggregate billing sum exceeds the preserved 160k default ceiling,
+    but Codex handoff uses the live rollout occupancy. A low or absent reading
+    therefore lets the agent finish without a handoff."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     from tests.codex_fakes import mcp_call

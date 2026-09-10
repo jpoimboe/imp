@@ -3,6 +3,7 @@ from __future__ import annotations
 from imp.providers.catalog import (
     ANTHROPIC,
     CLAUDE_CODE,
+    DEFAULT_CHECKPOINT_CEILING,
     DEFAULT_CHECKPOINT_FRACTION,
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_WINDOW,
@@ -94,16 +95,13 @@ def test_context_threshold_crossed_without_usage_never_fires() -> None:
 
 def test_gpt_5_6_crosses_at_the_ceiling_on_both_providers() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # The 160k ceiling is lower than the retained 260k billing cap, so it is
-    # what fires; 259k, which used to sit just under the cap, now crosses.
+    # With no explicit soft cap, legacy models cross at the 160k default ceiling.
     for provider in ("openai", "codex"):
         for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
             assert context_threshold_crossed(
-                {"input_tokens": 161_000}, provider, model) is True
+                {"input_tokens": 159_999}, provider, model) is False
             assert context_threshold_crossed(
-                {"input_tokens": 259_000}, provider, model) is True
-            assert context_threshold_crossed(
-                {"input_tokens": 159_000}, provider, model) is False
+                {"input_tokens": 160_000}, provider, model) is True
 
 
 def test_claude_opus_5_1m_crosses_at_the_ceiling_not_at_800k() -> None:
@@ -119,15 +117,19 @@ def test_claude_opus_5_1m_crosses_at_the_ceiling_not_at_800k() -> None:
             {"input_tokens": 159_000}, provider, "claude-opus-5[1m]") is False
 
 
-def test_sdk_crossed_applies_the_absolute_ceiling() -> None:
+def test_sdk_crossed_uses_the_default_ceiling_without_a_soft_cap() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    # Measured against the SDK's own live window, the ceiling binds, not 260k.
-    assert sdk_context_threshold_crossed(
-        160_000, 1_050_000, "openai", "gpt-5.6-sol") is True
-    assert sdk_context_threshold_crossed(
-        259_000, 1_050_000, "openai", "gpt-5.6-sol") is True
-    assert sdk_context_threshold_crossed(
-        159_000, 1_050_000, "openai", "gpt-5.6-sol") is False
+    # The SDK live window is compared against the model's 160k default ceiling.
+    models = (
+        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+        "gpt-5.6", "gpt-5.5", "gpt-5.4",
+    )
+    for provider in ("openai", "codex"):
+        for model in models:
+            assert sdk_context_threshold_crossed(
+                159_999, 1_050_000, provider, model) is False
+            assert sdk_context_threshold_crossed(
+                160_000, 1_050_000, provider, model) is True
     # The claude_code path on a live 1M window.
     assert sdk_context_threshold_crossed(
         160_000, 1_000_000, "claude_code", "claude-opus-5[1m]") is True
@@ -319,41 +321,32 @@ def test_catalog_aliases_unknown_provider_is_empty() -> None:
     assert catalog_aliases("nope") == ()
 
 
-def test_openai_5_6_family_carries_the_billing_soft_cap() -> None:
-    # OpenAI bills a prompt above 272k at 2x input / 1.5x output for the WHOLE
-    # request; 260k stays under it with headroom for the handoff turns. The bare
-    # alias routes to Sol, so it needs the same cap (a `gpt-5` prefix fallback
-    # would hand off at 320k, above the breakpoint).
-    for alias in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
-        assert OPENAI[alias] == ModelInfo(
-            window=1_050_000, max_output_tokens=128_000, soft_cap=260_000)
+def test_legacy_openai_models_use_the_default_ceiling() -> None:
+    for alias in (
+        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+        "gpt-5.6", "gpt-5.5", "gpt-5.4",
+    ):
+        info = OPENAI[alias]
+        assert info.window == 1_050_000
+        assert info.max_output_tokens == 128_000
+        assert info.soft_cap is None
+        assert checkpoint_cutoff(info, info.window) == 160_000 / 1_050_000
 
 
-def test_soft_cap_is_absent_on_every_other_entry() -> None:
-    # No claude model carries a billing breakpoint on this ladder.
-    capped = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6",
-              "gpt-5.5", "gpt-5.4"}
+def test_soft_cap_defaults_to_none_for_anthropic_models() -> None:
     assert ModelInfo().soft_cap is None
-    assert OPENAI["gpt-5"].soft_cap is None
-    assert OPENAI["gpt-5.3-codex"].soft_cap is None
-    # gpt-5.4-mini shares a prefix with the capped gpt-5.4 but has no
-    # breakpoint of its own — exact keys, never prefixes.
-    assert OPENAI["gpt-5.4-mini"].soft_cap is None
-    assert all(info.soft_cap is None
-               for key, info in OPENAI.items() if key not in capped)
     assert all(info.soft_cap is None for info in ANTHROPIC.values())
     assert all(info.soft_cap is None for info in CLAUDE_CODE.values())
 
 
 def test_limits_for_resolves_exact_aliases_per_provider() -> None:
     assert limits_for("openai", "gpt-5.6-sol") == OPENAI["gpt-5.6-sol"]
-    # codex shares the OPENAI table, so it inherits the cap with no entry of its own
     codex_sol = limits_for("codex", "gpt-5.6-sol")
     assert codex_sol is not None
-    assert codex_sol.soft_cap == 260_000
+    assert codex_sol.soft_cap is None
     bare = limits_for("openai", "gpt-5.6")
     assert bare is not None
-    assert (bare.window, bare.soft_cap) == (1_050_000, 260_000)
+    assert (bare.window, bare.soft_cap) == (1_050_000, None)
     anthropic_1m = limits_for("anthropic", "claude-opus-5[1m]")
     assert anthropic_1m is not None
     assert anthropic_1m.window == 1_000_000
@@ -376,11 +369,10 @@ def test_limits_for_longest_prefix_covers_dated_ids() -> None:
 
 
 def test_limits_for_longest_prefix_beats_a_shorter_key() -> None:
-    # Both "gpt-5.6-sol" and "gpt-5" are prefixes; the longest wins, so the
-    # capped 5.6 entry answers rather than the uncapped 400k catch-all.
+    # Both "gpt-5.6-sol" and "gpt-5" are prefixes; the longest wins.
     info = limits_for("openai", "gpt-5.6-sol-2026-03")
     assert info is not None
-    assert (info.window, info.soft_cap) == (1_050_000, 260_000)
+    assert (info.window, info.soft_cap) == (1_050_000, None)
 
 
 def test_limits_for_unknown_provider_or_model_is_none() -> None:
@@ -397,21 +389,20 @@ def test_limits_for_is_case_sensitive() -> None:
     assert limits_for("anthropic", "Opus") is None
 
 
-def test_checkpoint_ceiling_is_the_absolute_handoff_budget() -> None:
-    from imp.providers.catalog import DEFAULT_CHECKPOINT_CEILING
-    # A budget choice, not a measured degradation onset. It is also exactly
-    # 0.8 * 200_000, so every 200k-window model's trigger is unchanged.
+def test_default_checkpoint_ceiling_is_160000() -> None:
     assert DEFAULT_CHECKPOINT_CEILING == 160_000
 
 
-def test_checkpoint_cutoff_clamps_to_the_ceiling_but_a_smaller_cap_still_binds() -> None:
-    # The ceiling wins over a LARGER soft cap: 160k of a 1.05M window, not 260k.
-    info = OPENAI["gpt-5.6-sol"]
-    assert checkpoint_cutoff(info, info.window) == 160_000 / 1_050_000
-    # A cap BELOW the ceiling still binds — the formula keeps reading soft_cap,
-    # so the retained OpenAI billing entries bite again if the ceiling rises.
+def test_checkpoint_cutoff_uses_an_explicit_model_cap() -> None:
     assert checkpoint_cutoff(
-        ModelInfo(window=200_000, soft_cap=100_000), 200_000) == 0.5
+        ModelInfo(window=1_050_000, soft_cap=260_000), 1_050_000,
+    ) == 260_000 / 1_050_000
+    assert checkpoint_cutoff(
+        ModelInfo(window=200_000, soft_cap=100_000), 200_000,
+    ) == 0.5
+    assert checkpoint_cutoff(
+        ModelInfo(window=200_000, soft_cap=190_000), 200_000,
+    ) == DEFAULT_CHECKPOINT_FRACTION
 
 
 def test_checkpoint_cutoff_without_a_soft_cap_is_the_ceiling_or_the_fraction() -> None:
@@ -424,12 +415,6 @@ def test_checkpoint_cutoff_without_a_soft_cap_is_the_ceiling_or_the_fraction() -
     assert checkpoint_cutoff(ModelInfo(window=400_000), 400_000) == 0.4
     assert checkpoint_cutoff(ModelInfo(), 0) is None
     assert checkpoint_cutoff(ModelInfo(), None) is None
-
-
-def test_checkpoint_cutoff_never_loosens_the_default_share() -> None:
-    # A cap ABOVE 0.8 of the window must not push the handoff later.
-    assert checkpoint_cutoff(
-        ModelInfo(window=200_000, soft_cap=190_000), 200_000) == 0.8
 
 
 def test_checkpoint_cutoff_without_a_window_is_none() -> None:
@@ -451,29 +436,15 @@ def test_context_tokens_from_usage_docstring_disclaims_live_occupancy() -> None:
     assert "single model request" in doc
 
 
-def test_gpt_5_5_and_5_4_carry_the_1m_window_and_the_260k_soft_cap() -> None:
-    for alias in ("gpt-5.5", "gpt-5.4"):
-        info = OPENAI[alias]
-        assert info.window == 1_050_000
-        assert info.max_output_tokens == 128_000
-        assert info.soft_cap == 260_000
-        # The absolute ceiling clamps below both the retained 260k billing cap
-        # and the 0.8 default share: 160k of a 1.05M window ~= 0.152.
-        assert checkpoint_cutoff(info, info.window) == 160_000 / 1_050_000
-        assert checkpoint_cutoff(info, info.window) < DEFAULT_CHECKPOINT_FRACTION
-
-
 def test_gpt_5_5_and_5_4_cross_the_threshold_at_the_ceiling() -> None:
     from imp.providers.catalog import context_threshold_crossed
+    # With no explicit soft cap, legacy models cross at the 160k default ceiling.
     for provider in ("openai", "codex"):
         for model in ("gpt-5.5", "gpt-5.4"):
             assert context_threshold_crossed(
-                {"input_tokens": 161_000}, provider, model) is True
-            # past the ceiling, still under the retained 260k billing cap
+                {"input_tokens": 159_999}, provider, model) is False
             assert context_threshold_crossed(
-                {"input_tokens": 259_000}, provider, model) is True
-            assert context_threshold_crossed(
-                {"input_tokens": 159_000}, provider, model) is False
+                {"input_tokens": 160_000}, provider, model) is True
 
 
 def test_the_uncapped_openai_models_keep_the_400k_window() -> None:
