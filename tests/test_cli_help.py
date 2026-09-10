@@ -59,17 +59,16 @@ def test_opening_hint_omits_model() -> None:
     assert "/model" not in DEFAULT_HINT
 
 
-def test_events_help_documents_the_search_sibling(
+def test_events_help_documents_bounded_event_search(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # `imp events -h` shows a native-looking subcommands block documenting
-    # `imp events search`, mentioning --type / --agent. Widen the terminal so
-    # argparse does not wrap the phrase mid-string.
     monkeypatch.setenv("COLUMNS", "200")
     out = _help_for(["events", "-h"], capsys)
     assert "subcommands:" in out
     assert "imp events search <query>" in out
-    assert "--type / --agent" in out
+    flattened = " ".join(out.split())
+    assert "Substring search across event content (tool calls, results, reasoning)." in flattened
+    assert "Bounded by default; use --all for exhaustive output. Full flags with:" in flattened
 
 
 def test_events_help_moves_search_pointer_out_of_the_description(

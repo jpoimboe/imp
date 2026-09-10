@@ -209,7 +209,8 @@ def test_events_help_keeps_its_hand_wrapped_line_structure(
     assert ("subcommands:\n"
             "  imp events search <query>\n"
             "      Substring search across event content (tool calls, results,\n"
-            "      reasoning). Narrow with --type / --agent; full flags with:\n"
+            "      reasoning).\n"
+            "      Bounded by default; use --all for exhaustive output. Full flags with:\n"
             "      imp events search -h\n") in text
 
 

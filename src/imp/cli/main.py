@@ -3862,14 +3862,18 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
         "--agent", action=SplitAppend, default=None,
         help="Keep only these authors: step name, subagent handle, or sub:<id> "
              "(repeatable / comma-joined).")
-    p.add_argument("--all", action="store_true",
-                   help="Show every matched quest and matching event; conflicts with --limit.")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Raise the matched-quest cap above the default 3.")
-    p.add_argument("-l", "--list", action="store_true", dest="list",
-                   help="One terse line per matched quest (id, title, zone).")
-    p.add_argument("--json", action="store_true",
-                   help="Structured output of matched events.")
+    p.add_argument(
+        "--limit", type=int, default=None,
+        help="Show at most LIMIT matched quests (default: 3, except with --list).")
+    p.add_argument(
+        "--all", action="store_true",
+        help="Show every matched quest and matching event; conflicts with --limit.")
+    p.add_argument(
+        "-l", "--list", action="store_true", dest="list",
+        help="One terse line per matched quest (id, title, zone); combine with --limit to cap.")
+    p.add_argument(
+        "--json", action="store_true",
+        help="Structured output, bounded like the default view unless --all.")
     p.add_argument("--no-pager", action="store_true",
                    help="Disable the pager even when stdout is a TTY.")
     p.set_defaults(func=_cmd_events_search, parser=p)
@@ -4131,7 +4135,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "subcommands:\n"
             "  imp events search <query>\n"
             "      Substring search across event content (tool calls, results,\n"
-            "      reasoning). Narrow with --type / --agent; full flags with:\n"
+            "      reasoning).\n"
+            "      Bounded by default; use --all for exhaustive output. Full flags with:\n"
             "      imp events search -h"
         ),
         formatter_class=ImpRawHelpFormatter,
