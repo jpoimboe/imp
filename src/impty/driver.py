@@ -208,8 +208,8 @@ class ImptyDriver:
         return status, rows, body
 
     def _render(self, session: TerminalSession, *, full: bool = False) -> str:
-        """The complete screen (or the whole strip), and the baseline moves onto
-        it: the agent has now seen these rows."""
+        """Return the complete screen (or whole strip) without a diff or `[full screen]`
+        marker, and resynchronizes the changed-row baseline."""
         status, rows, body = self._frame(session, full=full)
         self._shown = rows
         return f"{status}\n{body}"
@@ -237,7 +237,9 @@ class ImptyDriver:
         rows: int = 24,
         env: dict[str, str] | None = None,
     ) -> str:
-        """Spawn an interactive program on a fresh pty and return its first screen.
+        """Spawn an interactive program on a fresh pty; wait until it settles, exits,
+        or the 3s settle deadline elapses, then return `[full screen]` followed by the
+        complete screen accumulated so far. This clears the changed-row baseline.
 
         Refuses while a program is still running — call stop() first. A session whose
         program has exited is replaced. `argv` is the command + args, e.g.
@@ -253,8 +255,8 @@ class ImptyDriver:
         mount namespace; with no hook it runs bare.
 
         `cols`/`rows` set the terminal size (a real test parameter — programs reflow
-        by width). Waits for the program to settle before returning, so the returned
-        screen is the first thing to react to.
+        by width). The startup screen can be incomplete; for a slow startup call
+        `wait(hard=...)` then `view()`.
         """
         if self._session is not None:
             if self._session.is_alive():
@@ -297,7 +299,8 @@ class ImptyDriver:
         return self._render_diff(session)
 
     def view(self, full: bool = False) -> str:
-        """Read the screen without sending anything.
+        """Read the complete current screen without a diff or `[full screen]` marker, and
+        resynchronizes subsequent changed-row responses.
 
         By default returns the CURRENT screen (what a human sees right now); the
         status header reports liveness, regime (scroll|screen), and cursor position
@@ -311,25 +314,25 @@ class ImptyDriver:
         return self._render(self._require(), full=full)
 
     def send(self, data: str, wait: bool | float = True) -> str:
-        """Send raw keystrokes to the program, then (by default) return the new screen.
+        """Send raw keystrokes to the program. When waiting, return a changed-row diff,
+        `[no text change]`, or `[full screen]` followed by the complete screen.
 
         `data` is literal bytes the program receives — NOT a description. Common keys:
         Enter=`\\r`, Tab=`\\t`, Ctrl-C=`\\x03`, Backspace=`\\x7f`,
         Up=`\\x1b[A` Down=`\\x1b[B` Right=`\\x1b[C` Left=`\\x1b[D`.
         So answering a prompt "foo" then Enter = data="foo\\r".
 
-        `wait` controls how long to settle before snapshotting:
-        - True (default): wait for the program to react and go QUIET, then return —
-          type-then-look in one call. Best for apps that settle after a keystroke.
-        - False: fire and return `[sent]` immediately (e.g. mid-stream input).
-        - a number (seconds): settle for that FIXED duration, then return the screen.
-          Use this for a continuously-animating full-screen app (a spinner / live
-          TUI) that NEVER goes quiet — there `wait=True` blocks the whole settle cap
-          every keystroke. e.g. `wait=0.4` lets the reaction render, then snapshots.
-          The background drainer keeps pyte current during the wait. A value over
-          240s is clamped to it — no single call blocks longer — and the reply's
-          first line then reads `[waited 240s call cap (600s requested)]`; send again
-          or call `wait()` to keep watching.
+        `wait` controls how long to settle before rendering:
+        - True (default): wait for the program to react and go QUIET — type-then-look
+          in one call. Best for apps that settle after a keystroke.
+        - False: `wait=False` returns `[sent]` without rendering (e.g. mid-stream input).
+        - a number (seconds): settle for that FIXED duration. Use this for a
+          continuously-animating full-screen app (a spinner / live TUI) that NEVER
+          goes quiet — there `wait=True` blocks the whole settle cap every keystroke.
+          e.g. `wait=0.4` lets the reaction render. The background drainer keeps pyte
+          current during the wait. A value over 240s is clamped to it — no single call
+          blocks longer — and the reply's first line then reads `[waited 240s call cap
+          (600s requested)]`; send again or call `wait()` to keep watching.
         """
         session = self._require()
         # Mark the type-then-look boundary just before the keystroke so wait_idle
@@ -350,8 +353,9 @@ class ImptyDriver:
         return f"{note}{self._render_diff(session)}"
 
     def send_signal(self, sig: int = signal.SIGINT) -> str:
-        """Deliver a real signal to the terminal's foreground process group, then
-        return the new screen. The mode-INDEPENDENT interrupt: unlike `send("\\x03")`
+        """Deliver a real signal to the terminal's foreground process group, then return a
+        changed-row diff, `[no text change]`, or `[full screen]` followed by the complete
+        screen. The mode-INDEPENDENT interrupt: unlike `send("\\x03")`
         — which only becomes a SIGINT when the tty's line discipline has ISIG on
         (cooked/cbreak) and is just a raw byte at a prompt_toolkit prompt — this
         bypasses the tty entirely. Use it when you want a deterministic Ctrl-C
@@ -372,7 +376,8 @@ class ImptyDriver:
         return self._render_diff(session)
 
     def resize(self, rows: int, cols: int, wait: bool | float = True) -> str:
-        """Resize the live terminal and return the new screen. The child receives
+        """Resize the live terminal. When waiting, return a changed-row diff, `[no text
+        change]`, or `[full screen]` followed by the complete screen. The child receives
         a real `SIGWINCH`, so a program that reflows on that signal (a TUI relaying
         out, a CLI re-wrapping at a new width) reacts exactly as it would in a real
         terminal that got resized.
@@ -383,14 +388,13 @@ class ImptyDriver:
         does the actual reflow. A program that ignores `SIGWINCH` just gets a
         re-framed grid.
 
-        `wait` controls how long to settle before snapshotting (same tri-state as
-        `send`):
-        - True (default): wait for the redraw reaction to go QUIET, then return.
-        - False: fire and return `[resized]` immediately (e.g. a never-quiet
-          animating TUI; snapshot separately).
-        - a number (seconds): settle for that FIXED duration, then return the screen.
-          A value over 240s is clamped to it and the reply's first line then reads
-          `[waited 240s call cap (600s requested)]`.
+        `wait` controls how long to settle before rendering (same tri-state as `send`):
+        - True (default): wait for the redraw reaction to go QUIET.
+        - False: `wait=False` returns `[resized]` without rendering (e.g. a never-quiet
+          animating TUI; render separately).
+        - a number (seconds): settle for that FIXED duration. A value over 240s is
+          clamped to it and the reply's first line then reads `[waited 240s call cap
+          (600s requested)]`.
         """
         session = self._require()
         # Mark the boundary before the resize so wait_idle settles on the REDRAW
@@ -413,23 +417,20 @@ class ImptyDriver:
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float | None = None,
         for_change: bool = False,
     ) -> str:
-        """Wait for the program to settle, then return the screen.
+        """Wait until there is an idle window after qualifying output, the process exits,
+        or `hard` elapses; then return a changed-row diff, `[no text change]`, or
+        `[full screen]` followed by the complete screen.
 
-        For watching a program that's still working (spinners, streaming) without
-        sending input: blocks until it goes quiet for `idle`, or `hard` elapses.
-        Counts output already on screen, so if the program is ALREADY quiet this
-        returns the current screen promptly rather than blocking for a next burst.
+        Output already read qualifies normally, so an already-quiet program returns
+        promptly. `for_change=True` requires new output after this call, then its idle
+        window. A live process with no output is not settled. This follows a long
+        command without polling `view`; an animating TUI qualifies on its next repaint.
 
-        `for_change=True` counts only output arriving AFTER this call, so an
-        already-quiet program blocks until something new lands and then goes quiet —
-        follow a long command without polling `view`. Any output counts, so an
-        animating TUI returns on its next repaint. `hard` defaults to 3s, or 30s with
-        `for_change=True`, and is clamped to 240s: no single call blocks longer than
-        that. The header is `[settled]`, `[still busy after <cap>s hard cap]`, or —
-        with `for_change=True` only — `[no change after <cap>s hard cap]`; when the
-        clamp fired the header instead names the call cap and the value you asked for
-        and tells you to call wait() again to keep watching, which is how you follow a
-        program for hours without any one call blocking for hours.
+        Caller `hard` values are accepted. `hard` defaults to 3s (30s with
+        `for_change=True`), and values over 240s are capped. The header is `[settled]`,
+        `[still busy after <cap>s hard cap]`, or — with `for_change=True` only —
+        `[no change after <cap>s hard cap]`; when capped it instead names the call cap
+        and requested value and tells you to call wait() again to keep watching.
         """
         session = self._require()
         # Stamp the boundary BEFORE waiting: in change mode only output read at or

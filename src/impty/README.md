@@ -220,13 +220,19 @@ Two ready-made entry points:
   imp's real renderer. `make snap-ui SNAP_ARGS="--limit 40"` for a slice, or
   `scripts/snap_imp_ui.py {stream,prompt} [--out PATH] [--open]` directly.
 - **Drive a live program over MCP and screenshot it:** run the stdio MCP server
-  (`python -m impty.mcp`, registered in `.mcp.json`). Tools: `start`, `send`,
-  `send_signal` (a real signal to the terminal's foreground process group, e.g. `sig=2` for a
-  mode-independent Ctrl-C), `resize` (`(rows, cols)` — resizes the live terminal,
-  delivering a real `SIGWINCH`), `wait` (`for_change=True` blocks until NEW output
-  arrives instead of counting what is already on screen), `view` (`full=True` for
-  the whole strip; once the child is gone its header carries the
-  exit status — `exit=0`, `exit=3`, or a signal name like `exit=SIGINT`),
-  `snapshot` (renders the live screen to a PNG and returns its
-  path), `stop` (SIGTERM, a 1s grace, then SIGKILL; returns the program's exit status
-  and its final screen). Adding/removing a tool needs a server restart.
+  (`python -m impty.mcp`, registered in `.mcp.json`). `start` waits until it settles,
+  exits, or the 3s settle deadline elapses, then returns `[full screen]` followed by
+  the complete screen accumulated so far; for slow startup use `wait(hard=...)` then
+  `view()`. `send(wait=False)` returns `[sent]` without rendering, and
+  `resize(..., wait=False)` returns `[resized]` without rendering; otherwise `send`,
+  `resize`, `wait`, and `send_signal` return a changed-row diff with 0-based labels,
+  `[no text change]`, or `[full screen]` plus the complete screen. `view` returns the
+  complete current screen with no diff or `[full screen]` marker and resynchronizes
+  subsequent changed-row responses; `full=True` returns the whole strip and, once the
+  child is gone, its header carries the exit status — `exit=0`, `exit=3`, or
+  `exit=SIGINT`. `send_signal` delivers a real signal to the terminal's foreground
+  process group (e.g. `sig=2` for mode-independent Ctrl-C); `resize` (`rows, cols`)
+  delivers a real `SIGWINCH`; `wait(for_change=True)` waits for NEW output.
+  `snapshot` renders the live screen to a PNG and returns its path; `stop` sends
+  SIGTERM, allows a 1s grace, then SIGKILL, and returns the program's exit status and
+  final screen. Adding/removing a tool needs a server restart.
