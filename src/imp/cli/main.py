@@ -3606,11 +3606,14 @@ def _render_events_search_hit(
     return lines
 
 
-def _events_search_json(hits: list[EventSearchHit]) -> list[dict[str, Any]]:
+def _events_search_json(
+    hits: list[EventSearchHit], *, event_limit: int = 3,
+) -> list[dict[str, Any]]:
     from imp.engine import events_index as ei
     return [
         {"quest_id": h.quest_id, "title": h.title, "zone": h.zone,
-         "last_activity": h.last_activity, "events": ei.events_json(h.events)}
+         "last_activity": h.last_activity,
+         "events": ei.events_json(h.events[:event_limit])}
         for h in hits
     ]
 
@@ -3633,14 +3636,18 @@ def _cmd_events_search(
     zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}
     hits.sort(key=lambda h: h.last_activity or "", reverse=True)
     hits.sort(key=lambda h: zone_order[h.zone])
+    quest_limit = args.limit
+    if quest_limit is None and (args.json or not args.list):
+        quest_limit = 3
+    selected_hits = hits[:quest_limit]
     if args.json:
         _page_or_print(
-            json.dumps(_events_search_json(hits), indent=2).splitlines(),
+            json.dumps(_events_search_json(selected_hits), indent=2).splitlines(),
             no_pager=args.no_pager)
         return 0
     if args.list:
         lines = [_events_search_list_line(h, query=args.query, color=color)
-                 for h in hits]
+                 for h in selected_hits]
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     now = datetime.now(UTC)
@@ -3650,14 +3657,13 @@ def _cmd_events_search(
     noun_q = "quest" if quests == 1 else "quests"
     header = pal.ansi(f'{total} {noun_m} in {quests} {noun_q} for "{args.query}"',
                       "dim", enabled=color)
-    cap = args.limit if args.limit is not None else 3
     width = _term_width()
     lines = [header]
-    for h in hits[:cap]:
+    for h in selected_hits:
         lines.append("")
         lines.extend(_render_events_search_hit(
             h, args.query, now=now, color=color, width=width))
-    extra = len(hits) - cap
+    extra = len(hits) - len(selected_hits)
     if extra > 0:
         lines.append("")
         lines.append(pal.ansi(f"… +{extra} more quests", "dim", enabled=color))
