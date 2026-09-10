@@ -183,8 +183,18 @@ def test_core_tail_does_not_contain_users_see_only() -> None:
     assert "Users see only your text output" not in _CORE_TAIL
 
 
-def test_user_facing_note_contains_tone_text_anchor() -> None:
-    assert "Users see only your text output" in _USER_FACING_NOTE
+def test_user_facing_note_contains_top_level_output_contract() -> None:
+    flat = " ".join(_USER_FACING_NOTE.split())
+    assert (
+        "Users see only your text output, not tool calls or thinking. "
+        "Before your first tool call, state in one sentence what you're about to do."
+    ) in flat
+    assert "give short updates at key moments" not in flat
+    assert "Brief is good — silent is not." not in flat
+    assert (
+        "Don't narrate your internal deliberation. User-facing text is relevant "
+        "communication, not commentary — state results and decisions directly."
+    ) in flat
 
 
 def test_top_level_invocation_contains_user_facing_note(tmp_path: Path) -> None:
