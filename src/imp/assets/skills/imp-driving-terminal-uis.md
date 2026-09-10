@@ -29,7 +29,9 @@ Diff hunks use 0-based labels such as `[row 7]`, `[rows 20-22 inserted]`, and
   pty; after it settles, exits, or the 3s settle deadline elapses, return
   `[full screen]` followed by the complete screen accumulated so far. The startup
   screen can be incomplete; for slow startup call `wait(hard=...)` then `view()`.
-  `cols`/`rows` set the size real programs reflow to. `env` entries are ADDED to the environment, overriding same-named ones (TERM
+  `cwd` defaults to the project root. Relative values are resolved from that root;
+  absolute values are used as written. `cols`/`rows` set the size real programs
+  reflow to. `env` entries are ADDED to the environment, overriding same-named ones (TERM
   still defaulted). Refuses while a program is still running — stop() first.
 - **`view(full=False)`** — read the complete current screen without a diff or
   `[full screen]` marker; resynchronizes subsequent changed-row responses. A cursor

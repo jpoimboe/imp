@@ -366,16 +366,38 @@ def test_bash_inactive_policy_never_flagged_spawn_failure(tmp_path: Path) -> Non
     assert out["returncode"] == 3
 
 
-def test_bash_default_cwd_is_project_root(tmp_path: Path) -> None:
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "pwd"}))
-    assert str(tmp_path) in out["stdout"]
+@pytest.mark.parametrize(
+    ("cwd", "expected_suffix"),
+    [
+        (None, ""),
+        ("", ""),
+        (".", ""),
+        ("sub", "sub"),
+    ],
+    ids=["omitted", "empty", "dot", "relative"],
+)
+def test_bash_resolves_cwd_from_project_root(
+    tmp_path: Path, cwd: str | None, expected_suffix: str,
+) -> None:
+    (tmp_path / "sub").mkdir()
+    args = {"command": "pwd"}
+    if cwd is not None:
+        args["cwd"] = cwd
+
+    out = json.loads(_run_bash(_ctx(tmp_path), args))
+
+    assert out["returncode"] == 0
+    assert Path(out["stdout"].strip()) == tmp_path / expected_suffix
 
 
-def test_bash_explicit_cwd(tmp_path: Path) -> None:
+def test_bash_absolute_cwd_is_unchanged(tmp_path: Path) -> None:
     sub = tmp_path / "sub"
     sub.mkdir()
+
     out = json.loads(_run_bash(_ctx(tmp_path), {"command": "pwd", "cwd": str(sub)}))
-    assert str(sub) in out["stdout"]
+
+    assert out["returncode"] == 0
+    assert Path(out["stdout"].strip()) == sub
 
 
 def test_bash_exposes_imp_project_root(tmp_path: Path) -> None:
@@ -1383,26 +1405,38 @@ def test_bash_background_spawns_with_the_sandbox_child_env(
     assert env["IMP_QUEST_ID"] == "test01"
 
 
-@pytest.mark.parametrize("in_background", [False, True],
-                         ids=["foreground", "background"])
+@pytest.mark.parametrize(
+    "in_background", [False, True], ids=["foreground", "background"],
+)
+@pytest.mark.parametrize(
+    "cwd_case", ["relative-dot", "absolute-spelling"],
+)
 def test_a_joined_spawn_takes_no_host_cwd_where_a_bare_one_does(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, in_background: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    in_background: bool,
+    cwd_case: str,
 ) -> None:
-    # Spec §1: on a join the cwd is set by the inner `cd`, never Popen's `cwd=` —
-    # both resolve in the CALLER's mount namespace. The bare /sandbox off shape
-    # has no inner `cd`, so its cwd must stay. Captured at the one spawn both
-    # shapes and both foreground/background paths funnel through.
     import imp.agents.tools.bg as bgmod
 
-    seen: list[object] = []
+    seen: list[tuple[object, object]] = []
 
     async def fake_open_process(argv: list[str], **kw: object) -> object:
-        seen.append(kw.get("cwd"))
+        env = kw["env"]
+        assert isinstance(env, dict)
+        seen.append((kw.get("cwd"), env.get("IMP_CWD")))
         raise RuntimeError("stop after capture")
 
     monkeypatch.setattr(bgmod.anyio, "open_process", fake_open_process)
-    args = {"command": "echo hi", "cwd": str(tmp_path),
-            "run_in_background": in_background}
+    monkeypatch.setenv("IMP_CWD", "/stale")
+    raw_absolute = f"{tmp_path}//masked///only-inside"
+    requested_cwd = "." if cwd_case == "relative-dot" else raw_absolute
+    expected_cwd = str(tmp_path) if cwd_case == "relative-dot" else raw_absolute
+    args = {
+        "command": "echo hi",
+        "cwd": requested_cwd,
+        "run_in_background": in_background,
+    }
 
     joined = _ctx(tmp_path)
     joined.background_enabled = True
@@ -1411,9 +1445,12 @@ def test_a_joined_spawn_takes_no_host_cwd_where_a_bare_one_does(
     with pytest.raises(RuntimeError):
         _run_bash(joined, args)
 
-    bare = _ctx(tmp_path)                    # no policy at all: the bare shape
+    bare = _ctx(tmp_path)
     bare.background_enabled = True
     with pytest.raises(RuntimeError):
         _run_bash(bare, args)
 
-    assert seen == [None, str(tmp_path)]
+    assert seen == [
+        (None, expected_cwd),
+        (expected_cwd, None),
+    ]

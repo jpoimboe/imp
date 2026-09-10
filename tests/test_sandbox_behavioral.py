@@ -2344,14 +2344,17 @@ def _joined_driver(ctx: ToolContext) -> ImptyDriver:
     below either compares a joined session against an unjoined one or asserts a
     denial; a hook that silently declined would turn the joined side into a second
     bare run and BOTH shapes would then pass vacuously."""
-    hook = make_impty_sandbox_hook(ctx)
+    driver = attach_impty_driver(ctx, journal_dir=ctx.project_root)
+    hook = driver._sandbox
+    assert hook is not None
 
     def checked(argv, cwd, env):
         plan = hook(argv, cwd, env)
         assert plan is not None and plan.argv[0] == "nsenter", plan
         return plan
 
-    return ImptyDriver(sandbox=checked)
+    driver._sandbox = checked
+    return driver
 
 
 def _drive_joined(ctx: ToolContext, body: Callable[[ImptyDriver], str]) -> str:
@@ -2389,6 +2392,7 @@ def _await_screen(driver: ImptyDriver, text: str) -> None:
 _PEEK = (
     "import os, sys\n"
     "d = sys.argv[1]\n"
+    "print('CWD=' + os.getcwd())\n"
     "print('LEFT=' + repr(sorted(os.listdir(d))))\n"
     "try:\n"
     "    print('READ=' + open(os.path.join(d, 'flag.txt')).read().strip())\n"
@@ -2411,13 +2415,35 @@ def test_a_joined_pty_session_cannot_read_a_masked_secret() -> None:
     argv = [sys.executable, "-c", _PEEK, str(masked)]
     try:
         ctx = _ctx(root, _active_policy(root, secret_dirs=(str(masked),)))
-        joined = _drive_joined(ctx, lambda d: d.start(argv))
+        joined = _drive_joined(ctx, lambda d: d.start(argv, cwd="masked"))
+        assert f"CWD={masked}" in joined, joined
         assert "LEFT=[]" in joined, joined              # the empty tmpfs mask
         assert "READ-DENIED 2" in joined, joined        # ENOENT, not a stray error
         assert _SECRET not in joined
         bare = _drive_bare(lambda d: d.start(argv))
         assert "LEFT=['flag.txt']" in bare, bare
         assert f"READ={_SECRET}" in bare, bare
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_imp_hosted_joined_pty_resolves_a_namespace_only_relative_cwd() -> None:
+    root = _make_root()
+    masked = root / "masked"
+    inside = masked / "only-inside"
+    masked.mkdir()
+    try:
+        ctx = _ctx(root, _active_policy(root, secret_dirs=(str(masked),)))
+        result = _bash(ctx, f"mkdir -p {shlex.quote(str(inside))}")
+        assert result["returncode"] == 0
+        assert not inside.exists()
+
+        argv = [sys.executable, "-c", "import os; print('CWD=' + os.getcwd())"]
+        screen = _drive_joined(
+            ctx, lambda d: d.start(argv, cwd="masked/only-inside", cols=200))
+        assert f"CWD={inside}" in screen, screen
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -2472,11 +2498,11 @@ def test_sandbox_off_spawns_the_pty_bare_and_unconfined(
     masked.mkdir()
     (masked / "flag.txt").write_text(_SECRET + "\n")
     argv = [sys.executable, "-c", _PEEK, str(masked)]
-    seen: list[list[str]] = []
+    seen: list[tuple[list[str], str | None]] = []
     real_init = TerminalSession.__init__
 
     def spy(self, spawn_argv, **kwargs):
-        seen.append(list(spawn_argv))
+        seen.append((list(spawn_argv), kwargs.get("cwd")))
         real_init(self, spawn_argv, **kwargs)
 
     monkeypatch.setattr(TerminalSession, "__init__", spy)
@@ -2485,15 +2511,16 @@ def test_sandbox_off_spawns_the_pty_bare_and_unconfined(
         ctx.coordinator = SimpleNamespace(unsandboxed=True, should_pause=False)
 
         async def _main() -> str:
-            driver = ImptyDriver(sandbox=make_impty_sandbox_hook(ctx))
+            driver = attach_impty_driver(ctx, journal_dir=root)
             try:
-                return await asyncio.to_thread(lambda: driver.start(argv))
+                return await asyncio.to_thread(lambda: driver.start(argv, cwd="."))
             finally:
                 await asyncio.to_thread(driver.close)
 
         screen = asyncio.run(_main())
-        assert seen == [argv], seen             # the caller's argv, verbatim
-        assert "nsenter" not in " ".join(seen[0])
+        assert seen == [(argv, str(root))], seen
+        assert "nsenter" not in " ".join(seen[0][0])
+        assert f"CWD={root}" in screen, screen
         assert f"READ={_SECRET}" in screen, screen
     finally:
         shutil.rmtree(root, ignore_errors=True)

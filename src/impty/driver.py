@@ -145,23 +145,24 @@ class PtySpawn:
 SandboxHook = Callable[
     [Sequence[str], str | None, Mapping[str, str] | None], PtySpawn | None
 ]
+CwdResolver = Callable[[str | None], str | None]
 
 
 class ImptyDriver:
     """One lazy `TerminalSession` at a time. `start` refuses to replace a live one.
 
-    `sandbox`, when given, is consulted on every `start()` with the requested
-    (argv, cwd, env): a returned `PtySpawn` replaces the spawn wholesale, and `None`
-    spawns bare. impty imports nothing from the embedding host — the sandbox arrives
-    as this callable or not at all."""
+    The resolver transforms each requested cwd before the sandbox is consulted.
+    `PtySpawn` replaces the spawn wholesale; `None` spawns bare. impty imports
+    nothing from its host."""
 
     def __init__(
         self, sandbox: SandboxHook | None = None, journal_dir: Path | None = None,
-        snapshot_dir: Path | None = None,
+        snapshot_dir: Path | None = None, cwd_resolver: CwdResolver | None = None,
     ) -> None:
         self._session: TerminalSession | None = None
         self._shown: list[str] | None = None
         self._sandbox = sandbox
+        self._cwd_resolver = cwd_resolver
         self._journal_dir = journal_dir
         self._sessions = 0 if journal_dir is None else _last_session_index(journal_dir)
         self._snapshot_dir = snapshot_dir
@@ -263,7 +264,8 @@ class ImptyDriver:
                 raise RuntimeError("session already running — call stop() first")
             self._session.close()
             self._session = None
-        plan = None if self._sandbox is None else self._sandbox(argv, cwd, env)
+        resolved_cwd = cwd if self._cwd_resolver is None else self._cwd_resolver(cwd)
+        plan = None if self._sandbox is None else self._sandbox(argv, resolved_cwd, env)
         journal = self._new_journal()
         try:
             if plan is None:
@@ -271,7 +273,8 @@ class ImptyDriver:
                 # unioned os.environ under whatever it was handed would pour the host
                 # environment into a sandboxing host's curated child env.
                 session = TerminalSession(
-                    argv, cwd=cwd, cols=cols, rows=rows, env={**os.environ, **(env or {})},
+                    argv, cwd=resolved_cwd, cols=cols, rows=rows,
+                    env={**os.environ, **(env or {})},
                     journal=journal,
                 )
             else:

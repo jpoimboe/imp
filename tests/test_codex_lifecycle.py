@@ -223,8 +223,8 @@ async def test_codex_teardown_closes_impty_session(
         # the run's sandbox hook, this step's transcript dir as the journal dir,
         # and a quest-scoped snapshot dir.
         patch("impty.driver.ImptyDriver",
-              new=lambda sandbox=None, journal_dir=None, snapshot_dir=None: (
-                  journal_dirs.append(journal_dir) or fake_driver)),
+              new=lambda sandbox=None, journal_dir=None, snapshot_dir=None,
+              cwd_resolver=None: journal_dirs.append(journal_dir) or fake_driver),
     ):
         [ev async for ev in runner.run(inv)]
 

@@ -42,23 +42,29 @@ overriding same-named ones.
 
 ## Embedding: the sandbox hook
 
-impty imports nothing from its host and never requires a sandbox. A host that wants
-the driven program confined injects one callable:
+impty imports nothing from its host and never requires a sandbox. A host can inject
+both callables:
 
 ```python
-ImptyDriver(sandbox=hook)   # hook(argv, cwd, env) -> PtySpawn | None
+ImptyDriver(sandbox=hook, cwd_resolver=resolve_cwd)
+# hook(argv, cwd, env) -> PtySpawn | None
+# resolve_cwd(cwd) -> transformed cwd
 ```
 
+The optional `ImptyDriver(cwd_resolver=...)` hook runs on every `start()` before the
+sandbox hook or bare spawn is selected, and the transformed cwd is passed to either
+route. Without a cwd resolver, omitted, relative, and absolute cwd values retain the
+host process's normal `Popen` handling.
+
 Returning `PtySpawn(argv, env, pass_fds, openpty)` replaces the spawn wholesale: the
-host's own argv (e.g. a namespace join that execs the caller's argv), the child
-environment it computed, the fds that must survive the fork — which
-`TerminalSession(pass_fds=…)` forwards to `Popen` — and, optionally, the host's own pty
-allocator, for a host that needs the pty to come from somewhere other than the caller's
-devpts; it is forwarded as `TerminalSession(openpty=…)` and defaults to `pty.openpty`.
-The cwd is then the host's to resolve inside its own argv, so the session is spawned with
-`cwd=None` (`Popen`'s `cwd=` would resolve in the *caller's* mount namespace). Returning
-`None` — or passing no hook at all, as `python -m impty.mcp` does — spawns the program
-bare, exactly as it always did.
+host's own argv, the child environment it computed, the fds that must survive the fork
+— which `TerminalSession(pass_fds=…)` forwards to `Popen` — and, optionally, the host's
+own pty allocator, for a host that needs the pty to come from somewhere other than the
+caller's devpts; it is forwarded as `TerminalSession(openpty=…)` and defaults to
+`pty.openpty`. The transformed cwd is host-resolved inside `plan.argv`, so the session
+is spawned with `cwd=None` (`Popen`'s `cwd=` would resolve in the *caller's* mount
+namespace). Returning `None` — or passing no hook at all, as `python -m impty.mcp`
+does — spawns the program bare.
 
 ## The pty journal (evidence that outlives the screen)
 

@@ -46,6 +46,56 @@ def test_resolve_project_path(tmp_path: Path) -> None:
     assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
 
+@pytest.mark.parametrize(
+    ("cwd", "expected_suffix"),
+    [
+        (None, ""),
+        ("", ""),
+        (".", ""),
+        ("nested/child", "nested/child"),
+    ],
+    ids=["omitted", "empty", "dot", "relative"],
+)
+def test_resolve_cwd_uses_the_live_project_root(
+    tmp_path: Path, cwd: str | None, expected_suffix: str,
+) -> None:
+    ctx = _ctx(tmp_path)
+
+    assert ctx.resolve_cwd(cwd) == str(tmp_path / expected_suffix)
+
+
+def test_resolve_cwd_reads_the_current_project_root(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    worktree = tmp_path / "worktree"
+    ctx.project_root = worktree
+
+    assert ctx.resolve_cwd(".") == str(worktree)
+
+
+def test_resolve_cwd_joins_relative_paths_lexically(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+
+    assert ctx.resolve_cwd("alias/missing") == str(alias / "missing")
+
+
+@pytest.mark.parametrize(
+    "absolute_suffix",
+    ["/masked/../only-inside", "//repeated///separators"],
+    ids=["parent-segment", "repeated-separators"],
+)
+def test_resolve_cwd_preserves_absolute_spelling(
+    tmp_path: Path, absolute_suffix: str,
+) -> None:
+    ctx = _ctx(tmp_path)
+    absolute = f"{tmp_path}{absolute_suffix}"
+
+    assert ctx.resolve_cwd(absolute) == absolute
+
+
 def test_quest_context_field(tmp_path: Path) -> None:
     from imp.agents.runner import QuestContext
     ctx = _ctx(tmp_path)
@@ -1081,6 +1131,12 @@ def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(
         # The hook is live: it plans a join rather than declining.
         plan = await asyncio.to_thread(lambda: driver._sandbox(["true"], None, None))
         assert plan is not None and plan.argv[0] == "nsenter"
+        worktree = tmp_path / "worktree"
+        ctx.project_root = worktree
+        assert driver._cwd_resolver is not None
+        assert driver._cwd_resolver(".") == str(worktree)
+        raw_absolute = f"{tmp_path}//absolute"
+        assert driver._cwd_resolver(raw_absolute) == raw_absolute
         monkeypatch.setattr(driver, "close", lambda: closed.append("closed"))
         return driver
 

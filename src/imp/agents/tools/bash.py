@@ -152,7 +152,7 @@ async def bash(
     ctx: ToolContext, command: str, cwd: str | None = None,
     *, run_in_background: bool = False, timeout: float | None = None,
 ) -> str:
-    cwd_path = cwd or str(ctx.project_root)
+    cwd_path = ctx.resolve_cwd(cwd)
     qdir = tool_quest_dir(ctx)
     eng = tool_engine_env(ctx)
     policy = ctx.sandbox_policy
@@ -196,7 +196,7 @@ async def bash(
         # policy, so it never reached the ref-reexpose or layer-minting work here.
         spawn = build_sandbox_spawn(
             command, cwd=cwd_path, policy=policy, engine_env=eng,
-            environ=os.environ,
+            environ={k: v for k, v in os.environ.items() if k != "IMP_CWD"},
             shim_dir=str(imp_shim_dir(qdir)) if qdir is not None else "")
         spawn_cwd = cwd_path
     argv, env, pass_fds = spawn.argv, spawn.env, spawn.pass_fds

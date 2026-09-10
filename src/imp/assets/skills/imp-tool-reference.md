@@ -98,6 +98,8 @@ anyway.
 
 ## bash
 
+- `cwd` defaults to the project root. Relative values are resolved from that
+  root; absolute values are used as written.
 - Foreground: each line over 2000 chars is clipped to 2000 with a
   `…[truncated]` marker, then the two streams are cut to a combined 30 KB
   head. When either fired, the full unmodified output spills to a file and a

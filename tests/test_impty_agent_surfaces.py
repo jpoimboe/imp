@@ -263,6 +263,21 @@ def test_terminal_ui_skill_start_bullet_states_the_env_overlay() -> None:
     assert "*replaces* the environment" not in body
 
 
+def test_terminal_ui_skill_start_bullet_states_project_root_cwd_resolution() -> None:
+    body = load_internal_skill(bundled_skills_dir(), "imp-driving-terminal-uis")
+    bullet = next(
+        (b for b in body.split("\n- ") if b.startswith("**`start(")),
+        None,
+    )
+    assert bullet is not None, "the skill has no `start(` bullet"
+    normalized = " ".join(bullet.split())
+
+    assert (
+        "`cwd` defaults to the project root. Relative values are resolved from "
+        "that root; absolute values are used as written."
+    ) in normalized
+
+
 def test_terminal_ui_skill_send_signal_bullet_names_the_foreground_group() -> None:
     body = load_internal_skill(bundled_skills_dir(), "imp-driving-terminal-uis")
     bullet = next((b for b in body.split("\n- ") if b.startswith("**`send_signal(")),

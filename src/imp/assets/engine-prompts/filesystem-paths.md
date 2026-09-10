@@ -9,6 +9,8 @@ is unsandboxed, confined to the sandbox's readable/writable set when active
 (secrets stay masked). `grep` and `glob` stay worktree-relative and reject
 absolute paths and `..` escapes.
 
-`bash` runs with its working directory at the project root, so use relative
-paths there too (e.g. `cat src/foo.py`). For an absolute path on disk, use
-`$IMP_PROJECT_ROOT`.
+For `bash`, the working-directory contract is below.
+
+`cwd` defaults to the project root. Relative values are resolved from that root;
+absolute values are used as written. Use project-relative paths where practical
+(e.g. `cat src/foo.py`); for an absolute project path, use `$IMP_PROJECT_ROOT`.
