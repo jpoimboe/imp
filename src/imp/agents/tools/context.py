@@ -184,6 +184,14 @@ class ToolContext:
         self._bg_counter += 1
         return f"bg{self._bg_counter}"
 
+    def resolve_cwd(self, cwd: str | None) -> str:
+        """Resolve a shell cwd lexically from the live project root."""
+        if cwd is None or cwd == "" or cwd == ".":
+            return str(self.project_root)
+        if os.path.isabs(cwd):
+            return cwd
+        return os.path.join(str(self.project_root), cwd)
+
     def resolve_path(self, path: str) -> Path:
         """Resolve an fs-tool path WITHOUT a worktree-containment raise.
 
