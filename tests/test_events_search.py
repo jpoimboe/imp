@@ -25,7 +25,7 @@ def _ev(eid: str | None, etype: str, agent_id: str | None = None,
 def _search_ns(query: str, **over: object) -> argparse.Namespace:
     base: dict[str, object] = dict(
         query=query, active=False, backlog=False, archived=False,
-        type=None, agent=None, limit=None, list=False, json=False, no_pager=True)
+        type=None, agent=None, limit=None, all=False, list=False, json=False, no_pager=True)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -254,6 +254,29 @@ def _hit(cid: str, title: str, zone: str, events: list[tuple[int, dict[str, Any]
     return m.EventSearchHit(cid, title, zone, last, events, {}, match_count)
 
 
+def _bounded_hits() -> list[m.EventSearchHit]:
+    def events(cid: str) -> list[tuple[int, dict[str, Any]]]:
+        return [
+            (ordinal, _ev(f"{cid}-{ordinal}", "tool_call", "step:impl/coder",
+                          name="bash",
+                          input={"cmd": f"GREPTARGET {cid} event {ordinal}"}))
+            for ordinal in range(1, 6)
+        ]
+
+    return [
+        _hit("arc_old", "Archive Old", "archive", events("arc_old"), 5,
+             "2026-06-10T00:00:00+00:00"),
+        _hit("act_old", "Active Old", "active", events("act_old"), 5,
+             "2026-06-11T00:00:00+00:00"),
+        _hit("arc_new", "Archive New", "archive", events("arc_new"), 5,
+             "2026-06-15T00:00:00+00:00"),
+        _hit("act_new", "Active New", "active", events("act_new"), 5,
+             "2026-06-16T00:00:00+00:00"),
+        _hit("bkl001", "Backlog One", "backlog", [], 1,
+             "2026-06-12T00:00:00+00:00"),
+    ]
+
+
 def test_cmd_events_search_rich_header_and_digest(monkeypatch, capsys, tmp_path: Path) -> None:
     hit = _hit("aaa111", "Alpha", "active",
                [(1, _ev("e0", "tool_call", "step:impl/coder", name="bash",
@@ -275,28 +298,145 @@ def test_cmd_events_search_empty_message(monkeypatch, capsys, tmp_path: Path) ->
     assert '0 matches for "zzz"' in out
 
 
-def test_cmd_events_search_quest_cap_and_overflow(monkeypatch, capsys, tmp_path: Path) -> None:
-    hits = [_hit(f"q{i}", f"T{i}", "archive",
-                 [(1, _ev("e0", "tool_call", None, name="bash",
-                          input={"cmd": "GREPTARGET"}))], 1,
-                 last=f"2026-06-1{i}T00:00:00+00:00") for i in range(5)]
-    monkeypatch.setattr(m, "_events_search", lambda *a, **k: hits)
+def test_cmd_events_search_no_match_json_is_empty_array(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: [])
+
+    assert m._cmd_events_search(_search_ns("zzz", json=True), tmp_path) == 0
+
+    assert capsys.readouterr().out == "[]\n"
+
+
+def test_cmd_events_search_all_is_exhaustive_in_every_view(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: _bounded_hits())
+    quest_ids = ("act_new", "act_old", "bkl001", "arc_new", "arc_old")
+
+    assert m._cmd_events_search(_search_ns("GREPTARGET", all=True), tmp_path) == 0
+    rich = capsys.readouterr().out
+    assert all(quest_id in rich for quest_id in quest_ids)
+    assert "#5" in rich
+    assert "more quests" not in rich
+    assert "\n  … +" not in rich
+
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", list=True, all=True), tmp_path) == 0
+    listed = capsys.readouterr().out
+    assert all(quest_id in listed for quest_id in quest_ids)
+
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", json=True, all=True), tmp_path) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert [hit["quest_id"] for hit in payload] == list(quest_ids)
+    assert [len(hit["events"]) for hit in payload] == [5, 5, 0, 5, 5]
+
+
+@pytest.mark.parametrize(
+    ("options", "error"),
+    [
+        (["--limit", "0"], "imp: --limit must be a positive integer\n"),
+        (["--limit", "-2"], "imp: --limit must be a positive integer\n"),
+        (["--all", "--limit", "0"], "imp: --limit must be a positive integer\n"),
+        (["--all", "--limit", "2"], "imp: --all and --limit cannot be used together\n"),
+    ],
+)
+def test_main_events_search_rejects_invalid_output_controls_before_lookup(
+        monkeypatch, capsys, tmp_path: Path, options: list[str], error: str) -> None:
+    control_root_calls = 0
+
+    def _record_control_root() -> Path:
+        nonlocal control_root_calls
+        control_root_calls += 1
+        return tmp_path
+
+    monkeypatch.setattr(m, "_control_root", _record_control_root)
+
+    assert main(["events", "search", "GREPTARGET", *options]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == error
+    assert control_root_calls == 0
+
+
+def test_cmd_events_search_default_rich_is_bounded(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: _bounded_hits())
+
     rc = m._cmd_events_search(_search_ns("GREPTARGET"), tmp_path)
+
     out = capsys.readouterr().out
+    lines = out.splitlines()
+    act_new_line = next(
+        line for line in lines if line.startswith("act_new · Active New · active · "))
+    act_old_index = next(
+        index for index, line in enumerate(lines)
+        if line.startswith("act_old · Active Old · active · "))
+    act_new_index = lines.index(act_new_line)
+    age = act_new_line.rsplit(" · ", 1)[1]
+
     assert rc == 0
+    assert '21 matches in 5 quests for "GREPTARGET"' in out
+    assert act_new_index < act_old_index < next(
+        index for index, line in enumerate(lines)
+        if line.startswith("bkl001 · Backlog One · backlog · "))
+    assert age[:-1].isdigit() and age[-1] in {"s", "m", "h", "d"}
+    assert [
+        line.split()[0]
+        for line in lines[act_new_index + 1:act_old_index]
+        if line.startswith("  #")
+    ] == ["#1", "#2", "#3"]
+    assert "arc_new" not in out and "arc_old" not in out
+    assert "#4" not in out
+    assert out.count("  … +2 more") == 2
     assert "… +2 more quests" in out
 
 
-def test_cmd_events_search_limit_raises_cap(monkeypatch, capsys, tmp_path: Path) -> None:
-    hits = [_hit(f"q{i}", f"T{i}", "archive",
-                 [(1, _ev("e0", "tool_call", None, name="bash",
-                          input={"cmd": "GREPTARGET"}))], 1,
-                 last=f"2026-06-1{i}T00:00:00+00:00") for i in range(5)]
+def test_cmd_events_search_human_presentation_and_spacing(
+        monkeypatch, tmp_path: Path) -> None:
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    hits = _bounded_hits()
+    hits[3] = hits[3]._replace(title="GREPTARGET Active New")
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: hits)
-    rc = m._cmd_events_search(_search_ns("GREPTARGET", limit=10), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "more quests" not in out
+    monkeypatch.setattr(m, "should_use_color", lambda stream: True)
+    out = _Tty()
+    monkeypatch.setattr(m.sys, "stdout", out)
+
+    assert m._cmd_events_search(_search_ns("GREPTARGET"), tmp_path) == 0
+    rich = out.getvalue()
+    act_new_heading = next(
+        line for line in rich.splitlines()
+        if line.startswith("\x1b[33mact_new\x1b[0m · "))
+    assert "\x1b[2m21 matches in 5 quests for \"GREPTARGET\"\x1b[0m" in rich
+    assert act_new_heading.startswith(
+        "\x1b[33mact_new\x1b[0m · "
+        "\x1b[1m\x1b[33mGREPTARGET\x1b[0m Active New · "
+        "\x1b[2mactive · "
+    )
+    assert "\x1b[2m  … +2 more\x1b[0m" in rich
+    assert "\x1b[2m… +2 more quests\x1b[0m" in rich
+    assert rich.endswith("\n\n") and not rich.endswith("\n\n\n")
+
+    out.seek(0)
+    out.truncate(0)
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", list=True), tmp_path) == 0
+    listed = out.getvalue()
+    assert listed.removesuffix("\n\n").splitlines() == [
+        (
+            "\x1b[33mact_new\x1b[0m · "
+            "\x1b[1m\x1b[33mGREPTARGET\x1b[0m Active New · "
+            "\x1b[2mactive\x1b[0m"
+        ),
+        "\x1b[33mact_old\x1b[0m · Active Old · \x1b[2mactive\x1b[0m",
+        "\x1b[33mbkl001\x1b[0m · Backlog One · \x1b[2mbacklog\x1b[0m",
+        "\x1b[33marc_new\x1b[0m · Archive New · \x1b[2marchive\x1b[0m",
+        "\x1b[33marc_old\x1b[0m · Archive Old · \x1b[2marchive\x1b[0m",
+    ]
+    assert listed.endswith("\n\n") and not listed.endswith("\n\n\n")
 
 
 def test_cmd_events_search_per_quest_event_overflow(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -310,32 +450,67 @@ def test_cmd_events_search_per_quest_event_overflow(monkeypatch, capsys, tmp_pat
     assert "  … +2 more" in out
 
 
-def test_cmd_events_search_list_mode(monkeypatch, capsys, tmp_path: Path) -> None:
-    hits = [_hit("aaa111", "Alpha", "active", [(1, _ev("e0", "tool_call"))], 1),
-            _hit("bbb222", "Beta", "archive", [(1, _ev("e0", "tool_call"))], 1)]
+def test_cmd_events_search_default_json_is_bounded_and_byte_clean(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    source_ordinals = [7, 11, 19, 23, 29]
+    hits = _bounded_hits()
+    hits[3] = _hit(
+        "act_new", "Active New", "active",
+        [(ordinal, _ev(f"act_new-{ordinal}", "tool_call", "step:impl/coder",
+                       name="bash",
+                       input={"cmd": f"GREPTARGET act_new event {ordinal}"}))
+         for ordinal in source_ordinals],
+        5, "2026-06-16T00:00:00+00:00")
     monkeypatch.setattr(m, "_events_search", lambda *a, **k: hits)
-    rc = m._cmd_events_search(_search_ns("q", list=True), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "aaa111 · Alpha · active" in out
-    assert "bbb222 · Beta · archive" in out
-    assert "match in" not in out
 
+    assert m._cmd_events_search(_search_ns("GREPTARGET", json=True), tmp_path) == 0
 
-def test_cmd_events_search_json_mode(monkeypatch, capsys, tmp_path: Path) -> None:
-    import json as _json
-    hit = _hit("aaa111", "Alpha", "active",
-               [(7, _ev("e0", "tool_call", "step:impl/coder", name="bash",
-                        input={"cmd": "GREPTARGET"}))], 1)
-    monkeypatch.setattr(m, "_events_search", lambda *a, **k: [hit])
-    rc = m._cmd_events_search(_search_ns("GREPTARGET", json=True), tmp_path)
     out = capsys.readouterr().out
-    assert rc == 0
     payload = _json.loads(out)
-    assert payload[0]["quest_id"] == "aaa111"
-    assert payload[0]["zone"] == "active"
-    assert payload[0]["events"][0]["ordinal"] == 7
-    assert payload[0]["events"][0]["type"] == "tool_call"
+    assert isinstance(payload, list)
+    assert [hit["quest_id"] for hit in payload] == ["act_new", "act_old", "bkl001"]
+    assert set(payload[0]) == {"quest_id", "title", "zone", "last_activity", "events"}
+    assert [event["ordinal"] for event in payload[0]["events"]] == [7, 11, 19]
+    assert payload[0]["events"][0]["payload"]["input"]["cmd"] == (
+        "GREPTARGET act_new event 7")
+    assert payload[2]["events"] == []
+    assert "truncated" not in out and "\x1b[" not in out
+
+
+def test_main_events_search_json_wins_over_list_and_is_bounded(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: _bounded_hits())
+    monkeypatch.setattr(m, "_apply_theme", lambda: None)
+
+    assert main(["events", "search", "GREPTARGET", "--list", "--json", "--no-pager"]) == 0
+
+    assert [hit["quest_id"] for hit in _json.loads(capsys.readouterr().out)] == [
+        "act_new", "act_old", "bkl001"]
+
+
+def test_cmd_events_search_list_is_exhaustive_but_limit_bounds_all_modes(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: _bounded_hits())
+
+    assert m._cmd_events_search(_search_ns("GREPTARGET", list=True), tmp_path) == 0
+    listed = capsys.readouterr().out
+    assert [cid for cid in ("act_new", "act_old", "bkl001", "arc_new", "arc_old")
+            if cid in listed] == ["act_new", "act_old", "bkl001", "arc_new", "arc_old"]
+
+    assert m._cmd_events_search(_search_ns("GREPTARGET", limit=2), tmp_path) == 0
+    assert "… +3 more quests" in capsys.readouterr().out
+
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", list=True, limit=2), tmp_path) == 0
+    assert [line.split(" · ")[0] for line in capsys.readouterr().out.splitlines()] == [
+        "act_new", "act_old"]
+
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", json=True, limit=2), tmp_path) == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert [hit["quest_id"] for hit in payload] == ["act_new", "act_old"]
+    assert [event["ordinal"] for event in payload[0]["events"]] == [1, 2, 3]
 
 
 def test_cmd_events_search_rich_header_plural_nouns(
@@ -357,31 +532,33 @@ def test_cmd_events_search_rich_header_plural_nouns(
     assert '4 matches in 2 quests for "GREPTARGET"' in out
 
 
-def test_cmd_events_search_zone_major_then_last_activity_desc_sort(
+def test_cmd_events_search_filters_before_sorting_and_bounding(
         monkeypatch, capsys, tmp_path: Path) -> None:
-    act_new = _hit("act_new", "Active New", "active",
-                   [(1, _ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"}))],
-                   match_count=1, last="2026-06-15T00:00:00+00:00")
-    act_old = _hit("act_old", "Active Old", "active",
-                   [(1, _ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"}))],
-                   match_count=1, last="2026-06-10T00:00:00+00:00")
-    bkl = _hit("bkl001", "Backlog One", "backlog",
-               [(1, _ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"}))],
-               match_count=1, last="2026-06-11T00:00:00+00:00")
-    arc = _hit("arc001", "Archive One", "archive",
-               [(1, _ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"}))],
-               match_count=1, last="2026-06-12T00:00:00+00:00")
-    # deliberately scrambled — correct sort must reorder them
-    monkeypatch.setattr(m, "_events_search", lambda *a, **k: [arc, act_old, bkl, act_new])
-    rc = m._cmd_events_search(_search_ns("GREPTARGET", limit=10), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
-    # zone-major (active→backlog→archive), then last-activity descending within zone
-    idx_act_new = out.index("act_new")
-    idx_act_old = out.index("act_old")
-    idx_bkl = out.index("bkl001")
-    idx_arc = out.index("arc001")
-    assert idx_act_new < idx_act_old < idx_bkl < idx_arc
+    rows = [
+        _row("drop_new", "Drop New", "2026-06-20T00:00:00+00:00"),
+        _row("keep_old", "Keep Old", "2026-06-10T00:00:00+00:00"),
+        _row("keep_mid", "Keep Mid", "2026-06-11T00:00:00+00:00"),
+        _row("keep_new", "Keep New", "2026-06-12T00:00:00+00:00"),
+    ]
+    events = {
+        "drop_new": [_ev("e1", "tool_call", "step:review/reviewer", name="bash",
+                          input={"cmd": "GREPTARGET"})],
+        "keep_old": [_ev("e1", "tool_result", "step:review/reviewer",
+                          content="GREPTARGET")],
+        "keep_mid": [_ev("e1", "tool_result", "step:review/reviewer",
+                          content="GREPTARGET")],
+        "keep_new": [_ev("e1", "tool_result", "step:review/reviewer",
+                          content="GREPTARGET")],
+    }
+    monkeypatch.setattr(s, "_status_rows", lambda control, scanned=None: rows)
+    monkeypatch.setattr("imp.cli.store.make_store", lambda control: _FakeStore(events))
+
+    assert m._cmd_events_search(
+        _search_ns("GREPTARGET", active=True, json=True,
+                   type=["tool_result"], agent=["reviewer"]), tmp_path) == 0
+
+    assert [hit["quest_id"] for hit in _json.loads(capsys.readouterr().out)] == [
+        "keep_new", "keep_mid", "keep_old"]
 
 
 def test_main_routes_events_search_against_archive(monkeypatch, tmp_path: Path) -> None:
@@ -414,9 +591,16 @@ def test_main_events_id_still_flat_after_search_route(monkeypatch, tmp_path: Pat
     assert called["token"] == "searchxyz"
 
 
-def test_events_search_help_exits_zero(capsys) -> None:
+def test_events_search_help_exits_zero_with_bounded_contract(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
     with pytest.raises(SystemExit) as exc:
         main(["events", "search", "--help"])
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "events search" in out
+    assert "Show at most LIMIT matched quests (default: 3, except with --list)." in out
+    assert "Show every matched quest and matching event; conflicts with --limit." in out
+    assert ("One terse line per matched quest (id, title, zone); combine with --limit to cap."
+            in out)
+    assert "Structured output, bounded like the default view unless --all." in out

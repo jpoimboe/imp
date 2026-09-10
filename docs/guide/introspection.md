@@ -62,9 +62,14 @@ names rather than guessing them.
   title + intent, since drafts have no events), and **archive** quests; the same
   `--active` / `--backlog` / `--archived` flags scope it, and `imp events`'
   `--type` / `--agent` filters narrow which events match (`--type tool_call` for
-  "where invoked", the default for anywhere). Default output caps at the 3
-  newest-matched quests with per-quest matched-event lines; `--limit` raises the
-  cap and `-l` / `--list` prints one terse line per matched quest.
+  "where invoked", the default for anywhere). Results stay zone-major — active →
+  backlog → archive — and newest-first within each zone. Default rich and `--json`
+  output show the first three matched quests and the first three matching events per
+  quest; `--limit N` changes only the matched-quest bound. `--list` scans every
+  matched quest unless capped with `--limit N`; `--all` lifts both search-result
+  bounds for intentionally exhaustive rich or JSON output. Scan with `--list`, then
+  retrieve exact payloads from a chosen quest with
+  `imp events <id> <range> --json`.
 
 Summarize the rows in plain language (what is in flight, what is parked, what is
 finished); do not invent quests that the commands did not list.

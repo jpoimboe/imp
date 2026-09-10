@@ -19,12 +19,18 @@ def test_skill_documents_append_intent() -> None:
     assert "before that quest is picked up" in text
 
 
-def test_introspection_documents_events_search() -> None:
+def test_introspection_documents_bounded_events_search_workflow() -> None:
     text = _SKILL.read_text()
+    flat = _flat(text)
     assert "imp events search <query>" in text
     assert "the structured-event sibling of `imp search`" in text
     assert "title + intent, since drafts have no events" in text
-    assert "newest-matched quests with per-quest matched-event lines" in text
+    assert "active → backlog → archive" in flat
+    assert "first three matched quests and the first three matching events per quest" in flat
+    assert "`--limit N` changes only the matched-quest bound" in flat
+    assert "`--list` scans every matched quest unless capped with `--limit N`" in flat
+    assert "`--all` lifts both search-result bounds" in flat
+    assert "`imp events <id> <range> --json`" in text
 
 
 def test_reading_another_quest_credits_the_daemon_not_the_sandbox_floor() -> None:
