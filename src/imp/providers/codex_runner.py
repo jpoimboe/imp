@@ -64,7 +64,14 @@ from imp.providers.codex_mcp import (
     start_impty_server,
     start_server,
 )
-from imp.providers.codex_rollout import RolloutReadings, compaction_seen, latest_readings
+from imp.providers.codex_rollout import (
+    CorrelatedReadings,
+    RolloutCursor,
+    RolloutReadings,
+    RolloutTelemetry,
+    RolloutUsage,
+    compaction_seen,
+)
 from imp.providers.codex_token_refresh import (
     FAILED_INVALID_GRANT,
     SKIPPED_ROTATED,
@@ -187,6 +194,42 @@ def _pre_spawn_token_refresh(elog: Any, aid: str) -> RefreshOutcome:
 # (dead MCP server, hard cancel); _message_to_items maps each to a terminal Error.
 _SERVER_DIED = object()
 _CANCEL = object()
+_ROLLOUT_WAIT_SECONDS = 2.0
+_ROLLOUT_POLL_SECONDS = 0.025
+
+
+def _rollout_usage(raw: Any) -> RolloutUsage:
+    return RolloutUsage(
+        input_tokens=int(getattr(raw, "input_tokens", 0) or 0),
+        cached_input_tokens=int(getattr(raw, "cached_input_tokens", 0) or 0),
+        cache_write_input_tokens=int(getattr(raw, "cache_write_input_tokens", 0) or 0),
+        output_tokens=int(getattr(raw, "output_tokens", 0) or 0),
+        reasoning_output_tokens=int(getattr(raw, "reasoning_output_tokens", 0) or 0),
+    )
+
+
+async def _wait_for_current_readings(
+    telemetry: RolloutTelemetry, cursor: RolloutCursor, usage: RolloutUsage,
+) -> RolloutReadings:
+    deadline = time.monotonic() + _ROLLOUT_WAIT_SECONDS
+    matched = False
+    first_scan = True
+    while first_scan or time.monotonic() < deadline:
+        first_scan = False
+        try:
+            correlated: CorrelatedReadings = telemetry.scan_current(cursor, usage)
+        except OSError:
+            correlated = CorrelatedReadings(
+                matched=False, readings=RolloutReadings(context=None, quota=None))
+        matched = matched or correlated.matched
+        if correlated.readings.context is not None:
+            return correlated.readings
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(_ROLLOUT_POLL_SECONDS, remaining))
+    telemetry.finish_turn(cursor, usage, matched)
+    return RolloutReadings(context=None, quota=None)
 
 
 class CodexSession(ObserveSession):
@@ -343,6 +386,8 @@ class CodexSession(ObserveSession):
                 "IMP_IMPTY_TOKEN" if runner._impty_handle is not None else None),
         )
         runner._codex_home = codex_home
+        proc_state["rollout_telemetry"] = RolloutTelemetry(codex_home, None)
+        proc_state["rollout_cursor"] = RolloutCursor((), discovery_complete=True)
         if auth_mode == "chatgpt":
             outcome = _pre_spawn_token_refresh(elog, aid)
             runner._spawn_token_expiry = canonical_expires_at()
@@ -501,6 +546,11 @@ class CodexSession(ObserveSession):
                 # base's send()→new events() call, so the first turn does NOT.
                 self._reset_capture()
             first = False
+            telemetry: RolloutTelemetry = self._proc_state["rollout_telemetry"]
+            thread_id = self._proc_state.get("thread_id")
+            if thread_id:
+                telemetry.thread_id = thread_id
+            self._proc_state["rollout_cursor"] = telemetry.begin_turn()
             streamed = await self._thread.run_streamed(self._next_prompt)
             requery = False
             async with contextlib.aclosing(request_bracketed(
@@ -555,6 +605,17 @@ class CodexSession(ObserveSession):
         upgraded.detail["provider_message"] = str(err)
         return upgraded
 
+    async def _resolve_rollout_readings(self, completed_usage: Any) -> RolloutReadings | None:
+        codex_home = self.runner._codex_home
+        thread_id = self._proc_state.get("thread_id")
+        if codex_home is None or not thread_id:
+            return None
+        telemetry: RolloutTelemetry = self._proc_state["rollout_telemetry"]
+        cursor: RolloutCursor = self._proc_state["rollout_cursor"]
+        telemetry.thread_id = thread_id
+        return await _wait_for_current_readings(
+            telemetry, cursor, _rollout_usage(completed_usage))
+
     async def _message_to_items(self, raw: Any) -> Any:
         if raw is _SERVER_DIED:
             sh = self.runner._server_handle
@@ -571,11 +632,16 @@ class CodexSession(ObserveSession):
                 "message": "runner cancelled by interrupt"})
             return
         state = self._state
+        rollout_readings = None
+        if (getattr(raw, "type", None) == "turn.completed"
+                and getattr(raw, "usage", None) is not None):
+            rollout_readings = await self._resolve_rollout_readings(raw.usage)
         process_event(raw, elog=self.elog, agent_id=self.aid,
                       state=self._proc_state,
                       provider=self.invocation.provider_name,
                       model=self.runner.model, run_state=state,
-                      codex_home=self.runner._codex_home)
+                      codex_home=self.runner._codex_home,
+                      rollout_readings=rollout_readings)
 
         # Mirror complete_step_args from the shared state into proc_state so the
         # terminal check sees them at the boundary.
@@ -1054,6 +1120,7 @@ def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str, run_state: Any = None,
     codex_home: Path | None = None,
+    rollout_readings: RolloutReadings | None = None,
 ) -> None:
     """Translate one codex ThreadEvent into imp EventLog records.
 
@@ -1272,13 +1339,9 @@ def process_event(
             "reasoning_output_tokens": reasoning_tokens,
         }
         # `normalized` is a billing sum over every model request in this turn,
-        # not prompt occupancy — read codex's own per-request record for that.
+        # not prompt occupancy — use the correlated per-request record.
         thread_id = state.get("thread_id")
-        readings = RolloutReadings(context=None, quota=None)
-        if codex_home is not None and thread_id:
-            # codex writes this file concurrently, so the read can lose it
-            with contextlib.suppress(OSError):
-                readings = latest_readings(codex_home, thread_id)
+        readings = rollout_readings or RolloutReadings(context=None, quota=None)
         reading = readings.context
         state["context_reading"] = reading
         if readings.quota is not None:

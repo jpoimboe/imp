@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-import imp.providers.codex_runner as cr
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.completion import build_continuation_fn
 from imp.engine.reincarnation import handoff_path_for
@@ -49,7 +48,7 @@ def _agent_def() -> AgentDef:
 
 @pytest.mark.anyio
 async def test_threshold_crossing_elicits_codex_handoff(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
     """A codex turn whose reported occupancy crosses the model cutoff,
     260000 / 400000 = 0.65 against the live SDK window, without completing the
     step elicits the handoff instruction as the next prompt; the following turn
@@ -57,10 +56,8 @@ async def test_threshold_crossing_elicits_codex_handoff(
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
-    # FakeCodex writes no rollout, so stand in for codex's own reading.
-    monkeypatch.setattr(
-        cr, "latest_readings",
-        lambda home, tid: RolloutReadings(context=(350_000, 400_000), quota=None))
+    fake_codex_rollout_readings[0] = RolloutReadings(
+        context=(350_000, 400_000), quota=None)
 
     scripted = [
         # Turn 1: the reading crosses (350000/400000 = 0.875), no complete_step.
@@ -99,15 +96,14 @@ async def test_threshold_crossing_elicits_codex_handoff(
 
 @pytest.mark.anyio
 async def test_silent_handoff_turn_does_not_write_note(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
     """When the handoff turn is agent-silent (no agent_message event), no note
     must be written. The handoff event must still fire so the engine reincarnates."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
-    monkeypatch.setattr(
-        cr, "latest_readings",
-        lambda home, tid: RolloutReadings(context=(350_000, 400_000), quota=None))
+    fake_codex_rollout_readings[0] = RolloutReadings(
+        context=(350_000, 400_000), quota=None)
 
     scripted = [
         # Turn 1: the reading crosses (350000/400000 = 0.875).
@@ -171,7 +167,7 @@ async def test_below_threshold_does_not_elicit_codex_handoff(tmp_path: Path) -> 
 
 @pytest.mark.anyio
 async def test_completing_turn_above_threshold_completes_not_handoff(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
     """Completion wins over a mere crossing: a turn whose reading crosses the
     threshold (350000/400000 = 0.875) AND calls complete_step yields
     agent_result, never a handoff. Pins the ordering invariant (complete_step
@@ -179,9 +175,8 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     crossing must be real, not absent."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
-    monkeypatch.setattr(
-        cr, "latest_readings",
-        lambda home, tid: RolloutReadings(context=(350_000, 400_000), quota=None))
+    fake_codex_rollout_readings[0] = RolloutReadings(
+        context=(350_000, 400_000), quota=None)
 
     from tests.codex_fakes import mcp_call
     scripted = [[
@@ -212,15 +207,14 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
 
 @pytest.mark.anyio
 async def test_rollout_reading_at_cutoff_elicits_handoff(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
     """The watch runs on codex's own reading: 206720/258400 = 0.80 hits the
     cutoff even though this turn's billing sum (1000) is nowhere near it."""
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     hp = handoff_path_for(tmp_path / "tx")
-    monkeypatch.setattr(
-        cr, "latest_readings",
-        lambda home, tid: RolloutReadings(context=(206_720, 258_400), quota=None))
+    fake_codex_rollout_readings[0] = RolloutReadings(
+        context=(206_720, 258_400), quota=None)
 
     scripted = [
         [thread_started("thr-1"), agent_message("working on it"),
@@ -252,7 +246,7 @@ async def test_rollout_reading_at_cutoff_elicits_handoff(
 @pytest.mark.anyio
 @pytest.mark.parametrize("reading", [(30_000, 258_400), None])
 async def test_low_or_absent_reading_suppresses_handoff_on_a_huge_turn_sum(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings],
         reading: tuple[int, int] | None) -> None:
     """Regression pin. A 300k turn sum crosses the OLD test (300000/1050000 >=
     the 260000/1050000 soft-cap fraction for gpt-5.6-luna), but real occupancy
@@ -260,8 +254,7 @@ async def test_low_or_absent_reading_suppresses_handoff_on_a_huge_turn_sum(
     _seed_git_and_auth(tmp_path)
     elog = InMemoryEventLog()
     from tests.codex_fakes import mcp_call
-    monkeypatch.setattr(cr, "latest_readings",
-                        lambda home, tid: RolloutReadings(context=reading, quota=None))
+    fake_codex_rollout_readings[0] = RolloutReadings(context=reading, quota=None)
 
     scripted = [
         [thread_started("thr-1"), agent_message("still working"),

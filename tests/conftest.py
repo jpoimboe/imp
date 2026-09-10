@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from imp.paths import project_state_dir
+from imp.providers.codex_rollout import RolloutReadings
 
 
 def _command_summaries() -> dict[str, str]:
@@ -219,6 +220,23 @@ _pin_subprocess_imp_to_working_tree()
 
 # imp builds imp: strip the inherited value before any module-scoped fixture sets up.
 os.environ.pop("IMP_STATE_DIR", None)
+
+
+@pytest.fixture(autouse=True)
+def fake_codex_rollout_readings(monkeypatch: pytest.MonkeyPatch) -> list[RolloutReadings]:
+    from imp.providers.codex_runner import CodexSession
+    from tests.codex_fakes import FakeThread
+
+    current = [RolloutReadings(context=None, quota=None)]
+    real = CodexSession._resolve_rollout_readings
+
+    async def resolve(session: Any, completed_usage: Any) -> RolloutReadings | None:
+        if isinstance(session._thread, FakeThread):
+            return current[0]
+        return await real(session, completed_usage)
+
+    monkeypatch.setattr(CodexSession, "_resolve_rollout_readings", resolve)
+    return current
 
 
 @pytest.fixture(autouse=True)
