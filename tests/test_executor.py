@@ -2197,13 +2197,22 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
 async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     tmp_path: Path, _bare_sandbox: None,
 ) -> None:
-    """A script gate runs with cwd under <state dir>/quests/test-quest/workflow/ (the snapshot,
-    sandbox binding intact) while IMP_PROJECT_ROOT still points at the worktree, so
-    git ops act on the change's real tree. Exit 0 -> continue -> COMPLETED."""
     import subprocess
 
     wf = tmp_path / "imp" / "workflows" / "imp"
-    wf.mkdir(parents=True)
+    scripts = wf / "scripts"
+    scripts.mkdir(parents=True)
+    probe = scripts / "probe.sh"
+    probe.write_text(
+        "#!/bin/sh\n"
+        'case "$(pwd)" in\n'
+        "  */quests/test-quest/workflow) ;;\n"
+        "  *) exit 9 ;;\n"
+        "esac\n"
+        'cd "$IMP_PROJECT_ROOT"\n'
+        "git rev-parse --is-inside-work-tree\n"
+    )
+    probe.chmod(0o755)
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 1, max_loops: 6}\n"
@@ -2211,9 +2220,7 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
         "  - name: only\n"
         "    steps:\n"
         "      - name: probe\n"
-        "        command: 'case \"$(pwd)\" in */quests/test-quest/workflow)"
-        " ;; *) exit 9;; esac;"
-        " cd \"$IMP_PROJECT_ROOT\"; git rev-parse --is-inside-work-tree'\n"
+        "        command: ./scripts/probe.sh\n"
         "        rules:\n"
         "          - {if: {exit: 0}, continue: true}\n"
         "          - {else: true, pause: true}\n"

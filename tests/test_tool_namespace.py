@@ -514,26 +514,28 @@ def test_a_call_can_use_a_cwd_that_exists_only_inside_the_keeper():
         ctx.base_sandbox_policy = _policy_for(root, secret_dirs=(str(masked),))
         ctx.background_enabled = True
         inside = masked / "only-inside"
+        relative_inside = str(inside.relative_to(root))
 
         made = _bash(ctx, f"mkdir -p {inside}")
         assert made["returncode"] == 0, made
-        assert not inside.exists()      # it lives in the keeper's tmpfs alone
+        assert not inside.exists()
 
-        # (a) foreground
-        done = _bash(ctx, "pwd", cwd=str(inside))
+        done = _bash(ctx, "pwd", cwd=relative_inside)
         assert done["returncode"] == 0, done
         assert done["stdout"].strip() == str(inside)
 
-        # (b) background, through the same shared spawn core. The beacon is read
-        # host-side: a bash_output wait cannot reach a terminal status here,
-        # since each call runs its own anyio.run and the child watcher that would
-        # update returncode belongs to the closed loop that spawned it.
         beacon = root / "bg-cwd.txt"
-        started = _bash(ctx, f"pwd > {beacon}", cwd=str(inside),
-                        run_in_background=True)
+        started = _bash(
+            ctx,
+            f"pwd > {beacon}",
+            cwd=relative_inside,
+            run_in_background=True,
+        )
         assert started["status"] == "running", started
-        assert _poll(lambda: beacon.read_text().strip() if beacon.exists() else "",
-                     what="the background call's own pwd") == str(inside)
+        assert _poll(
+            lambda: beacon.read_text().strip() if beacon.exists() else "",
+            what="the background call's own pwd",
+        ) == str(inside)
 
         # (c) a cwd in NEITHER view is now a shell error the agent can read
         missing = root / "nope"
