@@ -94,7 +94,7 @@ async def test_run_closes_the_impty_session_in_teardown(
         # attach_impty_driver, which passes the run's sandbox hook, this step's
         # transcript dir as the journal dir, and a quest-scoped snapshot dir.
         def __init__(self, sandbox: Any = None, journal_dir: Any = None,
-                     snapshot_dir: Any = None) -> None:
+                     snapshot_dir: Any = None, cwd_resolver: Any = None) -> None:
             self._closed = False
             self._sandbox = sandbox
             journal_dirs.append(journal_dir)

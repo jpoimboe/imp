@@ -1131,6 +1131,12 @@ def test_attaching_the_driver_hooks_it_and_registers_it_in_one_step(
         # The hook is live: it plans a join rather than declining.
         plan = await asyncio.to_thread(lambda: driver._sandbox(["true"], None, None))
         assert plan is not None and plan.argv[0] == "nsenter"
+        worktree = tmp_path / "worktree"
+        ctx.project_root = worktree
+        assert driver._cwd_resolver is not None
+        assert driver._cwd_resolver(".") == str(worktree)
+        raw_absolute = f"{tmp_path}//absolute"
+        assert driver._cwd_resolver(raw_absolute) == raw_absolute
         monkeypatch.setattr(driver, "close", lambda: closed.append("closed"))
         return driver
 

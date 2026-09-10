@@ -695,7 +695,9 @@ def attach_impty_driver(ctx: ToolContext, *, journal_dir: Path) -> ImptyDriver:
 
     quest_dir = tool_quest_dir(ctx)
     ctx.impty_driver = ImptyDriver(
-        sandbox=make_impty_sandbox_hook(ctx), journal_dir=journal_dir,
+        sandbox=make_impty_sandbox_hook(ctx),
+        journal_dir=journal_dir,
         snapshot_dir=None if quest_dir is None else quest_dir / "snapshots",
+        cwd_resolver=ctx.resolve_cwd,
     )
     return ctx.impty_driver
