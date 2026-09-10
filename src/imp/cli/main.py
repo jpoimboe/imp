@@ -2676,9 +2676,10 @@ def _resume_gone(control: Path, quest_id: str) -> int:
 
 def _rehydrate_resumable(control: Path, quest_id: str) -> Quest | None:
     from imp.engine.archive import read as archive_read
-    from imp.engine.archive import record, records_root
+    from imp.engine.archive import record, records_root, require_current
     from imp.engine.errors import LoadError, LoadErrors
     from imp.engine.quest import Quest
+    require_current(control)
     rec = record.read_record(records_root(control), quest_id)
     if rec is None or not rec.get("resumable"):
         return None
@@ -2764,11 +2765,21 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     absent record is."""
     from imp.cli.store import _row_for_id
     from imp.engine.archive import read as archive_read
-    from imp.engine.archive import record, records_root
+    from imp.engine.archive import (
+        check_index_floor,
+        record,
+        records_root,
+        require_current,
+    )
     from imp.engine.errors import ArchiveMismatch
 
     rows = [r for r in _resumable_rows(control) if token in r[0]]
     live = {r[0] for r in rows}
+    try:
+        require_current(control)
+        check_index_floor(control)
+    except (ArchiveMismatch, PermissionError):
+        return rows
     for cid in archive_read.archived_ids(control):
         if token not in cid or cid in live:
             continue

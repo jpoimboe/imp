@@ -9,7 +9,7 @@ import pytest
 
 from imp.engine import archive, durable
 from imp.engine.archive import record
-from imp.engine.archive.blobstore import LocalBlobStore
+from imp.engine.archive.blobstore import LocalBlobStore, hash_content
 
 
 class _FakeStderr:
@@ -176,6 +176,94 @@ def test_archive_quest_stamps_marker_current(tmp_path: Path) -> None:
     assert archive._read_data_version(tmp_path) >= archive._DATA_VERSION
 
 
+@pytest.mark.parametrize(
+    "stored_version", [None, 11], ids=["markerless", "marker-11"],
+)
+def test_archive_quest_rechecks_archive_after_readonly_skip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stored_version: int | None,
+) -> None:
+    _seed_old_archived_quest(tmp_path, "old-ro", _OLD)
+    if stored_version is not None:
+        archive.data_version_path(tmp_path).write_text(str(stored_version))
+    fresh_bytes = _jsonl([
+        {
+            "id": "fresh-e0", "parent_id": None, "agent_id": "fresh-agent",
+            "timestamp": "2026-06-02T00:00:00+00:00", "type": "step_started",
+            "payload": {"step": "implement", "round": 37},
+        },
+        {
+            "id": "fresh-e1", "parent_id": "fresh-e0", "agent_id": "fresh-agent",
+            "timestamp": "2026-06-02T00:00:01+00:00", "type": "user_message",
+            "payload": {
+                "role": "user", "subtype": "reply",
+                "content": [{"type": "text", "text": "FRESH_CURRENT_SENTINEL"}],
+            },
+        },
+    ])
+    events = tmp_path / "fresh.jsonl"
+    events.write_bytes(fresh_bytes)
+    quest_json = tmp_path / "fresh-quest.json"
+    quest_json.write_text(json.dumps({
+        "id": "fresh", "title": "Fresh", "base_branch": "main",
+        "created_at": "2026-06-02T00:00:00+00:00", "depends_on": [],
+        "workflow": "default", "provider": "codex",
+    }))
+    state_json = tmp_path / "fresh-state.json"
+    state_json.write_text(json.dumps({
+        "id": "fresh", "status": "merged", "step": "finalize",
+        "started_at": "2026-06-02T00:00:00+00:00",
+    }))
+    root = archive.archive_root(tmp_path)
+    real_access = archive.os.access
+    skipped = False
+
+    def access(path: Path, mode: int) -> bool:
+        nonlocal skipped
+        if Path(path) == root and mode == archive.os.W_OK and not skipped:
+            skipped = True
+            return False
+        return real_access(path, mode)
+
+    migrated_at_publication: list[list[str]] = []
+    real_write = record.write_record
+
+    def capture_publication(records_dir: Path, rec: dict) -> Path:
+        path = real_write(records_dir, rec)
+        if rec["id"] == "fresh":
+            migrated_at_publication.append([
+                event["type"] for event in _events_of(tmp_path, "old-ro")
+            ])
+        return path
+
+    monkeypatch.setattr(archive.os, "access", access)
+    monkeypatch.setattr(record, "write_record", capture_publication)
+
+    archive.archive_quest(
+        tmp_path, "fresh", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+    fresh = record.read_record(archive.records_root(tmp_path), "fresh")
+    fresh_hash = hash_content(fresh_bytes)
+    fresh_blob = (
+        LocalBlobStore(archive.blobs_root(tmp_path)).get(fresh["events_hash"])
+        if fresh else None
+    )
+    assert (
+        migrated_at_publication,
+        archive.data_version_path(tmp_path).read_text().strip(),
+        fresh and fresh["events_hash"],
+        fresh_blob,
+    ) == (
+        [[
+            "user_message", "step_context", "engine_message", "engine_message",
+            "agent_message", "awaiting_user_input", "user_message",
+        ]],
+        str(archive._DATA_VERSION),
+        fresh_hash,
+        fresh_bytes,
+    )
+
+
 def test_migrate_emits_dim_inplace_progress_on_tty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -258,8 +346,8 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_eleven() -> None:
-    assert archive._DATA_VERSION == 11
+def test_data_version_bumped_to_twelve() -> None:
+    assert archive._DATA_VERSION == 12
 
 
 def test_write_data_version_durably_replaces_exact_marker(
@@ -652,10 +740,10 @@ def test_a_forced_second_pass_leaves_the_backfilled_blob_alone(
     assert len(set(_session_costs(tmp_path, "qr002"))) == 2
 
 
-# 10, spelled out: the marker every existing install already carries. Deriving it as
+# 11, spelled out: the marker every existing install already carries. Deriving it as
 # _DATA_VERSION - 1 would sit below the constant whatever the constant is, so the
 # test would pass with the bump reverted — the literal is what pins it.
-_PREV_DATA_VERSION = 10
+_PREV_DATA_VERSION = 11
 
 
 def _started(round_: int | None = None, eid: str = "ss1") -> dict:
@@ -688,9 +776,8 @@ def test_an_archive_at_the_previous_data_version_still_gets_rounds_stamped(
 
 
 def test_archiving_a_post_change_quest_keeps_its_real_rounds(tmp_path: Path) -> None:
-    # archive_quest writes the record BEFORE calling ensure_current, so on an install
-    # whose marker is stale the chain re-runs over the just-written blob. An
-    # unconditional stamp would flatten these to 1.
+    # archive_quest migrates the stale archive before publishing the fresh record.
+    # This real-rounds regression ensures later archive writes never flatten them to 1.
     _seed_old_archived_quest(tmp_path, "rnd02", _TRIAD)
     archive.data_version_path(tmp_path).write_text(str(_PREV_DATA_VERSION))
     events = tmp_path / "live.jsonl"

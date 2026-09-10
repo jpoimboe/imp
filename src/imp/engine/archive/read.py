@@ -17,6 +17,7 @@ from imp.engine.archive import (
     index_path,
     record,
     records_root,
+    require_current,
 )
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.paths import project_state_dir
@@ -167,6 +168,7 @@ def rehydrate_quest(control_root: Path, quest_id: str) -> Path:
     quest_dir = project_state_dir(control_root) / "quests" / quest_id
     if quest_dir.exists():
         raise FileExistsError(f"live home for {quest_id!r} already exists")
+    require_current(control_root)
     quest_json = read_quest_json(control_root, quest_id)
     if quest_json is None:
         raise FileNotFoundError(f"no archived record for {quest_id!r}")

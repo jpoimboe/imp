@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -8,10 +9,14 @@ import pytest
 from imp.engine import archive
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
+from imp.engine.archive import record
+from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import session_has_resume_state
+from imp.engine.resume_state import parse_native_resume_state
 from imp.engine.state import State
 from imp.paths import project_state_dir
+from imp.providers.codex_rollout import parse_codex_resume_state, restore_rollout
 from tests.conftest import _seed_control
 
 
@@ -91,3 +96,109 @@ def test_rehydrate_non_resumable_restores_no_steps(tmp_path: Path) -> None:
     quest_dir = archive_read.rehydrate_quest(tmp_path, "conv")
 
     assert not (quest_dir / "steps").exists()
+
+
+def _seed_indexless_v11_legacy(control: Path, cid: str = "legacy") -> None:
+    _seed_control(control)
+    quest = Quest.create_draft(
+        control, title="Legacy", quest_id=cid, base_branch="main")
+    quest_dir = quest.quest_dir
+    meta = json.loads((quest_dir / "quest.json").read_text())
+    final_state = json.loads((quest_dir / "state" / "state.json").read_text())
+    events = (quest_dir / "events.jsonl").read_bytes()
+    shutil.rmtree(quest_dir)
+
+    store = LocalBlobStore(archive.blobs_root(control))
+    restore_path = "sessions/2026/09/legacy.jsonl"
+    rollout = b'{"type":"session_meta","payload":{"id":"legacy-thread"}}\n'
+    metadata = json.dumps({
+        "thread_id": "legacy-thread",
+        "rollout_relpath": restore_path,
+    }).encode()
+    step_blobs = {
+        "build/coder/codex_thread.json": store.put(metadata),
+        f"build/coder/codex_rollout/{restore_path}": store.put(rollout),
+    }
+    rec = record.build_record(
+        meta, final_state, store.put(events), resumable=True, step_blobs=step_blobs)
+    record.write_record(archive.records_root(control), rec)
+    archive.data_version_path(control).write_text("11")
+    assert not archive.index_path(control).exists()
+
+
+def test_rehydrate_migrates_indexless_v11_before_archive_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_indexless_v11_legacy(tmp_path)
+    observed: list[bytes] = []
+    original = {
+        "quest": archive_read.read_quest_json,
+        "state": archive_read.read_state_json,
+        "events": archive_read.read_events,
+        "steps": archive_read.read_step_blobs,
+    }
+
+    def checked(name: str):
+        def read(control: Path, cid: str):
+            observed.append(archive.data_version_path(control).read_bytes())
+            return original[name](control, cid)
+        return read
+
+    monkeypatch.setattr(archive_read, "read_quest_json", checked("quest"))
+    monkeypatch.setattr(archive_read, "read_state_json", checked("state"))
+    monkeypatch.setattr(archive_read, "read_events", checked("events"))
+    monkeypatch.setattr(archive_read, "read_step_blobs", checked("steps"))
+
+    quest_dir = archive_read.rehydrate_quest(tmp_path, "legacy")
+
+    loaded = Quest.load(tmp_path, "legacy")
+    session_dir = quest_dir / "steps" / "build" / "coder"
+    assert loaded.id == "legacy"
+    assert observed == [b"12"] * 4
+    assert not (session_dir / "codex_thread.json").exists()
+    assert not (session_dir / "codex_rollout").exists()
+    native = parse_native_resume_state((session_dir / "resume-state.json").read_bytes())
+    selected = parse_codex_resume_state(native)
+    codex_home = tmp_path / "codex-home"
+    thread_id = restore_rollout(
+        codex_home=codex_home,
+        transcript_dir=session_dir,
+        resume_state=native,
+    )
+    assert (
+        selected.restore_path,
+        codex_home.joinpath(*selected.restore_path.split("/")).read_bytes(),
+        thread_id,
+    ) == (
+        "sessions/2026/09/legacy.jsonl",
+        b'{"type":"session_meta","payload":{"id":"legacy-thread"}}\n',
+        "legacy-thread",
+    )
+
+
+def test_rehydrate_read_only_stale_archive_fails_before_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_indexless_v11_legacy(tmp_path)
+    quest_dir = project_state_dir(tmp_path) / "quests" / "legacy"
+    monkeypatch.setattr(archive.os, "access", lambda _path, _mode: False)
+    calls: list[str] = []
+
+    def unexpected(*_args, **_kwargs):
+        calls.append("read")
+        raise AssertionError("archive read before migration")
+
+    monkeypatch.setattr(archive_read, "read_quest_json", unexpected)
+    monkeypatch.setattr(archive_read, "read_state_json", unexpected)
+    monkeypatch.setattr(archive_read, "read_events", unexpected)
+    monkeypatch.setattr(archive_read, "read_step_blobs", unexpected)
+
+    with pytest.raises(PermissionError) as excinfo:
+        archive_read.rehydrate_quest(tmp_path, "legacy")
+
+    assert (
+        excinfo.value.filename,
+        calls,
+        quest_dir.exists(),
+        archive.data_version_path(tmp_path).read_bytes(),
+    ) == (str(archive.archive_root(tmp_path)), [], False, b"11")
