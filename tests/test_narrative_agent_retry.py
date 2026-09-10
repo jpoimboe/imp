@@ -204,6 +204,29 @@ PARENT_LINE = ("warning: [rate_limit] code-reviewer waiting for limit reset"
 IN_FOLD_LINE = "warning: [rate_limit] waiting for limit reset — retry 1 in 2h 45m"
 
 
+def test_nested_subagent_limit_wait_leaves_one_outermost_breadcrumb() -> None:
+    events = [
+        {"id": "s1", "agent_id": None, "type": "step_started",
+         "payload": {"step": "review", "kind": "agent", "phase": "convergence"}},
+        {"id": "parent", "agent_id": "step:convergence/review", "type": "tool_call",
+         "payload": {"id": "parent-block", "id_ns": "block", "name": "sub_agent",
+                     "input": {"subagent_name": "parent"}}},
+        {"id": "grandchild", "agent_id": "sub:parent", "type": "tool_call",
+         "payload": {"id": "grandchild-block", "id_ns": "block", "name": "sub_agent",
+                     "input": {"subagent_name": "grandchild"}}},
+        {"id": "retry", "agent_id": "sub:grandchild", "type": "agent_retry",
+         "payload": {"category": "rate_limit", "attempt": 1,
+                     "backoff_seconds": 9908.0, "hinted": True}},
+    ]
+
+    named = ("warning: [rate_limit] grandchild waiting for limit reset"
+             " — retry 1 in 2h 45m")
+    assert _lean(events).count(named) == 1
+    full = _full(events)
+    assert full.count(named) == 1
+    assert full.count(IN_FOLD_LINE) == 1
+
+
 def test_subagent_limit_wait_leaves_a_parent_level_breadcrumb() -> None:
     # 9908s is the observed hinted wait: 165 min -> "2h 45m".
     events = _sub_retry_events(category="rate_limit", attempt=1,

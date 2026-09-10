@@ -81,13 +81,19 @@ def test_step_started_resets_context_gauge() -> None:
     assert b.latest_context_window is None
 
 
-def test_an_unregistered_subagents_patch_leaves_the_top_level_gauge_alone() -> None:
+def test_a_retired_subagents_patch_leaves_the_top_level_gauge_alone() -> None:
     b = _fed()
+    b.add({"id": "t1", "type": "tool_call", "agent_id": AID,
+           "payload": {"id": "blk-t1", "id_ns": "block", "name": "sub_agent",
+                       "input": {"subagent_name": "coder"}}})
+    b.add({"id": "done", "type": "tool_result", "agent_id": AID,
+           "payload": {"id": "blk-t1", "id_ns": "block", "content": "done"}})
     b.add({"type": "agent_message_usage_patch", "agent_id": "sub:t1",
            "payload": {"usage": {}, "context_tokens": 199000,
                        "context_window": 258400}})
-    assert b.latest_prompt_tokens == 22389        # own turn holds the gauge
+    assert b.latest_prompt_tokens == 22389
+    assert not any(isinstance(n, nv.FallbackLine) for n in _walk(b.tree.root))
     b.add({"type": "reincarnating", "agent_id": None,
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "(199k/258k)" in out                   # ...but the crossing turn is named
+    assert "(199k/258k)" in out

@@ -160,17 +160,6 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
     assert "status=Success" not in out
 
 
-# NOTE: there is intentionally NO doubly-nested (sub-subagent) test here.
-# Routing is single-level by exact membership (narrative.py:763-770): a
-# grandchild's `sub:<id>` events are NOT delegated into the child fold's nested
-# builder, and spawned subagents receive `subagent_defs={}` so they cannot spawn
-# subagents at all. A sub-subagent fixture would misroute (inner prose lands at
-# the step level, inner fold stays empty) and any substring-presence assertion
-# would pass for the wrong reason. The render code recurses correctly, but the
-# scenario is unreachable until the engine enables nesting and routing becomes
-# recursive/prefix-aware — out of scope for this plan.
-
-
 def test_subagent_error_renders_failed_status_row() -> None:
     # Part D: a failed subagent surfaces as · failed in lean — NOT the raw
     # error outcome prose (which could leak the SDK sentinel).
@@ -904,15 +893,21 @@ def test_subagent_header_excludes_own_gutter() -> None:
 
 
 def test_nested_subagent_emits_two_gutter_levels() -> None:
-    # Sub-subagents can't be built through the event pipeline (single-level
-    # routing), so construct the nested SubagentFold directly and render it.
-    # The recursive gutter behavior lives in --full; lean collapses to one row.
-    inner = nv.SubagentFold(subagent_name="inner", event_id="e2", block_id="b2",
-                            nested=nv.NarrativeBuilder(), running=False)
-    inner.nested.tree.root.children.append(nv.LiteralTextNode(text="deep finding"))
-    outer = nv.SubagentFold(subagent_name="outer", event_id="e1", block_id="b1",
-                            nested=nv.NarrativeBuilder(), running=False)
-    outer.nested.tree.root.children.append(inner)
+    tree = nv.build_tree([
+        _ev("s", "step_started", step="s", kind="agent", phase="p"),
+        _ev("e1", "tool_call", agent_id="step:p/s", id="b1", id_ns="block",
+            name="sub_agent", input={"subagent_name": "outer"}),
+        _ev("e2", "tool_call", agent_id="sub:e1", id="b2", id_ns="block",
+            name="sub_agent", input={"subagent_name": "inner"}),
+        _ev("deep", "agent_message", agent_id="sub:e2", provider="codex", usage={},
+            raw={"content": [{"type": "text", "text": "deep finding"}]}),
+        _ev("r2", "tool_result", agent_id="sub:e1", id="b2", id_ns="block",
+            content="inner done", error=False),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1", id_ns="block",
+            content="outer done", error=False),
+    ])
+    step = tree.root.children[0].children[0]
+    outer = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     out = list(rt._render(outer, depth=0, full=True, color=False, width=80))
     assert out[0] == "▾ outer"                       # depth 0, no gutter
     assert any(ln == "│ ▾ inner" for ln in out)      # depth 1, one gutter

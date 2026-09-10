@@ -101,7 +101,7 @@ def test_pause_during_open_step_nests_inside_that_step() -> None:
     assert isinstance(parent, StepNode)
 
 
-def test_pause_finalizes_open_folds_without_clearing_membership() -> None:
+def test_pause_retires_open_folds() -> None:
     nb = NarrativeBuilder()
     for e in [
         _created(),
@@ -109,15 +109,16 @@ def test_pause_finalizes_open_folds_without_clearing_membership() -> None:
         {"id": "t1", "agent_id": "a", "type": "tool_call",
          "payload": {"id": "t1", "name": "sub_agent",
                      "input": {"subagent_name": "reviewer"}}},
-        _paused(eid="z", reason="interrupt"),
     ]:
         nb.add(e)
     fold = nb._open_sub_by_event["t1"]
+    nb.add(_paused(eid="z", reason="interrupt"))
     assert fold.running is False
     assert fold.terminal_state == "interrupted"
-    # Narrower than the resume loop: membership entries are NOT cleared.
-    assert "t1" in nb._open_sub_by_event
-    assert "sub:t1" in nb._sub_by_agent_id
+    assert "t1" not in nb._open_sub_by_event
+    assert "sub:t1" not in nb._sub_by_agent_id
+    assert "sub:t1" not in nb._descendant_builders
+    assert nb._retired_descendant_builders["sub:t1"] is fold.nested
 
 
 def test_awaiting_user_pause_appends_no_pause_node() -> None:
@@ -135,16 +136,23 @@ def test_awaiting_user_pause_still_finalizes_open_folds_and_sets_paused() -> Non
         {"id": "t1", "agent_id": "a", "type": "tool_call",
          "payload": {"id": "t1", "name": "sub_agent",
                      "input": {"subagent_name": "reviewer"}}},
-        {"id": "z", "agent_id": None, "type": "workflow_paused",
-         "payload": {"reason": "awaiting_user"}},
     ]:
         nb.add(e)
-    # Root still marked paused, open folds finalized exactly as for any pause...
-    assert nb.tree.root.status == "paused"
     fold = nb._open_sub_by_event["t1"]
+    nb.add({"id": "ask", "agent_id": None, "type": "awaiting_user_input",
+            "payload": {"prompt": "continue?"}})
     assert fold.running is False
     assert fold.terminal_state == "interrupted"
-    # ...but NO PauseNode is appended (the redundant your-turn line is suppressed).
+    assert fold.outcome is None
+    assert nb._descendant_builders["sub:t1"] is fold.nested
+    assert nb._sub_by_agent_id["sub:t1"] is fold
+
+    nb.add({"id": "z", "agent_id": None, "type": "workflow_paused",
+            "payload": {"reason": "awaiting_user"}})
+    assert nb.tree.root.status == "paused"
+    assert fold.outcome is None
+    assert "sub:t1" not in nb._descendant_builders
+    assert nb._retired_descendant_builders["sub:t1"] is fold.nested
     def _walk(node: object) -> bool:
         if isinstance(node, PauseNode):
             return True
