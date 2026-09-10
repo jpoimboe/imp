@@ -10,8 +10,8 @@ from imp.engine.quest import LAYOUT_VERSION, Quest, _imp_commit, _write_quest_js
 from tests.conftest import _git, _seed_control
 
 
-def test_layout_version_constant_is_twenty_one() -> None:
-    assert LAYOUT_VERSION == 21
+def test_layout_version_constant_is_twenty_two() -> None:
+    assert LAYOUT_VERSION == 22
 
 
 def test_quest_metadata_publish_fsyncs_the_containing_directory(

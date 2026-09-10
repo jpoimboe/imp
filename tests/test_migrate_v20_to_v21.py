@@ -120,6 +120,5 @@ def test_load_migrates_a_live_home_through_the_chain(tmp_path: Path) -> None:
     assert _meta(qd)["layout_version"] == LAYOUT_VERSION
 
 
-def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 21
+def test_the_hop_is_registered() -> None:
     assert quest_mod._MIGRATIONS[(20, 21)] is _migrate_v20_to_v21

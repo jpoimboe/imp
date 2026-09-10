@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, QuestContext
+from imp.engine.quest import Quest
 from imp.engine.resume_state import read_native_resume_state
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import (
@@ -32,6 +33,7 @@ from tests.codex_fakes import (
     thread_started,
     turn_completed,
 )
+from tests.conftest import _seed_control
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 
@@ -70,19 +72,20 @@ def _agent_def() -> AgentDef:
 
 def _build_invocation(
     tmp_path: Path, *, event_log: object, balance_on_resume: bool,
-    resume_cause: str = "human",
+    resume_cause: str = "human", transcript_dir: Path | None = None,
 ) -> AgentInvocation:
+    transcript_dir = transcript_dir or tmp_path / "tx"
     return AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
         quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
-        transcript_dir=tmp_path / "tx",
+        transcript_dir=transcript_dir,
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
         event_log=event_log, balance_on_resume=balance_on_resume,
         native_resume_state=(
-            read_native_resume_state(tmp_path / "tx")
+            read_native_resume_state(transcript_dir)
             if balance_on_resume else None),
         resume_cause=resume_cause,
     )
@@ -190,6 +193,74 @@ async def test_resume_calls_resume_thread_not_start_thread(tmp_path: Path) -> No
     assert fake.resume_thread_calls, "resume must call client.resume_thread()"
     assert fake.resume_thread_calls[0][0] == thread_id
     assert fake.start_thread_calls == [], "resume must NOT call start_thread()"
+
+
+@pytest.mark.anyio
+async def test_migrated_v20_session_resumes_exact_legacy_rollout(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    (tmp_path / "auth.json").write_text(
+        '{"auth_mode": "chatgpt", "tokens": {}}')
+    quest = Quest.create_draft(
+        tmp_path, title="", quest_id="migrated-resume", base_branch="main")
+    meta_path = quest.quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 20
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    session = quest.quest_dir / "steps" / "phase" / "step"
+    session.mkdir(parents=True)
+    thread_id = "01993480-c764-7a82-aa98-e2f62b4139e7"
+    restore_path = "sessions/2026/09/10/rollout-unrelated-name.jsonl"
+    rollout_bytes = b'{"unique":"legacy-v20-rollout"}\n'
+    (session / "codex_thread.json").write_text(json.dumps({
+        "thread_id": thread_id,
+        "rollout_relpath": restore_path,
+    }))
+    rollout = session / "codex_rollout"
+    rollout = rollout.joinpath(*restore_path.split("/"))
+    rollout.parent.mkdir(parents=True)
+    rollout.write_bytes(rollout_bytes)
+
+    Quest.load(tmp_path, "migrated-resume")
+
+    observed_rollouts: list[bytes] = []
+
+    def observe_restored_rollout() -> None:
+        assert runner._codex_home is not None
+        restored = runner._codex_home.joinpath(*restore_path.split("/"))
+        observed_rollouts.append(restored.read_bytes())
+
+    fake = FakeCodex(
+        scripted_turns=[[
+            thread_started(thread_id),
+            agent_message("resumed"),
+            mcp_call(
+                name="complete_step", args={"answer": "42"},
+                result="ok", item_id="cs-migrated"),
+            turn_completed(input_tokens=1, output_tokens=1),
+        ]],
+        on_turn_start=observe_restored_rollout,
+    )
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+    invocation = _build_invocation(
+        tmp_path,
+        event_log=InMemoryEventLog(),
+        balance_on_resume=True,
+        transcript_dir=session,
+    )
+
+    async for _event in runner.run(invocation):
+        pass
+
+    assert (
+        fake.resume_thread_calls[0][0],
+        fake.start_thread_calls,
+        observed_rollouts,
+    ) == (thread_id, [], [rollout_bytes])
 
 
 @pytest.mark.anyio

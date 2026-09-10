@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine import durable, worktree
+from imp.engine.codex_resume_migration import migrate_live_codex_resume_state
 from imp.engine.env import quest_var_tmp_root
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
 from imp.engine.event_migrations import (
@@ -38,7 +39,7 @@ from imp.engine.state import (
 from imp.engine.types import SourceLoc
 from imp.paths import project_state_dir
 
-LAYOUT_VERSION = 21  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 22  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -527,6 +528,14 @@ def _migrate_v20_to_v21(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v21_to_v22(quest_dir: Path) -> None:
+    migrate_live_codex_resume_state(quest_dir)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 22
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -548,6 +557,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (18, 19): _migrate_v18_to_v19,
     (19, 20): _migrate_v19_to_v20,
     (20, 21): _migrate_v20_to_v21,
+    (21, 22): _migrate_v21_to_v22,
 }
 
 
