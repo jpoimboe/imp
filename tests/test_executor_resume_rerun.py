@@ -4,14 +4,16 @@ import contextlib
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.engine.executor import RunResult, run_quest
+from imp.engine.executor import RunResult, _session_is_resumable, run_quest
 from imp.engine.quest import Quest
-from imp.engine.reincarnation import session_has_resume_state, write_session_owner
+from imp.engine.reincarnation import write_session_owner
+from imp.engine.resume_state import NativeResumeState, encode_native_resume_state
 from imp.engine.state import State
 from imp.paths import project_state_dir
 
@@ -27,13 +29,13 @@ def test_truncated_autonomous_session_is_replayed(tmp_path: Path) -> None:
     # the provider injects a continue nudge so it proceeds instead of re-running.
     _write(tmp_path, Message(role="assistant",
                              content=(TextBlock(text="still working"),)))
-    assert session_has_resume_state(tmp_path) is True
+    assert _session_is_resumable(tmp_path) is True
 
 
 def test_pending_user_turn_is_replayed(tmp_path: Path) -> None:
     # Last message is a user turn → SEND_TO_LLM, safe to replay.
     _write(tmp_path, Message(role="user", content=(TextBlock(text="hi"),)))
-    assert session_has_resume_state(tmp_path) is True
+    assert _session_is_resumable(tmp_path) is True
 
 
 def test_awaiting_user_is_replayed(tmp_path: Path) -> None:
@@ -41,7 +43,7 @@ def test_awaiting_user_is_replayed(tmp_path: Path) -> None:
     _write(tmp_path, Message(
         role="assistant",
         content=(ToolUseBlock(id="w1", name="wait_for_user", input={}),)))
-    assert session_has_resume_state(tmp_path) is True
+    assert _session_is_resumable(tmp_path) is True
 
 
 def test_empty_session_is_not_replayed(tmp_path: Path) -> None:
@@ -49,7 +51,7 @@ def test_empty_session_is_not_replayed(tmp_path: Path) -> None:
     # step through the resume branch (initial_messages=()), and the provider's
     # empty-transcript fallback would then build an EMPTY query that hangs
     # receive_response() forever. An empty transcript must run fresh.
-    assert session_has_resume_state(tmp_path) is False
+    assert _session_is_resumable(tmp_path) is False
 
 
 def test_dangling_tool_use_is_replayed(tmp_path: Path) -> None:
@@ -57,7 +59,7 @@ def test_dangling_tool_use_is_replayed(tmp_path: Path) -> None:
     _write(tmp_path, Message(
         role="assistant",
         content=(ToolUseBlock(id="t1", name="write_file", input={}),)))
-    assert session_has_resume_state(tmp_path) is True
+    assert _session_is_resumable(tmp_path) is True
 
 
 @pytest.fixture
@@ -65,7 +67,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _seed_single_agent(root: Path) -> Quest:
+def _seed_single_agent(root: Path, *, provider: str = "fake") -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
     wf = root / "imp" / "workflows" / "imp"
@@ -80,7 +82,10 @@ def _seed_single_agent(root: Path) -> Quest:
         "      - {name: w, file: agents/writer.md, tier: low}\n")
     (root / "imp" / "config.yaml").write_text("default-workflow: imp\n")
     (project_state_dir(root) / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
+        f"providers: [{provider}]\ntiers:\n"
+        f"  low: {{{provider}: m}}\n"
+        f"  medium: {{{provider}: m}}\n"
+        f"  high: {{{provider}: m}}\n")
     quest_dir = project_state_dir(root) / "quests" / "test-quest"
     (quest_dir / "state").mkdir(parents=True, exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
@@ -97,6 +102,143 @@ def _seed_single_agent(root: Path) -> Quest:
     quest.event_log().append(agent_id=None, type="quest_created",
                               payload={"id": "c", "title": "t"})
     return quest
+
+
+def _seed_native_manifest(
+    session_dir: Path, *, provider: str = "fake", state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    opaque = state if state is not None else {"thread_id": "native-thread"}
+    session_dir.mkdir(parents=True, exist_ok=True)
+    resume_state = NativeResumeState(provider=provider, state=opaque)
+    (session_dir / "resume-state.json").write_bytes(
+        encode_native_resume_state(resume_state))
+    return opaque
+
+
+def test_native_manifest_is_resumable_without_transcript(
+    tmp_path: Path, provider_registry,
+) -> None:
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: None)
+    _seed_native_manifest(tmp_path)
+
+    assert _session_is_resumable(tmp_path) is True
+
+
+@pytest.mark.anyio
+async def test_resume_native_only_session_uses_stored_context(
+    tmp_path: Path, provider_registry,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+    state = State.load(quest.state_dir)
+    state.resume_pending = state.step
+    state.save(quest.state_dir)
+    session_dir = quest.quest_dir / "steps" / "only" / "w"
+    opaque = _seed_native_manifest(
+        session_dir, state={"thread": {"id": "opaque", "turn": 7}})
+    quest.event_log().append(
+        agent_id="step:only/w", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "stored"}]})
+    seen: list[AgentInvocation] = []
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            seen.append(inv)
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+    events: list[dict[str, Any]] = []
+
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+
+    assert len(seen) == 1
+    invocation = seen[0]
+    assert invocation.balance_on_resume is True
+    assert invocation.native_resume_state == NativeResumeState(
+        provider="fake", state=opaque)
+    assert invocation.initial_messages == ()
+    assert invocation.system_prompt == "stored"
+    assert not [
+        e for e in events
+        if e["type"] == "engine_message"
+        and e["payload"].get("subtype") in {"system_prompt", "agent_prompt"}
+    ]
+    resumed = [e for e in events
+               if e["type"] == "step_started" and e["payload"].get("resumed")]
+    assert len(resumed) == 1
+    assert resumed[0]["payload"]["restarted"] is False
+
+
+@pytest.mark.anyio
+async def test_provider_retry_refreshes_native_resume_state(
+    tmp_path: Path, provider_registry, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _seed_single_agent(tmp_path, provider="codex")
+    state = State.load(quest.state_dir)
+    state.resume_pending = state.step
+    state.save(quest.state_dir)
+    session_dir = quest.quest_dir / "steps" / "only" / "w"
+    old = _seed_native_manifest(
+        session_dir, provider="codex",
+        state={"generation": "A", "rollout_slot": "native-a"})
+    (session_dir / "native-a").write_text("A")
+    quest.event_log().append(
+        agent_id="step:only/w", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "stored"}]})
+    seen: list[NativeResumeState | None] = []
+    new = {"generation": "B", "rollout_slot": "native-b"}
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            seen.append(inv.native_resume_state)
+            attempt = len(seen)
+            try:
+                if attempt == 1:
+                    yield {"type": "error", "payload": {
+                        "category": "network", "kind": "network",
+                        "message": "retry me"}}
+                else:
+                    yield {"type": "agent_result", "payload": {
+                        "outcome": "ok", "status": "Success"}}
+            finally:
+                if attempt == 1:
+                    (session_dir / "native-b").write_text("B")
+                    _seed_native_manifest(
+                        session_dir, provider="codex", state=new)
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "codex"
+        model = "m"
+
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    async def _no_sleep(*_args: Any, **_kwargs: Any) -> None:
+        pass
+
+    provider_registry("codex", env_check=lambda: True, factory=lambda _m: _P())
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+    assert seen == [
+        NativeResumeState(provider="codex", state=old),
+        NativeResumeState(provider="codex", state=new),
+    ]
 
 
 @pytest.mark.anyio

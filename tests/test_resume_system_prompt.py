@@ -59,8 +59,9 @@ def test_resume_system_prompt_returns_stored_without_touching_transcript(
         tmp_path: Path) -> None:
     log = _Log([_engine_sys("step:build/plan", "ROLE PROMPT")])
     # stored is not None → the transcript invariant branch is never reached.
-    assert (_resume_system_prompt(log, "step:build/plan", tmp_path)
-            == "ROLE PROMPT")
+    assert (_resume_system_prompt(
+        log, "step:build/plan", tmp_path, has_resume_state=True)
+        == "ROLE PROMPT")
 
 
 def test_resume_system_prompt_aborts_on_nonempty_transcript_without_stored(
@@ -72,11 +73,20 @@ def test_resume_system_prompt_aborts_on_nonempty_transcript_without_stored(
     t = Transcript(tmp_path / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="prior turn"),)))
     with pytest.raises(RuntimeError):
-        _resume_system_prompt(_Log([]), "step:p/s", tmp_path)
+        _resume_system_prompt(
+            _Log([]), "step:p/s", tmp_path, has_resume_state=True)
 
 
 def test_resume_system_prompt_rerenders_on_empty_transcript_without_stored(
         tmp_path: Path) -> None:
     # Empty transcript + no stored engine_message/system_prompt => None (re-render),
     # not an abort.
-    assert _resume_system_prompt(_Log([]), "step:p/s", tmp_path) is None
+    assert _resume_system_prompt(
+        _Log([]), "step:p/s", tmp_path, has_resume_state=False) is None
+
+
+def test_resume_system_prompt_aborts_on_native_state_without_stored(
+        tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="has a non-empty transcript"):
+        _resume_system_prompt(
+            _Log([]), "step:p/s", tmp_path, has_resume_state=True)

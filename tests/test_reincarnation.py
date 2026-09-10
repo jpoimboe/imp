@@ -2,11 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.resume_state import (
-    InvalidResumeState,
-    NativeResumeState,
-    encode_native_resume_state,
-)
 from imp.engine.reincarnation import (
     handoff_instruction,
     handoff_path_for,
@@ -16,6 +11,11 @@ from imp.engine.reincarnation import (
     stash_session,
     write_handoff_note,
     write_session_owner,
+)
+from imp.engine.resume_state import (
+    InvalidResumeState,
+    NativeResumeState,
+    encode_native_resume_state,
 )
 
 

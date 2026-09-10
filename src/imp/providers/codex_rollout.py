@@ -22,6 +22,7 @@ import shutil
 import stat
 import tempfile
 from collections.abc import Callable, Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -417,10 +418,8 @@ def _durable_replace(
         os.replace(temp_path, path)
         _fsync_directory(path.parent)
     except BaseException:
-        try:
+        with suppress(FileNotFoundError):
             temp_path.unlink()
-        except FileNotFoundError:
-            pass
         raise
 
 

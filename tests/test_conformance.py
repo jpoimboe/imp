@@ -4,7 +4,6 @@ pinned to a committed golden captured from the pre-refactor runner."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest

@@ -29,7 +29,9 @@ def test_native_resume_state_round_trips_opaque_nested_state(tmp_path) -> None:
 def test_native_resume_state_encoder_uses_compact_utf8_envelope() -> None:
     state = NativeResumeState(provider="codex", state={"thread_id": "café"})
 
-    assert encode_native_resume_state(state) == b'{"schema_version":1,"provider":"codex","state":{"thread_id":"caf\xc3\xa9"}}'
+    assert encode_native_resume_state(state) == (
+        b'{"schema_version":1,"provider":"codex","state":{"thread_id":"caf\xc3\xa9"}}'
+    )
 
 
 def test_registered_unavailable_provider_is_accepted_for_native_resume_state(

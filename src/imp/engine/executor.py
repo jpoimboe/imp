@@ -83,6 +83,7 @@ from imp.engine.reincarnation import (
     stash_session,
     write_session_owner,
 )
+from imp.engine.resume_state import read_native_resume_state
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_MAX_ATTEMPTS,
     SandboxOpenFailed,
@@ -194,18 +195,17 @@ def _latest_engine_system_prompt(log: EventLog, agent_id: str) -> str | None:
 
 
 def _resume_system_prompt(
-    log: EventLog, agent_id: str, transcript_dir: Any,
+    log: EventLog, agent_id: str, transcript_dir: Any, *, has_resume_state: bool,
 ) -> str | None:
     """Resume-replay source. Returns the stored prompt to replay verbatim, or
     None when the caller should re-render. Aborts on the invariant violation:
     a non-empty transcript with no stored engine_message/system_prompt means
     messages were rendered against a now-lost prompt — re-rendering would
     silently diverge."""
-    from imp.agents.transcript import Transcript
     stored = _latest_engine_system_prompt(log, agent_id)
     if stored is not None:
         return stored
-    if Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
+    if has_resume_state:
         raise RuntimeError(
             f"resume invariant violated: step {agent_id!r} has a non-empty "
             "transcript but no stored engine_message system prompt; refusing to "
@@ -1614,25 +1614,31 @@ def _enforce_clean_tree(
     return action, format_clean_tree_feedback(paths), {}
 
 
+def _session_is_resumable(session_dir: Path) -> bool:
+    return session_has_resume_state(session_dir)
+
+
 def _retire_foreign_session(
-    transcript_dir: Path, step: Step, quest: Quest, state: State, log: EventLog,
-    *, is_resume: bool, resolved: str,
+    session_dir: Path, step: Step, quest: Quest, state: State, log: EventLog,
+    *, is_resume: bool, resolved: str, native_resume_state: Any, resumable: bool,
 ) -> str | None:
     """Retire foreign resumable session state this dispatch would consume or destroy."""
-    if not session_has_resume_state(transcript_dir):
+    if not resumable:
         return None
-    if read_session_owner(transcript_dir) == resolved:
+    owner = (native_resume_state.provider if native_resume_state is not None
+             else read_session_owner(session_dir))
+    if owner == resolved:
         return None
     in_flight = (state.current_step is not None
-                 and state.current_step.transcript_dir == transcript_dir)
-    if not (is_resume or in_flight):
+                 and state.current_step.transcript_dir == session_dir)
+    if not (is_resume or in_flight or native_resume_state is not None):
         return None
     seed = reincarnation_seed(
         handoff_text=None, quest_id=quest.id, step_name=step.name,
         cause="provider_switch")
-    stash = stash_session(transcript_dir)
+    stash = stash_session(session_dir)
     assert stash is not None      # both limbs require resume state
-    note = handoff_path_for(transcript_dir)
+    note = handoff_path_for(session_dir)
     if note.exists():
         # A note left behind would be a previous generation's.
         note.rename(stash / note.name)
@@ -1656,27 +1662,35 @@ async def _route_agent(
     reincarnation_text: str | None = None,
     memory: dict[str, str] | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
+    session_dir = quest.quest_dir / "steps" / step.phase / step.name
+    native_resume_state = read_native_resume_state(session_dir)
+    resumable = (native_resume_state is not None
+                 or _session_is_resumable(session_dir))
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
     assert step.file is not None, "agent step must have a file this milestone"
     agent_def = workflow.agents[step.file.stem]
-    transcript_dir = quest.quest_dir / "steps" / step.phase / step.name
+    resolved_provider = current_provider_model(
+        state, workflow, step.name).provider
 
     # The one chokepoint every dispatch and re-entry crosses. Retiring here
     # renames the directory, so keep and balance_on_resume both recompute False
     # and the cross-vendor replay becomes unrepresentable rather than defended.
     retired_seed = _retire_foreign_session(
-        transcript_dir, step, quest, state, log, is_resume=is_resume,
-        resolved=current_provider_model(state, workflow, step.name).provider)
+        session_dir, step, quest, state, log, is_resume=is_resume,
+        resolved=resolved_provider, native_resume_state=native_resume_state,
+        resumable=resumable)
     if retired_seed is not None:
         # Overrides any value inherited from a caller: that one describes an
         # earlier generation.
         reincarnation_text = retired_seed
+        native_resume_state = None
+        resumable = False
 
     # Keep a resumable session on every `resume:` entry. A transcript that ended
     # before complete_step is replayed and continued (the provider injects a
     # `continue` nudge); only sessions without resume state start fresh.
-    keep = is_resume and session_has_resume_state(transcript_dir)
+    keep = is_resume and resumable
     # Plain lifecycle bit: True only when process-resume starts a session afresh.
     restarted = is_resume and not keep
     # Backstop applied once here; the raw parameter is what recursive re-entries re-apply.
@@ -1685,11 +1699,9 @@ async def _route_agent(
     run_opening = ""
     feedback_lead: str | None = None
     if not keep:
-        shutil.rmtree(transcript_dir, ignore_errors=True)
-        transcript_dir.mkdir(parents=True, exist_ok=True)
-        write_session_owner(
-            transcript_dir,
-            current_provider_model(state, workflow, step.name).provider)
+        shutil.rmtree(session_dir, ignore_errors=True)
+        session_dir.mkdir(parents=True, exist_ok=True)
+        write_session_owner(session_dir, resolved_provider)
         balance = False
         retry_wrapper: str | None = None
         # seed_opening (imp new intent) renders via run.opening in templates.
@@ -1699,7 +1711,7 @@ async def _route_agent(
         feedback_lead = delivered_wrapper if seed_opening is None else None
         initial: tuple[Message, ...] = ()
     else:  # keep the transcript, balance a trailing complete_step
-        transcript_dir.mkdir(parents=True, exist_ok=True)
+        session_dir.mkdir(parents=True, exist_ok=True)
         balance = True
         # No opener on resume: providers replay the on-disk transcript and
         # never iterate initial_messages. retry_wrapper rides on
@@ -1707,7 +1719,7 @@ async def _route_agent(
         retry_wrapper = delivered_wrapper
         initial = ()
 
-    state.current_step = CurrentStep(transcript_dir=transcript_dir)
+    state.current_step = CurrentStep(transcript_dir=session_dir)
     state.save(quest.state_dir)
 
     backoff = 0
@@ -1715,11 +1727,13 @@ async def _route_agent(
     hint_exempt_sleeps = 0
     rotation_exempt_sleeps = 0
     while True:
+        attempt_native_resume_state = (
+            read_native_resume_state(session_dir) if keep else None)
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
             tier=step.tier, step_name=step.name,
             workflow=workflow, quest=quest, state=state, log=log,
-            transcript_dir=transcript_dir,
+            transcript_dir=session_dir,
             step_started_payload_extras={
                 **_step_started_payload(step, state, quest, log),
                 "resumed": is_resume, "restarted": restarted},
@@ -1727,6 +1741,7 @@ async def _route_agent(
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
+            native_resume_state=attempt_native_resume_state,
             # is_resume=keep, not the entry's lifecycle bit: the stored-prompt
             # restore (system_prompt_override) suppresses first-user-message
             # composition on the assumption a kept transcript replays it. A
@@ -1896,7 +1911,7 @@ async def _route_agent(
                 < state.max_reincarnations):
             state.bump_reincarnation(reincarnation_key)
             # The stash stays on disk for human forensics; nothing reads it back.
-            stash_session(transcript_dir)
+            stash_session(session_dir)
             hp = Path(result.handoff_path)
             handoff_text = hp.read_text() if hp.exists() else None
             reason = ("context threshold crossed" if handoff_text is not None
@@ -1932,7 +1947,7 @@ async def _route_agent(
         # the step fresh — stash the transcript, seed the reborn session from it,
         # and re-enter — instead of pausing, up to the per-session cap.
         state.bump_reincarnation(reincarnation_key)
-        stash_session(transcript_dir)
+        stash_session(session_dir)
         _emit(log, "reincarnating",
               {"reason": "context window exceeded"}, agent_id=None)
         seed = reincarnation_seed(handoff_text=None, quest_id=quest.id,
@@ -2060,6 +2075,7 @@ async def _run_agent_invocation(
     prior_backoff_attempts: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
+    native_resume_state: Any = None,
     test_gates: TestGates | None = None,
     pythonpath: tuple[str, ...] = (),
     undecided: Undecided = ALL_DECIDED,
@@ -2091,7 +2107,8 @@ async def _run_agent_invocation(
         provider_model = state.resolved_tiers[tier]
     provider = provider_from_model(provider_model)
 
-    stored = _resume_system_prompt(log, agent_id, transcript_dir) if is_resume else None
+    stored = _resume_system_prompt(
+        log, agent_id, transcript_dir, has_resume_state=True) if is_resume else None
     rendered_persona = ""
     if stored is not None:
         rendered = stored
@@ -2178,6 +2195,7 @@ async def _run_agent_invocation(
         feedback_lead=feedback_lead,
         reincarnation_text=reincarnation_text,
         balance_on_resume=balance_on_resume,
+        native_resume_state=native_resume_state,
         resume_should_continue=(
             state.resume_pending == state.step
             and state.resume_should_continue),

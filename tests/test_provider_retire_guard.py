@@ -17,7 +17,10 @@ from imp.paths import project_state_dir
 from imp.providers import BUILTIN_FLOOR
 from imp.providers.config import ProviderModel
 from tests.conftest import _seed_control
-from tests.test_executor_resume_rerun import _seed_single_agent
+from tests.test_executor_resume_rerun import (
+    _seed_native_manifest,
+    _seed_single_agent,
+)
 
 
 @pytest.fixture
@@ -48,12 +51,21 @@ def _snapshot(quest: Quest, inv: AgentInvocation) -> dict[str, Any]:
                           if inv.initial_messages else ""),
         "stashes": [s.name for s in stashes],
         "stashed_transcript": "".join(
-            (s / "transcript.jsonl").read_text() for s in stashes),
+            _read(s / "transcript.jsonl") or "" for s in stashes),
+        "stashed_files": [
+            sorted(path.relative_to(s).as_posix()
+                   for path in s.rglob("*") if path.is_file())
+            for s in stashes
+        ],
         "stashed_sidecar": [_read(s / "provider") for s in stashes],
         "stashed_note": [_read(s / "w.handoff.md") for s in stashes],
         "live_note": _read(handoff_path_for(tdir)),
         "live_sidecar": _read(tdir / "provider"),
         "live_transcript": _read(tdir / "transcript.jsonl") or "",
+        "native_provider": (inv.native_resume_state.provider
+                            if inv.native_resume_state is not None else None),
+        "native_state": (inv.native_resume_state.state
+                         if inv.native_resume_state is not None else None),
         "reincarnating": [e["payload"]["reason"]
                           for e in events if e["type"] == "reincarnating"],
         "reincarnations": State.load(quest.state_dir).reincarnation_count(
@@ -155,6 +167,101 @@ async def test_a_matching_sidecar_replays_untouched(
     assert snap["stashes"] == []
     assert "from the same vendor" in snap["live_transcript"]
     assert _SWITCH_SENTENCE not in snap["first_message"]
+
+
+@pytest.mark.anyio
+async def test_manifest_owner_overrides_contradictory_matching_sidecar(
+    tmp_path: Path, provider_registry,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+    tdir = _seed_transcript(quest, "codex", body="")
+    opaque = _seed_native_manifest(
+        tdir, provider="fake", state={"session": {"id": "same-owner"}})
+    _arm_resume(quest)
+    seen: list[dict[str, Any]] = []
+    _register(provider_registry, quest, seen)
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    snap = seen[0]
+    assert snap["stashes"] == []
+    assert snap["native_provider"] == "fake"
+    assert snap["native_state"] == opaque
+
+
+@pytest.mark.anyio
+async def test_switch_away_from_manifest_owner_retires_whole_session(
+    tmp_path: Path, provider_registry,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+    tdir = _seed_transcript(quest, "fake", body="")
+    _seed_native_manifest(
+        tdir, provider="codex", state={"session": {"id": "foreign"}})
+    _arm_resume(quest)
+    seen: list[dict[str, Any]] = []
+    _register(provider_registry, quest, seen)
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    snap = seen[0]
+    assert snap["stashes"] == ["w.attempt-1"]
+    assert snap["stashed_files"] == [[
+        "provider", "resume-state.json", "transcript.jsonl"]]
+    assert snap["native_provider"] is None
+    assert snap["native_state"] is None
+    assert _SWITCH_SENTENCE in snap["first_message"]
+
+
+@pytest.mark.anyio
+async def test_completed_fresh_reentry_retires_foreign_native_session(
+    tmp_path: Path, provider_registry,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+    tdir = _tdir(quest)
+    _seed_native_manifest(
+        tdir, provider="codex",
+        state={"session": {"id": "complete"}, "slot": "native-slot"})
+    (tdir / "native-slot").write_text("opaque")
+    seen: list[dict[str, Any]] = []
+    _register(provider_registry, quest, seen)
+
+    assert await run_quest(quest) is RunResult.COMPLETED
+
+    snap = seen[0]
+    assert snap["stashes"] == ["w.attempt-1"]
+    assert snap["stashed_files"] == [["native-slot", "resume-state.json"]]
+    assert snap["native_provider"] is None
+    assert _SWITCH_SENTENCE in snap["first_message"]
+
+
+@pytest.mark.anyio
+async def test_malformed_manifest_fails_before_session_mutation(
+    tmp_path: Path, provider_registry,
+) -> None:
+    quest = _seed_single_agent(tmp_path)
+    tdir = _tdir(quest)
+    tdir.mkdir(parents=True)
+    (tdir / "provider").write_text("codex")
+    (tdir / "native-slot").write_bytes(b"opaque")
+    (tdir / "resume-state.json").write_bytes(b"{")
+    before = {
+        path.relative_to(tdir).as_posix(): path.read_bytes()
+        for path in tdir.rglob("*") if path.is_file()
+    }
+    seen: list[dict[str, Any]] = []
+    _register(provider_registry, quest, seen)
+
+    assert await run_quest(quest) is RunResult.PAUSED
+
+    after = {
+        path.relative_to(tdir).as_posix(): path.read_bytes()
+        for path in tdir.rglob("*") if path.is_file()
+    }
+    assert after == before
+    assert seen == []
+    assert list(tdir.parent.glob("w.attempt-*")) == []
+    errors = [e for e in quest.event_log().read() if e["type"] == "error"]
+    assert errors[-1]["payload"]["kind"] == "InvalidResumeState"
 
 
 @pytest.mark.anyio

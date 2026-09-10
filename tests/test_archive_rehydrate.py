@@ -8,8 +8,8 @@ import pytest
 from imp.engine import archive
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
-from imp.engine.reincarnation import session_has_resume_state
 from imp.engine.quest import Quest
+from imp.engine.reincarnation import session_has_resume_state
 from imp.engine.state import State
 from imp.paths import project_state_dir
 from tests.conftest import _seed_control

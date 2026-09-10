@@ -3,15 +3,24 @@ from __future__ import annotations
 import argparse
 import io
 import json
+from collections.abc import AsyncIterator
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.cli.main import _select_log_events, main
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import LAYOUT_VERSION
-from imp.engine.state import JsonlEventLog
+from imp.engine.resume_state import NativeResumeState
+from imp.engine.state import JsonlEventLog, State
 from imp.paths import project_state_dir
+from tests.test_executor_resume_rerun import (
+    _seed_native_manifest,
+    _seed_single_agent,
+)
 
 # Two steps (spec@1-3, plan@4-6); agent_message authors carry step:<phase>/<name>
 # agent_ids so agent_display renders "spec" / "plan".
@@ -234,6 +243,84 @@ def test_log_html_export_honors_filters(tmp_path, monkeypatch) -> None:
     assert rc == 0
     assert [e["type"] for e in cap["events"]] == [
         "step_started", "agent_message", "step_completed"]
+
+
+@pytest.mark.anyio
+async def test_log_preserves_narrative_across_native_only_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider_registry,
+) -> None:
+    quest = _seed_single_agent(tmp_path, provider="codex")
+    state = State.load(quest.state_dir)
+    state.resume_pending = state.step
+    state.save(quest.state_dir)
+    session_dir = quest.quest_dir / "steps" / "only" / "w"
+    opaque = _seed_native_manifest(
+        session_dir, provider="codex", state={"thread": {"id": "log-native"}})
+    log = quest.event_log()
+    log.append(
+        agent_id=None, type="user_message",
+        payload={"role": "user", "subtype": "intent",
+                 "content": [{"type": "text", "text": "ORIGINAL REQUEST"}]})
+    log.append(
+        agent_id=None, type="step_started",
+        payload={"step": "w", "kind": "agent", "phase": "only",
+                 "provider": "codex", "model": "m", "tools": [],
+                 "resumed": False, "restarted": False})
+    log.append(
+        agent_id="step:only/w", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "stored"}]})
+    log.append(
+        agent_id="step:only/w", type="agent_message",
+        payload={"provider": "anthropic", "model": "m",
+                 "raw": {"content": [
+                     {"type": "text", "text": "BEFORE INTERRUPTION"}]},
+                 "usage": {"input_tokens": 1, "output_tokens": 1},
+                 "stop_reason": "end_turn"})
+    log.append(
+        agent_id=None, type="workflow_paused",
+        payload={"reason": "interrupt", "interrupt_reason": "ctrl-c"})
+    log.append(agent_id=None, type="workflow_resumed", payload={})
+    seen: list[AgentInvocation] = []
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            seen.append(inv)
+            yield {"type": "agent_message", "payload": {
+                "provider": "anthropic", "model": "m",
+                "raw": {"content": [
+                    {"type": "text", "text": "AFTER INTERRUPTION"}]},
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+                "stop_reason": "end_turn"}}
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "codex"
+        model = "m"
+
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    provider_registry("codex", env_check=lambda: True, factory=lambda _m: _P())
+    events: list[dict[str, Any]] = []
+
+    assert await run_quest(quest, on_event=events.append) is RunResult.COMPLETED
+    assert seen[0].native_resume_state == NativeResumeState(
+        provider="codex", state=opaque)
+    resumed = [e for e in events
+               if e["type"] == "step_started" and e["payload"].get("resumed")]
+    assert len(resumed) == 1
+    assert resumed[0]["payload"]["restarted"] is False
+
+    rc, out, err = _run_log(monkeypatch, tmp_path, quest.id)
+    assert (rc, err) == (0, "")
+    assert (out.index("ORIGINAL REQUEST")
+            < out.index("BEFORE INTERRUPTION")
+            < out.index("AFTER INTERRUPTION"))
 
 
 def test_log_no_type_flag(tmp_path, monkeypatch) -> None:
