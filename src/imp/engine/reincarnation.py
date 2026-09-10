@@ -7,19 +7,25 @@ from pathlib import Path
 from typing import Literal
 
 
-def stash_transcript(transcript_dir: Path) -> Path | None:
-    """Move transcript_dir aside to a sibling ``<name>.attempt-N``; return the
-    stash path, or None when there is nothing to stash."""
-    tx = transcript_dir / "transcript.jsonl"
-    if not tx.exists() or tx.stat().st_size == 0:
+def session_has_resume_state(session_dir: Path) -> bool:
+    from imp.agents.transcript import Transcript
+    from imp.engine.resume_state import read_native_resume_state
+
+    native = read_native_resume_state(session_dir)
+    return native is not None or Transcript(session_dir / "transcript.jsonl").exists_and_nonempty()
+
+
+def stash_session(session_dir: Path) -> Path | None:
+    """Move a resumable session aside to its first free ``<name>.attempt-N`` sibling."""
+    if not session_has_resume_state(session_dir):
         return None
     n = 1
     while True:
-        dest = transcript_dir.parent / f"{transcript_dir.name}.attempt-{n}"
+        dest = session_dir.parent / f"{session_dir.name}.attempt-{n}"
         if not dest.exists():
             break
         n += 1
-    transcript_dir.rename(dest)
+    session_dir.rename(dest)
     return dest
 
 
@@ -78,33 +84,26 @@ def reincarnation_seed(
     return "\n".join(lines)
 
 
-def provider_path_for(transcript_dir: Path) -> Path:
-    """The sidecar naming the vendor that wrote this transcript — a CHILD of the
-    dir (unlike the handoff note), so it travels into a `.attempt-N` stash with
-    the transcript it describes and is wiped with a fresh entry."""
-    return transcript_dir / "provider"
+def provider_path_for(session_dir: Path) -> Path:
+    """The sidecar naming the vendor that wrote this session."""
+    return session_dir / "provider"
 
 
-def write_transcript_owner(transcript_dir: Path, provider: str) -> None:
-    provider_path_for(transcript_dir).write_text(provider)
+def write_session_owner(session_dir: Path, provider: str) -> None:
+    provider_path_for(session_dir).write_text(provider)
 
 
-def read_transcript_owner(transcript_dir: Path) -> str | None:
-    """The recorded owner, or None when the dir is unlabelled — which matches no
-    provider name."""
-    path = provider_path_for(transcript_dir)
+def read_session_owner(session_dir: Path) -> str | None:
+    """The recorded owner, or None when the session is unlabelled."""
+    path = provider_path_for(session_dir)
     if not path.exists():
         return None
     return path.read_text().strip() or None
 
 
-def handoff_path_for(transcript_dir: Path) -> Path:
-    """The on-disk handoff-note path for a session — a SIBLING of its transcript
-    dir (`<name>.handoff.md`), so it survives the fresh-entry wipe that removes
-    the transcript dir itself. One file per session generation; a later
-    reincarnation of the same step overwrites it (the prior content is preserved
-    in the stashed transcript)."""
-    return transcript_dir.parent / f"{transcript_dir.name}.handoff.md"
+def handoff_path_for(session_dir: Path) -> Path:
+    """The on-disk handoff-note path for a session, alongside its directory."""
+    return session_dir.parent / f"{session_dir.name}.handoff.md"
 
 
 def handoff_instruction() -> str:

@@ -9,9 +9,9 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.engine.executor import RunResult, _resume_replays_transcript, run_quest
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
-from imp.engine.reincarnation import write_transcript_owner
+from imp.engine.reincarnation import session_has_resume_state, write_session_owner
 from imp.engine.state import State
 from imp.paths import project_state_dir
 
@@ -22,18 +22,18 @@ def _write(dir_: Path, *messages: Message) -> None:
         t.append(msg)
 
 
-def test_truncated_autonomous_transcript_is_replayed(tmp_path: Path) -> None:
+def test_truncated_autonomous_session_is_replayed(tmp_path: Path) -> None:
     # P1: a bare assistant turn (MISSING_COMPLETE_STEP) is now KEPT and replayed;
     # the provider injects a continue nudge so it proceeds instead of re-running.
     _write(tmp_path, Message(role="assistant",
                              content=(TextBlock(text="still working"),)))
-    assert _resume_replays_transcript(tmp_path) is True
+    assert session_has_resume_state(tmp_path) is True
 
 
 def test_pending_user_turn_is_replayed(tmp_path: Path) -> None:
     # Last message is a user turn → SEND_TO_LLM, safe to replay.
     _write(tmp_path, Message(role="user", content=(TextBlock(text="hi"),)))
-    assert _resume_replays_transcript(tmp_path) is True
+    assert session_has_resume_state(tmp_path) is True
 
 
 def test_awaiting_user_is_replayed(tmp_path: Path) -> None:
@@ -41,15 +41,15 @@ def test_awaiting_user_is_replayed(tmp_path: Path) -> None:
     _write(tmp_path, Message(
         role="assistant",
         content=(ToolUseBlock(id="w1", name="wait_for_user", input={}),)))
-    assert _resume_replays_transcript(tmp_path) is True
+    assert session_has_resume_state(tmp_path) is True
 
 
-def test_empty_transcript_is_not_replayed(tmp_path: Path) -> None:
+def test_empty_session_is_not_replayed(tmp_path: Path) -> None:
     # Nothing on disk: there is nothing to replay. keep=True would route the
     # step through the resume branch (initial_messages=()), and the provider's
     # empty-transcript fallback would then build an EMPTY query that hangs
     # receive_response() forever. An empty transcript must run fresh.
-    assert _resume_replays_transcript(tmp_path) is False
+    assert session_has_resume_state(tmp_path) is False
 
 
 def test_dangling_tool_use_is_replayed(tmp_path: Path) -> None:
@@ -57,7 +57,7 @@ def test_dangling_tool_use_is_replayed(tmp_path: Path) -> None:
     _write(tmp_path, Message(
         role="assistant",
         content=(ToolUseBlock(id="t1", name="write_file", input={}),)))
-    assert _resume_replays_transcript(tmp_path) is True
+    assert session_has_resume_state(tmp_path) is True
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ async def test_resume_truncated_autonomous_replays_and_advances(
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
     # Own the transcript: an unlabelled one is retired at dispatch, not replayed.
-    write_transcript_owner(tdir, "fake")
+    write_session_owner(tdir, "fake")
     # Seed the engine_message/system_prompt event so _resume_system_prompt
     # finds the stored prompt (in production this is always present when a
     # transcript exists).
@@ -149,7 +149,7 @@ async def test_resume_truncated_autonomous_replays_and_advances(
 
 
 @pytest.mark.anyio
-async def test_resume_empty_transcript_with_stored_context_runs_fresh(
+async def test_resume_empty_session_with_stored_context_runs_fresh(
         tmp_path: Path, provider_registry) -> None:
     # The watchdog-kill shape: the step RAN before, so the log holds an
     # engine_message/system_prompt event — but the provider never flushed a
@@ -195,7 +195,7 @@ async def test_resume_empty_transcript_with_stored_context_runs_fresh(
 
 
 @pytest.mark.anyio
-async def test_resume_empty_transcript_seeds_fresh_and_advances(
+async def test_resume_empty_session_seeds_fresh_and_advances(
         tmp_path: Path, provider_registry) -> None:
     # A `resume:` edge into a step that never ran (empty transcript). This is the
     # reintegration path: a clean rebase skips the reconciler, integrate-verify

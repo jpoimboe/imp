@@ -7,7 +7,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.executor import RunResult, run_quest
-from imp.engine.reincarnation import read_transcript_owner
+from imp.engine.reincarnation import read_session_owner
 from tests.test_executor_resume_rerun import _seed_single_agent
 
 
@@ -23,7 +23,7 @@ def _recording_factory(
 
     class _Runner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
-            seen.append(read_transcript_owner(tdir))
+            seen.append(read_session_owner(tdir))
             yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
@@ -41,7 +41,7 @@ def _recording_factory(
 
 
 @pytest.mark.anyio
-async def test_a_fresh_dispatch_labels_the_transcript_with_its_resolved_vendor(
+async def test_a_fresh_dispatch_labels_the_session_with_its_resolved_vendor(
         tmp_path: Path, provider_registry) -> None:
     # "fake" is what the seeded config resolves every tier to, so the assertion
     # pins the resolved vendor rather than any literal the writer could echo.

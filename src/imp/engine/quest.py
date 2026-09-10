@@ -25,7 +25,7 @@ from imp.engine.event_migrations import (
     migrate_events,
     migrate_id_ns_event_to_block,
 )
-from imp.engine.reincarnation import write_transcript_owner
+from imp.engine.reincarnation import write_session_owner
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import (
     JsonlEventLog,
@@ -481,8 +481,8 @@ def _migrate_v18_to_v19(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
-def _backfill_transcript_owners(quest_dir: Path) -> None:
-    """Label every live step transcript with the provider state.json resolves for
+def _backfill_session_owners(quest_dir: Path) -> None:
+    """Label every live step session with the provider state.json resolves for
     it. `steps/<phase>/<step>/` is the only dispatch layout, so the two-level glob
     reaches exactly those directories and not the subagent transcripts nested
     below them; `.attempt-N` stashes are never read back. resolve_run picks one
@@ -503,17 +503,17 @@ def _backfill_transcript_owners(quest_dir: Path) -> None:
             continue
         owner = (steps.get(step_dir.name) or {}).get("provider") or fallback
         if owner is not None:
-            write_transcript_owner(step_dir, owner)
+            write_session_owner(step_dir, owner)
 
 
 def _migrate_v19_to_v20(quest_dir: Path) -> None:
     """v19->v20: quest.json gained `provider` (the per-quest pin, null until one is
-    set) and every live step transcript records the vendor that wrote it. Backfill
+    set) and every live step session records the vendor that wrote it. Backfill
     both — every live directory, not just the one current_step names, since a
     `resume:` edge can replay a step that finished earlier. The sidecars land
     before the version stamp, so a partial failure leaves the home at v19 and the
     hop re-runs; both halves are idempotent."""
-    _backfill_transcript_owners(quest_dir)
+    _backfill_session_owners(quest_dir)
     meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta.setdefault("provider", None)

@@ -11,7 +11,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, Text
 from imp.agents.transcript import Transcript
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
-from imp.engine.reincarnation import handoff_path_for, write_transcript_owner
+from imp.engine.reincarnation import handoff_path_for, write_session_owner
 from imp.engine.state import CurrentStep, State
 from imp.paths import project_state_dir
 from imp.providers import BUILTIN_FLOOR
@@ -71,7 +71,7 @@ def _seed_transcript(quest: Quest, owner: str | None, *, body: str = "x") -> Pat
     else:
         (tdir / "transcript.jsonl").write_text("")
     if owner is not None:
-        write_transcript_owner(tdir, owner)
+        write_session_owner(tdir, owner)
     # In production a step with a transcript always has its stored system prompt.
     quest.event_log().append(
         agent_id="step:only/w", type="engine_message",
@@ -115,7 +115,7 @@ def _register(provider_registry, quest: Quest, seen: list[dict[str, Any]],
 
 
 @pytest.mark.anyio
-async def test_a_foreign_transcript_a_resume_would_replay_is_retired(
+async def test_a_foreign_session_a_resume_would_replay_is_retired(
     tmp_path: Path, provider_registry,
 ) -> None:
     # Limb 1 — and no reconcile coincides with this dispatch: a rule-emitted
@@ -194,7 +194,7 @@ async def test_a_first_entry_in_flight_attempt_is_stashed_not_wiped(
 
 
 @pytest.mark.anyio
-async def test_an_empty_transcript_never_retires_whatever_the_sidecar_says(
+async def test_an_empty_session_never_retires_whatever_the_sidecar_says(
     tmp_path: Path, provider_registry,
 ) -> None:
     quest = _seed_single_agent(tmp_path)
@@ -324,7 +324,7 @@ async def test_a_switch_does_not_spend_reincarnation_budget(
 
 
 @pytest.mark.anyio
-async def test_a_same_name_pin_leaves_the_transcript_unstashed(
+async def test_a_same_name_pin_leaves_the_session_unstashed(
     tmp_path: Path, provider_registry,
 ) -> None:
     # AC 7(e)'s second half: pinning the vendor already resolved resumes
@@ -374,7 +374,7 @@ async def test_a_pin_applied_at_entry_retires_at_the_dispatch_that_follows(
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="work from the fled vendor"),)))
-    write_transcript_owner(tdir, "claude_code")
+    write_session_owner(tdir, "claude_code")
     quest.event_log().append(
         agent_id="step:only/w", type="engine_message",
         payload={"role": "system", "subtype": "system_prompt",
@@ -452,7 +452,7 @@ async def test_the_reborn_session_records_the_vendor_that_now_owns_it(
 
 
 @pytest.mark.anyio
-async def test_the_clean_tree_bounce_re_dispatch_retires_a_foreign_transcript(
+async def test_the_clean_tree_bounce_re_dispatch_retires_a_foreign_session(
     tmp_path: Path, floor_availability,
 ) -> None:
     # AC 9d(a)/(b), the scenario an earlier design got wrong: _enforce_clean_tree

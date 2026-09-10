@@ -20,7 +20,7 @@ from imp.agents.transcript import Transcript
 from imp.engine import executor as executor_mod
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
-from imp.engine.reincarnation import handoff_path_for, write_transcript_owner
+from imp.engine.reincarnation import handoff_path_for, write_session_owner
 from imp.engine.state import State
 from imp.providers import BUILTIN_FLOOR
 from tests.test_executor import _persist_initial, _seed_minimal_workflow
@@ -464,7 +464,7 @@ async def test_a_resumed_entry_reaches_the_same_end_state_through_limb_one(
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
-    write_transcript_owner(tdir, "claude_code")
+    write_session_owner(tdir, "claude_code")
     quest.event_log().append(
         agent_id="step:only/w", type="engine_message",
         payload={"role": "system", "subtype": "system_prompt",

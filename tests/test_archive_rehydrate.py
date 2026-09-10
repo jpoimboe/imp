@@ -8,7 +8,7 @@ import pytest
 from imp.engine import archive
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
-from imp.engine.executor import _resume_replays_transcript
+from imp.engine.reincarnation import session_has_resume_state
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.paths import project_state_dir
@@ -78,8 +78,8 @@ def test_rehydrate_restores_steps_subtree_byte_for_byte(tmp_path: Path) -> None:
     assert (sdir / "transcript.jsonl").read_bytes() == b'{"role":"user"}\n'
     assert (sdir / "claude_session" / "x" / "sess.jsonl").read_bytes() == b"SESS"
     assert (sdir / "codex_rollout" / "sessions" / "rollout-1.jsonl").read_bytes() == b"ROLL"
-    # The restored transcript makes the executor's replay decision fire.
-    assert _resume_replays_transcript(sdir) is True
+    # The restored session has resume state.
+    assert session_has_resume_state(sdir) is True
 
 
 def test_rehydrate_non_resumable_restores_no_steps(tmp_path: Path) -> None:

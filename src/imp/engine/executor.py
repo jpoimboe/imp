@@ -77,10 +77,11 @@ from imp.engine.provider_pin import provider_pending
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import (
     handoff_path_for,
-    read_transcript_owner,
+    read_session_owner,
     reincarnation_seed,
-    stash_transcript,
-    write_transcript_owner,
+    session_has_resume_state,
+    stash_session,
+    write_session_owner,
 )
 from imp.engine.sandbox import (
     SANDBOX_SPAWN_MAX_ATTEMPTS,
@@ -210,20 +211,6 @@ def _resume_system_prompt(
             "transcript but no stored engine_message system prompt; refusing to "
             "re-render against a lost prompt")
     return None       # empty transcript (pre-emit crash, or no-transcript provider)
-
-
-def _resume_replays_transcript(transcript_dir: Any) -> bool:
-    """True when a resumed step's kept transcript should be replayed. Every
-    non-empty transcript is replayed and continued — a MISSING_COMPLETE_STEP
-    transcript (autonomous turn ended without complete_step) is no longer wiped;
-    the provider injects a synthetic `continue` user turn so it resumes as the
-    ordinary SEND_TO_LLM case. Only an empty/absent transcript starts fresh: a
-    `resume:` edge can target a step that never ran (e.g. a clean reintegration
-    rebase skips the reconciler, then integrate-verify fails and resumes it), and
-    passively replaying nothing builds an empty query that hangs
-    receive_response() forever."""
-    from imp.agents.transcript import Transcript
-    return Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty()
 
 
 
@@ -1627,21 +1614,14 @@ def _enforce_clean_tree(
     return action, format_clean_tree_feedback(paths), {}
 
 
-def _retire_foreign_transcript(
+def _retire_foreign_session(
     transcript_dir: Path, step: Step, quest: Quest, state: State, log: EventLog,
     *, is_resume: bool, resolved: str,
 ) -> str | None:
-    """Retire a non-empty transcript that another vendor wrote and that THIS
-    dispatch would consume or destroy, returning the seed for the session that
-    replaces it; None when nothing is at risk, which is every ordinary dispatch.
-
-    Two limbs, one question — is an unfinished attempt about to be lost? It
-    would be replayed into the wrong vendor (the restore_rollout / mcp__imp__
-    crash class), or wiped mid-flight by the fresh path's rmtree. A step that
-    completed has current_step cleared, so a rework Goto re-runs it clean."""
-    if not _resume_replays_transcript(transcript_dir):
+    """Retire foreign resumable session state this dispatch would consume or destroy."""
+    if not session_has_resume_state(transcript_dir):
         return None
-    if read_transcript_owner(transcript_dir) == resolved:
+    if read_session_owner(transcript_dir) == resolved:
         return None
     in_flight = (state.current_step is not None
                  and state.current_step.transcript_dir == transcript_dir)
@@ -1650,8 +1630,8 @@ def _retire_foreign_transcript(
     seed = reincarnation_seed(
         handoff_text=None, quest_id=quest.id, step_name=step.name,
         cause="provider_switch")
-    stash = stash_transcript(transcript_dir)
-    assert stash is not None      # both limbs require a non-empty transcript
+    stash = stash_session(transcript_dir)
+    assert stash is not None      # both limbs require resume state
     note = handoff_path_for(transcript_dir)
     if note.exists():
         # A note left behind would be a previous generation's.
@@ -1685,7 +1665,7 @@ async def _route_agent(
     # The one chokepoint every dispatch and re-entry crosses. Retiring here
     # renames the directory, so keep and balance_on_resume both recompute False
     # and the cross-vendor replay becomes unrepresentable rather than defended.
-    retired_seed = _retire_foreign_transcript(
+    retired_seed = _retire_foreign_session(
         transcript_dir, step, quest, state, log, is_resume=is_resume,
         resolved=current_provider_model(state, workflow, step.name).provider)
     if retired_seed is not None:
@@ -1693,12 +1673,11 @@ async def _route_agent(
         # earlier generation.
         reincarnation_text = retired_seed
 
-    # Keep (replay) the transcript on every `resume:` entry that has a non-empty
-    # one. A transcript that ended before complete_step is replayed and
-    # continued (the provider injects a `continue` nudge), not re-run fresh; only
-    # an empty/absent transcript starts fresh.
-    keep = is_resume and _resume_replays_transcript(transcript_dir)
-    # Plain lifecycle bit: True only on an empty-transcript process-resume (restart from scratch).
+    # Keep a resumable session on every `resume:` entry. A transcript that ended
+    # before complete_step is replayed and continued (the provider injects a
+    # `continue` nudge); only sessions without resume state start fresh.
+    keep = is_resume and session_has_resume_state(transcript_dir)
+    # Plain lifecycle bit: True only when process-resume starts a session afresh.
     restarted = is_resume and not keep
     # Backstop applied once here; the raw parameter is what recursive re-entries re-apply.
     delivered_wrapper = apply_completion_backstop(
@@ -1708,7 +1687,7 @@ async def _route_agent(
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
-        write_transcript_owner(
+        write_session_owner(
             transcript_dir,
             current_provider_model(state, workflow, step.name).provider)
         balance = False
@@ -1917,7 +1896,7 @@ async def _route_agent(
                 < state.max_reincarnations):
             state.bump_reincarnation(reincarnation_key)
             # The stash stays on disk for human forensics; nothing reads it back.
-            stash_transcript(transcript_dir)
+            stash_session(transcript_dir)
             hp = Path(result.handoff_path)
             handoff_text = hp.read_text() if hp.exists() else None
             reason = ("context threshold crossed" if handoff_text is not None
@@ -1953,7 +1932,7 @@ async def _route_agent(
         # the step fresh — stash the transcript, seed the reborn session from it,
         # and re-enter — instead of pausing, up to the per-session cap.
         state.bump_reincarnation(reincarnation_key)
-        stash_transcript(transcript_dir)
+        stash_session(transcript_dir)
         _emit(log, "reincarnating",
               {"reason": "context window exceeded"}, agent_id=None)
         seed = reincarnation_seed(handoff_text=None, quest_id=quest.id,

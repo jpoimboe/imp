@@ -1,14 +1,21 @@
 from pathlib import Path
 
+import pytest
+
+from imp.engine.resume_state import (
+    InvalidResumeState,
+    NativeResumeState,
+    encode_native_resume_state,
+)
 from imp.engine.reincarnation import (
     handoff_instruction,
     handoff_path_for,
     provider_path_for,
-    read_transcript_owner,
+    read_session_owner,
     reincarnation_seed,
-    stash_transcript,
+    stash_session,
     write_handoff_note,
-    write_transcript_owner,
+    write_session_owner,
 )
 
 
@@ -17,10 +24,10 @@ def _seed(transcript_dir: Path, body: str = '{"k": 1}\n') -> None:
     (transcript_dir / "transcript.jsonl").write_text(body)
 
 
-def test_stash_moves_nonempty_transcript_aside(tmp_path: Path) -> None:
+def test_stash_moves_nonempty_session_aside(tmp_path: Path) -> None:
     tx = tmp_path / "steps" / "design" / "spec"
     _seed(tx, '{"turn": 1}\n')
-    dest = stash_transcript(tx)
+    dest = stash_session(tx)
     assert dest == tmp_path / "steps" / "design" / "spec.attempt-1"
     assert not tx.exists()                                   # moved aside
     assert (dest / "transcript.jsonl").read_text() == '{"turn": 1}\n'
@@ -29,21 +36,21 @@ def test_stash_moves_nonempty_transcript_aside(tmp_path: Path) -> None:
 def test_stash_picks_next_free_index(tmp_path: Path) -> None:
     tx = tmp_path / "steps" / "design" / "spec"
     _seed(tx)
-    stash_transcript(tx)            # -> spec.attempt-1
+    stash_session(tx)            # -> spec.attempt-1
     _seed(tx)                       # caller would normally mkdir afresh
-    dest = stash_transcript(tx)     # -> spec.attempt-2
+    dest = stash_session(tx)     # -> spec.attempt-2
     assert dest == tmp_path / "steps" / "design" / "spec.attempt-2"
     assert (tmp_path / "steps" / "design" / "spec.attempt-1").exists()
 
 
 def test_stash_returns_none_when_nothing_to_stash(tmp_path: Path) -> None:
     missing = tmp_path / "steps" / "design" / "spec"
-    assert stash_transcript(missing) is None                # absent dir
+    assert stash_session(missing) is None                # absent dir
     empty = tmp_path / "steps" / "design" / "other"
     empty.mkdir(parents=True)
-    assert stash_transcript(empty) is None                  # no transcript.jsonl
+    assert stash_session(empty) is None                  # no transcript.jsonl
     (empty / "transcript.jsonl").write_text("")
-    assert stash_transcript(empty) is None                  # empty transcript
+    assert stash_session(empty) is None                  # empty transcript
 
 
 _NOTE = "# Handoff\nGoal: land the parser\nRemains: wire `--json` output\n"
@@ -96,7 +103,7 @@ def test_seed_shapes_share_the_opening_and_orientation_lines() -> None:
     assert with_note[3] == without[2]        # the orientation bullet, verbatim
 
 
-def test_handoff_path_is_sibling_of_transcript_dir() -> None:
+def test_handoff_path_is_sibling_of_session_dir() -> None:
     # A sibling (not a child) so it survives the fresh-entry wipe of the dir.
     p = handoff_path_for(Path("/x/steps/impl/coder"))
     assert p == Path("/x/steps/impl/coder.handoff.md")
@@ -136,33 +143,33 @@ def test_write_handoff_note_whitespace_only_writes_nothing(tmp_path: Path) -> No
     assert not note.exists()
 
 
-def test_transcript_owner_lives_inside_the_dir_and_travels_with_it(
+def test_session_owner_lives_inside_the_dir_and_travels_with_it(
         tmp_path: Path) -> None:
     # INSIDE (not a sibling, unlike the handoff note): the label describes the
     # transcript, so it must follow it into a stash and vanish with a wipe.
     tx = tmp_path / "steps" / "impl" / "coder"
     _seed(tx)
 
-    write_transcript_owner(tx, "claude_code")
+    write_session_owner(tx, "claude_code")
 
     assert provider_path_for(tx) == tx / "provider"
-    assert read_transcript_owner(tx) == "claude_code"
-    dest = stash_transcript(tx)
+    assert read_session_owner(tx) == "claude_code"
+    dest = stash_session(tx)
     assert dest is not None
-    assert read_transcript_owner(dest) == "claude_code"
+    assert read_session_owner(dest) == "claude_code"
     assert not tx.exists()
 
 
-def test_an_unlabelled_transcript_dir_has_no_owner(tmp_path: Path) -> None:
+def test_an_unlabelled_session_dir_has_no_owner(tmp_path: Path) -> None:
     # No label and a blank label both read as None, which never matches a
     # provider name — the safe direction for the dispatch-time check.
     tx = tmp_path / "steps" / "impl" / "coder"
     _seed(tx)
-    assert read_transcript_owner(tx) is None
+    assert read_session_owner(tx) is None
 
     (tx / "provider").write_text("  \n")
 
-    assert read_transcript_owner(tx) is None
+    assert read_session_owner(tx) is None
 
 
 _CONTEXT_OPENING = (
@@ -200,3 +207,36 @@ def test_only_the_opening_sentence_differs_between_causes() -> None:
         handoff_text=None, quest_id="q7", step_name="coder").splitlines()
     assert switched[1:] == context[1:]
     assert switched[0] != context[0]
+
+
+def test_stash_moves_a_native_only_session_aside(tmp_path: Path) -> None:
+    session = tmp_path / "steps" / "impl" / "coder"
+    session.mkdir(parents=True)
+    manifest = encode_native_resume_state(NativeResumeState(provider="codex", state={}))
+    (session / "resume-state.json").write_bytes(manifest)
+
+    dest = stash_session(session)
+
+    assert dest == tmp_path / "steps" / "impl" / "coder.attempt-1"
+    assert not session.exists()
+    assert (dest / "resume-state.json").read_bytes() == manifest
+
+
+def test_malformed_manifest_prevents_session_stash(tmp_path: Path) -> None:
+    session = tmp_path / "steps" / "impl" / "coder"
+    _seed(session)
+    (session / "resume-state.json").write_bytes(b"{")
+    before = {
+        path.relative_to(session): path.read_bytes()
+        for path in session.rglob("*") if path.is_file()
+    }
+
+    with pytest.raises(InvalidResumeState):
+        stash_session(session)
+
+    after = {
+        path.relative_to(session): path.read_bytes()
+        for path in session.rglob("*") if path.is_file()
+    }
+    assert after == before
+    assert not (session.parent / "coder.attempt-1").exists()

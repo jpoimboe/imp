@@ -16,7 +16,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, Text
 from imp.agents.transcript import Transcript
 from imp.engine.executor import run_quest
 from imp.engine.quest import Quest
-from imp.engine.reincarnation import write_transcript_owner
+from imp.engine.reincarnation import write_session_owner
 from imp.engine.state import State
 from imp.paths import project_state_dir
 
@@ -84,7 +84,7 @@ def _write_awaiting_user_transcript(quest: Quest, step_name: str) -> Path:
         TextBlock(text=f"brainstorm partner. opening: {SEED}"),)))
     t.append(Message(role="assistant", content=(
         TextBlock(text="Sure! What's your read/write ratio?"),)))
-    write_transcript_owner(tdir, "fake")   # replayed, so it must own it
+    write_session_owner(tdir, "fake")   # replayed, so it must own it
     (tdir / "claude_session").mkdir(parents=True, exist_ok=True)
     (tdir / "claude_session" / "sentinel").write_text("native session bytes")
     # On the armed resume path (is_resume=True) the executor replays the stored
@@ -131,7 +131,7 @@ def _register_observing_provider(provider_registry, tdir: Path, observed: dict) 
 
 
 @pytest.mark.anyio
-async def test_armed_resume_keeps_transcript_native_and_no_seed(
+async def test_armed_resume_keeps_session_native_and_no_seed(
         tmp_path: Path, provider_registry) -> None:
     # Armed marker + non-empty AWAITING_USER transcript => is_resume and keep both True.
     quest, step_name = _seed_interactive_change(tmp_path, armed=True)
@@ -178,7 +178,7 @@ async def test_fresh_run_delivers_seed_once(
 
 
 @pytest.mark.anyio
-async def test_armed_but_empty_transcript_starts_fresh(
+async def test_armed_but_empty_session_starts_fresh(
         tmp_path: Path, provider_registry) -> None:
     # Armed marker but NO transcript (draft that never produced a turn): keep gates
     # on a non-empty transcript, so it still starts fresh and re-delivers the seed.
