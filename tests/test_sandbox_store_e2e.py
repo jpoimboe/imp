@@ -231,59 +231,64 @@ async def _serve_and_run(
     # override, since the mask hides the `repo` marker the slug walk needs.
     engine_env = {"PYTHONPATH": _SRC,
                   "IMP_STATE_DIR": str(project_state_dir(control))}
-    cfg = SandboxConfig(enabled=True, allow_unsandboxed=False, network=True,
-                        uid=os.getuid())
-    policy = resolve_policy(
-        worktree=control, control_root=control, quest_id=CUR, cfg=cfg,
-        engine_env_result=engine_env, environ=dict(os.environ),
-        available=True, disposable_tree=True,
-        quest_dir=project_state_dir(control) / "quests" / CUR)
-    # Mirror executor._build_sandbox_policy: create quest_var_tmp_dir before bwrap.
-    if policy.quest_var_tmp_dir:
-        Path(policy.quest_var_tmp_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
-    # Mirror the real spawn path (bash.py / gates.py): existence-gate the frozen
-    # masks before handing them to bwrap, so a mask over a path absent on this host
-    # (e.g. /run/user/$UID when there is no live user session) doesn't die in sandbox
-    # setup. The masks under test (events.jsonl, archive blobs, index.db) all exist
-    # and survive the prune, so the asserted behavior is unchanged.
-    policy = prepare_spawn_policy(policy)
-    sandbox_spawn = build_sandbox_spawn(
-        command, cwd=str(control), policy=policy, engine_env=engine_env,
-        environ=dict(os.environ))
 
+    # Bind the socket BEFORE resolving the policy: the session_socket_ro re-expose is
+    # existence-gated, and a bind pins the inode it resolved at namespace creation.
+    # Production has the same order — the daemon opens the socket, then run_quest
+    # resolves the policy.
     sock_path = session_socket_path(CUR)
     socket = SessionSocket(str(sock_path), on_query=build_session_handler(control))
     await socket.open()
 
-    out: dict[str, object] = {"rc": None, "stdout": b"", "stderr": b""}
-
-    async def serve() -> None:
-        await socket.serve()
-
-    async def spawn() -> None:
-        # `async with` so a deadlock-path cancellation (move_on_after) terminates the
-        # bwrap child instead of leaking it.
-        async with await anyio.open_process(
-                sandbox_spawn.argv, env=sandbox_spawn.env,
-                stdout=PIPE, stderr=PIPE) as proc:
-            oc: list[bytes] = []
-            ec: list[bytes] = []
-
-            async def drain(stream, sink):
-                if stream is None:
-                    return
-                async for chunk in stream:
-                    sink.append(chunk)
-
-            async with anyio.create_task_group() as tg2:
-                tg2.start_soon(drain, proc.stdout, oc)
-                tg2.start_soon(drain, proc.stderr, ec)
-                await proc.wait()
-            out["rc"] = proc.returncode
-            out["stdout"] = b"".join(oc)
-            out["stderr"] = b"".join(ec)
-
     try:
+        cfg = SandboxConfig(enabled=True, allow_unsandboxed=False, network=True,
+                            uid=os.getuid())
+        policy = resolve_policy(
+            worktree=control, control_root=control, quest_id=CUR, cfg=cfg,
+            engine_env_result=engine_env, environ=dict(os.environ),
+            available=True, disposable_tree=True,
+            quest_dir=project_state_dir(control) / "quests" / CUR)
+        # Mirror executor._build_sandbox_policy: create quest_var_tmp_dir before bwrap.
+        if policy.quest_var_tmp_dir:
+            Path(policy.quest_var_tmp_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Mirror the real spawn path (bash.py / gates.py): existence-gate the frozen
+        # masks before handing them to bwrap, so a mask over a path absent on this host
+        # (e.g. /run/user/$UID when there is no live user session) doesn't die in sandbox
+        # setup. The masks under test (events.jsonl, archive blobs, index.db) all exist
+        # and survive the prune, so the asserted behavior is unchanged.
+        policy = prepare_spawn_policy(policy)
+        sandbox_spawn = build_sandbox_spawn(
+            command, cwd=str(control), policy=policy, engine_env=engine_env,
+            environ=dict(os.environ))
+
+        out: dict[str, object] = {"rc": None, "stdout": b"", "stderr": b""}
+
+        async def serve() -> None:
+            await socket.serve()
+
+        async def spawn() -> None:
+            # `async with` so a deadlock-path cancellation (move_on_after) terminates the
+            # bwrap child instead of leaking it.
+            async with await anyio.open_process(
+                    sandbox_spawn.argv, env=sandbox_spawn.env,
+                    stdout=PIPE, stderr=PIPE) as proc:
+                oc: list[bytes] = []
+                ec: list[bytes] = []
+
+                async def drain(stream, sink):
+                    if stream is None:
+                        return
+                    async for chunk in stream:
+                        sink.append(chunk)
+
+                async with anyio.create_task_group() as tg2:
+                    tg2.start_soon(drain, proc.stdout, oc)
+                    tg2.start_soon(drain, proc.stderr, ec)
+                    await proc.wait()
+                out["rc"] = proc.returncode
+                out["stdout"] = b"".join(oc)
+                out["stderr"] = b"".join(ec)
+
         with anyio.move_on_after(timeout) as scope:
             async with anyio.create_task_group() as tg:
                 tg.start_soon(serve)

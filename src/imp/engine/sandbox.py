@@ -1199,6 +1199,8 @@ def resolve_policy(
     # temp-redirect fixture and points at the dir the executor creates/wipes. The
     # SAME value is the bind source below — one derivation, two uses.
     quest_tmp = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / quest_id
+    quest_tmp_mask = str(quest_tmp.parent)
+    session_socket_ro = str(session_sock) if session_sock.exists() else ""
     var_tmp_root = quest_var_tmp_root()
     quest_var_tmp_dir = (
         str(var_tmp_root / f"imp-{os.getuid()}" / quest_id)
@@ -1228,6 +1230,8 @@ def resolve_policy(
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
         quest_tmp_dir=str(quest_tmp),
+        quest_tmp_mask=quest_tmp_mask,
+        session_socket_ro=session_socket_ro,
         quest_var_tmp_dir=quest_var_tmp_dir,
         child_env=_build_child_env(
             engine_env_result, environ, cfg.env_passthrough,

@@ -34,6 +34,7 @@ from imp.engine.sandbox import (
 )
 from imp.paths import imp_home, project_state_dir
 from imp.providers.config import parse_config_layer
+from imp.remote.session.discover import session_socket_path
 
 
 def _policy(**over) -> SandboxPolicy:
@@ -2682,6 +2683,49 @@ def test_argv_binds_match_bind_plan_with_scratch_mask():
     pol = _scratch_block_policy()
     argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     assert _parse_argv_binds(argv) == pol.bind_plan()
+
+
+def test_resolve_policy_masks_the_resolved_scratch_root_not_literal_tmp(tmp_path):
+    # AC 3(a). The mask is the parent of the RESOLVED scratch dir. The suite redirects
+    # tempfile.tempdir per test, so a literal /tmp/imp-<uid> would mask the wrong
+    # directory here — and would break the inner sandboxes the suite spawns, whose
+    # scratch nests under the outer quest's own $TMPDIR.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True)
+    assert pol.quest_tmp_mask == str(Path(pol.quest_tmp_dir).parent)
+    assert Path(pol.quest_tmp_mask).is_relative_to(Path(tempfile.gettempdir()))
+    assert pol.quest_tmp_mask != f"/tmp/imp-{os.getuid()}"
+    assert (pol.quest_tmp_mask, "mask_dir") in pol.bind_plan()
+    assert pol.allows_write(Path(pol.quest_tmp_dir) / "scratch.txt") is True
+    assert pol.allows_read(
+        Path(pol.quest_tmp_mask) / "other" / "imp-codex-9-dead" / "auth.json") is False
+
+
+def test_resolve_policy_re_exposes_the_own_socket_only_when_it_exists(tmp_path):
+    # AC 3(b). Existence-gated like the other churn-prone bind sources: no daemon
+    # running → no re-expose (a script gate, most unit tests). When one IS running the
+    # re-exposed path is exactly the IMP_SESSION_SOCKET the child env bakes in.
+    control, wt = _layout(tmp_path)
+    sock = session_socket_path("abc")
+    assert not sock.exists()
+    bare = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True)
+    assert bare.session_socket_ro == ""
+    assert bare.allows_read(sock) is False        # masked, no re-expose
+
+    sock.parent.mkdir(parents=True, exist_ok=True)
+    sock.touch()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True)
+    assert pol.session_socket_ro == str(sock)
+    assert ("IMP_SESSION_SOCKET", str(sock)) in pol.child_env
+    assert (str(sock), "ro") in pol.bind_plan()
+    assert pol.allows_read(sock) is True
+    assert pol.allows_write(sock) is False
 
 
 def _cross_project_policy(**over) -> SandboxPolicy:
