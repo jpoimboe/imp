@@ -94,6 +94,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
     synthesize_native_success_on_resume,
+    unresolved_tool_result_content,
 )
 from imp.engine.agent_run import (
     INTERRUPT_STEER_HINT,
@@ -382,11 +383,21 @@ def _is_terminated_process_teardown(exc: BaseException) -> bool:
 
 # ── Per-run state captured by tool wrappers and read by the receive loop ─────
 
+INFLIGHT_RESULT_BOUND_S = 30.0
+
 
 @dataclass(slots=True)
 class _InFlight:
     name: str
     future: asyncio.Future[tuple[str, bool]]
+
+
+@dataclass(frozen=True, slots=True)
+class _InFlightOutcome:
+    key: str
+    name: str
+    content: str
+    is_error: bool
 
 
 @dataclass
@@ -433,6 +444,28 @@ class _RunState:
         entry = self.inflight.pop(key, None)
         if entry is not None:
             entry.future.set_result((content, is_error))
+
+
+async def _settle_inflight(
+    state: _RunState, timeout: float,
+) -> list[_InFlightOutcome]:
+    """Wait out the imp calls in flight at an interrupt — bounded per wait, not per
+    call — and report each one's real outcome, substituting the uncertainty body for
+    any that has not finished when the bound expires.
+    """
+    entries = list(state.inflight.items())
+    if not entries:
+        return []
+    await asyncio.wait([e.future for _, e in entries], timeout=timeout)
+    out: list[_InFlightOutcome] = []
+    for key, e in entries:
+        if e.future.done():
+            content, is_error = e.future.result()
+        else:
+            content, is_error = unresolved_tool_result_content(e.name), True
+        out.append(_InFlightOutcome(
+            key=key, name=e.name, content=content, is_error=is_error))
+    return out
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────

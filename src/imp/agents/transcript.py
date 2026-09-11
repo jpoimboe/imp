@@ -177,6 +177,30 @@ def _synthetic_tool_result_content(tool_name: str) -> str:
     )
 
 
+_UNRESOLVED_SENTENCE = (
+    "imp interrupted this turn; this call was still running and its outcome was "
+    "not recorded. Verify the current state before relying on it."
+)
+
+_UNRESOLVED_BASH_BODY = (
+    '{"stdout": "", '
+    f'"stderr": "{_UNRESOLVED_SENTENCE}", '
+    '"returncode": null}'
+)
+
+
+def unresolved_tool_result_content(tool_name: str) -> str:
+    """Body for a call still running when the bounded post-interrupt wait expired.
+
+    Distinct from _synthetic_tool_result_content, whose "re-run or re-dispatch this
+    call" advice is unsafe for a call that may still be executing; and `returncode`
+    is null rather than -2, since no kill has been established here.
+    """
+    if tool_name in ("bash", "mcp__imp__bash"):
+        return _UNRESOLVED_BASH_BODY
+    return _UNRESOLVED_SENTENCE
+
+
 def captured_result_key(name: str, tool_input: dict[str, Any]) -> str:
     """Reconciliation key matching a captured result to a dangling tool_use by name +
     canonical input (no usable execution-time id exists for in-process MCP tools); the

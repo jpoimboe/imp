@@ -1,6 +1,7 @@
 # tests/test_transcript.py
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
     synthesize_native_success_on_resume,
+    unresolved_tool_result_content,
 )
 from imp.engine.state import InMemoryEventLog
 
@@ -1137,3 +1139,29 @@ def test_interrupt_marker_repair_appends_durability_note_even_all_captured_succe
     assert by_id["w1"].is_error is False
     assert by_id["w2"].is_error is False
     assert msgs[-1].content[-1] == TextBlock(text=RESUME_DURABILITY_NOTE)
+
+
+def test_unresolved_tool_result_content_states_uncertainty_without_advising_a_rerun(
+) -> None:
+    """The expiry body must not reuse the interrupted-placeholder's 're-run or
+    re-dispatch this call' advice: the call may still be executing, so re-running it
+    could duplicate durable work."""
+    body = unresolved_tool_result_content("write_file")
+    assert body == (
+        "imp interrupted this turn; this call was still running and its outcome "
+        "was not recorded. Verify the current state before relying on it.")
+    assert "re-run" not in body
+    assert "rejected" not in body
+
+
+def test_unresolved_tool_result_content_keeps_bash_parseable_with_null_returncode(
+) -> None:
+    """Agents parse bash results, so the sentence rides inside the tool's own JSON
+    shape — with a NULL returncode, because on expiry no kill has been established
+    (the -2 of _INTERRUPTED_BASH_BODY would assert a SIGINT that never happened)."""
+    for name in ("bash", "mcp__imp__bash"):
+        assert json.loads(unresolved_tool_result_content(name)) == {
+            "stdout": "",
+            "stderr": unresolved_tool_result_content("write_file"),
+            "returncode": None,
+        }
