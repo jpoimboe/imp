@@ -99,7 +99,7 @@ def test_a_metered_backend_renders_the_bare_quest_total() -> None:
                                                   priced=1)).endswith(" <$0.01")
     # An API-keyed provider carries no auth_mode and is metered all the same.
     assert _row(activity=_act(provider="anthropic"), cost=priced).endswith(" $4.21")
-    # A recorded reading never stamps a provider segment onto the metered field.
+    # AC 5: a recorded reading never stamps a provider segment onto the metered field.
     metered = _row(auth_mode="apikey", cost=priced,
                    quota=_reading(QuotaWindow("5h", 34.0, None)))
     assert metered.endswith(" $4.21") and "claude_code" not in metered
@@ -197,7 +197,7 @@ def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
     assert "session" not in bare
 
 
-# AC 5
+# AC 4
 def test_the_position_row_carries_no_switch_hint_at_any_level() -> None:
     import imp.cli.live_driver as ld
 
