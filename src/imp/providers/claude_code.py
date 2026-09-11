@@ -383,6 +383,12 @@ def _is_terminated_process_teardown(exc: BaseException) -> bool:
 # ── Per-run state captured by tool wrappers and read by the receive loop ─────
 
 
+@dataclass(slots=True)
+class _InFlight:
+    name: str
+    future: asyncio.Future[tuple[str, bool]]
+
+
 @dataclass
 class _RunState:
     """Per-run mutable state shared between MCP tool wrappers and the runner.
@@ -414,6 +420,19 @@ class _RunState:
     # (as an agent_message) BEFORE it eagerly appends the sub_agent tool_call.
     # None until _run assigns it (pre-loop); _impl guards on that.
     flush_llm_group: Any = None
+    # imp tools currently executing, keyed by captured_result_key. An entry lives
+    # ONLY while its call is in flight — every wrapper exit path resolves and pops
+    # it — so this dict is the in-flight set.
+    inflight: dict[str, _InFlight] = field(default_factory=dict)
+
+    def register_inflight(self, key: str, name: str) -> None:
+        self.inflight[key] = _InFlight(
+            name=name, future=asyncio.get_running_loop().create_future())
+
+    def resolve_inflight(self, key: str, content: str, *, is_error: bool) -> None:
+        entry = self.inflight.pop(key, None)
+        if entry is not None:
+            entry.future.set_result((content, is_error))
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -617,6 +636,7 @@ def _wrap_one(
             raise RuntimeError(
                 "claude_code MCP tool dispatched off the runner loop "
                 "(same-loop topology pin)")
+        inflight_key: str | None = None
         try:
             # Decision 10 sweep site: EVERY tool dispatch — the claude_code
             # analog of agents/dispatch.py's first-statement sweep. Inside the
@@ -719,6 +739,8 @@ def _wrap_one(
             tuid = args.get("__tool_use_id__", "")
             clean_args = {k: v for k, v in args.items()
                           if not (k.startswith("__") and k.endswith("__"))}
+            inflight_key = captured_result_key(name, clean_args)
+            state.register_inflight(inflight_key, name)
             start = time.perf_counter()
             with suspend_inactivity_watchdog(ctx):
                 raw = await t.async_invoke(ctx, clean_args)
@@ -727,10 +749,11 @@ def _wrap_one(
                 state.tool_durations[tuid] = dur_ms
             if (isinstance(raw, list) and raw
                     and all(isinstance(p, (TextPart, ImagePart)) for p in raw)):
+                caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
                 if ctx.parent_transcript_dir is not None:
-                    caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
                     _append_captured_tool_result(
                         ctx.parent_transcript_dir, name, clean_args, caption)
+                state.resolve_inflight(inflight_key, caption, is_error=False)
                 return _tool_response_parts(raw)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             if name == "bash":
@@ -748,9 +771,12 @@ def _wrap_one(
             if ctx.parent_transcript_dir is not None:
                 _append_captured_tool_result(
                     ctx.parent_transcript_dir, name, clean_args, content_str)
+            state.resolve_inflight(inflight_key, content_str, is_error=False)
             return _tool_response(content_str, is_error=False)
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))
+            if inflight_key is not None:
+                state.resolve_inflight(inflight_key, str(fte), is_error=True)
             return _tool_response(str(fte), is_error=True)
         except Exception as exc:
             # Decision #6: re-raise a subagent-origin pause for honesty, but a
@@ -760,8 +786,10 @@ def _wrap_one(
             # practice a subagent-origin pause under claude_code degrades to an
             # is_error tool_result. Acceptable: resume = restart the subtree, and
             # subagents are restart-safe by design.
-            raise_if_suspended(exc)
             text = f"{type(exc).__name__}: {exc}"
+            if inflight_key is not None:
+                state.resolve_inflight(inflight_key, text, is_error=True)
+            raise_if_suspended(exc)
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
 
