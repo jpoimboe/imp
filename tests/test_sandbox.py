@@ -2952,6 +2952,25 @@ def test_the_overlay_and_keeper_docstrings_drop_their_retired_rationale():
         assert "keeper namespace mints one layer" in doc
 
 
+def test_the_scratch_block_docstrings_describe_the_mask_and_the_re_exposes():
+    # AC 10. Three docstrings described the pre-mask world. A reader who trusts the old
+    # session_socket_path text — the read-only floor is what makes the socket reachable —
+    # would delete the re-expose and cut every sandboxed `imp` off from its daemon.
+    # Flattened, because every asserted sentence is hard-wrapped where it lives.
+    import imp.engine.sandbox as sb
+    from imp.remote.session.discover import session_socket_path as ssp
+    plan_doc = _flat_doc(sb.SandboxPolicy.bind_plan)
+    assert "a tmpfs over the scratch ROOT (quest_tmp_mask) FIRST" in plan_doc
+    assert ("the exposed set under the scratch root is EXACTLY this quest's own "
+            "scratch dir plus its own session socket") in plan_doc
+    prepare_doc = _flat_doc(sb.prepare_spawn_policy)
+    assert "session_socket_ro churns the same way and is pruned with them" in prepare_doc
+    assert "only the session daemon can bind it" in prepare_doc
+    sock_doc = _flat_doc(ssp)
+    assert "read-only floor" not in sock_doc
+    assert "re-exposes THIS quest's own socket read-only" in sock_doc
+
+
 def test_normalize_returncode_separates_imps_kills_from_the_commands_own():
     # Spec §7. A join propagates a self-inflicted signal as a NEGATIVE code where
     # bwrap mapped it to 128+n; providers key tool_killed on the sign, so the two

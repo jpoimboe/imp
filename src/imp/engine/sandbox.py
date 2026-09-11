@@ -138,9 +138,17 @@ class SandboxPolicy:
         cover — only the secret masks are unconditionally last. Add a new bind here
         and ALL consumers pick it up; the argv-parity test enforces no drift. The
         home_layer rw bind goes FIRST (so caches/worktree/secrets over $HOME win),
-        then the per-quest scratch bind — quest_tmp_dir re-exposed rw at its own real
-        path, the dir TMPDIR points at. Host /tmp gets no covering bind and stays on
-        the read-only floor. Then the per-quest read-write /var/tmp scratch bind
+        then the per-quest scratch block: a tmpfs over the scratch ROOT
+        (quest_tmp_mask) FIRST, then its two re-exposes on top — quest_tmp_dir rw at
+        its own real path (the dir TMPDIR points at) and session_socket_ro, THIS
+        quest's own session socket, ro. The tmpfs must precede both or last-wins
+        buries the quest's own $TMPDIR and its control socket. Scratch-root
+        invariant: after the whole plan applies, the exposed set under the scratch
+        root is EXACTLY this quest's own scratch dir plus its own session socket —
+        every sibling quest's scratch dir, its staged provider credentials and its
+        control socket are gone from the namespace, as is the remote-control socket.
+        Host /tmp OUTSIDE that root gets no covering bind and stays on the read-only
+        floor. Then the per-quest read-write /var/tmp scratch bind
         (emitted only when quest_var_tmp_dir is set; empty → no /var/tmp bind, host
         /var/tmp stays on the read-only floor), and the secret masks unconditionally LAST.
 
@@ -860,10 +868,14 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     policy creation; bwrap must still bind each ro path over the read-only floor,
     so a spawn carrying a vanished path dies in sandbox SETUP ("Read-only file
     system") before the command runs. A mask over a gone path protects nothing, so
-    existence-gating at spawn is always safe. Own binds (worktree, quest_home) and stable config
-    (caches, extra_*) never churn and are left untouched. Scoped to the spawn argv only; the
-    in-process allows_read/allows_write mirrors keep the unpruned policy (a gone path is denied
-    either way).
+    existence-gating at spawn is always safe. session_socket_ro churns the same way and is
+    pruned with them: quest_tmp_dir is defended by RE-CREATION at spawn, which is impossible
+    for a socket — only the session daemon can bind it, and the executor unlinks it at quest
+    completion — so a policy whose socket has since gone would abort bwrap SETUP for every
+    remaining spawn instead of degrading to a namespace with no control channel. Own binds
+    (worktree, quest_home) and stable config (caches, extra_*) never churn and are left
+    untouched. Scoped to the spawn argv only; the in-process allows_read/allows_write mirrors
+    keep the unpruned policy (a gone path is denied either way).
 
     The repo marker re-expose (state_repo_ro) is gated on the same terms _checked_override
     reads it on — is_file() — so the bind exists exactly when the guard has something to
