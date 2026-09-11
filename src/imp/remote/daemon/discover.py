@@ -32,15 +32,14 @@ class QuestInfo:
 def list_quests(control_root: Path) -> list[QuestInfo]:
     """The in-flight quests the `list` verb reports — those a user can still act on.
 
-    `_iter_quest_ids` enumerates every known quest including the journal
-    (completed / merged / abandoned), but those are terminal: surfacing them in a
-    remote `/list` is just noise. Keep only the in-flight statuses
-    (running / new / paused / merge_blocked / draft); `running` and
-    `draft` are derived at display time — there is no persisted `errored`."""
-    from imp.cli.main import _iter_quest_ids
+    Live homes only: a quest is archived solely on a terminal status, none of which
+    is in `_INFLIGHT`, so an archived id could never survive the filter below — and
+    the daemon polls this, so reading the archive to enumerate them is pure cost.
+    `running` and `waiting` are derived at display time, not persisted."""
+    from imp.cli.main import _live_quest_ids
     from imp.cli.store import _INFLIGHT, _row_for_id
     out: list[QuestInfo] = []
-    for quest_id in _iter_quest_ids(control_root):
+    for quest_id in _live_quest_ids(control_root):
         try:
             row = _row_for_id(control_root, quest_id)
         except Exception:

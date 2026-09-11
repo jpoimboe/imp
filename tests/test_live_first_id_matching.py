@@ -20,7 +20,7 @@ from imp.engine import archive
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import Quest
 from imp.paths import project_state_dir
-from imp.remote.daemon import spawn
+from imp.remote.daemon import discover, spawn
 from tests.conftest import _seed_control
 
 LIVE = "livid1"
@@ -174,3 +174,15 @@ def test_resume_quest_resolves_a_live_token_with_an_unreadable_journal(
 
     assert msg == "Resuming @livid1…"
     assert spawned == [[sys.executable, "-m", "imp", "resume", LIVE, "--headless"]]
+
+
+def test_daemon_list_quests_reports_live_quests_with_an_unreadable_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 4: the daemon's poll enumerates live homes only — the raising store double
+    is the proof it never drains the journal, and the live quest still surfaces."""
+    _live_quest_unreadable_journal(tmp_path, monkeypatch)
+
+    infos = discover.list_quests(tmp_path)
+
+    assert [(i.id, i.title, i.status) for i in infos] == [(LIVE, "Live Thing", "new")]
