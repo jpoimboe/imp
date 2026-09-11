@@ -425,6 +425,7 @@ class ImptyDriver:
 
     def send(
         self, data: str = "", keys: list[str] | None = None, wait: bool | float = True,
+        for_text: str | None = None, pattern: str | None = None,
     ) -> str:
         """Send text and/or named keys to the program. When waiting, return a changed-row
         diff, `[no text change]`, or `[full screen]` followed by the complete screen.
@@ -455,7 +456,18 @@ class ImptyDriver:
           current during the wait. A value over 240s is clamped to it — no single call
           blocks longer — and the reply's first line then reads `[waited 240s call cap
           (600s requested)]`; send again or call `wait()` to keep watching.
+
+        `for_text=` (a plain substring) or `pattern=` (a regex) instead waits for that
+        text to APPEAR on screen — the reaction you are actually waiting for, instead
+        of guessing a settle time. Pass one, not both, and leave `wait` at True. It
+        settles for 0.3s after the match and gives up after 30s; its header is
+        `[found]`, `[not seen after <cap>s hard cap]`, or `[not seen — program exited]`.
+        For a longer budget send with `wait=False`, then `wait(for_text=…, hard=120)`.
         """
+        matcher = _screen_matcher(for_text, pattern, for_change=False)
+        if matcher is not None and wait is not True:
+            raise ValueError("for_text/pattern needs wait=True (the default)"
+                             " — a numeric or False wait contradicts it")
         if not data and not keys:
             raise ValueError("send needs data= text, keys=[...], or both")
         # Resolve the WHOLE list before the first write: an unknown name must deliver
@@ -467,6 +479,11 @@ class ImptyDriver:
         # touched seconds ago.
         since = time.monotonic()
         session.send(payload)
+        if matcher is not None:
+            capped = min(DEFAULT_CHANGE_HARD, MAX_CALL_HARD)
+            header = self._await_match(
+                session, matcher, DEFAULT_SETTLE_IDLE, capped, DEFAULT_CHANGE_HARD)
+            return f"{header}\n{self._render_diff(session)}"
         # `is False` / `is True`: bool is an int subclass, so a numeric `wait` must
         # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
         if wait is False:

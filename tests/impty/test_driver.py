@@ -486,6 +486,79 @@ def test_send_docstring_teaches_the_key_vocabulary() -> None:
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_matcher_returns_found_once_the_reaction_appears() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        # The echo child prints its CUMULATIVE input as hex, so this string can only
+        # appear once both bytes have come back — a real reaction, not the send.
+        echoed = b"hi".hex()
+        result = d.send(data="hi", for_text=echoed)
+        assert result.splitlines()[0] == "[found]"
+        assert f"GOT {echoed}" in result
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_matcher_that_never_appears_reports_the_not_seen_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        # send's matcher budget IS DEFAULT_CHANGE_HARD, read off the module at call
+        # time — shrink it rather than block a test for the real 30s.
+        monkeypatch.setattr("impty.driver.DEFAULT_CHANGE_HARD", 0.5)
+        t0 = time.monotonic()
+        result = d.send(data="hi", for_text="NEVER")
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == "[not seen after 0.5s hard cap]"
+        assert elapsed >= 0.5  # the header's elapsed-time claim is true
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_plain_send_still_returns_a_bare_screen_with_no_header_line() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        result = d.send(data="hi")
+        # No note line: the first line is the render's own status header.
+        assert result.splitlines()[0].startswith("[alive=")
+    finally:
+        d.stop()
+
+
+def test_send_matcher_argument_conflicts_raise_value_error() -> None:
+    # No session: these are argument errors, raised before anything is written.
+    d = ImptyDriver()
+    conflict = ("for_text/pattern needs wait=True (the default)"
+                " — a numeric or False wait contradicts it")
+    with pytest.raises(ValueError) as exc:
+        d.send(data="x", for_text="a", wait=False)
+    assert str(exc.value) == conflict
+    with pytest.raises(ValueError) as exc:
+        d.send(data="x", for_text="a", wait=0.4)
+    assert str(exc.value) == conflict
+    with pytest.raises(ValueError) as exc:
+        d.send(data="x", for_text="a", pattern="b")
+    assert str(exc.value) == "for_text and pattern are mutually exclusive — pass one"
+
+
+def test_send_docstring_teaches_the_matcher_and_its_headers() -> None:
+    doc = ImptyDriver.send.__doc__ or ""
+    assert "for_text=" in doc
+    assert "pattern=" in doc
+    assert "[found]" in doc
+    assert "[not seen — program exited]" in doc
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_resize_delivers_sigwinch_and_child_sees_new_width() -> None:
     d = ImptyDriver()
     d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
