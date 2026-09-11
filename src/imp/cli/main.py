@@ -2740,10 +2740,13 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     records — an archived id whose archive record reads `resumable=True` (a
     "shelved" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
-    matches, so a terminal id sharing a stem never joins the menu."""
+    matches, so a terminal id sharing a stem never joins the menu.
+    An archived candidate this install cannot read is omitted, exactly as an
+    absent record is."""
     from imp.cli.store import _row_for_id
     from imp.engine.archive import read as archive_read
     from imp.engine.archive import record, records_root
+    from imp.engine.errors import ArchiveMismatch
 
     rows = [r for r in _resumable_rows(control) if token in r[0]]
     live = {r[0] for r in rows}
@@ -2753,7 +2756,10 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
         rec = record.read_record(records_root(control), cid)
         if rec is None or not rec.get("resumable"):
             continue
-        row = _row_for_id(control, cid)
+        try:
+            row = _row_for_id(control, cid)
+        except ArchiveMismatch:
+            continue
         if row is not None:
             rows.append(row)
     return _sort_rows_newest_first(rows)

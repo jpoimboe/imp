@@ -11,6 +11,7 @@ import imp.cli.main as m
 from imp.cli.main import main
 from imp.engine import archive, quest_refs
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
 from tests.conftest import _branch_with_commit, _seed_control
 
 ARCH = "arqu99"
@@ -121,3 +122,31 @@ def test_merged_after_returns_its_fail_safe_false(tmp_path: Path) -> None:
     _raise_data_floor(tmp_path)
 
     assert _merged_after(tmp_path, ARCH, base) is False
+
+
+def test_resume_offers_the_live_candidate_and_omits_the_unreadable_one(
+    tmp_path: Path,
+) -> None:
+    """An archived candidate this install cannot read is simply not offered,
+    exactly as an absent record is not — and `imp resume` still resolves."""
+    import anyio
+
+    from imp.engine.abandon import archive_conversation
+
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="Live", quest_id="lodo40",
+                       base_branch="main", origin="idea")
+    shelved = Quest.create_draft(tmp_path, title="Shelved", quest_id="lodo77",
+                                 base_branch="main")
+    archive_conversation(shelved)
+    assert not (project_state_dir(tmp_path) / "quests" / "lodo77").exists()
+    _raise_data_floor(tmp_path)
+
+    rows = m._resumable_match_rows(tmp_path, "lodo")
+
+    async def _resolve() -> str | int:
+        return await m._resolve_resume_target(
+            tmp_path, "lodo", non_interactive=True)
+
+    assert {r[0] for r in rows} == {"lodo40"}
+    assert anyio.run(_resolve) == "lodo40"
