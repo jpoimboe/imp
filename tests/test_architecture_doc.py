@@ -580,6 +580,22 @@ def test_invariants_pin_the_policy_to_the_quests_project_root() -> None:
     assert "must agree with `quest.project_root`" in layering
 
 
+def test_invariants_pin_codex_durability_and_bounded_interruption() -> None:
+    text = Path("docs/internals/invariants.md").read_text()
+    flat = " ".join(text.split())
+    expected = (
+        "- **Codex native session.** One run-scoped process owner linearizes "
+        "cancellation with subprocess publication and identity-safe cleanup; a "
+        "live hard stop captures the process tree before waking blocked driver "
+        "I/O, and the wake also releases drains held after parent exit. The "
+        "coordinator's two-second hard deadline is acknowledged by receive or "
+        "teardown independently of tool cleanup. Normal finalization still "
+        "persists the exact native thread and rollout before removing the "
+        "temporary Codex home.")
+    layering, _, _future = flat.partition("## Future / unbuilt")
+    assert expected in layering
+
+
 def test_architecture_engine_half_names_the_current_default_subagents() -> None:
     text = ARCH.read_text()
     assert (
