@@ -29,7 +29,7 @@ clone's deletion).
 ```bash
 REPO=$(git rev-parse --show-toplevel)        # main checkout — the report lands here
 cd "$REPO"
-WT=/tmp/imp-dogfood-$(date +%Y%m%d-%H%M%S)
+WT=${TMPDIR:-/tmp}/imp-dogfood-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"                       # standalone clone of HEAD; control root resolves to $WT
 ls "$WT"/imp/config.yaml                      # confirms $WT is an imp project
 ```

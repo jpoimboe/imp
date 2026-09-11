@@ -255,7 +255,7 @@ isolated; a linked worktree's local layer would resolve to the shared main check
 ```bash
 REPO=$(git rev-parse --show-toplevel)   # main checkout — report lands here, survives clone deletion
 cd "$REPO"
-WT=/tmp/imp-interrupt-$(date +%Y%m%d-%H%M%S)
+WT=${TMPDIR:-/tmp}/imp-interrupt-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"                 # standalone clone of HEAD → control root resolves to $WT itself
 echo "$WT"                              # your cwd for every imp run
 ls "$WT"/imp/config.yaml                # the committed project marker → confirms $WT is an imp project

@@ -26,7 +26,7 @@ Run in a **standalone `git clone`** (not a `git worktree add`) — see the READM
 ```bash
 REPO=$(git rev-parse --show-toplevel)        # main checkout — the report lands here
 cd "$REPO"
-WT=/tmp/imp-remote-$(date +%Y%m%d-%H%M%S)
+WT=${TMPDIR:-/tmp}/imp-remote-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"
 ls "$WT"/imp/config.yaml                      # confirms $WT is an imp project
 ```
@@ -57,10 +57,10 @@ token; the harness ignores the token contents:
 
 ```bash
 export IMP_TELEGRAM_CHAT_ID=4242
-python3 -m tests.playbooks.fake_telegram > /tmp/fake-url.txt &   # prints its URL on the first stdout line
+python3 -m tests.playbooks.fake_telegram > "${TMPDIR:-/tmp}/fake-url.txt" &   # prints its URL on the first stdout line
 FAKE_PID=$!
-until [ -s /tmp/fake-url.txt ]; do sleep 0.1; done               # wait for the URL line to land
-FAKE_URL=$(head -1 /tmp/fake-url.txt)
+until [ -s "${TMPDIR:-/tmp}/fake-url.txt" ]; do sleep 0.1; done         # wait for the URL line to land
+FAKE_URL=$(head -1 "${TMPDIR:-/tmp}/fake-url.txt")
 echo "fake at $FAKE_URL"                                         # e.g. http://127.0.0.1:PORT
 ```
 

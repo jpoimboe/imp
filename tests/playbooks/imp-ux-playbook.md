@@ -27,7 +27,7 @@ description: Drive imp's CLI with fresh eyes and emit a PASS/FAIL UX verdict plu
 
 ```bash
 REPO=$(git rev-parse --show-toplevel)     # main checkout — notes land here, survives clone deletion
-WT=/tmp/imp-ux-$(date +%Y%m%d-%H%M%S)
+WT=${TMPDIR:-/tmp}/imp-ux-$(date +%Y%m%d-%H%M%S)
 git clone "$REPO" "$WT"
 echo "$WT"                                # cwd for every imp run
 cd "$WT" && imp config >/dev/null         # claims this clone's state dir under ~/.imp/projects/
