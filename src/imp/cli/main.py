@@ -3871,8 +3871,10 @@ def _cmd_events(args: argparse.Namespace) -> int:
             no_pager=args.no_pager)
         return 0
     width = None if args.full else _term_width()
+    overlays = ei.usage_patch_overlays(indexed)
     _page_or_print(
-        [ei.digest_line(o, ev, handle_map, width=width) for o, ev in selected],
+        [ei.digest_line(o, ev, handle_map, width=width, overlay=overlays.get(o))
+         for o, ev in selected],
         no_pager=args.no_pager, trailing_blank=True)
     return 0
 

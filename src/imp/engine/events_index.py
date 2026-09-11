@@ -375,16 +375,45 @@ def agent_display(agent_id: str | None, handle_map: dict[str, str]) -> str:
     return agent_id
 
 
+def usage_patch_overlays(
+    indexed: Sequence[tuple[int, dict[str, Any]]],
+) -> dict[int, dict[str, Any]]:
+    """Ordinal -> codex usage-patch occupancy for that `agent_message` — display only."""
+    last: dict[str | None, int] = {}
+    overlays: dict[int, dict[str, Any]] = {}
+    for ordinal, event in indexed:
+        etype = event.get("type")
+        if etype == "agent_message":
+            last[event.get("agent_id")] = ordinal
+        elif etype == "agent_message_usage_patch":
+            target = last.get(event.get("agent_id"))
+            if target is None:
+                continue
+            payload = event.get("payload") or {}
+            fields = {key: payload[key]
+                      for key in ("context_tokens", "context_window")
+                      if key in payload}
+            if fields:
+                overlays.setdefault(target, {}).update(fields)
+    return overlays
+
+
 def digest_line(
     ordinal: int, event: dict[str, Any], handle_map: dict[str, str],
-    *, width: int | None = None,
+    *, width: int | None = None, overlay: dict[str, Any] | None = None,
 ) -> str:
     """Compact one-line rendering: `#N  <type>  [agent]  <summary>` — no
     wall-clock timestamp (the ordinal conveys order). When `width` is an int the
     assembled line is clipped to that many columns (one reserved for a trailing
-    `…`); `width=None` renders the full untruncated line (the `--full` path)."""
+    `…`); `width=None` renders the full untruncated line (the `--full` path).
+    `overlay` adds payload fields for this rendering only — a copy is summarized,
+    so the event dict stays exactly as it was read."""
     etype = event.get("type") or "?"
     agent = agent_display(event.get("agent_id"), handle_map)
+    if overlay:
+        payload = event.get("payload")
+        base = payload if isinstance(payload, dict) else {}
+        event = {**event, "payload": {**base, **overlay}}
     line = (
         f"#{ordinal}  {etype:<{_TYPE_WIDTH}} [{agent}]  {summarize(event)}"
     ).rstrip()
