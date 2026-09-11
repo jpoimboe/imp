@@ -68,6 +68,23 @@ def test_ensure_quest_tmp_dir_creates_0o700_parent_and_leaf(tmp_path: Path) -> N
     assert leaf.parent.stat().st_mode & 0o777 == 0o700
 
 
+def test_quest_tmp_dir_equals_resolve_policy_bind_source(tmp_path: Path) -> None:
+    # The executor wipes Quest.tmp_dir while the sandbox binds resolve_policy's value;
+    # drift would silently leave the bound scratch dir un-wiped.
+    from imp.engine.sandbox import SandboxConfig, resolve_policy
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="qtmp2", base_branch="main")
+    pol = resolve_policy(
+        worktree=ch.project_root, control_root=ch.control_root,
+        quest_id=ch.id, cfg=SandboxConfig(uid=99999),
+        engine_env_result={}, environ={}, available=True, quest_dir=ch.quest_dir)
+    assert pol.quest_tmp_dir == str(ch.tmp_dir)
+    assert (str(ch.tmp_dir), "rw") in pol.bind_plan()
+    assert ("TMPDIR", str(ch.tmp_dir)) in pol.child_env
+    assert "imp-99999" not in pol.quest_tmp_dir
+
+
 def test_quest_scratch_root_prefers_imp_quest_tmp_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
