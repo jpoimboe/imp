@@ -285,3 +285,52 @@ def test_a_subagent_row_carries_no_cost_field_on_a_metered_backend() -> None:
     assert "$" in rows[2] and "session" not in rows[2]
     assert "████░░░░░░ 42%" in rows[3]                 # same gauge, same grammar
     assert "session" not in rows[3] and "$" not in rows[3]
+
+
+def test_compose_status_passes_the_live_width_to_the_activity_line(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """One term_width() per compose, shared by the activity line and the position row:
+    at 80 columns the activity line keeps the countdown and sheds the p hint."""
+    from imp.cli import live_driver as ld
+    drv = _drive([
+        ev("1", "quest_created", quest_id="pazo49", title="t"),
+        ev("2", "step_started", step="coder", kind="agent", phase="implement phase",
+           model="claude-opus-5", provider="anthropic"),
+        ev("3", "agent_retry", category="rate_limit", attempt=1,
+           backoff_seconds=2940.0, hinted=True),
+    ])
+    calls: list[int] = []
+
+    def _counting_term_width() -> int:
+        calls.append(80)
+        return 80
+
+    monkeypatch.setattr(ld, "term_width", _counting_term_width)
+    rows = drv.compose_status(0)
+    assert rows is not None
+    assert len(calls) == 1
+    assert "press r to retry now" in rows[0]
+    assert "press p to switch provider" not in rows[0]
+    assert rows[0].endswith("49m left")
+    assert pal.clip_display(rows[0], 79) == rows[0]
+
+
+def test_compose_startup_passes_the_live_width_to_the_activity_line(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two term_width() calls: the activity line takes the live width, as the identity
+    row already does — a hardcoded width would leave only one."""
+    from imp.cli import live_driver as ld
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=200, status=LiveStatus(out),
+                     startup_verb="resuming", quest_id="pazo49", title="t")
+    calls: list[int] = []
+
+    def _counting_term_width() -> int:
+        calls.append(200)
+        return 200
+
+    monkeypatch.setattr(ld, "term_width", _counting_term_width)
+    rows = drv.compose_startup(0)
+    assert rows is not None
+    assert "resuming" in rows[0]
+    assert len(calls) == 2
