@@ -38,7 +38,7 @@ import shutil
 import signal
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -466,6 +466,26 @@ async def _settle_inflight(
         out.append(_InFlightOutcome(
             key=key, name=e.name, content=content, is_error=is_error))
     return out
+
+
+_CORRECTION_HEADER = (
+    "[imp] This turn was interrupted while the calls below were still running. "
+    "Your session may show them as rejected or denied — that is the client's "
+    "cancellation filler, NOT a rejection, denial, or failure, and NOT anything "
+    "the user did. These are the real outcomes; treat them as authoritative and "
+    "do not re-run the calls on their account."
+)
+
+
+def correction_increment(settled: Sequence[_InFlightOutcome]) -> str:
+    """Prefix for the post-interrupt query naming each in-flight call's real outcome.
+
+    Empty when nothing was in flight, so the common interrupt grows no preamble.
+    """
+    if not settled:
+        return ""
+    bullets = "\n".join(f"- {s.name}: {s.content}" for s in settled)
+    return f"{_CORRECTION_HEADER}\n\n{bullets}\n\n"
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────

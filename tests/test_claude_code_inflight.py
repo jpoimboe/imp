@@ -8,8 +8,10 @@ import pytest
 
 from imp.providers.claude_code import (
     INFLIGHT_RESULT_BOUND_S,
+    _InFlightOutcome,
     _RunState,
     _settle_inflight,
+    correction_increment,
 )
 
 
@@ -69,3 +71,33 @@ async def test_settle_returns_immediately_when_nothing_is_in_flight() -> None:
     state = _RunState()
     assert await asyncio.wait_for(
         _settle_inflight(state, INFLIGHT_RESULT_BOUND_S), timeout=10) == []
+
+
+def test_no_increment_when_nothing_was_in_flight() -> None:
+    """The common interrupt must grow no preamble — an empty settle list yields
+    nothing to prepend, which is what keeps the bare handoff instruction bare."""
+    assert correction_increment([]) == ""
+
+
+def test_increment_names_each_call_and_its_real_outcome() -> None:
+    """The increment has to out-argue the SDK's "the tool use was rejected" in the
+    model's own context: it labels that filler as filler and then states, per call,
+    what imp's own execution actually produced."""
+    inc = correction_increment([
+        _InFlightOutcome(key="k1", name="write_file",
+                         content="wrote 1 bytes to scratch", is_error=False),
+        _InFlightOutcome(key="k2", name="bash",
+                         content='{"stdout": "ok", "returncode": 0}',
+                         is_error=False),
+    ])
+
+    assert inc.startswith(
+        "[imp] This turn was interrupted while the calls below were still "
+        "running.")
+    assert "NOT a rejection, denial, or failure, and NOT anything the user did" in inc
+    assert "do not re-run the calls on their account" in inc
+    assert "- write_file: wrote 1 bytes to scratch" in inc
+    assert '- bash: {"stdout": "ok", "returncode": 0}' in inc
+    assert "account.\n\n- write_file:" in inc
+    # Prepended verbatim to the next query, so it must end separated from it.
+    assert inc.endswith("\n\n")
