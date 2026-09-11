@@ -212,3 +212,26 @@ def test_events_full_widens_past_the_width_clip(tmp_path, monkeypatch) -> None:
     assert "TAILMARK" not in clipped                # the tail was clipped off
     assert "TAILMARK" in full                       # --full lifts the clip
     assert "…" not in full
+
+
+def test_events_compact_renders_context_occupancy_per_provider_shape(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events = [
+        {"type": "agent_message", "agent_id": "step:build/coder",
+         "payload": {"provider": "anthropic", "model": "claude-opus-5",
+                     "stop_reason": "end_turn",
+                     "usage": {"input_tokens": 10, "output_tokens": 2},
+                     "context_tokens": 159_842,
+                     "raw": {"content": [{"type": "text", "text": "one"}]}}},
+        {"type": "agent_message", "agent_id": "step:build/coder",
+         "payload": {"provider": "claude_code", "model": "claude-opus-5",
+                     "stop_reason": "end_turn",
+                     "usage": {"input_tokens": 10, "output_tokens": 2},
+                     "context_tokens": 137_000, "context_window": 1_000_000,
+                     "context_pct": 79.85263,
+                     "raw": {"content": [{"type": "text", "text": "two"}]}}},
+    ]
+    _make_live_quest(tmp_path, "ccc333", events)
+    out = _run(monkeypatch, tmp_path, "events", "ccc333", "--all", "--full")
+    assert "ctx=159842/200000 (79.9%)" in out      # catalog window, computed pct
+    assert "ctx=137000/1000000 (79.9%)" in out     # provider-reported window+pct
