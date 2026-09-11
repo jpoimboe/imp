@@ -5,7 +5,7 @@ from pathlib import Path
 
 from imp.agents.tools import limits
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.spill import spill_tool_output
+from imp.agents.tools.spill import spill_tool_output, wrap_task_result
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -70,3 +70,39 @@ def test_preview_equals_full_when_shorter_than_preview_bytes(tmp_path: Path) -> 
     result = spill_tool_output(ctx, "abc.txt", "short output")
     preview = result.split("\n", 1)[0]
     assert preview == "short output"
+
+
+def test_result_at_the_cap_is_returned_inline(tmp_path: Path) -> None:
+    # AC 7: the trigger is strictly ">", so a result of exactly the cap is handed
+    # back byte-for-byte and nothing is written to disk.
+    ctx = _ctx(tmp_path)
+    exact = "x" * 30_000
+    assert wrap_task_result(ctx, "t1", exact) == exact
+    assert not (tmp_path / ".imp" / "quests" / "test-quest" / "tool-results").exists()
+
+
+def test_result_one_byte_over_the_cap_spills_with_a_2kb_preview(tmp_path: Path) -> None:
+    # AC 7: one byte over -> a 2 KB head plus the existing notice verbatim, and the
+    # complete result recoverable byte-for-byte from the named file.
+    ctx = _ctx(tmp_path)
+    over = "x" * 30_001
+    preview, notice = wrap_task_result(ctx, "t1", over).split("\n", 1)
+    assert len(preview.encode("utf-8")) == 2_000
+    assert notice == ("[full output 30 KB at "
+                      ".imp/quests/test-quest/tool-results/t1; "
+                      "read with read_file offset=1]")
+    spilled = tmp_path / ".imp" / "quests" / "test-quest" / "tool-results" / "t1"
+    assert spilled.read_text(encoding="utf-8") == over
+
+
+def test_over_cap_preview_never_splits_a_multibyte_char(tmp_path: Path) -> None:
+    # AC 8: byte 2000 of this result lands mid-"中" (1999 ASCII then 3-byte chars).
+    # A char-count slice would overrun 2000 bytes; a raw byte slice would emit
+    # U+FFFD. The preview must be a valid, byte-bounded prefix of the full result.
+    ctx = _ctx(tmp_path)
+    result = "a" * 1_999 + "中" * 10_500          # 33_499 bytes -> over the cap
+    preview = wrap_task_result(ctx, "t1", result).split("\n", 1)[0]
+    assert "�" not in preview            # no replacement char
+    assert len(preview.encode("utf-8")) <= 2_000
+    assert result.encode("utf-8").startswith(preview.encode("utf-8"))
+    assert preview == "a" * 1_999                 # the partial char is dropped

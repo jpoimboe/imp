@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from imp.agents.tools.limits import PREVIEW_BYTES
+from imp.agents.tools.limits import PREVIEW_BYTES, TASK_RESULT_CAP_BYTES
 
 if TYPE_CHECKING:
     from imp.agents.tools.context import ToolContext
@@ -44,3 +44,10 @@ def spill_tool_output(
         return notice
     preview = data[:preview_bytes].decode("utf-8", "ignore")
     return f"{preview}\n{notice}"
+
+
+def wrap_task_result(ctx: ToolContext, name: str, result: str) -> str:
+    """Spill an over-cap subagent result; return preview + notice, else unchanged."""
+    if len(result.encode("utf-8")) > TASK_RESULT_CAP_BYTES:
+        return spill_tool_output(ctx, name, result)
+    return result

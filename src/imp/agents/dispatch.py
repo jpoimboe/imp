@@ -46,8 +46,7 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
 from imp.agents.tools.context import suspend_inactivity_watchdog
 from imp.agents.tools.errors import FatalToolError
-from imp.agents.tools.limits import TOOL_OUTPUT_CAP_BYTES
-from imp.agents.tools.spill import spill_tool_output
+from imp.agents.tools.spill import wrap_task_result
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.schema import validate_agent_output
 
@@ -59,13 +58,6 @@ class TurnState:
     tool_calls_used: int
     ceiling_tripped: bool = False
     nudged: bool = False
-
-
-def _wrap_task_result(ctx: Any, tu_id: str, result_str: str) -> str:
-    """Spill an over-cap subagent result to disk; return a preview + notice, else unchanged."""
-    if len(result_str.encode("utf-8")) > TOOL_OUTPUT_CAP_BYTES:
-        return spill_tool_output(ctx, tu_id, result_str)
-    return result_str
 
 
 def _dep_wait_event(ctx: Any) -> dict[str, Any] | None:
@@ -288,7 +280,7 @@ async def dispatch_task_batch(
             results[tu.id] = block
             elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
             return
-        block = ToolResultBlock(tu.id, _wrap_task_result(ctx, tu.id, result_str))
+        block = ToolResultBlock(tu.id, wrap_task_result(ctx, tu.id, result_str))
         results[tu.id] = block
         elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
 
@@ -374,7 +366,7 @@ async def _dispatch_one_task_inline(
         tool_results.append(block)
         elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
         return
-    block = ToolResultBlock(tu.id, _wrap_task_result(ctx, tu.id, result_str))
+    block = ToolResultBlock(tu.id, wrap_task_result(ctx, tu.id, result_str))
     tool_results.append(block)
     elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
 
