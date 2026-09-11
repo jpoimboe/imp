@@ -3357,3 +3357,34 @@ def test_sibling_scratch_and_foreign_sockets_are_gone_from_the_namespace() -> No
     finally:
         shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_own_session_socket_resists_rm_from_inside_the_namespace() -> None:
+    """AC6(b): the own-socket re-expose is a MOUNT POINT in the namespace, so an `rm` of
+    it from inside fails and the socket node is still bound on the host — an agent cannot
+    delete its own quest's control channel out from under the daemon. The AC is that the
+    removal fails, not that a particular errno comes back (EBUSY here, and an rw bind
+    would refuse it the same way)."""
+    root = _make_root()
+    parent = _scratch_parent()
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    sock = parent / f"{uuid.uuid4().hex[:8]}.sock"
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        with _bound_listener(sock):
+            pol = _active_policy(root, quest_tmp_dir=str(scratch),
+                                 quest_tmp_mask=str(parent),
+                                 session_socket_ro=str(sock))
+            ctx = _ctx(root, pol)
+
+            # -f on purpose: a socket merely MISSING inside would exit 0 and fail here.
+            rm = _bash(ctx, f"rm -f {shlex.quote(str(sock))}")
+            assert rm["returncode"] != 0, rm
+            assert sock.is_socket(), "the host socket node did not survive the rm"
+
+            ls = _bash(ctx, f"ls -A {shlex.quote(str(parent))}")
+            assert ls["returncode"] == 0, ls
+            assert sock.name in str(ls["stdout"]).split(), ls
+    finally:
+        shutil.rmtree(parent.parent, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
