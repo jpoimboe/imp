@@ -382,7 +382,7 @@ def test_agent_message_ctx_prefers_the_reported_window_and_pct() -> None:
     assert "13.7" not in line
 
 
-def test_agent_message_ctx_falls_back_to_pct_when_no_window_resolves() -> None:
+def test_agent_message_ctx_falls_back_to_pct_when_tokens_are_absent() -> None:
     ev = {
         "id": "c3", "type": "agent_message", "agent_id": "step:build/coder",
         "payload": {
@@ -396,6 +396,24 @@ def test_agent_message_ctx_falls_back_to_pct_when_no_window_resolves() -> None:
     line = digest_event(ev)
     assert "ctx=79.9%" in line
     assert "79.85263" not in line
+
+
+def test_agent_message_ctx_falls_back_to_pct_when_the_window_is_unknown() -> None:
+    ev = {
+        "id": "c3b", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "no_such_provider", "model": "m",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 2},
+            "context_tokens": 5000,
+            "context_pct": 79.85263,
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    line = digest_event(ev)
+    assert "ctx=79.9%" in line
+    assert "79.85263" not in line
+    assert "5000" not in line
 
 
 def test_agent_message_ctx_omitted_when_the_window_cannot_be_resolved() -> None:
