@@ -95,6 +95,27 @@ _ECHO_CHILD = (
     "    os.write(1, b'GOT ' + buf.hex().encode() + b'\\r\\n')\n"
 )
 
+_MARKER_THEN_TAIL_CHILD = (
+    "import os, sys, time\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "p = sys.argv[1]\n"
+    "while not os.path.exists(p):\n"
+    "    time.sleep(0.05)\n"
+    "os.write(1, b'MARKER\\r\\n')\n"
+    "time.sleep(0.5)\n"
+    "os.write(1, b'TAIL\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+_SCROLL_OFF_CHILD = (
+    "import time\n"
+    "print('SCROLLED-AWAY')\n"
+    "for i in range(60):\n"
+    "    print('filler', i)\n"
+    "print('BOTTOM', flush=True)\n"
+    "time.sleep(30)\n"
+)
+
 
 def _received(driver: ImptyDriver) -> str:
     """Hex of everything the echo child has received so far — its last GOT line."""
@@ -714,6 +735,236 @@ def test_wait_clamped_for_change_reports_no_change_with_the_resume_clause(
         assert elapsed < 10.0
     finally:
         d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_keeps_watching_a_program_that_already_went_quiet(
+    tmp_path: Path,
+) -> None:
+    # The criterion a predicate checked around an UNSUPPRESSED quiet settle-return
+    # fails: the child is quiet when the call starts, so that build returns a
+    # not-seen header within milliseconds.
+    flag = tmp_path / "go"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _POLL_FOR_FILE_CHILD, str(flag)])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "PROGRESS" not in d.view()
+        # Arm the touch and only THEN call the wait, so the marker cannot possibly
+        # have landed before the call — however loaded the runner is.
+        timer = threading.Timer(1.0, flag.touch)
+        timer.start()
+        try:
+            t0 = time.monotonic()
+            result = d.wait(for_text="PROGRESS", idle=0.2, hard=30.0)
+            elapsed = time.monotonic() - t0
+        finally:
+            timer.cancel()
+        assert result.splitlines()[0] == "[found]"
+        assert "PROGRESS" in result
+        assert elapsed >= 0.5   # it blocked past the earlier output's settle...
+        assert elapsed < 20.0   # ...and returned on the marker, not at the 30s cap
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_already_on_screen_returns_at_once() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        t0 = time.monotonic()
+        result = d.wait(for_text="READY", idle=0.2, hard=30.0)
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == "[found]"
+        # The up-front scan, not a block toward the 30s cap.
+        assert elapsed < 10.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_names_the_program_exiting_rather_than_a_phantom_cap() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "print('BYE')"])
+    try:
+        t0 = time.monotonic()
+        result = d.wait(for_text="NEVER", idle=0.2, hard=30.0)
+        elapsed = time.monotonic() - t0
+        # Exact at EOF; alive=False is NOT asserted here — it comes from the
+        # lagging reap, so it belongs to a poll (see _dead_header), not this frame.
+        assert result.splitlines()[0] == "[not seen — program exited]"
+        assert elapsed < 20.0  # EOF ended the wait; the 30s cap never elapsed
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_never_seen_reports_the_hard_cap_and_blocks_for_it() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        t0 = time.monotonic()
+        result = d.wait(for_text="NEVER", idle=0.2, hard=0.5)
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == "[not seen after 0.5s hard cap]"
+        assert elapsed >= 0.5  # the header's elapsed-time claim is true
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_clamped_reports_the_call_cap_with_the_resume_clause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        # Settle on a generous explicit hard BEFORE arming the clamp: a saturated
+        # runner can push interpreter startup past start()'s own 3s cap.
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.5)
+        t0 = time.monotonic()
+        result = d.wait(for_text="NEVER", idle=0.2, hard=30.0)
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == (
+            "[not seen after 0.5s call cap (30s requested)"
+            " — call wait() again to keep watching]")
+        assert elapsed < 10.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_pattern_anchors_per_screen_line_and_never_crosses_one() -> None:
+    prog = "import time; print('ALPHA'); print('BETA'); time.sleep(30)"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", prog])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert d.wait(pattern=r"AL.HA", idle=0.2, hard=5.0).splitlines()[0] == "[found]"
+        # MULTILINE: ^ anchors to a SCREEN LINE; the body starts with ALPHA, so
+        # without it this pattern could never match.
+        assert d.wait(pattern=r"^BETA", idle=0.2, hard=5.0).splitlines()[0] == "[found]"
+        # DOTALL is off, so `.` never bridges the two rows (rows are rstripped and
+        # joined with "\n", so with DOTALL this WOULD match).
+        assert d.wait(pattern=r"ALPHA.BETA", idle=0.2, hard=0.5).splitlines()[0] == (
+            "[not seen after 0.5s hard cap]")
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_matcher_defaults_to_the_change_hard_and_scans_from_zero() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        recorded: list[dict[str, Any]] = []
+
+        def _record(**kwargs: Any) -> bool:
+            recorded.append(kwargs)
+            return True
+
+        d._require().wait_idle = _record  # type: ignore[method-assign]
+        d.wait(for_text="anything")
+        # A matcher waits for something that has not happened yet, so it inherits
+        # the change budget, not the 3s settle one...
+        assert recorded[0]["hard"] == DEFAULT_CHANGE_HARD
+        # ...and needs no `since` boundary: the predicate is its own stale-screen gate.
+        assert recorded[0]["since"] == 0.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_scans_the_screen_window_not_the_scrollback() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _SCROLL_OFF_CHILD])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "SCROLLED-AWAY" in d.view(full=True)  # still in history...
+        assert "SCROLLED-AWAY" not in d.view()       # ...but off the screen window
+        result = d.wait(for_text="SCROLLED-AWAY", idle=0.2, hard=0.5)
+        # A strip-scanning implementation reports [found] here.
+        assert result.splitlines()[0] == "[not seen after 0.5s hard cap]"
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_settles_after_the_match_so_the_finished_reaction_is_on_screen(
+    tmp_path: Path,
+) -> None:
+    flag = tmp_path / "go"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _MARKER_THEN_TAIL_CHILD, str(flag)])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        # Armed so MARKER lands while the wait is already running.
+        timer = threading.Timer(0.5, flag.touch)
+        timer.start()
+        try:
+            # idle=3s sits far above the child's own 0.5s MARKER->TAIL gap, so the
+            # tail cannot fall outside the settle window even on a saturated runner
+            # — the 0.3s default could.
+            result = d.wait(for_text="MARKER", idle=3.0, hard=30.0)
+        finally:
+            timer.cancel()
+        assert result.splitlines()[0] == "[found]"
+        # A call that returned the instant it matched shows a half-drawn reaction.
+        assert "TAIL" in result
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_matcher_on_a_never_quiet_program_still_reports_found() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        # The child sleeps 0.4s after READY before it starts ticking; poll for the
+        # real signal rather than sleeping past it.
+        assert _poll(lambda: "tick" in d.view(), E2E_POLL_TIMEOUT)
+        # idle=5s can never be satisfied by a 0.02s tick loop, so the cap fires —
+        # but a match that landed is a success, not a timeout.
+        result = d.wait(for_text="tick", idle=5.0, hard=6.0)
+        assert result.splitlines()[0] == "[found]"
+    finally:
+        d.stop()
+
+
+def test_wait_matcher_argument_conflicts_raise_value_error() -> None:
+    # No session: these are argument errors, raised before anything blocks.
+    d = ImptyDriver()
+    with pytest.raises(ValueError) as exc:
+        d.wait(for_text="a", pattern="b")
+    assert str(exc.value) == "for_text and pattern are mutually exclusive — pass one"
+    with pytest.raises(ValueError) as exc:
+        d.wait(for_change=True, for_text="a")
+    assert str(exc.value) == "for_change cannot be combined with for_text/pattern"
+    # The re.error text is quoted verbatim, so derive it rather than hardcoding a
+    # message CPython may reword between versions.
+    with pytest.raises(re.error) as re_exc:
+        re.compile("(unclosed")
+    with pytest.raises(ValueError) as exc:
+        d.wait(pattern="(unclosed")
+    assert str(exc.value) == f"invalid pattern: {re_exc.value}"
+
+
+def test_wait_docstring_teaches_the_text_matchers() -> None:
+    doc = ImptyDriver.wait.__doc__ or ""
+    assert "for_text=" in doc
+    assert "pattern=" in doc
+    assert "[found]" in doc
+    assert "[not seen — program exited]" in doc
+    # A matcher wait can be clamped too, so the call-cap guidance must not sit
+    # INSIDE the "Without a matcher" listing: an agent told the clamp applies only
+    # to the other headers would not know to call again after a clamped not-seen.
+    clamp_guidance = doc.split("Without a matcher")[1]
+    assert "call cap" in clamp_guidance
+    assert "not seen" in clamp_guidance
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")

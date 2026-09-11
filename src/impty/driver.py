@@ -177,6 +177,39 @@ def _resolve_key(name: str) -> str:
     )
 
 
+def _screen_matcher(
+    for_text: str | None, pattern: str | None, *, for_change: bool,
+) -> Callable[[str], bool] | None:
+    """The screen test a `for_text`/`pattern` wait applies, or None when no matcher
+    was asked for. Every conflicting combination raises here, before anything blocks
+    or a single byte is sent."""
+    if for_text is not None and pattern is not None:
+        raise ValueError("for_text and pattern are mutually exclusive — pass one")
+    if for_change and (for_text is not None or pattern is not None):
+        raise ValueError("for_change cannot be combined with for_text/pattern")
+    if for_text is not None:
+        needle = for_text  # a local: mypy does not narrow a parameter into a lambda
+        return lambda screen: needle in screen
+    if pattern is None:
+        return None
+    try:
+        # MULTILINE so ^/$ anchor to screen lines; deliberately NOT DOTALL, so `.`
+        # never bridges two rows the terminal wrapped apart.
+        compiled = re.compile(pattern, re.MULTILINE)
+    except re.error as exc:
+        raise ValueError(f"invalid pattern: {exc}") from exc
+    return lambda screen: compiled.search(screen) is not None
+
+
+def _capped_header(kind: str, capped: float, requested: float) -> str:
+    """The not-settled header, in the one construction `still busy`, `no change` and
+    `not seen` share — so the clamp's prose can never drift between them."""
+    if requested > MAX_CALL_HARD:
+        return (f"[{kind} after {capped:g}s call cap ({requested:g}s requested)"
+                " — call wait() again to keep watching]")
+    return f"[{kind} after {capped:g}s hard cap]"
+
+
 def _format_exit(code: int) -> str:
     """The agent-facing spelling of a raw `Popen` returncode: a plain number for a
     normal exit, the signal's NAME for a signal death — never a bare negative. A
@@ -507,32 +540,77 @@ class ImptyDriver:
             time.sleep(settle)  # fixed settle; drainer updates pyte
         return f"{note}{self._render_diff(session)}"
 
+    def _await_match(
+        self, session: TerminalSession, matcher: Callable[[str], bool],
+        idle: float, capped: float, requested: float,
+    ) -> str:
+        """Block until the screen matches and then settles, and name the outcome.
+        The match travels back on the latched flag, never through wait_idle's bool
+        — settledness is the session's answer, matchedness ours — so an unmatched
+        True can only be its EOF/child-exited branch, the quiet settle-return being
+        suppressed until the predicate fires. `since=0.0` because the predicate is
+        itself this wait's gate against a stale screen."""
+        found = False
+
+        def probe() -> bool:
+            nonlocal found
+            found = found or matcher("\n".join(session.lines(limit=session.rows)))
+            return found
+
+        settled = session.wait_idle(idle=idle, hard=capped, since=0.0, predicate=probe)
+        if found:
+            return "[found]"
+        if settled:
+            return "[not seen — program exited]"
+        return _capped_header("not seen", capped, requested)
+
     def wait(
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float | None = None,
-        for_change: bool = False,
+        for_change: bool = False, for_text: str | None = None,
+        pattern: str | None = None,
     ) -> str:
         """Wait until there is an idle window after qualifying output, the process exits,
-        or `hard` elapses; then return a changed-row diff, `[no text change]`, or
-        `[full screen]` followed by the complete screen.
+        the text appears, or `hard` elapses; then return a changed-row diff, `[no text
+        change]`, or `[full screen]` followed by the complete screen.
 
         Output already read qualifies normally, so an already-quiet program returns
         promptly. `for_change=True` requires new output after this call, then its idle
         window. A live process with no output is not settled. This follows a long
         command without polling `view`; an animating TUI qualifies on its next repaint.
 
-        Caller `hard` values are accepted. `hard` defaults to 3s (30s with
-        `for_change=True`), and values over 240s are capped. The header is `[settled]`,
+        `for_text=` (a plain substring) or `pattern=` (a regex; `^`/`$` anchor to
+        screen lines and `.` never crosses one) waits for that text to APPEAR — wait
+        for a named prompt instead of burning calls polling `view`. Pass one, not
+        both, and not with `for_change`. It matches against the CURRENT SCREEN, so
+        text already showing returns at once — pick a string unique to the reaction
+        you expect — text that has scrolled off does not count, and a string
+        spanning a line the terminal wrapped never matches (match a short fragment).
+        After it matches the call still settles for `idle`, so you see the finished
+        reaction. Its header is `[found]`, `[not seen after <cap>s hard cap]`, or
+        `[not seen — program exited]` when the program ended without printing it.
+
+        `hard` defaults to 3s — 30s with `for_change=True` or a matcher, which wait
+        for something that has not happened yet — and is clamped to 240s: no single
+        call blocks longer than that. Without a matcher the header is `[settled]`,
         `[still busy after <cap>s hard cap]`, or — with `for_change=True` only —
-        `[no change after <cap>s hard cap]`; when capped it instead names the call cap
-        and requested value and tells you to call wait() again to keep watching.
+        `[no change after <cap>s hard cap]`. Whenever the clamp fires, whichever
+        not-settled header applies (`not seen` included) names the call cap and the
+        value you asked for and tells you to call wait() again to keep watching —
+        which is how you follow a program for hours without any one call blocking
+        for hours.
         """
+        matcher = _screen_matcher(for_text, pattern, for_change=for_change)
         session = self._require()
+        requested = hard if hard is not None else (
+            DEFAULT_SETTLE_HARD if matcher is None and not for_change
+            else DEFAULT_CHANGE_HARD)
+        capped = min(requested, MAX_CALL_HARD)
+        if matcher is not None:
+            header = self._await_match(session, matcher, idle, capped, requested)
+            return f"{header}\n{self._render_diff(session)}"
         # Stamp the boundary BEFORE waiting: in change mode only output read at or
         # after this instant qualifies, so an already-quiet screen can't settle it.
         since = time.monotonic() if for_change else 0.0
-        requested = hard if hard is not None else (
-            DEFAULT_CHANGE_HARD if for_change else DEFAULT_SETTLE_HARD)
-        capped = min(requested, MAX_CALL_HARD)
         settled = session.wait_idle(idle=idle, hard=capped, since=since)
         if settled:
             header = "[settled]"
@@ -544,12 +622,7 @@ class ImptyDriver:
                 for_change
                 and (session.last_output_at is None or session.last_output_at < since)
             ) else "still busy"
-            if requested > MAX_CALL_HARD:
-                header = (
-                    f"[{kind} after {capped:g}s call cap ({requested:g}s requested)"
-                    " — call wait() again to keep watching]")
-            else:
-                header = f"[{kind} after {capped:g}s hard cap]"
+            header = _capped_header(kind, capped, requested)
         return f"{header}\n{self._render_diff(session)}"
 
     def snapshot(
