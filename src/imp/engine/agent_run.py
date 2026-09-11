@@ -80,6 +80,11 @@ _FILESYSTEM_TOOLS = frozenset(
 _READONLY_STEP_NOTE = engine_prompt("readonly-step.md")
 
 
+# Formatted with the policy's live scratch dir, so it is gated on a non-empty
+# quest_tmp_dir too — an agent is never pointed at a path nothing binds.
+_SANDBOX_SCRATCH_NOTE = engine_prompt("sandbox-scratch.md")
+
+
 # Cribbed into the shared system prompt (non-resume only) so BOTH providers see
 # one identical date anchor — without it a model defaults to its training-cutoff
 # date and mis-handles relative->absolute dates, recency, and "latest version"
@@ -557,12 +562,19 @@ def build_agent_invocation(
         readonly_step = (
             sandbox_policy is not None and sandbox_policy.active
             and not sandbox_policy.allows_write(Path(sandbox_policy.worktree)))
+        scratch_note = (
+            _SANDBOX_SCRATCH_NOTE.format(tmpdir=sandbox_policy.quest_tmp_dir)
+            if (sandbox_policy is not None and sandbox_policy.active
+                and sandbox_policy.quest_tmp_dir)
+            else "")
         if is_subagent:
             body = f"{base}\n\n{body_source}"
             if agent_def.tools & _FILESYSTEM_TOOLS:
                 body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
                 if readonly_step:
                     body = f"{body}\n\n{_READONLY_STEP_NOTE}"
+                if scratch_note:
+                    body = f"{body}\n\n{scratch_note}"
             body = f"{body}\n\n{date_note}"
             body = reflow_markdown(body)
             system_prompt = f"{body}\n\n{SUBAGENT_DELIVERABLE_NOTE}"
@@ -572,6 +584,8 @@ def build_agent_invocation(
                 header = f"{header}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
                 if readonly_step:
                     header = f"{header}\n\n{_READONLY_STEP_NOTE}"
+                if scratch_note:
+                    header = f"{header}\n\n{scratch_note}"
             header = f"{header}\n\n{date_note}"
             system_prompt = reflow_markdown(header)
             task = f"{reflow_markdown(body_source)}\n\n{instruction}"

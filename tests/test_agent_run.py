@@ -2119,7 +2119,11 @@ async def test_error_info_message_is_absent_when_the_payload_carries_none(
     assert res.error is not None and res.error.message is None
 
 
-def _ro_policy(tmp_path: Path, *, active: bool = True, readonly: bool = False):
+_SCRATCH_DIR = "/tmp/imp-1000/abc"
+
+
+def _ro_policy(tmp_path: Path, *, active: bool = True, readonly: bool = False,
+               quest_tmp_dir: str = ""):
     """A policy whose worktree is `tmp_path`; `readonly=True` layers the same ro
     overlay a `read_only: ["."]` step composes in _apply_readonly_overlay."""
     from imp.engine.sandbox import SandboxPolicy
@@ -2128,7 +2132,8 @@ def _ro_policy(tmp_path: Path, *, active: bool = True, readonly: bool = False):
         git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
         writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(), child_env=(), network=True, note="",
-        readonly_overlays=(str(tmp_path),) if readonly else ())
+        readonly_overlays=(str(tmp_path),) if readonly else (),
+        quest_tmp_dir=quest_tmp_dir)
 
 
 @pytest.mark.parametrize("subagent_depth", [0, 1])
@@ -2192,4 +2197,96 @@ def test_readonly_note_absent_without_filesystem_tools(tmp_path: Path) -> None:
         sandbox_policy=_ro_policy(tmp_path, readonly=True))
 
     assert "This step is read-only." not in inv.system_prompt
+    assert "IMP_PROJECT_ROOT" not in inv.system_prompt
+
+
+@pytest.mark.parametrize("subagent_depth", [0, 1])
+def test_scratch_note_injected_when_the_policy_carries_a_quest_tmp_dir(
+    tmp_path: Path, subagent_depth: int,
+) -> None:
+    # AC 9(a): every filesystem-tool holder is told where scratch goes, with the
+    # policy's real scratch path substituted — top-level and subagent alike.
+    pol = _ro_policy(tmp_path, quest_tmp_dir=_SCRATCH_DIR)
+
+    inv = _build_inv(tmp_path, sandbox_policy=pol, subagent_depth=subagent_depth)
+
+    assert "## Scratch files go in your scratch dir" in inv.system_prompt
+    assert ("`/tmp` is read-only inside the sandbox — a literal write to "
+            "`/tmp/<anything>` is refused." in inv.system_prompt)
+    assert (f"scripts under `{_SCRATCH_DIR}`, which is also your `$TMPDIR`; it "
+            "is wiped when your step ends" in inv.system_prompt)
+    assert ("The file tools don't expand `$TMPDIR` — give them the literal path."
+            in inv.system_prompt)
+    assert "{tmpdir}" not in inv.system_prompt   # the placeholder was formatted
+    assert "{#" not in inv.system_prompt         # asset doc-header stripped
+
+
+@pytest.mark.parametrize("subagent_depth", [0, 1])
+def test_scratch_note_follows_the_readonly_note_and_precedes_the_date(
+    tmp_path: Path, subagent_depth: int,
+) -> None:
+    # Scope §3 order: paths block -> read-only note -> scratch note -> date line.
+    # Both branches append the note independently, so both are pinned here.
+    pol = _ro_policy(tmp_path, readonly=True, quest_tmp_dir=_SCRATCH_DIR)
+    assert not pol.allows_write(Path(pol.worktree))   # the fixture really denies
+
+    prompt = _build_inv(tmp_path, sandbox_policy=pol,
+                        subagent_depth=subagent_depth).system_prompt
+
+    i_paths = prompt.index("IMP_PROJECT_ROOT")
+    i_readonly = prompt.index("This step is read-only.")
+    i_scratch = prompt.index("## Scratch files go in your scratch dir")
+    i_date = prompt.index("Today's date is ")
+    assert i_paths < i_readonly < i_scratch < i_date
+
+
+@pytest.mark.parametrize("subagent_depth", [0, 1])
+def test_scratch_note_absent_when_the_policy_has_no_quest_tmp_dir(
+    tmp_path: Path, subagent_depth: int,
+) -> None:
+    # An unbound scratch dir must never be advertised — no "under  , which is".
+    inv = _build_inv(tmp_path, sandbox_policy=_ro_policy(tmp_path),
+                     subagent_depth=subagent_depth)
+
+    assert "Scratch files go in your scratch dir" not in inv.system_prompt
+    assert "IMP_PROJECT_ROOT" in inv.system_prompt    # the paths note still lands
+
+
+@pytest.mark.parametrize("subagent_depth", [0, 1])
+def test_scratch_note_absent_when_policy_inactive(
+    tmp_path: Path, subagent_depth: int,
+) -> None:
+    # AC 9(b): an inactive policy binds nothing, so its scratch dir must not speak.
+    pol = _ro_policy(tmp_path, active=False, quest_tmp_dir=_SCRATCH_DIR)
+
+    inv = _build_inv(tmp_path, sandbox_policy=pol, subagent_depth=subagent_depth)
+
+    assert "Scratch files go in your scratch dir" not in inv.system_prompt
+
+
+def test_scratch_note_absent_without_sandbox_policy(tmp_path: Path) -> None:
+    inv = _build_inv(tmp_path)                        # sandbox_policy defaults to None
+
+    assert "Scratch files go in your scratch dir" not in inv.system_prompt
+
+
+@pytest.mark.parametrize("subagent_depth", [0, 1])
+def test_scratch_note_absent_without_filesystem_tools(
+    tmp_path: Path, subagent_depth: int,
+) -> None:
+    # AC 9(b): the scratch note rides the same filesystem-tool gate as the paths note.
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(),                           # tools = {complete_step}
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path, events_path=tmp_path / "e",
+        subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
+        event_log=None, quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None, subagent_depth=subagent_depth,
+        sandbox_policy=_ro_policy(tmp_path, quest_tmp_dir=_SCRATCH_DIR))
+
+    assert "Scratch files go in your scratch dir" not in inv.system_prompt
     assert "IMP_PROJECT_ROOT" not in inv.system_prompt
