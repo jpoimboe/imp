@@ -253,7 +253,7 @@ async def test_a_backlogged_quest_keeps_the_pin_for_its_later_resume(
             provider="codex"))
 
     assert rc == 0
-    (quest_id,) = main._iter_quest_ids(tmp_path)
+    (quest_id,) = main._live_quest_ids(tmp_path)
     assert Quest.load(tmp_path, quest_id).provider == "codex"
 
 
@@ -267,7 +267,7 @@ def test_apply_new_records_the_pin_on_the_quest_it_files(tmp_path) -> None:
         depends_on=None, provider="codex")
 
     assert rc == 0
-    (quest_id,) = main._iter_quest_ids(tmp_path)
+    (quest_id,) = main._live_quest_ids(tmp_path)
     assert Quest.load(tmp_path, quest_id).provider == "codex"
 
 
@@ -285,7 +285,7 @@ def test_apply_new_background_records_the_pin_and_calls_spawn(
         depends_on=None, background=True, provider="codex")
 
     assert rc == 0
-    (quest_id,) = main._iter_quest_ids(tmp_path)
+    (quest_id,) = main._live_quest_ids(tmp_path)
     assert Quest.load(tmp_path, quest_id).provider == "codex"
     assert spawned, "spawn.start_quest was not called"
 

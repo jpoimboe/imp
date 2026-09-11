@@ -62,7 +62,7 @@ class _StubStore:
         return list(self._rows)
 
 
-def test_iter_quest_ids_live_first_then_archived_sorted_deduped(
+def test_merged_id_space_live_first_then_archived_sorted_deduped(
     monkeypatch, tmp_path: Path,
 ) -> None:
     # Live ids come through the store (scan_homes); their order is preserved, archived
@@ -74,4 +74,5 @@ def test_iter_quest_ids_live_first_then_archived_sorted_deduped(
         _completed_row("quest-d", "2026-06-01T00:00:00+00:00"),
     ]
     monkeypatch.setattr("imp.cli.store.make_store", lambda _: _StubStore(homes, rows))
-    assert m._iter_quest_ids(tmp_path) == ["quest-b", "quest-a", "quest-c", "quest-d"]
+    assert m._with_archived_ids(tmp_path, m._live_quest_ids(tmp_path)) == [
+        "quest-b", "quest-a", "quest-c", "quest-d"]

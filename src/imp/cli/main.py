@@ -1770,11 +1770,6 @@ def _with_archived_ids(control: Path, live: list[str]) -> list[str]:
     return out
 
 
-def _iter_quest_ids(control: Path) -> list[str]:
-    """Live homes first, then archived ids not in the live set."""
-    return _with_archived_ids(control, _live_quest_ids(control))
-
-
 def _match_quest_ids(control: Path, token: str) -> list[str]:
     """Quest ids containing token, the one matching seam every command shares.
 

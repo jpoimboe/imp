@@ -92,7 +92,7 @@ def test_a_token_matching_live_and_archived_ids_resolves_live(tmp_path: Path) ->
     _archive_merged(tmp_path, "lodo77")
 
     assert m._resolve_id(tmp_path, "lodo") == "lodo40"
-    assert m._iter_quest_ids(tmp_path) == ["lodo40", "lodo77"]
+    assert m._with_archived_ids(tmp_path, m._live_quest_ids(tmp_path)) == ["lodo40", "lodo77"]
 
 
 def test_a_token_that_needs_the_archive_still_raises(

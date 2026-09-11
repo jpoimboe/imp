@@ -22,7 +22,7 @@ class _FakeStore:
         return []
 
     def scan_homes(self):
-        # _iter_quest_ids resolves live ids through the store; this file's only
+        # _live_quest_ids resolves live ids through the store; this file's only
         # seeded live home is "alpha".
         from imp.cli.store import HomeDigest
         return [HomeDigest("alpha", b"{}", None, {}, "", False, "", None, False)]
