@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.env import ensure_quest_tmp_dir
 from imp.engine.quest import Quest
-from imp.remote.session.attach import ensure_quest_tmp_dir, spawn_session_daemon
+from imp.remote.session.attach import spawn_session_daemon
 from tests.conftest import _seed_control
 
 
@@ -45,7 +46,11 @@ def test_ensure_quest_tmp_dir_creates_0o700_parent_and_leaf(tmp_path: Path) -> N
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="T", quest_id="ensq1", base_branch="main")
 
-    ensure_quest_tmp_dir(ch)
+    old_umask = os.umask(0)          # a permissive umask would leave the parent 0o777
+    try:
+        ensure_quest_tmp_dir(ch.tmp_dir)
+    finally:
+        os.umask(old_umask)
 
     leaf = ch.tmp_dir
     assert leaf.is_dir()
@@ -57,7 +62,7 @@ def test_ensure_quest_tmp_dir_creates_0o700_parent_and_leaf(tmp_path: Path) -> N
     # (resume-after-reap / live-daemon-already-holds-dir) must stay idempotent.
     leaf.chmod(0o755)
     leaf.parent.chmod(0o755)
-    ensure_quest_tmp_dir(ch)
+    ensure_quest_tmp_dir(ch.tmp_dir)
     assert leaf.is_dir()
     assert leaf.stat().st_mode & 0o777 == 0o700
     assert leaf.parent.stat().st_mode & 0o777 == 0o700

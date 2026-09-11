@@ -170,6 +170,13 @@ def quest_var_tmp_root() -> Path:
     return Path(override) if override else Path("/var/tmp")
 
 
+def ensure_quest_tmp_dir(tmp_dir: Path) -> None:
+    """Idempotently create the per-quest tmp dir 0o700 on both imp-<uid> parent and <id> leaf."""
+    tmp_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for d in (tmp_dir.parent, tmp_dir):
+        d.chmod(0o700)
+
+
 def engine_env(
     *, project_root: Path, quest_id: str, quest_title: str,
     quest_dir: Path | None = None,

@@ -49,7 +49,13 @@ from imp.engine.agent_run import (
 from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
-from imp.engine.env import ALL_DECIDED, TestGates, Undecided, engine_env
+from imp.engine.env import (
+    ALL_DECIDED,
+    TestGates,
+    Undecided,
+    engine_env,
+    ensure_quest_tmp_dir,
+)
 from imp.engine.error_policy import budget_for
 from imp.engine.errors import LoadError, summarize_exception
 from imp.engine.feedback import (
@@ -393,9 +399,8 @@ def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
 
 def _wipe_step_scratch(quest: Quest) -> None:
     """Empty Quest.tmp_dir and recreate it 0o700; called only on a genuine step advance."""
-    from imp.remote.session.attach import ensure_quest_tmp_dir
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
-    ensure_quest_tmp_dir(quest)
+    ensure_quest_tmp_dir(quest.tmp_dir)
 
 
 def _reconcile_provider(
@@ -2250,8 +2255,7 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
         # TMPDIR points at Quest.tmp_dir; ensure it exists 0o700 for the sandboxed
         # agent + host provisioning scratch (spawn_session_daemon does this too — the
         # call is idempotent and covers direct-run paths with no daemon).
-        from imp.remote.session.attach import ensure_quest_tmp_dir
-        ensure_quest_tmp_dir(quest)
+        ensure_quest_tmp_dir(quest.tmp_dir)
     if policy.active and policy.quest_var_tmp_dir:
         # The bwrap SOURCE for the namespace /var/tmp; --bind (not --bind-try)
         # requires it to exist before any sandboxed spawn. Chmod the imp-<uid> parent
