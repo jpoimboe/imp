@@ -10,7 +10,7 @@
 # is in range, a fixup! targeting ANY quest commit folds.
 #
 #   0 -> clean tree, fixups folded, trailers stamped (or already-clean no-op)
-#   2 -> resolvable fold conflict (rebase left in progress) -> autosquash-resolve-merge
+#   2 -> fold conflict, or a clean fold that changed the tree -> autosquash-resolve-merge
 #   1 -> pause for a human: dirty working tree, a surviving fixup directive that
 #        cannot be folded, or a hard rebase/stamp failure
 set -uo pipefail
@@ -143,9 +143,9 @@ fi
 # The deterministic fold runs under `set -e` (it relies on -e to abort on an
 # unexpected git failure mid-rebase).
 set -e
+BEFORE=$(git rev-parse HEAD)
+BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
 if _has_directives; then
-  BEFORE=$(git rev-parse HEAD)
-  BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
   if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$FORK"; then
     if _has_directives; then
       _diagnose_surviving_directives
@@ -185,5 +185,13 @@ while read -r h; do
   [ "$(git log -1 --format='%(trailers:key=Quest,valueonly)' "$h")" = "$ID" ] \
     || { echo "stamp failed: $h missing Quest: $ID" >&2; exit 1; }
 done < <(git rev-list --no-merges "$FORK"..HEAD)
+
+AFTER_TREE=$(git rev-parse 'HEAD^{tree}')
+if [ "$AFTER_TREE" != "$BEFORE_TREE" ]; then
+  _write_sentinels
+  echo "cleanup: the rebase finished cleanly but changed the tree ($BEFORE_TREE -> $AFTER_TREE) — a fixup! is mis-targeted; handing to autosquash-resolve. Paths that differ:" >&2
+  git diff --stat "$BEFORE_TREE" "$AFTER_TREE" >&2
+  exit 2
+fi
 
 echo "ok: clean tree, fixups folded, Quest: $ID stamped over $FORK..HEAD"

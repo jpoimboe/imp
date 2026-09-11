@@ -2,7 +2,7 @@
 
 Exit contract:
   0 -> clean tree, fixups folded, Quest: <id> stamped (or already-clean no-op)
-  2 -> resolvable fold conflict (rebase left in progress, sentinels written)
+  2 -> fold conflict, or a clean fold that changed the tree (sentinels written)
   1 -> pause for a human: dirty working tree, a surviving fixup directive that
        cannot be folded, or a hard rebase/stamp failure
 
@@ -370,3 +370,63 @@ def test_stamps_under_active_rerere(tmp_path: Path) -> None:
     assert res.returncode == 0, res.stderr
     for h in _git(pr, "rev-list", "--no-merges", f"{fork}..HEAD").stdout.split():
         assert _trailer(pr, h) == ID, f"{h} not stamped"
+
+
+# ── clean fold that changed the tree (exit 2) ────────────────────────────────
+
+def test_clean_fold_changing_the_tree_hands_off_exit_2(tmp_path: Path) -> None:
+    """ludu88's shape: a fixup! whose hunk MOVES a line a LATER commit introduced.
+    Autosquash hoists the fixup above the owning commit; the three-way merge drops
+    the unmatched deletion but keeps the insertion, then the later commit re-adds
+    its own copy. The fold is conflict-free yet the tree gained a duplicate line."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
+    _git(pr, "checkout", "-b", "imp/x")
+    m = pr / "m.py"
+
+    # commit A — the fixup!'s target. Long enough that a top-of-file insertion and
+    # a mid-body deletion land in SEPARATE diff hunks.
+    body = ["import os\n", *(f"line{i} = {i}\n" for i in range(1, 31))]
+    m.write_text("".join(body))
+    _git(pr, "add", "m.py")
+    _git(pr, "commit", "-m", "feat: module")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+
+    # commit B (LATER) — introduces the import line mid-body, its own use far below.
+    m.write_text("".join([*body[:16], "from helper import thing\n", *body[16:],
+                          "use = thing\n"]))
+    _git(pr, "add", "m.py")
+    _git(pr, "commit", "-m", "test: use helper")
+
+    # fixup! A — moves B's import line to the top (a ruff I001-style re-sort).
+    m.write_text("".join(["from helper import thing\n", *body, "use = thing\n"]))
+    _git(pr, "add", "m.py")
+    _git(pr, "commit", f"--fixup={target}")
+    before_head = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    before_tree = _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip()
+    # Pre-seed the attempts file so _write_sentinels' reset of the budget is a
+    # behaviour under test, not a vacuous absence in a fresh state dir.
+    state = _state(pr)
+    state.mkdir(parents=True, exist_ok=True)
+    state.joinpath("autosquash-resolve-attempts").write_text("2\n")
+
+    res = _run(pr)
+
+    assert res.returncode == 2, res.stdout + res.stderr
+    rebase_dir = _git(pr, "rev-parse", "--git-path", "rebase-merge").stdout.strip()
+    assert not (pr / rebase_dir).is_dir()          # the fold itself was conflict-free
+    assert (state / "autosquash-before-tree").read_text().strip() == before_tree
+    assert (state / "autosquash-before-head").read_text().strip() == before_head
+    assert (state / "autosquash-fork").read_text().strip() == fork
+    assert not (state / "autosquash-resolve-attempts").exists()   # budget restarted from 2
+    assert "m.py" in res.stderr                   # the diverging path is named
+    assert "mis-targeted" in res.stderr
+    # Handed off AFTER the stamp: the branch sits on the diverged, stamped head ...
+    assert _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip() != before_tree
+    assert m.read_text().count("from helper import thing\n") == 2   # the duplicate
+    for h in _git(pr, "rev-list", "--no-merges", f"{fork}..HEAD").stdout.split():
+        assert _trailer(pr, h) == ID, f"{h} not stamped"
+    # ... and the commit the agent resets to still holds the pre-fold tree.
+    assert _git(pr, "rev-parse", f"{before_head}^{{tree}}").stdout.strip() == before_tree
