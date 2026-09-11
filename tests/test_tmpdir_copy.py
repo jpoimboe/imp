@@ -3,9 +3,16 @@ an agent to write there, and no comment still calls the host temp dir an identit
 read-write bind."""
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from imp.agents.skills import load_internal_skill
 from imp.assets import bundled_skills_dir
 from tests._corpus import tracked
+
+# AC 6(b)'s grep: `[^.]` spans newlines, so a claim wrapped across two lines is
+# caught the same as a one-liner.
+_IDENTITY = re.compile(r"(/tmp[^.]{0,120}identity|identity[^.]{0,120}/tmp)")
 
 _ROOTS = ("src/imp/assets/skills", "tests/playbooks", "scripts/showcase",
           "src/impty/README.md")
@@ -48,3 +55,22 @@ def test_web_ui_skill_sends_screenshots_to_the_scratch_dir() -> None:
             "rendered and read back") in norm
     assert "Write throwaway driver scripts to `$TMPDIR` and run them there." in norm
     assert "screenshot to `$TMPDIR`, and print the console errors" in norm
+
+
+def test_no_source_prose_claims_host_tmp_is_an_identity_rw_bind() -> None:
+    # AC 6(b): host /tmp is on the read-only floor now; the only bind at its real
+    # path is the quest scratch dir. Nothing may still describe the old contract.
+    me = Path(__file__).resolve()   # this test's own name+comment spans the pattern
+    hits = [(p.as_posix(), m)
+            for p in tracked("src/imp", "tests", suffixes=(".py", ".md"))
+            if p.resolve() != me
+            for m in _IDENTITY.findall(p.read_text())]
+    assert hits == []
+
+
+def test_impty_readme_describes_the_readonly_tmp_as_shipped() -> None:
+    # AC 12(b): the rebind this quest ships is no longer described as future work.
+    norm = " ".join(Path("src/impty/README.md").read_text().split())
+    assert "a future `/tmp` rebind" not in norm
+    assert ("so the sandbox's read-only `/tmp` — only the per-quest scratch dir is "
+            "bound writable — leaves them where they are.") in norm

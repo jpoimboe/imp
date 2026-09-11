@@ -170,8 +170,8 @@ agent's `read_file` — the right containment for raw bytes that may carry a tok
 instead of accumulating in the system temp dir forever; it stays readable through the
 agent's `read_file`, an explicit `snapshot(path=...)` is unaffected, and with no
 `snapshot_dir` the default is a temp file exactly as before. Both directories live
-under the quest home rather than `/tmp`, so a future `/tmp` rebind inside the sandbox
-namespace (quest `jibu68`) leaves them where they are.
+under the quest home rather than `/tmp`, so the sandbox's read-only `/tmp` — only the
+per-quest scratch dir is bound writable — leaves them where they are.
 
 ## Sequences pyte can't parse (the `TerminalStream` filter)
 
