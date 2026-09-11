@@ -33,11 +33,14 @@ def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
     return not non_interactive and sys.stdin.isatty()
 
 
-def build_provider_picker(quest: Quest, driver: Any, status: Any) -> Any:
+def build_provider_picker(
+    quest: Quest, driver: Any, status: Any,
+) -> Callable[[], contextlib.AbstractContextManager[list[str | None]] | None]:
     """The picker's rendering seam: CtrlDReader has no output channel, so the
     block is drawn here, where driver and quest are both in scope. The suspend
     bracket spans the digit read so the 100ms footer tick cannot paint over it;
-    tty_quiesced would be wrong — the reader still owns the tty."""
+    tty_quiesced would be wrong — the reader still owns the tty. None outside a
+    retry backoff: `p` opens in exactly the window `r` is honored in."""
     from imp.cli.provider_command import (
         current_provider_for,
         picker_choices,
@@ -46,7 +49,7 @@ def build_provider_picker(quest: Quest, driver: Any, status: Any) -> Any:
     )
 
     @contextlib.contextmanager
-    def _open() -> Iterator[list[str | None]]:
+    def _block() -> Iterator[list[str | None]]:
         names = selectable_available()
         current = current_provider_for(quest)
         suspend = (status.suspend() if status is not None
@@ -54,6 +57,9 @@ def build_provider_picker(quest: Quest, driver: Any, status: Any) -> Any:
         with suspend:
             driver.emit_lines(render_picker(current, names))
             yield picker_choices(current, names)
+
+    def _open() -> contextlib.AbstractContextManager[list[str | None]] | None:
+        return _block() if driver.retry_countdown_in_flight() else None
 
     return _open
 

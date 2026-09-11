@@ -16,7 +16,7 @@ from tests.test_provider_reconcile import _seed, _tiers
 
 _PICKER = """\
 switch provider — the rest of this quest runs on your pick
-takes effect when this step ends, or right away if it's waiting out a rate limit
+takes effect right away — this step is waiting to retry
 
   1  claude_code   current
   2  codex
@@ -33,7 +33,10 @@ Available:
 Switch with  /provider <name> — the rest of this quest runs on it."""
 
 
+# AC 8
 def test_the_picker_block_is_verbatim() -> None:
+    # Line 2 of the head must stay true for every backoff category the gate
+    # admits — auth, network, rate_limit and stalled — so it names none of them.
     assert "\n".join(
         render_picker("claude_code", ["claude_code", "codex"])) == _PICKER
 

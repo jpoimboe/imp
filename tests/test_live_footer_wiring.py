@@ -169,7 +169,8 @@ def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
                         auth_mode="subscription")
     row = _position_row(events)
     # The same priced sequence: the auth mode alone decides which field shows.
-    assert row == "t · claude-opus-5 · ██████░░░░ 60%" + " " * 143 + "session 34% · week 7%"
+    assert row == ("t · claude-opus-5 · ██████░░░░ 60%" + " " * 129
+                   + "claude_code · session 34% · week 7%")
     assert "$" not in row
 
 
@@ -239,7 +240,7 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
         ev("q1", "quota_reading", agent_id="step:p1/a",
            **codex_reading.to_payload()),
     ]
-    assert _position_row(started).endswith("session 12%")
+    assert _position_row(started).endswith("codex · session 12%")
 
     crossed = [
         *started,
@@ -262,8 +263,8 @@ def test_codex_usage_patches_drive_parent_and_subagent_footer_rows() -> None:
     assert rows is not None and len(rows) == 4
     expected_parent = (
         "t · gpt-5.6-terra · █░░░░░░░░░ 9%"
-        + " " * 144
-        + "session 12% · week 7%"
+        + " " * 136
+        + "codex · session 12% · week 7%"
     )
     assert rows[2] == expected_parent
     assert pal.display_width(rows[2]) == 198
