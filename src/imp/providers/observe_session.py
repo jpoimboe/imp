@@ -79,7 +79,7 @@ class ObserveSession:
 
     # --- the per-turn item stream ---------------------------------------
     async def events(self) -> AsyncIterator[Any]:
-        from imp.agents.loop_items import EndOfTurn, Error
+        from imp.agents.loop_items import DependencyWaited, EndOfTurn, Error
         from imp.providers import errors as perr
         if self._pending_terminal is not None:
             pending, self._pending_terminal = self._pending_terminal, None
@@ -94,6 +94,11 @@ class ObserveSession:
             fatal = self._fatal_error()
             if fatal is not None:
                 yield Error(payload=fatal)
+                return
+            if self.ctx.dependency_wait:
+                # Before _is_terminal: that is where a captured complete_step
+                # becomes the step's output, and a waiting turn has no output.
+                yield DependencyWaited(deps=tuple(self.ctx.dependency_wait))
                 return
             if await self._is_terminal(raw):
                 # LoopGuard single-feed: a no-complete_step terminal turn is fed

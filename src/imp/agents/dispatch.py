@@ -68,6 +68,14 @@ def _wrap_task_result(ctx: Any, tu_id: str, result_str: str) -> str:
     return result_str
 
 
+def _dep_wait_event(ctx: Any) -> dict[str, Any] | None:
+    """The terminal event when the tool just run asked the engine to wait."""
+    deps = getattr(ctx, "dependency_wait", ())
+    if not deps:
+        return None
+    return {"type": "dependency_wait", "payload": {"depends_on": list(deps)}}
+
+
 async def dispatch_one_tool_use(
     *,
     ctx: Any,
@@ -190,7 +198,7 @@ async def dispatch_one_tool_use(
         tool_results.append(block)
         elog.append_tool_result(agent_id=aid, block=block,
                                 duration_ms=(time.perf_counter() - start) * 1000.0)
-        return None
+        return _dep_wait_event(ctx)
 
     content_str = (raw_result if isinstance(raw_result, str)
                    else json.dumps(raw_result, default=str))
@@ -211,7 +219,7 @@ async def dispatch_one_tool_use(
     tool_results.append(block)
     elog.append_tool_result(agent_id=aid, block=block,
                             duration_ms=(time.perf_counter() - start) * 1000.0)
-    return None
+    return _dep_wait_event(ctx)
 
 
 async def dispatch_task_batch(
