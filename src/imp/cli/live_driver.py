@@ -201,8 +201,8 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
         candidate = render(hints)
         # fits when it survives _draw's clip_display(row, width - 1) byte-identical
         if pal.clip_display(candidate, width - 1) == candidate:
-            return candidate
-    return render(ladder[-1])
+            break
+    return candidate
 
 
 def _band_wrap(body: str, bg: str, width: int) -> str:
