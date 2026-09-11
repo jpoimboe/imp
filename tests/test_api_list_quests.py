@@ -100,16 +100,25 @@ def test_a_session_socket_in_the_env_does_not_retarget_the_listing(
 
 
 def test_an_archive_newer_than_this_install_raises_imp_error(tmp_path: Path) -> None:
-    # AC 1: the floor check fires on completed_rows. A consumer catching ImpError
-    # must not have to also catch an imp.engine.* type to survive version skew.
+    # list_quests reaches the archive only through completed_rows, an index-only
+    # read. A consumer catching ImpError must not have to also catch an
+    # imp.engine.* type to survive version skew.
+    import sqlite3
+
     from imp.engine import archive
+    from imp.engine.archive import index
 
     _seed_control(tmp_path)
     _archive_with_event(tmp_path, "gone78", "Finished one", _EVENT)
-    ahead = archive._DATA_VERSION + 1
-    archive.data_version_path(tmp_path).write_text(str(ahead))
+    ahead = index._SCHEMA_VERSION + 1
+    conn = sqlite3.connect(archive.index_path(tmp_path))
+    try:
+        conn.execute(f"PRAGMA user_version = {ahead}")
+        conn.commit()
+    finally:
+        conn.close()
 
     with pytest.raises(ImpError) as excinfo:
         list_quests(tmp_path)
 
-    assert f"archive data is at v{ahead}" in str(excinfo.value)
+    assert f"archive index is at v{ahead}" in str(excinfo.value)

@@ -601,7 +601,6 @@ def test_show_json_backlog_quest(
     }
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: meta)
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "idea01")
-    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["idea01"])
     out = _run(monkeypatch, tmp_path, "show", "idea01", "--json")
     data = json.loads(out)
     assert data["id"] == "idea01"
@@ -625,7 +624,6 @@ def test_show_json_backlog_body_strips_title_prefix(
     }
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: meta)
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "idea02")
-    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["idea02"])
     out = _run(monkeypatch, tmp_path, "show", "idea02", "--json")
     data = json.loads(out)
     assert data["body"] == "wire up OAuth login"
@@ -639,7 +637,6 @@ def test_show_json_none_quest_prints_error(
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["lostid"])
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "lostid")
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: None)
     monkeypatch.setattr(s, "_row_for_id", lambda control, qid: None)

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from imp.engine.archive import read as archive_read
+from imp.engine.errors import ArchiveMismatch
 from imp.paths import project_state_dir
 
 if TYPE_CHECKING:
@@ -23,7 +24,10 @@ def _title(control_root: Path, quest_id: str) -> str:
             return str(json.loads(home.read_bytes())["title"])
         except (json.JSONDecodeError, KeyError):
             return quest_id
-    raw = archive_read.read_quest_json(control_root, quest_id)
+    try:
+        raw = archive_read.read_quest_json(control_root, quest_id)
+    except ArchiveMismatch:
+        return quest_id
     if raw is not None:
         try:
             return str(json.loads(raw)["title"])

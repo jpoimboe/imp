@@ -38,7 +38,7 @@ import shutil
 import signal
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -94,6 +94,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     repair_interrupt_marker_on_resume,
     synthesize_native_success_on_resume,
+    unresolved_tool_result_content,
 )
 from imp.engine.agent_run import (
     INTERRUPT_STEER_HINT,
@@ -141,6 +142,8 @@ from imp.providers.web_native import (
 
 if TYPE_CHECKING:
     from claude_agent_sdk import EffortLevel, ThinkingConfig
+
+    from imp.engine.state import EventLog
 
 
 # The CLI echoes an image tool result twice on one stream-json line (the content
@@ -382,6 +385,37 @@ def _is_terminated_process_teardown(exc: BaseException) -> bool:
 
 # ── Per-run state captured by tool wrappers and read by the receive loop ─────
 
+INFLIGHT_RESULT_BOUND_S = 30.0
+
+
+@dataclass(slots=True)
+class _InFlight:
+    name: str
+    future: asyncio.Future[tuple[str, bool]]
+
+
+@dataclass(frozen=True, slots=True)
+class _InFlightOutcome:
+    key: str
+    name: str
+    content: str
+    is_error: bool
+
+
+_ToolResultContent = str | list[ContentPart] | list[dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class _WithheldResult:
+    tool_use_id: str
+    key: str
+    name: str
+    # The SDK's filler, restored verbatim if this turn never reaches the correction.
+    filler: _ToolResultContent
+    # The call block when the streaming site never journaled its tool_call (the
+    # threshold crossing returns before that loop); None when it already did.
+    call: ToolUseBlock | None
+
 
 @dataclass
 class _RunState:
@@ -414,6 +448,143 @@ class _RunState:
     # (as an agent_message) BEFORE it eagerly appends the sub_agent tool_call.
     # None until _run assigns it (pre-loop); _impl guards on that.
     flush_llm_group: Any = None
+    # imp tools currently executing, keyed by captured_result_key. An entry lives
+    # ONLY while its call is in flight — every wrapper exit path resolves and pops
+    # it — so this dict is the in-flight set.
+    inflight: dict[str, _InFlight] = field(default_factory=dict)
+    # Fillers withheld at the streaming append site, awaiting imp's own result.
+    # Drained on every terminal path, so a withheld result is never dropped.
+    withheld: list[_WithheldResult] = field(default_factory=list)
+
+    def register_inflight(self, key: str, name: str) -> None:
+        self.inflight[key] = _InFlight(
+            name=name, future=asyncio.get_running_loop().create_future())
+
+    def resolve_inflight(self, key: str, content: str, *, is_error: bool) -> None:
+        entry = self.inflight.pop(key, None)
+        if entry is not None:
+            entry.future.set_result((content, is_error))
+
+    def withhold_inflight(
+        self, call: ToolUseBlock | None, filler: _ToolResultContent, *,
+        journaled: bool,
+    ) -> bool:
+        """Withhold the SDK's filler for a call of imp's own still in flight.
+
+        Records the id -> key mapping now because nothing downstream can rebuild it,
+        keeps the filler so a turn that never reaches the correction can put it back,
+        and carries the call block when its tool_call was never journaled, so the
+        late append emits the pair. False when the call is not one imp is running.
+        """
+        if call is None:
+            return False
+        name = _canon_tool_name(call.name)
+        key = captured_result_key(name, call.input)
+        if key not in self.inflight:
+            return False
+        self.withheld.append(_WithheldResult(
+            tool_use_id=call.id, key=key, name=name, filler=filler,
+            call=None if journaled else ToolUseBlock(
+                id=call.id, name=name, input=call.input)))
+        return True
+
+
+async def _settle_inflight(
+    state: _RunState, timeout: float,
+) -> list[_InFlightOutcome]:
+    """Wait out the imp calls in flight at an interrupt — bounded per wait, not per
+    call — and report each one's real outcome, substituting the uncertainty body for
+    any that has not finished when the bound expires.
+    """
+    entries = list(state.inflight.items())
+    if not entries:
+        return []
+    await asyncio.wait([e.future for _, e in entries], timeout=timeout)
+    out: list[_InFlightOutcome] = []
+    for key, e in entries:
+        if e.future.done():
+            content, is_error = e.future.result()
+        else:
+            content, is_error = unresolved_tool_result_content(e.name), True
+        out.append(_InFlightOutcome(
+            key=key, name=e.name, content=content, is_error=is_error))
+    return out
+
+
+def _tool_use_block(
+    messages: list[Message], tool_use_id: str,
+) -> ToolUseBlock | None:
+    """The assistant tool_use a tool_result answers — the in-process source of the
+    call's name and input, which _pending_tools does not hold on a crossing turn.
+    """
+    for m in reversed(messages):
+        for b in m.content:
+            if isinstance(b, ToolUseBlock) and b.id == tool_use_id:
+                return b
+    return None
+
+
+def _journal_withheld(
+    elog: EventLog, aid: str, state: _RunState, w: _WithheldResult,
+    content: _ToolResultContent, *, is_error: bool,
+) -> None:
+    """Emit the pair a withheld call is owed: its tool_call when the streaming site
+    never journaled one, then its one result."""
+    if w.call is not None:
+        elog.append_tool_call(agent_id=aid, block=w.call)
+    elog.append_tool_result(
+        agent_id=aid,
+        block=ToolResultBlock(w.tool_use_id, content, is_error=is_error),
+        duration_ms=state.tool_durations.pop(w.tool_use_id, None))
+
+
+def _correct_withheld_results(
+    elog: EventLog, aid: str, state: _RunState,
+    captured: dict[str, tuple[str, bool]],
+) -> None:
+    """Journal imp's own account of each filler the streaming site withheld.
+
+    Drained as it goes, so no entry is ever journaled twice.
+    """
+    while state.withheld:
+        w = state.withheld.pop(0)
+        content, is_error = captured.get(
+            w.key, (unresolved_tool_result_content(w.name), True))
+        _journal_withheld(elog, aid, state, w, content, is_error=is_error)
+
+
+def _restore_withheld_results(
+    elog: EventLog, aid: str, state: _RunState,
+) -> None:
+    """Put back the fillers of a turn that never reached the correction.
+
+    A terminal outcome other than the handoff close — a complete_step preemption, or
+    a close that is not error_during_execution — runs no bounded await, so imp has
+    no settled result to substitute and the SDK's account goes back verbatim.
+    """
+    while state.withheld:
+        w = state.withheld.pop(0)
+        _journal_withheld(elog, aid, state, w, w.filler, is_error=True)
+
+
+_CORRECTION_HEADER = (
+    "[imp] This turn was interrupted while the calls below were still running. "
+    "Your session may show them as rejected or denied — that is the client's "
+    "cancellation filler, NOT a rejection, denial, or failure, and NOT anything "
+    "the user did. These are the real outcomes; treat them as authoritative and "
+    "do not re-run the calls on their account."
+)
+
+
+def correction_increment(settled: Sequence[_InFlightOutcome]) -> str:
+    """Prefix for the post-interrupt query naming each in-flight call's real outcome.
+
+    Empty when nothing was in flight, so the common interrupt grows no preamble.
+    """
+    if not settled:
+        return ""
+    bullets = "\n".join(f"- {s.name}: {s.content}" for s in settled)
+    return f"{_CORRECTION_HEADER}\n\n{bullets}\n\n"
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -617,6 +788,7 @@ def _wrap_one(
             raise RuntimeError(
                 "claude_code MCP tool dispatched off the runner loop "
                 "(same-loop topology pin)")
+        inflight_key: str | None = None
         try:
             # Decision 10 sweep site: EVERY tool dispatch — the claude_code
             # analog of agents/dispatch.py's first-statement sweep. Inside the
@@ -719,6 +891,8 @@ def _wrap_one(
             tuid = args.get("__tool_use_id__", "")
             clean_args = {k: v for k, v in args.items()
                           if not (k.startswith("__") and k.endswith("__"))}
+            inflight_key = captured_result_key(name, clean_args)
+            state.register_inflight(inflight_key, name)
             start = time.perf_counter()
             with suspend_inactivity_watchdog(ctx):
                 raw = await t.async_invoke(ctx, clean_args)
@@ -727,10 +901,11 @@ def _wrap_one(
                 state.tool_durations[tuid] = dur_ms
             if (isinstance(raw, list) and raw
                     and all(isinstance(p, (TextPart, ImagePart)) for p in raw)):
+                caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
                 if ctx.parent_transcript_dir is not None:
-                    caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
                     _append_captured_tool_result(
                         ctx.parent_transcript_dir, name, clean_args, caption)
+                state.resolve_inflight(inflight_key, caption, is_error=False)
                 return _tool_response_parts(raw)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             if name == "bash":
@@ -748,9 +923,12 @@ def _wrap_one(
             if ctx.parent_transcript_dir is not None:
                 _append_captured_tool_result(
                     ctx.parent_transcript_dir, name, clean_args, content_str)
+            state.resolve_inflight(inflight_key, content_str, is_error=False)
             return _tool_response(content_str, is_error=False)
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))
+            if inflight_key is not None:
+                state.resolve_inflight(inflight_key, str(fte), is_error=True)
             return _tool_response(str(fte), is_error=True)
         except Exception as exc:
             # Decision #6: re-raise a subagent-origin pause for honesty, but a
@@ -760,8 +938,10 @@ def _wrap_one(
             # practice a subagent-origin pause under claude_code degrades to an
             # is_error tool_result. Acceptable: resume = restart the subtree, and
             # subagents are restart-safe by design.
-            raise_if_suspended(exc)
             text = f"{type(exc).__name__}: {exc}"
+            if inflight_key is not None:
+                state.resolve_inflight(inflight_key, text, is_error=True)
+            raise_if_suspended(exc)
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
 
@@ -1782,7 +1962,19 @@ class ClaudeCodeSession(ObserveSession):
                             continue
                         pend = self._pending_tools.get(b.tool_use_id)
                         is_task = pend is not None and pend.name == "sub_agent"
-                        if not is_task:
+                        # imp executed this tool itself; while an interrupt is
+                        # pending the SDK's is_error filler for a call still running
+                        # is hearsay. Withhold it — the real result is journaled once
+                        # the bounded await resolves.
+                        withheld = (
+                            b.is_error
+                            and (self.runner._handoff_requested
+                                 or self.runner._steer_requested)
+                            and state.withhold_inflight(
+                                _tool_use_block(self.messages, b.tool_use_id),
+                                b.content,
+                                journaled=pend is not None))
+                        if not is_task and not withheld:
                             elog.append_tool_result(
                                 agent_id=aid, block=b,
                                 duration_ms=state.tool_durations.pop(
@@ -1850,10 +2042,19 @@ class ClaudeCodeSession(ObserveSession):
                 from imp.engine.reincarnation import handoff_instruction
                 runner._handoff_requested = False
                 self._flush_turn_record()
+                # imp executed these tools itself; the SDK's account of them is hearsay.
+                captured = _load_captured_tool_results(invocation.transcript_dir)
+                settled = await _settle_inflight(
+                    self.runner._state, INFLIGHT_RESULT_BOUND_S)
+                for s in settled:
+                    captured[s.key] = (s.content, s.is_error)
+                _correct_withheld_results(elog, aid, runner._state, captured)
+                # Marker repair first: it collapses the tail the dangling repair then no-ops on.
+                repair_interrupt_marker_on_resume(
+                    self.messages, self.transcript, captured=captured)
                 repair_dangling_tool_use_on_resume(
-                    self.messages, self.transcript,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
-                instr = handoff_instruction()
+                    self.messages, self.transcript, captured=captured)
+                instr = correction_increment(settled) + handoff_instruction()
                 instr_msg = Message(
                     role="user", content=(TextBlock(text=instr),))
                 self.messages.append(instr_msg)
@@ -1869,15 +2070,27 @@ class ClaudeCodeSession(ObserveSession):
             runner._steer_unblocked.set()
             runner._steer_requested = False
             self._flush_turn_record()
-            # The marker is still the tail here; _enter's repair is tail-only and
-            # can no longer reach it once the steer reply is appended below.
-            repair_interrupt_marker_on_resume(
-                self.messages, self.transcript,
-                captured=_load_captured_tool_results(invocation.transcript_dir))
             # Kills only: this branch RE-QUERIES with the same ctx, so closing the
-            # namespace here would fail-close every later bash call.
+            # namespace here would fail-close every later bash call. Ahead of the
+            # bounded await so a killed bash yields its real result inside the
+            # kill's own escalation instead of stalling the prompt for the bound.
             from imp.agents.tools.context import terminate_tool_processes
             await terminate_tool_processes(ctx)
+            # imp executed these tools itself; the SDK's account of them is hearsay.
+            captured = _load_captured_tool_results(invocation.transcript_dir)
+            settled = await _settle_inflight(
+                runner._state, INFLIGHT_RESULT_BOUND_S)
+            for s in settled:
+                captured[s.key] = (s.content, s.is_error)
+            _correct_withheld_results(elog, aid, runner._state, captured)
+            # The marker is still the tail here; _enter's repair is tail-only and
+            # can no longer reach it once anything is appended below.
+            repair_interrupt_marker_on_resume(
+                self.messages, self.transcript, captured=captured)
+            increment = correction_increment(settled)
+            if increment:
+                deliver_engine_continuation(
+                    self.messages, self.transcript, elog, aid, increment)
             last_text = ""
             for prev in reversed(self.messages):
                 if prev.role == "assistant":
@@ -1900,9 +2113,9 @@ class ClaudeCodeSession(ObserveSession):
                 deliver_engine_continuation(
                     self.messages, self.transcript, elog, aid,
                     RESUME_CONTINUE_NUDGE)
-                self._next_query = RESUME_CONTINUE_NUDGE
+                self._next_query = increment + RESUME_CONTINUE_NUDGE
             else:
-                self._next_query = deliver_continuation_reply(
+                self._next_query = increment + deliver_continuation_reply(
                     self.messages, self.transcript, elog, aid, reply, human=True)
             self._requery_pending = True
             return False
@@ -1913,6 +2126,10 @@ class ClaudeCodeSession(ObserveSession):
                 self._handoff_phase = None
             runner._steer_requested = False
             runner._complete_requested = False
+
+        # Every other terminal outcome corrects nothing, so anything still withheld
+        # goes back as it came: a withheld result is never dropped.
+        _restore_withheld_results(elog, aid, runner._state)
 
         if self._handoff_phase == "instruction_sent":
             # The handoff-writing turn completed: capture the handoff and stop.
@@ -2202,6 +2419,11 @@ class ClaudeCodeAgentRunner:
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
+            if self._state is not None:
+                # Last chance: a fatal tool error, a cancel and an SDK close with no
+                # ResultMessage all return before _is_terminal, so this is the only
+                # point every run passes through. A no-op once a drain has run.
+                _restore_withheld_results(session.elog, session.aid, self._state)
             if self._ctx is not None:
                 # None guard: _ctx is assigned mid-_run_loop; the finally runs
                 # with None when _run_loop raises BEFORE the assignment (the

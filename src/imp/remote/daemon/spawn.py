@@ -44,8 +44,8 @@ def create_quest(control_root: Path, prompt: str) -> str:
 
 def resume_quest(control_root: Path, token: str) -> str:
     """Resolve a token to a single quest and spawn a detached `imp resume` for it."""
-    from imp.cli.main import _iter_quest_ids
-    matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
+    from imp.cli.main import _match_quest_ids
+    matches = _match_quest_ids(control_root, token)
     if len(matches) != 1:
         if not matches:
             return f"No quest matches {token!r}."

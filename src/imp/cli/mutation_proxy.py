@@ -28,9 +28,9 @@ def run_mutation(
         message = spawn.resume_quest(control_root, args["token"])
         return {"returncode": 0, "message": message}
     if op == "edit":
-        from imp.cli.main import _iter_quest_ids, apply_edit
+        from imp.cli.main import _match_quest_ids, apply_edit
         token = args["token"]
-        matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
+        matches = _match_quest_ids(control_root, token)
         if len(matches) != 1:
             message = (f"imp: no quest matches {token!r}" if not matches
                        else f"imp: {token!r} is ambiguous: {', '.join(matches)}")
@@ -51,9 +51,9 @@ def run_mutation(
             provider=args.get("provider"))
         return {"returncode": rc, "message": message}
     if op == "abandon":
-        from imp.cli.main import _abandon, _iter_quest_ids
+        from imp.cli.main import _abandon, _match_quest_ids
         token = args["token"]
-        matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
+        matches = _match_quest_ids(control_root, token)
         if len(matches) != 1:
             message = (f"imp: no quest matches {token!r}" if not matches
                        else f"imp: {token!r} is ambiguous: {', '.join(matches)}")

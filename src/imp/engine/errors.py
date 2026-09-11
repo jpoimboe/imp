@@ -77,9 +77,10 @@ class ArchiveMismatch(LoadError):
         self.known = known
         super().__init__(
             f"archive {floor} is at v{stored}, newer than this imp "
-            f"(knows v{known}) — this checkout is behind. Fix: update imp, or "
-            "Ctrl-D and `imp resume` to restart a running quest on the "
-            "current install. Agents: suggest this to the user."
+            f"(knows v{known}). A running imp keeps the code it started with, "
+            "so this is usually a stale process, not a stale checkout. "
+            "Fix: Ctrl-D and `imp resume` to restart this quest on the current "
+            "install; if it persists, update imp. Agents: suggest this to the user."
         )
 
 

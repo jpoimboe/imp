@@ -1749,21 +1749,40 @@ def _display_width() -> int:
         return 80
 
 
-def _iter_quest_ids(control: Path) -> list[str]:
-    """Live homes first, then archived ids not in the live set. Live-home ids come
-    through the store (scan_homes), not a raw state-dir disk scan, so an
-    in-sandbox CLI resolves them via the session daemon: the fail-closed state mask
-    hides sibling homes on disk, and the daemon reads them unsandboxed."""
+def _live_quest_ids(control: Path) -> list[str]:
+    """Ids of live quest homes. They come through the store (scan_homes), not a raw
+    state-dir disk scan, so an in-sandbox CLI resolves them via the session daemon:
+    the fail-closed state mask hides sibling homes on disk, and the daemon reads them
+    unsandboxed."""
     from imp.cli.store import make_store
-    store = make_store(control)
-    live = [h.quest_id for h in store.scan_homes()]
+    return [h.quest_id for h in make_store(control).scan_homes()]
+
+
+def _with_archived_ids(control: Path, live: list[str]) -> list[str]:
+    """The given live ids, then archived ids not among them, sorted."""
+    from imp.cli.store import make_store
     seen = set(live)
     out = list(live)
-    for cid in sorted(r.quest_id for r in store.completed_rows()):
+    for cid in sorted(r.quest_id for r in make_store(control).completed_rows()):
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
     return out
+
+
+def _match_quest_ids(control: Path, token: str) -> list[str]:
+    """Quest ids containing token, the one matching seam every command shares.
+
+    Live homes match first and an unambiguous live hit returns without touching the
+    archive, so a live quest resolves whatever state the archive is in. Zero or
+    several live hits fall through to the merged live+archived space — reusing the
+    live list already scanned — which still raises honestly when the token genuinely
+    needs the archive."""
+    live = _live_quest_ids(control)
+    hits = [cid for cid in live if token in cid]
+    if len(hits) == 1:
+        return hits
+    return [cid for cid in _with_archived_ids(control, live) if token in cid]
 
 
 def _title_for_id(control: Path, quest_id: str) -> str | None:
@@ -1793,7 +1812,7 @@ def _resolve_id(control: Path, token: str) -> str:
     if not token.strip():
         _emit_cli_error(f"no quest matches {token!r}")
         raise SystemExit(2)
-    matches = [cid for cid in _iter_quest_ids(control) if token in cid]
+    matches = _match_quest_ids(control, token)
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -2740,10 +2759,13 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     records — an archived id whose archive record reads `resumable=True` (a
     "shelved" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
-    matches, so a terminal id sharing a stem never joins the menu."""
+    matches, so a terminal id sharing a stem never joins the menu.
+    An archived candidate this install cannot read is omitted, exactly as an
+    absent record is."""
     from imp.cli.store import _row_for_id
     from imp.engine.archive import read as archive_read
     from imp.engine.archive import record, records_root
+    from imp.engine.errors import ArchiveMismatch
 
     rows = [r for r in _resumable_rows(control) if token in r[0]]
     live = {r[0] for r in rows}
@@ -2753,7 +2775,10 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
         rec = record.read_record(records_root(control), cid)
         if rec is None or not rec.get("resumable"):
             continue
-        row = _row_for_id(control, cid)
+        try:
+            row = _row_for_id(control, cid)
+        except ArchiveMismatch:
+            continue
         if row is not None:
             rows.append(row)
     return _sort_rows_newest_first(rows)

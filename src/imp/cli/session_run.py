@@ -78,16 +78,21 @@ class SettledOutcome:
 
 def resolve_settled_outcome(quest: Quest) -> SettledOutcome:
     """Read status and events from one source: the live home if state.json loads, else
-    the archive — a reaped home can still hold a stray events.jsonl line."""
+    the archive — a reaped home can still hold a stray events.jsonl line. An archive
+    this install cannot read counts as absent, so a teardown never dies on skew."""
     from imp.cli.store import _parse_jsonl
     from imp.engine.archive import read as archive_read
+    from imp.engine.errors import ArchiveMismatch
     try:
         state = State.load(quest.state_dir)
     except FileNotFoundError:
-        raw = archive_read.read_events(quest.control_root, quest.id)
+        try:
+            raw = archive_read.read_events(quest.control_root, quest.id)
+            status = archive_read.status_of(quest.control_root, quest.id)
+        except ArchiveMismatch:
+            return SettledOutcome(status=None, events=[])
         return SettledOutcome(
-            status=archive_read.status_of(quest.control_root, quest.id),
-            events=_parse_jsonl(raw) if raw is not None else [])
+            status=status, events=_parse_jsonl(raw) if raw is not None else [])
     return SettledOutcome(status=state.status, events=list(quest.event_log().read()))
 
 

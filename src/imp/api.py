@@ -119,7 +119,7 @@ def list_quests(control_root: Path) -> list[QuestSummary]:
     from imp.engine.errors import LoadError
     from imp.engine.quest import live_quest_ids
 
-    # Deliberately not `_iter_quest_ids`: its `make_store` retargets to whatever
+    # Deliberately not `_live_quest_ids`: its `make_store` retargets to whatever
     # IMP_SESSION_SOCKET names, ignoring control_root, while rows are read locally.
     live = live_quest_ids(control_root)
     out: list[QuestSummary] = []

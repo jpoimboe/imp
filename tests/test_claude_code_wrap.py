@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,6 +19,8 @@ from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import FatalToolError
+from imp.agents.transcript import captured_result_key
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
 from imp.providers.claude_code import _RunState, _wrap_one
@@ -884,3 +887,106 @@ async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
     assert call_event["id"], "sub_agent tool_call event id must be non-empty"
     assert captured["tool_call_event_id"] == call_event["id"], (
         "dispatch_task must receive the sub_agent tool_call's EVENT id (parent link)")
+
+
+@pytest.mark.anyio
+async def test_wrap_registers_the_call_in_flight_and_resolves_the_real_body(
+        tmp_path: Path) -> None:
+    """The registry IS the in-flight set: an entry keyed by captured_result_key
+    exists while the tool runs, and the wrapper resolves it with the body the tool
+    actually produced — the result an interrupt's cancellation filler would
+    otherwise displace — then removes it."""
+    state = _RunState()
+    key = captured_result_key("rec", {"path": "x.txt"})
+    seen: dict[str, Any] = {}
+    (tmp_path / "x.txt").write_text("hello")
+
+    def _fn(ctx, path):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        return (tmp_path / path).read_text().upper()
+
+    rec = Tool(name="rec", description="",
+               input_schema={"type": "object",
+                             "properties": {"path": {"type": "string"}},
+                             "required": ["path"]},
+               fn=_fn)
+    wrapped = _wrap_one("rec", rec, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({"path": "x.txt", "__tool_use_id__": ""})
+
+    assert seen["entry"].name == "rec"
+    assert seen["entry"].future.result() == ("HELLO", False)
+    assert out["content"][0]["text"] == "HELLO"
+    assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_resolves_the_in_flight_entry_on_fatal_tool_error(
+        tmp_path: Path) -> None:
+    """A fatal tool error is a real outcome: the entry resolves with the message
+    the SDK was handed, is_error=True, and is gone — a pending entry here would
+    burn the post-interrupt bound for nothing."""
+    state = _RunState()
+    key = captured_result_key("boom", {})
+    seen: dict[str, Any] = {}
+
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        raise FatalToolError("gate refused")
+
+    boom = Tool(name="boom", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+    wrapped = _wrap_one("boom", boom, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({})
+
+    assert out["isError"] is True
+    assert seen["entry"].future.result() == ("gate refused", True)
+    assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_resolves_the_in_flight_entry_on_a_generic_exception(
+        tmp_path: Path) -> None:
+    """The generic degrade path resolves with the same text it returns to the SDK."""
+    state = _RunState()
+    key = captured_result_key("kaput", {})
+    seen: dict[str, Any] = {}
+
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        raise ValueError("disk gone")
+
+    kaput = Tool(name="kaput", description="",
+                 input_schema={"type": "object", "properties": {}}, fn=_fn)
+    wrapped = _wrap_one("kaput", kaput, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({})
+
+    assert out["content"][0]["text"] == "ValueError: disk gone"
+    assert seen["entry"].future.result() == ("ValueError: disk gone", True)
+    assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_resolves_the_in_flight_entry_on_the_parts_return(
+        tmp_path: Path) -> None:
+    """The parts-returning branch returns AHEAD of the ordinary success exit; it
+    resolves with the same caption it writes to the capture sidecar."""
+    state = _RunState()
+    key = captured_result_key("shot", {})
+    seen: dict[str, Any] = {}
+
+    def _fn(ctx, **kw):  # type: ignore[no-untyped-def]
+        seen["entry"] = state.inflight[key]
+        return [TextPart(text="rendered 3 layers")]
+
+    shot = Tool(name="shot", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+    wrapped = _wrap_one("shot", shot, _ctx(tmp_path), state, _passthrough_decorator)
+
+    out = await wrapped({})
+
+    assert out["content"][0]["text"] == "rendered 3 layers"
+    assert seen["entry"].future.result() == ("rendered 3 layers", False)
+    assert state.inflight == {}

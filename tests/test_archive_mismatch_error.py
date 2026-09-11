@@ -4,15 +4,17 @@ from __future__ import annotations
 from imp.engine.errors import ArchiveMismatch, LoadError
 
 _DATA_LINE = (
-    "archive data is at v8, newer than this imp (knows v7) — this checkout is "
-    "behind. Fix: update imp, or Ctrl-D and `imp resume` to restart a running "
-    "quest on the current install. Agents: suggest this to the user."
+    "archive data is at v8, newer than this imp (knows v7). A running imp keeps "
+    "the code it started with, so this is usually a stale process, not a stale "
+    "checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current "
+    "install; if it persists, update imp. Agents: suggest this to the user."
 )
 
 _INDEX_LINE = (
-    "archive index is at v6, newer than this imp (knows v5) — this checkout is "
-    "behind. Fix: update imp, or Ctrl-D and `imp resume` to restart a running "
-    "quest on the current install. Agents: suggest this to the user."
+    "archive index is at v6, newer than this imp (knows v5). A running imp keeps "
+    "the code it started with, so this is usually a stale process, not a stale "
+    "checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current "
+    "install; if it persists, update imp. Agents: suggest this to the user."
 )
 
 

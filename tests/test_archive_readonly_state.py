@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine import archive
-from imp.engine.archive import read
+from imp.engine.archive import index, read
 from imp.engine.errors import ArchiveMismatch
 
 ARCH = "arqu99"
@@ -115,12 +115,12 @@ def test_a_newer_read_only_archive_still_raises(
 ) -> None:
     """The floor check precedes ensure_current's writability early return."""
     _seed_archived_quest(tmp_path)
-    ahead = archive._DATA_VERSION + 1
-    archive.data_version_path(tmp_path).write_text(str(ahead))
+    ahead = index._SCHEMA_VERSION + 1
+    _stamp_user_version(tmp_path, ahead)
     _clear_lock_file(tmp_path)
     _deny_writes(monkeypatch, archive.archive_root(tmp_path))
 
     with pytest.raises(ArchiveMismatch) as excinfo:
         read.completed_rows(tmp_path)
 
-    assert (excinfo.value.floor, excinfo.value.stored) == ("data", ahead)
+    assert (excinfo.value.floor, excinfo.value.stored) == ("index", ahead)

@@ -93,21 +93,34 @@ pwd -P > "$DIR/repo"           # imp now refuses any other checkout pointed here
 
 ## Archive version skew
 
-An imp older than the archive on disk refuses to read it, on every command that
-touches the archive — `imp list` and `imp search`, plus anything that resolves a
-quest id (`imp show`, `imp log`, `imp abandon`, `imp edit`, `imp resume`). One line
-on stderr, exit 2, no output:
+An imp older than the archive on disk refuses only the reads that touch the floor
+that moved, and each floor refuses whole commands rather than degrading part of
+one. An ahead index floor refuses `imp list` and `imp search` outright — both
+query the archive's sqlite index, and there is no partial listing. An ahead blob
+floor refuses reads of an **archived** quest's own record — `imp show`, `imp log`,
+`imp events` on an archived id — while `imp list` and `imp search` still succeed
+in full, since neither opens a record. A live quest stays reachable either way:
+its id resolves against live homes and its data sits in its own home, so
+`imp show`, `imp log`, `imp events`, `imp edit`, `imp abandon` and `imp resume`
+all work for it while the archive is unreadable. A refusal is one line on stderr,
+exit 2, no output:
 
 ```
-imp: archive data is at v12, newer than this imp (knows v11) — this checkout is behind. Fix: update imp, or Ctrl-D and `imp resume` to restart a running quest on the current install. Agents: suggest this to the user.
+imp: archive data is at v12, newer than this imp (knows v11). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
 ```
 
 `archive index is at v...` is the same refusal for the index's schema floor.
 
-The usual cause is an agent working in a quest worktree whose branch predates the
-archive's last format change: the worktree's `pythonpath: [src]` resolves `imp` to
-that older source. Remedy: update the checkout — or, for a running quest, Ctrl-D to
-pause it and `imp resume <id>` on the current install.
+The usual cause is a stale process, not a stale checkout. A running imp keeps the
+code it started with: a session daemon warms its module graph at startup, so
+rewriting `src/imp/` under a live process cannot splice newer code into it, and
+the floors that process knows stay frozen at launch. Update the checkout while a
+quest runs, let current code then archive something — a dependency's merge, say —
+and the long-running daemon refuses the archive that write just bumped. Remedy:
+Ctrl-D to pause the quest, then `imp resume <id>` on the current install. A
+genuinely older checkout is the other cause — an agent working in a quest worktree
+whose branch predates the archive's last format change, where `pythonpath: [src]`
+resolves `imp` to that older source; there, update the checkout.
 
 Writes are deliberately unguarded. An older imp may still archive a quest into a
 newer archive; that lowers both floors (the blob `data_version` marker and the
@@ -118,6 +131,11 @@ quest on bookkeeping after its merge had already landed.
 **Constraint on future schema work: a new index column must be nullable.** An older
 writer's `index.ingest` never supplies it, and that row stands until a rebuild; a
 `NOT NULL` column would make the older writer's archive fail outright.
+
+**Constraint on future migrations: a blob migration that changes an index-visible
+value must also bump the index schema version.** Each read checks only the floor it
+touches, so a blob rewrite that changed what an index query reports would otherwise
+slip past the index-only gate on an archive this imp cannot read.
 
 ---
 
