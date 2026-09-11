@@ -122,6 +122,8 @@ class SandboxPolicy:
     overlay_root: OverlayRoot | None = None  # per-step root keepers mint layers under
     # per-quest scratch dir, rw at its own real path ("" → no bind; host /tmp fully ro)
     quest_tmp_dir: str = ""
+    quest_tmp_mask: str = ""   # tmpfs over the scratch ROOT (parent of quest_tmp_dir); "" → none
+    session_socket_ro: str = ""  # ro re-expose of THIS quest's own session socket ("" → none)
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -183,7 +185,10 @@ class SandboxPolicy:
             else [(self.worktree, "rw"), *state_block])
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
+            *([(self.quest_tmp_mask, "mask_dir")] if self.quest_tmp_mask else []),
+            # Both re-exposes are binds: each pins the inode it resolved at namespace creation.
             *([(self.quest_tmp_dir, "rw")] if self.quest_tmp_dir else []),
+            *([(self.session_socket_ro, "ro")] if self.session_socket_ro else []),
             *([("/var/tmp", "rw")] if self.quest_var_tmp_dir else []),
             *worktree_block,
             (self.git_common_dir, "rw"),
