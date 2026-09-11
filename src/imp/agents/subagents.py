@@ -218,24 +218,28 @@ def _attach_isolated_home(
         policy, home_layer=layer, overlay_root=overlay_root), cleanup
 
 
+def _recovery_command(quest_id: str, call_event_id: str) -> str:
+    return f"imp events {quest_id} --agent sub:{call_event_id} --limit 50"
+
+
 def _suspend_handback_body(
-    subagent_name: str, target_dir: Path, *, interrupted: bool
+    subagent_name: str, quest_id: str, call_event_id: str, *, interrupted: bool
 ) -> str:
     """Parent-handback body for a suspended/interrupted subagent."""
     # _close_subagent_fold scans is_error content for the [suspended]/[interrupted] marker.
-    tx = target_dir / "transcript.jsonl"
     if interrupted:
         header = (f"subagent {subagent_name!r} was interrupted before finishing — "
                   f"the run was paused. [interrupted]")
+        footer = "Re-dispatch a fresh subagent or continue from the activity above."
     else:
         header = (f"subagent {subagent_name!r} was suspended before finishing — "
                   f"its provider or retry budget ran out. [suspended]")
+        footer = ("Use the activity above to decide whether to retry the subagent "
+                  "or continue yourself.")
     return (
         f"{header}\n\n"
-        f"Full prior transcript: {tx}\n\n"
-        f"You decide what happens next — re-dispatch a fresh subagent "
-        f"(pointed at the transcript above to continue), or carry on from what "
-        f"you have.")
+        f"Recent activity:\n{_recovery_command(quest_id, call_event_id)}\n\n"
+        f"{footer}")
 
 
 async def dispatch_task(
@@ -476,7 +480,7 @@ async def dispatch_task(
                         # turn: a RuntimeError body the dispatch layer appends as an
                         # is_error tool_result. Marker keyed off should_pause.
                         raise RuntimeError(_suspend_handback_body(
-                            subagent_name, target_dir,
+                            subagent_name, cc.id, tool_call_event_id,
                             interrupted=(ctx.coordinator is not None
                                          and ctx.coordinator.should_pause)))
                 backoff += 1
@@ -514,13 +518,13 @@ async def dispatch_task(
                     cumulative_backoff += result.delay
                 if coord is not None and coord.should_pause:
                     raise RuntimeError(_suspend_handback_body(
-                        subagent_name, target_dir, interrupted=True))
+                        subagent_name, cc.id, tool_call_event_id, interrupted=True))
 
             if result.paused:
                 # Hand back through the same seam as context-exhaustion; the marker
                 # is keyed off should_pause (a human stop -> [interrupted]).
                 raise RuntimeError(_suspend_handback_body(
-                    subagent_name, target_dir,
+                    subagent_name, cc.id, tool_call_event_id,
                     interrupted=(ctx.coordinator is not None
                                  and ctx.coordinator.should_pause)))
 

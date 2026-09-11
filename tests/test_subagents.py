@@ -100,6 +100,29 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     return ctx
 
 
+def _handback(ctx: ToolContext, result, *, call_event_id: str = "ev-77") -> str:
+    """Drive dispatch_task to its parent-handback raise; return the body text."""
+    import anyio
+
+    import imp.agents.subagents as sub_mod
+
+    async def _fake_drive(*_a, **_k):
+        return result
+
+    async def _call() -> str:
+        return await dispatch_task(ctx, "reviewer", "do x",
+                                   tool_call_event_id=call_event_id)
+
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(_call)
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+    return str(ei.value)
+
+
 def test_dispatch_task_surfaces_stalled_kind(tmp_path: Path) -> None:
     # PRODUCER: when drive_invocation returns ErrorInfo(category='config',
     # kind='stalled') (the B.2 watchdog outcome), dispatch_task must surface the
@@ -131,61 +154,37 @@ def test_dispatch_task_suspend_handback_on_budget_ceiling(tmp_path: Path) -> Non
     # PRODUCER: when the retry-budget ceiling is hit during subagent backoff and no
     # human pause is pending (coordinator.should_pause is False), dispatch_task hands
     # the child back as a RuntimeError whose body carries the literal [suspended]
-    # marker and the transcript pointer — it no longer raises SubagentSuspended.
-    import anyio
-
+    # marker and the bounded recovery command — it no longer raises SubagentSuspended.
     from imp.engine.agent_run import AgentRunResult, ErrorInfo
 
     ctx = _dispatch_ctx(tmp_path)
     assert ctx.coordinator.should_pause is False
 
-    async def _fake_drive(*_a, **_k):
-        # delay far exceeds budget_for("auth") (1800s) -> ceiling on the first pass.
-        return AgentRunResult(output=None, errored=True, paused=False,
-                              fatal=False, delay=1e9,
-                              error=ErrorInfo("auth", None))
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    # delay far exceeds budget_for("auth") (1800s) -> ceiling on the first pass.
+    body = _handback(ctx, AgentRunResult(output=None, errored=True, paused=False,
+                                         fatal=False, delay=1e9,
+                                         error=ErrorInfo("auth", None)))
     assert "[suspended]" in body
     assert "[interrupted]" not in body
-    assert "transcript.jsonl" in body
+    assert "imp events change-42 --agent sub:ev-77 --limit 50" in body
+    assert "transcript.jsonl" not in body
 
 
 def test_dispatch_task_interrupt_handback_on_pause(tmp_path: Path) -> None:
     # PRODUCER: with a human pause pending (coordinator.should_pause True) and the
     # child's drive returning paused, dispatch_task hands back a RuntimeError whose
-    # body carries the [interrupted] marker and the transcript pointer.
-    import anyio
-
+    # body carries the [interrupted] marker and the bounded recovery command.
     from imp.engine.agent_run import AgentRunResult
 
     ctx = _dispatch_ctx(tmp_path)
     ctx.coordinator._should_pause = True
 
-    async def _fake_drive(*_a, **_k):
-        return AgentRunResult(output=None, errored=False, paused=True,
-                              fatal=False, delay=None, error=None)
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    body = _handback(ctx, AgentRunResult(output=None, errored=False, paused=True,
+                                         fatal=False, delay=None, error=None))
     assert "[interrupted]" in body
     assert "[suspended]" not in body
-    assert "transcript.jsonl" in body
+    assert "imp events change-42 --agent sub:ev-77 --limit 50" in body
+    assert "transcript.jsonl" not in body
 
 
 def test_task_tool_invoke_raises_sentinel(tmp_path: Path) -> None:
@@ -1420,3 +1419,58 @@ def test_every_provider_copies_undecided_onto_the_child_context() -> None:
     for module in ("claude_code", "codex_runner", "push_session", "scripted"):
         src = Path(f"src/imp/providers/{module}.py").read_text()
         assert "ctx.undecided = invocation.undecided" in src, module
+
+
+def test_interrupted_handback_body_is_verbatim(tmp_path: Path) -> None:
+    # A human pause during the child's run: the body must be the pinned text,
+    # with the runnable recovery command carrying real values.
+    from imp.engine.agent_run import AgentRunResult
+
+    ctx = _dispatch_ctx(tmp_path)
+    ctx.coordinator._should_pause = True
+    body = _handback(ctx, AgentRunResult(output=None, errored=False, paused=True,
+                                         fatal=False, delay=None))
+    assert body == (
+        "subagent 'reviewer' was interrupted before finishing — the run was "
+        "paused. [interrupted]\n\n"
+        "Recent activity:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Re-dispatch a fresh subagent or continue from the activity above.")
+
+
+def test_suspended_handback_body_is_verbatim(tmp_path: Path) -> None:
+    # Same seam with no human pause -> [suspended], and the neutral retry footer
+    # (a spent provider/retry budget says nothing about task size).
+    from imp.engine.agent_run import AgentRunResult
+
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=False, paused=True,
+                                    fatal=False, delay=None))
+    assert body == (
+        "subagent 'reviewer' was suspended before finishing — its provider or "
+        "retry budget ran out. [suspended]\n\n"
+        "Recent activity:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Use the activity above to decide whether to retry the subagent or "
+        "continue yourself.")
+
+
+def test_nested_dispatch_handback_carries_the_live_quest_id(tmp_path: Path) -> None:
+    # A subagent that itself dispatches a subagent (depth 1 dispatching a depth-2
+    # child). ToolContext.quest is None at that depth, so reading the quest id
+    # from ctx.quest would raise AttributeError — which _handback's
+    # pytest.raises(RuntimeError) does NOT swallow. The distinct id pins that the
+    # value comes from the propagated quest_context snapshot.
+    import dataclasses
+
+    from imp.engine.agent_run import AgentRunResult
+
+    ctx = _dispatch_ctx(tmp_path)
+    ctx.subagent_depth = 1          # this ctx belongs to a subagent, not a step
+    ctx.quest_context = dataclasses.replace(ctx.quest_context, id="nested-9")
+    assert ctx.quest is None        # ToolContext.quest is None inside a subagent
+    body = _handback(ctx, AgentRunResult(output=None, errored=False, paused=True,
+                                         fatal=False, delay=None),
+                     call_event_id="ev-deep")
+    assert "imp events nested-9 --agent sub:ev-deep --limit 50" in body
+    assert "sub: " not in body      # never an empty child id

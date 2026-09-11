@@ -143,7 +143,9 @@ def test_sigint_during_subagent_hands_back_and_resumes(tmp_path: Path) -> None:
         "no [interrupted] handback in parent transcript"
     body = _parent_tx().read_text()
     assert "was interrupted before finishing" in body     # the handback header
-    assert "Full prior transcript:" in body               # the transcript pointer
+    assert "imp events " in body                          # runnable recovery command
+    assert "--agent sub:" in body                         # scoped to this one child
+    assert "transcript.jsonl" not in body                 # no sandbox-masked path
 
     # Resume continues the interrupt-paused step and runs to completion: the quest
     # recovers with the handback already in the parent's transcript (exit 0).
