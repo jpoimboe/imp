@@ -338,8 +338,9 @@ phases:
         file: agents/autosquash-resolve.md
         tier: high
         label: resolving merge fixups
-        clean_tree: false   # operates on an in-progress autosquash rebase whose
-                            # legitimate completion may still be mid-rebase
+        clean_tree: false   # the conflicted-fold entry runs inside an in-progress
+                            # autosquash rebase, whose legitimate completion may
+                            # still be mid-rebase
         rules:
           - {else: true, goto: cleanup-merge}
 

@@ -409,7 +409,7 @@ INTEGRATE_DIAGRAM = """flowchart TD
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN
   FIN -->|merge| CM{{"cleanup-merge"}}
-  CM -->|"fixup conflict"| ASR["autosquash-resolve-merge"]
+  CM -->|"fixup conflict / fold changed the tree"| ASR["autosquash-resolve-merge"]
   ASR --> CM
   CM -. "unfoldable fixup / stamp failure" .-> HUMAN
   CM --> AST{{"assert-stamped"}}
@@ -490,6 +490,14 @@ def test_architecture_step_agent_table_pairs_files_with_steps_and_tiers() -> Non
         "| `summarizer` | `summarizer` | medium |",
     ):
         assert row in text, row
+
+
+def test_architecture_agent_table_names_both_autosquash_entry_modes() -> None:
+    assert (
+        "| `autosquash-resolve` | `autosquash-resolve-merge` | high | Make the fixup "
+        "fold reproduce the pre-squash tree: resolve a conflict, or repair a fold "
+        "that changed content. |"
+    ) in ARCH.read_text()
 
 
 def test_architecture_subagent_table_is_separate_and_names_dispatchers() -> None:

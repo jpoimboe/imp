@@ -10,7 +10,7 @@
 # is in range, a fixup! targeting ANY quest commit folds.
 #
 #   0 -> clean tree, fixups folded, trailers stamped (or already-clean no-op)
-#   2 -> resolvable fold conflict (rebase left in progress) -> autosquash-resolve-merge
+#   2 -> fold conflict, or a clean fold that changed the tree -> autosquash-resolve-merge
 #   1 -> pause for a human: dirty working tree, a surviving fixup directive that
 #        cannot be folded, or a hard rebase/stamp failure
 set -uo pipefail
@@ -59,6 +59,15 @@ _diagnose_surviving_directives() {
   return 0
 }
 
+# Resets the attempts budget — a fresh hand-off, not a repair judgement.
+_write_sentinels() {
+  mkdir -p "$STATE"
+  rm -f "$STATE/autosquash-resolve-attempts"
+  printf '%s\n' "$BEFORE_TREE" > "$STATE/autosquash-before-tree"
+  printf '%s\n' "$BEFORE"      > "$STATE/autosquash-before-head"
+  printf '%s\n' "$FORK"        > "$STATE/autosquash-fork"
+}
+
 # ── VERIFY MODE ──────────────────────────────────────────────────────────────
 # A before-tree sentinel means a fold conflict was handed to autosquash-resolve,
 # which has now run; this re-entry VERIFIES its resolution rather than re-folding.
@@ -74,7 +83,8 @@ if [ -f "$STATE/autosquash-before-tree" ]; then
   MAX_ATTEMPTS=3
 
   _clear_sentinels() {
-    rm -f "$STATE/autosquash-before-tree" "$STATE/autosquash-before-head" "$ATTEMPTS_FILE"
+    rm -f "$STATE/autosquash-before-tree" "$STATE/autosquash-before-head" \
+      "$STATE/autosquash-fork" "$ATTEMPTS_FILE"
   }
 
   # First objective failure (empty REASON => verified). An in-progress rebase makes
@@ -133,9 +143,9 @@ fi
 # The deterministic fold runs under `set -e` (it relies on -e to abort on an
 # unexpected git failure mid-rebase).
 set -e
+BEFORE=$(git rev-parse HEAD)
+BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
 if _has_directives; then
-  BEFORE=$(git rev-parse HEAD)
-  BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
   if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$FORK"; then
     if _has_directives; then
       _diagnose_surviving_directives
@@ -146,10 +156,7 @@ if _has_directives; then
     # A genuine fold CONFLICT (rebase in progress AND unmerged paths) is agent-
     # resolvable: leave it in progress and hand off. Any other failure is hard.
     if [ -d "$(git rev-parse --git-path rebase-merge)" ] && [ -n "$(git ls-files -u)" ]; then
-      mkdir -p "$STATE"
-      rm -f "$STATE/autosquash-resolve-attempts"
-      printf '%s\n' "$BEFORE_TREE" > "$STATE/autosquash-before-tree"
-      printf '%s\n' "$BEFORE" > "$STATE/autosquash-before-head"
+      _write_sentinels
       echo "cleanup: fixup fold conflicted; handing to autosquash-resolve (rebase left in progress)" >&2
       exit 2
     fi
@@ -178,5 +185,13 @@ while read -r h; do
   [ "$(git log -1 --format='%(trailers:key=Quest,valueonly)' "$h")" = "$ID" ] \
     || { echo "stamp failed: $h missing Quest: $ID" >&2; exit 1; }
 done < <(git rev-list --no-merges "$FORK"..HEAD)
+
+AFTER_TREE=$(git rev-parse 'HEAD^{tree}')
+if [ "$AFTER_TREE" != "$BEFORE_TREE" ]; then
+  _write_sentinels
+  echo "cleanup: the rebase finished cleanly but changed the tree ($BEFORE_TREE -> $AFTER_TREE) — a fixup! is mis-targeted; handing to autosquash-resolve. Paths that differ:" >&2
+  git diff --stat "$BEFORE_TREE" "$AFTER_TREE" >&2
+  exit 2
+fi
 
 echo "ok: clean tree, fixups folded, Quest: $ID stamped over $FORK..HEAD"
