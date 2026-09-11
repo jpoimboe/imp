@@ -3,7 +3,7 @@
 > **You are producing a before/after visual showcase.** Given any imp Change,
 > render the user-visible CLI surfaces it touched — once from the code *before*
 > the change, once *after* — and assemble them into one self-contained HTML page in
-> `/tmp`. The screenshots come from imp's **real** render code (the same functions
+> `$TMPDIR`. The screenshots come from imp's **real** render code (the same functions
 > the live CLI calls) through the impty pyte→PNG pipeline, so the page shows exactly
 > what a user sees, not a mock-up.
 >
@@ -38,6 +38,8 @@ are two git trees you check out side by side.
 
 ```bash
 REPO=$(git rev-parse --show-toplevel)
+SHOW=${TMPDIR:-/tmp}/showcase        # scratch root; /tmp is read-only in the sandbox
+mkdir -p "$SHOW/ansi" "$SHOW/png"    # the render step redirects into these
 ID=2026-06-11-9k6zii                 # the Change id (see `imp list --all`)
 BR=imp/$ID                           # the Change's branch
 BASE=$(cd "$REPO" && imp show "$ID" --json 2>/dev/null \
@@ -48,11 +50,11 @@ BASE=$(cd "$REPO" && imp show "$ID" --json 2>/dev/null \
 # the branch tip (works for a merged quest too — the ref lives on).
 AFTER=$(git -C "$REPO" worktree list --porcelain \
         | awk -v b="branch refs/heads/$BR" '/^worktree /{w=$2} $0==b{print w}')
-[ -n "$AFTER" ] && [ -d "$AFTER" ] || { AFTER=/tmp/showcase/after-tree; git worktree add -q "$AFTER" "$BR"; }
+[ -n "$AFTER" ] && [ -d "$AFTER" ] || { AFTER=$SHOW/after-tree; git worktree add -q "$AFTER" "$BR"; }
 
 # BEFORE tree: where the branch diverged from base — the code as it was.
 MB=$(git merge-base "$BASE" "$BR")
-BEFORE=/tmp/showcase/before-tree
+BEFORE=$SHOW/before-tree
 git worktree add -q "$BEFORE" "$MB"
 echo "before=$BEFORE  after=$AFTER"
 ```
@@ -88,7 +90,7 @@ Write two scripts that each print one scene's real ANSI to stdout. Keep a third
 pure-data module so before and after show the **same** underlying data (fix `now` so
 relative ages are reproducible). Run each from its own tree.
 
-`/tmp/showcase/data.py` (no imp imports — shared by both):
+`$SHOW/data.py` (no imp imports — shared by both):
 ```python
 from datetime import datetime, timedelta, timezone
 NOW = datetime(2026, 6, 11, 12, 10, 0, tzinfo=timezone.utc)
@@ -96,10 +98,10 @@ def iso(age_min): return (NOW - timedelta(minutes=age_min)).isoformat()
 ROWS = [("2026-06-11-yaitd7", "Add a --version flag", "paused", "implement", 2), ...]
 ```
 
-`/tmp/showcase/after.py` — uses the **new** APIs (lazy-import inside each scene so a
+`$SHOW/after.py` — uses the **new** APIs (lazy-import inside each scene so a
 missing symbol can't break unrelated scenes):
 ```python
-import sys; sys.path.insert(0, "/tmp/showcase"); import data
+import sys, pathlib; sys.path.insert(0, str(pathlib.Path(__file__).parent)); import data
 from imp.cli import quest_row            # a new module → only resolves in the after tree
 def scene_status():
     rows = [quest_row.header_line(color=True, name_width=48)]
@@ -111,7 +113,7 @@ SCENES = {"status": scene_status, ...}
 sys.stdout.write("\n".join(SCENES[sys.argv[1]]()) + "\n")
 ```
 
-`/tmp/showcase/before.py` — reproduces the **old** behaviour from the before tree. New
+`$SHOW/before.py` — reproduces the **old** behaviour from the before tree. New
 functions don't exist there, so either call the old function (e.g. the old
 `_render_status_table`) or just run the real old command and capture its output. The
 goal is a faithful old rendering, by whatever path the old code offered.
@@ -127,10 +129,10 @@ goal is a faithful old rendering, by whatever path the old code offered.
 
 ```bash
 for s in status status_all picker ambiguous pause rename quiet ... ; do
-  ( cd "$BEFORE" && PYTHONPATH=src python3 /tmp/showcase/before.py $s > /tmp/showcase/ansi/before_$s.txt
-    PYTHONPATH=src python3 "$REPO/scripts/showcase/render_png.py" /tmp/showcase/ansi/before_$s.txt /tmp/showcase/png/before_$s.png dark )
-  ( cd "$AFTER"  && PYTHONPATH=src python3 /tmp/showcase/after.py  $s > /tmp/showcase/ansi/after_$s.txt
-    PYTHONPATH=src python3 "$REPO/scripts/showcase/render_png.py" /tmp/showcase/ansi/after_$s.txt  /tmp/showcase/png/after_$s.png dark )
+  ( cd "$BEFORE" && PYTHONPATH=src python3 "$SHOW/before.py" $s > "$SHOW/ansi/before_$s.txt"
+    PYTHONPATH=src python3 "$REPO/scripts/showcase/render_png.py" "$SHOW/ansi/before_$s.txt" "$SHOW/png/before_$s.png" dark )
+  ( cd "$AFTER"  && PYTHONPATH=src python3 "$SHOW/after.py"  $s > "$SHOW/ansi/after_$s.txt"
+    PYTHONPATH=src python3 "$REPO/scripts/showcase/render_png.py" "$SHOW/ansi/after_$s.txt"  "$SHOW/png/after_$s.png" dark )
 done
 ```
 
@@ -154,30 +156,30 @@ PNGs with the Read tool and check truncation, colour, and alignment before movin
 
 ## 5. Assemble the manifest and build
 
-Write `/tmp/showcase/<slug>.manifest.json` grouping the items (mirror the change's
+Write `$SHOW/<slug>.manifest.json` grouping the items (mirror the change's
 own structure — e.g. its spec's areas — so the page reads in the author's order).
 Each item is `{title, caption, before, after}`; `after`-only and an optional
 `swatches` colour table are allowed (see the builder docstring). Titles and captions
 take inline HTML (`<code>`, `<kbd>`, `<em>`).
 
 ```bash
-python3 "$REPO/scripts/showcase/build_showcase.py" /tmp/showcase/<slug>.manifest.json
-# → /tmp/<slug>-before-after.html   (self-contained; open in any browser)
+python3 "$REPO/scripts/showcase/build_showcase.py" "$SHOW/<slug>.manifest.json"
+# → ${TMPDIR:-/tmp}/<slug>-before-after.html   (self-contained; open in any browser)
 ```
 
 ## 6. Verify, then clean up
 
 ```bash
 google-chrome --headless=new --no-sandbox --hide-scrollbars \
-  --window-size=1200,7600 --screenshot=/tmp/showcase/verify.png \
-  "file:///tmp/<slug>-before-after.html"
+  --window-size=1200,7600 --screenshot="$SHOW/verify.png" \
+  "file://${TMPDIR:-/tmp}/<slug>-before-after.html"
 ```
 Read `verify.png` (crop tall pages with PIL). Confirm every pair rendered, captions
 read clearly, and the before/after bars (red = before, green = after) are right.
 
 ```bash
-git worktree remove /tmp/showcase/before-tree --force
-[ "$AFTER" = "/tmp/showcase/after-tree" ] && git worktree remove "$AFTER" --force
+git worktree remove "$SHOW/before-tree" --force
+[ "$AFTER" = "$SHOW/after-tree" ] && git worktree remove "$AFTER" --force
 git worktree prune
 ```
 

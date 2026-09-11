@@ -13,21 +13,13 @@ from typing import Any
 import anyio
 
 from imp.api_errors import DaemonUnreachable
-from imp.engine.env import QUEST_TMP_ENV, overlay_engine_env
+from imp.engine.env import QUEST_TMP_ENV, ensure_quest_tmp_dir, overlay_engine_env
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.discover import session_socket_path
 
 SpawnFn = Callable[[Quest], "subprocess.Popen[bytes] | None"]
 LAYOUT_MISMATCH_EXIT = 78  # sysexits EX_CONFIG: daemon hit a version downgrade, not a crash
-
-
-def ensure_quest_tmp_dir(quest: Quest) -> None:
-    """Idempotently create the per-quest tmp dir 0o700 on both imp-<uid> parent and <id> leaf."""
-    tmp = quest.tmp_dir
-    tmp.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for d in (tmp.parent, tmp):
-        d.chmod(0o700)
 
 
 def spawn_session_daemon(
@@ -54,7 +46,7 @@ def spawn_session_daemon(
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     env[QUEST_TMP_ENV] = str(quest.tmp_dir)
     quest.quest_dir.mkdir(parents=True, exist_ok=True)
-    ensure_quest_tmp_dir(quest)
+    ensure_quest_tmp_dir(quest.tmp_dir)
     with open(quest.quest_dir / "daemon.stderr", "wb") as stderr_file:
         return subprocess.Popen(
             argv,

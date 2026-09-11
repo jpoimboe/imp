@@ -42,9 +42,9 @@ pytestmark = pytest.mark.skipif(
 def _sandbox_worktree() -> Path:
     """Return a temp dir for the sandbox worktree.
 
-    The real /tmp is now bound rw by identity (--bind /tmp /tmp) so a worktree
-    under /tmp is no longer shadowed inside the namespace — default tempfile
-    is fine.
+    The worktree gets its own rw bind (emitted after the per-quest scratch bind),
+    so a worktree under the default temp dir is not shadowed inside the namespace
+    — default tempfile is fine.
     """
     return Path(tempfile.mkdtemp(prefix="imp-test-sb-"))
 
@@ -119,7 +119,7 @@ requires_overlay = pytest.mark.skipif(
 def _overlay_policy(base: Path) -> tuple[SandboxPolicy, Callable[[], None]]:
     """Active policy whose every spawn mints its own COW-overlay layer under a
     per-step overlay root. home + worktree are SIBLINGS under `base` (a /var/tmp
-    real fs), so no later bind_plan bind (/tmp identity, worktree rw) covers the
+    real fs), so no later bind_plan bind (scratch dir, worktree rw) covers the
     home path and shadows the overlay merged mount. Returns (policy, cleanup);
     cleanup removes the whole overlay root."""
     home = base / "home"

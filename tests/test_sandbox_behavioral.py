@@ -2,12 +2,13 @@
 
 Each test builds a REAL active SandboxPolicy, runs a real bash command under
 bwrap, and asserts the OS-level outcome (write-confinement, secret masking,
-/tmp persistence, network argv, git commit + escape-vector blocking).
+scratch-dir persistence, network argv, git commit + escape-vector blocking).
 
-Sandbox worktrees use the default temp directory (/tmp). /tmp is bound rw to
-the real host /tmp (identity bind, right after the ro-floor). A worktree under
-/tmp is NOT shadowed — --chdir works and /tmp is visible inside and outside the
-sandbox.
+Sandbox worktrees use the default temp directory ($TMPDIR, else /tmp). Host /tmp
+has no covering bind — it stays on the --ro-bind / / floor, readable but not
+writable — while a worktree under it gets its own rw bind (emitted after the
+per-quest scratch bind), so --chdir works and the worktree is writable inside the
+namespace and visible outside it.
 """
 from __future__ import annotations
 
@@ -20,9 +21,11 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -76,22 +79,35 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 
 def _make_root(prefix: str = "imp-test-beh-") -> Path:
-    """Create a sandbox root under the default temp dir (/tmp).
+    """Create a sandbox root under the default temp dir ($TMPDIR, else /tmp).
 
-    The worktree is bound rw after the /tmp bind, so it is not shadowed inside
-    the namespace — no /var/tmp workaround needed.
+    The worktree gets its own rw bind, emitted after the per-quest scratch bind,
+    so it is writable inside the namespace even though host /tmp is not — no
+    /var/tmp workaround needed.
     """
     return Path(tempfile.mkdtemp(prefix=prefix))
 
 
+def _scratch_parent() -> Path:
+    """A throwaway `<tmp>/imp-<uid>` scratch parent, unique per test.
+
+    Same shape as the real one, but never the shared `<tmp>/imp-<uid>` — that one
+    holds every live quest's scratch dir and sockets, and sibling tests running
+    concurrently under `-n auto` would collide in it.
+    """
+    return Path(tempfile.mkdtemp(prefix="imp-beh-tmp-")) / f"imp-{os.getuid()}"
+
+
 def _active_policy(worktree: Path, *, home: Path | None = None,
-                   secret_dirs: tuple[str, ...] = ()) -> SandboxPolicy:
+                   secret_dirs: tuple[str, ...] = (),
+                   quest_tmp_dir: str = "") -> SandboxPolicy:
     """Minimal hand-built active policy for simple behavioral tests.
 
     Uses PATH from the real environment so git, cat, echo, etc. resolve.
     HOME is set to a dir under the worktree root (or the provided `home`).
-    This hand-built policy sets no /tmp source, so /tmp is bound rw by identity in
-    build_sandbox_spawn — no per-test tmp dir setup is needed.
+    Host /tmp gets no bind and stays on the read-only floor; pass `quest_tmp_dir`
+    to re-expose a per-quest scratch dir rw at its real path — prepare_spawn_policy
+    creates it before the spawn, and TMPDIR then points at it.
     """
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
@@ -113,9 +129,11 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
                 p for p in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
                 if "imp-shim" not in p) or "/usr/bin:/bin"),
             ("HOME", str(_home)),
+            *([("TMPDIR", quest_tmp_dir)] if quest_tmp_dir else ()),
         ),
         network=True,
         note="",
+        quest_tmp_dir=quest_tmp_dir,
     )
 
 
@@ -147,9 +165,9 @@ def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
 
 
 # The overlay home under test must live at a path covered by NO later bind_plan
-# bind — NOT under /tmp (build_sandbox_spawn emits --bind /tmp /tmp, which re-mounts
-# the host /tmp OVER an overlay home placed under /tmp, defeating it) and NOT under
-# the sandbox worktree (its rw bind does the same). The home-layer rw bind is
+# bind — NOT under the per-quest scratch dir (its rw bind would re-mount over an
+# overlay home placed there, defeating it) and NOT under the sandbox worktree (its
+# rw bind does the same). The home-layer rw bind is
 # emitted FIRST (sandbox.py:91), so it can never be the last-covering bind for a
 # path that a later bind also covers. So the overlay tests root their home AND
 # worktree as SIBLINGS under a real fs OUTSIDE /tmp (/var/tmp): the --ro-bind / /
@@ -213,7 +231,7 @@ def _overlay_home(base: Path, home: Path, *,
     """Active policy whose EVERY spawn mints its own COW-overlay layer under a
     per-step overlay root, exactly as a real spawn does (the bash tool calls
     prepare_spawn_policy). `home` and the sandbox worktree are SIBLINGS under
-    `base` (a non-/tmp real fs), so no later bind_plan bind (/tmp identity,
+    `base` (a non-/tmp real fs), so no later bind_plan bind (scratch dir,
     worktree rw) covers `home` and shadows the overlay merged mount. Returns
     (policy, cleanup); cleanup removes the whole overlay root."""
     wt = base / "worktree"
@@ -231,8 +249,8 @@ def _fallback_home(root: Path, home: Path, *,
                    secret_dirs: tuple[str, ...] = ()) -> SandboxPolicy:
     """Active policy with a rw-fallback HomeLayer (no overlay) over `home` — a
     plain --bind home home (writes persist to the REAL home). The fallback writes
-    THROUGH to the real home by design, so a /tmp-based root is fine here (the /tmp
-    shadow re-binds the same host home dir the fallback already targets)."""
+    THROUGH to the real home by design, and its own rw bind covers `home` wherever
+    the root lives, so a temp-dir-based root is fine here."""
     base = _active_policy(root, home=home, secret_dirs=secret_dirs)
     layer, overlay_root, _ = make_home_layer(
         str(home), root=root / "ovl", userxattr=None)
@@ -341,7 +359,6 @@ def test_write_outside_worktree_fails() -> None:
 def test_rm_outside_fails() -> None:
     """rm of a file outside the rw worktree must not delete it on the host.
 
-    With the real-/tmp identity bind, /tmp is entirely rw inside the sandbox.
     The victim is /etc/hosts (always present, in the RO floor, outside all rw
     binds). rm inside the sandbox must fail; the host file must still exist.
     """
@@ -403,28 +420,33 @@ def test_secret_env_dropped() -> None:
 
 
 # ---------------------------------------------------------------------------
-# B10.5  /tmp persists across separate bash calls (same tmp_host bound to /tmp)
+# B10.5  The per-quest scratch dir persists across separate bash calls
 # ---------------------------------------------------------------------------
 
-def test_tmp_persists_across_calls() -> None:
-    """/tmp inside the sandbox is the real host /tmp (identity bind); it persists
-    between bash invocations on the same ctx/policy (same /tmp re-bound each call).
-    """
+def test_scratch_dir_writable_and_persists_across_calls() -> None:
+    """AC4(a)(b): $TMPDIR — the per-quest scratch dir, rw at its own real path —
+    is writable, persists between bash invocations on the same ctx/policy, and the
+    bytes land on the host at that same path."""
     root = _make_root()
+    parent = _scratch_parent()
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
     try:
-        pol = _active_policy(root)
+        pol = _active_policy(root, quest_tmp_dir=str(scratch))
         ctx = _ctx(root, pol)
-        # First call: write a marker to /tmp
-        r1 = _bash(ctx, "echo marker > /tmp/x && echo written")
-        assert r1["returncode"] == 0
+        # First call: write a marker under $TMPDIR
+        r1 = _bash(ctx, 'echo scratch-marker > "$TMPDIR/x" && echo written')
+        assert r1["returncode"] == 0, r1
         assert "written" in r1["stdout"]
         # Second call: read it back
-        r2 = _bash(ctx, "cat /tmp/x")
-        assert r2["returncode"] == 0, f"cat /tmp/x failed: {r2}"
-        assert "marker" in r2["stdout"], (
-            f"/tmp/x not readable in second call — persistence broken: {r2['stdout']!r}"
+        r2 = _bash(ctx, 'cat "$TMPDIR/x"')
+        assert r2["returncode"] == 0, f'cat "$TMPDIR/x" failed: {r2}'
+        assert "scratch-marker" in r2["stdout"], (
+            f"$TMPDIR/x not readable in second call — persistence broken: {r2['stdout']!r}"
         )
+        # ...and it is the real host path, not a private namespace copy.
+        assert (scratch / "x").read_text().strip() == "scratch-marker"
     finally:
+        shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -1189,8 +1211,8 @@ def test_overlay_home_faithful_isolated_and_masked() -> None:
     # AC 5: ~/.claude is readable (model auth intact).
     # AC 3 (overlay mode): a secret dir (.ssh) is masked to empty — proving the
     #       overlay home bind is emitted BEFORE the secret masks.
-    # home + worktree are siblings under a non-/tmp base so the overlay is not
-    # shadowed by the /tmp/worktree binds (see _overlay_home).
+    # home + worktree are siblings under a base no bind_plan bind covers, so the
+    # worktree rw bind does not shadow the overlay (see _overlay_home).
     root = _make_overlay_root()
     try:
         home = root / "home"
@@ -1827,20 +1849,50 @@ def test_repo_marker_readable_but_never_writable_in_sandbox() -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
-def test_slash_tmp_is_the_real_host_tmp() -> None:
-    """AC3: /tmp inside the sandbox is the real host /tmp (identity bind); a write
-    to /tmp/<name> inside the sandbox appears at the same path on the host."""
+def test_write_to_slash_tmp_is_refused() -> None:
+    """AC3: host /tmp has no covering bind, so it falls to the --ro-bind / / floor —
+    a literal write to /tmp/<name> fails inside the sandbox with the kernel's own
+    read-only error and never reaches the host."""
     root = _make_root()
     marker = f"beh-{uuid.uuid4().hex}"
     host_path = Path("/tmp") / marker
     try:
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
-        r = _bash(ctx, f"echo hi > /tmp/{marker} && echo ok")
-        assert r["returncode"] == 0, r
-        assert host_path.read_text().strip() == "hi"
+        r = _bash(ctx, f"echo hi > /tmp/{marker}")
+        assert r["returncode"] != 0, r
+        assert "Read-only file system" in str(r["stderr"]), r
+        assert not host_path.exists(), f"{host_path} escaped to the host"
     finally:
-        host_path.unlink(missing_ok=True)
+        # Guard the unlink on exists(): unlink() checks mnt_want_write() BEFORE the
+        # dentry lookup, so on a read-only host /tmp it raises EROFS even for an
+        # absent path and missing_ok= would not suppress it. The file can only be
+        # here if /tmp was writable, in which case the unlink succeeds.
+        if host_path.exists():
+            host_path.unlink()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_scratch_dir_selfheals_0o700_from_a_missing_parent() -> None:
+    """AC4(c)(d): with the whole imp-<uid> parent absent, spawn still succeeds —
+    prepare_spawn_policy recreates parent and leaf 0o700 whatever the ambient umask
+    (mkdir(mode=) would set only the leaf)."""
+    root = _make_root()
+    parent = _scratch_parent()   # unique root: the imp-<uid> parent does not exist yet
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    old_umask = os.umask(0)
+    try:
+        assert not parent.exists()
+        pol = _active_policy(root, quest_tmp_dir=str(scratch))
+        ctx = _ctx(root, pol)
+        r = _bash(ctx, 'echo ok > "$TMPDIR/probe" && echo done')
+        assert r["returncode"] == 0, r
+        assert "done" in r["stdout"]
+        assert scratch.stat().st_mode & 0o777 == 0o700
+        assert parent.stat().st_mode & 0o777 == 0o700
+    finally:
+        os.umask(old_umask)
+        shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -3098,4 +3150,121 @@ def test_killing_the_ns_init_under_a_joined_session_ends_it_like_an_eof() -> Non
         screen = _drive_joined(ctx, _drive)
         assert screen.splitlines()[0] == "[stopped: exit=SIGKILL]", screen
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# AC5/AC6: read-only floor read-through and session-socket reachability
+# ---------------------------------------------------------------------------
+
+_SOCK_CLIENT = (
+    "import socket, sys\n"
+    "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+    "s.connect(sys.argv[1])\n"
+    "s.sendall(b'ping')\n"
+    "print(s.recv(16).decode())\n"
+)
+
+
+def _echo_once(path: Path, ready: threading.Event) -> None:
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.listen(1)
+    srv.settimeout(60.0)     # generous: only a genuine hang should ever trip it
+    ready.set()
+    try:
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(64)
+            conn.sendall(b"pong")
+    except OSError:
+        pass
+    finally:
+        srv.close()
+
+
+def test_uncovered_tmp_path_is_readable_but_not_writable() -> None:
+    """AC5: a host file no bind covers — a sibling of the scratch dir, the same
+    shape as any /tmp/<name> — is still readable inside the sandbox through the
+    --ro-bind / / floor, via bash and via the in-process read_file tool, while a
+    write to it is refused."""
+    root = _make_root()
+    parent = _scratch_parent()
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    victim = parent / f"host-{uuid.uuid4().hex[:8]}.txt"
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        victim.write_text("host-side content\n")
+        pol = _active_policy(root, quest_tmp_dir=str(scratch))
+        ctx = _ctx(root, pol)
+
+        r = _bash(ctx, f"cat {shlex.quote(str(victim))}")
+        assert r["returncode"] == 0, r
+        assert "host-side content" in r["stdout"]
+
+        async def _read() -> str:
+            return await get_registry()["read_file"].async_invoke(
+                ctx, {"path": str(victim)})
+        assert "host-side content" in anyio.run(_read)
+
+        w = _bash(ctx, f"echo nope > {shlex.quote(str(victim))}")
+        assert w["returncode"] != 0, w
+        assert "Read-only file system" in str(w["stderr"]), w
+        assert victim.read_text() == "host-side content\n"
+    finally:
+        shutil.rmtree(parent.parent, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_session_socket_shape_round_trips_from_inside_the_namespace() -> None:
+    """AC6(a): the per-quest session socket sits at <tmp>/imp-<uid>/<id>.sock, on the
+    read-only floor inside the namespace. connect() across a read-only mount is
+    permitted, so a round-trip works — including for a socket the host binds AFTER
+    the keeper namespace already exists."""
+    root = _make_root()
+    parent = _scratch_parent()
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    sock = parent / f"{uuid.uuid4().hex[:8]}.sock"
+    ready = threading.Event()
+    thread: threading.Thread | None = None
+    try:
+        pol = _active_policy(root, quest_tmp_dir=str(scratch))
+        ctx = _ctx(root, pol)
+        # Open the keeper namespace FIRST, so the socket is bound after it exists.
+        warm = _bash(ctx, "echo warm")
+        assert warm["returncode"] == 0, warm
+
+        parent.mkdir(parents=True, exist_ok=True)
+        thread = threading.Thread(target=_echo_once, args=(sock, ready), daemon=True)
+        thread.start()
+        assert ready.wait(60.0), "host echo server never bound its socket"
+
+        r = _bash(ctx, f"{shlex.quote(sys.executable)} -c {shlex.quote(_SOCK_CLIENT)} "
+                       f"{shlex.quote(str(sock))}")
+        assert r["returncode"] == 0, r
+        assert "pong" in r["stdout"], r
+    finally:
+        if thread is not None:
+            thread.join(timeout=10.0)
+        shutil.rmtree(parent.parent, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.skipif(
+    not os.access("/tmp", os.W_OK),
+    reason="host /tmp is not writable here (the suite is already running sandboxed)")
+def test_literal_slash_tmp_file_is_readable_inside_the_sandbox() -> None:
+    """AC5, the literal case: a pre-existing file at /tmp/<name> on the host stays
+    readable inside the sandbox even though /tmp is no longer bound rw."""
+    root = _make_root()
+    victim = Path("/tmp") / f"beh-ro-{uuid.uuid4().hex[:8]}.txt"
+    try:
+        victim.write_text("dropped by the user\n")
+        pol = _active_policy(root)
+        ctx = _ctx(root, pol)
+        r = _bash(ctx, f"cat {shlex.quote(str(victim))}")
+        assert r["returncode"] == 0, r
+        assert "dropped by the user" in r["stdout"]
+    finally:
+        victim.unlink(missing_ok=True)
         shutil.rmtree(root, ignore_errors=True)

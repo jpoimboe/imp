@@ -2,8 +2,8 @@
 
 Each test runs a REAL gate through gates.run_command under a real active policy, so
 run_command opens a keeper, joins it and closes it around the one command. Roots live
-under the default temp dir (/tmp), which build_sandbox_spawn binds by identity, so a
-planted process is visible both inside the namespace and host-side.
+under the default temp dir and get their own rw worktree bind, so a planted process is
+visible both inside the namespace and host-side.
 """
 from __future__ import annotations
 

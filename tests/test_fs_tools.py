@@ -531,3 +531,57 @@ def test_write_after_stubbed_read_is_allowed(tmp_path: Path) -> None:
     assert stub == "[unchanged since you read it at lines 1-3 above]"
     _write_file(ctx, path="p.md", content="new")  # record still present -> allowed
     assert (tmp_path / "p.md").read_text() == "new"
+
+
+_SCRATCH_DIR = "/tmp/imp-1000/abc"
+
+
+def _tmp_policy(tmp_path: Path, *,
+                quest_tmp_dir: str = _SCRATCH_DIR) -> SandboxPolicy:
+    return SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), child_env=(), network=True, note="",
+        quest_tmp_dir=quest_tmp_dir,
+    )
+
+
+def test_write_file_to_slash_tmp_names_the_scratch_dir(tmp_path: Path) -> None:
+    # AC 7(a): these tools deny the write in-process, so there is no kernel EROFS
+    # to read — the message is the only thing that tells the agent where to go.
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _tmp_policy(tmp_path)
+
+    with pytest.raises(PermissionDenied) as exc:
+        _write_file(ctx, path="/tmp/fugorepo/x", content="x")
+
+    assert str(exc.value) == (
+        "write on /tmp/fugorepo/x denied by the sandbox policy — /tmp is "
+        "read-only; write scratch under $TMPDIR (/tmp/imp-1000/abc)")
+
+
+def test_edit_file_to_slash_tmp_names_the_scratch_dir(tmp_path: Path) -> None:
+    # edit_file authorizes ("read", "write"): the read clears the ro floor, so it
+    # is the write verdict that must carry the hint.
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _tmp_policy(tmp_path)
+
+    with pytest.raises(PermissionDenied) as exc:
+        _edit_file(ctx, path="/tmp/fugorepo/x", old="a", new="b")
+
+    assert str(exc.value) == (
+        "write on /tmp/fugorepo/x denied by the sandbox policy — /tmp is "
+        "read-only; write scratch under $TMPDIR (/tmp/imp-1000/abc)")
+
+
+def test_write_file_under_the_scratch_dir_is_not_denied(tmp_path: Path) -> None:
+    # The hint needs no scratch-dir exclusion because a write there is allowed
+    # outright; pin that so the two halves cannot drift apart. The scratch dir
+    # sits OUTSIDE the worktree, so only the quest_tmp_dir bind can permit it.
+    scratch = tmp_path.parent / "scratch_outside_the_worktree"
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _tmp_policy(tmp_path, quest_tmp_dir=str(scratch))
+
+    _write_file(ctx, path=str(scratch / "note.txt"), content="hi")
+
+    assert (scratch / "note.txt").read_text() == "hi"

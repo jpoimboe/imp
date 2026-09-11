@@ -231,8 +231,8 @@ def run_command(
     orphaned; closing the keeper then kills whatever escaped the group. So this
     uses Popen(start_new_session=True) + an owned selectors drain loop and a
     graceful group kill (SIGTERM -> grace -> SIGKILL) on the timeout, abort, and
-    output-cap paths. `cwd` must lie inside the writable set (worktree/`/tmp`); a
-    command pointed at the RO floor fails.
+    output-cap paths. `cwd` must lie inside the writable set (worktree / the
+    per-quest scratch dir); a command pointed at the RO floor fails.
 
     `env_extra` (an engine_env result) is the live per-spawn engine env: it refreshes
     the sandbox child environment's IMP_* slice, and on the unsandboxed path it is

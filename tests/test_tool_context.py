@@ -465,7 +465,8 @@ def test_resolve_path_expands_home(tmp_path: Path, monkeypatch) -> None:
     assert ctx.resolve_path("~") == home.resolve()
 
 
-def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = ()) -> SandboxPolicy:
+def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = (),
+                   quest_tmp_dir: str = "/tmp/imp-1000/abc") -> SandboxPolicy:
     home = tmp_path.parent / "changes_abc"
     return SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
@@ -473,6 +474,7 @@ def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = ()) -
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=("/home/u/.ssh",), secret_files=("/home/u/.netrc",),
         child_env=(), network=True, note="", readonly_overlays=readonly_overlays,
+        quest_tmp_dir=quest_tmp_dir,
     )
 
 
@@ -528,12 +530,51 @@ def test_authorize_fs_out_of_worktree_sandboxed_read(tmp_path: Path) -> None:
 
 def test_authorize_fs_out_of_worktree_sandboxed_write(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.base_sandbox_policy = _active_policy(tmp_path)
-    assert ctx.authorize_fs(("write",), "/tmp/scratch.txt") == Path("/tmp/scratch.txt")
+    pol = _active_policy(tmp_path)
+    ctx.base_sandbox_policy = pol
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("write",), "/tmp/scratch.txt")     # host /tmp: read-only floor
+    # ...but the per-quest scratch dir under it is writable, and /tmp stays readable.
+    scratch = Path(pol.quest_tmp_dir) / "scratch.txt"
+    assert ctx.authorize_fs(("write",), str(scratch)) == scratch
+    assert ctx.authorize_fs(("read",), "/tmp/scratch.txt") == Path("/tmp/scratch.txt")
     with pytest.raises(PermissionDenied):
         ctx.authorize_fs(("write",), "/usr/lib/x")          # no writable bind
     with pytest.raises(PermissionDenied):
         ctx.authorize_fs(("write",), "/home/u/.ssh/id_rsa")  # secret mask
+
+
+def test_authorize_fs_denial_message_hint_is_scoped_to_slash_tmp_writes(
+    tmp_path: Path,
+) -> None:
+    # AC 7(b): only a write under /tmp earns the scratch-dir hint. A write denied
+    # elsewhere, and any read denial, keeps the message it has today.
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    with pytest.raises(PermissionDenied) as exc:
+        ctx.authorize_fs(("write",), "/usr/lib/x")
+    assert str(exc.value) == "write on /usr/lib/x denied by the sandbox policy"
+
+    with pytest.raises(PermissionDenied) as exc:
+        ctx.authorize_fs(("read",), "/home/u/.ssh/id_rsa")
+    assert str(exc.value) == (
+        "read on /home/u/.ssh/id_rsa denied by the sandbox policy")
+
+
+def test_authorize_fs_slash_tmp_hint_is_omitted_without_a_scratch_dir(
+    tmp_path: Path,
+) -> None:
+    # AC 7(c): a policy with no scratch dir must never render "under $TMPDIR ()".
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path, quest_tmp_dir="")
+
+    with pytest.raises(PermissionDenied) as exc:
+        ctx.authorize_fs(("write",), "/tmp/scratch.txt")
+
+    assert str(exc.value) == (
+        "write on /tmp/scratch.txt denied by the sandbox policy")
+    assert "$TMPDIR" not in str(exc.value)
 
 
 def test_background_registry_and_bg_ids(tmp_path) -> None:
@@ -1190,8 +1231,8 @@ def test_the_attached_driver_journals_into_the_step_dir_and_snapshots_into_the_q
 
 
 def test_a_context_with_no_quest_dir_gets_no_snapshot_dir(tmp_path: Path) -> None:
-    # The detached-agent path builds a QuestContext with neither quest_dir nor
-    # quest_home, so tool_quest_dir yields None. That is the snapshot_dir=None the
+    # A QuestContext with neither quest_dir nor quest_home — a run outside a quest —
+    # makes tool_quest_dir yield None. That is the snapshot_dir=None the
     # driver already models (temp-file snapshots), not a new case — and not a raise.
     from imp.agents.runner import QuestContext
     from imp.agents.tools.context import attach_impty_driver, tool_quest_dir

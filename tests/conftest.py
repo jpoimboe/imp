@@ -111,7 +111,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # there would orphan a /tmp dir once monkeypatch restores the live value.
     global _OWNED_IMP_HOME
     if _OWNED_IMP_HOME is None:
-        _OWNED_IMP_HOME = tempfile.mkdtemp(prefix="imphome", dir="/tmp")
+        _OWNED_IMP_HOME = tempfile.mkdtemp(prefix="imphome")
         os.environ["IMP_HOME"] = _OWNED_IMP_HOME
 
     # Numerous tests hand-bind AF_UNIX sockets DIRECTLY under tmp_path
@@ -121,20 +121,18 @@ def pytest_configure(config: pytest.Config) -> None:
     # stay under the 107-byte AF_UNIX sun_path limit under -n auto. (imp's two
     # PRODUCTION sockets — the per-quest session socket and the remote-control
     # socket — have been relocated to /tmp/imp-<uid>/ and no longer depend on this
-    # pin; the test-local binds still do.) tmp_path descends from basetemp, so
-    # root the whole run at a short FIXED basetemp `/tmp/ip<6hex>`, independent of
-    # tempfile.gettempdir()/TMPDIR length: inside imp's bwrap sandbox TMPDIR is a
-    # long per-quest scratch (/tmp/imp-<uid>/<questid>) that would otherwise blow
-    # those socket paths over the limit. `/tmp` is the shortest guaranteed-writable
-    # root (identity-bound rw in the sandbox, src/imp/engine/sandbox.py); the
-    # random 6-hex suffix keeps concurrent suite runs on the shared host /tmp
-    # unique. Skip when the user set --basetemp explicitly, and on xdist workers
-    # (they inherit the controller's basetemp via xdist). pytest_unconfigure reaps
-    # the dir we created on clean session end — it is no longer nested under the
-    # engine-reaped quest scratch, so nothing else cleans it.
+    # pin; the test-local binds still do.) tmp_path descends from basetemp, so root
+    # the run at an `ip<6hex>` dir directly under tempfile.gettempdir(): inside imp's
+    # bwrap sandbox that is the per-quest scratch (/tmp/imp-<uid>/<questid>) — the
+    # only writable temp root there, and short enough to leave ~40 bytes of sun_path
+    # headroom — and outside it, plain /tmp. The random 6-hex suffix keeps concurrent
+    # suite runs unique. Skip when the user set --basetemp explicitly, and on xdist
+    # workers (they inherit the controller's basetemp via xdist). pytest_unconfigure
+    # reaps the dir we created on clean session end; the engine's scratch wipe only
+    # runs between steps, never during a run, so nothing else cleans it.
     global _OWNED_BASETEMP
     if not config.option.basetemp and "PYTEST_XDIST_WORKER" not in os.environ:
-        basetemp = os.path.join("/tmp", f"ip{uuid.uuid4().hex[:6]}")
+        basetemp = os.path.join(tempfile.gettempdir(), f"ip{uuid.uuid4().hex[:6]}")
         config.option.basetemp = basetemp
         _OWNED_BASETEMP = basetemp
 

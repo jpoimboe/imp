@@ -43,6 +43,7 @@ import base64
 import html as _html
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -172,7 +173,8 @@ def main() -> None:
         sys.exit("usage: build_showcase.py <manifest.json> [out.html]")
     manifest = json.loads(Path(sys.argv[1]).read_text())
     slug = manifest.get("slug", "showcase")
-    out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(f"/tmp/{slug}-before-after.html")
+    out = (Path(sys.argv[2]) if len(sys.argv) > 2
+           else Path(tempfile.gettempdir()) / f"{slug}-before-after.html")
     html = build(manifest)
     out.write_text(html)
     print(f"wrote {out} ({len(html.encode()) // 1024} KB, "

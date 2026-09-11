@@ -7,11 +7,12 @@ gates (engine/gates.py). `resolve_policy` does the one-time stat I/O and bakes a
 frozen `SandboxPolicy`; `build_sandbox_spawn` is pure given that policy.
 
 The flag ORDER in build_sandbox_spawn is load-bearing: bwrap is last-wins, so the
-writable-home bind (when a home_layer is present) and then the /tmp bind are
-emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
-secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
-a config-driven bind could re-expose a masked secret dir (spec L1-r5). /tmp is
-an identity bind to the real host /tmp.
+writable-home bind (when a home_layer is present) and then the per-quest scratch
+bind are emitted EARLY (right after the ro-floor, before worktree/git/remask) and
+the secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
+a config-driven bind could re-expose a masked secret dir (spec L1-r5). Host /tmp
+has no covering bind of its own: it stays on the --ro-bind / / floor, readable but
+not writable, and only the per-quest scratch dir is re-exposed rw at its real path.
 
 `--unshare-pid` isolates the process table (a shell cannot see or signal
 anything outside its own namespace). One keeper namespace per agent run holds
@@ -57,6 +58,7 @@ from typing import Any, overload
 
 from imp.engine.env import (
     HEADLESS_ENV,
+    ensure_quest_tmp_dir,
     merge_pythonpath_prefix,
     overlay_engine_env,
     quest_var_tmp_root,
@@ -118,6 +120,8 @@ class SandboxPolicy:
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
     overlay_root: OverlayRoot | None = None  # per-step root keepers mint layers under
+    # per-quest scratch dir, rw at its own real path ("" → no bind; host /tmp fully ro)
+    quest_tmp_dir: str = ""
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -132,9 +136,11 @@ class SandboxPolicy:
         cover — only the secret masks are unconditionally last. Add a new bind here
         and ALL consumers pick it up; the argv-parity test enforces no drift. The
         home_layer rw bind goes FIRST (so caches/worktree/secrets over $HOME win),
-        /tmp next, then the per-quest read-write /var/tmp scratch bind (emitted only
-        when quest_var_tmp_dir is set; empty → no /var/tmp bind, host /var/tmp stays
-        on the read-only floor), and the secret masks unconditionally LAST.
+        then the per-quest scratch bind — quest_tmp_dir re-exposed rw at its own real
+        path, the dir TMPDIR points at. Host /tmp gets no covering bind and stays on
+        the read-only floor. Then the per-quest read-write /var/tmp scratch bind
+        (emitted only when quest_var_tmp_dir is set; empty → no /var/tmp bind, host
+        /var/tmp stays on the read-only floor), and the secret masks unconditionally LAST.
 
         The state tmpfs (state_mask) is a fail-closed mask over THIS project's
         state directory, preceded in the same state_block by the read-only
@@ -177,7 +183,7 @@ class SandboxPolicy:
             else [(self.worktree, "rw"), *state_block])
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
-            ("/tmp", "rw"),
+            *([(self.quest_tmp_dir, "rw")] if self.quest_tmp_dir else []),
             *([("/var/tmp", "rw")] if self.quest_var_tmp_dir else []),
             *worktree_block,
             (self.git_common_dir, "rw"),
@@ -381,8 +387,9 @@ def build_sandbox_spawn(
     # 2-10. path-covering binds, in emit order from policy.bind_plan() (the single
     #    source shared with allows_write). Emit order is load-bearing and last-wins:
     #    the home_layer rw bind (when present) goes FIRST so caches/worktree/secrets
-    #    over $HOME win; /tmp goes next (identity bind to the real host /tmp) before
-    #    the worktree/git binds and secret masks; secret masks go LAST.
+    #    over $HOME win; the per-quest scratch bind goes next, at its own real path,
+    #    before the worktree/git binds — host /tmp itself keeps no bind and stays on
+    #    the read-only floor; secret masks go LAST.
     for bind, kind in policy.bind_plan():
         if kind == "rw":
             hl = policy.home_layer
@@ -391,7 +398,7 @@ def build_sandbox_spawn(
             elif bind == "/var/tmp" and policy.quest_var_tmp_dir:
                 src = policy.quest_var_tmp_dir         # per-quest host dir onto namespace /var/tmp
             else:
-                src = bind                            # identity — /tmp is the real host /tmp
+                src = bind                            # bound at its own real path
             argv += ["--bind", src, bind]
         elif kind == "ro":
             argv += ["--ro-bind", bind, bind]
@@ -825,7 +832,8 @@ class SandboxNamespace:
 
 def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     """Ready a frozen policy for THIS spawn: re-create imp's own re-exposed ref
-    directories, and drop any mask/ro-bind path that has since vanished.
+    directories and the per-quest scratch dir, and drop any mask/ro-bind path that
+    has since vanished.
 
     git_ref_reexpose (.git/refs/heads/imp) is created once, at policy-bake time in
     resolve_policy — but git prunes a ref directory the moment its last loose ref
@@ -867,6 +875,12 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
         return policy
     for ref_dir in policy.git_ref_reexpose:
         Path(ref_dir).mkdir(parents=True, exist_ok=True)
+    if policy.quest_tmp_dir:
+        # The executor empties this dir between steps and reaps it at quest end, so
+        # --bind (not --bind-try) would abort setup on a missing source. The chmod
+        # covers the imp-<uid> PARENT too: mkdir(mode=) applies only to the leaf, so
+        # a recreated parent would land at the umask default.
+        ensure_quest_tmp_dir(Path(policy.quest_tmp_dir))
     home_layer = policy.home_layer
     if policy.overlay_root is not None:
         root = Path(policy.overlay_root.path)
@@ -1177,7 +1191,8 @@ def resolve_policy(
     session_sock = session_socket_path(quest_id)
     # TMPDIR: per-quest scratch dir, derived EXACTLY like Quest.tmp_dir
     # (Path(tempfile.gettempdir()) / imp-<uid> / <id>) so it tracks the conftest
-    # temp-redirect fixture and points at the dir the executor creates/wipes.
+    # temp-redirect fixture and points at the dir the executor creates/wipes. The
+    # SAME value is the bind source below — one derivation, two uses.
     quest_tmp = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / quest_id
     var_tmp_root = quest_var_tmp_root()
     quest_var_tmp_dir = (
@@ -1207,6 +1222,7 @@ def resolve_policy(
         extra_writable=tuple(cfg.extra_writable),
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
+        quest_tmp_dir=str(quest_tmp),
         quest_var_tmp_dir=quest_var_tmp_dir,
         child_env=_build_child_env(
             engine_env_result, environ, cfg.env_passthrough,
