@@ -3452,6 +3452,16 @@ def test_compose_identity_toolbar_unsandboxed_after_id_when_no_title() -> None:
     assert bar == "z9gixx · unsandboxed"
 
 
+# AC 8
+def test_compose_identity_toolbar_clips_an_over_wide_left_group() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    bar = compose_identity_toolbar(quest_id="z9gixx", title="x" * 100,
+                                   color=False, width=40)
+    # Clipped to the band's own width-2, ellipsis included, like the position row.
+    assert bar == "z9gixx · " + "x" * 28 + "…"
+    assert pal.display_width(bar) == 38            # was 109: the band overflowed
+
+
 def test_compose_position_row_unsandboxed_is_bold_red_under_ansi() -> None:
     from imp.cli.live_driver import compose_position_row
     try:

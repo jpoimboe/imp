@@ -469,3 +469,35 @@ def test_the_fallback_group_degrades_by_the_same_ladder(
     assert narrow.endswith(_WINDOWS) and "claude_code" not in narrow
     monkeypatch.setenv("COLUMNS", "30")     # neither candidate fits
     assert _chrome_row(events) == "t"
+
+
+# AC 7(a)
+def test_the_opening_prompt_band_carries_no_group_before_the_first_step() -> None:
+    drv = _drive([
+        ev("1", "quest_created", id="pazo49", title="t"),
+        ev("3", "agent_message", agent_id=_STEP, provider="claude_code",
+           model="claude-opus-5", auth_mode="subscription", stop_reason="end_turn",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
+        _quota_event("claude_code"),
+    ])
+    # No step_started, so current_activity() is None and the toolbar takes the
+    # identity fallback — even though a carrier is sitting in the builder behind it.
+    assert drv._builder.current_activity() is None
+    assert drv._builder.carrier_for(None) is not None
+    assert drv.compose_toolbar_static() == "pazo49 · t"
+
+
+# AC 7(c)
+def test_the_startup_band_stays_bare_when_the_replay_established_a_carrier() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=200, status=LiveStatus(out),
+                     startup_verb="resuming")
+    for e in [*_cc_events(_quota_event("claude_code"), auth_mode="subscription"),
+              *_chrome_tail()]:
+        drv.on_event(e)
+    assert drv._builder.carrier_for(None) is not None
+    rows = drv.compose_startup(0)
+    assert rows is not None and len(rows) == 3     # spinner / blank / identity
+    # _cc_events' quest_created carries `quest_id`, not `id`, so the band is the
+    # title alone. The boot window names the quest; it does not meter it.
+    assert rows[2] == "t"
