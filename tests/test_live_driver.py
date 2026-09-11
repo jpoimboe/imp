@@ -3536,10 +3536,10 @@ def test_compose_activity_line_shows_retry_hint_when_total_at_least_60() -> None
                       start_ts="2026-01-01T00:00:00+00:00")
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:11:00+00:00")
-    # the countdown timer is the trailing ` · `-joined segment, after the hint
-    assert line.endswith("38m left")
-    assert " · 38m left" in line
-    assert line.index("press r to retry now") < line.index("38m left")
+    # the countdown timer is the trailing ` · `-joined segment, after both hints,
+    # and `p` sits immediately after `r` — the two keys are offered together
+    assert line.endswith("waiting for limit reset · press r to retry now"
+                         " · press p to switch provider · 38m left")
 
 
 def test_compose_activity_line_retry_hint_survives_final_minute() -> None:
@@ -3550,7 +3550,8 @@ def test_compose_activity_line_retry_hint_survives_final_minute() -> None:
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:01:40+00:00")
     assert line.endswith("20s left")
-    assert line.index("press r to retry now") < line.index("20s left")
+    assert (line.index("press r to retry now")
+            < line.index("press p to switch provider") < line.index("20s left"))
 
 
 def test_compose_activity_line_no_retry_hint_below_60() -> None:
@@ -3560,6 +3561,7 @@ def test_compose_activity_line_no_retry_hint_below_60() -> None:
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert "press r to retry now" not in line
+    assert "press p to switch provider" not in line
 
 
 def test_echo_submitted_reply_shows_before_replay_and_reconciles_once() -> None:
@@ -3598,6 +3600,7 @@ def test_compose_activity_line_no_retry_hint_without_countdown() -> None:
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:00:14+00:00")
     assert "press r to retry now" not in line
+    assert "press p to switch provider" not in line
 
 
 def test_compose_activity_line_retry_hint_at_exactly_60() -> None:
@@ -3607,7 +3610,8 @@ def test_compose_activity_line_retry_hint_at_exactly_60() -> None:
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert line.endswith("55s left")
-    assert line.index("press r to retry now") < line.index("55s left")
+    assert (line.index("press r to retry now")
+            < line.index("press p to switch provider") < line.index("55s left"))
 
 
 def test_frame_suppressed_opening_live_log_parity() -> None:

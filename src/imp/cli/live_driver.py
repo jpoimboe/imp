@@ -177,6 +177,8 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
         tail = rt.fmt_seconds(elapsed)
     if activity.countdown_total is not None and activity.countdown_total >= 60:
         parts.append(_paint("press r to retry now", "dim", color=color, over_bg=False))
+        parts.append(_paint("press p to switch provider", "dim", color=color,
+                            over_bg=False))
     if activity.dep_wait:
         parts.append(_paint("press ctrl-d to pause", "dim", color=color, over_bg=False))
     if pending_provider is not None:
