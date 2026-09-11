@@ -16,7 +16,7 @@ from tests.test_provider_reconcile import _seed, _tiers
 
 _PICKER = """\
 switch provider — the rest of this quest runs on your pick
-takes effect when this step ends, or right away if it's waiting out a rate limit
+takes effect right away — this step is waiting to retry
 
   1  claude_code   current
   2  codex
@@ -36,6 +36,15 @@ Switch with  /provider <name> — the rest of this quest runs on it."""
 def test_the_picker_block_is_verbatim() -> None:
     assert "\n".join(
         render_picker("claude_code", ["claude_code", "codex"])) == _PICKER
+
+
+# AC 8
+def test_the_picker_head_names_no_backoff_category() -> None:
+    from imp.cli.provider_command import PICKER_HEAD
+
+    # The gate admits auth, network, rate_limit and stalled waits alike, so the
+    # copy must not claim any one of them.
+    assert PICKER_HEAD[1] == "takes effect right away — this step is waiting to retry"
 
 
 def test_the_roster_block_is_verbatim() -> None:

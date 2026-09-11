@@ -10,8 +10,7 @@ from typing import Any
 
 PICKER_HEAD = (
     "switch provider — the rest of this quest runs on your pick",
-    "takes effect when this step ends, or right away if it's waiting out a "
-    "rate limit",
+    "takes effect right away — this step is waiting to retry",
 )
 PICKER_FOOT = "press a number, or esc to cancel"
 ROSTER_FOOT = "Switch with  /provider <name> — the rest of this quest runs on it."
