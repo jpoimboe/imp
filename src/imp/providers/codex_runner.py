@@ -713,6 +713,7 @@ class CodexSession(ObserveSession):
                 subtype="continuation")
             self._next_prompt = instr
             self._handoff_phase = "instruction_sent"
+            self._proc_state["handoff"] = True
             self._requery_pending = True
             return False
         if self._handoff_phase == "instruction_sent":
@@ -1110,7 +1111,8 @@ def _flush_codex_prose(
         raw={"content": [{"type": "text", "text": t} for t in parts]},
         usage={}, stop_reason=None, auth_mode=state.get("auth_mode"),
         provider_error=classifies_as_provider_error(
-            parts[-1], output_tokens=output_tokens, stop_reason=None))
+            parts[-1], output_tokens=output_tokens, stop_reason=None),
+        handoff=bool(state.get("handoff")))
     state["turn_had_llm"] = True
 
 

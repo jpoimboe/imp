@@ -285,6 +285,47 @@ async def test_low_or_absent_reading_suppresses_handoff_on_a_huge_turn_sum(
 
 
 @pytest.mark.anyio
+async def test_handoff_note_turn_is_flagged_in_the_event_log(
+        tmp_path: Path, fake_codex_rollout_readings: list[RolloutReadings]) -> None:
+    # Turn 1 -> inject -> turn 2: _flush_codex_prose flags the note off the proc-state bridge.
+    _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    fake_codex_rollout_readings[0] = RolloutReadings(
+        context=(160_000, 400_000), quota=None)
+
+    scripted = [
+        # Turn 1 reaches the cutoff (160000/400000 = 0.40), no complete_step.
+        [thread_started("thr-1"), agent_message("working on it"),
+         turn_completed(input_tokens=1_000)],
+        # Turn 2 is the handoff note itself.
+        [agent_message("HANDOFF-SENTINEL: where I left off"),
+         turn_completed(input_tokens=1_000)],
+    ]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = tmp_path / "auth.json"  # test seam
+
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
+        system_prompt="you are a test agent", initial_messages=(),
+        quest_context=QuestContext(title="t", project_root=tmp_path,
+                                     workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
+        agent_id="step:t", event_log=elog)
+
+    events = [ev async for ev in runner.run(inv)]
+
+    assert len([e for e in events if e["type"] == "handoff"]) == 1
+    msgs = [e for e in elog.read() if e["type"] == "agent_message"]
+    assert len(msgs) >= 2
+    # the flagged turn is the note itself, not merely the last message
+    assert "HANDOFF-SENTINEL" in str(msgs[-1]["payload"]["raw"])
+    assert msgs[-1]["payload"]["handoff"] is True
+    assert all("handoff" not in m["payload"] for m in msgs[:-1])
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(("context_tokens", "expects_handoff"), [
     (259_999, False),
     (260_000, True),
