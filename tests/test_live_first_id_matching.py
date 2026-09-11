@@ -6,6 +6,7 @@ the archive still raises."""
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,13 @@ import pytest
 import imp.cli.main as m
 import imp.cli.store as s
 from imp.cli.main import main
+from imp.cli.mutation_proxy import run_mutation
 from imp.cli.store import CompletedRow, LocalStore
 from imp.engine import archive
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.quest import Quest
+from imp.paths import project_state_dir
+from imp.remote.daemon import spawn
 from tests.conftest import _seed_control
 
 LIVE = "livid1"
@@ -123,3 +127,50 @@ def test_matching_scans_live_homes_once(
 
     assert m._match_quest_ids(tmp_path, "arch") == ["arch77"]
     assert scans["n"] == 1
+
+
+def test_edit_resolves_a_live_token_with_an_unreadable_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 2(b): the edit lands on the live quest, not an error frame."""
+    _live_quest_unreadable_journal(tmp_path, monkeypatch)
+
+    result = run_mutation(tmp_path, "edit", {
+        "token": "livid", "title": "Renamed", "backlog": False, "active": False,
+        "depends_on": None, "clear_deps": False, "append_intent": None,
+        "base": None})
+
+    assert result == {
+        "returncode": 0, "message": 'edited livid1 · title → "Renamed"'}
+    meta = json.loads(
+        (project_state_dir(tmp_path) / "quests" / LIVE / "quest.json").read_text())
+    assert meta["title"] == "Renamed"
+
+
+def test_abandon_resolves_a_live_token_with_an_unreadable_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 2(c): the home is actually torn down, so the resolution really reached it."""
+    _live_quest_unreadable_journal(tmp_path, monkeypatch)
+
+    result = run_mutation(tmp_path, "abandon", {"token": "livid"})
+
+    assert result == {"returncode": 0, "message": "Abandoned livid1."}
+    assert not (project_state_dir(tmp_path) / "quests" / LIVE).exists()
+
+
+def test_resume_quest_resolves_a_live_token_with_an_unreadable_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC 2(d): `imp resume` is the remedy the ArchiveMismatch copy prescribes, and
+    the remote/session path resolves its token through this seam."""
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        spawn, "_spawn_detached",
+        lambda argv, env, cwd: spawned.append(argv))
+    _live_quest_unreadable_journal(tmp_path, monkeypatch)
+
+    msg = spawn.resume_quest(tmp_path, "livid")
+
+    assert msg == "Resuming @livid1…"
+    assert spawned == [[sys.executable, "-m", "imp", "resume", LIVE, "--headless"]]
