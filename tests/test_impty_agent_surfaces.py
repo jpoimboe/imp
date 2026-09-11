@@ -376,6 +376,11 @@ def test_terminal_ui_skill_send_bullet_teaches_named_keys() -> None:
     assert "a mistyped escape in `data` is silently typed into the program" in bullet
 
 
+def test_terminal_ui_skill_send_bullet_notes_matcher_needs_default_wait() -> None:
+    bullet = _flat_bullet("**`send(")
+    assert "needs the default `wait=True`" in bullet
+
+
 def test_terminal_ui_skill_wait_bullet_teaches_the_text_matchers() -> None:
     bullet = _flat_bullet("**`wait(")
     assert "for_text=" in bullet and "pattern=" in bullet

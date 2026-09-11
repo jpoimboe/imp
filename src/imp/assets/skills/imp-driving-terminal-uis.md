@@ -49,7 +49,7 @@ Diff hunks use 0-based labels such as `[row 7]`, `[rows 20-22 inserted]`, and
   otherwise return a changed-row diff, `[no text change]`, or `[full screen]` followed
   by the complete screen. `wait=True` settles; `wait=<seconds>` settles a fixed time
   for an always-animating TUI; `for_text=`/`pattern=` waits for that text as `wait()`
-  does and returns its header.
+  does and returns its header (needs the default `wait=True`).
 - **`snapshot(path=None, full=False, light=False)`** — render the screen to a PNG and
   return its path; **read it with `read_file` to see color, bold, and box-drawing**
   (`view` is text only). Let `path` default to a temp file — don't point it into the
