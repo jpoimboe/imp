@@ -544,6 +544,39 @@ def test_authorize_fs_out_of_worktree_sandboxed_write(tmp_path: Path) -> None:
         ctx.authorize_fs(("write",), "/home/u/.ssh/id_rsa")  # secret mask
 
 
+def test_authorize_fs_denial_message_hint_is_scoped_to_slash_tmp_writes(
+    tmp_path: Path,
+) -> None:
+    # AC 7(b): only a write under /tmp earns the scratch-dir hint. A write denied
+    # elsewhere, and any read denial, keeps the message it has today.
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+
+    with pytest.raises(PermissionDenied) as exc:
+        ctx.authorize_fs(("write",), "/usr/lib/x")
+    assert str(exc.value) == "write on /usr/lib/x denied by the sandbox policy"
+
+    with pytest.raises(PermissionDenied) as exc:
+        ctx.authorize_fs(("read",), "/home/u/.ssh/id_rsa")
+    assert str(exc.value) == (
+        "read on /home/u/.ssh/id_rsa denied by the sandbox policy")
+
+
+def test_authorize_fs_slash_tmp_hint_is_omitted_without_a_scratch_dir(
+    tmp_path: Path,
+) -> None:
+    # AC 7(c): a policy with no scratch dir must never render "under $TMPDIR ()".
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path, quest_tmp_dir="")
+
+    with pytest.raises(PermissionDenied) as exc:
+        ctx.authorize_fs(("write",), "/tmp/scratch.txt")
+
+    assert str(exc.value) == (
+        "write on /tmp/scratch.txt denied by the sandbox policy")
+    assert "$TMPDIR" not in str(exc.value)
+
+
 def test_background_registry_and_bg_ids(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")

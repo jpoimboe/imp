@@ -211,7 +211,9 @@ class ToolContext:
         authorize each op against the sandbox policy — the same boundary bash
         obeys. An unsandboxed run is fully trusted (allow-all, bash parity); under
         an active policy each op is bounded by allows_read/allows_write. Raises
-        PermissionDenied on a denied op; returns the resolved Path."""
+        PermissionDenied on a denied op; returns the resolved Path. A denied write
+        under /tmp names the scratch dir — these tools deny in-process, so there is
+        no kernel EROFS for the agent to read."""
         resolved = self.resolve_path(path)
         policy = self.sandbox_policy
         if policy is None or not policy.active:
@@ -222,8 +224,13 @@ class ToolContext:
                 else policy.allows_write(resolved)
             )
             if not allowed:
+                hint = ""
+                if (op == "write" and policy.quest_tmp_dir
+                        and resolved.is_relative_to(Path("/tmp"))):
+                    hint = (" — /tmp is read-only; write scratch under "
+                            f"$TMPDIR ({policy.quest_tmp_dir})")
                 raise PermissionDenied(
-                    f"{op} on {resolved} denied by the sandbox policy"
+                    f"{op} on {resolved} denied by the sandbox policy{hint}"
                 )
         return resolved
 
