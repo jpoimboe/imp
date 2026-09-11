@@ -109,31 +109,46 @@ def test_over_cap_preview_never_splits_a_multibyte_char(tmp_path: Path) -> None:
     assert preview == "a" * 1_999                 # the partial char is dropped
 
 
-def _dispatch_task_call_sites() -> dict[str, tuple[list[int], list[int]]]:
-    """src/imp modules calling dispatch_task -> (call linenos, wrap_task_result linenos)."""
-    def _calls(tree: ast.AST, name: str) -> list[int]:
-        return [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Call)
-                and ((isinstance(n.func, ast.Name) and n.func.id == name)
-                     or (isinstance(n.func, ast.Attribute) and n.func.attr == name))]
+def _dispatch_task_call_sites() -> list[tuple[str, str, int, bool]]:
+    """(rel_module, func_name, call_lineno, has_wrap) for each dispatch_task call site."""
+    def _is_call(node: ast.AST, name: str) -> bool:
+        return (isinstance(node, ast.Call) and
+                ((isinstance(node.func, ast.Name) and node.func.id == name) or
+                 (isinstance(node.func, ast.Attribute) and node.func.attr == name)))
+
+    def _enclosing_func(tree: ast.AST, lineno: int) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+        best = None
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.lineno <= lineno <= node.end_lineno:  # type: ignore[attr-defined]
+                    if best is None or node.lineno > best.lineno:
+                        best = node
+        return best
 
     src = Path(__file__).resolve().parents[1] / "src" / "imp"
-    out: dict[str, tuple[list[int], list[int]]] = {}
+    out: list[tuple[str, str, int, bool]] = []
     for path in sorted(src.rglob("*.py")):
         tree = ast.parse(path.read_text())
-        sites = _calls(tree, "dispatch_task")
-        if sites:
-            out[str(path.relative_to(src))] = (sites, _calls(tree, "wrap_task_result"))
+        rel = str(path.relative_to(src))
+        for node in ast.walk(tree):
+            if _is_call(node, "dispatch_task"):
+                enc = _enclosing_func(tree, node.lineno)  # type: ignore[arg-type]
+                if enc is None:
+                    out.append((rel, "<module>", node.lineno, False))
+                else:
+                    has_wrap = any(_is_call(n, "wrap_task_result") for n in ast.walk(enc))
+                    out.append((rel, enc.name, node.lineno, has_wrap))
     return out
 
 
 def test_every_dispatch_task_call_site_wraps_its_result() -> None:
-    # AC 9: adding a sub_agent dispatch site without routing its result through
-    # wrap_task_result must fail here. Asserted over the DISCOVERED set of sites,
-    # never a hard-coded total; the floor below only proves the scan sees all three
-    # dispatch paths (anthropic/openai, codex, claude_code).
+    # AC 9: each dispatch_task call site must have wrap_task_result in its own enclosing
+    # function. Asserted over the DISCOVERED set; the floor below proves the scan sees all
+    # three dispatch paths (anthropic/openai, codex, claude_code).
     sites = _dispatch_task_call_sites()
-    assert set(sites) >= {"agents/dispatch.py", "providers/codex_mcp.py",
-                          "providers/claude_code.py"}
-    for rel, (calls, wraps) in sites.items():
-        assert len(wraps) >= len(calls), (
-            f"{rel}: {len(calls)} dispatch_task call(s), {len(wraps)} wrap(s)")
+    assert {rel for rel, _, _, _ in sites} >= {
+        "agents/dispatch.py", "providers/codex_mcp.py", "providers/claude_code.py"
+    }
+    for rel, func, lineno, has_wrap in sites:
+        assert has_wrap, (
+            f"{rel}: dispatch_task at line {lineno} in `{func}` has no wrap_task_result")
