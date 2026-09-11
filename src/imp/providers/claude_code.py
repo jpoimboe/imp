@@ -143,6 +143,8 @@ from imp.providers.web_native import (
 if TYPE_CHECKING:
     from claude_agent_sdk import EffortLevel, ThinkingConfig
 
+    from imp.engine.state import EventLog
+
 
 # The CLI echoes an image tool result twice on one stream-json line (the content
 # block plus a `tool_use_result` copy); 4x is that doubling plus 2x headroom.
@@ -400,6 +402,21 @@ class _InFlightOutcome:
     is_error: bool
 
 
+_ToolResultContent = str | list[ContentPart] | list[dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class _WithheldResult:
+    tool_use_id: str
+    key: str
+    name: str
+    # The SDK's filler, restored verbatim if this turn never reaches the correction.
+    filler: _ToolResultContent
+    # The call block when the streaming site never journaled its tool_call (the
+    # threshold crossing returns before that loop); None when it already did.
+    call: ToolUseBlock | None
+
+
 @dataclass
 class _RunState:
     """Per-run mutable state shared between MCP tool wrappers and the runner.
@@ -435,6 +452,9 @@ class _RunState:
     # ONLY while its call is in flight — every wrapper exit path resolves and pops
     # it — so this dict is the in-flight set.
     inflight: dict[str, _InFlight] = field(default_factory=dict)
+    # Fillers withheld at the streaming append site, awaiting imp's own result.
+    # Drained on every terminal path, so a withheld result is never dropped.
+    withheld: list[_WithheldResult] = field(default_factory=list)
 
     def register_inflight(self, key: str, name: str) -> None:
         self.inflight[key] = _InFlight(
@@ -444,6 +464,29 @@ class _RunState:
         entry = self.inflight.pop(key, None)
         if entry is not None:
             entry.future.set_result((content, is_error))
+
+    def withhold_inflight(
+        self, call: ToolUseBlock | None, filler: _ToolResultContent, *,
+        journaled: bool,
+    ) -> bool:
+        """Withhold the SDK's filler for a call of imp's own still in flight.
+
+        Records the id -> key mapping now because nothing downstream can rebuild it,
+        keeps the filler so a turn that never reaches the correction can put it back,
+        and carries the call block when its tool_call was never journaled, so the
+        late append emits the pair. False when the call is not one imp is running.
+        """
+        if call is None:
+            return False
+        name = _canon_tool_name(call.name)
+        key = captured_result_key(name, call.input)
+        if key not in self.inflight:
+            return False
+        self.withheld.append(_WithheldResult(
+            tool_use_id=call.id, key=key, name=name, filler=filler,
+            call=None if journaled else ToolUseBlock(
+                id=call.id, name=name, input=call.input)))
+        return True
 
 
 async def _settle_inflight(
@@ -466,6 +509,62 @@ async def _settle_inflight(
         out.append(_InFlightOutcome(
             key=key, name=e.name, content=content, is_error=is_error))
     return out
+
+
+def _tool_use_block(
+    messages: list[Message], tool_use_id: str,
+) -> ToolUseBlock | None:
+    """The assistant tool_use a tool_result answers — the in-process source of the
+    call's name and input, which _pending_tools does not hold on a crossing turn.
+    """
+    for m in reversed(messages):
+        for b in m.content:
+            if isinstance(b, ToolUseBlock) and b.id == tool_use_id:
+                return b
+    return None
+
+
+def _journal_withheld(
+    elog: EventLog, aid: str, state: _RunState, w: _WithheldResult,
+    content: _ToolResultContent, *, is_error: bool,
+) -> None:
+    """Emit the pair a withheld call is owed: its tool_call when the streaming site
+    never journaled one, then its one result."""
+    if w.call is not None:
+        elog.append_tool_call(agent_id=aid, block=w.call)
+    elog.append_tool_result(
+        agent_id=aid,
+        block=ToolResultBlock(w.tool_use_id, content, is_error=is_error),
+        duration_ms=state.tool_durations.pop(w.tool_use_id, None))
+
+
+def _correct_withheld_results(
+    elog: EventLog, aid: str, state: _RunState,
+    captured: dict[str, tuple[str, bool]],
+) -> None:
+    """Journal imp's own account of each filler the streaming site withheld.
+
+    Drained as it goes, so no entry is ever journaled twice.
+    """
+    while state.withheld:
+        w = state.withheld.pop(0)
+        content, is_error = captured.get(
+            w.key, (unresolved_tool_result_content(w.name), True))
+        _journal_withheld(elog, aid, state, w, content, is_error=is_error)
+
+
+def _restore_withheld_results(
+    elog: EventLog, aid: str, state: _RunState,
+) -> None:
+    """Put back the fillers of a turn that never reached the correction.
+
+    A terminal outcome other than the handoff close — a complete_step preemption, or
+    a close that is not error_during_execution — runs no bounded await, so imp has
+    no settled result to substitute and the SDK's account goes back verbatim.
+    """
+    while state.withheld:
+        w = state.withheld.pop(0)
+        _journal_withheld(elog, aid, state, w, w.filler, is_error=True)
 
 
 _CORRECTION_HEADER = (

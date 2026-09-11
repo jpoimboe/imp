@@ -6,13 +6,28 @@ import json
 
 import pytest
 
+from imp.agents.runner import (
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
+from imp.agents.transcript import captured_result_key
+from imp.engine.state import InMemoryEventLog
 from imp.providers.claude_code import (
     INFLIGHT_RESULT_BOUND_S,
+    _correct_withheld_results,
     _InFlightOutcome,
+    _restore_withheld_results,
     _RunState,
     _settle_inflight,
+    _tool_use_block,
     correction_increment,
 )
+
+# Stands in for whatever the SDK sent; the point of the restore path is that it
+# goes back verbatim, whatever it was.
+FILLER = "the SDK's rejection filler"
 
 
 @pytest.fixture
@@ -101,3 +116,126 @@ def test_increment_names_each_call_and_its_real_outcome() -> None:
     assert "account.\n\n- write_file:" in inc
     # Prepended verbatim to the next query, so it must end separated from it.
     assert inc.endswith("\n\n")
+
+
+@pytest.mark.anyio
+async def test_a_withheld_filler_is_replaced_by_imps_own_result() -> None:
+    """imp is the executor of its own tools, so the log must carry what the tool
+    really did — paired with the tool_call the crossing turn never journaled."""
+    state = _RunState()
+    args = {"path": "scratch", "content": "x"}
+    key = captured_result_key("write_file", args)
+    state.register_inflight(key, "write_file")
+
+    assert state.withhold_inflight(
+        ToolUseBlock(id="u1", name="mcp__imp__write_file", input=args),
+        FILLER, journaled=False) is True
+
+    log = InMemoryEventLog()
+    _correct_withheld_results(log, "step:p/s", state,
+                              {key: ("wrote 1 bytes to scratch", False)})
+
+    events = list(log.read())
+    assert [e["type"] for e in events] == ["tool_call", "tool_result"]
+    assert events[0]["payload"] == {
+        "id": "u1", "name": "write_file", "input": args}
+    assert events[1]["payload"] == {
+        "id": "u1", "content": "wrote 1 bytes to scratch", "error": False}
+    assert not state.withheld
+
+
+@pytest.mark.anyio
+async def test_an_already_journaled_call_gains_only_its_result() -> None:
+    """One call and one result per tool_use_id: when the streaming site already
+    emitted the tool_call, the late append must not emit a second one."""
+    state = _RunState()
+    key = captured_result_key("write_file", {"path": "a"})
+    state.register_inflight(key, "write_file")
+    state.withhold_inflight(
+        ToolUseBlock(id="u7", name="write_file", input={"path": "a"}),
+        FILLER, journaled=True)
+
+    log = InMemoryEventLog()
+    _correct_withheld_results(log, "step:p/s", state, {key: ("wrote it", False)})
+
+    assert [e["type"] for e in log.read()] == ["tool_result"]
+
+
+@pytest.mark.anyio
+async def test_a_call_imp_is_not_running_is_never_withheld() -> None:
+    """Suppression is narrow: a filler imp has no better account of — a different
+    call's args, or a tool_use imp never saw — stays in the log as today."""
+    state = _RunState()
+    state.register_inflight(
+        captured_result_key("write_file", {"path": "a"}), "write_file")
+
+    assert state.withhold_inflight(
+        ToolUseBlock(id="u8", name="write_file", input={"path": "b"}),
+        FILLER, journaled=False) is False
+    assert state.withhold_inflight(None, FILLER, journaled=False) is False
+    assert not state.withheld
+
+
+@pytest.mark.anyio
+async def test_a_withheld_result_imp_has_no_record_of_states_uncertainty() -> None:
+    """The call resolved through an exception path, which writes no capture, in the
+    window between the filler and the settle — so the merged map holds nothing for
+    it. The log still gets its one result: honest uncertainty, never the filler."""
+    state = _RunState()
+    key = captured_result_key("bash", {"command": "sleep 5"})
+    state.register_inflight(key, "bash")
+    state.withhold_inflight(
+        ToolUseBlock(id="u2", name="mcp__imp__bash", input={"command": "sleep 5"}),
+        FILLER, journaled=True)
+
+    log = InMemoryEventLog()
+    _correct_withheld_results(log, "step:p/s", state, {})
+
+    [ev] = [e for e in log.read() if e["type"] == "tool_result"]
+    assert ev["payload"]["error"] is True
+    assert json.loads(ev["payload"]["content"]) == {
+        "stdout": "",
+        "stderr": ("imp interrupted this turn; this call was still running and its "
+                   "outcome was not recorded. Verify the current state before "
+                   "relying on it."),
+        "returncode": None}
+
+
+@pytest.mark.anyio
+async def test_a_turn_that_never_corrects_puts_the_filler_back() -> None:
+    """The withhold is a deferral, not a deletion. A terminal outcome that runs no
+    bounded await has nothing truer to say, so the SDK's account goes back verbatim
+    and the call keeps the one record it has today."""
+    state = _RunState()
+    key = captured_result_key("write_file", {"path": "a"})
+    state.register_inflight(key, "write_file")
+    state.withhold_inflight(
+        ToolUseBlock(id="u9", name="mcp__imp__write_file", input={"path": "a"}),
+        FILLER, journaled=False)
+
+    log = InMemoryEventLog()
+    _restore_withheld_results(log, "step:p/s", state)
+
+    events = list(log.read())
+    assert [e["type"] for e in events] == ["tool_call", "tool_result"]
+    assert events[1]["payload"] == {"id": "u9", "content": FILLER, "error": True}
+    assert not state.withheld
+
+
+def test_tool_use_block_finds_the_call_a_result_answers() -> None:
+    """_pending_tools is empty on a crossing turn, so the in-memory transcript is the
+    only source of the call's name and input."""
+    messages = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            TextBlock(text="working"),
+            ToolUseBlock(id="u1", name="mcp__imp__write_file",
+                         input={"path": "a"}))),
+        Message(role="user", content=(
+            ToolResultBlock("u1", "rejected", is_error=True),)),
+    ]
+
+    found = _tool_use_block(messages, "u1")
+    assert found is not None
+    assert (found.name, found.input) == ("mcp__imp__write_file", {"path": "a"})
+    assert _tool_use_block(messages, "u404") is None
