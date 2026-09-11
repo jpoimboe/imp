@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from imp.cli.narrative import NarrativeBuilder
+from imp.cli.narrative import Carrier, NarrativeBuilder, carrier_provider
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests._event_fixtures import ev
 
@@ -98,3 +98,48 @@ def test_a_retained_reading_is_still_a_raw_fallback_line() -> None:
 
     step = b.tree.root.children[0].children[0]
     assert [getattr(c, "event_type", None) for c in step.children] == ["quota_reading"]
+
+
+def test_carrier_provider_names_only_step_level_agent_messages() -> None:
+    assert carrier_provider(_message("3", "step:p/s", "codex")) == "codex"
+    assert carrier_provider(_message("r1", "sub:t1", "codex")) is None
+    assert carrier_provider(ev("q1", "quota_reading", agent_id="step:p/s",
+                               provider="codex")) is None
+    assert carrier_provider(ev("3", "agent_message", agent_id="step:p/s")) is None
+
+
+def test_the_carrier_pairs_a_provider_with_its_own_mode_and_reading() -> None:
+    b = NarrativeBuilder()
+    assert b.carrier_for(None) is None            # no turn has named a carrier yet
+    reading = _reading("claude_code", QuotaWindow("5h", 62.0, None))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="claude-opus-5", provider="claude_code"))
+    b.add(_message("3", "step:p/s", "claude_code", auth_mode="subscription"))
+    b.add(ev("q1", "quota_reading", agent_id="step:p/s", **reading.to_payload()))
+
+    # A provider-less step (chrome, or a drained stack) falls back to that turn.
+    assert b.carrier_for(None) == Carrier(provider="claude_code",
+                                          auth_mode="subscription",
+                                          quota=reading)
+    # A named provider still wins, and never borrows the other's mode.
+    b.add(_message("4", "step:p/s", "codex", auth_mode="apikey"))
+    assert b.carrier_for("claude_code") == Carrier(provider="claude_code",
+                                                   auth_mode="subscription",
+                                                   quota=reading)
+    assert b.carrier_for("anthropic") == Carrier(provider="anthropic",
+                                                 auth_mode=None, quota=None)
+    # Latest step-level turn wins the fallback slot.
+    assert b.carrier_for(None) == Carrier(provider="codex", auth_mode="apikey",
+                                          quota=None)
+
+
+def test_a_subagent_turn_does_not_set_the_last_known_provider() -> None:
+    b = NarrativeBuilder()
+    _codex_step(b)
+    b.add(_message("3", "step:p/s", "codex", auth_mode="apikey"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
+             name="sub_agent", input={"subagent_name": "coder"}))
+    b.add(_message("r1", "sub:t1", "anthropic"))
+
+    assert b.carrier_for(None) == Carrier(provider="codex", auth_mode="apikey",
+                                          quota=None)
