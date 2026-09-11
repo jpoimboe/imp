@@ -587,8 +587,9 @@ class ImptyDriver:
         pattern: str | None = None,
     ) -> str:
         """Wait until there is an idle window after qualifying output, the process exits,
-        the text appears, or `hard` elapses; then return a changed-row diff, `[no text
-        change]`, or `[full screen]` followed by the complete screen.
+        or `hard` elapses — or, with a matcher, until its text appears; then return a
+        changed-row diff, `[no text change]`, or `[full screen]` followed by the
+        complete screen.
 
         Output already read qualifies normally, so an already-quiet program returns
         promptly. `for_change=True` requires new output after this call, then its idle
@@ -606,11 +607,11 @@ class ImptyDriver:
         reaction. Its header is `[found]`, `[not seen after <cap>s hard cap]`, or
         `[not seen — program exited]` when the program ended without printing it.
 
-        `hard` defaults to 3s — 30s with `for_change=True` or a matcher, which wait
-        for something that has not happened yet — and is clamped to 240s: no single
-        call blocks longer than that. Without a matcher the header is `[settled]`,
+        `hard` defaults to 3s (30s with `for_change=True` or a matcher), caller values
+        are accepted, and values over 240s are capped: no single call blocks longer
+        than that. Without a matcher the header is `[settled]`,
         `[still busy after <cap>s hard cap]`, or — with `for_change=True` only —
-        `[no change after <cap>s hard cap]`. Whenever the clamp fires, whichever
+        `[no change after <cap>s hard cap]`. Whenever the cap fires, whichever
         not-settled header applies (`not seen` included) names the call cap and the
         value you asked for and tells you to call wait() again to keep watching —
         which is how you follow a program for hours without any one call blocking

@@ -86,3 +86,14 @@ def test_impty_tool_specs_match_build_server_introspection() -> None:
         assert spec.description == THIN_DESCRIPTIONS[spec.name]
         assert tool.description == driver_docs[spec.name]
         assert spec.description != driver_docs[spec.name]
+
+
+def test_send_and_wait_schemas_carry_the_new_parameters() -> None:
+    driver = ImptyDriver()
+    specs = {s.name: s for s in impty_tool_specs(driver)}
+    rich = {t.name: t for t in asyncio.run(build_server(driver).list_tools())}
+    # Both surfaces introspect the same bound methods — no per-provider code.
+    for name, added in (("send", {"keys", "for_text", "pattern"}),
+                        ("wait", {"for_text", "pattern"})):
+        assert added <= set(specs[name].input_schema["properties"])
+        assert added <= set(rich[name].inputSchema["properties"])

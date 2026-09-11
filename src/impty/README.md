@@ -229,7 +229,10 @@ Two ready-made entry points:
   (`python -m impty.mcp`, registered in `.mcp.json`). `start` waits until it settles,
   exits, or the 3s settle deadline elapses, then returns `[full screen]` followed by
   the complete screen accumulated so far; for slow startup use `wait(hard=...)` then
-  `view()`. `send(wait=False)` returns `[sent]` without rendering, and
+  `view()`. `send` takes `data=` literal text and/or `keys=["enter"]` named keys,
+  resolved and delivered in one write, and its `for_text=`/`pattern=` waits for the
+  reaction text instead of a settle. `send(wait=False)` returns `[sent]` without
+  rendering, and
   `resize(..., wait=False)` returns `[resized]` without rendering; otherwise `send`,
   `resize`, `wait`, and `send_signal` return a changed-row diff with 0-based labels,
   `[no text change]`, or `[full screen]` plus the complete screen. `view` returns the
@@ -238,7 +241,9 @@ Two ready-made entry points:
   child is gone, its header carries the exit status — `exit=0`, `exit=3`, or
   `exit=SIGINT`. `send_signal` delivers a real signal to the terminal's foreground
   process group (e.g. `sig=2` for mode-independent Ctrl-C); `resize` (`rows, cols`)
-  delivers a real `SIGWINCH`; `wait(for_change=True)` waits for NEW output.
-  `snapshot` renders the live screen to a PNG and returns its path; `stop` sends
-  SIGTERM, allows a 1s grace, then SIGKILL, and returns the program's exit status and
-  final screen. Adding/removing a tool needs a server restart.
+  delivers a real `SIGWINCH`; `wait(for_change=True)` waits for NEW output, and its
+  `for_text=`/`pattern=` blocks until that text is on the current screen, heading the
+  reply `[found]` or `[not seen …]`. `snapshot` renders the live screen to a PNG and
+  returns its path; `stop` sends SIGTERM, allows a 1s grace, then SIGKILL, and returns
+  the program's exit status and final screen. Adding/removing a tool needs a server
+  restart.
