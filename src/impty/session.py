@@ -371,7 +371,7 @@ class TerminalSession:
 
     def wait_idle(
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float = DEFAULT_SETTLE_HARD,
-        *, since: float = 0.0,
+        *, since: float = 0.0, predicate: Callable[[], bool] | None = None,
     ) -> bool:
         """Block until the child produces output and then goes quiet for `idle`
         seconds (or exits, or `hard` elapses), feeding everything to pyte.
@@ -398,19 +398,32 @@ class TerminalSession:
         stamp is still `>= since`, so drainer-consumed reaction bytes qualify just
         as if we'd read them ourselves.
 
+        `predicate`, when given, gates ONLY the quiet settle-return: the wait keeps
+        going until it fires, so a program that printed something earlier and then
+        went quiet stays watched instead of settling on that stale screen. It is
+        checked once up front (so a condition ALREADY true settles at once) and
+        after every read that delivered bytes — a QUIET read cannot have changed
+        anything — and never again once it has fired, leaving plain settle semantics
+        for the rest of `hard`. The EOF, child-exit and deadline branches are
+        untouched, so the returned bool still means exactly 'settled'; whether the
+        predicate fired is the caller's to observe through the predicate itself.
+
         `_last_data_t` is shared state updated by `_read_step` whoever calls it,
         all under `_io_lock`."""
         with self._io_lock:
             start = time.monotonic()
+            pending = predicate is not None and not predicate()
             while True:
                 remaining = hard - (time.monotonic() - start)
                 result = self._read_step(max(_FLOOR, min(idle, remaining)))
                 now = time.monotonic()
                 if result is _StepResult.EOF:
                     return True  # child exited / pty closed
+                if predicate is not None and pending and result is _StepResult.DATA:
+                    pending = not predicate()
                 last = self._last_data_t
                 if last is not None and last >= since:  # qualifying output seen...
-                    if (now - last) >= idle:
+                    if not pending and (now - last) >= idle:
                         return True  # ...by us or the drainer, then quiet
                 elif self._proc.poll() is not None:
                     return True  # child exited having produced nothing qualifying

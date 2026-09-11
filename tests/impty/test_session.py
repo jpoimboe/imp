@@ -110,6 +110,21 @@ def test_wait_idle_since_waits_for_delayed_reaction_not_stale_screen() -> None:
         assert "REACTION" in "\n".join(s.lines())
 
 
+def test_wait_idle_predicate_suppresses_the_quiet_settle_until_it_fires() -> None:
+    # The flagship shape: a program that printed something, went quiet, and will
+    # only later print what the caller is waiting for. Settling on that stale screen
+    # would end the wait before the thing ever arrives.
+    prog = "import time; print('READY', flush=True); time.sleep(30)"
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        assert s.wait_idle(idle=0.2, hard=10.0) is True  # READY read; child now quiet
+        t0 = time.monotonic()
+        assert s.wait_idle(idle=0.2, hard=0.5, predicate=lambda: False) is False
+        # Without the suppression this returns True at ~idle on the stale screen.
+        assert time.monotonic() - t0 >= 0.5
+        # A predicate already true settles exactly as an unpredicated wait does.
+        assert s.wait_idle(idle=0.2, hard=10.0, predicate=lambda: True) is True
+
+
 def test_default_term_is_set_for_color_fidelity() -> None:
     # The child inherits TERM=xterm-256color by default, so a real program's
     # color emission (and thus cell().fg) is deterministic across machines/CI.
