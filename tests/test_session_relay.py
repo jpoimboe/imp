@@ -225,9 +225,15 @@ async def test_relay_reflects_title_rename_after_start(tmp_path: Path) -> None:
     assert sink[1]["quest"]["title"] == "Real Title"   # picked up the rename
 
 
+@pytest.mark.parametrize(("event_type", "payload"), [
+    ("interrupt_delivery_started",
+     {"agent_id": "step:p/s", "tier": "cooperative"}),
+    ("interrupt_delivered",
+     {"agent_id": "step:p/s", "tier": "cooperative", "outcome": "ok"}),
+])
 @pytest.mark.anyio
 async def test_relay_interrupt_record_does_not_retake_lease_at_a_gate(
-    tmp_path: Path,
+    tmp_path: Path, event_type: str, payload: dict[str, Any],
 ) -> None:
     # An interrupt record is observational: it can arrive after the gate on a
     # mid-run Ctrl-C, and must not clear _awaiting and re-take the lease.
@@ -245,11 +251,10 @@ async def test_relay_interrupt_record_does_not_retake_lease_at_a_gate(
         socket.broadcast({"id": "g1", "type": "awaiting_user_input",
                           "payload": {"prompt": "?"}})
         await wait_until(lambda: socket.leased_count == 0)
-        socket.broadcast({"id": "i1", "type": "interrupt_delivered",
-                          "payload": {"tier": "cooperative", "outcome": "ok"}})
+        socket.broadcast({"id": "i1", "type": event_type, "payload": payload})
         # Event-driven: the relay has ingested the record once it reaches the sink.
         await wait_until(lambda: any(s.get("id") == "i1" for s in sink))
-        await anyio.sleep(0.1)             # several poll gaps for any wrong re-lease
+        assert relay._awaiting is True
         assert socket.leased_count == 0    # gate still stands: no lease taken back
         # ...and the poll loop is alive — a real run event DOES take the lease back.
         socket.broadcast({"id": "m1", "type": "agent_message", "payload": {}})

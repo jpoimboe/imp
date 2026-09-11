@@ -154,6 +154,141 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
 
 
 @pytest.mark.anyio
+async def test_repeat_ctrl_c_forces_silent_daemon_run_after_delivery_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.signals as signals
+
+    sock = str(tmp_path / "s.sock")
+    daemon_coord = InterruptCoordinator()
+    server = SessionServer(sock, coordinator=daemon_coord, hibernate=False)
+    client_coord = InterruptCoordinator()
+    clock = {"now": 100.0}
+    client_coord._now = lambda: clock["now"]
+    cleanup_started = anyio.Event()
+    cleanup_release = anyio.Event()
+    ack_release = anyio.Event()
+    deadline_started = anyio.Event()
+    deadline_release = anyio.Event()
+    watchdog_started = anyio.Event()
+    watchdog_release = anyio.Event()
+    finish_run = anyio.Event()
+    force_seen = anyio.Event()
+    client_done = anyio.Event()
+    force_calls: list[str] = []
+    records: list[dict[str, Any]] = []
+    seen: list[str] = []
+
+    async def wait_deadline() -> None:
+        deadline_started.set()
+        await deadline_release.wait()
+
+    async def held_watchdog() -> None:
+        watchdog_started.set()
+        await watchdog_release.wait()
+
+    async def silent_interrupt() -> None:
+        cleanup_started.set()
+        with anyio.CancelScope(shield=True):
+            await cleanup_release.wait()
+
+    async def force_kill() -> None:
+        force_calls.append("step:p/s")
+        force_seen.set()
+
+    monkeypatch.setattr(signals, "_wait_interrupt_deadline", wait_deadline)
+    monkeypatch.setattr(daemon_coord, "_yield_watchdog", held_watchdog)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        class _BroadcastLog:
+            def append(self, *, agent_id: Any, type: str, payload: dict[str, Any]):
+                record = {
+                    "id": f"i{len(records)}", "agent_id": agent_id,
+                    "type": type, "payload": payload,
+                }
+                records.append(record)
+                on_event(record)
+                return record
+
+        daemon_coord.set_event_log(_BroadcastLog())
+        with daemon_coord.runner_attached(
+            silent_interrupt, force_kill=force_kill,
+            interrupt_ack=ack_release.wait, agent_id="step:p/s",
+        ):
+            await finish_run.wait()
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            seen.append(event["type"])
+
+        def finish(self) -> None:
+            ...
+
+    async def attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def solicit(_prompt: str, _interrupt: bool = False) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    async def run_client() -> None:
+        await run_terminal_client(
+            attach=attach, driver=_Driver(), coord=client_coord,
+            solicit=solicit, leave_mode="new")
+        client_done.set()
+
+    with anyio.fail_after(120):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+            tg.start_soon(client_coord.run_signal_receiver)
+            tg.start_soon(run_client)
+            await wait_until(lambda: server.attached_count == 1)
+            await wait_until(lambda: bool(client_coord._runner_stack))
+            await wait_until(lambda: client_coord._sig_send is not None)
+
+            client_coord._dispatch_signal(signal.SIGINT)
+            await cleanup_started.wait()
+            await deadline_started.wait()
+            await watchdog_started.wait()
+            await wait_until(
+                lambda: "interrupt_delivery_started" in seen
+                and client_coord._delivery_observed)
+
+            clock["now"] = 100.5
+            client_coord._dispatch_signal(signal.SIGINT)
+            assert force_calls == []
+
+            clock["now"] = 101.5
+            client_coord._dispatch_signal(signal.SIGINT)
+            await force_seen.wait()
+            await wait_until(lambda: any(
+                r["type"] == "interrupt_escalated"
+                and r["payload"]["reason"] == "second_gesture"
+                for r in records))
+            assert force_calls == ["step:p/s"]
+            escalations = [
+                r["payload"] for r in records
+                if r["type"] == "interrupt_escalated"]
+            assert escalations == [{
+                "reason": "second_gesture", "killed": ["step:p/s"]}]
+            assert not deadline_release.is_set()
+            assert not watchdog_release.is_set()
+
+            ack_release.set()
+            cleanup_release.set()
+            deadline_release.set()
+            watchdog_release.set()
+            finish_run.set()
+            await client_done.wait()
+            tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
 async def test_terminal_client_detaches_interrupt_forwarder_on_return(
     tmp_path: Path,
 ) -> None:
@@ -2998,9 +3133,15 @@ async def test_terminal_client_threads_interrupt_and_skips_empty_echo(
     assert echoed == []                  # no blank "> " line echoed for an empty reply
 
 
+@pytest.mark.parametrize(("event_type", "payload"), [
+    ("interrupt_delivery_started",
+     {"agent_id": "step:p/s", "tier": "cooperative"}),
+    ("interrupt_delivered",
+     {"agent_id": "step:p/s", "tier": "cooperative", "outcome": "ok"}),
+])
 @pytest.mark.anyio
 async def test_interrupt_record_after_gate_leaves_title_idle(
-    tmp_path: Path,
+    tmp_path: Path, event_type: str, payload: dict[str, Any],
 ) -> None:
     # Delivery can land after the gate on a mid-run Ctrl-C: the record is
     # observational and must not re-mark the run busy while the user is prompted.
@@ -3011,8 +3152,7 @@ async def test_interrupt_record_after_gate_leaves_title_idle(
         await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input",
                   "payload": {"steer_hint": "steer?", "interrupt": True}})
-        on_event({"type": "interrupt_delivered",
-                  "payload": {"tier": "cooperative", "outcome": "ok"}})
+        on_event({"type": event_type, "payload": payload})
         await user_chat_input_fn("steer?")
         return "done"
 
@@ -3055,19 +3195,18 @@ async def test_interrupt_record_after_gate_leaves_title_idle(
 
 
 @pytest.mark.anyio
-async def test_only_a_live_interrupt_delivered_arms_the_force_quit_offer(
+async def test_only_a_live_interrupt_delivery_start_arms_the_force_quit_offer(
     tmp_path: Path,
 ) -> None:
-    """AC13: the second-gesture force-quit offer is gated on a NON-replayed
-    interrupt_delivered observed for this round. A replayed copy (an earlier
-    round's, re-sent on attach) must not arm it; the live record must."""
+    """The force-quit offer is gated on a live delivery-start record.
+    Replayed records from earlier rounds must not arm it."""
     from imp.cli.signals import _FORCE_FORWARD
 
     events_path = tmp_path / "events.jsonl"
     # An earlier round's delivery, already on disk: replay re-sends it on attach.
     events_path.write_text(json.dumps(
-        {"id": "d0", "type": "interrupt_delivered",
-         "payload": {"tier": "cooperative", "outcome": "ok"}}) + "\n")
+        {"id": "d0", "type": "interrupt_delivery_started",
+         "payload": {"agent_id": "codex", "tier": "cooperative"}}) + "\n")
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False, events_path=events_path)
     deliver = anyio.Event()
@@ -3077,8 +3216,8 @@ async def test_only_a_live_interrupt_delivered_arms_the_force_quit_offer(
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count != 0)
         await deliver.wait()
-        on_event({"id": "d1", "type": "interrupt_delivered",
-                  "payload": {"tier": "cooperative", "outcome": "ok"}})
+        on_event({"id": "d1", "type": "interrupt_delivery_started",
+                  "payload": {"agent_id": "codex", "tier": "cooperative"}})
         await done.wait()
         return "ok"
 
@@ -3122,9 +3261,9 @@ async def test_only_a_live_interrupt_delivered_arms_the_force_quit_offer(
 
             tg.start_soon(_client)
             await wait_until(lambda: ("replay_complete", False) in seen)
-            assert ("interrupt_delivered", True) in seen   # the replayed copy arrived
+            assert ("interrupt_delivery_started", True) in seen   # the replayed copy arrived
 
-            # A stop is unwinding; the only delivery seen so far is the replayed one.
+            # A stop is unwinding; only a replayed delivery start has arrived.
             coord._should_pause = True
             coord._first_gesture_at = 100.0
             t["now"] = 101.5
@@ -3133,7 +3272,7 @@ async def test_only_a_live_interrupt_delivered_arms_the_force_quit_offer(
             assert acks == ["stopping…"]         # ...and no force-quit promise
 
             deliver.set()
-            await wait_until(lambda: ("interrupt_delivered", False) in seen)
+            await wait_until(lambda: ("interrupt_delivery_started", False) in seen)
 
             t["now"] = 102.5
             coord._dispatch_signal(signal.SIGINT)

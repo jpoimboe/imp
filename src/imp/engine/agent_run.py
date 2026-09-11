@@ -707,6 +707,7 @@ async def drive_invocation(
     attach = (coordinator.runner_attached(
                   runner.interrupt,
                   force_kill=getattr(runner, "force_kill", None),
+                  interrupt_ack=getattr(runner, "wait_for_interrupt_ack", None),
                   agent_id=invocation.agent_id)
               if coordinator is not None else contextlib.nullcontext())
     gen = runner.run(invocation)

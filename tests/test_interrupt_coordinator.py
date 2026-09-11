@@ -65,11 +65,15 @@ def test_runner_attached_carries_force_kill_and_agent_id() -> None:
 
     async def i() -> None: ...
     async def fk() -> None: ...
+    async def interrupt_ack() -> None: ...
 
-    with coord.runner_attached(i, force_kill=fk, agent_id="agent-7"):
+    with coord.runner_attached(
+        i, force_kill=fk, interrupt_ack=interrupt_ack, agent_id="agent-7",
+    ):
         att = coord._runner_stack[-1]
         assert att.interrupt is i
         assert att.force_kill is fk
+        assert att.interrupt_ack is interrupt_ack
         assert att.agent_id == "agent-7"
 
 

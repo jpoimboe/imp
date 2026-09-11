@@ -501,3 +501,143 @@ async def test_reset_and_clear_pause_drop_a_pending_delivery(drop: str) -> None:
     assert interrupted == []
     assert killed == []
     assert [r["type"] for r in log.records] == ["interrupt_requested"]
+
+
+@pytest.mark.anyio
+async def test_acknowledgement_deadline_forces_while_cleanup_is_shielded(
+    monkeypatch: Any,
+) -> None:
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    deadline = _WatchedEvent()
+    cleanup_started = anyio.Event()
+    cleanup_release = anyio.Event()
+    ack_release = anyio.Event()
+    killed: list[str] = []
+
+    async def wait_deadline() -> None:
+        await deadline.wait()
+
+    async def interrupt() -> None:
+        cleanup_started.set()
+        with anyio.CancelScope(shield=True):
+            await cleanup_release.wait()
+
+    async def interrupt_ack() -> None:
+        await ack_release.wait()
+
+    async def force_kill() -> None:
+        killed.append("codex")
+
+    monkeypatch.setattr(_signals, "_wait_interrupt_deadline", wait_deadline)
+
+    with anyio.fail_after(120):
+        async with anyio.create_task_group() as tg:
+            coord.set_delivery_spawner(tg.start_soon)
+            with coord.runner_attached(
+                interrupt, force_kill=force_kill,
+                interrupt_ack=interrupt_ack, agent_id="codex",
+            ):
+                tg.start_soon(coord._deliver_interrupt)
+                await cleanup_started.wait()
+                await deadline.waited.wait()
+                deadline.set()
+                await wait_until(lambda: killed == ["codex"])
+                hard = [r for r in log.records
+                        if r["type"] == "interrupt_delivered"
+                        and r["payload"]["tier"] == "hard"]
+                assert len(hard) == 1
+                assert not cleanup_release.is_set()
+                assert not ack_release.is_set()
+                ack_release.set()
+                cleanup_release.set()
+                await wait_until(lambda: any(
+                    r["type"] == "interrupt_delivered"
+                    and r["payload"]["tier"] == "cooperative"
+                    for r in log.records))
+
+    cooperative = [r for r in log.records
+                   if r["type"] == "interrupt_delivered"
+                   and r["payload"]["tier"] == "cooperative"]
+    assert len(cooperative) == 1
+    assert cooperative[0]["payload"]["outcome"] == "ok"
+
+
+@pytest.mark.anyio
+async def test_nested_acknowledgement_deadlines_arm_before_child_cleanup(
+    monkeypatch: Any,
+) -> None:
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    deadline = anyio.Event()
+    both_deadlines_armed = anyio.Event()
+    child_cleanup_started = anyio.Event()
+    child_cleanup_release = anyio.Event()
+    parent_started = anyio.Event()
+    parent_ack = anyio.Event()
+    child_ack = anyio.Event()
+    armed = {"count": 0}
+    cooperative_order: list[str] = []
+    killed: list[str] = []
+
+    async def wait_deadline() -> None:
+        armed["count"] += 1
+        if armed["count"] == 2:
+            both_deadlines_armed.set()
+        await deadline.wait()
+
+    async def parent_interrupt() -> None:
+        parent_started.set()
+        cooperative_order.append("parent")
+
+    async def child_interrupt() -> None:
+        cooperative_order.append("child")
+        child_cleanup_started.set()
+        with anyio.CancelScope(shield=True):
+            await child_cleanup_release.wait()
+
+    async def force_parent() -> None:
+        killed.append("parent")
+
+    async def force_child() -> None:
+        killed.append("child")
+
+    monkeypatch.setattr(_signals, "_wait_interrupt_deadline", wait_deadline)
+
+    with anyio.fail_after(120):
+        async with anyio.create_task_group() as tg:
+            coord.set_delivery_spawner(tg.start_soon)
+            with (
+                coord.runner_attached(
+                    parent_interrupt, force_kill=force_parent,
+                    interrupt_ack=parent_ack.wait, agent_id="parent"),
+                coord.runner_attached(
+                    child_interrupt, force_kill=force_child,
+                    interrupt_ack=child_ack.wait, agent_id="child"),
+            ):
+                tg.start_soon(coord._deliver_interrupt)
+                await both_deadlines_armed.wait()
+                await child_cleanup_started.wait()
+                assert not parent_started.is_set()
+                deadline.set()
+                await wait_until(lambda: set(killed) == {"parent", "child"})
+                assert killed.count("parent") == 1
+                assert killed.count("child") == 1
+                assert not child_cleanup_release.is_set()
+                hard_agents = {
+                    r["payload"]["agent_id"] for r in log.records
+                    if r["type"] == "interrupt_delivered"
+                    and r["payload"]["tier"] == "hard"}
+                assert hard_agents == {"parent", "child"}
+                parent_ack.set()
+                child_ack.set()
+                child_cleanup_release.set()
+                await parent_started.wait()
+                await wait_until(lambda: len([
+                    r for r in log.records
+                    if r["type"] == "interrupt_delivered"
+                    and r["payload"]["tier"] == "cooperative"]) == 2)
+
+    assert cooperative_order == ["child", "parent"]

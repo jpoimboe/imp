@@ -108,11 +108,16 @@ async def test_attached_client_sees_interrupt_events_live(tmp_path: Path) -> Non
 
     interrupts = [e for e in live if e["type"].startswith("interrupt_")]
     assert [e["type"] for e in interrupts] == [
-        "interrupt_requested", "interrupt_delivered"]
+        "interrupt_requested", "interrupt_delivery_started",
+        "interrupt_delivered"]
     assert all("_replay" not in e for e in interrupts)   # live, not replayed
-    assert interrupts[1]["payload"]["agent_id"] == "step:p/s"
-    assert interrupts[1]["payload"]["outcome"] == "ok"
+    assert interrupts[1]["payload"] == {
+        "agent_id": "step:p/s", "tier": "cooperative"}
+    assert interrupts[2]["payload"]["agent_id"] == "step:p/s"
+    assert interrupts[2]["payload"]["outcome"] == "ok"
     journal = _journal(quest)
     assert sum(1 for e in journal if e["type"] == "interrupt_requested") == 1
+    assert sum(1 for e in journal
+               if e["type"] == "interrupt_delivery_started") == 1
     assert sum(1 for e in journal if e["type"] == "interrupt_delivered") == 1
     assert pulses == []   # the fan-out must not pulse the inactivity watchdog

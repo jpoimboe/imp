@@ -150,7 +150,7 @@ def test_dispatch_second_ctrl_c_forwards_force_not_escalation_after_window() -> 
     # A stop is already unwinding (first gesture landed).
     coord._should_pause = True
     coord._first_gesture_at = 100.0
-    coord.note_interrupt_delivered()   # a real interrupt is in flight: FORCE has a target
+    coord.note_interrupt_delivery_started()   # a real interrupt is in flight: FORCE has a target
     esc_fired = {"v": False}
     coord.set_escalation_hook(lambda: esc_fired.__setitem__("v", True))
 
@@ -574,7 +574,7 @@ def test_dispatch_force_forwarded_at_most_once_per_round() -> None:
     # A stop is already unwinding (first gesture landed) and reached a runner.
     coord._should_pause = True
     coord._first_gesture_at = 100.0
-    coord.note_interrupt_delivered()
+    coord.note_interrupt_delivery_started()
 
     sent: list = []
 
@@ -600,7 +600,7 @@ def test_dispatch_force_forwarded_at_most_once_per_round() -> None:
     coord.end_gesture_round()
     coord._should_pause = True
     coord._first_gesture_at = 200.0
-    coord.note_interrupt_delivered()
+    coord.note_interrupt_delivery_started()
     t["now"] = 201.5
     coord._dispatch_signal(_sig.SIGINT)
     assert sent == [_FORCE_FORWARD, _FORCE_FORWARD]
@@ -618,7 +618,7 @@ def test_reset_rearms_force_forward_latch() -> None:
     coord._now = lambda: t["now"]
     coord._should_pause = True
     coord._first_gesture_at = 100.0
-    coord.note_interrupt_delivered()
+    coord.note_interrupt_delivery_started()
 
     sent: list = []
 
@@ -639,7 +639,7 @@ def test_reset_rearms_force_forward_latch() -> None:
     coord._dispatch_signal(_sig.SIGINT)
     assert sent == [_FORCE_FORWARD]     # reset dropped the observed delivery too
 
-    coord.note_interrupt_delivered()
+    coord.note_interrupt_delivery_started()
     t["now"] = 202.5
     coord._dispatch_signal(_sig.SIGINT)
     assert sent == [_FORCE_FORWARD, _FORCE_FORWARD]
@@ -676,9 +676,8 @@ def test_repeat_press_before_any_delivery_promises_no_force_quit() -> None:
 
 
 def test_press_after_an_observed_delivery_still_offers_the_force_quit() -> None:
-    """AC14: a press made with no force-quit available must not spend the one-shot
-    latch — a later press, once an interrupt_delivered has been observed, still
-    offers the escalation and forwards exactly one FORCE for the round."""
+    """A press before delivery starts must not spend the one-shot latch.
+    A later press after a delivery-start observation still forwards one FORCE."""
     import signal as _sig
 
     from imp.cli.signals import _FORCE_FORWARD
@@ -702,7 +701,7 @@ def test_press_after_an_observed_delivery_still_offers_the_force_quit() -> None:
     t["now"] = 101.5
     coord._dispatch_signal(_sig.SIGINT)     # nothing delivered yet → promises nothing
 
-    coord.note_interrupt_delivered()        # the daemon's record reaches the client
+    coord.note_interrupt_delivery_started()  # the daemon's start record reaches the client
 
     t["now"] = 102.5
     coord._dispatch_signal(_sig.SIGINT)
@@ -733,7 +732,7 @@ def test_end_gesture_round_drops_the_observed_delivery() -> None:
 
     coord._sig_send = _Send()
 
-    coord.note_interrupt_delivered()
+    coord.note_interrupt_delivery_started()
     coord.end_gesture_round()
 
     coord._should_pause = True              # the next round's gesture lands
@@ -765,7 +764,7 @@ def test_a_new_first_gesture_drops_a_delivery_observed_for_the_previous_round() 
 
     coord._sig_send = _Send()
 
-    coord.note_interrupt_delivered()        # straggler, after the previous gate
+    coord.note_interrupt_delivery_started()        # straggler, after the previous gate
     coord._first_gesture_at = 200.0
     asyncio.run(coord.signal_pause(reason="ctrl-c"))   # the new round's first gesture
 

@@ -199,7 +199,9 @@ class _PauseCoordinator:
     should_pause = True
     interrupted = True
 
-    def runner_attached(self, fn, *, force_kill=None, agent_id=None):
+    def runner_attached(
+        self, fn, *, force_kill=None, interrupt_ack=None, agent_id=None,
+    ):
         import contextlib
         return contextlib.nullcontext()
 
@@ -212,7 +214,9 @@ class _PauseOnAttachCoordinator(_PauseCoordinator):
     check and True from the moment the runner is attached (the in-loop pause path)."""
     should_pause = False
 
-    def runner_attached(self, fn, *, force_kill=None, agent_id=None):
+    def runner_attached(
+        self, fn, *, force_kill=None, interrupt_ack=None, agent_id=None,
+    ):
         import contextlib
 
         @contextlib.contextmanager
