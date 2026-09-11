@@ -41,7 +41,11 @@ from imp.agents.timeouts import (
     PROCESS_KILL_GRACE_S,
     PROVIDER_REQUEST_SILENCE_CEILING_S,
 )
-from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
+from imp.agents.transcript import (
+    RESUME_CONTINUE_NUDGE,
+    RESUME_DEPENDENCY_NUDGE,
+    RESUME_RETRY_NUDGE,
+)
 from imp.assets import engine_prompt
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
@@ -344,8 +348,12 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
 
 
 def continuation_nudge(cause: ResumeCause) -> str:
-    """The resume-continuation copy for `cause`: a provider retry is not a pause."""
-    return RESUME_RETRY_NUDGE if cause == "provider_retry" else RESUME_CONTINUE_NUDGE
+    """The resume-continuation copy for `cause`: a retry or dependency wait is not a pause."""
+    if cause == "provider_retry":
+        return RESUME_RETRY_NUDGE
+    if cause == "dependency":
+        return RESUME_DEPENDENCY_NUDGE
+    return RESUME_CONTINUE_NUDGE
 
 
 async def _resolve_wait_reply(
