@@ -905,6 +905,8 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
         git_ro_remask=_existing(list(policy.git_ro_remask)),
         secret_dirs=_existing(list(policy.secret_dirs)),
         secret_files=_existing(list(policy.secret_files)),
+        session_socket_ro=(policy.session_socket_ro
+                           if Path(policy.session_socket_ro).exists() else ""),
         state_repo_ro=(policy.state_repo_ro
                        if Path(policy.state_repo_ro).is_file() else ""),
     )

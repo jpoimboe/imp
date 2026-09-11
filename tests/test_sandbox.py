@@ -2728,6 +2728,26 @@ def test_resolve_policy_re_exposes_the_own_socket_only_when_it_exists(tmp_path):
     assert pol.allows_write(sock) is False
 
 
+def test_prepare_spawn_policy_drops_a_vanished_session_socket(tmp_path):
+    # AC 4. quest_tmp_dir is defended by RE-CREATION at spawn; that is impossible for a
+    # socket — only the daemon can bind it. Without the prune, a policy whose socket has
+    # since been unlinked would abort bwrap SETUP ("Read-only file system") for every
+    # remaining spawn instead of degrading to a namespace with no control channel.
+    scratch = tmp_path / f"imp-{os.getuid()}" / "abc"
+    sock = scratch.parent / "abc.sock"
+    pol = _policy(quest_tmp_mask=str(scratch.parent), quest_tmp_dir=str(scratch),
+                  session_socket_ro=str(sock))
+
+    gone = prepare_spawn_policy(pol)
+    assert gone.session_socket_ro == ""
+    assert str(sock) not in _argv("x", cwd="/wt", policy=gone, engine_env={})
+
+    sock.touch()                      # prepare_spawn_policy created the parent above
+    kept = prepare_spawn_policy(pol)
+    assert kept.session_socket_ro == str(sock)
+    assert str(sock) in _argv("x", cwd="/wt", policy=kept, engine_env={})
+
+
 def _cross_project_policy(**over) -> SandboxPolicy:
     # Nested quest with $HOME writable: without the ro bind, other projects would be WRITABLE.
     base = dict(
