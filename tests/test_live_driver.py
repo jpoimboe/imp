@@ -2746,8 +2746,10 @@ def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> s
                              provider="claude_code", phase="implementation",
                              plan="plan-1", counter="step 3/7"),
         quest_id="nota40", title=title, project="imp", prompt_tokens=None,
-        color=color, width=width, context_pct=44.0, auth_mode="subscription",
-        quota=reading, now_epoch=_ROW_NOW)
+        color=color, width=width, context_pct=44.0,
+        carrier=nv.Carrier(provider="claude_code", auth_mode="subscription",
+                           quota=reading),
+        now_epoch=_ROW_NOW)
 
 
 def test_position_row_anchors_the_quota_flush_to_the_band_edge() -> None:

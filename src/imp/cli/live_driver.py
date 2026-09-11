@@ -260,8 +260,7 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          context_window: int | None = None,
-                         auth_mode: str | None = None,
-                         quota: QuotaReading | None = None,
+                         carrier: nv.Carrier | None = None,
                          cost: RowUsage | None = None,
                          now_epoch: float | None = None,
                          unsandboxed: bool = False, project: str = "") -> str:
@@ -293,11 +292,13 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                           context_pct=context_pct, context_window=context_window,
                           color=color, over_bg=over)
     rights: list[str]
-    if is_metered(activity.provider, auth_mode):
+    if carrier is None:
+        rights = []
+    elif is_metered(carrier.provider, carrier.auth_mode):
         dollars = cost_field(cost)
         rights = [dollars] if dollars else []
-    elif quota is not None:
-        rights = list(quota_field(quota, now_epoch=now_epoch, color=color,
+    elif carrier.quota is not None:
+        rights = list(quota_field(carrier.quota, now_epoch=now_epoch, color=color,
                                   over_bg=over))
     else:
         rights = []
@@ -569,8 +570,7 @@ class LiveDriver:
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
-            auth_mode=self._builder.auth_mode_for(activity.provider),
-            quota=self._builder.quota_for(activity.provider),
+            carrier=self._builder.carrier_for(activity.provider),
             cost=self._quest_cost(),
             unsandboxed=self._unsandboxed)
         rows = [a_line, "", p_row]
@@ -618,8 +618,7 @@ class LiveDriver:
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
-            auth_mode=self._builder.auth_mode_for(activity.provider),
-            quota=self._builder.quota_for(activity.provider),
+            carrier=self._builder.carrier_for(activity.provider),
             cost=self._quest_cost(),
             unsandboxed=self._unsandboxed)
 

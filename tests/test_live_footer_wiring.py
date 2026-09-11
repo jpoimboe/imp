@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import time
 from typing import Any
 
 import pytest
@@ -230,13 +231,18 @@ def test_a_contribution_for_an_unrelated_agent_leaves_the_field_absent() -> None
     assert row.endswith("claude-opus-5 · ██████░░░░ 60%")
 
 
-# AC 14
+# AC 4, AC 14
 def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
     codex_reading = _reading("codex", QuotaWindow("5h", 12.0, None))
     started = [
         ev("1", "quest_created", quest_id="pazo49", title="t"),
         ev("2", "step_started", step="a", kind="agent", phase="p1",
            model="gpt-5.6-terra", provider="codex"),
+        # A step-level turn, so codex becomes the last-known provider (and states
+        # no auth_mode, so its reading — not dollars — is what the row can show).
+        ev("m1", "agent_message", agent_id="step:p1/a", provider="codex",
+           model="gpt-5.6-terra", stop_reason="end_turn",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
         ev("q1", "quota_reading", agent_id="step:p1/a",
            **codex_reading.to_payload()),
     ]
@@ -249,8 +255,11 @@ def test_a_mixed_provider_run_renders_the_active_steps_carrier() -> None:
         ev("4", "step_started", step="b", kind="agent", phase="p2",
            model="claude-opus-5", provider="claude_code"),
     ]
-    # codex's level says nothing about the claude account: no field, no placeholder.
-    assert _position_row(crossed).endswith("claude-opus-5")
+    # codex's level says nothing about the claude account: no field, no
+    # placeholder — the running step's carrier wins over the last-known one.
+    row = _position_row(crossed)
+    assert row.endswith("claude-opus-5")
+    assert "codex" not in row and "session" not in row
 
 
 # AC 2(b-c), 3(a-c), 6(i)
@@ -334,3 +343,129 @@ def test_compose_startup_passes_the_live_width_to_the_activity_line(
     assert rows is not None
     assert "resuming" in rows[0]
     assert len(calls) == 2
+
+
+_WINDOWS = "session 62% (3h left) · week 7% (5d left)"
+
+
+def _future_reading(provider: str) -> QuotaReading:
+    """Resets 3h and ~5d out, sat mid-bucket: 30 min of margin before the session
+    window would coarsen to `2h` and ~11h before the weekly one reads `4d`, so a
+    run stalled under load still renders the same countdown."""
+    now = int(time.time())
+    return _reading(provider, QuotaWindow("5h", 62.0, now + 10_800),
+                    QuotaWindow("7d", 7.0, now + 430_000))
+
+
+def _quota_event(provider: str) -> dict[str, Any]:
+    return ev("q1", "quota_reading", agent_id=_STEP,
+              **_future_reading(provider).to_payload())
+
+
+def _chrome_tail() -> list[dict[str, Any]]:
+    """The agent step ends and a script step takes the stack top: its Activity
+    carries provider=None, which is the hole that used to empty the right group."""
+    return [
+        ev("8", "step_completed", step="coder", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("9", "step_started", step="verify", kind="script",
+           phase="implement phase", command="pytest -q"),
+    ]
+
+
+def _chrome_row(events: list[dict[str, Any]]) -> str:
+    return _position_row([*events, *_chrome_tail()])
+
+
+# AC 1
+def test_the_footer_keeps_the_group_through_a_chrome_step() -> None:
+    row = _chrome_row(_cc_events(_quota_event("claude_code"),
+                                 auth_mode="subscription"))
+    assert row.endswith("claude_code · " + _WINDOWS)
+    assert pal.display_width(row) == 198       # still anchored to the band's edge
+    assert row.startswith("t ")                # the script step contributes no segment
+
+
+# AC 6
+def test_the_chrome_row_carries_no_context_gauge() -> None:
+    row = _chrome_row(_cc_events(_quota_event("claude_code"),
+                                 auth_mode="subscription"))
+    assert row.endswith(_WINDOWS)
+    # The gauge stays gated on the activity's kind, not on the resolved carrier.
+    assert "█" not in row and "░" not in row
+
+
+# AC 2
+def test_the_your_turn_prompt_keeps_the_group_after_the_turn_ends() -> None:
+    drv = _drive(_cc_events(
+        _quota_event("claude_code"),
+        ev("4", "step_completed", step="coder", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        auth_mode="subscription"))
+    rows = drv.compose_status(0)
+    assert rows is not None and "working" in rows[0]   # the step stack is drained
+    toolbar = drv.compose_toolbar_static()
+    assert toolbar is not None
+    assert toolbar.endswith("claude_code · " + _WINDOWS)
+
+
+# AC 3(a)
+def test_an_api_only_provider_keeps_its_dollars_through_a_chrome_step() -> None:
+    events = [
+        ev("1", "quest_created", quest_id="pazo49", title="t"),
+        ev("2", "step_started", step="coder", kind="agent",
+           phase="implement phase", model="claude-opus-5", provider="anthropic"),
+        ev("3", "agent_message", agent_id=_STEP, provider="anthropic",
+           model="claude-opus-5", stop_reason="end_turn",
+           raw={"content": [{"type": "text", "text": "done"}]},
+           usage={"input_tokens": 120000, "output_tokens": 9000}),
+    ]
+    total = summary_totals(build_summary(events), None)[1]
+    assert total.priced == 1 and total.dollars > 0    # anthropic states no auth_mode
+    row = _chrome_row(events)
+    assert row.endswith(f" ${total.dollars:.2f}")
+    assert "session" not in row and "week" not in row
+
+
+# AC 3(b)
+def test_an_api_keyed_subscription_provider_keeps_its_dollars_too() -> None:
+    events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000),
+                        _quota_event("claude_code"), auth_mode="apikey")
+    row = _chrome_row(events)
+    assert row.endswith(" $4.21")
+    assert "session" not in row and "claude_code" not in row
+
+
+# AC 5
+def test_a_subagent_provider_never_becomes_the_footers_fallback() -> None:
+    events = _cc_events(
+        _quota_event("claude_code"),
+        ev("t1", "tool_call", agent_id=_STEP, id="blk-t1", name="sub_agent",
+           input={"subagent_name": "coder"}),
+        ev("c1", "step_context", agent_id="sub:t1", provider="codex",
+           model="gpt-5.6-terra", tools_schema=[], params={},
+           max_tool_calls=None),
+        ev("r1", "agent_message", agent_id="sub:t1", provider="codex",
+           model="gpt-5.6-terra", stop_reason="end_turn",
+           raw={"content": [{"type": "text", "text": "hi"}]}, usage={}),
+        auth_mode="subscription")
+    assert _chrome_row(events).endswith("claude_code · " + _WINDOWS)
+
+
+# AC 11
+def test_a_chrome_step_with_no_reading_and_no_dollars_renders_no_group() -> None:
+    # A claude_code agent_message prices nothing, and no reading was recorded.
+    row = _chrome_row(_cc_events(auth_mode="subscription"))
+    assert row == "t"
+    assert "n/a" not in row and "—" not in row
+
+
+# AC 12
+def test_the_fallback_group_degrades_by_the_same_ladder(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    events = _cc_events(_quota_event("claude_code"), auth_mode="subscription")
+    monkeypatch.setenv("COLUMNS", "50")     # 48 columns carry the windows, not the name
+    narrow = _chrome_row(events)
+    assert narrow.endswith(_WINDOWS) and "claude_code" not in narrow
+    monkeypatch.setenv("COLUMNS", "30")     # neither candidate fits
+    assert _chrome_row(events) == "t"
