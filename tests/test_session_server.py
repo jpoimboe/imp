@@ -976,8 +976,13 @@ async def test_lease_less_client_does_not_satisfy_keep_alive_gate(
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True, first_attach_timeout=0.2)
+    observed: dict[str, int] = {}
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        # The lease-less client must be attached before the gate opens: the grace
+        # clock would otherwise lapse and tear the attachment down unobserved.
+        await wait_until(lambda: server.attached_count == 1)
+        observed["leased"] = server.leased_count
         try:
             return await user_chat_input_fn("")
         except AwaitingUserInput:
@@ -993,11 +998,11 @@ async def test_lease_less_client_does_not_satisfy_keep_alive_gate(
         tg.start_soon(_serve)
         client = await anyio.connect_unix(sock)
         await client.send((encode_attach("c1", "T", False) + "\n").encode())  # lease-less
-        await wait_until(lambda: server.attached_count == 1)
         # No leased attachment ever arrives: the gate hibernates on the
         # first-leased-attach timeout despite a live lease-less attachment.
         await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
+        assert observed["leased"] == 0
         await client.aclose()
         tg.cancel_scope.cancel()
 
