@@ -253,6 +253,67 @@ class Activity:
     backoff_base: float = field(default=0.0, compare=False)
 
 
+@dataclass(frozen=True)
+class Carrier:
+    """Who the footer's right group is about: the provider named, that provider's
+    own reported auth mode, and its latest quota reading — resolved as one value,
+    so a mode can never be shown against another provider's name."""
+    provider: str
+    auth_mode: str | None
+    quota: QuotaReading | None
+
+
+def carrier_provider(event: dict[str, Any]) -> str | None:
+    """The provider this event states as the footer's carrier, else None: a
+    step-level (non-`sub:`) agent_message naming a provider. A subagent can run a
+    different provider than its step, and the group has always meant the step's."""
+    if event.get("type") != "agent_message":
+        return None
+    agent_id = event.get("agent_id")
+    if isinstance(agent_id, str) and agent_id.startswith("sub:"):
+        return None
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    provider = payload.get("provider")
+    return provider if isinstance(provider, str) else None
+
+
+def carrier_from_events(events: Iterable[dict[str, Any]]) -> Carrier | None:
+    """The carrier a quest's event log states, for a surface with no live builder:
+    the provider of the last step-level agent turn, that provider's own last stated
+    auth mode, and its last quota reading. None until a turn has named one."""
+    # Lazy, like the builder's own quota import: narrative stays provider-free.
+    from imp.providers.quota import QuotaReading
+
+    auth_modes: dict[str, str] = {}
+    quotas: dict[str, QuotaReading] = {}
+    last_provider: str | None = None
+    for event in events:
+        etype = event.get("type")
+        if etype == "agent_message":
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            # Sourced as add() sources them: the mode account-wide (a subagent's
+            # turn states it for the same account), the carrier's name step-level.
+            provider = payload.get("provider")
+            mode = payload.get("auth_mode")
+            if isinstance(provider, str) and mode is not None:
+                auth_modes[provider] = mode
+            step_provider = carrier_provider(event)
+            if step_provider is not None:
+                last_provider = step_provider
+        elif etype == "quota_reading":
+            payload = event["payload"]
+            quotas[str(payload["provider"])] = QuotaReading.from_payload(payload)
+    if last_provider is None:
+        return None
+    return Carrier(provider=last_provider,
+                   auth_mode=auth_modes.get(last_provider),
+                   quota=quotas.get(last_provider))
+
+
 @dataclass
 class DepWait:
     """Footer state for a go-live blocked on unmerged deps: waited ids + pinned clock start."""
@@ -563,6 +624,7 @@ class NarrativeBuilder:
         # shows one carrier's figures against the other's step.
         self._auth_mode_by_provider: dict[str, str] = {}
         self._quota_by_provider: dict[str, QuotaReading] = {}
+        self._last_step_provider: str | None = None
 
     # -- public API -----------------------------------------------------------
     @property
@@ -597,6 +659,16 @@ class NarrativeBuilder:
     def quota_for(self, provider: str | None) -> QuotaReading | None:
         """This provider's latest recorded quota reading, or None before one exists."""
         return self._quota_by_provider.get(provider) if provider else None
+
+    def carrier_for(self, provider: str | None) -> Carrier | None:
+        """The right group's carrier for the active step's `provider`, falling back
+        to the provider of the most recent step-level agent turn when the step
+        names none — a chrome step, or a drained step stack. None until one has."""
+        name = provider or self._last_step_provider
+        if name is None:
+            return None
+        return Carrier(provider=name, auth_mode=self.auth_mode_for(name),
+                       quota=self.quota_for(name))
 
     @property
     def current_burst(self) -> ToolBurstFold | None:
@@ -880,6 +952,9 @@ class NarrativeBuilder:
             # provider and states none, and must not erase what the step reported.
             if isinstance(prov, str) and auth is not None:
                 self._auth_mode_by_provider[prov] = auth
+            step_prov = carrier_provider(event)
+            if step_prov is not None:
+                self._last_step_provider = step_prov
             usage = payload.get("usage")
             pt = usage_prompt_tokens(usage)
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")

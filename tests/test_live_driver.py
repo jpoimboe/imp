@@ -2670,7 +2670,7 @@ def test_compose_prelaunch_position_row_forwards_project() -> None:
     row = compose_prelaunch_position_row(
         phase="implementation phase", plan="plan 1/1", step_label="task 1/3",
         model="m", project="imp", quest_id="vope45", title="t",
-        color=False, width=80)
+        color=False, width=80, carrier=None, cost=None)
     assert row == ("imp · vope45 · t · implementation phase · plan 1/1 · "
                    "task 1/3 · m")
 
@@ -2746,8 +2746,10 @@ def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> s
                              provider="claude_code", phase="implementation",
                              plan="plan-1", counter="step 3/7"),
         quest_id="nota40", title=title, project="imp", prompt_tokens=None,
-        color=color, width=width, context_pct=44.0, auth_mode="subscription",
-        quota=reading, now_epoch=_ROW_NOW)
+        color=color, width=width, context_pct=44.0,
+        carrier=nv.Carrier(provider="claude_code", auth_mode="subscription",
+                           quota=reading),
+        now_epoch=_ROW_NOW)
 
 
 def test_position_row_anchors_the_quota_flush_to_the_band_edge() -> None:
@@ -2803,7 +2805,7 @@ def test_prelaunch_row_fits_the_band_and_pads_under_a_banded_theme() -> None:
     narrow = compose_prelaunch_position_row(
         phase="implementation phase", plan="plan 2/4", step_label="task 1/3",
         model="claude-opus-5", project="imp", quest_id="nota40",
-        title=_LONG_TITLE, color=False, width=80)
+        title=_LONG_TITLE, color=False, width=80, carrier=None, cost=None)
     assert "%" not in narrow                     # still no gauge before launch
     assert narrow.endswith("…")                  # 119 columns clipped to the target
     assert pal.display_width(narrow) == 78
@@ -2811,7 +2813,7 @@ def test_prelaunch_row_fits_the_band_and_pads_under_a_banded_theme() -> None:
         pal.set_theme("dark")
         banded = compose_prelaunch_position_row(
             phase=None, plan=None, step_label=None, model=None, project="imp",
-            quest_id="nota40", title="t", color=True, width=80)
+            quest_id="nota40", title="t", color=True, width=80, carrier=None, cost=None)
     finally:
         pal.set_theme("ansi")
     assert banded.startswith("\x1b[48;2;43;47;58m") and banded.endswith("\x1b[0m")
@@ -3450,6 +3452,16 @@ def test_compose_identity_toolbar_unsandboxed_after_id_when_no_title() -> None:
     assert bar == "z9gixx · unsandboxed"
 
 
+# AC 8
+def test_compose_identity_toolbar_clips_an_over_wide_left_group() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    bar = compose_identity_toolbar(quest_id="z9gixx", title="x" * 100,
+                                   color=False, width=40)
+    # Clipped to the band's own width-2, ellipsis included, like the position row.
+    assert bar == "z9gixx · " + "x" * 28 + "…"
+    assert pal.display_width(bar) == 38            # was 109: the band overflowed
+
+
 def test_compose_position_row_unsandboxed_is_bold_red_under_ansi() -> None:
     from imp.cli.live_driver import compose_position_row
     try:
@@ -3470,7 +3482,7 @@ def test_compose_prelaunch_position_row_renders_state_segments_no_context_bar() 
     row = compose_prelaunch_position_row(
         phase="planning phase", plan="plan 2/4", step_label="reviewing spec",
         model="sonnet", quest_id="feat", title="demo",
-        color=False, width=200)
+        color=False, width=200, carrier=None, cost=None)
     assert row == "feat · demo · planning phase · plan 2/4 · reviewing spec · sonnet"
     assert "%" not in row      # context-usage bar omitted pre-launch
 
@@ -3479,7 +3491,7 @@ def test_compose_prelaunch_position_row_omits_absent_segments() -> None:
     from imp.cli.live_driver import compose_prelaunch_position_row
     row = compose_prelaunch_position_row(
         phase=None, plan=None, step_label=None, model=None,
-        quest_id="feat", title="demo", color=False, width=200)
+        quest_id="feat", title="demo", color=False, width=200, carrier=None, cost=None)
     assert row == "feat · demo"      # residual: less state → fewer segments, no drift
 
 

@@ -24,6 +24,11 @@ def _reading(*windows: QuotaWindow) -> QuotaReading:
     return QuotaReading(provider="claude_code", plan=None, windows=windows, raw={})
 
 
+def _carrier(quota: QuotaReading | None = None, *, provider: str = "claude_code",
+             auth_mode: str | None = None) -> nv.Carrier:
+    return nv.Carrier(provider=provider, auth_mode=auth_mode, quota=quota)
+
+
 def _row(**kw: Any) -> str:
     activity = kw.pop("activity", _act())
     color = kw.pop("color", False)
@@ -36,20 +41,20 @@ def _row(**kw: Any) -> str:
 def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
     left = "implement phase · claude-opus-5 · ████░░░░░░ 44%"
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
-    row = _row(auth_mode="subscription", quota=calm)
+    row = _row(carrier=_carrier(calm, auth_mode="subscription"))
     # 48 + 115 + 35 = 198 = width - 2: the field is reached across the gap.
     assert row == left + " " * 115 + "claude_code · session 34% · week 7%"
     assert pal.display_width(row) == 198
 
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
                       QuotaWindow("7d", 7.0, int(_NOW) + 600000))
-    assert _row(auth_mode="subscription", quota=one_up).endswith(
+    assert _row(carrier=_carrier(one_up, auth_mode="subscription")).endswith(
         "claude_code · session 62% (40m left) · week 7% (7d left)")
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
     # A red window changes nothing on the row now: the levels, and only the levels.
-    red_row = _row(auth_mode="subscription", quota=both)
+    red_row = _row(carrier=_carrier(both, auth_mode="subscription"))
     assert red_row.endswith("session 92% (40m left) · week 96% (2d left)")
     assert "switch provider" not in red_row
 
@@ -79,36 +84,37 @@ def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
     # Percentage-independent, now that the band gates nothing: calm and red alike.
     for pct, shown in ((92.0, "session 92%"), (34.0, "session 34%")):
         null_reset = _reading(QuotaWindow("5h", pct, None))
-        assert _row(auth_mode="subscription", quota=null_reset).endswith(shown)
+        assert _row(carrier=_carrier(null_reset, auth_mode="subscription")).endswith(shown)
 
         already_past = _reading(QuotaWindow("5h", pct, int(_NOW) - 10))
-        assert _row(auth_mode="subscription", quota=already_past).endswith(shown)
+        assert _row(carrier=_carrier(already_past, auth_mode="subscription")).endswith(shown)
 
 
 # AC 10
 def test_a_metered_backend_renders_the_bare_quest_total() -> None:
     priced = RowUsage(dollars=4.21, priced=1)
-    row = _row(auth_mode="apikey", cost=priced)
+    row = _row(carrier=_carrier(auth_mode="apikey"), cost=priced)
     assert row == "implement phase · claude-opus-5 · ████░░░░░░ 44%" + " " * 145 + "$4.21"
     assert " · $4.21" not in row                 # flush right, no label, no color, no ~
     assert pal.display_width(row) == 198
     # A step on a model the price table lacks still renders the figure, no ≥.
     with_unpriced = RowUsage(dollars=4.21, priced=1, unpriced=1)
-    assert _row(auth_mode="apikey", cost=with_unpriced).endswith(" $4.21")
-    assert _row(auth_mode="apikey", cost=RowUsage(dollars=0.004,
-                                                  priced=1)).endswith(" <$0.01")
-    # An API-keyed provider carries no auth_mode and is metered all the same.
-    assert _row(activity=_act(provider="anthropic"), cost=priced).endswith(" $4.21")
+    assert _row(carrier=_carrier(auth_mode="apikey"), cost=with_unpriced).endswith(" $4.21")
+    assert _row(carrier=_carrier(auth_mode="apikey"),
+                cost=RowUsage(dollars=0.004, priced=1)).endswith(" <$0.01")
+    # An API-only provider carries no auth_mode and is metered all the same.
+    assert _row(carrier=_carrier(provider="anthropic"),
+                cost=priced).endswith(" $4.21")
     # AC 5: a recorded reading never stamps a provider segment onto the metered field.
-    metered = _row(auth_mode="apikey", cost=priced,
-                   quota=_reading(QuotaWindow("5h", 34.0, None)))
+    metered = _row(carrier=_carrier(_reading(QuotaWindow("5h", 34.0, None)),
+                                    auth_mode="apikey"), cost=priced)
     assert metered.endswith(" $4.21") and "claude_code" not in metered
 
 
 # AC 10
 def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None:
-    row = _row(auth_mode="apikey", cost=RowUsage(),
-               quota=_reading(QuotaWindow("5h", 34.0, None)))
+    row = _row(carrier=_carrier(_reading(QuotaWindow("5h", 34.0, None)),
+                                auth_mode="apikey"), cost=RowUsage())
     assert row.endswith("claude-opus-5 · ████░░░░░░ 44%")
     assert "n/a" not in row and "—" not in row
     # The metered choice is exclusive: a stale reading never leaks onto this row.
@@ -117,13 +123,13 @@ def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None
 
 # AC 11
 def test_a_subscription_backend_with_no_reading_renders_no_field() -> None:
-    row = _row(auth_mode="subscription")
+    row = _row(carrier=_carrier(auth_mode="subscription"))
     assert row == "implement phase · claude-opus-5 · ████░░░░░░ 44%"
 
 
 def test_an_unrecognized_window_label_renders_verbatim() -> None:
     odd = _reading(QuotaWindow("30d", 12.0, None))
-    assert _row(auth_mode="subscription", quota=odd).endswith("30d 12%")
+    assert _row(carrier=_carrier(odd, auth_mode="subscription")).endswith("30d 12%")
 
 
 def test_the_countdown_rounds_to_one_nearest_unit() -> None:
@@ -166,8 +172,8 @@ def test_the_field_names_the_readings_own_provider() -> None:
     assert windows == "session 62% (3h left) · week 91% (5d left)"
     # The name is the reading's, never the activity's: a claude_code step whose
     # recorded reading came from codex still says codex.
-    row = _row(activity=_act(provider="claude_code"), auth_mode="subscription",
-               quota=codex)
+    row = _row(activity=_act(provider="claude_code"),
+               carrier=_carrier(codex, auth_mode="subscription"))
     assert row.endswith("codex · session 62% (3h left) · week 91% (5d left)")
 
 
@@ -180,7 +186,7 @@ def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
         return compose_position_row(
             activity=_act(), quest_id=None, title="", prompt_tokens=None,
             color=False, width=width, context_pct=44.0, now_epoch=_NOW,
-            auth_mode="subscription", quota=reading)
+            carrier=_carrier(reading, auth_mode="subscription"))
 
     # (a) target 198: left group 48 + full right group 56, gap to spare.
     assert at(200).endswith(
@@ -203,6 +209,21 @@ def test_the_position_row_carries_no_switch_hint_at_any_level() -> None:
 
     assert not hasattr(ld, "SWITCH_HINT")
     at_red = _reading(QuotaWindow("5h", float(pal.QUOTA_RED_AT), None))
-    row = _row(auth_mode="subscription", quota=at_red)
+    row = _row(carrier=_carrier(at_red, auth_mode="subscription"))
     assert row.endswith(f"session {pal.QUOTA_RED_AT}%")
     assert "switch provider" not in row
+
+
+# AC 1, AC 3, AC 6
+def test_a_provider_less_activity_still_renders_the_carriers_group() -> None:
+    chrome = nv.Activity(kind="script", verb="pytest -q")
+    windows = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 9960),
+                       QuotaWindow("7d", 7.0, int(_NOW) + 430000))
+    row = _row(activity=chrome,
+               carrier=_carrier(windows, auth_mode="subscription"))
+    assert row.endswith("claude_code · session 62% (3h left) · week 7% (5d left)")
+    assert "█" not in row and "░" not in row      # kind-gated: no gauge on a chrome row
+    # The metered choice reads the carrier too, not the provider-less activity.
+    metered = _row(activity=chrome, carrier=_carrier(provider="anthropic"),
+                   cost=RowUsage(dollars=4.21, priced=1))
+    assert metered.endswith(" $4.21") and "session" not in metered
