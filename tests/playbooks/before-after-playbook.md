@@ -39,6 +39,7 @@ are two git trees you check out side by side.
 ```bash
 REPO=$(git rev-parse --show-toplevel)
 SHOW=${TMPDIR:-/tmp}/showcase        # scratch root; /tmp is read-only in the sandbox
+mkdir -p "$SHOW/ansi" "$SHOW/png"    # the render step redirects into these
 ID=2026-06-11-9k6zii                 # the Change id (see `imp list --all`)
 BR=imp/$ID                           # the Change's branch
 BASE=$(cd "$REPO" && imp show "$ID" --json 2>/dev/null \
