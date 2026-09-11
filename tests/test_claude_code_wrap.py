@@ -990,3 +990,49 @@ async def test_wrap_resolves_the_in_flight_entry_on_the_parts_return(
     assert out["content"][0]["text"] == "rendered 3 layers"
     assert seen["entry"].future.result() == ("rendered 3 layers", False)
     assert state.inflight == {}
+
+
+@pytest.mark.anyio
+async def test_wrap_task_over_cap_result_spills_and_records_the_wrapped_body(
+    tmp_path: Path,
+) -> None:
+    # AC 9(c)/AC 10: the claude_code sub_agent arm wraps its success result, so the
+    # body handed to the model and the minted tool_result recorded in the event log
+    # are byte-identical, and the full result stays recoverable on disk.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    big = "D" * 60_000
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_result", "payload": {"text": big}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+
+    body = out["content"][0]["text"]
+    assert len(body) < len(big)                            # previewed, not the 60 KB
+    assert "read with read_file offset=1" in body
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is False
+    assert results[0]["payload"]["content"] == body        # recorded == returned
+    minted = results[0]["payload"]["id"]
+    assert (tmp_path / "tool-results" / minted).read_text(encoding="utf-8") == big
