@@ -2679,35 +2679,45 @@ def test_split_pad_anchors_the_right_group_to_the_band_edge() -> None:
     from imp.cli.live_driver import _split_pad
     # target = width - 2 = 18: the gauged left group (10) and the right group (2)
     # sit at the two edges and the gap between them is spaces, never ` · `.
-    body = _split_pad("left", "left gauge", "R2", width=20)
+    body = _split_pad("left", "left gauge", ["R2"], width=20)
     assert body == "left gauge      R2"
     assert pal.display_width(body) == 18
-    # An empty right group is no right group: nothing to anchor, no trailing gap.
-    assert _split_pad("left", "left gauge", "", width=20) == "left gauge"
-    assert _split_pad("left", "left gauge", None, width=20) == "left gauge"
+    # No candidates is no right group: nothing to anchor, no trailing gap.
+    assert _split_pad("left", "left gauge", [], width=20) == "left gauge"
+
+
+def test_split_pad_takes_the_first_candidate_that_leaves_a_gap() -> None:
+    from imp.cli.live_driver import _split_pad
+    # Widest first: at target 18 the wide candidate still leaves the one-column gap.
+    assert _split_pad("left", "left gauge", ["wide R2", "R2"],
+                      width=20) == "left gauge wide R2"
+    # At target 15 it does not, so the narrower candidate takes its place rather
+    # than the whole group going.
+    assert _split_pad("left", "left gauge", ["wide R2", "R2"],
+                      width=17) == "left gauge   R2"
 
 
 def test_split_pad_drops_the_right_group_whole_before_the_gauge() -> None:
     from imp.cli.live_driver import _split_pad
     # target 13: both groups fit with exactly the minimum one-space gap.
-    assert _split_pad("left", "left gauge", "R2", width=15) == "left gauge R2"
+    assert _split_pad("left", "left gauge", ["R2"], width=15) == "left gauge R2"
     # target 12: one column short of that gap — the right group goes whole rather
     # than being severed, and the gauge stays.
-    assert _split_pad("left", "left gauge", "R2", width=14) == "left gauge"
+    assert _split_pad("left", "left gauge", ["R2"], width=14) == "left gauge"
 
 
 def test_split_pad_drops_the_gauge_before_touching_the_left_group() -> None:
     from imp.cli.live_driver import _split_pad
     # target 6: the gauged group (10) no longer fits, the bare left group (4) does.
-    assert _split_pad("left", "left gauge", "R2", width=8) == "left"
-    assert _split_pad("left", "left gauge", None, width=8) == "left"
+    assert _split_pad("left", "left gauge", ["R2"], width=8) == "left"
+    assert _split_pad("left", "left gauge", [], width=8) == "left"
 
 
 def test_split_pad_clips_the_left_group_only_as_a_last_resort() -> None:
     from imp.cli.live_driver import _split_pad
     # target 10 and nothing left to drop: pal.clip_display reserves the column for
     # its own ellipsis, so the body lands at exactly the target and no wider.
-    body = _split_pad("implementation phase", "implementation phase gauge", "R2",
+    body = _split_pad("implementation phase", "implementation phase gauge", ["R2"],
                       width=12)
     assert body == "implement…"
     assert pal.display_width(body) == 10

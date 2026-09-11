@@ -28,7 +28,7 @@ the same render_text path `imp log --full` uses.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -44,9 +44,6 @@ if TYPE_CHECKING:
 
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
-
-# Row 3's quota tail gains this once a window turns red; shed before the quota.
-SWITCH_HINT = "press p to switch provider"
 
 _AMBER_AT = 0.75          # of the cutoff
 _GAUGE_CELLS = 10
@@ -196,18 +193,14 @@ def _band_wrap(body: str, bg: str, width: int) -> str:
     return f"{bg}{body}{_RESET}"
 
 
-def _split_pad(left: str, gauged: str, right: str | None, *, width: int,
-               right_suffix: str | None = None) -> str:
-    """`gauged` with `right` anchored flush to the band's right edge, degrading
-    right-first: drop `right_suffix`, then the right group, then the gauge, then
-    clip the left group."""
+def _split_pad(left: str, gauged: str, rights: Sequence[str], *,
+               width: int) -> str:
+    """`gauged` with the widest right-group candidate that still leaves a column
+    of gap anchored flush to the band's right edge, degrading right-first: the
+    candidates in order, then the right group whole, then the gauge, then clip the
+    left group. An empty sequence is no right group."""
     target = width - 2
     gauged_w = pal.display_width(gauged)
-    rights = []
-    if right and right_suffix:
-        rights.append(f"{right} · {right_suffix}")
-    if right:
-        rights.append(right)
     for candidate in rights:
         gap = target - gauged_w - pal.display_width(candidate)
         if gap >= 1:
@@ -276,20 +269,19 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         bar = context_bar(activity.provider, activity.model, prompt_tokens,
                           context_pct=context_pct, context_window=context_window,
                           color=color, over_bg=over)
-    hint = None
+    rights: list[str]
     if is_metered(activity.provider, auth_mode):
-        tail = cost_field(cost)
+        dollars = cost_field(cost)
+        rights = [dollars] if dollars else []
+    elif quota is not None:
+        rights = [quota_field(quota, now_epoch=now_epoch, color=color,
+                              over_bg=over)]
     else:
-        tail = (quota_field(quota, now_epoch=now_epoch, color=color, over_bg=over)
-                if quota is not None else None)
-        if quota is not None and any(pal.quota_pct(w.used_pct) >= pal.QUOTA_RED_AT
-                                     for w in quota.windows):
-            hint = _paint(SWITCH_HINT, "dim", color=color, over_bg=over)
+        rights = []
     left_segs = [project_seg, id_seg, title_seg, unsandboxed_seg,
                  phase_seg, plan_seg, counter_seg, model_seg]
     body = _split_pad(rt.compose_label(left_segs),
-                      rt.compose_label([*left_segs, bar]), tail, width=width,
-                      right_suffix=hint)
+                      rt.compose_label([*left_segs, bar]), rights, width=width)
     return _band_wrap(body, bg, width)
 
 
