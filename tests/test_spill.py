@@ -116,13 +116,15 @@ def _dispatch_task_call_sites() -> list[tuple[str, str, int, bool]]:
                 ((isinstance(node.func, ast.Name) and node.func.id == name) or
                  (isinstance(node.func, ast.Attribute) and node.func.attr == name)))
 
-    def _enclosing_func(tree: ast.AST, lineno: int) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    def _enclosing_func(
+        tree: ast.AST, lineno: int
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
         best = None
         for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.lineno <= lineno <= node.end_lineno:  # type: ignore[attr-defined]
-                    if best is None or node.lineno > best.lineno:
-                        best = node
+            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and node.lineno <= lineno <= node.end_lineno  # type: ignore[attr-defined]
+                    and (best is None or node.lineno > best.lineno)):
+                best = node
         return best
 
     src = Path(__file__).resolve().parents[1] / "src" / "imp"
