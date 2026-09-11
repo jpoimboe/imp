@@ -916,7 +916,7 @@ def test_explorer_bounds_searches_in_both_shipped_copies() -> None:
 
 
 def test_explorer_nudges_symbol_outline_in_both_copies() -> None:
-    for wf in ("default",):
+    for wf in ("default", "minimal"):
         text = Path(f"src/imp/assets/workflows/{wf}/agents/explorer.md").read_text()
         assert "symbol_outline" in text
         assert "before reading full bodies" in text
