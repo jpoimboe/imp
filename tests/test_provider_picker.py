@@ -1,5 +1,5 @@
-"""The `p` picker: the cbreak reader's binding, its refusals, and the seam that
-renders it (Scope 3; AC 8a, 8b, 8c, 8d, 8f)."""
+"""The `p` picker: the cbreak reader's binding, its refusals, the retry-backoff
+gate on the seam, and the block that seam renders."""
 from __future__ import annotations
 
 import contextlib
@@ -183,7 +183,9 @@ def test_the_seam_renders_the_block_inside_a_suspend_bracket(
             finally:
                 trace.append("exit")
 
-    with build_provider_picker(quest, _Driver(), _Status())() as choices:  # type: ignore[union-attr]
+    opened = build_provider_picker(quest, _Driver(), _Status())()
+    assert opened is not None
+    with opened as choices:
         trace.append("read")
 
     assert choices == [None, "codex"]        # the resolved vendor arms nothing
