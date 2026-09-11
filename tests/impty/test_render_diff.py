@@ -103,9 +103,11 @@ class _FakeSession:
     def resize(self, rows: int, cols: int) -> None:
         self.screen.resize(lines=rows, columns=cols)
 
-    def wait_idle(self, **kwargs) -> bool:
-        """Nothing to settle: the screen is already whatever feed() painted."""
-        return True
+    def wait_idle(self, predicate=None, **kwargs) -> bool:
+        """Nothing to settle: the screen is already whatever feed() painted. A
+        predicate still gets its look, so the matcher paths render as they would
+        against a real session."""
+        return predicate() if predicate is not None else True
 
     def is_alive(self) -> bool:
         return self.returncode is None
@@ -290,6 +292,27 @@ def test_send_returns_only_the_rows_its_reaction_changed() -> None:
     d.view()
     s.feed(b"\x1b[5;1H\x1b[2Kfourth line replaced")
     assert _body(d.send("x", wait=0.0)) == "[row 4]\nfourth line replaced"
+
+
+def test_send_matcher_returns_only_the_rows_its_reaction_changed() -> None:
+    d, s = _driver_on_a_fake_screen()
+    s.feed(b"\r\n".join(b"line %d of the screen" % i for i in range(8)))
+    d.view()
+    s.feed(b"\x1b[5;1H\x1b[2Kfourth line replaced")
+    header, _, screen = d.send("x", for_text="fourth line replaced").partition("\n")
+    assert header == "[found]"
+    assert _body(screen) == "[row 4]\nfourth line replaced"
+
+
+def test_wait_matcher_on_text_already_shown_reports_no_text_change() -> None:
+    # The matcher case that betrays a full-screen render: nothing moved, so only a
+    # diffing path can answer [no text change].
+    d, s = _driver_on_a_fake_screen()
+    s.feed(b"\r\n".join(b"line %d of the screen" % i for i in range(8)))
+    d.view()
+    header, _, screen = d.wait(for_text="line 3 of the screen").partition("\n")
+    assert header == "[found]"
+    assert _body(screen) == "[no text change]"
 
 
 def test_send_signal_returns_only_the_rows_its_reaction_changed() -> None:
