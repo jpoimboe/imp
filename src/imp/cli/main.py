@@ -2764,13 +2764,13 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     An archived candidate this install cannot read is omitted, exactly as an
     absent record is."""
     from imp.cli.store import _row_for_id
-    from imp.engine.archive import read as archive_read
     from imp.engine.archive import (
         check_index_floor,
         record,
         records_root,
         require_current,
     )
+    from imp.engine.archive import read as archive_read
     from imp.engine.errors import ArchiveMismatch
 
     rows = [r for r in _resumable_rows(control) if token in r[0]]

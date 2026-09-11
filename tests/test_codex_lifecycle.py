@@ -23,7 +23,6 @@ from imp.engine.types import (
 )
 from imp.providers.codex_rollout import parse_codex_resume_state
 from imp.providers.codex_runner import CodexAgentRunner
-from tests.conftest import _pid_gone_or_zombie
 from tests.codex_fakes import FakeCodex, thread_started, turn_completed
 from tests.conftest import _pid_gone_or_zombie
 
