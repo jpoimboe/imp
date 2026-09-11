@@ -15,6 +15,7 @@ from imp.engine.types import (
 )
 from imp.providers.codex_runner import CodexAgentRunner
 from tests.codex_fakes import FakeCodex, thread_started, turn_completed
+from tests.conftest import _pid_gone_or_zombie
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 

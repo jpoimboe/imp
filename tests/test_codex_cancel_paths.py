@@ -73,7 +73,7 @@ async def test_silent_stream_end_after_cancel_yields_interrupted(tmp_path: Path)
         model_name="gpt-5.5",
         client_factory=lambda options=None: FakeCodex(
             scripted_turns=scripted,
-            on_turn_start=lambda: setattr(runner, "_cancel", True)))
+            on_turn_start=runner._process_owner.cancel))
     runner._canonical_auth_override = auth
 
     events = [ev async for ev in runner.run(_invocation(tmp_path, event_log=elog))]
@@ -103,7 +103,7 @@ async def test_cancel_after_continuation_resolves_yields_interrupted(tmp_path: P
     runner._canonical_auth_override = auth
 
     def _cont(_last_text: str) -> tuple[str, bool]:
-        runner._cancel = True   # interrupt lands while the nudge is computed
+        runner._process_owner.cancel()  # interrupt lands while the nudge is computed
         return "keep going", False
 
     inv = _invocation(tmp_path, event_log=elog, continuation_fn=_cont)
@@ -133,7 +133,7 @@ async def test_cancel_raised_inside_continuation_yields_interrupted(tmp_path: Pa
     runner._canonical_auth_override = auth
 
     def _cont(_last_text: str) -> tuple[str, bool]:
-        runner._cancel = True
+        runner._process_owner.cancel()
         raise RuntimeError("transport died mid-nudge")
 
     inv = _invocation(tmp_path, event_log=elog, continuation_fn=_cont)
@@ -247,7 +247,7 @@ async def test_interrupt_after_sdk_task_start_adds_no_sdk_lifecycle(
     def _cancel_after_start(event: Any, **kwargs: Any) -> None:
         original(event, **kwargs)
         if getattr(event, "type", None) == "item.started":
-            runner._cancel = True
+            runner._process_owner.cancel()
 
     monkeypatch.setattr(cr, "process_event", _cancel_after_start)
     [ev async for ev in runner.run(_invocation(tmp_path, event_log=elog))]

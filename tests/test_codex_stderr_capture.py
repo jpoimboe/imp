@@ -70,8 +70,6 @@ async def test_codex_failure_floor_attaches_stderr_tail(
 
     monkeypatch.setattr("imp.providers.codex_runner.run_agent_loop",
                         lambda invocation, session: _boom(invocation, session))
-    runner._cancel = False
-
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
 
     assert len(events) == 1
@@ -105,8 +103,6 @@ async def test_codex_floor_prefers_live_capture_without_duplicating(
 
     monkeypatch.setattr("imp.providers.codex_runner.run_agent_loop",
                         lambda invocation, session: _boom(invocation, session))
-    runner._cancel = False
-
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
 
     tail = events[0]["payload"]["detail"]["stderr_tail"]

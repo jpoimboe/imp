@@ -30,7 +30,7 @@ async def test_outer_except_reclassifies_to_interrupted_when_cancel_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = _runner_with_failing_loop(monkeypatch, RuntimeError("transport torn down"))
-    runner._cancel = True
+    runner._process_owner.cancel()
 
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
 
@@ -45,8 +45,6 @@ async def test_outer_except_unknown_when_cancel_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = _runner_with_failing_loop(monkeypatch, RuntimeError("genuine bug"))
-    runner._cancel = False
-
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
 
     assert len(events) == 1
@@ -82,8 +80,6 @@ async def test_outer_except_reraises_subagent_suspended(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = _runner_with_failing_loop(monkeypatch, SubagentSuspended("paused"))
-    runner._cancel = False
-
     with pytest.raises(SubagentSuspended):
         async for _ev in runner.run(object()):  # type: ignore[arg-type]
             pass
@@ -96,8 +92,6 @@ async def test_outer_except_reraises_awaiting_user_input(
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
     runner = _runner_with_failing_loop(monkeypatch, AwaitingUserInput("the question"))
-    runner._cancel = False
-
     with pytest.raises(AwaitingUserInput):
         async for _ev in runner.run(object()):  # type: ignore[arg-type]
             pass
