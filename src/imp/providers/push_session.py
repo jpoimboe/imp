@@ -387,6 +387,7 @@ class PushSession:
             stop_reason=self._stop_reason(raw),
             context_tokens=context_tokens_from_usage(usage),
             request_id=request_id,
+            handoff=self._handoff_phase == "instruction_sent",
             duration_ms=(time.perf_counter() - t0) * 1000.0)
         return usage
 

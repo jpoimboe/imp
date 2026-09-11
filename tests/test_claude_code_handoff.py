@@ -268,3 +268,40 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     assert any(e["type"] == "agent_result" for e in events)
     # Part A: the completing turn is interrupted (completion path), not a handoff.
     assert holder["client"].interrupts == 1
+
+
+@pytest.mark.anyio
+async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> None:
+    # Only the note turn is flagged; the interrupted turn is flushed before the phase is set.
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+
+    scripted = [
+        # Turn 1: live context 170000/200000 = 0.85 >= 0.8 — the runner interrupts.
+        assistant(text("working"),
+                  tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
+        result(subtype="error_during_execution", is_error=True),
+        # Turn 2 (after the instruction increment) is the handoff note itself.
+        assistant(text("HANDOFF-SENTINEL: where I left off")),
+        result(),
+    ]
+
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted,
+                                   context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert len([e for e in events if e["type"] == "handoff"]) == 1
+    msgs = [e for e in log.read() if e["type"] == "agent_message"]
+    assert len(msgs) >= 2
+    # the flagged turn is the note itself, not merely the last message
+    assert "HANDOFF-SENTINEL" in str(msgs[-1]["payload"]["raw"])
+    assert msgs[-1]["payload"]["handoff"] is True
+    assert all("handoff" not in m["payload"] for m in msgs[:-1])

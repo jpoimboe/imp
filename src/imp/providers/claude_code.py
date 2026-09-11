@@ -1543,6 +1543,7 @@ class ClaudeCodeSession(ObserveSession):
                     self._llm_tail_text,
                     output_tokens=self._flushed_output_tokens,
                     stop_reason=self._flushed_stop_reason),
+                handoff=self._handoff_phase == "instruction_sent",
                 message_id=self._llm_group_key,
                 context_window=cu_fields.get("context_window"),
                 context_pct=cu_fields.get("context_pct"),

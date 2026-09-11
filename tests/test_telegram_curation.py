@@ -313,3 +313,10 @@ def test_ceiling_reauth_pause_still_buzzes() -> None:
         assert imp_telegram.curate("workflow_paused", payload) == "buzz"
         assert imp_telegram.event_body(
             "workflow_paused", payload) == "needs you to re-authenticate"
+
+
+def test_handoff_note_dropped_but_ordinary_agent_message_still_silent() -> None:
+    # The reincarnation note is private to the reborn agent; _SILENT membership
+    # for agent_message is otherwise unchanged.
+    assert imp_telegram.curate("agent_message", {"handoff": True}) is None
+    assert imp_telegram.curate("agent_message", {}) == "silent"

@@ -4017,3 +4017,40 @@ def test_activity_countdown_renders_a_multi_day_wait_in_days() -> None:
                                  now_iso="2026-01-01T00:01:00+00:00")
 
     assert "2d 4h left" in line
+
+
+def test_handoff_note_absent_from_live_scrollback() -> None:
+    # The flagged note leaves no node at all, so the live stream goes straight
+    # from the prose before it to the lifecycle line — with no gap where the
+    # note used to be (a node that renders nothing must not arm the prose
+    # separator), and byte-identical to the batch render.
+    drv, out = _driver()
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("3", "step_started", step="impl", kind="agent", phase="build",
+           model="m", provider="anthropic"),
+        ev("4", "agent_message", agent_id="a", usage={},
+           raw={"content": [{"type": "text", "text": "ordinary prose"}]}),
+        ev("5", "engine_message", agent_id="a", subtype="continuation",
+           content=[{"type": "text", "text": "write a handoff note"}]),
+        ev("6", "agent_message", agent_id="a", usage={}, handoff=True,
+           raw={"content": [{"type": "text", "text": "HANDOFF-SENTINEL"}]}),
+        ev("7", "reincarnating", reason="context threshold crossed"),
+        ev("8", "step_started", step="impl", kind="agent", phase="build",
+           model="m", provider="anthropic", restarted=False),
+        ev("9", "agent_message", agent_id="a", usage={},
+           raw={"content": [{"type": "text", "text": "reborn prose"}]}),
+        ev("10", "step_completed", step="impl", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert not any("HANDOFF-SENTINEL" in ln for ln in body)
+    assert any("reincarnating — context threshold crossed" in ln for ln in body)
+    assert any("ordinary prose" in ln for ln in body)     # the turn before it survives
+    assert any("reborn prose" in ln for ln in body)       # and the reborn turn after it
+    assert not any(body[i].strip() == "" and body[i + 1].strip() == ""
+                   for i in range(len(body) - 1))
+    assert body == _render_body(events)                   # live/log parity

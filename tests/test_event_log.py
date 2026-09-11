@@ -488,3 +488,15 @@ def test_jsonl_usage_patch_broadcasts_after_persisting(tmp_path: Path) -> None:
     assert set(patch) == {"type", "agent_id", "payload"}
     assert lines_on_disk == 2
     assert _read(path)[-1] == patch
+
+
+def test_agent_message_handoff_flag_is_optional(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append_agent_message(agent_id="A", provider="p", model="m",
+                            raw={"content": []}, usage={}, stop_reason="end_turn")
+    log.append_agent_message(agent_id="A", provider="p", model="m",
+                            raw={"content": []}, usage={}, stop_reason="end_turn",
+                            handoff=True)
+    plain, flagged = _read(tmp_path / "e.jsonl")
+    assert "handoff" not in plain["payload"]
+    assert flagged["payload"]["handoff"] is True

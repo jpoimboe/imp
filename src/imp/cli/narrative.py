@@ -1842,6 +1842,9 @@ def _h_agent_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     # shared prose predicate.
     if not agent_message_has_prose(p):
         return
+    # The handoff note reaches the reborn agent inlined in its seed; it is private.
+    if p.get("handoff"):
+        return
     node = AgentTextNode(payload=p)
     # A prose turn after a completion_nudge clears the flag; a bare WAITING
     # protocol reply (case-insensitive) is dropped before any side effect.

@@ -6,6 +6,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.reincarnation import handoff_path_for
+from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import OpenAIAgentRunner
 from tests.openai_fakes import (
@@ -32,7 +33,8 @@ def _agent(name: str, *, tools) -> AgentDef:
         source=SourceLoc(file=Path("a.md"), line=1))
 
 
-def _invocation(tmp_path: Path) -> AgentInvocation:
+def _invocation(tmp_path: Path,
+                log: InMemoryEventLog | None = None) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent("w", tools={"complete_step", "write_file"}),
         provider_name="openai", model_name="gpt-5.4",
@@ -42,7 +44,7 @@ def _invocation(tmp_path: Path) -> AgentInvocation:
                                     workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
-        agent_id="step:impl/w")
+        agent_id="step:impl/w", event_log=log)
 
 
 @pytest.mark.anyio
@@ -147,3 +149,30 @@ async def test_handoff_fires_on_tool_less_writing_turn(tmp_path: Path) -> None:
     assert "approaching the context limit" in transcript   # instruction injected
     assert hp.exists()
     assert hp.read_text() == "Understood, stopping here."
+
+
+@pytest.mark.anyio
+async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> None:
+    # Only the note turn is flagged; ordinary turns carry no handoff key.
+    log = InMemoryEventLog()
+    fake = FakeResponsesClient([
+        # Turn 1 reaches the 160k default-ceiling cutoff.
+        resp_response(
+            resp_message("still working"),
+            resp_function_call("u1", "write_file",
+                               '{"path": "scratch.txt", "content": "x"}'),
+            usage={"input_tokens": 160_000}),
+        # Turn 2 is the handoff note itself.
+        resp_response(resp_message("HANDOFF-SENTINEL: where I left off")),
+    ])
+    runner = OpenAIAgentRunner(model_name="gpt-5.4", client_factory=lambda: fake)
+
+    events = [e async for e in runner.run(_invocation(tmp_path, log))]
+
+    assert len([e for e in events if e["type"] == "handoff"]) == 1
+    msgs = [e for e in log.read() if e["type"] == "agent_message"]
+    assert len(msgs) >= 2
+    # the flagged turn is the note itself, not merely the last message
+    assert "HANDOFF-SENTINEL" in str(msgs[-1]["payload"]["raw"])
+    assert msgs[-1]["payload"]["handoff"] is True
+    assert all("handoff" not in m["payload"] for m in msgs[:-1])

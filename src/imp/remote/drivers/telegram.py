@@ -180,10 +180,12 @@ def _pause_is_silent(payload: Mapping[str, Any]) -> bool:
 def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
     """Classify an event into a delivery tier: 'buzz' (notify), 'silent' (quiet
     stream), or None (dropped). Buzz = input prompts + status transitions; silent =
-    narrative / script output / step dividers; everything else (tool plumbing) drops. Two
-    payload-aware cases: a nonterminal interrupt 'error' is dropped to match the summary
-    builder (only terminal errors buzz); and 'workflow_paused' is curated by its payload
-    'reason' — silent when a companion event already buzzed the stop, else buzz."""
+    narrative / script output / step dividers; everything else (tool plumbing) drops.
+    Payload-aware cases: a nonterminal interrupt 'error' is dropped to match the summary
+    builder (only terminal errors buzz); 'workflow_paused' is curated by its payload
+    'reason' — silent when a companion event already buzzed the stop, else buzz; and a
+    handoff-flagged 'agent_message' is dropped — the reincarnation note is private to
+    the reborn agent."""
     if event_type == "error":
         from imp.cli.render_summary import _is_nonterminal_error
         from imp.engine.error_policy import is_retry_with_backoff
@@ -201,6 +203,8 @@ def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
     if event_type == "awaiting_user_input":
         # interrupt=True is self-inflicted (silent); flag absent/false is a genuine yield (buzz).
         return "silent" if payload.get("interrupt") else "buzz"
+    if event_type == "agent_message" and payload.get("handoff"):
+        return None
     if event_type in _BUZZ:
         return "buzz"
     if event_type in _SILENT:
