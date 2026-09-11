@@ -125,7 +125,7 @@ def test_a_home_with_no_resolved_map_is_left_unlabelled(tmp_path: Path) -> None:
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 21
+    assert LAYOUT_VERSION == 22
     assert quest_mod._MIGRATIONS[(19, 20)] is _migrate_v19_to_v20
 
 

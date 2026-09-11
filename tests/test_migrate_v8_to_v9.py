@@ -47,4 +47,4 @@ def test_hop_is_idempotent_and_leaves_no_temp_file(tmp_path: Path) -> None:
     assert _meta(qd)["create_mode"] == "new"
     assert _meta(qd)["layout_version"] == 9
     assert not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 21
+    assert LAYOUT_VERSION == 22

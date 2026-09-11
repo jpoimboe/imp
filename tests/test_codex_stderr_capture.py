@@ -42,8 +42,6 @@ async def test_codex_failure_tail_preserves_temp_home_warning(
 
     monkeypatch.setattr("imp.providers.codex_runner.run_agent_loop",
                         lambda invocation, session: _boom(invocation, session))
-    runner._cancel = False
-
     events = [ev async for ev in runner.run(object())]  # type: ignore[arg-type]
 
     assert events[0]["payload"]["detail"]["stderr_tail"] == _TEMP_HOME_WARNING

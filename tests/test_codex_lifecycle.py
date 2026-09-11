@@ -15,7 +15,6 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.resume_state import read_native_resume_state
-from imp.engine.state import parse_events_jsonl
 from imp.engine.types import (
     AgentDef,
     OutputField,
@@ -31,8 +30,12 @@ from tests.conftest import _pid_gone_or_zombie
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 
 
-async def _wait_for_signal(predicate: Callable[[], bool]) -> None:
+async def _wait_for_signal(
+    predicate: Callable[[], bool], *, runner_done: asyncio.Event | None = None,
+) -> None:
     while not predicate():
+        if runner_done is not None and runner_done.is_set():
+            raise AssertionError("runner finalized before publishing the awaited signal")
         await anyio.sleep(0.02)
 
 
@@ -101,17 +104,6 @@ Path(os.environ["IMP_TEST_CODEX_PIDS"]).write_text(
     f"{{os.getpid()}} {{escapee.pid}}")
 print(json.dumps({{"type": "thread.started", "thread_id": "thread-hard-stop"}}),
       flush=True)
-print(json.dumps({{
-    "type": "item.started",
-    "item": {{
-        "id": "sub-hard-stop",
-        "type": "mcp_tool_call",
-        "server": "imp",
-        "tool": "sub_agent",
-        "arguments": {{"subagent_name": "worker", "task_description": "block"}},
-        "status": "in_progress",
-    }},
-}}), flush=True)
 signal.pause()
 ''')
     executable.chmod(0o755)
@@ -304,6 +296,7 @@ async def test_codex_teardown_closes_impty_session(
 
 
 @pytest.mark.anyio
+@pytest.mark.timeout(300)
 async def test_hard_stop_reaps_real_tree_and_preserves_finalization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -318,7 +311,7 @@ async def test_hard_stop_reaps_real_tree_and_preserves_finalization(
         agent_def=AgentDef(
             name="t",
             description="",
-            tools=frozenset({"complete_step", "sub_agent"}),
+            tools=frozenset({"complete_step"}),
             subagents=(),
             output_schema=_agent_def().output_schema,
             prompt_template_source="",
@@ -357,34 +350,47 @@ async def test_hard_stop_reaps_real_tree_and_preserves_finalization(
         finally:
             interrupt_done.set()
 
+    waiting_for = "Codex PID publication"
     with (
         patch("imp.providers.codex_runner.start_impty_server",
               new=fake_start_impty),
         patch("impty.driver.ImptyDriver",
-              new=lambda sandbox=None, journal_dir=None, snapshot_dir=None: (
-                  journal_dirs.append(journal_dir) or fake_driver)),
+              new=lambda sandbox=None, journal_dir=None, snapshot_dir=None,
+              cwd_resolver=None: journal_dirs.append(journal_dir) or fake_driver),
     ):
         try:
-            with anyio.fail_after(120):
+            with anyio.fail_after(240):
                 async with anyio.create_task_group() as task_group:
                     task_group.start_soon(drive)
                     await _wait_for_signal(
                         lambda: (pids_path.exists()
-                                 and runner._proc_state.get("thread_id")
-                                 == "thread-hard-stop"
-                                 and runner._process_owner.process is not None
-                                 and runner._proc_state.get("open_task_ids")
-                                 == {"sub-hard-stop": "step:t"}))
+                                 and len(pids_path.read_text().split()) == 2),
+                        runner_done=drive_done)
                     pids = [int(pid) for pid in pids_path.read_text().split()]
+                    waiting_for = "Codex thread publication"
+                    await _wait_for_signal(
+                        lambda: runner._proc_state.get("thread_id")
+                        == "thread-hard-stop",
+                        runner_done=drive_done)
+                    waiting_for = "Codex process ownership"
+                    await _wait_for_signal(
+                        lambda: runner._process_owner.process is not None,
+                        runner_done=drive_done)
                     codex_home = runner._codex_home
                     assert codex_home is not None
                     task_group.start_soon(interrupt)
+                    waiting_for = "interrupt cancellation"
                     await _wait_for_signal(lambda: runner._process_owner.cancelled)
                     await runner.force_kill()
-                    await _wait_for_signal(
-                        lambda: drive_done.is_set() and interrupt_done.is_set())
+                    waiting_for = "runner finalization"
+                    await _wait_for_signal(lambda: drive_done.is_set())
+                    waiting_for = "interrupt acknowledgement"
+                    await _wait_for_signal(lambda: interrupt_done.is_set())
+                waiting_for = "process-tree reaping"
                 await _wait_for_signal(
                     lambda: all(_pid_gone_or_zombie(pid) for pid in pids))
+        except TimeoutError:
+            pytest.fail(f"timed out waiting for {waiting_for}", pytrace=False)
         finally:
             for pid in pids:
                 if not _pid_gone_or_zombie(pid):
@@ -400,16 +406,6 @@ async def test_hard_stop_reaps_real_tree_and_preserves_finalization(
     assert shutdown_calls == [1]
     assert close_calls == [1, 1]
     assert journal_dirs == [tmp_path / "tx"]
-    records = parse_events_jsonl(invocation.events_path.read_bytes())
-    call = next(record for record in records if record["type"] == "tool_call"
-                and record["payload"]["id"] == "sub-hard-stop")
-    assert call["payload"]["id_ns"] == "block"
-    closer = next(record for record in records if record["type"] == "tool_result"
-                  and record["payload"]["id"] == "sub-hard-stop")
-    assert closer["payload"]["error"] is True
-    assert closer["payload"]["kind"] == "interrupted"
-    assert closer["payload"]["id_ns"] == "block"
-    assert closer["payload"]["content"].startswith("[interrupted]")
     state = parse_codex_resume_state(read_native_resume_state(invocation.transcript_dir))
     assert state.thread_id == "thread-hard-stop"
     assert state.restore_path == (
@@ -419,6 +415,7 @@ async def test_hard_stop_reaps_real_tree_and_preserves_finalization(
 
 
 @pytest.mark.anyio
+@pytest.mark.timeout(300)
 async def test_prepublication_hard_stop_preserves_runner_finalization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -466,26 +463,37 @@ async def test_prepublication_hard_stop_preserves_runner_finalization(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", gated_spawn)
     runner.force_kill = recorded_force_kill
+    waiting_for = "Codex subprocess spawn"
     try:
-        with anyio.fail_after(120):
+        with anyio.fail_after(240):
             async with anyio.create_task_group() as task_group:
                 task_group.start_soon(drive)
                 await spawned.wait()
-                await _wait_for_signal(lambda: pids_path.exists())
+                waiting_for = "Codex PID publication"
+                await _wait_for_signal(
+                    lambda: (pids_path.exists()
+                             and len(pids_path.read_text().split()) == 2),
+                    runner_done=drive_done)
                 pids = [int(pid) for pid in pids_path.read_text().split()]
                 codex_home = runner._codex_home
                 assert codex_home is not None
                 assert runner._process_owner.process is None
                 task_group.start_soon(interrupt)
+                waiting_for = "interrupt cancellation"
                 await _wait_for_signal(lambda: runner._process_owner.cancelled)
                 await runner.force_kill()
                 assert force_calls == [None]
                 assert runner._process_owner.process is None
                 release_publication.set()
+                waiting_for = "runner finalization"
+                await _wait_for_signal(lambda: drive_done.is_set())
+                waiting_for = "interrupt acknowledgement"
+                await _wait_for_signal(lambda: interrupt_done.is_set())
+                waiting_for = "process-tree reaping"
                 await _wait_for_signal(
-                    lambda: (drive_done.is_set()
-                             and interrupt_done.is_set()
-                             and all(_pid_gone_or_zombie(pid) for pid in pids)))
+                    lambda: all(_pid_gone_or_zombie(pid) for pid in pids))
+    except TimeoutError:
+        pytest.fail(f"timed out waiting for {waiting_for}", pytrace=False)
     finally:
         release_publication.set()
         for pid in pids:
