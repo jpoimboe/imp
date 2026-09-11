@@ -398,9 +398,15 @@ def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
 
 
 def _wipe_step_scratch(quest: Quest) -> None:
-    """Empty Quest.tmp_dir and recreate it 0o700; called only on a genuine step advance."""
-    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    """Empty Quest.tmp_dir IN PLACE; called only on a genuine step advance. The
+    sandbox binds this dir, and a bind resolves the inode it saw when the namespace
+    was created — recreating it would drop live namespaces to the read-only floor."""
     ensure_quest_tmp_dir(quest.tmp_dir)
+    for child in quest.tmp_dir.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
 
 
 def _reconcile_provider(

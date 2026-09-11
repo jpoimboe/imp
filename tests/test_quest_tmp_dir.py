@@ -179,3 +179,46 @@ def test_resolve_policy_var_tmp_derives_from_quest_var_tmp_root(
         Path("/custom/vroot") / f"imp-{os.getuid()}" / "qvt4")
     assert pol.quest_var_tmp_dir == str(ch.var_tmp_dir)
     assert "imp-99999" not in pol.quest_var_tmp_dir
+
+
+def test_wipe_step_scratch_empties_in_place_without_changing_the_inode(
+    tmp_path: Path,
+) -> None:
+    # The sandbox binds this directory, and a bind resolves the inode it saw at
+    # namespace creation — recreating the dir would drop the bind to the ro floor.
+    from imp.engine.executor import _wipe_step_scratch
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="wipe1", base_branch="main")
+    ensure_quest_tmp_dir(ch.tmp_dir)
+    before_ino = ch.tmp_dir.stat().st_ino
+
+    real_dir = tmp_path / "outside"
+    real_dir.mkdir()
+    (real_dir / "sentinel.txt").write_text("keep")
+    (ch.tmp_dir / "loose.txt").write_text("x")
+    (ch.tmp_dir / "nest" / "deeper").mkdir(parents=True)
+    (ch.tmp_dir / "nest" / "deeper" / "g.txt").write_text("y")
+    (ch.tmp_dir / "dangling").symlink_to(ch.tmp_dir / "gone")
+    (ch.tmp_dir / "symdir").symlink_to(real_dir)
+    ch.tmp_dir.chmod(0o755)
+
+    _wipe_step_scratch(ch)
+
+    assert ch.tmp_dir.stat().st_ino == before_ino
+    assert list(ch.tmp_dir.iterdir()) == []
+    assert ch.tmp_dir.stat().st_mode & 0o777 == 0o700
+    assert (real_dir / "sentinel.txt").exists()  # the dir symlink was not followed
+
+
+def test_wipe_step_scratch_creates_the_dir_when_it_is_missing(tmp_path: Path) -> None:
+    from imp.engine.executor import _wipe_step_scratch
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="wipe2", base_branch="main")
+    assert not ch.tmp_dir.exists()
+
+    _wipe_step_scratch(ch)
+
+    assert ch.tmp_dir.is_dir()
+    assert ch.tmp_dir.stat().st_mode & 0o777 == 0o700
