@@ -790,3 +790,51 @@ def test_grep_surfaces_sanctioned_quest_home_symlink(tmp_path: Path) -> None:
 
     out = _grep(_ctx(root), pattern="DECISION", path=".")
     assert ".imp/quests/c1/artifacts/spec/feat.md" in out
+
+
+def test_glob_surfaces_the_spike_subtree_beside_artifacts(tmp_path: Path) -> None:
+    home = tmp_path / ".imp" / "quests" / "c1"
+    (home / "artifacts" / "spec").mkdir(parents=True)
+    (home / "artifacts" / "spec" / "feat.md").write_text("# spec\n")
+    (home / "spike").mkdir()
+    (home / "spike" / "probe.py").write_text("print('x')\n")
+    (home / "progress.md").write_text("notes\n")          # quest-home root: stays hidden
+    (home / "steps").mkdir()
+    (home / "steps" / "t.jsonl").write_text("{}\n")       # non-visible sibling: stays hidden
+
+    out = _glob(_ctx(tmp_path), pattern="**/*")
+
+    assert ".imp/quests/c1/spike/probe.py" in out
+    assert ".imp/quests/c1/artifacts/spec/feat.md" in out
+    assert "progress.md" not in out
+    assert "t.jsonl" not in out
+
+
+def test_grep_surfaces_the_spike_subtree_outside_a_repo(tmp_path: Path) -> None:
+    home = tmp_path / ".imp" / "quests" / "c1"
+    (home / "spike").mkdir(parents=True)
+    (home / "spike" / "probe.out").write_text("the DECISION is X\n")
+    (home / "steps").mkdir()
+    (home / "steps" / "t.jsonl").write_text("the DECISION leaked\n")
+
+    out = _grep(_ctx(tmp_path), pattern="DECISION", path=".")
+
+    assert ".imp/quests/c1/spike/probe.out" in out
+    assert "t.jsonl" not in out
+
+
+def test_grep_surfaces_the_spike_subtree_in_a_repo(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, ".imp/\n")
+    home = tmp_path / ".imp" / "quests" / "c1"
+    (home / "spike").mkdir(parents=True)
+    (home / "spike" / "probe.out").write_text("the DECISION is X\n")
+    (home / "artifacts" / "spec").mkdir(parents=True)
+    (home / "artifacts" / "spec" / "feat.md").write_text("the DECISION is X\n")
+    (home / "steps").mkdir()
+    (home / "steps" / "t.jsonl").write_text("the DECISION leaked\n")
+
+    out = _grep(_ctx(tmp_path), pattern="DECISION", path=".")
+
+    assert ".imp/quests/c1/spike/probe.out" in out
+    assert ".imp/quests/c1/artifacts/spec/feat.md" in out
+    assert "t.jsonl" not in out

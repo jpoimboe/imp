@@ -188,3 +188,43 @@ def test_finish_propagates_cancellation(
     # complete.
     assert not any(e["type"] == "warning" for e in log.events)
     assert not any(e["type"] == "step_completed" for e in log.events)
+
+
+def test_harvest_never_journals_the_sibling_spike_dir(tmp_path: Path) -> None:
+    # `artifacts/` means committed; the sibling spike/ is throwaway evidence and
+    # must never reach refs/imp/artifacts/<id>.
+    _init_repo(tmp_path)
+    ch = _change(tmp_path, "spk")
+    spec = ch.quest_dir / "artifacts" / "spec"
+    spec.mkdir(parents=True)
+    (spec / "spk.md").write_text("# spec\n")
+    spike = ch.quest_dir / "spike"
+    spike.mkdir(parents=True)
+    (spike / "probe.py").write_text("print('x')\n")
+
+    executor._harvest_artifacts(ch, SimpleNamespace(name="threshold"))
+
+    entries = _git(tmp_path, "ls-tree", "--name-only",
+                   "refs/imp/artifacts/spk").stdout.split()
+    assert entries == ["spec"]
+    assert _git(tmp_path, "cat-file", "-e",
+                "refs/imp/artifacts/spk:spike").returncode != 0
+
+
+def test_a_recreated_artifacts_spike_is_still_harvested(tmp_path: Path) -> None:
+    # In-flight: an older run writes the old path and is journaled as before.
+    _init_repo(tmp_path)
+    ch = _change(tmp_path, "flight")
+    old = ch.quest_dir / "artifacts" / "spike"
+    old.mkdir(parents=True)
+    (old / "probe.py").write_text("print('old')\n")
+    new = ch.quest_dir / "spike"
+    new.mkdir(parents=True)
+    (new / "probe.py").write_text("print('new')\n")
+
+    executor._harvest_artifacts(ch, SimpleNamespace(name="threshold"))
+
+    assert _git(tmp_path, "ls-tree", "--name-only",
+                "refs/imp/artifacts/flight").stdout.split() == ["spike"]
+    assert _git(tmp_path, "show",
+                "refs/imp/artifacts/flight:spike/probe.py").stdout == "print('old')\n"

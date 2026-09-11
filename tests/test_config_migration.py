@@ -15,11 +15,13 @@ from imp.cli.config_migrate import (
     migrate_config_layers,
     migrate_global_config,
     migrate_project_config,
+    migrate_spike_artifact_refs,
     rewrite_config_file,
     run_startup_migrations,
 )
-from imp.paths import display_path
-from tests.conftest import _assert_outside_a_git_work_tree
+from imp.engine.worktree import RepoGitLock, _git_ok, artifact_commit
+from imp.paths import display_path, imp_home, project_state_dir
+from tests.conftest import _assert_outside_a_git_work_tree, _init_repo
 
 
 def _legacy(tmp_path: Path, body: str = "providers: [openai]\n") -> Path:
@@ -737,3 +739,153 @@ def test_a_quest_worktrees_own_config_is_never_rewritten(
     assert (wt / "imp" / "config.yaml").read_text() == _RETIRED_BODY
     assert (repo / "imp" / "config.yaml").read_text() == "default-workflow: imp\n"
     assert capsys.readouterr().err == ""
+
+
+def _spiked_repo(tmp_path: Path) -> Path:
+    """A checkout whose one artifact ref carries parked spike evidence."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _init_repo(root)
+    project_state_dir(root)  # a project imp manages has a claimed state dir
+    probe = tmp_path / "files" / "probe.py"
+    probe.parent.mkdir(parents=True)
+    probe.write_text("print(1)\n")
+    spec = tmp_path / "files" / "f.md"
+    spec.write_text("# spec\n")
+    artifact_commit(root, "aaa", {"spec/f.md": spec, "spike/probe.py": probe},
+                    message="artifacts: threshold")
+    return root
+
+
+def _marker(root: Path) -> Path:
+    return project_state_dir(root) / "spike-refs-pruned"
+
+
+def _tip_entries(root: Path) -> list[str]:
+    return _git_ok(root, "ls-tree", "--name-only", "refs/imp/artifacts/aaa").split()
+
+
+_PRUNED_ONE = ("imp: pruned spike evidence from 1 artifact ref; "
+               "run `git gc` to reclaim the space.\n")
+_PRUNED_MANY = ("imp: pruned spike evidence from 26 artifact refs; "
+                "run `git gc` to reclaim the space.\n")
+
+
+def test_the_spike_sweep_prunes_the_ref_marks_it_done_and_reports_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _spiked_repo(tmp_path)
+
+    migrate_spike_artifact_refs(root)
+
+    assert _tip_entries(root) == ["spec"]
+    assert _marker(root).is_file()
+    assert capsys.readouterr().err == _PRUNED_ONE
+
+
+def test_the_plural_form_names_the_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _spiked_repo(tmp_path)
+    monkeypatch.setattr("imp.engine.worktree.prune_spike_from_artifact_refs",
+                        lambda control_root: 26)
+
+    migrate_spike_artifact_refs(root)
+
+    assert capsys.readouterr().err == _PRUNED_MANY
+
+
+def test_a_sweep_that_rewrote_nothing_says_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    _init_repo(root)
+    project_state_dir(root)  # a project imp manages has a claimed state dir
+
+    migrate_spike_artifact_refs(root)
+
+    assert _marker(root).is_file()
+    assert capsys.readouterr().err == ""
+
+
+def test_a_repo_imp_has_never_managed_is_left_completely_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    _init_repo(root)
+
+    migrate_spike_artifact_refs(root)
+
+    assert not (imp_home() / "projects").exists()
+    assert not (root / ".git" / "imp").exists()
+    assert capsys.readouterr().err == ""
+
+
+def test_the_marker_stops_a_second_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _spiked_repo(tmp_path)
+    _marker(root).touch()
+
+    def never(control_root: Path) -> int:
+        raise AssertionError("swept with the marker already present")
+
+    monkeypatch.setattr("imp.engine.worktree.prune_spike_from_artifact_refs", never)
+
+    migrate_spike_artifact_refs(root)
+
+    assert _tip_entries(root) == ["spec", "spike"]
+    assert capsys.readouterr().err == ""
+
+
+def test_a_held_lock_defers_the_sweep_and_the_next_invocation_retries(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _spiked_repo(tmp_path)
+    with RepoGitLock(root).acquire(timeout=10):
+        migrate_spike_artifact_refs(root)
+        assert not _marker(root).exists()
+        assert _tip_entries(root) == ["spec", "spike"]
+        assert capsys.readouterr().err == ""
+
+    migrate_spike_artifact_refs(root)
+
+    assert _marker(root).is_file()
+    assert _tip_entries(root) == ["spec"]
+    assert capsys.readouterr().err == _PRUNED_ONE
+
+
+def test_a_raising_sweep_cannot_fail_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _spiked_repo(tmp_path)
+    monkeypatch.chdir(root)
+
+    def boom(cwd: Path) -> None:
+        raise RuntimeError("sweep exploded")
+
+    monkeypatch.setattr("imp.cli.config_migrate.migrate_spike_artifact_refs", boom)
+
+    run_startup_migrations()   # must not raise
+
+    assert not _marker(root).exists()
+
+
+def test_the_spike_sweep_runs_after_the_state_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _spiked_repo(tmp_path)
+    monkeypatch.chdir(root)
+    order: list[str] = []
+    monkeypatch.setattr("imp.cli.state_migrate.migrate_project_state",
+                        lambda cwd: order.append("state"))
+    monkeypatch.setattr("imp.cli.config_migrate.migrate_spike_artifact_refs",
+                        lambda cwd: order.append("spike"))
+
+    run_startup_migrations()
+
+    assert order == ["state", "spike"]

@@ -7,11 +7,16 @@ from imp.paths import project_state_dir
 from tests.conftest import _seed_control
 
 
-def test_artifacts_guard_admits_quests_path() -> None:
-    from imp.agents.tools.limits import leads_to_or_within_artifacts, within_artifacts
-    assert within_artifacts(Path(".imp/quests/que123/artifacts/plans/p.md"))
-    assert leads_to_or_within_artifacts(Path(".imp/quests"))
-    assert not within_artifacts(Path(".imp/changes/que123/artifacts/plans/p.md"))
+def test_visible_subtree_guard_admits_artifacts_and_spike() -> None:
+    from imp.agents.tools.limits import (
+        leads_to_or_within_visible_quest_subtree,
+        within_visible_quest_subtree,
+    )
+    assert within_visible_quest_subtree(Path(".imp/quests/que123/artifacts/plans/p.md"))
+    assert within_visible_quest_subtree(Path(".imp/quests/que123/spike/probe.py"))
+    assert leads_to_or_within_visible_quest_subtree(Path(".imp/quests"))
+    assert not within_visible_quest_subtree(Path(".imp/quests/que123/steps/s.jsonl"))
+    assert not within_visible_quest_subtree(Path(".imp/changes/que123/artifacts/plans/p.md"))
 
 
 def test_rehydrate_recreates_home_under_quests(tmp_path: Path) -> None:

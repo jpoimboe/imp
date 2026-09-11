@@ -36,10 +36,11 @@ from imp.agents.tools.limits import (
     OUTPUT_TRUNCATION_MARKER,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
-    leads_to_or_within_artifacts,
+    VISIBLE_QUEST_SUBDIRS,
+    leads_to_or_within_visible_quest_subtree,
     read_text_capped,
     tool_checkpoint,
-    within_artifacts,
+    within_visible_quest_subtree,
 )
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
 
@@ -48,15 +49,16 @@ def _iter_files(target: Path, policy: Any = None,
                 root: Path | None = None,
                 excluded: frozenset[str] = EXCLUDED_DIRS) -> Iterator[Path]:
     """Files under `target`, never descending into an excluded control/VCS dir
-    (A3) — EXCEPT the per-quest artifact subtree .imp/quests/<id>/artifacts/, which
-    is surfaced (passed via `root`, the worktree root, so the carve-out is anchored
-    there; `root=None` for external targets keeps the old exclude-everything
-    behavior). `os.walk` with in-place `dirnames` pruning means the walk does not
-    even *enumerate* inside `.imp/`/`.git/` beyond the carve-out. When `policy` is
-    an active SandboxPolicy, additionally prune directories and drop files whose
-    resolved path fails `policy.allows_read` — the in-process mirror of the bwrap
-    secret masks, so the search tool never out-reads `bash`-under-bwrap (a symlink
-    into a masked dir is dropped by resolving before the check)."""
+    (A3) — EXCEPT a quest's visible subtrees .imp/quests/<id>/{artifacts,spike}/,
+    which are surfaced (passed via `root`, the worktree root, so the carve-out is
+    anchored there; `root=None` for external targets keeps the old
+    exclude-everything behavior). `os.walk` with in-place `dirnames` pruning means
+    the walk does not even *enumerate* inside `.imp/`/`.git/` beyond the carve-out.
+    When `policy` is an active SandboxPolicy, additionally prune directories and
+    drop files whose resolved path fails `policy.allows_read` — the in-process
+    mirror of the bwrap secret masks, so the search tool never out-reads
+    `bash`-under-bwrap (a symlink into a masked dir is dropped by resolving before
+    the check)."""
     if target.is_file():
         yield target
         return
@@ -75,7 +77,7 @@ def _iter_files(target: Path, policy: Any = None,
             if d in excluded:
                 child = Path(dirpath) / d
                 if not (root is not None and child.is_relative_to(root)
-                        and leads_to_or_within_artifacts(child.relative_to(root))):
+                        and leads_to_or_within_visible_quest_subtree(child.relative_to(root))):
                     continue
             keep.append(d)
         if masking:
@@ -94,11 +96,11 @@ def _iter_files(target: Path, policy: Any = None,
             if not p.is_file():
                 continue
             # A file directly under an excluded dir (e.g. .imp/events.jsonl) stays
-            # hidden even though the walk descended .imp to reach the artifact subtree.
+            # hidden even though the walk descended .imp to reach a visible subtree.
             if root is not None and p.is_relative_to(root):
                 rel = p.relative_to(root)
                 if (any(part in excluded for part in rel.parts)
-                        and not within_artifacts(rel)):
+                        and not within_visible_quest_subtree(rel)):
                     continue
             if masking and not policy.allows_read(p.resolve()):
                 continue
@@ -107,18 +109,19 @@ def _iter_files(target: Path, policy: Any = None,
 
 def _git_files(unignored: set[Path], target: Path, root: Path,
                policy: Any) -> list[Path]:
-    """Normal in-worktree git path: the unignored set UNION each quest's
-    .imp/quests/<id>/artifacts/ carve-out portion under `target` (walked
+    """Normal in-worktree git path: the unignored set UNION each quest's visible
+    .imp/quests/<id>/{artifacts,spike}/ carve-out portions under `target` (walked
     separately since .imp is gitignored), restricted to regular files under
     `target`, sandbox-masked, sorted (head_limit early-exit makes order
     observable)."""
     masking = policy is not None and policy.active
     candidates = set(unignored)
-    for art in sorted((root / ".imp" / "quests").glob("*/artifacts")):
-        if not (art.is_dir()
-                and (art.is_relative_to(target) or target.is_relative_to(art))):
+    quests = root / ".imp" / "quests"
+    for subdir in sorted(p for sub in VISIBLE_QUEST_SUBDIRS for p in quests.glob(f"*/{sub}")):
+        if not (subdir.is_dir()
+                and (subdir.is_relative_to(target) or target.is_relative_to(subdir))):
             continue
-        for dirpath, _dirnames, filenames in os.walk(art):
+        for dirpath, _dirnames, filenames in os.walk(subdir):
             base = Path(dirpath)
             for name in filenames:
                 candidates.add(base / name)
@@ -211,7 +214,7 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
         resolved = p.resolve()
         # p.resolve() escapes root via the quest-home symlink; use the logical path instead.
         rel = p.relative_to(root) if p.is_relative_to(root) else None
-        sanctioned = rel is not None and within_artifacts(rel)
+        sanctioned = rel is not None and within_visible_quest_subtree(rel)
         if inside:
             if not resolved.is_relative_to(root) and not sanctioned:
                 continue                        # belt-and-suspenders vs symlinks
@@ -229,7 +232,7 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
         repo = await repo_root(gbase if gbase.is_dir() else gbase.parent)
         if repo is not None and not await is_ignored(repo, gbase):
             to_check = {p.resolve() for p in matched
-                        if not within_artifacts(p.relative_to(root))}
+                        if not within_visible_quest_subtree(p.relative_to(root))}
             ignored = await partition_ignored(repo, to_check)
             if ignored:
                 matched = [p for p in matched if p.resolve() not in ignored]

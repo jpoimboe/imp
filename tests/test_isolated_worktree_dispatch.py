@@ -138,7 +138,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
         seen["root"] = inv.quest_context.project_root
         # write through the planted change-home symlink inside the throwaway
         home = inv.quest_context.project_root / ".imp" / "quests" / quest.id
-        dest = home / "artifacts" / "spike" / "finding.md"
+        dest = home / "spike" / "finding.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("empirical result: 42\n")
 
@@ -152,7 +152,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
     # the write happened INSIDE the disposable worktree ...
     assert seen["root"] == throwaway
     # ... which is now gone, yet the parked artifact persists in the durable home
-    parked = quest.quest_dir / "artifacts" / "spike" / "finding.md"
+    parked = quest.quest_dir / "spike" / "finding.md"
     assert parked.read_text() == "empirical result: 42\n"
     assert not throwaway.exists()
 

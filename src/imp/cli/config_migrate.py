@@ -2,10 +2,11 @@
 # Copyright 2026 Josh Poimboeuf
 """One-shot startup migrations: the global config file's move into $IMP_HOME, the
 project config file's staged rename, the `repo` ownership marker's backfill into
-imp-owned state directories, and the per-project state directory's move out of the
-checkout. Run by the console-script entrypoint (`imp.__main__:main`), never by
-`imp.cli.main:main` — the suite drives the latter in-process, where a migration
-would rearrange the developer's own files."""
+imp-owned state directories, the per-project state directory's move out of the
+checkout, and the spike evidence's removal from the artifact refs. Run by the
+console-script entrypoint (`imp.__main__:main`), never by `imp.cli.main:main` —
+the suite drives the latter in-process, where a migration would rearrange the
+developer's own files."""
 
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-from imp.paths import _slug, display_path, imp_home
+from imp.paths import _slug, claimed_state_dir, display_path, imp_home
 
 
 def migrate_global_config(legacy: Path, new: Path) -> None:
@@ -265,6 +266,34 @@ def backfill_repo_markers() -> None:
             marker.write_text(f"{owner}\n")
 
 
+def migrate_spike_artifact_refs(cwd: Path) -> None:
+    """Drop the spike evidence every artifact ref committed before it moved out of
+    `artifacts/`, once per project."""
+    from filelock import Timeout
+
+    from imp.engine.worktree import find_control_root, prune_spike_from_artifact_refs
+
+    control_root = find_control_root(cwd)
+    # No claimed state dir means imp has never run here — nothing to prune, and
+    # resolving one would mint state in a repo imp does not manage.
+    state_dir = claimed_state_dir(control_root)
+    if state_dir is None:
+        return
+    marker = state_dir / "spike-refs-pruned"
+    if marker.exists():
+        return
+    try:
+        pruned = prune_spike_from_artifact_refs(control_root)
+    except Timeout:
+        return                    # a live harvest holds the lock; retry next invocation
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
+    if pruned:
+        noun = "ref" if pruned == 1 else "refs"
+        print(f"imp: pruned spike evidence from {pruned} artifact {noun}; "
+              "run `git gc` to reclaim the space.", file=sys.stderr)
+
+
 def run_startup_migrations() -> None:
     """Best-effort per config step: one that cannot run is retried on the next
     invocation and must never be the reason a command dies. The state move is
@@ -289,3 +318,6 @@ def run_startup_migrations() -> None:
     from imp.cli.state_migrate import migrate_project_state
 
     migrate_project_state(Path.cwd())
+    # Last: it resolves the state directory, so it must see its final location.
+    with suppress(Exception):
+        migrate_spike_artifact_refs(Path.cwd())

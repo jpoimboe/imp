@@ -23,7 +23,7 @@ def test_no_control_imp_reference_remains() -> None:
 
 # The only surviving `.imp` path literals in src/ are the imp home's own default,
 # two worktree-relative paths (the per-quest home symlink and the nav-tool
-# artifact carve-out that walks it), and the startup migration's one reader of
+# visible-subtree carve-out that walks it), and the startup migration's one reader of
 # the pre-migration layout it exists to move.
 _SRC_ALLOWED = {
     ('imp/paths.py',
@@ -31,7 +31,7 @@ _SRC_ALLOWED = {
     ('imp/engine/quest.py',
      'link = worktree_path / ".imp" / "quests" / quest_dir.name'),
     ('imp/agents/tools/nav.py',
-     'for art in sorted((root / ".imp" / "quests").glob("*/artifacts")):'),
+     'quests = root / ".imp" / "quests"'),
     ('imp/cli/state_migrate.py',
      'return control_root / ".imp"'),
 }

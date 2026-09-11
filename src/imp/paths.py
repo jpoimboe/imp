@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterator
+from itertools import count
 from pathlib import Path
 
 
@@ -33,6 +35,31 @@ def _slug(basename: str) -> str:
     return _SLUG_DISALLOWED.sub("-", basename.lower())[:_SLUG_MAX] or "project"
 
 
+def _state_dir_candidates(root: Path) -> Iterator[Path]:
+    projects = imp_home() / "projects"
+    base = _slug(root.name)
+    yield projects / base
+    for n in count(2):
+        yield projects / f"{base}-{n}"
+
+
+def claimed_state_dir(control_root: Path) -> Path | None:
+    """This project's state directory if one is already claimed — unlike
+    `project_state_dir`, creating and marking nothing. `$IMP_STATE_DIR` still wins
+    verbatim, so a hand-pinned directory always reads as claimed."""
+    root = control_root.resolve()
+    override = os.environ.get("IMP_STATE_DIR")
+    if override:
+        return _checked_override(Path(override), root)
+    for candidate in _state_dir_candidates(root):
+        if not candidate.exists():
+            return None
+        marker = candidate / "repo"
+        if marker.is_file() and marker.read_text().strip() == str(root):
+            return candidate
+    return None  # unreachable — the candidate stream is unbounded, which mypy can't infer
+
+
 def project_state_dir(control_root: Path) -> Path:
     """This project's state directory — where its quests, worktrees and archive
     live. `$IMP_STATE_DIR` wins verbatim when set. Otherwise resolution claims:
@@ -40,20 +67,11 @@ def project_state_dir(control_root: Path) -> Path:
     `imp_home()/projects` and writes its `repo` marker. A slug already claimed by
     a different control root is skipped for `<slug>-2`, `-3`, …"""
     root = control_root.resolve()
-    override = os.environ.get("IMP_STATE_DIR")
-    if override:
-        return _checked_override(Path(override), root)
-    projects = imp_home() / "projects"
-    base = _slug(root.name)
-    n = 1
     while True:
-        candidate = projects / (base if n == 1 else f"{base}-{n}")
-        if candidate.exists():
-            marker = candidate / "repo"
-            if marker.is_file() and marker.read_text().strip() == str(root):
-                return candidate
-            n += 1
-            continue
+        claimed = claimed_state_dir(root)
+        if claimed is not None:
+            return claimed
+        candidate = next(c for c in _state_dir_candidates(root) if not c.exists())
         try:
             candidate.mkdir(parents=True)
         except FileExistsError:

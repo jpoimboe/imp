@@ -32,7 +32,7 @@ at the threshold.
 
 {% include "partials/delegate-exploration.md" %}
 
-Dispatch a **`spiker`** when a claim can only be settled by running code rather than reading it — runtime ordering, what a provider actually emits, whether a seam carries the value you assume. It works in a disposable worktree and parks its script and output under `{{ quest.home }}/artifacts/spike/`; cite that evidence in the spec so the reviewer checks it instead of re-deriving it.
+Dispatch a **`spiker`** when a claim can only be settled by running code rather than reading it — runtime ordering, what a provider actually emits, whether a seam carries the value you assume. It works in a disposable worktree and parks its script and output under `{{ quest.home }}/spike/`; cite that evidence in the spec so the reviewer checks it instead of re-deriving it.
 
 ## Threshold handoff (phase 1 adopt)
 

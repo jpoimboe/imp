@@ -61,6 +61,6 @@ you proved by running from what you merely inferred.
 ## Park the evidence before you return
 
 Park a durable copy of the spike artifact — the script or patch and its captured
-output — under `{{ quest.home }}/artifacts/spike/` before sending your final
-message. That path resolves to the quest's durable home, which survives the
-worktree teardown; everything else you wrote does not.
+output — under `{{ quest.home }}/spike/` before sending your final message. That
+path resolves to the quest's durable home, which survives the worktree teardown;
+everything else you wrote does not.

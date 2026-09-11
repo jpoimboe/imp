@@ -30,7 +30,7 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
    brainstorm prose (tool noise elided), the provenance record of what was
    decided, not current state.
 3. This is review lap {{ step.lap }}.{% if step.prior_laps %} Prior laps ended — {% for l in step.prior_laps %}{{ l.lap }}: {{ l.outcome }}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %} Outcomes only, not prior findings: judge the spec yourself, and use the laps only to notice an area that keeps returning.
-4. Read `{{ quest.home }}/artifacts/spike/` if it exists — empirical evidence a spiker captured. A recorded result is settled fact: don't re-derive it, don't flag a claim it supports.
+4. Read `{{ quest.home }}/spike/` if it exists — empirical evidence a spiker captured. A recorded result is settled fact: don't re-derive it, don't flag a claim it supports.
 5. Evaluate against the checks below.
 6. Produce a severity-classified findings report and call `complete_step`.
 

@@ -601,7 +601,7 @@ def test_spec_reviewer_later_lap_lists_outcomes_and_no_findings(tmp_path) -> Non
 
 def test_spec_reviewer_reads_the_quest_spike_dir(tmp_path) -> None:
     out = _render_spec_reviewer(tmp_path)
-    assert ".imp/quests/abc/artifacts/spike/" in out
+    assert ".imp/quests/abc/spike/" in out
     assert "{{ quest.home }}" not in out
 
 

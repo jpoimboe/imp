@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -460,6 +460,69 @@ def artifact_commit(
         else:
             _force_update_ref(control_root, ref, commit)
     return True
+
+
+# Short: a live harvest must never queue behind this one-shot sweep. Declining leaves
+# the marker unwritten, so the next invocation retries.
+_SWEEP_LOCK_TIMEOUT = 2.0
+
+_SWEEP_IDENT = (
+    "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
+)
+
+
+def _replay_without_spike(control_root: Path, commit: str, parent: str) -> str:
+    """One artifact commit re-made without its root-level `spike` entry, keeping the
+    message bytes, both identities and both dates — so a commit that carried no spike
+    entry re-hashes to its own sha."""
+    entries = [line for line
+               in _git_ok(control_root, "ls-tree", f"{commit}^{{tree}}").splitlines()
+               if line.split("\t", 1)[1] != "spike"]
+    tree = subprocess.run(
+        ["git", "mktree"], cwd=control_root, input="".join(f"{e}\n" for e in entries),
+        capture_output=True, text=True, check=True).stdout.strip()
+    ident = _git_ok(
+        control_root, "show", "-s",
+        "--format=%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI", commit).rstrip("\n")
+    env = dict(os.environ, **dict(zip(_SWEEP_IDENT, ident.split("\x1f"), strict=True)))
+    # cat-file, not `--format=%B`, which appends a newline: the header block ends at the
+    # first blank line, so this is the message's exact bytes.
+    message = subprocess.run(
+        ["git", "cat-file", "commit", commit], cwd=control_root,
+        capture_output=True, check=True).stdout.split(b"\n\n", 1)[1]
+    args = ["git", "commit-tree", tree] + (["-p", parent] if parent else [])
+    return subprocess.run(args, cwd=control_root, input=message, env=env,
+                          capture_output=True, check=True).stdout.decode().strip()
+
+
+def _prune_one_ref(control_root: Path, ref: str) -> bool:
+    """Replay `ref`'s whole chain without spike and advance it under CAS. False when no
+    commit carries a spike entry: the ref is left untouched, at its exact sha."""
+    old = _git_ok(control_root, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+    if not _git_ok(control_root, "rev-list", ref, "--", "spike").strip():
+        return False
+    parent = ""
+    for commit in _git_ok(control_root, "rev-list", "--reverse", ref).split():
+        parent = _replay_without_spike(control_root, commit, parent)
+    _git_ok(control_root, "update-ref", ref, parent, old)
+    return True
+
+
+def prune_spike_from_artifact_refs(control_root: Path) -> int:
+    """One-shot: drop the root-level `spike` tree from every commit of every
+    refs/imp/artifacts/* ref, preserving each ref's per-step lineage. Returns the number
+    of refs rewritten; a ref that fails part-way keeps its old tip and the sweep moves on
+    to the next one."""
+    with RepoGitLock(control_root).acquire(timeout=_SWEEP_LOCK_TIMEOUT):
+        refs = _git_ok(control_root, "for-each-ref", "--format=%(refname)",
+                       "refs/imp/artifacts/").split()
+        pruned = 0
+        for ref in refs:
+            with suppress(Exception):
+                if _prune_one_ref(control_root, ref):
+                    pruned += 1
+        return pruned
 
 
 def _common_dir(control_root: Path) -> Path:

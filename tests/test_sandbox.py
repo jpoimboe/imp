@@ -3263,3 +3263,42 @@ def test_nothing_is_bound_between_dev_and_chdir():
         # policy.bind_plan() (where every other bind in the argv comes from)
         # lands nowhere near --dev and would slip past the adjacency check.
         assert "/dev/pts" not in argv
+
+
+def test_resolve_policy_reaches_the_quest_spike_dir(tmp_path):
+    # AC 1(a): the ordinary agent policy permits read+write of <quest_home>/spike/
+    # with no sandbox.py change — it rides the plain quest_home rw bind.
+    control, wt = _layout(tmp_path)
+    quest_dir = (project_state_dir(control) / "quests" / "abc")
+    (quest_dir / "steps").mkdir(parents=True)
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True, quest_dir=quest_dir)
+    spike = quest_dir.resolve() / "spike"
+    assert pol.allows_write(spike) is True
+    assert pol.allows_read(spike / "probe.py") is True
+    # steps/ stays masked — the reason spike/ is a sibling of it, not inside it.
+    assert pol.allows_read(quest_dir.resolve() / "steps" / "s.jsonl") is False
+
+
+def test_isolated_subagent_policy_reaches_the_quest_spike_dir(tmp_path, monkeypatch):
+    # AC 1(b): the spiker runs as an isolated subagent, whose policy is built from
+    # the same quest_dir — so its park path must be writable there too.
+    import imp.agents.subagents as subagents
+
+    control, wt = _layout(tmp_path)
+    quest_dir = (project_state_dir(control) / "quests" / "abc")
+    (quest_dir / "steps").mkdir(parents=True)
+    monkeypatch.setattr("imp.providers.effective.load_effective_config",
+                        lambda **k: _types.SimpleNamespace(
+                            config=_types.SimpleNamespace(sandbox={}, pythonpath=())))
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    quest = _types.SimpleNamespace(project_root=wt, control_root=control, id="abc",
+                                   title="t", quest_dir=quest_dir)
+
+    pol = subagents._build_isolated_policy(quest, tmp_path / "spike-wt", None)
+
+    spike = quest_dir.resolve() / "spike"
+    assert pol.allows_write(spike) is True
+    assert pol.allows_read(spike / "probe.py") is True
+    assert pol.allows_read(quest_dir.resolve() / "steps" / "s.jsonl") is False
