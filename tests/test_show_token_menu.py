@@ -40,7 +40,7 @@ def test_show_ambiguous_token_lists_candidates_exit_2(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_interactive", lambda: True)
     monkeypatch.setattr(
-        m, "_iter_quest_ids", lambda c: ["2026-06-10-foo", "2026-06-11-foo"])
+        m, "_live_quest_ids", lambda c: ["2026-06-10-foo", "2026-06-11-foo"])
     monkeypatch.setattr(s, "_row_for_id", lambda c, cid: None)
     rc = m._cmd_show(_ns("foo"))
     err = capsys.readouterr().err
@@ -71,7 +71,7 @@ def test_show_empty_token_errors_no_match(monkeypatch, tmp_path: Path, capsys) -
     # An empty (non-None) token is not the no-id case: it flows to _resolve_id,
     # whose empty-token guard prints "no quest matches" and exits 2.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["2026-06-10-foo"])
+    monkeypatch.setattr(m, "_live_quest_ids", lambda c: ["2026-06-10-foo"])
     rc = m._cmd_show(_ns(""))
     err = capsys.readouterr().err
     assert rc == 2
