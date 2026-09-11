@@ -17,18 +17,21 @@ _IDENTITY = re.compile(r"(/tmp[^.]{0,120}identity|identity[^.]{0,120}/tmp)")
 _ROOTS = ("src/imp/assets/skills", "tests/playbooks", "scripts/showcase",
           "src/impty/README.md")
 _FALLBACK = "${TMPDIR:-/tmp}"
-# `make snap-ui` is a human-run helper that never executes inside the sandbox.
+# `make snap-ui` is a human-run helper that never executes inside the sandbox;
+# match the path token so innocent rewording of surrounding prose doesn't break this.
 _ALLOWED = {
-    ("src/impty/README.md",
-     "`make snap-ui` writes `/tmp/imp_ui/stream.png` from the stored journal through"),
+    ("src/impty/README.md", "/tmp/imp_ui/stream.png"),
 }
 
 
 def _literal_tmp_lines() -> set[tuple[str, str]]:
+    # Bare /tmp (no trailing slash) counts — the migrated copy said "Write shots to /tmp".
+    # Lines containing "read-only" are exempt: they state the rule, not instruct a write.
     hits = set()
     for path in tracked(*_ROOTS, suffixes=(".md", ".py")):
         for line in path.read_text().splitlines():
-            if "/tmp/" in line.replace(_FALLBACK, ""):
+            stripped = line.replace(_FALLBACK, "")
+            if "/tmp" in stripped and "read-only" not in stripped:
                 hits.add((path.as_posix(), line.strip()))
     return hits
 
@@ -36,8 +39,14 @@ def _literal_tmp_lines() -> set[tuple[str, str]]:
 def test_no_shipped_instruction_writes_to_a_literal_tmp_path() -> None:
     # AC 12(a): every shipped instruction that writes scratch names $TMPDIR (or the
     # ${TMPDIR:-/tmp} fallback for a host-run shell), so none of them hands its
-    # reader a path the sandbox refuses.
-    assert _literal_tmp_lines() == _ALLOWED
+    # reader a path the sandbox refuses. Lines stating /tmp is read-only are exempt
+    # (they explain the rule); known human-only helpers are exempt by path token.
+    hits = _literal_tmp_lines()
+    allowed = {h for h in hits
+               if any(h[0] == p and token in h[1] for p, token in _ALLOWED)}
+    assert hits - allowed == set()
+    assert all(any(h[0] == p and token in h[1] for h in hits)
+               for p, token in _ALLOWED), f"dead exemption in _ALLOWED: {_ALLOWED}"
 
 
 def test_web_ui_skill_sends_screenshots_to_the_scratch_dir() -> None:
