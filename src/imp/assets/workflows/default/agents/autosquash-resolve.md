@@ -76,9 +76,11 @@ content the pre-autosquash branch already had.
 
 ## Before finishing
 
-Self-check:
+Self-check — the three conditions `cleanup.sh` re-verifies, in its order:
 
+    FORK=$(cat {{ quest.home }}/state/autosquash-fork)
     test ! -d "$(git rev-parse --git-path rebase-merge)" \
+      && [ -z "$(git log --format='%s' "$FORK"..HEAD | grep -E '^(fixup|squash|amend)!')" ] \
       && [ "$(git rev-parse HEAD^{tree})" = "$(cat {{ quest.home }}/state/autosquash-before-tree)" ] \
       && echo OK
 
