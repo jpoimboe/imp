@@ -9,7 +9,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.tools import Tool
-from imp.engine.reincarnation import handoff_path_for
+from imp.engine.reincarnation import handoff_instruction, handoff_path_for
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
@@ -486,3 +486,153 @@ async def test_handoff_dangling_assistant_tail_stays_balanced(
     results = [b["tool_use_id"] for r in rows if r["role"] == "user"
                for b in r["content"] if b.get("type") == "tool_result"]
     assert calls == ["u1"] and results == ["u1"]
+
+
+def _naive_note_from(prompt: str) -> str:
+    """Stand-in for the model that authors the handoff note: it reports the newest
+    account of the interrupted call it was handed. With no correction increment the
+    only account in its context is the SDK's rejection filler — which is exactly the
+    note the jibu68 session wrote."""
+    for line in reversed(prompt.splitlines()):
+        if line.startswith("- write_file:"):
+            return f"handoff: write_file — {line.split(':', 1)[1].strip()}"
+    return "handoff: write_file was rejected by the user; nothing was written"
+
+
+@pytest.mark.anyio
+async def test_handoff_note_is_written_from_imps_real_result(
+        tmp_path: Path) -> None:
+    """The whole point of Channel 1: the note-authoring turn is driven by the string
+    imp queries against the LIVE client, so correcting that string corrects the note.
+    The increment rides as a plain string increment, never a history replay."""
+    (tmp_path / "art").mkdir()
+    hp = handoff_path_for(tmp_path / "step")
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    started = asyncio.Event()
+
+    class NoteWritingClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            runner = holder["runner"]
+            wrapped = _wrap_one("write_file", _slow_write_tool(started),
+                                runner._ctx, runner._state, _passthrough)
+            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
+            await started.wait()
+            await super().interrupt()
+
+        async def query(self, prompt: Any) -> None:
+            await super().query(prompt)
+            if isinstance(prompt, str) and "approaching the context limit" in prompt:
+                # The cursor sits on the handoff turn's assistant message; author it
+                # from what the model was actually told.
+                self._scripted[self._pos] = assistant(
+                    text(_naive_note_from(prompt)))
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        client = NoteWritingClient(
+            opts, scripted_messages=_interrupted_script(), context_usage=cu)
+        holder["client"] = client
+        return client
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+    await holder["call"]
+
+    client = holder["client"]
+    requery = client.queries[1]
+    assert requery.startswith(
+        "[imp] This turn was interrupted while the calls below were still "
+        "running.")
+    assert "- write_file: wrote 1 bytes to scratch" in requery
+    assert "You are approaching the context limit" in requery
+    assert "doesn't want to proceed" not in requery
+    # Still a plain string increment — the all-strings requery invariant.
+    assert all(isinstance(q, str) for q in client.queries[1:])
+    # The note the successor inherits reports the real outcome, not a rejection.
+    assert hp.read_text() == "handoff: write_file — wrote 1 bytes to scratch"
+    # Journaled once, in the instruction's own engine_message/continuation.
+    cont = [e for e in log.read() if e["type"] == "engine_message"
+            and e["payload"].get("subtype") == "continuation"]
+    assert len(cont) == 1
+    assert ("- write_file: wrote 1 bytes to scratch"
+            in cont[0]["payload"]["content"][0]["text"])
+
+
+@pytest.mark.anyio
+async def test_handoff_increment_states_uncertainty_when_the_bound_expires(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A call still wedged when the bound expires is named in the increment with the
+    honest uncertainty sentence — never the SDK's claim of rejection."""
+    from imp.agents.transcript import captured_result_key
+    from imp.providers import claude_code as cc
+
+    monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    key = captured_result_key("write_file", SLOW_ARGS)
+
+    class WedgedClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            holder["runner"]._state.register_inflight(key, "write_file")
+            await super().interrupt()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        client = WedgedClient(opts, scripted_messages=_interrupted_script(),
+                              context_usage=cu)
+        holder["client"] = client
+        return client
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    requery = holder["client"].queries[1]
+    assert ("- write_file: imp interrupted this turn; this call was still running "
+            "and its outcome was not recorded. Verify the current state before "
+            "relying on it.") in requery
+    assert "doesn't want to proceed" not in requery
+
+
+@pytest.mark.anyio
+async def test_handoff_with_nothing_in_flight_queries_the_bare_instruction(
+        tmp_path: Path) -> None:
+    """No imp tool was in flight, so there is nothing to correct: the requery is the
+    handoff instruction and nothing else, and the log gains no extra event."""
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    scripted = [
+        assistant(text("working"),
+                  tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("writing handoff")),
+        result(),
+    ]
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
+                                     context_usage=cu)
+        holder["client"] = client
+        return client
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    assert holder["client"].queries[1] == handoff_instruction()
+    cont = [e for e in log.read() if e["type"] == "engine_message"
+            and e["payload"].get("subtype") == "continuation"]
+    assert len(cont) == 1
