@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -9,11 +11,17 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.tools import Tool
+from imp.agents.transcript import RESUME_CONTINUE_NUDGE
 from imp.engine.reincarnation import handoff_instruction, handoff_path_for
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import ClaudeCodeAgentRunner, _wrap_one
+from imp.providers.claude_code import (
+    ClaudeCodeAgentRunner,
+    _InFlightOutcome,
+    _wrap_one,
+    correction_increment,
+)
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
@@ -845,3 +853,204 @@ async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
         (e["payload"]["id"], e["payload"]["name"]) for e in events
         if e["type"] == "tool_call"]
     assert not runner._state.withheld
+
+
+def _steer_script() -> tuple[list[Any], list[Any]]:
+    """The steer arrival: imp's tool_use, the SDK's matched rejection filler and
+    its interrupt marker before the balanced error close, then the steered turn."""
+    before_result = [
+        assistant(text("working"),
+                  tool_use("u1", "mcp__imp__write_file", SLOW_ARGS)),
+        user(tool_result("u1", REJECTION, is_error=True)),
+        user(text("[Request interrupted by user for tool use]")),
+    ]
+    after_steer = [
+        assistant(text("checking the other file"),
+                  tool_use("c1", "mcp__imp__complete_step", {"status": "Success"})),
+        result(),
+    ]
+    return before_result, after_steer
+
+
+async def _run_steer(tmp_path: Path, log: InMemoryEventLog, reply: str) -> Any:
+    """Drive a Ctrl-C steer whose interrupt lands while one of imp's own tools is
+    mid-flight, and return the live client once the run has finished."""
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    before_result, after_steer = _steer_script()
+    coord = InterruptCoordinator()
+    holder: dict[str, Any] = {}
+    started = asyncio.Event()
+
+    class DispatchingCooperativeClient(CooperativeClient):
+        async def interrupt(self) -> None:
+            # Fires twice: the steer, then Part A preempting the steered turn's
+            # complete_step. Only the first lands mid-tool.
+            if "call" not in holder:
+                runner = holder["runner"]
+                wrapped = _wrap_one("write_file", _slow_write_tool(started),
+                                    runner._ctx, runner._state, _passthrough)
+                holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
+                await started.wait()
+            await super().interrupt()
+
+    def factory(opts: Any) -> Any:
+        c = DispatchingCooperativeClient(opts, after_steer=after_steer,
+                                         before_result=before_result)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: reply)
+    holder["runner"] = runner
+    inv = replace(_inv(tmp_path, log), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    async def drive() -> None:
+        async for _ev in runner.run(inv):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(2000):
+        if "c" in holder and holder["c"].queries:
+            break
+        await asyncio.sleep(0.01)
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=60)
+    await holder["call"]
+    return holder["c"]
+
+
+@pytest.mark.anyio
+async def test_steer_corrects_all_three_channels_for_a_call_in_flight(
+        tmp_path: Path) -> None:
+    """AC 13: the steer path owes the same three corrections as the handoff path —
+    the live session's next query, the event log, and the transcript."""
+    log = InMemoryEventLog()
+    client = await _run_steer(tmp_path, log, "go check the other file instead")
+
+    # Channel 1: the steered query carries the increment, still a plain string —
+    # the first query streams history, every requery after it is an increment.
+    assert isinstance(client.queries[0], list)
+    assert all(isinstance(q, str) for q in client.queries[1:])
+    assert client.queries[-1] == correction_increment([
+        _InFlightOutcome(key="k", name="write_file",
+                         content="wrote 1 bytes to scratch",
+                         is_error=False)]) + "go check the other file instead"
+
+    # Channel 2: the log carries imp's own account, once, with its call.
+    events = list(log.read())
+    assert REJECTION not in json.dumps(events)
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert [(e["payload"]["id"], e["payload"]["content"], e["payload"]["error"])
+            for e in results] == [("u1", "wrote 1 bytes to scratch", False)]
+    assert "duration_ms" not in results[0]["payload"]
+    assert [e["payload"]["id"] for e in events
+            if e["type"] == "tool_call"].count("u1") == 1
+    cont = [e for e in events if e["type"] == "engine_message"
+            and e["payload"].get("subtype") == "continuation"]
+    assert len(cont) == 1
+    assert cont[0]["payload"]["content"][0]["text"].startswith(
+        "[imp] This turn was interrupted")
+
+    # Channel 3: the transcript's result for u1 is the real one, marker collapsed.
+    body = (tmp_path / "step" / "transcript.jsonl").read_text()
+    rows = [json.loads(x) for x in body.splitlines()]
+    assert [(b["tool_use_id"], b["content"], b["is_error"])
+            for r in rows if r["role"] == "user"
+            for b in r["content"] if b.get("type") == "tool_result"] == [
+        ("u1", "wrote 1 bytes to scratch", False)]
+    assert "[Request interrupted by user" not in body
+    assert REJECTION not in body
+
+
+@pytest.mark.anyio
+async def test_steer_empty_reply_carries_the_increment_before_the_nudge(
+        tmp_path: Path) -> None:
+    """The other steer arm: an empty reply continues on the nudge, which the
+    correction must precede rather than replace."""
+    log = InMemoryEventLog()
+    client = await _run_steer(tmp_path, log, "")
+
+    q = client.queries[-1]
+    assert q.startswith("[imp] This turn was interrupted")
+    assert "- write_file: wrote 1 bytes to scratch" in q
+    assert q.endswith(RESUME_CONTINUE_NUDGE)
+
+
+@pytest.mark.anyio
+async def test_steer_kills_before_waiting_so_bash_reports_its_real_death(
+        tmp_path: Path) -> None:
+    """AC 15: Ctrl-C during a long bash. The kill runs ahead of the bounded await,
+    so the recorded result is the real killed-process one and the steer prompt is
+    reached in the kill's own escalation, not after the 30s bound."""
+    from imp.agents.tools import get_registry
+    from imp.agents.tools.context import terminate_tool_processes
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    args = {"command": "sleep 120"}
+    before_result = [
+        assistant(text("running"), tool_use("u1", "mcp__imp__bash", args)),
+        user(tool_result("u1", REJECTION, is_error=True)),
+        user(text("[Request interrupted by user for tool use]")),
+    ]
+    after_steer = [
+        assistant(text("ok"),
+                  tool_use("c1", "mcp__imp__complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, Any] = {}
+    reached: list[float] = []
+
+    def _reply(_prompt: str) -> str:
+        reached.append(time.monotonic())
+        return "never mind"
+
+    def factory(opts: Any) -> Any:
+        c = CooperativeClient(opts, after_steer=after_steer,
+                              before_result=before_result)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=_reply)
+
+    async def drive() -> None:
+        async for _ev in runner.run(_inv(tmp_path, log)):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(2000):
+        if "c" in holder and holder["c"].queries:
+            break
+        await asyncio.sleep(0.01)
+
+    wrapped = _wrap_one("bash", get_registry()["bash"],
+                        runner._ctx, runner._state, _passthrough)
+    call = asyncio.create_task(wrapped(dict(args)))
+    try:
+        for _ in range(2000):
+            if runner._ctx.running_processes:
+                break
+            await asyncio.sleep(0.01)
+        assert runner._ctx.running_processes
+        t0 = time.monotonic()
+        await runner.interrupt()
+        await asyncio.wait_for(task, timeout=60)
+        await call
+    finally:
+        await terminate_tool_processes(runner._ctx)
+
+    assert reached and reached[0] - t0 < 15
+    results = [e for e in log.read() if e["type"] == "tool_result"]
+    assert [e["payload"]["id"] for e in results] == ["u1"]
+    content = results[0]["payload"]["content"]
+    assert content != REJECTION
+    assert "was not recorded" not in content
+    assert json.loads(content)["returncode"] < 0

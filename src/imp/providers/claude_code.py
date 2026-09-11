@@ -1962,12 +1962,14 @@ class ClaudeCodeSession(ObserveSession):
                             continue
                         pend = self._pending_tools.get(b.tool_use_id)
                         is_task = pend is not None and pend.name == "sub_agent"
-                        # imp executed this tool itself; while a handoff interrupt is
+                        # imp executed this tool itself; while an interrupt is
                         # pending the SDK's is_error filler for a call still running
                         # is hearsay. Withhold it — the real result is journaled once
                         # the bounded await resolves.
                         withheld = (
-                            b.is_error and self.runner._handoff_requested
+                            b.is_error
+                            and (self.runner._handoff_requested
+                                 or self.runner._steer_requested)
                             and state.withhold_inflight(
                                 _tool_use_block(self.messages, b.tool_use_id),
                                 b.content,
@@ -2068,15 +2070,27 @@ class ClaudeCodeSession(ObserveSession):
             runner._steer_unblocked.set()
             runner._steer_requested = False
             self._flush_turn_record()
-            # The marker is still the tail here; _enter's repair is tail-only and
-            # can no longer reach it once the steer reply is appended below.
-            repair_interrupt_marker_on_resume(
-                self.messages, self.transcript,
-                captured=_load_captured_tool_results(invocation.transcript_dir))
             # Kills only: this branch RE-QUERIES with the same ctx, so closing the
-            # namespace here would fail-close every later bash call.
+            # namespace here would fail-close every later bash call. Ahead of the
+            # bounded await so a killed bash yields its real result inside the
+            # kill's own escalation instead of stalling the prompt for the bound.
             from imp.agents.tools.context import terminate_tool_processes
             await terminate_tool_processes(ctx)
+            # imp executed these tools itself; the SDK's account of them is hearsay.
+            captured = _load_captured_tool_results(invocation.transcript_dir)
+            settled = await _settle_inflight(
+                runner._state, INFLIGHT_RESULT_BOUND_S)
+            for s in settled:
+                captured[s.key] = (s.content, s.is_error)
+            _correct_withheld_results(elog, aid, runner._state, captured)
+            # The marker is still the tail here; _enter's repair is tail-only and
+            # can no longer reach it once anything is appended below.
+            repair_interrupt_marker_on_resume(
+                self.messages, self.transcript, captured=captured)
+            increment = correction_increment(settled)
+            if increment:
+                deliver_engine_continuation(
+                    self.messages, self.transcript, elog, aid, increment)
             last_text = ""
             for prev in reversed(self.messages):
                 if prev.role == "assistant":
@@ -2099,9 +2113,9 @@ class ClaudeCodeSession(ObserveSession):
                 deliver_engine_continuation(
                     self.messages, self.transcript, elog, aid,
                     RESUME_CONTINUE_NUDGE)
-                self._next_query = RESUME_CONTINUE_NUDGE
+                self._next_query = increment + RESUME_CONTINUE_NUDGE
             else:
-                self._next_query = deliver_continuation_reply(
+                self._next_query = increment + deliver_continuation_reply(
                     self.messages, self.transcript, elog, aid, reply, human=True)
             self._requery_pending = True
             return False
