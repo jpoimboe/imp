@@ -100,14 +100,18 @@ def _scratch_parent() -> Path:
 
 def _active_policy(worktree: Path, *, home: Path | None = None,
                    secret_dirs: tuple[str, ...] = (),
-                   quest_tmp_dir: str = "") -> SandboxPolicy:
+                   quest_tmp_dir: str = "",
+                   quest_tmp_mask: str = "",
+                   session_socket_ro: str = "") -> SandboxPolicy:
     """Minimal hand-built active policy for simple behavioral tests.
 
     Uses PATH from the real environment so git, cat, echo, etc. resolve.
     HOME is set to a dir under the worktree root (or the provided `home`).
     Host /tmp gets no bind and stays on the read-only floor; pass `quest_tmp_dir`
     to re-expose a per-quest scratch dir rw at its real path — prepare_spawn_policy
-    creates it before the spawn, and TMPDIR then points at it.
+    creates it before the spawn, and TMPDIR then points at it. Pass `quest_tmp_mask`
+    to tmpfs the scratch ROOT (the parent) and `session_socket_ro` to re-expose this
+    quest's own session socket read-only through that mask.
     """
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
@@ -134,6 +138,8 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
         network=True,
         note="",
         quest_tmp_dir=quest_tmp_dir,
+        quest_tmp_mask=quest_tmp_mask,
+        session_socket_ro=session_socket_ro,
     )
 
 
@@ -3184,18 +3190,20 @@ def _echo_once(path: Path, ready: threading.Event) -> None:
 
 
 def test_uncovered_tmp_path_is_readable_but_not_writable() -> None:
-    """AC5: a host file no bind covers — a sibling of the scratch dir, the same
+    """AC5: a host file no bind covers — outside the masked scratch root, the same
     shape as any /tmp/<name> — is still readable inside the sandbox through the
     --ro-bind / / floor, via bash and via the in-process read_file tool, while a
-    write to it is refused."""
+    write to it is refused. A true sibling INSIDE the scratch root is masked
+    instead, which is what the scratch tmpfs is for."""
     root = _make_root()
     parent = _scratch_parent()
     scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
-    victim = parent / f"host-{uuid.uuid4().hex[:8]}.txt"
+    victim = parent.parent / f"host-{uuid.uuid4().hex[:8]}.txt"
     try:
         parent.mkdir(parents=True, exist_ok=True)
         victim.write_text("host-side content\n")
-        pol = _active_policy(root, quest_tmp_dir=str(scratch))
+        pol = _active_policy(root, quest_tmp_dir=str(scratch),
+                             quest_tmp_mask=str(parent))
         ctx = _ctx(root, pol)
 
         r = _bash(ctx, f"cat {shlex.quote(str(victim))}")
@@ -3217,10 +3225,12 @@ def test_uncovered_tmp_path_is_readable_but_not_writable() -> None:
 
 
 def test_session_socket_shape_round_trips_from_inside_the_namespace() -> None:
-    """AC6(a): the per-quest session socket sits at <tmp>/imp-<uid>/<id>.sock, on the
-    read-only floor inside the namespace. connect() across a read-only mount is
-    permitted, so a round-trip works — including for a socket the host binds AFTER
-    the keeper namespace already exists."""
+    """AC6(a): the per-quest session socket sits at <tmp>/imp-<uid>/<id>.sock, inside the
+    scratch root the policy masks with a tmpfs — reachable only because the policy
+    re-exposes THIS quest's own socket read-only. connect() across a read-only mount is
+    permitted, so a round-trip works. The listener binds BEFORE the namespace opens: a
+    bind resolves its inode at namespace creation, and production always binds first (the
+    daemon opens the socket before any step dispatches)."""
     root = _make_root()
     parent = _scratch_parent()
     scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
@@ -3228,16 +3238,15 @@ def test_session_socket_shape_round_trips_from_inside_the_namespace() -> None:
     ready = threading.Event()
     thread: threading.Thread | None = None
     try:
-        pol = _active_policy(root, quest_tmp_dir=str(scratch))
-        ctx = _ctx(root, pol)
-        # Open the keeper namespace FIRST, so the socket is bound after it exists.
-        warm = _bash(ctx, "echo warm")
-        assert warm["returncode"] == 0, warm
-
         parent.mkdir(parents=True, exist_ok=True)
         thread = threading.Thread(target=_echo_once, args=(sock, ready), daemon=True)
         thread.start()
         assert ready.wait(60.0), "host echo server never bound its socket"
+
+        pol = _active_policy(root, quest_tmp_dir=str(scratch),
+                             quest_tmp_mask=str(parent),
+                             session_socket_ro=str(sock))
+        ctx = _ctx(root, pol)
 
         r = _bash(ctx, f"{shlex.quote(sys.executable)} -c {shlex.quote(_SOCK_CLIENT)} "
                        f"{shlex.quote(str(sock))}")
