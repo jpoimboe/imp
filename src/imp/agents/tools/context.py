@@ -91,6 +91,10 @@ class ToolContext:
     # Distinct from quest_context, which is the FROZEN render-time snapshot.
     quest: Any = None
     quest_home: Path | None = None
+    # Set by create_and_enter_worktree when a declared dependency has not merged:
+    # the unmerged quest ids. The tool-dispatch paths turn it into the terminal
+    # `dependency_wait` event; the engine waits and re-enters the step.
+    dependency_wait: tuple[str, ...] = ()
     # The runner injects this callable as the bare-turn-end / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.
     user_input_fn: Any = None
