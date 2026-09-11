@@ -161,6 +161,9 @@ class AgentRunResult:
     # seeded from it; dispatch_task hands it back to the parent. None on every
     # other outcome.
     handoff_path: str | None = None
+    # Unmerged dependency ids reported by create_and_enter_worktree through the
+    # terminal dependency_wait event; the executor waits on them and re-enters.
+    dependency_wait: tuple[str, ...] = ()
 
 
 class SubagentSuspended(Exception):
@@ -726,6 +729,14 @@ async def drive_invocation(
                             fatal=False, delay=None,
                             handoff_path=(event.get("payload") or {}).get(
                                 "handoff_path"))
+                    if event["type"] == "dependency_wait":
+                        # Control signal like handoff, not a logged event: the
+                        # finally below closes the call before the engine waits.
+                        return AgentRunResult(
+                            output=None, errored=False, paused=False,
+                            fatal=False, delay=None,
+                            dependency_wait=tuple(
+                                (event.get("payload") or {}).get("depends_on", ())))
                     if emit_events and log is not None:
                         log.append(agent_id=invocation.agent_id,
                                    type=event["type"],

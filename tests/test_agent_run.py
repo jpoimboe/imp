@@ -2290,3 +2290,36 @@ def test_scratch_note_absent_without_filesystem_tools(
 
     assert "Scratch files go in your scratch dir" not in inv.system_prompt
     assert "IMP_PROJECT_ROOT" not in inv.system_prompt
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_dependency_wait_is_not_journaled(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    class _Log:
+        def __init__(self):
+            self.types: list[str] = []
+        def append(self, *, agent_id, type, payload):
+            self.types.append(type)
+
+    coord = InterruptCoordinator()
+    log = _Log()
+    runner = _Runner([
+        {"type": "thinking", "payload": {"x": 1}},
+        {"type": "dependency_wait",
+         "payload": {"depends_on": ["jibu68", "koze82"]}},
+        {"type": "agent_result", "payload": {"status": "Success"}},
+    ])
+
+    res = await drive_invocation(_inv(tmp_path), runner, coordinator=coord,
+                                 log=log, emit_events=True)
+
+    assert res.dependency_wait == ("jibu68", "koze82")
+    assert res.output is None
+    assert res.errored is False and res.paused is False and res.fatal is False
+    assert res.delay is None
+    # A control signal: never journaled, and terminal — the trailing
+    # agent_result was never drained.
+    assert log.types == ["thinking"]
