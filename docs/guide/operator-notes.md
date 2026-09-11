@@ -93,10 +93,17 @@ pwd -P > "$DIR/repo"           # imp now refuses any other checkout pointed here
 
 ## Archive version skew
 
-An imp older than the archive on disk refuses to read it, on every command that
-touches the archive — `imp list` and `imp search`, plus anything that resolves a
-quest id (`imp show`, `imp log`, `imp abandon`, `imp edit`, `imp resume`). One line
-on stderr, exit 2, no output:
+An imp older than the archive on disk refuses only the reads that touch the floor
+that moved, and each floor refuses whole commands rather than degrading part of
+one. An ahead index floor refuses `imp list` and `imp search` outright — both
+query the archive's sqlite index, and there is no partial listing. An ahead blob
+floor refuses reads of an **archived** quest's own record — `imp show`, `imp log`,
+`imp events` on an archived id — while `imp list` and `imp search` still succeed
+in full, since neither opens a record. A live quest stays reachable either way:
+its id resolves against live homes and its data sits in its own home, so
+`imp show`, `imp log`, `imp events`, `imp edit`, `imp abandon` and `imp resume`
+all work for it while the archive is unreadable. A refusal is one line on stderr,
+exit 2, no output:
 
 ```
 imp: archive data is at v12, newer than this imp (knows v11). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
@@ -124,6 +131,11 @@ quest on bookkeeping after its merge had already landed.
 **Constraint on future schema work: a new index column must be nullable.** An older
 writer's `index.ingest` never supplies it, and that row stands until a rebuild; a
 `NOT NULL` column would make the older writer's archive fail outright.
+
+**Constraint on future migrations: a blob migration that changes an index-visible
+value must also bump the index schema version.** Each read checks only the floor it
+touches, so a blob rewrite that changed what an index query reports would otherwise
+slip past the index-only gate on an archive this imp cannot read.
 
 ---
 

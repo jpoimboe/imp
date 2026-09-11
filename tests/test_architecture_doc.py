@@ -220,6 +220,9 @@ def test_operator_notes_document_archive_version_skew() -> None:
     assert "imp resume <id>" in section
     assert "a new index column must be nullable" in section
     assert "index.ingest" in section
+    # the rule that keeps the split floor checks safe (mirrored at _DATA_VERSION)
+    assert ("a blob migration that changes an index-visible value must also bump "
+            "the index schema version") in section
 
 
 def test_operator_notes_skew_names_the_stale_process_first() -> None:
@@ -230,6 +233,19 @@ def test_operator_notes_skew_names_the_stale_process_first() -> None:
     assert "The usual cause is a stale process, not a stale checkout" in section
     assert "warms its module graph at startup" in section
     assert "this checkout is behind" not in section
+
+
+def test_operator_notes_skew_scope_excludes_a_live_quest() -> None:
+    """Ids resolve against live homes and a live quest's data sits in its own
+    home, so the refusal no longer reaches an id-resolving command for one."""
+    text = Path("docs/guide/operator-notes.md").read_text()
+    section = " ".join(text.split("## Archive version skew", 1)[1].split())
+    assert "refuses only the reads that touch the floor that moved" in section
+    assert "A live quest stays reachable either way" in section
+    assert "on every command that touches the archive" not in section
+    # each floor refuses whole commands: no read degrades part of one
+    assert "refuses whole commands rather than degrading part of" in section
+    assert "journal section" not in section
 
 
 def test_operator_notes_document_the_unguarded_pinned_state_dir() -> None:
