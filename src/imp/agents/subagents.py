@@ -532,8 +532,8 @@ async def dispatch_task(
             # handoff as it approached, or hit the hard context_window error. Instead
             # of reincarnating in place, hand its progress back to the parent as an
             # is_error tool_result (the raise below reuses that path) so the parent
-            # adjudicates: re-dispatch narrower/higher-tier, point a fresh subagent at
-            # the handoff/transcript, or carry on itself.
+            # adjudicates: re-dispatch narrower, hand the fresh subagent this
+            # handoff, or carry on itself.
             # CONSUMER CONTRACT: narrative._close_subagent_fold scans this is_error
             # content for the literal "[context_exhausted]" marker to derive the
             # subagent's terminal state — keep that bracketed marker in the body.
@@ -542,12 +542,12 @@ async def dispatch_task(
                 or (result.fatal and result.error is not None
                     and result.error.category == "context_window"))
             if context_ceiling:
-                tx = target_dir / "transcript.jsonl"
                 note = None
                 if result.handoff_path is not None:
                     hp = Path(result.handoff_path)
                     if hp.exists():
                         note = hp.read_text()
+                cmd = _recovery_command(cc.id, tool_call_event_id)
                 header = (f"subagent {subagent_name!r} reached its context limit and "
                           f"stopped before finishing. [context_exhausted]")
                 if note is not None:
@@ -555,19 +555,16 @@ async def dispatch_task(
                         f"{header}\n\n"
                         f"It wrote this handoff before stopping:\n\n"
                         f"{note}\n\n"
-                        f"Full prior transcript: {tx}\n\n"
-                        f"You decide what happens next — re-dispatch a fresh subagent "
-                        f"(narrower, at a higher tier, or pointed at the "
-                        f"handoff/transcript above to continue), or carry on from this "
-                        f"handoff yourself.")
+                        f"For more detail:\n{cmd}\n\n"
+                        f"Re-dispatch a fresh subagent with a narrower task, or "
+                        f"continue from this handoff.")
                 else:
                     body = (
                         f"{header}\n\n"
-                        f"It hit the hard context limit without writing a handoff. "
-                        f"Full prior transcript: {tx}\n\n"
-                        f"You decide what happens next — re-dispatch a fresh subagent "
-                        f"(narrower, at a higher tier, or pointed at the transcript "
-                        f"above to continue), or carry on from what you have.")
+                        f"It hit the hard context limit without writing a handoff.\n\n"
+                        f"Recent activity:\n{cmd}\n\n"
+                        f"Re-dispatch a fresh subagent with a narrower task, or "
+                        f"continue from the activity above.")
                 raise RuntimeError(body)
 
             if result.fatal or result.errored or result.output is None:
