@@ -144,9 +144,12 @@ class SandboxPolicy:
         quest's own session socket, ro. The tmpfs must precede both or last-wins
         buries the quest's own $TMPDIR and its control socket. Scratch-root
         invariant: after the whole plan applies, the exposed set under the scratch
-        root is EXACTLY this quest's own scratch dir plus its own session socket —
-        every sibling quest's scratch dir, its staged provider credentials and its
-        control socket are gone from the namespace, as is the remote-control socket.
+        root is EXACTLY this quest's own scratch dir, its own session socket, plus
+        any path a LATER bind (worktree_block, quest_home, the git binds,
+        writable_caches, extra_readable/extra_writable) re-exposes under that root
+        — no policy places one there today. Every sibling quest's scratch dir, its
+        staged provider credentials and its control socket are gone from the
+        namespace, as is the remote-control socket.
         Host /tmp OUTSIDE that root gets no covering bind and stays on the read-only
         floor. Then the per-quest read-write /var/tmp scratch bind
         (emitted only when quest_var_tmp_dir is set; empty → no /var/tmp bind, host
