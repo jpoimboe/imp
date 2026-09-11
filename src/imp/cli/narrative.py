@@ -279,6 +279,41 @@ def carrier_provider(event: dict[str, Any]) -> str | None:
     return provider if isinstance(provider, str) else None
 
 
+def carrier_from_events(events: Iterable[dict[str, Any]]) -> Carrier | None:
+    """The carrier a quest's event log states, for a surface with no live builder:
+    the provider of the last step-level agent turn, that provider's own last stated
+    auth mode, and its last quota reading. None until a turn has named one."""
+    # Lazy, like the builder's own quota import: narrative stays provider-free.
+    from imp.providers.quota import QuotaReading
+
+    auth_modes: dict[str, str] = {}
+    quotas: dict[str, QuotaReading] = {}
+    last_provider: str | None = None
+    for event in events:
+        etype = event.get("type")
+        if etype == "agent_message":
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            # Sourced as add() sources them: the mode account-wide (a subagent's
+            # turn states it for the same account), the carrier's name step-level.
+            provider = payload.get("provider")
+            mode = payload.get("auth_mode")
+            if isinstance(provider, str) and mode is not None:
+                auth_modes[provider] = mode
+            step_provider = carrier_provider(event)
+            if step_provider is not None:
+                last_provider = step_provider
+        elif etype == "quota_reading":
+            payload = event["payload"]
+            quotas[str(payload["provider"])] = QuotaReading.from_payload(payload)
+    if last_provider is None:
+        return None
+    return Carrier(provider=last_provider,
+                   auth_mode=auth_modes.get(last_provider),
+                   quota=quotas.get(last_provider))
+
+
 @dataclass
 class DepWait:
     """Footer state for a go-live blocked on unmerged deps: waited ids + pinned clock start."""

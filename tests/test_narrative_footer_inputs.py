@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from imp.cli.narrative import Carrier, NarrativeBuilder, carrier_provider
+from imp.cli.narrative import Carrier, NarrativeBuilder, carrier_from_events, carrier_provider
 from imp.providers.quota import QuotaReading, QuotaWindow
 from tests._event_fixtures import ev
 
@@ -143,3 +143,50 @@ def test_a_subagent_turn_does_not_set_the_last_known_provider() -> None:
 
     assert b.carrier_for(None) == Carrier(provider="codex", auth_mode="apikey",
                                           quota=None)
+
+
+def test_the_carrier_scan_reads_a_parked_quests_log() -> None:
+    reading = _reading("claude_code", QuotaWindow("5h", 62.0, None))
+    assert carrier_from_events([]) is None          # nothing has named a carrier
+    events = [
+        ev("1", "quest_created", quest_id="c", title="C"),
+        ev("q1", "quota_reading", agent_id="step:p/s", **reading.to_payload()),
+        _message("3", "step:p/s", "claude_code", auth_mode="subscription"),
+        # A subagent can run another provider; the group has always meant the step's.
+        _message("r1", "sub:t1", "codex", auth_mode="apikey"),
+        # A torn final line reads as this, and must not break the parked prompt.
+        {"_malformed": True, "raw": '{"type": "agent_mes'},
+        # A later turn that states no mode must not erase the one the step reported.
+        _message("5", "step:p/s", "claude_code"),
+    ]
+    assert carrier_from_events(events) == Carrier(
+        provider="claude_code", auth_mode="subscription", quota=reading)
+
+
+def test_the_scan_never_pairs_a_provider_with_another_ones_mode_or_reading() -> None:
+    claude = _reading("claude_code", QuotaWindow("5h", 62.0, None))
+    events = [
+        _message("3", "step:p/s", "claude_code", auth_mode="subscription"),
+        ev("q1", "quota_reading", agent_id="step:p/s", **claude.to_payload()),
+        # The last step-level turn wins the slot, and brings only its own figures:
+        # codex stated apikey and has no reading of its own.
+        _message("4", "step:p/s", "codex", auth_mode="apikey"),
+    ]
+    assert carrier_from_events(events) == Carrier(
+        provider="codex", auth_mode="apikey", quota=None)
+
+
+def test_the_scan_and_the_live_builder_resolve_the_same_carrier() -> None:
+    # An auth mode is account-wide, so a subagent turn can state one for the very
+    # provider its step-level turn left unstated. Both resolvers must honour it: a
+    # divergence means a parked row reading metered dollars while the live footer
+    # reads percentages, off one identical log.
+    events = [
+        _message("3", "step:p/s", "codex"),
+        _message("r1", "sub:t1", "codex", auth_mode="apikey"),
+    ]
+    b = NarrativeBuilder()
+    for event in events:
+        b.add(event)
+    assert carrier_from_events(events) == b.carrier_for(None) == Carrier(
+        provider="codex", auth_mode="apikey", quota=None)
