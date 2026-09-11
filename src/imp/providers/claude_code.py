@@ -1911,9 +1911,16 @@ class ClaudeCodeSession(ObserveSession):
                 from imp.engine.reincarnation import handoff_instruction
                 runner._handoff_requested = False
                 self._flush_turn_record()
+                # imp executed these tools itself; the SDK's account of them is hearsay.
+                captured = _load_captured_tool_results(invocation.transcript_dir)
+                for settled in await _settle_inflight(
+                        self.runner._state, INFLIGHT_RESULT_BOUND_S):
+                    captured[settled.key] = (settled.content, settled.is_error)
+                # Marker repair first: it collapses the tail the dangling repair then no-ops on.
+                repair_interrupt_marker_on_resume(
+                    self.messages, self.transcript, captured=captured)
                 repair_dangling_tool_use_on_resume(
-                    self.messages, self.transcript,
-                    captured=_load_captured_tool_results(invocation.transcript_dir))
+                    self.messages, self.transcript, captured=captured)
                 instr = handoff_instruction()
                 instr_msg = Message(
                     role="user", content=(TextBlock(text=instr),))

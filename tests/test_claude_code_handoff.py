@@ -1,23 +1,28 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
+from imp.agents.tools import Tool
 from imp.engine.reincarnation import handoff_path_for
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.paths import project_state_dir
-from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude_code import ClaudeCodeAgentRunner, _wrap_one
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
     context_usage,
     result,
     text,
+    tool_result,
     tool_use,
+    user,
 )
 
 
@@ -305,3 +310,179 @@ async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> 
     assert "HANDOFF-SENTINEL" in str(msgs[-1]["payload"]["raw"])
     assert msgs[-1]["payload"]["handoff"] is True
     assert all("handoff" not in m["payload"] for m in msgs[:-1])
+
+
+REJECTION = ("The user doesn't want to proceed with this tool use. The tool use "
+             "was rejected (eg. if it was a file edit).")
+
+SLOW_ARGS = {"path": "scratch", "content": "x"}
+
+
+def _passthrough(name, description, schema, annotations=None):  # type: ignore[no-untyped-def]
+    """Stub claude_agent_sdk.tool — returns the wrapper body unchanged."""
+    def _inner(fn):  # type: ignore[no-untyped-def]
+        return fn
+    return _inner
+
+
+def _slow_write_tool(started: asyncio.Event) -> Tool:
+    """A real imp tool that is still running when the interrupt lands."""
+    async def _fn(ctx: Any, path: str, content: str) -> str:
+        started.set()
+        await asyncio.sleep(0.2)
+        (ctx.project_root / path).write_text(content)
+        return f"wrote {len(content)} bytes to {path}"
+
+    return Tool(name="write_file", description="",
+                input_schema={"type": "object",
+                              "properties": {"path": {"type": "string"},
+                                             "content": {"type": "string"}},
+                              "required": ["path", "content"]},
+                fn=_fn)
+
+
+def _interrupted_script() -> list[Any]:
+    """The shape the jibu68 spike observed: imp's tool_use, the SDK's matched
+    rejection filler, its interrupt marker, then the balanced error close."""
+    return [
+        assistant(text("working"),
+                  tool_use("u1", "mcp__imp__write_file", SLOW_ARGS)),
+        user(tool_result("u1", REJECTION, is_error=True)),
+        user(text("[Request interrupted by user for tool use]")),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("writing handoff")),
+        result(),
+    ]
+
+
+@pytest.mark.anyio
+async def test_handoff_records_the_real_result_of_a_call_still_in_flight(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real imp tool is dispatched through the wrapper and is still running when
+    the threshold interrupt lands; it finishes AFTER the post-interrupt
+    ResultMessage. The persisted transcript must carry what the tool really did —
+    and the capture sidecar cannot be the source: the spy pins that it did not yet
+    exist at the moment imp read it."""
+    from imp.providers import claude_code as cc
+
+    real_load = cc._load_captured_tool_results
+    reads: list[bool] = []
+
+    def _spy(d: Path) -> Any:
+        reads.append((d / "captured_tool_results.jsonl").exists())
+        return real_load(d)
+
+    monkeypatch.setattr(cc, "_load_captured_tool_results", _spy)
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    started = asyncio.Event()
+
+    class DispatchingClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            runner = holder["runner"]
+            wrapped = _wrap_one("write_file", _slow_write_tool(started),
+                                runner._ctx, runner._state, _passthrough)
+            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
+            await started.wait()
+            await super().interrupt()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return DispatchingClient(opts, scripted_messages=_interrupted_script(),
+                                 context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+    await holder["call"]
+
+    body = (tmp_path / "step" / "transcript.jsonl").read_text()
+    rows = [json.loads(x) for x in body.splitlines()]
+    results = [b for r in rows if r["role"] == "user"
+               for b in r["content"] if b.get("type") == "tool_result"]
+    assert [(b["tool_use_id"], b["content"], b["is_error"]) for b in results] == [
+        ("u1", "wrote 1 bytes to scratch", False)]
+    assert reads[-1] is False              # sidecar unwritten when imp read it
+    assert "[Request interrupted by user" not in body
+    assert "doesn't want to proceed" not in body
+
+
+@pytest.mark.anyio
+async def test_handoff_substitutes_the_uncertainty_body_when_the_bound_expires(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A call that never finishes gets an honest statement of uncertainty on the
+    transcript — is_error, but never the SDK's claim of rejection."""
+    from imp.agents.transcript import captured_result_key
+    from imp.providers import claude_code as cc
+
+    monkeypatch.setattr(cc, "INFLIGHT_RESULT_BOUND_S", 0.05)
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    key = captured_result_key("write_file", SLOW_ARGS)
+
+    class WedgedClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            holder["runner"]._state.register_inflight(key, "write_file")
+            await super().interrupt()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return WedgedClient(opts, scripted_messages=_interrupted_script(),
+                            context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    body = (tmp_path / "step" / "transcript.jsonl").read_text()
+    rows = [json.loads(x) for x in body.splitlines()]
+    results = [b for r in rows if r["role"] == "user"
+               for b in r["content"] if b.get("type") == "tool_result"]
+    assert [(b["content"], b["is_error"]) for b in results] == [(
+        "imp interrupted this turn; this call was still running and its outcome "
+        "was not recorded. Verify the current state before relying on it.", True)]
+    assert "doesn't want to proceed" not in body
+
+
+@pytest.mark.anyio
+async def test_handoff_dangling_assistant_tail_stays_balanced(
+        tmp_path: Path) -> None:
+    """The other tail shape: an assistant turn with a tool_use and no user turn
+    after it. Adding the marker repair ahead of the dangling repair must leave this
+    one balanced — every tool_use still has its tool_result."""
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    scripted = [
+        assistant(text("working"),
+                  tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("writing handoff")),
+        result(),
+    ]
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted,
+                                   context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    rows = [json.loads(x) for x in
+            (tmp_path / "step" / "transcript.jsonl").read_text().splitlines()]
+    calls = [b["id"] for r in rows if r["role"] == "assistant"
+             for b in r["content"] if b.get("type") == "tool_use"]
+    results = [b["tool_use_id"] for r in rows if r["role"] == "user"
+               for b in r["content"] if b.get("type") == "tool_result"]
+    assert calls == ["u1"] and results == ["u1"]
