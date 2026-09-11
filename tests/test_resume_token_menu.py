@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
+from imp.engine import archive
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import archive_quest
 from imp.engine.quest import Quest
@@ -160,6 +161,70 @@ async def test_real_archived_resumable_resolves_by_stem_and_full_id(
         tmp_path, "lodo", non_interactive=True) == "lodo40"
     assert await m._resolve_resume_target(
         tmp_path, "lodo40", non_interactive=True) == "lodo40"
+
+
+@pytest.mark.parametrize("index_state", ["missing", "corrupt"])
+def test_archived_resumable_match_repairs_index_before_enumeration(
+    monkeypatch, tmp_path: Path, index_state: str,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="Left", quest_id="lodo40",
+                            base_branch="main")
+    archive_conversation(ch)
+    index = archive.index_path(tmp_path)
+    if index_state == "missing":
+        index.unlink()
+    else:
+        index.write_bytes(b"not a sqlite database")
+    enumerated: list[list[str]] = []
+    original_archived_ids = archive.read.archived_ids
+
+    def archived_ids(control: Path) -> list[str]:
+        ids = original_archived_ids(control)
+        enumerated.append(ids)
+        return ids
+
+    monkeypatch.setattr(archive.read, "archived_ids", archived_ids)
+
+    rows = m._resumable_match_rows(tmp_path, "lodo")
+
+    assert ([row[0] for row in rows], enumerated) == (["lodo40"], [["lodo40"]])
+
+
+def test_archived_resumable_match_requires_current_before_record_reads(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="Left", quest_id="lodo40",
+                            base_branch="main")
+    archive_conversation(ch)
+    calls: list[str] = []
+    original_archived_ids = archive.read.archived_ids
+    original_read = archive.record.read_record
+
+    def require_current(control: Path) -> None:
+        calls.append("require_current")
+
+    def archived_ids(control: Path) -> list[str]:
+        assert calls == ["require_current"]
+        calls.append("archived_ids")
+        return original_archived_ids(control)
+
+    def read_record(root: Path, quest_id: str):
+        assert calls[:2] == ["require_current", "archived_ids"]
+        calls.append("read_record")
+        return original_read(root, quest_id)
+
+    monkeypatch.setattr(archive, "require_current", require_current)
+    monkeypatch.setattr(archive.read, "archived_ids", archived_ids)
+    monkeypatch.setattr(archive.record, "read_record", read_record)
+
+    rows = m._resumable_match_rows(tmp_path, "lodo")
+
+    assert ([row[0] for row in rows], calls) == (
+        ["lodo40"],
+        ["require_current", "archived_ids", "read_record", "read_record", "read_record"],
+    )
 
 
 @pytest.mark.anyio

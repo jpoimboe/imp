@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
+import pytest
+
 from imp.engine import archive
-from imp.engine.archive import index, record
+from imp.engine.archive import index, read, record
 from imp.engine.archive.blobstore import LocalBlobStore, hash_content
 
 
@@ -55,6 +58,142 @@ def test_archive_quest_writes_blob_record_and_index(tmp_path: Path) -> None:
         ).fetchone() == ("merged", expected_hash)
     finally:
         conn.close()
+
+
+def test_first_archive_is_current_when_its_record_is_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
+    versions_at_publication: list[int] = []
+    real_write = record.write_record
+
+    def capture_version(records_dir: Path, rec: dict) -> Path:
+        path = real_write(records_dir, rec)
+        versions_at_publication.append(archive._read_data_version(tmp_path))
+        return path
+
+    monkeypatch.setattr(record, "write_record", capture_version)
+
+    archive.archive_quest(
+        tmp_path, "alpha", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+    assert versions_at_publication == [archive._DATA_VERSION]
+
+
+def test_ensure_current_recovers_first_record_when_index_ingest_crashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
+
+    def crash_ingest(_conn, _rec, _events) -> None:
+        raise OSError("injected index crash")
+
+    with monkeypatch.context() as crash:
+        crash.setattr(index, "ingest", crash_ingest)
+        with pytest.raises(OSError, match="injected index crash"):
+            archive.archive_quest(
+                tmp_path, "alpha", events_path=events,
+                quest_json_path=quest_json, state_json_path=state_json)
+
+    db = archive.index_path(tmp_path)
+    conn = sqlite3.connect(db)
+    try:
+        incomplete = (
+            db.exists(),
+            int(conn.execute("PRAGMA user_version").fetchone()[0]),
+            [row[0] for row in conn.execute("SELECT id FROM quests")],
+        )
+    finally:
+        conn.close()
+    assert incomplete == (True, index._SCHEMA_VERSION, [])
+
+    archive.ensure_current(tmp_path)
+
+    conn = index.connect(db)
+    try:
+        ids = [row[0] for row in conn.execute("SELECT id FROM quests")]
+    finally:
+        conn.close()
+    assert ids == ["alpha"]
+
+
+def test_ensure_current_rebuilds_physically_corrupt_index(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
+    archive.archive_quest(
+        tmp_path, "alpha", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+    db = archive.index_path(tmp_path)
+    db.write_bytes(b"not a sqlite database")
+
+    archive.ensure_current(tmp_path)
+
+    conn = sqlite3.connect(db)
+    try:
+        rebuilt = (
+            int(conn.execute("PRAGMA user_version").fetchone()[0]),
+            conn.execute(
+                "SELECT id, title, base, created_at, status, step, last_event_ts"
+                " FROM quests").fetchone(),
+            conn.execute(
+                "SELECT quest_id, depends_on_id FROM deps").fetchall(),
+        )
+    finally:
+        conn.close()
+    assert rebuilt == (
+        index._SCHEMA_VERSION,
+        ("alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00", "merged",
+         "finalize", "2026-06-01T00:00:02+00:00"),
+        [("alpha", "beta")],
+    )
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        ("CREATE TABLE quests (id TEXT PRIMARY KEY)",),
+        (index._SCHEMA[0],),
+    ],
+    ids=["quests-missing-columns", "deps-missing"],
+)
+def test_ensure_current_rebuilds_current_but_malformed_index(
+    tmp_path: Path, schema: tuple[str, ...],
+) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
+    archive.archive_quest(
+        tmp_path, "alpha", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+    db = archive.index_path(tmp_path)
+    db.unlink()
+    conn = sqlite3.connect(db)
+    try:
+        for statement in schema:
+            conn.execute(statement)
+        conn.execute("INSERT INTO quests (id) VALUES ('alpha')")
+        conn.execute(f"PRAGMA user_version = {index._SCHEMA_VERSION}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    archive.ensure_current(tmp_path)
+
+    completed = read.completed_rows(tmp_path)
+    conn = sqlite3.connect(db)
+    try:
+        quest = conn.execute(
+            "SELECT id, title, base, created_at, status, step, last_event_ts"
+            " FROM quests").fetchone()
+        deps = conn.execute(
+            "SELECT quest_id, depends_on_id FROM deps").fetchall()
+    finally:
+        conn.close()
+    assert (completed, quest, deps) == (
+        [("alpha", "merged", "finalize", "2026-06-01T00:00:02+00:00",
+          "Alpha", "2026-06-01T00:00:00+00:00", None)],
+        ("alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00", "merged",
+         "finalize", "2026-06-01T00:00:02+00:00"),
+        [("alpha", "beta")],
+    )
 
 
 def test_archive_quest_is_idempotent(tmp_path: Path) -> None:

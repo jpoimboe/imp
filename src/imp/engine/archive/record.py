@@ -4,15 +4,12 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, cast
 
-from imp.engine import readfault
+from imp.engine import durable, readfault
 from imp.engine.pagecache import drop_page_cache
 
 
@@ -35,23 +32,11 @@ def build_record(
 
 
 def write_record(records_dir: Path, record: dict[str, Any]) -> Path:
-    """Atomic write (tmp -> fsync -> os.replace), mirroring State.save: the
-    record is the archive's source of truth with no git recovery, and readers
-    (status fallback, imp log, rebuild_index) race this write — they must only
-    ever see a complete record, never a truncate-then-write torn state."""
+    """Atomically publish the archive's source-of-truth record."""
     records_dir.mkdir(parents=True, exist_ok=True)
     path = records_dir / f"{record['id']}.json"
-    fd, tmp_name = tempfile.mkstemp(prefix=".record-", dir=records_dir)
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(record, f, indent=2, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(tmp_name)
-        raise
+    durable.durable_replace_bytes(
+        path, json.dumps(record, indent=2, sort_keys=True).encode("utf-8"))
     return path
 
 

@@ -16,7 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from imp.engine import worktree
+from imp.engine import durable, worktree
+from imp.engine.codex_resume_migration import migrate_live_codex_resume_state
 from imp.engine.env import quest_var_tmp_root
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
 from imp.engine.event_migrations import (
@@ -25,7 +26,7 @@ from imp.engine.event_migrations import (
     migrate_events,
     migrate_id_ns_event_to_block,
 )
-from imp.engine.reincarnation import write_transcript_owner
+from imp.engine.reincarnation import write_session_owner
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import (
     JsonlEventLog,
@@ -38,22 +39,12 @@ from imp.engine.state import (
 from imp.engine.types import SourceLoc
 from imp.paths import project_state_dir
 
-LAYOUT_VERSION = 21  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 22  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
-    """Atomically rewrite quest.json (tmp file, fsync, os.replace); mirrors State.save."""
-    fd, tmp_name = tempfile.mkstemp(prefix=".quest-", dir=meta_path.parent)
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(meta, f, indent=2, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_name, meta_path)
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(tmp_name)
-        raise
+    encoded = json.dumps(meta, indent=2, sort_keys=True).encode()
+    durable.durable_replace_bytes(meta_path, encoded)
 
 
 def _fold_phantom(phantom: Path, home: Path) -> None:
@@ -481,8 +472,8 @@ def _migrate_v18_to_v19(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
-def _backfill_transcript_owners(quest_dir: Path) -> None:
-    """Label every live step transcript with the provider state.json resolves for
+def _backfill_session_owners(quest_dir: Path) -> None:
+    """Label every live step session with the provider state.json resolves for
     it. `steps/<phase>/<step>/` is the only dispatch layout, so the two-level glob
     reaches exactly those directories and not the subagent transcripts nested
     below them; `.attempt-N` stashes are never read back. resolve_run picks one
@@ -503,17 +494,17 @@ def _backfill_transcript_owners(quest_dir: Path) -> None:
             continue
         owner = (steps.get(step_dir.name) or {}).get("provider") or fallback
         if owner is not None:
-            write_transcript_owner(step_dir, owner)
+            write_session_owner(step_dir, owner)
 
 
 def _migrate_v19_to_v20(quest_dir: Path) -> None:
     """v19->v20: quest.json gained `provider` (the per-quest pin, null until one is
-    set) and every live step transcript records the vendor that wrote it. Backfill
+    set) and every live step session records the vendor that wrote it. Backfill
     both — every live directory, not just the one current_step names, since a
     `resume:` edge can replay a step that finished earlier. The sidecars land
     before the version stamp, so a partial failure leaves the home at v19 and the
     hop re-runs; both halves are idempotent."""
-    _backfill_transcript_owners(quest_dir)
+    _backfill_session_owners(quest_dir)
     meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta.setdefault("provider", None)
@@ -534,6 +525,14 @@ def _migrate_v20_to_v21(quest_dir: Path) -> None:
     meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 21
+    _write_quest_json(meta_path, meta)
+
+
+def _migrate_v21_to_v22(quest_dir: Path) -> None:
+    migrate_live_codex_resume_state(quest_dir)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 22
     _write_quest_json(meta_path, meta)
 
 
@@ -558,6 +557,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (18, 19): _migrate_v18_to_v19,
     (19, 20): _migrate_v19_to_v20,
     (20, 21): _migrate_v20_to_v21,
+    (21, 22): _migrate_v21_to_v22,
 }
 
 

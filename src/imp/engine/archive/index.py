@@ -21,6 +21,10 @@ _SCHEMA = (
 _SCHEMA_VERSION = 5
 
 
+def _commit(conn: sqlite3.Connection) -> None:
+    conn.commit()
+
+
 def connect(index_path: Path) -> sqlite3.Connection:
     index_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(index_path, timeout=30)
@@ -31,14 +35,14 @@ def connect(index_path: Path) -> sqlite3.Connection:
         conn.execute(stmt)
     if fresh:
         conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-    conn.commit()
+    _commit(conn)
     return conn
 
 
 def stamp_version(conn: sqlite3.Connection) -> None:
     """An older writer lowers the floor, so the next current imp rebuilds its row."""
     conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-    conn.commit()
+    _commit(conn)
 
 
 def ingest(
@@ -65,7 +69,7 @@ def ingest(
     for dep in record.get("depends_on") or []:
         conn.execute("INSERT INTO deps (quest_id, depends_on_id) VALUES (?, ?)",
                      (cid, dep))
-    conn.commit()
+    _commit(conn)
 
 
 def quest_ids(conn: sqlite3.Connection) -> list[str]:

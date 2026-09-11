@@ -149,6 +149,11 @@ def available_providers(config: Config) -> list[str]:
     return out
 
 
+def provider_is_registered(name: str) -> bool:
+    _ensure_builtins()
+    return name in _PROVIDERS
+
+
 def provider_is_available(name: str) -> bool:
     """One registered vendor's env_check, asked by name. Unlike
     available_providers this ignores config.providers: a per-quest pin reaches a

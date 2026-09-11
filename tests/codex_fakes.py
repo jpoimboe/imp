@@ -9,7 +9,13 @@ they only need to walk like a duck.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+from imp.engine.resume_state import (
+    NativeResumeState,
+    encode_native_resume_state,
+)
 
 
 @dataclass
@@ -169,6 +175,27 @@ class FakeCodex:
 
 
 # Helper builders for tests.
+
+def seed_codex_resume_state(
+    transcript_dir: Path,
+    *,
+    thread_id: str,
+    restore_path: str,
+    rollout_slot: str = "codex-rollout-a.jsonl",
+    body: bytes | None = None,
+) -> NativeResumeState:
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    state = NativeResumeState(provider="codex", state={
+        "thread_id": thread_id,
+        "restore_path": restore_path,
+        "rollout_slot": rollout_slot,
+    })
+    (transcript_dir / rollout_slot).write_bytes(
+        body if body is not None else f'{{"id":"{thread_id}"}}\n'.encode())
+    (transcript_dir / "resume-state.json").write_bytes(
+        encode_native_resume_state(state))
+    return state
+
 
 def reasoning(text: str) -> FakeItemEvent:
     return FakeItemEvent(type="item.completed",

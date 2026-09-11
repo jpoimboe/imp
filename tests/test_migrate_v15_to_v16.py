@@ -54,7 +54,7 @@ def test_load_restamps_the_fold_as_block_and_stamps_the_version(tmp_path: Path) 
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 21
+    assert LAYOUT_VERSION == 22
     assert quest_mod._MIGRATIONS[(15, 16)] is _migrate_v15_to_v16
 
 

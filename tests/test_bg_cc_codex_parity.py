@@ -256,6 +256,7 @@ def test_codex_interrupt_tears_down_background(tmp_path: Path) -> None:
         runner._ctx = ctx
         out = await _spawn_bg(ctx)
         try:
+            runner._process_owner.acknowledge()
             await runner.interrupt()
             with pytest.raises(ProcessLookupError):
                 os.killpg(out["pid"], 0)

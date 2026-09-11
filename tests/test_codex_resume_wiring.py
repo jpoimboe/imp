@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, QuestContext
+from imp.engine.quest import Quest
+from imp.engine.resume_state import read_native_resume_state
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import (
     AgentDef,
@@ -27,9 +29,11 @@ from tests.codex_fakes import (
     FakeCodex,
     agent_message,
     mcp_call,
+    seed_codex_resume_state,
     thread_started,
     turn_completed,
 )
+from tests.conftest import _seed_control
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 
@@ -68,17 +72,21 @@ def _agent_def() -> AgentDef:
 
 def _build_invocation(
     tmp_path: Path, *, event_log: object, balance_on_resume: bool,
-    resume_cause: str = "human",
+    resume_cause: str = "human", transcript_dir: Path | None = None,
 ) -> AgentInvocation:
+    transcript_dir = transcript_dir or tmp_path / "tx"
     return AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
         quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
-        transcript_dir=tmp_path / "tx",
+        transcript_dir=transcript_dir,
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
         event_log=event_log, balance_on_resume=balance_on_resume,
+        native_resume_state=(
+            read_native_resume_state(transcript_dir)
+            if balance_on_resume else None),
         resume_cause=resume_cause,
     )
 
@@ -87,16 +95,13 @@ def _build_invocation(
 async def test_resume_emits_no_step_context(tmp_path: Path) -> None:
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-resume-1.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-resume-1", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-resume-1"}\n')
+    thread_id = "thr-resume-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
 
     elog = InMemoryEventLog()
     scripted = [[
-        thread_started("thr-resume-1"),
+        thread_started(thread_id),
         agent_message("resumed; calling complete_step"),
         mcp_call(name="complete_step", args={"answer": "42"},
                  result="ok", item_id="cs-1"),
@@ -111,8 +116,52 @@ async def test_resume_emits_no_step_context(tmp_path: Path) -> None:
     async for _ev in runner.run(inv):
         pass
 
-    sc = [e for e in elog.read() if e["type"] == "step_context"]
+    events = elog.read()
+    sc = [e for e in events if e["type"] == "step_context"]
     assert sc == [], sc
+    assert not any(
+        event["type"] == "engine_message"
+        and event.get("payload", {}).get("subtype")
+        in {"system_prompt", "agent_prompt"}
+        for event in events)
+
+
+@pytest.mark.anyio
+async def test_resume_without_native_state_fails_before_restore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_git_and_auth(tmp_path)
+    restore_called = False
+
+    def record_restore(**kwargs: object) -> str:
+        nonlocal restore_called
+        restore_called = True
+        return "unexpected"
+
+    monkeypatch.setattr(
+        "imp.providers.codex_rollout.restore_rollout", record_restore)
+    fake = FakeCodex()
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: fake,
+    )
+    runner._canonical_auth_override = tmp_path / "auth.json"
+    inv = _build_invocation(
+        tmp_path, event_log=InMemoryEventLog(), balance_on_resume=True)
+
+    events = [event async for event in runner.run(inv)]
+
+    assert len(events) == 1
+    assert events[0]["type"] == "error"
+    payload = events[0]["payload"]
+    assert payload["category"] == "unknown"
+    assert payload["kind"] == "InvalidResumeState"
+    assert isinstance(payload["message"], str)
+    assert payload["detail"] == {}
+    assert restore_called is False
+    assert fake.start_thread_calls == []
+    assert fake.resume_thread_calls == []
 
 
 @pytest.mark.anyio
@@ -120,16 +169,13 @@ async def test_resume_calls_resume_thread_not_start_thread(tmp_path: Path) -> No
     _seed_git_and_auth(tmp_path)
     # Pre-seed transcript_dir as if a prior paused run persisted its rollout.
     tx = tmp_path / "tx"
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-resume-1.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-resume-1", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-resume-1"}\n')
+    thread_id = "thr-resume-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
 
     elog = InMemoryEventLog()
     scripted = [[
-        thread_started("thr-resume-1"),
+        thread_started(thread_id),
         agent_message("resumed; calling complete_step"),
         mcp_call(name="complete_step", args={"answer": "42"},
                  result="ok", item_id="cs-1"),
@@ -145,8 +191,76 @@ async def test_resume_calls_resume_thread_not_start_thread(tmp_path: Path) -> No
         pass
 
     assert fake.resume_thread_calls, "resume must call client.resume_thread()"
-    assert fake.resume_thread_calls[0][0] == "thr-resume-1"
+    assert fake.resume_thread_calls[0][0] == thread_id
     assert fake.start_thread_calls == [], "resume must NOT call start_thread()"
+
+
+@pytest.mark.anyio
+async def test_migrated_v20_session_resumes_exact_legacy_rollout(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    (tmp_path / "auth.json").write_text(
+        '{"auth_mode": "chatgpt", "tokens": {}}')
+    quest = Quest.create_draft(
+        tmp_path, title="", quest_id="migrated-resume", base_branch="main")
+    meta_path = quest.quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 20
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    session = quest.quest_dir / "steps" / "phase" / "step"
+    session.mkdir(parents=True)
+    thread_id = "01993480-c764-7a82-aa98-e2f62b4139e7"
+    restore_path = "sessions/2026/09/10/rollout-unrelated-name.jsonl"
+    rollout_bytes = b'{"unique":"legacy-v20-rollout"}\n'
+    (session / "codex_thread.json").write_text(json.dumps({
+        "thread_id": thread_id,
+        "rollout_relpath": restore_path,
+    }))
+    rollout = session / "codex_rollout"
+    rollout = rollout.joinpath(*restore_path.split("/"))
+    rollout.parent.mkdir(parents=True)
+    rollout.write_bytes(rollout_bytes)
+
+    Quest.load(tmp_path, "migrated-resume")
+
+    observed_rollouts: list[bytes] = []
+
+    def observe_restored_rollout() -> None:
+        assert runner._codex_home is not None
+        restored = runner._codex_home.joinpath(*restore_path.split("/"))
+        observed_rollouts.append(restored.read_bytes())
+
+    fake = FakeCodex(
+        scripted_turns=[[
+            thread_started(thread_id),
+            agent_message("resumed"),
+            mcp_call(
+                name="complete_step", args={"answer": "42"},
+                result="ok", item_id="cs-migrated"),
+            turn_completed(input_tokens=1, output_tokens=1),
+        ]],
+        on_turn_start=observe_restored_rollout,
+    )
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+    invocation = _build_invocation(
+        tmp_path,
+        event_log=InMemoryEventLog(),
+        balance_on_resume=True,
+        transcript_dir=session,
+    )
+
+    async for _event in runner.run(invocation):
+        pass
+
+    assert (
+        fake.resume_thread_calls[0][0],
+        fake.start_thread_calls,
+        observed_rollouts,
+    ) == (thread_id, [], [rollout_bytes])
 
 
 @pytest.mark.anyio
@@ -296,12 +410,9 @@ async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path)
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-cont-1.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-cont-1", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-cont-1"}\n')
+    thread_id = "thr-cont-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
 
     # events.jsonl that derives MISSING_COMPLETE_STEP (agent_message, no complete_step).
     _write_events(tmp_path / "events.jsonl", [
@@ -311,7 +422,7 @@ async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path)
 
     elog = InMemoryEventLog()
     scripted = [[
-        thread_started("thr-cont-1"),
+        thread_started(thread_id),
         agent_message("resumed; calling complete_step"),
         mcp_call(name="complete_step", args={"answer": "42"}, result="ok", item_id="cs-1"),
         turn_completed(input_tokens=1, output_tokens=1),
@@ -349,12 +460,9 @@ async def test_awaiting_user_retry_continue_journals_continuation_not_user_messa
 
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-rc-1.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-rc-1", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-rc-1"}\n')
+    thread_id = "thr-rc-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
 
     # events.jsonl deriving AWAITING_USER: a tail agent_message + the journaled
     # awaiting_user_input, with no complete_step.
@@ -367,7 +475,7 @@ async def test_awaiting_user_retry_continue_journals_continuation_not_user_messa
 
     elog = InMemoryEventLog()
     scripted = [[
-        thread_started("thr-rc-1"),
+        thread_started(thread_id),
         agent_message("resumed; calling complete_step"),
         mcp_call(name="complete_step", args={"answer": "42"},
                  result="ok", item_id="cs-1"),
@@ -424,12 +532,9 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
 
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-pr-1.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-pr-1", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-pr-1"}\n')
+    thread_id = "thr-pr-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
 
     # events.jsonl deriving AWAITING_USER with a trailing solicited reply:
     # agent_message(question) -> awaiting_user_input -> user_message(reply),
@@ -446,7 +551,7 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
 
     elog = InMemoryEventLog()
     scripted = [[
-        thread_started("thr-pr-1"),
+        thread_started(thread_id),
         agent_message("resumed with the reply; calling complete_step"),
         mcp_call(name="complete_step", args={"answer": "42"},
                  result="ok", item_id="cs-1"),
@@ -497,12 +602,9 @@ async def test_awaiting_user_solicit_emits_gate_with_last_agent_message(
     sourced from derive_codex_resume_state's second return value."""
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-s-1.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-s-1", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-s-1"}\n')
+    thread_id = "thr-s-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
 
     # events.jsonl deriving AWAITING_USER: a tail prose agent_message + the
     # journaled awaiting_user_input, no complete_step, no following user_message.
@@ -516,7 +618,7 @@ async def test_awaiting_user_solicit_emits_gate_with_last_agent_message(
 
     elog = InMemoryEventLog()
     scripted = [[
-        thread_started("thr-s-1"),
+        thread_started(thread_id),
         agent_message("resumed; calling complete_step"),
         mcp_call(name="complete_step", args={"answer": "foo.py"},
                  result="ok", item_id="cs-1"),
@@ -548,12 +650,9 @@ async def test_resume_missing_complete_step_under_retry_uses_the_retry_note(
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
     _seed_git_and_auth(tmp_path)
     tx = tmp_path / "tx"
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-cont-2.jsonl"
-    (tx / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-cont-2", "rollout_relpath": rel}))
-    saved = tx / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-cont-2"}\n')
+    thread_id = "thr-cont-2"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    seed_codex_resume_state(tx, thread_id=thread_id, restore_path=rel)
 
     _write_events(tmp_path / "events.jsonl", [
         {"agent_id": "step:t", "type": "agent_message",
@@ -563,7 +662,7 @@ async def test_resume_missing_complete_step_under_retry_uses_the_retry_note(
 
     elog = InMemoryEventLog()
     scripted = [[
-        thread_started("thr-cont-2"),
+        thread_started(thread_id),
         agent_message("resumed; calling complete_step"),
         mcp_call(name="complete_step", args={"answer": "42"}, result="ok",
                  item_id="cs-1"),

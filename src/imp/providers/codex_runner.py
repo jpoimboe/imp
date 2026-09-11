@@ -1,11 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright 2026 Josh Poimboeuf
-"""CodexAgentRunner — the heavy lifting for the `codex` provider.
-
-Implements: interrupt() with two effects, fail-fast preflight(), and
-process_event() for basic event types. Native writes need no runner-side guard:
-codex's own `read-only` sandbox refuses them.
-"""
+"""Codex provider with run-scoped process ownership, preflight, and event mapping."""
 
 from __future__ import annotations
 
@@ -56,7 +51,12 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
-from imp.providers.codex_exec import Codex, CodexOptions, ThreadOptions
+from imp.providers.codex_exec import (
+    Codex,
+    CodexOptions,
+    CodexProcessOwner,
+    ThreadOptions,
+)
 from imp.providers.codex_mcp import (
     CODEX_APPROVAL_POLICY,
     RunState,
@@ -423,16 +423,15 @@ class CodexSession(ObserveSession):
         proc_state["web_search_enabled"] = web_enabled
         thread_options = runner._build_thread_options(invocation.tier)
         if invocation.balance_on_resume:
-            # Resume edge (Fix 1): restore codex's rollout into the fresh
-            # CODEX_HOME, then resume the native thread by id instead of starting a
-            # new one. restore_rollout fails loudly if the rollout is missing.
+            from imp.engine.resume_state import InvalidResumeState
             from imp.providers.codex_rollout import restore_rollout
+            if invocation.native_resume_state is None:
+                raise InvalidResumeState()
             thread_id = restore_rollout(
                 codex_home=codex_home,
-                transcript_dir=invocation.transcript_dir)
-            # Seed thread_id now so a subsequent pause persists the resumed thread
-            # even if codex does not re-emit thread.started on resume
-            # (process_event overwrites this with the same id if it does).
+                transcript_dir=invocation.transcript_dir,
+                resume_state=invocation.native_resume_state,
+            )
             proc_state["thread_id"] = thread_id
             thread = client.resume_thread(thread_id, thread_options)
         else:
@@ -535,10 +534,17 @@ class CodexSession(ObserveSession):
         self._handoff_phase: str | None = None
         self._handoff_path_obj = handoff_path_for(invocation.transcript_dir)
 
+    def _cancelled_event(self) -> object:
+        self.runner._process_owner.acknowledge()
+        return _CANCEL
+
     async def _receive(self) -> Any:
         coordinator = self.invocation.coordinator
         first = True
         while True:
+            if self.runner._cancel:
+                yield self._cancelled_event()
+                return
             if not first:
                 # Internal re-query loop-back (the handoff-crossing threshold
                 # re-query set by _is_terminal): reset capture like the old loop's
@@ -562,7 +568,7 @@ class CodexSession(ObserveSession):
                         yield _SERVER_DIED
                         return
                     if self.runner._cancel:
-                        yield _CANCEL
+                        yield self._cancelled_event()
                         return
                     if coordinator is not None:
                         coordinator.note_activity()
@@ -575,6 +581,9 @@ class CodexSession(ObserveSession):
                             self._requery_pending = False
                             requery = True
                         break
+            if self.runner._cancel:
+                yield self._cancelled_event()
+                return
             if requery:
                 continue
             return
@@ -791,7 +800,7 @@ class CodexAgentRunner:
         self.model = model_name
         self._client_factory = client_factory
         self._user_input_fn = user_input_fn
-        self._cancel = False
+        self._process_owner = CodexProcessOwner()
         self._ctx: ToolContext | None = None
         # Test seam: overrides the canonical codex auth.json path. Read by
         # `_canonical_auth_path()`; declared here so the attribute the tests set
@@ -815,6 +824,10 @@ class CodexAgentRunner:
         self._spawn_token_expiry: int | None = None
         self._canonical_auth: Path | None = None
         self._proc_state: dict[str, Any] = {}
+
+    @property
+    def _cancel(self) -> bool:
+        return self._process_owner.cancelled
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         session = CodexSession(invocation, self)
@@ -857,6 +870,7 @@ class CodexAgentRunner:
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
+            self._process_owner.acknowledge()
             # Two nested finally blocks preserve the old structure's exception
             # isolation: the former _run_loop teardown is the inner block; the
             # former run() bg teardown is the outer finally, so it STILL runs even
@@ -937,7 +951,7 @@ class CodexAgentRunner:
         if impty_bearer_token is not None:
             overrides["IMP_IMPTY_TOKEN"] = impty_bearer_token
         env = overlay_engine_env(os.environ, overrides)
-        return Codex(CodexOptions(env=env))
+        return Codex(CodexOptions(env=env), process_owner=self._process_owner)
 
     def _build_thread_options(self, tier: str | None = None) -> ThreadOptions:
         """The design's exact production flags. Lives in its own method so the
@@ -1025,17 +1039,18 @@ class CodexAgentRunner:
         return prompt
 
     async def interrupt(self) -> None:
-        """Cancel the run — two effects:
-          1. set `self._cancel = True`.
-          2. `terminate_tool_processes(ctx)` — foreground then background
-             (Decision 7: pause kills bg processes; persisted tombstones
-             explain it on resume). NOT the namespace: interrupt is not by
-             itself the end of the run, so the close stays in run()'s finally.
-        Idempotent. The `codex exec` child needs no third effect: closing the
-        event stream group-kills its whole session in codex_exec's teardown."""
-        self._cancel = True
-        if self._ctx is not None:
-            await terminate_tool_processes(self._ctx)
+        self._process_owner.cancel()
+        try:
+            if self._ctx is not None:
+                await terminate_tool_processes(self._ctx)
+        finally:
+            await self._process_owner.wait_for_acknowledgement()
+
+    async def wait_for_interrupt_ack(self) -> None:
+        await self._process_owner.wait_for_acknowledgement()
+
+    async def force_kill(self) -> None:
+        await self._process_owner.force_kill()
 
 
 # ── Event mapping ─────────────────────────────────────────────────────────────

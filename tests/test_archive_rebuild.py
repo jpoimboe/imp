@@ -86,6 +86,39 @@ def test_rebuild_reproduces_index_contents(tmp_path: Path) -> None:
     assert all(row[7] for row in after["quests"])  # last_event_ts populated
 
 
+def test_rebuild_fsyncs_tmp_before_replace_and_archive_directory(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    _archive_one(tmp_path, "alpha", "beta", "quest_created")
+    calls: list[tuple] = []
+    real_fsync = archive.os.fsync
+    real_replace = archive.os.replace
+
+    def fsync(fd: int) -> None:
+        calls.append(("fsync", Path(f"/proc/self/fd/{fd}").resolve()))
+        real_fsync(fd)
+
+    def replace(src, target) -> None:
+        calls.append(("replace", Path(src), Path(target)))
+        real_replace(src, target)
+
+    def fsync_directory(path: Path) -> None:
+        calls.append(("directory", path))
+
+    monkeypatch.setattr(archive.os, "fsync", fsync)
+    monkeypatch.setattr(archive.os, "replace", replace)
+    monkeypatch.setattr(archive.durable, "fsync_directory", fsync_directory)
+
+    archive.rebuild_index(tmp_path)
+
+    tmp_index = calls[1][1]
+    assert calls == [
+        ("fsync", tmp_index),
+        ("replace", tmp_index, archive.index_path(tmp_path)),
+        ("directory", archive.archive_root(tmp_path)),
+    ]
+
+
 def test_rebuild_keeps_original_rows_queryable_during_ingest(
     tmp_path: Path, monkeypatch,
 ) -> None:

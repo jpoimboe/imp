@@ -46,7 +46,8 @@ SIDE_EFFECT_REASONS = frozenset({"model-override", "compact"})
 # Interrupt-machinery records. Observational only: delivery can land AFTER the
 # gate, so they must never move a consumer's derived run state.
 INTERRUPT_EVENT_TYPES = frozenset({
-    "interrupt_requested", "interrupt_delivered", "interrupt_escalated"})
+    "interrupt_requested", "interrupt_delivery_started",
+    "interrupt_delivered", "interrupt_escalated"})
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,7 +4,6 @@ pinned to a committed golden captured from the pre-refactor runner."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -379,19 +378,17 @@ async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_resume_emits_no_step_context_codex(tmp_path: Path) -> None:
     from imp.providers.codex_runner import CodexAgentRunner
-    from tests.codex_fakes import FakeCodex
+    from tests.codex_fakes import FakeCodex, seed_codex_resume_state
 
-    # Seed a saved thread + rollout so balance_on_resume restores + resumes.
     _runner_unused, inv = build("codex", tmp_path, [], balance_on_resume=True)
-    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-resume-1.jsonl"
-    (tmp_path / "tx" / "codex_thread.json").write_text(
-        json.dumps({"thread_id": "thr-resume-1", "rollout_relpath": rel}))
-    saved = tmp_path / "tx" / "codex_rollout" / rel
-    saved.parent.mkdir(parents=True, exist_ok=True)
-    saved.write_text('{"id": "thr-resume-1"}\n')
+    thread_id = "thr-resume-1"
+    rel = f"sessions/2026/06/05/rollout-2026-06-05T00-00-00-{thread_id}.jsonl"
+    state = seed_codex_resume_state(
+        tmp_path / "tx", thread_id=thread_id, restore_path=rel)
+    object.__setattr__(inv, "native_resume_state", state)
 
     scripted = [[
-        cx_start("thr-resume-1"),
+        cx_start(thread_id),
         cx_msg("resumed; calling complete_step"),
         cx_call(name="complete_step", args=_OK, result="ok", item_id="cs-1"),
         cx_done(input_tokens=1, output_tokens=1),

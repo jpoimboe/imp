@@ -57,6 +57,10 @@ _FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
 _PRESERVE_ON_PAUSE = ("merge_blocked", "merged", "done", "shelved", "abandoned", "error")
 
 
+async def _wait_interrupt_deadline() -> None:
+    await asyncio.sleep(_COOPERATIVE_DEADLINE_S)
+
+
 def _leave_signals() -> tuple[int, ...]:
     """Signals meaning 'this client is leaving' (Intent B). SIGHUP is absent on
     some platforms (Windows); include it only when present."""
@@ -192,10 +196,11 @@ def _leave_reason_for_signal(sig: int) -> str:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class _Attached:
-    """A runner attached for one drive: cooperative interrupt, wait-free force_kill, agent_id."""
+    """A runner attached for one drive."""
     # eq=False: identity equality — .remove(att) pops this exact entry
     interrupt: Any
     force_kill: Any = None
+    interrupt_ack: Any = None
     agent_id: str | None = None
 
 
@@ -242,8 +247,8 @@ class InterruptCoordinator:
         self._save_hook: Any = None
         self._forward_force: Any = None   # client force-forward hook (SessionControls)
         self._force_forwarded = False     # one-shot: a FORCE was forwarded this round
-        # Client-side: a non-replayed interrupt_delivered was observed this round, so a
-        # FORCE has a live runner to hard-kill. Until then the offer would be a lie.
+        # Client-side: a live, non-replayed delivery-start was observed this round,
+        # so a FORCE has a live runner to hard-kill.
         self._delivery_observed = False
         self._forward_retry_now: Any = None   # client retry-now forward hook (SessionControls)
         self._forward_set_provider: Any = None  # client set-provider forward hook
@@ -465,9 +470,8 @@ class InterruptCoordinator:
             text += " (interrupt again to force-quit)"
         fn(text)
 
-    def note_interrupt_delivered(self) -> None:
-        """A live interrupt_delivered arrived for this round: an interrupt really is in
-        flight against a runner, so a second gesture's force-quit has something to kill."""
+    def note_interrupt_delivery_started(self) -> None:
+        """Mark a live delivery start so a repeat gesture can forward force."""
         self._delivery_observed = True
 
     def enqueue_interject(self, text: str) -> None:
@@ -633,28 +637,65 @@ class InterruptCoordinator:
             with _suppress(Exception):
                 log.append(agent_id=None, type=etype, payload=payload)
 
+    async def _interrupt_deadline_supervisor(
+        self, att: _Attached, armed: Any,
+    ) -> None:
+        ack_task = asyncio.create_task(att.interrupt_ack())
+        deadline_task = asyncio.create_task(_wait_interrupt_deadline())
+        armed.set()
+        try:
+            await asyncio.wait(
+                (ack_task, deadline_task), return_when=asyncio.FIRST_COMPLETED)
+            if ack_task.done():
+                return
+            self._emit("interrupt_escalated", {
+                "reason": "cooperative_timeout", "killed": [att.agent_id]})
+            await self._hard_kill(att)
+        finally:
+            ack_task.cancel()
+            deadline_task.cancel()
+            await asyncio.gather(
+                ack_task, deadline_task, return_exceptions=True)
+
     async def _deliver_interrupt(self) -> None:
         """Tiered bounded delivery down the attach stack, innermost first."""
         import anyio
 
-        for att in reversed(list(self._runner_stack)):
+        attachments = list(reversed(list(self._runner_stack)))
+        armed_events: list[Any] = []
+        for att in attachments:
+            if att.interrupt_ack is None:
+                continue
+            armed = anyio.Event()
+            armed_events.append(armed)
+            assert self._spawn is not None
+            self._spawn(self._interrupt_deadline_supervisor, att, armed)
+        for armed in armed_events:
+            await armed.wait()
+
+        for att in attachments:
+            self._emit("interrupt_delivery_started", {
+                "agent_id": att.agent_id, "tier": "cooperative"})
             outcome = "ok"
             t0 = self._now()
-            with anyio.move_on_after(_COOPERATIVE_DEADLINE_S) as scope:
+            if att.interrupt_ack is not None:
                 try:
                     await att.interrupt()
                 except Exception:
                     outcome = "error"
-            if scope.cancelled_caught:
-                outcome = "timeout"
+            else:
+                with anyio.move_on_after(_COOPERATIVE_DEADLINE_S) as scope:
+                    try:
+                        await att.interrupt()
+                    except Exception:
+                        outcome = "error"
+                if scope.cancelled_caught:
+                    outcome = "timeout"
             self._emit("interrupt_delivered", {
                 "agent_id": att.agent_id, "tier": "cooperative",
                 "outcome": outcome,
                 "duration_ms": int((self._now() - t0) * 1000)})
-            if outcome != "ok":
-                # Only a genuine timeout with a force_kill present gets the
-                # cooperative_timeout escalation record; an "error" outcome
-                # escalates via the hard record only.
+            if att.interrupt_ack is None and outcome != "ok":
                 if outcome == "timeout" and att.force_kill is not None:
                     self._emit("interrupt_escalated", {
                         "reason": "cooperative_timeout", "killed": [att.agent_id]})
@@ -751,13 +792,13 @@ class InterruptCoordinator:
     @contextlib.contextmanager
     def runner_attached(
         self, interrupt_fn: Any, *, force_kill: Any = None,
-        agent_id: str | None = None,
+        interrupt_ack: Any = None, agent_id: str | None = None,
     ) -> Iterator[None]:
-        """Push `interrupt_fn` (with optional wait-free `force_kill` and `agent_id`)
-        for one drive, then pop it. Nesting-safe: a nested subagent drive pushes on
+        """Push an interrupt attachment for one drive, then pop it. Nesting-safe:
+        a nested subagent drive pushes on
         top so delivery interrupts the innermost runner first, each ancestor after;
         on exit the exact entry is removed, restoring the parent as the chain top."""
-        att = _Attached(interrupt_fn, force_kill, agent_id)
+        att = _Attached(interrupt_fn, force_kill, interrupt_ack, agent_id)
         self._runner_stack.append(att)
         try:
             spawn = self._spawn

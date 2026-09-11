@@ -12,7 +12,7 @@ from imp.agents.runner import Message, TextBlock
 from imp.agents.transcript import Transcript
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.executor import RunResult, run_quest
-from imp.engine.reincarnation import write_transcript_owner
+from imp.engine.reincarnation import write_session_owner
 from imp.engine.state import State
 from tests.test_executor_retry_continue import _SINGLE_WF, _WRITER, _make_quest
 
@@ -334,7 +334,7 @@ async def test_reentry_does_not_redeliver_retry_feedback(
     tdir.mkdir(parents=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="user", content=(TextBlock(text="go"),)))
-    write_transcript_owner(tdir, "fake")
+    write_session_owner(tdir, "fake")
     # Seed the engine_message/system_prompt event so _resume_system_prompt
     # finds the stored prompt (in production this is always present when a
     # transcript exists).

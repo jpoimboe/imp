@@ -245,6 +245,43 @@ async def test_drive_invocation_success(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_drive_invocation_attaches_runner_interrupt_ack(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    captured: dict[str, object] = {}
+
+    class _CaptureCoordinator:
+        should_pause = False
+        interrupted = False
+
+        def runner_attached(
+            self, interrupt, *, force_kill=None, interrupt_ack, agent_id=None,
+        ):
+            import contextlib
+            captured.update(
+                interrupt=interrupt, force_kill=force_kill,
+                interrupt_ack=interrupt_ack, agent_id=agent_id)
+            return contextlib.nullcontext()
+
+        def drain_interject(self):
+            return None
+
+    runner = _Runner([{"type": "agent_result", "payload": {"status": "Success"}}])
+
+    async def interrupt_ack() -> None:
+        ...
+
+    runner.wait_for_interrupt_ack = interrupt_ack
+    result = await drive_invocation(
+        _inv(tmp_path), runner, coordinator=_CaptureCoordinator(),
+        log=None, emit_events=False)
+
+    assert result.output == {"status": "Success"}
+    assert captured["interrupt_ack"] is interrupt_ack
+    assert captured["agent_id"] == "step:p/s"
+
+
+@pytest.mark.anyio
 async def test_drive_invocation_fatal_error(tmp_path: Path) -> None:
     from imp.engine.agent_run import drive_invocation
 

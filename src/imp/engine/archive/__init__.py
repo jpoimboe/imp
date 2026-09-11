@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import sqlite3
@@ -16,8 +17,13 @@ from typing import Any
 
 import filelock
 
+from imp.engine import durable
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
+from imp.engine.archive.codex_resume_migration import (
+    ArchiveCodexResumePlan,
+    plan_archive_codex_resume_state,
+)
 from imp.engine.errors import ArchiveMismatch
 from imp.engine.event_migrations import (
     backfill_query_result_session_ids,
@@ -69,6 +75,15 @@ def archive_quest(
     resumable: bool = False,
 ) -> None:
     """Finalize one completed/abandoned/shelved quest into the archive. Idempotent."""
+    ensure_current(control_root)
+    marker = data_version_path(control_root)
+    archive_root(control_root).mkdir(parents=True, exist_ok=True)
+    with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
+        if _read_data_version(control_root) < _DATA_VERSION:
+            _migrate_archive_blobs(control_root)
+        elif not marker.exists():
+            _write_data_version(control_root, _DATA_VERSION)
+
     events_bytes = events_path.read_bytes() if events_path.exists() else b""
     store = LocalBlobStore(blobs_root(control_root))
     events_hash = store.put(events_bytes)
@@ -87,7 +102,6 @@ def archive_quest(
         resumable=resumable, step_blobs=step_blobs)
     record.write_record(records_root(control_root), rec)
 
-    ensure_current(control_root)
     with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
         conn = index.connect(index_path(control_root))
         try:
@@ -146,7 +160,10 @@ def rebuild_index(control_root: Path) -> None:
                     index.ingest(conn, rec, events)
         finally:
             conn.close()
+        with open(tmp, "rb") as stream:
+            os.fsync(stream.fileno())
         os.replace(tmp, index_path(control_root))
+        durable.fsync_directory(archive_root(control_root))
     finally:
         Path(tmp).unlink(missing_ok=True)
 
@@ -154,17 +171,45 @@ def rebuild_index(control_root: Path) -> None:
 def _read_user_version(control_root: Path) -> int:
     db = index_path(control_root)
     if not db.exists():
-        # Absent db: nothing to migrate; connect() stamps a fresh db current.
+        if record.list_record_ids(records_root(control_root)):
+            return 0
         return index._SCHEMA_VERSION
-    conn = sqlite3.connect(db, timeout=30)
+    conn: sqlite3.Connection | None = None
     try:
+        conn = sqlite3.connect(db, timeout=30)
         return int(conn.execute("PRAGMA user_version").fetchone()[0])
+    except sqlite3.DatabaseError:
+        return 0
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
-# blob schema versions: 11 == quest_meta.provider backfilled;
-# 10 == final_state.outcome_history head stripped;
+def _index_is_complete(control_root: Path) -> bool:
+    record_ids = record.list_record_ids(records_root(control_root))
+    db = index_path(control_root)
+    if not db.exists():
+        return not record_ids
+    try:
+        conn = sqlite3.connect(
+            f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        try:
+            conn.execute(
+                "SELECT id, title, base, created_at, status, step, events_hash,"
+                " ingested_at, last_event_ts, content, events_content"
+                " FROM quests LIMIT 0")
+            conn.execute(
+                "SELECT quest_id, depends_on_id FROM deps LIMIT 0")
+            indexed_ids = set(index.quest_ids(conn))
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return False
+    return all(cid in indexed_ids for cid in record_ids)
+
+
+# blob schema versions: 12 == archived Codex native resume converted;
+# 11 == quest_meta.provider backfilled; 10 == final_state.outcome_history head stripped;
 # 9 == step_started round stamped;
 # 8 == query_result session_id backfilled;
 # 7 == "event" id_ns restamped "block";
@@ -173,38 +218,27 @@ def _read_user_version(control_root: Path) -> int:
 # 4 == final_state.resume_target `prompt` split; 3 == final_state.status
 # realigned; 2 == started_at backfilled; 1 == triad; absent == pre-triad
 # A blob migration changing an index-visible value must also bump index._SCHEMA_VERSION.
-_DATA_VERSION = 11
+_DATA_VERSION = 12
 
 
 def _read_data_version(control_root: Path) -> int:
-    """The archive's blob-schema version. No index yet == nothing archived, so
-    trivially current (mirrors _read_user_version). Index present but marker
-    absent == a pre-triad archive predating this migration."""
-    if not index_path(control_root).exists():
-        return _DATA_VERSION
+    """Read the authoritative marker; only a truly empty archive is current."""
     marker = data_version_path(control_root)
-    if not marker.exists():
+    if marker.exists():
+        try:
+            return int(marker.read_text().strip())
+        except (ValueError, OSError):
+            return 0
+    if index_path(control_root).exists() or record.list_record_ids(
+            records_root(control_root)):
         return 0
-    try:
-        return int(marker.read_text().strip())
-    except (ValueError, OSError):
-        return 0
+    return _DATA_VERSION
 
 
 def _write_data_version(control_root: Path, version: int) -> None:
     archive_root(control_root).mkdir(parents=True, exist_ok=True)
-    path = data_version_path(control_root)
-    fd, tmp = tempfile.mkstemp(prefix=".data_version-", dir=archive_root(control_root))
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(str(version))
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(tmp)
-        raise
+    durable.durable_replace_bytes(
+        data_version_path(control_root), str(version).encode("ascii"))
 
 
 def _serialize_events(events: list[dict[str, Any]]) -> bytes:
@@ -233,6 +267,14 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     store = LocalBlobStore(blobs_root(control_root))
     records_dir = records_root(control_root)
     cids = list(record.list_record_ids(records_dir))
+    plans: dict[str, ArchiveCodexResumePlan | None] = {}
+    for cid in cids:
+        rec = record.read_record(records_dir, cid)
+        if rec is None:
+            continue
+        plans[cid] = plan_archive_codex_resume_state(
+            rec.get("step_blobs", {}), store.get)
+
     total = len(cids)
     with _progress("Migrating archive...") as emit:
         for i, cid in enumerate(cids, start=1):
@@ -245,6 +287,14 @@ def _migrate_archive_blobs(control_root: Path) -> None:
             migrated = backfill_step_round(backfill_query_result_session_ids(
                 migrate_id_ns_event_to_block(migrate_events(events))))
             dirty = False
+            plan = plans.get(cid)
+            if plan is not None:
+                for dependency in plan.blob_bytes:
+                    digest = store.put(dependency)
+                    if not store.has(digest):
+                        raise OSError(digest)
+                rec["step_blobs"] = plan.step_blobs
+                dirty = True
             if blob is not None and migrated != events:
                 rec["events_hash"] = store.put(_serialize_events(migrated))
                 dirty = True
@@ -309,7 +359,7 @@ def check_index_floor(control_root: Path) -> None:
 def ensure_current(control_root: Path) -> None:
     """Bring the archive up to date: migrate pre-triad event blobs to the triad
     schema (once, gated by the data-version marker) and rebuild the index if its
-    schema version is stale.
+    schema version is stale or it is missing a durable record.
 
     Double-checked locking: lock-free version reads fast-path the steady state;
     the one-time work runs under the writer lock with a re-check so two processes
@@ -322,12 +372,28 @@ def ensure_current(control_root: Path) -> None:
     if root.exists() and not os.access(root, os.W_OK):
         return
     if (_read_data_version(control_root) >= _DATA_VERSION
-            and _read_user_version(control_root) >= index._SCHEMA_VERSION):
+            and _read_user_version(control_root) >= index._SCHEMA_VERSION
+            and _index_is_complete(control_root)):
         return
     with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
         if _read_data_version(control_root) < _DATA_VERSION:
             _migrate_archive_blobs(control_root)
             return
-        if _read_user_version(control_root) >= index._SCHEMA_VERSION:
+        if (_read_user_version(control_root) >= index._SCHEMA_VERSION
+                and _index_is_complete(control_root)):
             return
         rebuild_index(control_root)
+
+
+def require_current(control_root: Path) -> None:
+    check_data_floor(control_root)
+    if _read_data_version(control_root) < _DATA_VERSION:
+        check_index_floor(control_root)
+    ensure_current(control_root)
+    check_data_floor(control_root)
+    if _read_data_version(control_root) < _DATA_VERSION:
+        raise PermissionError(
+            errno.EACCES,
+            os.strerror(errno.EACCES),
+            str(archive_root(control_root)),
+        )

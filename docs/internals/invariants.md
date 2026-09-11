@@ -26,6 +26,13 @@ Read this when editing imp's engine/renderer or workflow prompts.
   messages[:resume_base]))`, overwritten wholesale. Records the CLI wrote are
   never merged in or counted; imp's transcript is the only source of truth for
   resumed context.
+- **Codex native session.** One run-scoped process owner linearizes cancellation
+  with subprocess publication and identity-safe cleanup; a live hard stop captures
+  the process tree before waking blocked driver I/O, and the wake also releases
+  drains held after parent exit. The coordinator's two-second hard deadline is
+  acknowledged by receive or teardown independently of tool cleanup. Normal
+  finalization still persists the exact native thread and rollout before removing
+  the temporary Codex home.
 - **Subagents must be restart-safe.** A subagent can be paused and resumed at
   any time, and resume **re-runs it from scratch** — the engine does not continue
   a paused subagent from its transcript, it restarts the affected subtree. This

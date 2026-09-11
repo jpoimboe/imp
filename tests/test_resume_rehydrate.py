@@ -46,6 +46,28 @@ def test_rehydrate_resumable_returns_none_for_terminal_record(tmp_path: Path) ->
     assert not (project_state_dir(tmp_path) / "quests" / "done").exists()   # never rebuilt
 
 
+def test_rehydrate_resumable_requires_current_before_record_read(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    _archive_terminal(tmp_path, "done", "completed")
+    calls: list[str] = []
+    original_read = archive.record.read_record
+
+    def require_current(control: Path) -> None:
+        calls.append("require_current")
+
+    def read_record(root: Path, quest_id: str):
+        assert calls == ["require_current"]
+        calls.append("read_record")
+        return original_read(root, quest_id)
+
+    monkeypatch.setattr(archive, "require_current", require_current)
+    monkeypatch.setattr(archive.record, "read_record", read_record)
+
+    assert (m._rehydrate_resumable(tmp_path, "done"), calls) == (
+        None, ["require_current", "read_record"])
+
+
 def test_rehydrate_resumable_unknown_returns_none(tmp_path: Path) -> None:
     assert m._rehydrate_resumable(tmp_path, "nope") is None
 

@@ -511,6 +511,7 @@ def build_agent_invocation(
     feedback_lead: str | None = None,
     reincarnation_text: str | None = None,
     balance_on_resume: bool = False,
+    native_resume_state: Any = None,
     resume_should_continue: bool = False,
     resume_cause: ResumeCause = "human",
     log: Any = None,
@@ -648,6 +649,7 @@ def build_agent_invocation(
         first_event_parent_id=first_event_parent_id,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
+        native_resume_state=native_resume_state,
         resume_should_continue=resume_should_continue,
         resume_cause=resume_cause,
         resolved_tiers=resolved_tiers,
@@ -705,6 +707,7 @@ async def drive_invocation(
     attach = (coordinator.runner_attached(
                   runner.interrupt,
                   force_kill=getattr(runner, "force_kill", None),
+                  interrupt_ack=getattr(runner, "wait_for_interrupt_ack", None),
                   agent_id=invocation.agent_id)
               if coordinator is not None else contextlib.nullcontext())
     gen = runner.run(invocation)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from imp.engine import quest as quest_mod
 from imp.engine.quest import LAYOUT_VERSION, Quest, _migrate_v19_to_v20
-from imp.engine.reincarnation import read_transcript_owner
+from imp.engine.reincarnation import read_session_owner
 from tests.conftest import _seed_control
 
 _TIERS = {"low": {"provider": "claude_code", "model": "sonnet"},
@@ -59,7 +59,7 @@ def test_load_backfills_a_null_pin_and_stamps_the_version(tmp_path: Path) -> Non
     assert _meta(qd)["layout_version"] == LAYOUT_VERSION
 
 
-def test_every_live_transcript_is_labelled_not_just_the_current_step(
+def test_every_live_session_is_labelled_not_just_the_current_step(
         tmp_path: Path) -> None:
     # A `resume:` edge can replay a step that finished earlier, so an unlabelled
     # completed step would be retired where a plain replay was correct.
@@ -71,8 +71,8 @@ def test_every_live_transcript_is_labelled_not_just_the_current_step(
 
     _migrate_v19_to_v20(qd)
 
-    assert read_transcript_owner(done) == "claude_code"
-    assert read_transcript_owner(live) == "claude_code"
+    assert read_session_owner(done) == "claude_code"
+    assert read_session_owner(live) == "claude_code"
 
 
 def test_a_step_override_labels_that_step_with_its_own_vendor(
@@ -87,11 +87,11 @@ def test_a_step_override_labels_that_step_with_its_own_vendor(
 
     _migrate_v19_to_v20(qd)
 
-    assert read_transcript_owner(plain) == "claude_code"
-    assert read_transcript_owner(overridden) == "openai"
+    assert read_session_owner(plain) == "claude_code"
+    assert read_session_owner(overridden) == "openai"
 
 
-def test_empty_transcripts_and_attempt_stashes_are_left_unlabelled(
+def test_empty_sessions_and_attempt_stashes_are_left_unlabelled(
         tmp_path: Path) -> None:
     # Nothing replayable and nothing ever read back: labelling either would be
     # noise, and unlabelled is the safe reading anyway.
@@ -102,8 +102,8 @@ def test_empty_transcripts_and_attempt_stashes_are_left_unlabelled(
 
     _migrate_v19_to_v20(qd)
 
-    assert read_transcript_owner(empty) is None
-    assert read_transcript_owner(stash) is None
+    assert read_session_owner(empty) is None
+    assert read_session_owner(stash) is None
 
 
 def test_a_home_with_no_resolved_map_is_left_unlabelled(tmp_path: Path) -> None:
@@ -119,13 +119,13 @@ def test_a_home_with_no_resolved_map_is_left_unlabelled(tmp_path: Path) -> None:
 
     _migrate_v19_to_v20(qd)
 
-    assert read_transcript_owner(live) is None
+    assert read_session_owner(live) is None
     assert _meta(qd)["provider"] is None          # the pin half still lands
     assert _meta(qd)["layout_version"] == 20
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
-    assert LAYOUT_VERSION == 21
+    assert LAYOUT_VERSION == 22
     assert quest_mod._MIGRATIONS[(19, 20)] is _migrate_v19_to_v20
 
 
@@ -139,4 +139,4 @@ def test_a_second_run_is_a_no_op(tmp_path: Path) -> None:
     _migrate_v19_to_v20(qd)
 
     assert _meta(qd) == after_first
-    assert read_transcript_owner(live) == "claude_code"
+    assert read_session_owner(live) == "claude_code"

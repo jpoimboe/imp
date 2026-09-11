@@ -10,23 +10,30 @@ import signal
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
+import anyio
 import pytest
 
+import imp.providers.codex_exec as _codex_exec
 from imp.providers.codex_exec import (
     CODEX_STREAM_LIMIT,
     STDERR_ERROR_CHARS,
     Codex,
     CodexExecError,
     CodexOptions,
+    CodexProcessOwner,
     ThreadOptions,
     _drain_stderr,
     _run_exec,
+    _wait_for_hard_stop,
     build_command_args,
 )
 from imp.providers.errors import ConfigError
 from imp.providers.stderr_sink import StderrSink, current_stderr_sink
+from tests.async_wait import wait_until
 from tests.conftest import _pid_gone_or_zombie
 
 
@@ -190,7 +197,7 @@ def _await_death(pid: int, complaint: str) -> None:
 
 async def _collect(exe: Path, prompt: str, args: list[str] | None = None) -> list[str]:
     lines: list[str] = []
-    gen = _run_exec(str(exe), args or [], dict(os.environ), prompt)
+    gen = _run_exec(str(exe), args or [], dict(os.environ), prompt, CodexProcessOwner())
     async with contextlib.aclosing(gen):
         async for line in gen:
             lines.append(line)
@@ -266,7 +273,7 @@ async def test_a_flooding_child_produces_a_bounded_error_message_with_the_tail(
 async def test_closing_the_line_stream_kills_the_child_and_its_grandchild(
         tmp_path: Path) -> None:
     exe = _fake_codex(tmp_path, _GRANDPARENT)
-    gen = _run_exec(str(exe), [], dict(os.environ), "go")
+    gen = _run_exec(str(exe), [], dict(os.environ), "go", CodexProcessOwner())
     async with contextlib.aclosing(gen):
         async for line in gen:
             child, grandchild = (int(x) for x in line.split())
@@ -280,7 +287,7 @@ async def test_teardown_returns_when_a_descendant_escapes_the_group(tmp_path: Pa
     """Process.wait() returns only once the child's pipes disconnect, so an escapee
     still holding them would hang teardown forever without the bounded reap."""
     exe = _fake_codex(tmp_path, _ESCAPEE)
-    gen = _run_exec(str(exe), [], dict(os.environ), "go")
+    gen = _run_exec(str(exe), [], dict(os.environ), "go", CodexProcessOwner())
     async with contextlib.aclosing(gen):
         async for line in gen:
             child, escapee = (int(x) for x in line.split())
@@ -346,7 +353,7 @@ async def test_stderr_reaches_the_sink_while_the_child_is_still_running(
     sink = StderrSink(tmp_path / "stderr.log")
     token = current_stderr_sink.set(sink)
     try:
-        gen = _run_exec(str(exe), [], dict(os.environ), "go")
+        gen = _run_exec(str(exe), [], dict(os.environ), "go", CodexProcessOwner())
         async with contextlib.aclosing(gen):
             async for line in gen:
                 assert line == "first line"
@@ -518,3 +525,405 @@ async def test_a_child_exiting_before_the_prompt_lands_still_raises_with_its_std
         assert "error: unexpected argument '--json' found" in (sink.tail() or "")
     finally:
         current_stderr_sink.reset(token)
+
+
+@pytest.mark.anyio
+async def test_precancelled_owner_never_spawns() -> None:
+    owner = CodexProcessOwner()
+    owner.cancel()
+    with patch.object(_codex_exec.asyncio, "create_subprocess_exec",
+                      new_callable=AsyncMock) as spawn:
+        lines = [line async for line in _run_exec(
+            "codex", ["exec", "--json"], {}, "prompt", owner)]
+    assert lines == []
+    spawn.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_stale_clear_cannot_disown_a_newer_process() -> None:
+    owner = CodexProcessOwner()
+    first = SimpleNamespace(returncode=None, wait=AsyncMock())
+    second = SimpleNamespace(returncode=None, wait=AsyncMock())
+    owner.publish(first)
+    owner.clear(first)
+    owner.publish(second)
+    owner.clear(first)
+    with patch.object(_codex_exec, "kill_process_tree",
+                      new_callable=AsyncMock) as kill_tree:
+        await owner.force_kill()
+    kill_tree.assert_awaited_once_with(second, signal.SIGKILL)
+    second.wait.assert_not_awaited()
+    assert owner.cancelled and owner.process is second
+
+
+@pytest.mark.anyio
+async def test_force_kill_clears_a_completed_process_without_signalling() -> None:
+    owner = CodexProcessOwner()
+    process = SimpleNamespace(returncode=0, wait=AsyncMock())
+    owner.publish(process)
+    with patch.object(_codex_exec, "kill_process_tree",
+                      new_callable=AsyncMock) as kill_tree:
+        await owner.force_kill()
+    kill_tree.assert_not_awaited()
+    assert owner.process is None
+
+
+@pytest.mark.anyio
+async def test_wait_for_hard_stop_drains_its_operation_when_cancelled() -> None:
+    operation_started = asyncio.Event()
+    operation_finished = asyncio.Event()
+    never_stop = asyncio.Event()
+
+    async def operation() -> None:
+        operation_started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            operation_finished.set()
+
+    hard_stop_task = asyncio.create_task(never_stop.wait())
+    task = asyncio.create_task(_wait_for_hard_stop(operation(), hard_stop_task))
+    await operation_started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    hard_stop_task.cancel()
+    await asyncio.gather(hard_stop_task, return_exceptions=True)
+    assert operation_finished.is_set()
+
+
+_STDERR_ESCAPE_AFTER_PARENT_EXIT = """\
+import os, subprocess, sys
+sys.stdin.read()
+kid = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(300)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, start_new_session=True)
+with open(os.environ["IMP_TEST_DESCENDANT_PID_PATH"], "w") as f:
+    f.write(str(kid.pid))
+print(kid.pid, flush=True)
+"""
+
+
+@pytest.mark.anyio
+async def test_hard_stop_wakes_stderr_drain_after_completed_parent(
+        tmp_path: Path) -> None:
+    exe = _fake_codex(tmp_path, _STDERR_ESCAPE_AFTER_PARENT_EXIT)
+    descendant_pid_path = tmp_path / "stderr-descendant.pid"
+    env = {**os.environ, "IMP_TEST_DESCENDANT_PID_PATH": str(descendant_pid_path)}
+    owner = CodexProcessOwner()
+    real_spawn = asyncio.create_subprocess_exec
+    spawned_process: asyncio.subprocess.Process | None = None
+    descendant_pid: int | None = None
+    lines: list[str] = []
+    line_seen = asyncio.Event()
+    release_consumer = asyncio.Event()
+
+    async def capture_spawn(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
+        nonlocal spawned_process
+        spawned_process = await real_spawn(*args, **kwargs)
+        return spawned_process
+
+    async def consume() -> None:
+        async for line in _run_exec(str(exe), [], env, "go", owner):
+            lines.append(line)
+            line_seen.set()
+            await release_consumer.wait()
+
+    task: asyncio.Task[None] | None = None
+    try:
+        with anyio.fail_after(120), patch.object(
+                _codex_exec.asyncio, "create_subprocess_exec",
+                side_effect=capture_spawn), patch.object(
+                _codex_exec, "kill_process_tree",
+                new_callable=AsyncMock) as kill_tree:
+            task = asyncio.create_task(consume())
+            await line_seen.wait()
+            descendant_pid = int(lines[0])
+            assert spawned_process is not None
+            process = spawned_process
+            await wait_until(lambda: process.returncode is not None)
+            await process.wait()
+            assert process.returncode == 0
+            release_consumer.set()
+            await wait_until(lambda: owner.process is None)
+            assert not task.done()
+            await owner.force_kill()
+            await task
+            kill_tree.assert_not_awaited()
+            assert lines == [str(descendant_pid)]
+            assert not _pid_gone_or_zombie(descendant_pid)
+            assert owner.process is None
+    finally:
+        release_consumer.set()
+        if task is not None and not task.done():
+            task.cancel()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        if descendant_pid is None and descendant_pid_path.exists():
+            descendant_pid = int(descendant_pid_path.read_text())
+        if descendant_pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(descendant_pid, signal.SIGKILL)
+            _await_death(descendant_pid, f"stderr-holding descendant {descendant_pid} survived")
+
+
+@pytest.mark.anyio
+async def test_cancel_between_spawn_and_publication_kills_tree_before_io(
+        tmp_path: Path) -> None:
+    prompt_path = tmp_path / "prompt"
+    pids_path = tmp_path / "pids"
+    body = f"""\
+import json, os, subprocess, sys, time
+kid = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(300)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, start_new_session=True)
+with open({str(pids_path)!r}, "w") as f:
+    f.write(f"{{os.getpid()}} {{kid.pid}}")
+print(json.dumps({{"type": "thread.started", "thread_id": "ready"}}), flush=True)
+prompt = sys.stdin.read()
+with open({str(prompt_path)!r}, "w") as f:
+    f.write(prompt)
+time.sleep(300)
+"""
+    exe = _fake_codex(tmp_path, body)
+    owner = CodexProcessOwner()
+    spawned = asyncio.Event()
+    release = asyncio.Event()
+    timeline: list[str] = []
+    processes: list[Any] = []
+    real_spawn = asyncio.create_subprocess_exec
+    real_kill_tree = _codex_exec.kill_process_tree
+
+    class WrappedStdin:
+        def __init__(self, stream: Any) -> None:
+            self._stream = stream
+
+        def write(self, data: bytes) -> None:
+            timeline.append("stdin.write")
+            self._stream.write(data)
+
+        async def drain(self) -> None:
+            timeline.append("stdin.drain")
+            await self._stream.drain()
+
+        def close(self) -> None:
+            self._stream.close()
+
+    class WrappedStdout:
+        def __init__(self, stream: Any) -> None:
+            self._stream = stream
+
+        async def readline(self) -> bytes:
+            timeline.append("stdout.readline")
+            return await self._stream.readline()
+
+    async def gated_spawn(*args: Any, **kwargs: Any) -> Any:
+        proc = await real_spawn(*args, **kwargs)
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin = WrappedStdin(proc.stdin)
+        proc.stdout = WrappedStdout(proc.stdout)
+        processes.append(proc)
+        await wait_until(lambda: pids_path.exists() and bool(pids_path.read_text()))
+        spawned.set()
+        await release.wait()
+        return proc
+
+    lines: list[str] = []
+
+    async def drive() -> None:
+        async for line in _run_exec(str(exe), [], dict(os.environ), "prompt", owner):
+            lines.append(line)
+
+    with patch.object(_codex_exec.asyncio, "create_subprocess_exec",
+                      side_effect=gated_spawn), patch.object(
+            _codex_exec, "kill_process_tree",
+            new=AsyncMock(wraps=real_kill_tree)) as kill_tree:
+        task = asyncio.create_task(drive())
+        await spawned.wait()
+        child, descendant = (int(pid) for pid in pids_path.read_text().split())
+        owner.cancel()
+        await owner.force_kill()
+        release.set()
+        await task
+
+    kill_tree.assert_awaited_once_with(processes[0], signal.SIGKILL)
+    assert timeline == []
+    assert lines == []
+    assert not prompt_path.exists()
+    await wait_until(
+        lambda: _pid_gone_or_zombie(child) and _pid_gone_or_zombie(descendant))
+    assert owner.process is None
+
+
+@pytest.mark.anyio
+async def test_anyio_scope_cancellation_during_spawn_reaps_child_and_escapee(
+        tmp_path: Path) -> None:
+    pids_path = tmp_path / "pids"
+    body = f"""\
+import os, subprocess, sys, time
+kid = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(300)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    start_new_session=True)
+with open({str(pids_path)!r}, "w") as f:
+    f.write(f"{{os.getpid()}} {{kid.pid}}")
+time.sleep(300)
+"""
+    exe = _fake_codex(tmp_path, body)
+    owner = CodexProcessOwner()
+    spawned = asyncio.Event()
+    release = asyncio.Event()
+    processes: list[Any] = []
+    pids: list[int] = []
+    lines: list[str] = []
+    result: tuple[Any, ...] | None = None
+    real_spawn = asyncio.create_subprocess_exec
+    real_kill_tree = _codex_exec.kill_process_tree
+
+    async def gated_spawn(*args: Any, **kwargs: Any) -> Any:
+        proc = await real_spawn(*args, **kwargs)
+        processes.append(proc)
+        while not (pids_path.exists() and pids_path.read_text()):
+            await asyncio.sleep(0.02)
+        spawned.set()
+        await release.wait()
+        return proc
+
+    async def consume() -> None:
+        async for line in _run_exec(str(exe), [], dict(os.environ), "prompt", owner):
+            lines.append(line)
+
+    try:
+        with patch.object(_codex_exec.asyncio, "create_subprocess_exec",
+                          side_effect=gated_spawn), patch.object(
+                _codex_exec, "kill_process_tree",
+                new=AsyncMock(wraps=real_kill_tree)) as kill_tree:
+            with anyio.move_on_after(120):
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(consume)
+                    await spawned.wait()
+                    pids = [int(pid) for pid in pids_path.read_text().split()]
+                    tg.cancel_scope.cancel()
+                    release.set()
+                while not all(_pid_gone_or_zombie(pid) for pid in pids):
+                    await anyio.sleep(0.02)
+                kill_args = kill_tree.await_args.args if kill_tree.await_args is not None else None
+                result = (kill_args, lines, owner.process)
+    finally:
+        for pid in pids:
+            if not _pid_gone_or_zombie(pid):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+
+    spawned_process = processes[0] if processes else None
+    assert result == ((spawned_process, signal.SIGKILL), [], None)
+
+
+@pytest.mark.anyio
+async def test_repeated_direct_cancellation_during_spawn_reaps_child_and_escapee(
+        tmp_path: Path) -> None:
+    pids_path = tmp_path / "pids"
+    body = f"""\
+import os, subprocess, sys, time
+kid = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(300)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    start_new_session=True)
+with open({str(pids_path)!r}, "w") as f:
+    f.write(f"{{os.getpid()}} {{kid.pid}}")
+time.sleep(300)
+"""
+    exe = _fake_codex(tmp_path, body)
+    owner = CodexProcessOwner()
+    spawned = asyncio.Event()
+    release = asyncio.Event()
+    spawn_cancelled = asyncio.Event()
+    pids: list[int] = []
+    task: asyncio.Task[None] | None = None
+    result: tuple[bool, ...] | None = None
+    real_spawn = asyncio.create_subprocess_exec
+
+    async def gated_spawn(*args: Any, **kwargs: Any) -> Any:
+        proc = await real_spawn(*args, **kwargs)
+        while not (pids_path.exists() and pids_path.read_text()):
+            await anyio.sleep(0.02)
+        spawned.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            spawn_cancelled.set()
+            raise
+        return proc
+
+    async def consume() -> None:
+        async for _line in _run_exec(str(exe), [], dict(os.environ), "prompt", owner):
+            pass
+
+    try:
+        with patch.object(_codex_exec.asyncio, "create_subprocess_exec",
+                          side_effect=gated_spawn):
+            with anyio.fail_after(120):
+                task = asyncio.create_task(consume())
+                await spawned.wait()
+                pids = [int(pid) for pid in pids_path.read_text().split()]
+
+                task.cancel()
+                await anyio.lowlevel.checkpoint()
+                alive_after_first = not task.done()
+                task.cancel()
+                await anyio.lowlevel.checkpoint()
+                alive_after_second = not task.done()
+                release.set()
+
+                consumer_cancelled = False
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    consumer_cancelled = True
+
+                if not spawn_cancelled.is_set():
+                    while not all(_pid_gone_or_zombie(pid) for pid in pids):
+                        await anyio.sleep(0.02)
+                pids_gone = all(_pid_gone_or_zombie(pid) for pid in pids)
+                result = (
+                    alive_after_first,
+                    alive_after_second,
+                    consumer_cancelled,
+                    not spawn_cancelled.is_set(),
+                    pids_gone,
+                    owner.process is None,
+                )
+    finally:
+        release.set()
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        for pid in pids:
+            if not _pid_gone_or_zombie(pid):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+
+    assert result == (True, True, True, True, True, True)
+
+
+@pytest.mark.anyio
+async def test_anyio_scope_cancellation_reaps_the_whole_child_group(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(tmp_path, _JSONL_GRANDPARENT, monkeypatch)
+    turn = await client.start_thread(_OPTS_HIGH).run_streamed("go")
+    seen: list[Any] = []
+
+    async def consume() -> None:
+        async with contextlib.aclosing(turn.events) as events:
+            async for event in events:
+                seen.append(event)
+
+    with anyio.fail_after(120):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(consume)
+            await wait_until(lambda: bool(seen))
+            child, grandchild = (int(pid) for pid in seen[0].item.text.split())
+            tg.cancel_scope.cancel()
+
+    await wait_until(
+        lambda: _pid_gone_or_zombie(child) and _pid_gone_or_zombie(grandchild))
