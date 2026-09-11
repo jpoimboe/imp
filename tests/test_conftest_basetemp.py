@@ -121,8 +121,8 @@ def test_configure_pins_imp_home_off_the_real_home(monkeypatch):
 def test_configure_leaves_an_existing_imp_home_pin_alone(monkeypatch):
     monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     monkeypatch.setattr(conftest, "_OWNED_BASETEMP", None)
-    monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", "/tmp/imphome-sentinel")
+    monkeypatch.setattr(conftest, "_OWNED_IMP_HOME", "/sentinel/imphome")
     before = os.environ["IMP_HOME"]
     conftest.pytest_configure(_config(basetemp="/custom/bt"))
-    assert conftest._OWNED_IMP_HOME == "/tmp/imphome-sentinel"
+    assert conftest._OWNED_IMP_HOME == "/sentinel/imphome"
     assert os.environ["IMP_HOME"] == before
