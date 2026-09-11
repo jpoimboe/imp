@@ -59,6 +59,15 @@ _diagnose_surviving_directives() {
   return 0
 }
 
+# Resets the attempts budget — a fresh hand-off, not a repair judgement.
+_write_sentinels() {
+  mkdir -p "$STATE"
+  rm -f "$STATE/autosquash-resolve-attempts"
+  printf '%s\n' "$BEFORE_TREE" > "$STATE/autosquash-before-tree"
+  printf '%s\n' "$BEFORE"      > "$STATE/autosquash-before-head"
+  printf '%s\n' "$FORK"        > "$STATE/autosquash-fork"
+}
+
 # ── VERIFY MODE ──────────────────────────────────────────────────────────────
 # A before-tree sentinel means a fold conflict was handed to autosquash-resolve,
 # which has now run; this re-entry VERIFIES its resolution rather than re-folding.
@@ -74,7 +83,8 @@ if [ -f "$STATE/autosquash-before-tree" ]; then
   MAX_ATTEMPTS=3
 
   _clear_sentinels() {
-    rm -f "$STATE/autosquash-before-tree" "$STATE/autosquash-before-head" "$ATTEMPTS_FILE"
+    rm -f "$STATE/autosquash-before-tree" "$STATE/autosquash-before-head" \
+      "$STATE/autosquash-fork" "$ATTEMPTS_FILE"
   }
 
   # First objective failure (empty REASON => verified). An in-progress rebase makes
@@ -146,10 +156,7 @@ if _has_directives; then
     # A genuine fold CONFLICT (rebase in progress AND unmerged paths) is agent-
     # resolvable: leave it in progress and hand off. Any other failure is hard.
     if [ -d "$(git rev-parse --git-path rebase-merge)" ] && [ -n "$(git ls-files -u)" ]; then
-      mkdir -p "$STATE"
-      rm -f "$STATE/autosquash-resolve-attempts"
-      printf '%s\n' "$BEFORE_TREE" > "$STATE/autosquash-before-tree"
-      printf '%s\n' "$BEFORE" > "$STATE/autosquash-before-head"
+      _write_sentinels
       echo "cleanup: fixup fold conflicted; handing to autosquash-resolve (rebase left in progress)" >&2
       exit 2
     fi

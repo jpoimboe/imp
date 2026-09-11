@@ -204,6 +204,7 @@ def test_fold_conflict_hands_off_exit_2(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _init(pr)
     _record_change(pr)
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "a.txt").write_text("orig\n")
     _git(pr, "add", "a.txt")
@@ -225,6 +226,7 @@ def test_fold_conflict_hands_off_exit_2(tmp_path: Path) -> None:
     state = _state(pr)
     assert (state / "autosquash-before-tree").read_text().strip() == before_tree
     assert (state / "autosquash-before-head").read_text().strip() == before_head
+    assert (state / "autosquash-fork").read_text().strip() == fork
     _git(pr, "rebase", "--abort")
 
 
@@ -291,6 +293,7 @@ def test_verify_passes_and_stamps(tmp_path: Path) -> None:
         assert _trailer(pr, h) == ID                    # fell through to stamp, all commits
     assert not (_state(pr) / "autosquash-before-tree").exists()   # sentinels cleaned
     assert not (_state(pr) / "autosquash-before-head").exists()
+    assert not (_state(pr) / "autosquash-fork").exists()
     assert not (_state(pr) / "autosquash-resolve-attempts").exists()
 
 
@@ -340,6 +343,7 @@ def test_verify_exhaustion_restores_pristine(tmp_path: Path) -> None:
     assert _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip() == before_tree
     assert not (_state(pr) / "autosquash-before-tree").exists()
     assert not (_state(pr) / "autosquash-before-head").exists()
+    assert not (_state(pr) / "autosquash-fork").exists()
     assert not (_state(pr) / "autosquash-resolve-attempts").exists()
     assert "rebase -i --autosquash" in res.stderr        # manual-recovery hint
 
