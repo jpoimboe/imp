@@ -94,7 +94,9 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
         name="sub_agent",
         description=(
             "Dispatch a subtask to a named subagent. "
-            "Returns the subagent's final message as a plain string. "
+            "Returns the subagent's final message as a plain string; an "
+            "over-long one is returned as a head preview plus a path to the "
+            "full text. "
             "Independent subtasks issued as multiple sub_agent calls in ONE "
             "assistant message run concurrently; issue dependent subtasks "
             "sequentially across turns. A non-sub_agent tool issued in the "

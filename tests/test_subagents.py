@@ -1019,6 +1019,18 @@ def test_make_task_tool_description_has_parallel_guidance() -> None:
     assert make_task_tool(("low", "high")).description == desc
 
 
+def test_make_task_tool_description_states_the_spill_shape() -> None:
+    """AC 12: spilling falsifies the unconditional "returns the final message as a
+    plain string" promise, so the description names the preview-plus-path shape an
+    over-long result actually takes."""
+    desc = make_task_tool().description
+    assert ("Returns the subagent's final message as a plain string; an over-long "
+            "one is returned as a head preview plus a path to the full text.") in desc
+    assert "plain string. " not in desc          # the unconditional promise is gone
+    # The tier-bearing variant shares the same description.
+    assert make_task_tool(("low", "high")).description == desc
+
+
 @pytest.mark.anyio
 async def test_subagent_auth_budget_hands_back_suspended(tmp_path: Path,
                                                          monkeypatch) -> None:
