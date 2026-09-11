@@ -3277,3 +3277,83 @@ def test_literal_slash_tmp_file_is_readable_inside_the_sandbox() -> None:
     finally:
         victim.unlink(missing_ok=True)
         shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# AC5/AC6(b)/AC7: the scratch-root mask under real bwrap — siblings gone, the
+# own socket and the own scratch dir intact
+# ---------------------------------------------------------------------------
+
+
+# connect() only, no recv: nothing here accepts, and a recv against a bound-but-
+# unaccepted peer blocks forever — so a reachability regression must ASSERT, not hang.
+_SOCK_CONNECT_ONLY = (
+    "import socket, sys\n"
+    "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+    "s.connect(sys.argv[1])\n"
+    "print('reached')\n"
+)
+
+
+def _bound_listener(path: Path) -> socket.socket:
+    """A real bound, listening AF_UNIX socket, left NON-BLOCKING: a later accept()
+    probes the backlog without waiting, so a queued connection proves something
+    reached it and BlockingIOError proves nothing did — no thread, no timeout."""
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.listen(1)
+    srv.setblocking(False)
+    return srv
+
+
+def test_sibling_scratch_and_foreign_sockets_are_gone_from_the_namespace() -> None:
+    """AC5: with a sibling quest's scratch dir, its staged provider credentials, its
+    session socket and the remote-control socket all planted in the scratch root on the
+    host, the namespace sees NONE of them: the root lists exactly this quest's own
+    scratch dir and own socket, the credential cat fails, connect() to either foreign
+    socket fails with ENOENT, and neither host listener ever sees a connection.
+    Merely-unwritable was the pre-mask posture; this asserts gone."""
+    root = _make_root()
+    parent = _scratch_parent()
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    own_sock = parent / f"{uuid.uuid4().hex[:8]}.sock"
+    sib_sock = parent / "other.sock"
+    rc_sock = parent / "rc-0123456789abcdef.sock"
+    cred = parent / "other" / "imp-codex-9-deadbeef" / "auth.json"
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        cred.parent.mkdir(parents=True, exist_ok=True)
+        cred.write_text("SIBLING_PROVIDER_TOKEN\n")
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(_bound_listener(own_sock))
+            sib_srv = stack.enter_context(_bound_listener(sib_sock))
+            rc_srv = stack.enter_context(_bound_listener(rc_sock))
+
+            pol = _active_policy(root, quest_tmp_dir=str(scratch),
+                                 quest_tmp_mask=str(parent),
+                                 session_socket_ro=str(own_sock))
+            ctx = _ctx(root, pol)
+
+            ls = _bash(ctx, f"ls -A {shlex.quote(str(parent))}")
+            assert ls["returncode"] == 0, ls
+            assert set(str(ls["stdout"]).split()) == {scratch.name, own_sock.name}, ls
+
+            cat = _bash(ctx, f"cat {shlex.quote(str(cred))}")
+            assert cat["returncode"] != 0, cat
+            assert "SIBLING_PROVIDER_TOKEN" not in str(cat["stdout"]), cat
+
+            for foreign in (sib_sock, rc_sock):
+                c = _bash(
+                    ctx,
+                    f"{shlex.quote(sys.executable)} -c {shlex.quote(_SOCK_CONNECT_ONLY)} "
+                    f"{shlex.quote(str(foreign))}")
+                assert c["returncode"] != 0, c
+                assert "No such file or directory" in str(c["stderr"]), c
+                assert "reached" not in str(c["stdout"]), c
+
+            for srv in (sib_srv, rc_srv):
+                with pytest.raises(BlockingIOError):
+                    srv.accept()        # empty backlog: nothing inside reached it
+    finally:
+        shutil.rmtree(parent.parent, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
