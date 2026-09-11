@@ -88,3 +88,36 @@ def test_show_renders_a_live_quest_with_an_archived_dependency(
     assert captured.err == ""
     assert "Live Thing" in captured.out
     assert f"depends_on:    {ARCH} · {ARCH} (merged)" in captured.out
+
+
+def test_settled_outcome_returns_its_absent_record_outcome(tmp_path: Path) -> None:
+    """A session teardown must not die on archive skew: no state.json and an
+    unreadable archive is the same 'nothing to report' as no record at all."""
+    from imp.cli.session_run import SettledOutcome, resolve_settled_outcome
+
+    _seed_control(tmp_path)
+    _archive_merged(tmp_path, ARCH)
+    quest = Quest.create_draft(tmp_path, title="Live Thing", quest_id=LIVE,
+                               base_branch="main")
+    (quest.state_dir / "state.json").unlink()
+    _raise_data_floor(tmp_path)
+
+    assert resolve_settled_outcome(quest) == SettledOutcome(status=None, events=[])
+
+
+def test_merged_after_returns_its_fail_safe_false(tmp_path: Path) -> None:
+    """The fail-safe False, not the ordinary negative: this record's merge sha
+    genuinely landed after the base, so the same call reads True while the
+    archive is readable. Only the degrade can flip it."""
+    from imp.cli.store import _merged_after
+    from imp.engine import worktree
+
+    _seed_control(tmp_path)
+    landed_after = _branch_with_commit(tmp_path, "later")
+    base = worktree.head_of(tmp_path, "main")
+    _archive_merged(tmp_path, ARCH, merge_commit=landed_after)
+    assert _merged_after(tmp_path, ARCH, base) is True     # guard: readable == True
+
+    _raise_data_floor(tmp_path)
+
+    assert _merged_after(tmp_path, ARCH, base) is False

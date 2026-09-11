@@ -659,7 +659,11 @@ def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
     """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
     from imp.engine import worktree
     from imp.engine.archive import read as archive_read
-    merge_commit = archive_read.merge_commit_of(control, quest_id)
+    from imp.engine.errors import ArchiveMismatch
+    try:
+        merge_commit = archive_read.merge_commit_of(control, quest_id)
+    except ArchiveMismatch:
+        return False
     if not merge_commit:
         return False
     # git exit 1 = not an ancestor (landed after) → keep; exit 0/any-other = exclude (fail-safe).
