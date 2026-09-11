@@ -38,22 +38,35 @@ Diff hunks use 0-based labels such as `[row 7]`, `[rows 20-22 inserted]`, and
   parked after a prompt means it's waiting for input. `full=True` adds history. Once
   the program has exited the header carries its exit status: `exit=0`, `exit=2`, or a
   signal name like `exit=SIGINT`.
-- **`send(data, wait=True)`** — raw keystrokes: Enter=`\r`, Tab=`\t`, Ctrl-C=`\x03`,
-  Backspace=`\x7f`, arrows=`\x1b[A`/`B`/`C`/`D`. `wait=False` returns `[sent]` without
-  rendering; otherwise return a changed-row diff, `[no text change]`, or
-  `[full screen]` followed by the complete screen. `wait=True` settles;
-  `wait=<seconds>` settles a fixed time for an always-animating TUI.
+- **`send(data="", keys=None, wait=True, for_text=None, pattern=None)`** — `data` is
+  literal text, escapes decoded: Enter=`\r`, Tab=`\t`, Ctrl-C=`\x03`. `keys` is a list
+  of key NAMES, sent after it in one write: enter, tab, shift-tab, escape, space,
+  backspace, delete, insert, up, down, left, right, home, end, pageup, pagedown,
+  f1-f12, ctrl-<a-z>, alt-<key> (`ctrl-c`, `Ctrl+C`, `CTRL_C` are one key). Prefer
+  `keys` for non-printing keys — a mistyped escape in `data` is silently typed into
+  the program, a mistyped NAME is an error that sends nothing; "foo" then Enter is
+  `data="foo", keys=["enter"]`. `wait=False` returns `[sent]` without rendering;
+  otherwise return a changed-row diff, `[no text change]`, or `[full screen]` followed
+  by the complete screen. `wait=True` settles; `wait=<seconds>` settles a fixed time
+  for an always-animating TUI; `for_text=`/`pattern=` waits for that text as `wait()`
+  does and returns its header (needs the default `wait=True`).
 - **`snapshot(path=None, full=False, light=False)`** — render the screen to a PNG and
   return its path; **read it with `read_file` to see color, bold, and box-drawing**
   (`view` is text only). Let `path` default to a temp file — don't point it into the
   worktree. `light=True` previews a light theme.
-- **`wait(idle=…, hard=…, for_change=False)`** — wait until there is an idle window
-  after qualifying output, the process exits, or `hard` elapses; then return a
-  changed-row diff, `[no text change]`, or `[full screen]` followed by the complete
-  screen; already-read output qualifies normally; `for_change=True` requires new
-  output. A live process with no output is not settled. `hard` defaults to 3s (30s
-  with `for_change=True`), caller values are accepted, and values over 240s are
-  capped; call again to keep watching.
+- **`wait(idle=…, hard=…, for_change=False, for_text=None, pattern=None)`** — wait
+  until there is an idle window after qualifying output, the process exits, or `hard`
+  elapses; then return a changed-row diff, `[no text change]`, or `[full screen]`
+  followed by the complete screen; already-read output qualifies normally;
+  `for_change=True` requires new output, to follow a long command without polling. A
+  live process with no output is not settled. `for_text=` (substring) or `pattern=`
+  (regex, anchored per screen line) instead blocks until that text appears — waiting
+  for a named prompt beats polling `view` — and heads the reply `[found]`,
+  `[not seen after …]`, or `[not seen — program exited]`. It scans the CURRENT screen,
+  so pick a string unique to the reaction you expect, and keep it short: one spanning
+  a line the terminal wrapped never matches. `hard` defaults to 3s (30s with
+  `for_change=True` or a matcher), caller values are accepted, and values over 240s
+  are capped; call again to keep watching.
 - **`resize(rows, cols, wait=True)`** — resize the terminal (SIGWINCH) to test reflow.
   `wait=False` returns `[resized]` without rendering; otherwise return a changed-row
   diff, `[no text change]`, or `[full screen]` followed by the complete screen.

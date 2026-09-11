@@ -13,6 +13,14 @@ from impty.mcp import THIN_DESCRIPTIONS
 from impty.session import MAX_CALL_HARD
 
 
+def _flat_bullet(prefix: str) -> str:
+    """One skill bullet, whitespace-normalized: pins the prose, not the wrapping."""
+    body = load_internal_skill(bundled_skills_dir(), "imp-driving-terminal-uis")
+    bullet = next((b for b in body.split("\n- ") if b.startswith(prefix)), None)
+    assert bullet is not None, f"the skill has no {prefix} bullet"
+    return " ".join(bullet.split())
+
+
 def test_wait_one_liner_states_the_per_call_cap_and_the_resume_instruction() -> None:
     # The full driver docstring is agent-facing only on the standalone stdio
     # server, so this one-liner is all the agent sees under both providers.
@@ -133,7 +141,7 @@ def test_changed_rows_contract_reaches_every_agent_surface() -> None:
     require(docs["wait"], "Output already read qualifies normally")
     require(docs["wait"], "`for_change=True` requires new output")
     require(docs["wait"], "live process with no output is not settled")
-    require(docs["wait"], "`hard` defaults to 3s (30s with `for_change=True`)")
+    require(docs["wait"], "`hard` defaults to 3s (30s with `for_change=True` or a matcher)")
     require(docs["wait"], "values over 240s are capped")
     require(docs["view"], "complete current screen without a diff or `[full screen]` marker")
     require(docs["view"], "resynchronizes subsequent changed-row responses")
@@ -149,9 +157,10 @@ def test_changed_rows_contract_reaches_every_agent_surface() -> None:
             "resynchronizes changed-row responses."
         ),
         "send": (
-            "Send raw keystrokes; `wait=False` returns `[sent]` without rendering, otherwise "
-            "return a changed-row diff, `[no text change]`, or `[full screen]` plus the "
-            "complete screen."
+            'Send text and/or named keys (keys=["ctrl-c"]), optionally waiting for the '
+            "reaction text (for_text=/pattern=); `wait=False` returns `[sent]` without "
+            "rendering, otherwise return a changed-row diff, `[no text change]`, or "
+            "`[full screen]` plus the complete screen."
         ),
         "resize": (
             "Resize the terminal (SIGWINCH); `wait=False` returns `[resized]` without "
@@ -159,11 +168,12 @@ def test_changed_rows_contract_reaches_every_agent_surface() -> None:
             "screen]` plus the complete screen."
         ),
         "wait": (
-            "Wait until there is an idle window after qualifying output, the process exits, "
-            "or `hard` elapses; then return a changed-row diff, `[no text change]`, or `[full "
+            "Wait until there is an idle window after qualifying output, the process exits, or "
+            "`hard` elapses; then return a changed-row diff, `[no text change]`, or `[full "
             "screen]` plus the complete screen. Output already read qualifies by default; "
-            "`for_change=True` requires new output. `hard` defaults to 3s (30s with "
-            "`for_change=True`), and values over 240s are capped; call again to keep watching."
+            "`for_change=True` requires new output; for_text=/pattern= wait for the text to "
+            "appear. `hard` defaults to 3s (30s with `for_change=True` or a matcher), and "
+            "values over 240s are capped; call again to keep watching."
         ),
     }
     for name, expected in expected_thin.items():
@@ -200,7 +210,7 @@ def test_changed_rows_contract_reaches_every_agent_surface() -> None:
     require(wait, "already-read output qualifies normally")
     require(wait, "`for_change=True` requires new output")
     require(wait, "live process with no output is not settled")
-    require(wait, "`hard` defaults to 3s (30s with `for_change=True`)")
+    require(wait, "`hard` defaults to 3s (30s with `for_change=True` or a matcher)")
     require(wait, "caller values are accepted")
     require(wait, "values over 240s are capped")
     require(
@@ -348,3 +358,56 @@ def test_no_shipped_copy_still_claims_the_old_env_and_signal_behavior() -> None:
             flat = " ".join(path.read_text().split())
             for claim in stale:
                 assert claim not in flat, f"{path.name} still says {claim!r}"
+
+
+def test_send_one_liner_names_the_named_keys() -> None:
+    assert 'keys=["ctrl-c"]' in THIN_DESCRIPTIONS["send"]
+
+
+def test_wait_one_liner_names_the_text_matchers() -> None:
+    assert "for_text=/pattern=" in THIN_DESCRIPTIONS["wait"]
+
+
+def test_terminal_ui_skill_send_bullet_teaches_named_keys() -> None:
+    bullet = _flat_bullet("**`send(")
+    assert 'keys=["enter"]' in bullet
+    assert "ctrl-<a-z>" in bullet
+    # The silent failure the keys= vocabulary exists to remove.
+    assert "a mistyped escape in `data` is silently typed into the program" in bullet
+
+
+def test_terminal_ui_skill_send_bullet_notes_matcher_needs_default_wait() -> None:
+    bullet = _flat_bullet("**`send(")
+    assert "needs the default `wait=True`" in bullet
+
+
+def test_terminal_ui_skill_wait_bullet_teaches_the_text_matchers() -> None:
+    bullet = _flat_bullet("**`wait(")
+    assert "for_text=" in bullet and "pattern=" in bullet
+    assert "[found]" in bullet
+    assert "[not seen — program exited]" in bullet
+
+
+def test_terminal_ui_skill_teaches_both_text_wait_caveats() -> None:
+    bullet = _flat_bullet("**`wait(")
+    # Stale on-screen text, then wrapped lines: both traps, on the bullet itself.
+    assert "scans the CURRENT screen" in bullet
+    assert "unique to the reaction you expect" in bullet
+    assert "spanning a line the terminal wrapped never matches" in bullet
+
+
+def test_impty_readme_tool_listing_carries_the_new_send_and_wait_parameters() -> None:
+    import impty
+    readme = (Path(impty.__file__).parent / "README.md").read_text()
+    # Sliced at the MCP listing, so the prose has to sit THERE and not merely
+    # somewhere in a README whose library API section mentions the same names.
+    listing = " ".join(
+        readme.split("Drive a live program over MCP and screenshot it:")[1].split())
+    assert 'keys=["enter"]' in listing
+    assert "`for_text=`/`pattern=` waits for the reaction text" in listing
+    assert "`for_text=`/`pattern=` blocks" in listing
+
+
+def test_playbooks_readme_points_at_keys_for_non_printing_keys() -> None:
+    flat = " ".join(Path("tests/playbooks/README.md").read_text().split())
+    assert 'send(keys=["ctrl-c"])' in flat

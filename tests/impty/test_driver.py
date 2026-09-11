@@ -17,7 +17,13 @@ import pytest
 from PIL import Image
 
 from impty import TerminalSession
-from impty.driver import ImptyDriver, PtySpawn, _decode_keys, _format_exit
+from impty.driver import (
+    ImptyDriver,
+    PtySpawn,
+    _decode_keys,
+    _format_exit,
+    _resolve_key,
+)
 from impty.render import _MAX_DIM
 from impty.session import (
     DEFAULT_CHANGE_HARD,
@@ -77,6 +83,45 @@ _RESIZE_CHILD = (
     "time.sleep(30)\n"
 )
 
+_ECHO_CHILD = (
+    "import os, sys, tty\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "buf = b''\n"
+    "while True:\n"
+    "    c = os.read(sys.stdin.fileno(), 1)\n"
+    "    if not c: break\n"
+    "    buf += c\n"
+    "    os.write(1, b'GOT ' + buf.hex().encode() + b'\\r\\n')\n"
+)
+
+_MARKER_THEN_TAIL_CHILD = (
+    "import os, sys, time\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "p = sys.argv[1]\n"
+    "while not os.path.exists(p):\n"
+    "    time.sleep(0.05)\n"
+    "os.write(1, b'MARKER\\r\\n')\n"
+    "time.sleep(0.5)\n"
+    "os.write(1, b'TAIL\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
+_SCROLL_OFF_CHILD = (
+    "import time\n"
+    "print('SCROLLED-AWAY')\n"
+    "for i in range(60):\n"
+    "    print('filler', i)\n"
+    "print('BOTTOM', flush=True)\n"
+    "time.sleep(30)\n"
+)
+
+
+def _received(driver: ImptyDriver) -> str:
+    """Hex of everything the echo child has received so far — its last GOT line."""
+    got = [ln for ln in driver.view().splitlines() if ln.startswith("GOT ")]
+    return got[-1].split(" ", 1)[1].strip() if got else ""
+
 
 def test_decodes_carriage_return_so_enter_submits() -> None:
     assert _decode_keys("foo\\r") == "foo\r"
@@ -94,6 +139,77 @@ def test_leaves_plain_text_and_unicode_untouched() -> None:
 
 def test_leaves_unrecognized_backslash_literal() -> None:
     assert _decode_keys("a\\z b") == "a\\z b"
+
+
+# The key table exactly as the spec pins it; the resolver is checked against THIS,
+# never the other way round.
+_PINNED_KEY_BYTES = {
+    "enter": "\r", "return": "\r", "tab": "\t", "shift-tab": "\x1b[Z",
+    "escape": "\x1b", "esc": "\x1b", "space": " ", "backspace": "\x7f",
+    "delete": "\x1b[3~", "insert": "\x1b[2~",
+    "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
+    "home": "\x1b[H", "end": "\x1b[F", "pageup": "\x1b[5~", "pagedown": "\x1b[6~",
+    "f1": "\x1bOP", "f2": "\x1bOQ", "f3": "\x1bOR", "f4": "\x1bOS",
+    "f5": "\x1b[15~", "f6": "\x1b[17~", "f7": "\x1b[18~", "f8": "\x1b[19~",
+    "f9": "\x1b[20~", "f10": "\x1b[21~", "f11": "\x1b[23~", "f12": "\x1b[24~",
+    "ctrl-[": "\x1b", "ctrl-\\": "\x1c", "ctrl-]": "\x1d", "ctrl-^": "\x1e",
+    "ctrl-_": "\x1f",
+}
+
+_UNKNOWN_KEY_MESSAGE = (
+    "unknown key name 'contrl-c' — valid: enter, tab, shift-tab, escape, space, "
+    "backspace, delete, insert, up, down, left, right, home, end, pageup, pagedown, "
+    "f1-f12, ctrl-<a-z>, alt-<key>; for anything else pass the raw bytes in data="
+)
+
+
+@pytest.mark.parametrize(("name", "expected"), sorted(_PINNED_KEY_BYTES.items()))
+def test_key_names_resolve_to_the_pinned_bytes(name: str, expected: str) -> None:
+    assert _resolve_key(name) == expected
+
+
+def test_ctrl_letter_range_is_the_ascii_control_codes() -> None:
+    # ctrl-a..ctrl-z are \x01..\x1a — the ASCII definition, not a table lookup.
+    assert [_resolve_key(f"ctrl-{c}") for c in "abcdefghijklmnopqrstuvwxyz"] == [
+        chr(i) for i in range(1, 27)
+    ]
+
+
+def test_alt_prefixes_escape_onto_the_resolved_remainder() -> None:
+    assert _resolve_key("alt-enter") == "\x1b\r"
+    assert _resolve_key("alt-x") == "\x1bx"
+    assert _resolve_key("alt-_") == "\x1b_"
+    # The remainder folds through its OWN stages: page_up -> pageup.
+    assert _resolve_key("Alt+Page_Up") == "\x1b\x1b[5~"
+    # A bare-char remainder is sent AS WRITTEN: name-folding must not rewrite the
+    # literal byte, or alt-A would silently deliver ESC a and alt-+ would deliver ESC -.
+    assert _resolve_key("alt-A") == "\x1bA"
+    assert _resolve_key("alt-+") == "\x1b+"
+    assert _resolve_key("Alt_A") == "\x1bA"
+
+
+def test_name_normalization_folds_spellings_and_keeps_ctrl_underscore() -> None:
+    assert _resolve_key("Ctrl+C") == "\x03"
+    assert _resolve_key("ctrl-c") == "\x03"
+    assert _resolve_key("CTRL_C") == "\x03"
+    assert _resolve_key("Page_Up") == "\x1b[5~"
+    assert _resolve_key("PageUp") == "\x1b[5~"
+    assert _resolve_key("pageup") == "\x1b[5~"
+    # The pair no single-stage rule can satisfy at once.
+    assert _resolve_key("shift_tab") == "\x1b[Z"
+    assert _resolve_key("ctrl-_") == "\x1f"
+
+
+def test_unknown_key_name_message_quotes_the_name_as_written() -> None:
+    with pytest.raises(ValueError) as exc:
+        _resolve_key("contrl-c")
+    assert str(exc.value) == _UNKNOWN_KEY_MESSAGE
+
+
+def test_keys_is_a_closed_vocabulary_so_a_bare_char_is_not_a_key() -> None:
+    # A lone printable char is only meaningful after alt-; on its own it belongs in data=.
+    with pytest.raises(ValueError):
+        _resolve_key("x")
 
 
 def test_tool_methods_expose_the_eight_tools_in_order() -> None:
@@ -288,6 +404,158 @@ def test_send_wait_true_returns_screen_not_sent_marker() -> None:
         assert result.startswith("[")  # status header
     finally:
         d.stop()
+
+
+def test_send_with_neither_data_nor_keys_is_an_error() -> None:
+    with pytest.raises(ValueError) as exc:
+        ImptyDriver().send()
+    assert str(exc.value) == "send needs data= text, keys=[...], or both"
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_delivers_data_then_the_named_keys_in_order() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        d.send(data="foo", keys=["enter"])
+        assert _poll(lambda: _received(d) == b"foo\r".hex(), E2E_POLL_TIMEOUT)
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_writes_data_and_keys_in_a_single_pty_write() -> None:
+    # One write, or pyte's CPR/DA reply writer could land between the typed text and
+    # the key that commits it.
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        session = d._require()
+        writes: list[str] = []
+        real = session.send
+
+        def spy(payload: bytes | str) -> None:
+            writes.append(str(payload))
+            real(payload)
+
+        session.send = spy
+        d.send(data="hi", keys=["space", "enter"])
+        assert writes == ["hi \r"]
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_unknown_key_name_delivers_nothing_to_the_program() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        with pytest.raises(ValueError) as exc:
+            d.send(data="foo", keys=["contrl-c"])
+        assert str(exc.value) == _UNKNOWN_KEY_MESSAGE
+        # A probe the child DOES get proves the failed call wrote nothing: its
+        # cumulative buffer is the probe alone, not "foo" followed by the probe.
+        d.send(keys=["tab"])
+        assert _poll(lambda: _received(d) == b"\t".hex(), E2E_POLL_TIMEOUT)
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_a_bad_key_later_in_the_list_sends_none_of_the_earlier_ones() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        with pytest.raises(ValueError):
+            d.send(keys=["space", "nope"])
+        d.send(keys=["tab"])
+        assert _poll(lambda: _received(d) == b"\t".hex(), E2E_POLL_TIMEOUT)
+    finally:
+        d.stop()
+
+
+def test_send_docstring_teaches_the_key_vocabulary() -> None:
+    doc = ImptyDriver.send.__doc__ or ""
+    assert 'keys=["enter"]' in doc
+    assert "ctrl-<a-z>" in doc
+    assert "single write" in doc
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_matcher_returns_found_once_the_reaction_appears() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        # The echo child prints its CUMULATIVE input as hex, so this string can only
+        # appear once both bytes have come back — a real reaction, not the send.
+        echoed = b"hi".hex()
+        result = d.send(data="hi", for_text=echoed)
+        assert result.splitlines()[0] == "[found]"
+        assert f"GOT {echoed}" in result
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_matcher_that_never_appears_reports_the_not_seen_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        # send's matcher budget IS DEFAULT_CHANGE_HARD, read off the module at call
+        # time — shrink it rather than block a test for the real 30s.
+        monkeypatch.setattr("impty.driver.DEFAULT_CHANGE_HARD", 0.5)
+        t0 = time.monotonic()
+        result = d.send(data="hi", for_text="NEVER")
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == "[not seen after 0.5s hard cap]"
+        assert elapsed >= 0.5  # the header's elapsed-time claim is true
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_plain_send_still_returns_a_bare_screen_with_no_header_line() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ECHO_CHILD])
+    try:
+        d.wait(idle=0.2, hard=30.0)  # READY
+        result = d.send(data="hi")
+        # No note line: the first line is the render's own status header.
+        assert result.splitlines()[0].startswith("[alive=")
+    finally:
+        d.stop()
+
+
+def test_send_matcher_argument_conflicts_raise_value_error() -> None:
+    # No session: these are argument errors, raised before anything is written.
+    d = ImptyDriver()
+    conflict = ("for_text/pattern needs wait=True (the default)"
+                " — a numeric or False wait contradicts it")
+    with pytest.raises(ValueError) as exc:
+        d.send(data="x", for_text="a", wait=False)
+    assert str(exc.value) == conflict
+    with pytest.raises(ValueError) as exc:
+        d.send(data="x", for_text="a", wait=0.4)
+    assert str(exc.value) == conflict
+    with pytest.raises(ValueError) as exc:
+        d.send(data="x", for_text="a", pattern="b")
+    assert str(exc.value) == "for_text and pattern are mutually exclusive — pass one"
+
+
+def test_send_docstring_teaches_the_matcher_and_its_headers() -> None:
+    doc = ImptyDriver.send.__doc__ or ""
+    assert "for_text=" in doc
+    assert "pattern=" in doc
+    assert "[found]" in doc
+    assert "[not seen — program exited]" in doc
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")
@@ -540,6 +808,236 @@ def test_wait_clamped_for_change_reports_no_change_with_the_resume_clause(
         assert elapsed < 10.0
     finally:
         d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_keeps_watching_a_program_that_already_went_quiet(
+    tmp_path: Path,
+) -> None:
+    # The criterion a predicate checked around an UNSUPPRESSED quiet settle-return
+    # fails: the child is quiet when the call starts, so that build returns a
+    # not-seen header within milliseconds.
+    flag = tmp_path / "go"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _POLL_FOR_FILE_CHILD, str(flag)])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "PROGRESS" not in d.view()
+        # Arm the touch and only THEN call the wait, so the marker cannot possibly
+        # have landed before the call — however loaded the runner is.
+        timer = threading.Timer(1.0, flag.touch)
+        timer.start()
+        try:
+            t0 = time.monotonic()
+            result = d.wait(for_text="PROGRESS", idle=0.2, hard=30.0)
+            elapsed = time.monotonic() - t0
+        finally:
+            timer.cancel()
+        assert result.splitlines()[0] == "[found]"
+        assert "PROGRESS" in result
+        assert elapsed >= 0.5   # it blocked past the earlier output's settle...
+        assert elapsed < 20.0   # ...and returned on the marker, not at the 30s cap
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_already_on_screen_returns_at_once() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        t0 = time.monotonic()
+        result = d.wait(for_text="READY", idle=0.2, hard=30.0)
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == "[found]"
+        # The up-front scan, not a block toward the 30s cap.
+        assert elapsed < 10.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_names_the_program_exiting_rather_than_a_phantom_cap() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "print('BYE')"])
+    try:
+        t0 = time.monotonic()
+        result = d.wait(for_text="NEVER", idle=0.2, hard=30.0)
+        elapsed = time.monotonic() - t0
+        # Exact at EOF; alive=False is NOT asserted here — it comes from the
+        # lagging reap, so it belongs to a poll (see _dead_header), not this frame.
+        assert result.splitlines()[0] == "[not seen — program exited]"
+        assert elapsed < 20.0  # EOF ended the wait; the 30s cap never elapsed
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_never_seen_reports_the_hard_cap_and_blocks_for_it() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        t0 = time.monotonic()
+        result = d.wait(for_text="NEVER", idle=0.2, hard=0.5)
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == "[not seen after 0.5s hard cap]"
+        assert elapsed >= 0.5  # the header's elapsed-time claim is true
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_clamped_reports_the_call_cap_with_the_resume_clause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        # Settle on a generous explicit hard BEFORE arming the clamp: a saturated
+        # runner can push interpreter startup past start()'s own 3s cap.
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        monkeypatch.setattr("impty.driver.MAX_CALL_HARD", 0.5)
+        t0 = time.monotonic()
+        result = d.wait(for_text="NEVER", idle=0.2, hard=30.0)
+        elapsed = time.monotonic() - t0
+        assert result.splitlines()[0] == (
+            "[not seen after 0.5s call cap (30s requested)"
+            " — call wait() again to keep watching]")
+        assert elapsed < 10.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_pattern_anchors_per_screen_line_and_never_crosses_one() -> None:
+    prog = "import time; print('ALPHA'); print('BETA'); time.sleep(30)"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", prog])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert d.wait(pattern=r"AL.HA", idle=0.2, hard=5.0).splitlines()[0] == "[found]"
+        # MULTILINE: ^ anchors to a SCREEN LINE; the body starts with ALPHA, so
+        # without it this pattern could never match.
+        assert d.wait(pattern=r"^BETA", idle=0.2, hard=5.0).splitlines()[0] == "[found]"
+        # DOTALL is off, so `.` never bridges the two rows (rows are rstripped and
+        # joined with "\n", so with DOTALL this WOULD match).
+        assert d.wait(pattern=r"ALPHA.BETA", idle=0.2, hard=0.5).splitlines()[0] == (
+            "[not seen after 0.5s hard cap]")
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_matcher_defaults_to_the_change_hard_and_scans_from_zero() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; print('READY'); time.sleep(30)"])
+    try:
+        recorded: list[dict[str, Any]] = []
+
+        def _record(**kwargs: Any) -> bool:
+            recorded.append(kwargs)
+            return True
+
+        d._require().wait_idle = _record  # type: ignore[method-assign]
+        d.wait(for_text="anything")
+        # A matcher waits for something that has not happened yet, so it inherits
+        # the change budget, not the 3s settle one...
+        assert recorded[0]["hard"] == DEFAULT_CHANGE_HARD
+        # ...and needs no `since` boundary: the predicate is its own stale-screen gate.
+        assert recorded[0]["since"] == 0.0
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_for_text_scans_the_screen_window_not_the_scrollback() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _SCROLL_OFF_CHILD])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        assert "SCROLLED-AWAY" in d.view(full=True)  # still in history...
+        assert "SCROLLED-AWAY" not in d.view()       # ...but off the screen window
+        result = d.wait(for_text="SCROLLED-AWAY", idle=0.2, hard=0.5)
+        # A strip-scanning implementation reports [found] here.
+        assert result.splitlines()[0] == "[not seen after 0.5s hard cap]"
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_settles_after_the_match_so_the_finished_reaction_is_on_screen(
+    tmp_path: Path,
+) -> None:
+    flag = tmp_path / "go"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _MARKER_THEN_TAIL_CHILD, str(flag)])
+    try:
+        assert d.wait(idle=0.2, hard=20.0).startswith("[settled]")
+        # Armed so MARKER lands while the wait is already running.
+        timer = threading.Timer(0.5, flag.touch)
+        timer.start()
+        try:
+            # idle=3s sits far above the child's own 0.5s MARKER->TAIL gap, so the
+            # tail cannot fall outside the settle window even on a saturated runner
+            # — the 0.3s default could.
+            result = d.wait(for_text="MARKER", idle=3.0, hard=30.0)
+        finally:
+            timer.cancel()
+        assert result.splitlines()[0] == "[found]"
+        # A call that returned the instant it matched shows a half-drawn reaction.
+        assert "TAIL" in result
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_matcher_on_a_never_quiet_program_still_reports_found() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        # The child sleeps 0.4s after READY before it starts ticking; poll for the
+        # real signal rather than sleeping past it.
+        assert _poll(lambda: "tick" in d.view(), E2E_POLL_TIMEOUT)
+        # idle=5s can never be satisfied by a 0.02s tick loop, so the cap fires —
+        # but a match that landed is a success, not a timeout.
+        result = d.wait(for_text="tick", idle=5.0, hard=6.0)
+        assert result.splitlines()[0] == "[found]"
+    finally:
+        d.stop()
+
+
+def test_wait_matcher_argument_conflicts_raise_value_error() -> None:
+    # No session: these are argument errors, raised before anything blocks.
+    d = ImptyDriver()
+    with pytest.raises(ValueError) as exc:
+        d.wait(for_text="a", pattern="b")
+    assert str(exc.value) == "for_text and pattern are mutually exclusive — pass one"
+    with pytest.raises(ValueError) as exc:
+        d.wait(for_change=True, for_text="a")
+    assert str(exc.value) == "for_change cannot be combined with for_text/pattern"
+    # The re.error text is quoted verbatim, so derive it rather than hardcoding a
+    # message CPython may reword between versions.
+    with pytest.raises(re.error) as re_exc:
+        re.compile("(unclosed")
+    with pytest.raises(ValueError) as exc:
+        d.wait(pattern="(unclosed")
+    assert str(exc.value) == f"invalid pattern: {re_exc.value}"
+
+
+def test_wait_docstring_teaches_the_text_matchers() -> None:
+    doc = ImptyDriver.wait.__doc__ or ""
+    assert "for_text=" in doc
+    assert "pattern=" in doc
+    assert "[found]" in doc
+    assert "[not seen — program exited]" in doc
+    # A matcher wait can be clamped too, so the call-cap guidance must not sit
+    # INSIDE the "Without a matcher" listing: an agent told the clamp applies only
+    # to the other headers would not know to call again after a clamped not-seen.
+    clamp_guidance = doc.split("Without a matcher")[1]
+    assert "call cap" in clamp_guidance
+    assert "not seen" in clamp_guidance
 
 
 @pytest.mark.skipif(not can_pty(), reason="pty not available")

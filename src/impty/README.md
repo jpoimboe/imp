@@ -21,7 +21,7 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 
 ## API
 
-- `wait_idle(idle=0.3, hard=3.0, *, since=0.0) -> bool` — read until quiet; `False` on hard timeout. `hard` is a max-patience ceiling (a settling program returns at `idle`) and is the whole wall-clock cap: every select slice is bounded by the remaining budget, so an `idle` window that cannot fit inside `hard` reports not settled at `hard` rather than settling after it. `since` is a monotonic stamp: only output read at or after it qualifies (the 0.0 default counts any output ever read), which is what the tool layer's `for_change` wait is built on. Defaults are `DEFAULT_SETTLE_IDLE`/`DEFAULT_SETTLE_HARD`, the single source of truth the MCP tools inherit for settling; `DEFAULT_CHANGE_HARD` (30.0) is the change-mode ceiling the tool layer also inherits. The tool layer adds one policy of its own: it clamps each `wait`/`send`/`resize` call to `MAX_CALL_HARD` (240s) so no single MCP call blocks longer than that.
+- `wait_idle(idle=0.3, hard=3.0, *, since=0.0, predicate=None) -> bool` — read until quiet; `False` on hard timeout. `hard` is a max-patience ceiling (a settling program returns at `idle`) and is the whole wall-clock cap: every select slice is bounded by the remaining budget, so an `idle` window that cannot fit inside `hard` reports not settled at `hard` rather than settling after it. `since` is a monotonic stamp: only output read at or after it qualifies (the 0.0 default counts any output ever read), which is what the tool layer's `for_change` wait is built on. `predicate` is a zero-arg callable, checked up front and after every read that delivered bytes, that gates ONLY the quiet settle-return: while it is unfired the wait keeps going, so a program that went quiet before the awaited output arrived stays watched. EOF, child-exit and deadline are unchanged and the returned bool still means exactly "settled", so a caller learns whether it fired from the callable itself — this is what the tool layer's `for_text`/`pattern` wait is built on. Defaults are `DEFAULT_SETTLE_IDLE`/`DEFAULT_SETTLE_HARD`, the single source of truth the MCP tools inherit for settling; `DEFAULT_CHANGE_HARD` (30.0) is the change-mode ceiling the tool layer also inherits. The tool layer adds one policy of its own: it clamps each `wait`/`send`/`resize` call to `MAX_CALL_HARD` (240s) so no single MCP call blocks longer than that.
 - `run_to_completion(hard=60.0) -> int` — drive the child to exit, draining ALL remaining output into pyte first; returns the exit code, raises `TimeoutExpired` on hard timeout (child still alive). Use this (not `wait()`) when the child floods after your last `send()`.
 - `send(bytes | str)` — raw keystrokes to the program. `\x03` (Ctrl-C) is faithful: a real `SIGINT` to the terminal's foreground process group in cooked mode (the controlling terminal is set up at spawn), a raw byte in raw mode (the app makes its own `KeyboardInterrupt`), exactly like a real terminal.
 - `send_signal(sig=signal.SIGINT)` — deliver a real signal to the terminal's FOREGROUND process group, regardless of tty mode (cooked or raw). The deterministic escape hatch when you don't want to depend on tty mode; a no-op once nothing holds the foreground. It is the aim a real Ctrl-C has, so under a shell doing its own job control it reaches the running job rather than the shell — and a grandchild that `setsid()`'d into its own session is not signalled. `close()` is deliberately separate: its SIGTERM→SIGKILL ladder always targets the direct child's own group, which always contains the child, so teardown can never be diverted by whoever holds the foreground.
@@ -229,16 +229,21 @@ Two ready-made entry points:
   (`python -m impty.mcp`, registered in `.mcp.json`). `start` waits until it settles,
   exits, or the 3s settle deadline elapses, then returns `[full screen]` followed by
   the complete screen accumulated so far; for slow startup use `wait(hard=...)` then
-  `view()`. `send(wait=False)` returns `[sent]` without rendering, and
-  `resize(..., wait=False)` returns `[resized]` without rendering; otherwise `send`,
-  `resize`, `wait`, and `send_signal` return a changed-row diff with 0-based labels,
-  `[no text change]`, or `[full screen]` plus the complete screen. `view` returns the
-  complete current screen with no diff or `[full screen]` marker and resynchronizes
-  subsequent changed-row responses; `full=True` returns the whole strip and, once the
-  child is gone, its header carries the exit status — `exit=0`, `exit=3`, or
-  `exit=SIGINT`. `send_signal` delivers a real signal to the terminal's foreground
-  process group (e.g. `sig=2` for mode-independent Ctrl-C); `resize` (`rows, cols`)
-  delivers a real `SIGWINCH`; `wait(for_change=True)` waits for NEW output.
-  `snapshot` renders the live screen to a PNG and returns its path; `stop` sends
-  SIGTERM, allows a 1s grace, then SIGKILL, and returns the program's exit status and
-  final screen. Adding/removing a tool needs a server restart.
+  `view()`. `send` takes `data=` literal text and/or `keys=["enter"]` named keys,
+  resolved and delivered in one write, and its `for_text=`/`pattern=` waits for the
+  reaction text instead of a settle. `send(wait=False)` returns `[sent]` without
+  rendering, and `resize(..., wait=False)` returns `[resized]` without rendering;
+  otherwise `send`, `resize`, `wait`, and `send_signal` return a changed-row diff with
+  0-based labels, `[no text change]`, or `[full screen]` plus the complete screen.
+  A matcher reply is the same diff shape under a `[found]` / `[not seen …]` header.
+  `view` returns the complete current screen with no diff or `[full screen]` marker
+  and resynchronizes subsequent changed-row responses; `full=True` returns the whole
+  strip and, once the child is gone, its header carries the exit status — `exit=0`,
+  `exit=3`, or `exit=SIGINT`. `send_signal` delivers a real signal to the terminal's
+  foreground process group (e.g. `sig=2` for mode-independent Ctrl-C); `resize`
+  (`rows, cols`) delivers a real `SIGWINCH`; `wait(for_change=True)` waits for NEW
+  output, and its `for_text=`/`pattern=` blocks until that text is on the current
+  screen, heading the reply `[found]` or `[not seen …]`. `snapshot` renders the live
+  screen to a PNG and returns its path; `stop` sends SIGTERM, allows a 1s grace, then
+  SIGKILL, and returns the program's exit status and final screen. Adding/removing a
+  tool needs a server restart.

@@ -103,6 +103,113 @@ def _decode_keys(data: str) -> str:
     return _ESCAPE_RE.sub(lambda m: codecs.decode(m.group(0), "unicode_escape"), data)
 
 
+# The named-key vocabulary send(keys=[...]) resolves. Bytes are the normal-cursor
+# (non-DECCKM) xterm forms, matching the TERM=xterm-256color the session defaults to.
+_KEY_TABLE: dict[str, str] = {
+    "enter": "\r", "return": "\r", "tab": "\t", "shift-tab": "\x1b[Z",
+    "escape": "\x1b", "esc": "\x1b", "space": " ", "backspace": "\x7f",
+    "delete": "\x1b[3~", "insert": "\x1b[2~",
+    "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
+    "home": "\x1b[H", "end": "\x1b[F", "pageup": "\x1b[5~", "pagedown": "\x1b[6~",
+    "f1": "\x1bOP", "f2": "\x1bOQ", "f3": "\x1bOR", "f4": "\x1bOS",
+    "f5": "\x1b[15~", "f6": "\x1b[17~", "f7": "\x1b[18~", "f8": "\x1b[19~",
+    "f9": "\x1b[20~", "f10": "\x1b[21~", "f11": "\x1b[23~", "f12": "\x1b[24~",
+}
+
+# ctrl-<char> is computed, not tabulated: the control byte is the character's code
+# minus 0x40, which covers a-z and the [ \ ] ^ _ punctuation with one rule.
+_CTRL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz[\\]^_")
+
+_KEY_VOCABULARY = (
+    "enter, tab, shift-tab, escape, space, backspace, delete, insert, up, down, "
+    "left, right, home, end, pageup, pagedown, f1-f12, ctrl-<a-z>, alt-<key>"
+)
+
+
+def _resolve_named(name: str, raw: str) -> str | None:
+    """One exact spelling (`name`, normalized; `raw` the same name as the caller wrote
+    it) to its bytes, or None when it names nothing: a table row, the computed
+    `ctrl-<char>` form, or `alt-<rest>` — which prefixes ESC to the remainder's OWN
+    staged resolution, falling back to a lone printable char.
+
+    The alt- remainder is taken from `raw`: name-folding may only fold key NAMES, and
+    a literal char passed through it would change byte (`alt-A` → ESC a, `alt-+` → ESC
+    -) — silently, which is the failure this whole feature removes. Stages 1-2 are
+    index-preserving so `raw[4:]` is that remainder, and stage 3 strips the `alt-`
+    prefix itself, so this branch never sees a stage-3 candidate."""
+    if (found := _KEY_TABLE.get(name)) is not None:
+        return found
+    if name.startswith("ctrl-") and name[5:] in _CTRL_CHARS:
+        return chr(ord(name[5].upper()) - 0x40)
+    if name.startswith("alt-"):
+        rest = raw[4:]
+        body = _resolve_spelling(rest)
+        if body is None and len(rest) == 1 and rest.isprintable():
+            body = rest
+        return None if body is None else f"\x1b{body}"
+    return None
+
+
+def _resolve_spelling(name: str) -> str | None:
+    """Try up to three progressively more aggressive spellings, stopping at the first
+    that resolves. Staged rather than one pass because no single rule keeps `ctrl-_`
+    addressable (an unconditional `_`→`-` destroys it) while still folding `CTRL_C`
+    (an unconditional `_`-strip yields the unresolvable `ctrlc`)."""
+    lowered = name.lower().replace("+", "-")
+    dashed = lowered.replace("_", "-")
+    for candidate in (lowered, dashed, dashed.replace("-", "")):
+        if (found := _resolve_named(candidate, name)) is not None:
+            return found
+    return None
+
+
+def _resolve_key(name: str) -> str:
+    """A `send(keys=[...])` name to the bytes a real terminal sends for that key.
+
+    Raises ValueError naming the key AS THE CALLER WROTE IT — an unknown name has to
+    be recognizable to whoever typed it, and the message carries the whole vocabulary
+    plus the `data=` escape hatch, since this is the one moment an agent needs both."""
+    if (found := _resolve_spelling(name)) is not None:
+        return found
+    raise ValueError(
+        f"unknown key name '{name}' — valid: {_KEY_VOCABULARY};"
+        " for anything else pass the raw bytes in data="
+    )
+
+
+def _screen_matcher(
+    for_text: str | None, pattern: str | None, *, for_change: bool,
+) -> Callable[[str], bool] | None:
+    """The screen test a `for_text`/`pattern` wait applies, or None when no matcher
+    was asked for. Every conflicting combination raises here, before anything blocks
+    or a single byte is sent."""
+    if for_text is not None and pattern is not None:
+        raise ValueError("for_text and pattern are mutually exclusive — pass one")
+    if for_change and (for_text is not None or pattern is not None):
+        raise ValueError("for_change cannot be combined with for_text/pattern")
+    if for_text is not None:
+        needle = for_text  # a local: mypy does not narrow a parameter into a lambda
+        return lambda screen: needle in screen
+    if pattern is None:
+        return None
+    try:
+        # MULTILINE so ^/$ anchor to screen lines; deliberately NOT DOTALL, so `.`
+        # never bridges two rows the terminal wrapped apart.
+        compiled = re.compile(pattern, re.MULTILINE)
+    except re.error as exc:
+        raise ValueError(f"invalid pattern: {exc}") from exc
+    return lambda screen: compiled.search(screen) is not None
+
+
+def _capped_header(kind: str, capped: float, requested: float) -> str:
+    """The not-settled header, in the one construction `still busy`, `no change` and
+    `not seen` share — so the clamp's prose can never drift between them."""
+    if requested > MAX_CALL_HARD:
+        return (f"[{kind} after {capped:g}s call cap ({requested:g}s requested)"
+                " — call wait() again to keep watching]")
+    return f"[{kind} after {capped:g}s hard cap]"
+
+
 def _format_exit(code: int) -> str:
     """The agent-facing spelling of a raw `Popen` returncode: a plain number for a
     normal exit, the signal's NAME for a signal death — never a bare negative. A
@@ -316,14 +423,27 @@ class ImptyDriver:
         """
         return self._render(self._require(), full=full)
 
-    def send(self, data: str, wait: bool | float = True) -> str:
-        """Send raw keystrokes to the program. When waiting, return a changed-row diff,
-        `[no text change]`, or `[full screen]` followed by the complete screen.
+    def send(
+        self, data: str = "", keys: list[str] | None = None, wait: bool | float = True,
+        for_text: str | None = None, pattern: str | None = None,
+    ) -> str:
+        """Send text and/or named keys to the program. When waiting, return a changed-row
+        diff, `[no text change]`, or `[full screen]` followed by the complete screen.
 
-        `data` is literal bytes the program receives — NOT a description. Common keys:
-        Enter=`\\r`, Tab=`\\t`, Ctrl-C=`\\x03`, Backspace=`\\x7f`,
-        Up=`\\x1b[A` Down=`\\x1b[B` Right=`\\x1b[C` Left=`\\x1b[D`.
-        So answering a prompt "foo" then Enter = data="foo\\r".
+        `data` is literal text the program receives — NOT a description. Escape
+        mnemonics in it are decoded: Enter=`\\r`, Tab=`\\t`, Ctrl-C=`\\x03`,
+        Backspace=`\\x7f`, Up=`\\x1b[A` Down=`\\x1b[B` Right=`\\x1b[C` Left=`\\x1b[D`.
+
+        `keys` is a list of KEY NAMES, sent after `data` in list order — the safe way
+        to send a non-printing key: a mistyped escape in `data` is silently typed into
+        the program as text, while a mistyped key NAME is an error that sends nothing.
+        So answering a prompt "foo" then Enter = data="foo", keys=["enter"]. Names:
+        enter, tab, shift-tab, escape, space, backspace, delete, insert, up, down,
+        left, right, home, end, pageup, pagedown, f1-f12, ctrl-<a-z>, alt-<key>
+        (spelling is forgiving — `ctrl-c`, `Ctrl+C` and `CTRL_C` are one key). Pass at
+        least one of `data` / `keys`; both reach the program in a single write, so
+        nothing can land between your text and the key that commits it. For a key the
+        list doesn't name, pass its raw bytes in `data`.
 
         `wait` controls how long to settle before rendering:
         - True (default): wait for the program to react and go QUIET — type-then-look
@@ -336,13 +456,34 @@ class ImptyDriver:
           current during the wait. A value over 240s is clamped to it — no single call
           blocks longer — and the reply's first line then reads `[waited 240s call cap
           (600s requested)]`; send again or call `wait()` to keep watching.
+
+        `for_text=` (a plain substring) or `pattern=` (a regex) instead waits for that
+        text to APPEAR on screen — the reaction you are actually waiting for, instead
+        of guessing a settle time. Pass one, not both, and leave `wait` at True. It
+        settles for 0.3s after the match and gives up after 30s; its header is
+        `[found]`, `[not seen after <cap>s hard cap]`, or `[not seen — program exited]`.
+        For a longer budget send with `wait=False`, then `wait(for_text=…, hard=120)`.
         """
+        matcher = _screen_matcher(for_text, pattern, for_change=False)
+        if matcher is not None and wait is not True:
+            raise ValueError("for_text/pattern needs wait=True (the default)"
+                             " — a numeric or False wait contradicts it")
+        if not data and not keys:
+            raise ValueError("send needs data= text, keys=[...], or both")
+        # Resolve the WHOLE list before the first write: an unknown name must deliver
+        # nothing at all, half a key list being a state neither side can reason about.
+        payload = _decode_keys(data) + "".join(_resolve_key(k) for k in keys or ())
         session = self._require()
         # Mark the type-then-look boundary just before the keystroke so wait_idle
         # settles on the REACTION, not on a stale pre-send screen the drainer last
         # touched seconds ago.
         since = time.monotonic()
-        session.send(_decode_keys(data))
+        session.send(payload)
+        if matcher is not None:
+            capped = min(DEFAULT_CHANGE_HARD, MAX_CALL_HARD)
+            header = self._await_match(
+                session, matcher, DEFAULT_SETTLE_IDLE, capped, DEFAULT_CHANGE_HARD)
+            return f"{header}\n{self._render_diff(session)}"
         # `is False` / `is True`: bool is an int subclass, so a numeric `wait` must
         # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
         if wait is False:
@@ -416,32 +557,78 @@ class ImptyDriver:
             time.sleep(settle)  # fixed settle; drainer updates pyte
         return f"{note}{self._render_diff(session)}"
 
+    def _await_match(
+        self, session: TerminalSession, matcher: Callable[[str], bool],
+        idle: float, capped: float, requested: float,
+    ) -> str:
+        """Block until the screen matches and then settles, and name the outcome.
+        The match travels back on the latched flag, never through wait_idle's bool
+        — settledness is the session's answer, matchedness ours — so an unmatched
+        True can only be its EOF/child-exited branch, the quiet settle-return being
+        suppressed until the predicate fires. `since=0.0` because the predicate is
+        itself this wait's gate against a stale screen."""
+        found = False
+
+        def probe() -> bool:
+            nonlocal found
+            found = found or matcher("\n".join(session.lines(limit=session.rows)))
+            return found
+
+        settled = session.wait_idle(idle=idle, hard=capped, since=0.0, predicate=probe)
+        if found:
+            return "[found]"
+        if settled:
+            return "[not seen — program exited]"
+        return _capped_header("not seen", capped, requested)
+
     def wait(
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float | None = None,
-        for_change: bool = False,
+        for_change: bool = False, for_text: str | None = None,
+        pattern: str | None = None,
     ) -> str:
         """Wait until there is an idle window after qualifying output, the process exits,
-        or `hard` elapses; then return a changed-row diff, `[no text change]`, or
-        `[full screen]` followed by the complete screen.
+        or `hard` elapses — or, with a matcher, until its text appears; then return a
+        changed-row diff, `[no text change]`, or `[full screen]` followed by the
+        complete screen.
 
         Output already read qualifies normally, so an already-quiet program returns
         promptly. `for_change=True` requires new output after this call, then its idle
         window. A live process with no output is not settled. This follows a long
         command without polling `view`; an animating TUI qualifies on its next repaint.
 
-        Caller `hard` values are accepted. `hard` defaults to 3s (30s with
-        `for_change=True`), and values over 240s are capped. The header is `[settled]`,
+        `for_text=` (a plain substring) or `pattern=` (a regex; `^`/`$` anchor to
+        screen lines and `.` never crosses one) waits for that text to APPEAR — wait
+        for a named prompt instead of burning calls polling `view`. Pass one, not
+        both, and not with `for_change`. It matches against the CURRENT SCREEN, so
+        text already showing returns at once — pick a string unique to the reaction
+        you expect — text that has scrolled off does not count, and a string
+        spanning a line the terminal wrapped never matches (match a short fragment).
+        After it matches the call still settles for `idle`, so you see the finished
+        reaction. Its header is `[found]`, `[not seen after <cap>s hard cap]`, or
+        `[not seen — program exited]` when the program ended without printing it.
+
+        `hard` defaults to 3s (30s with `for_change=True` or a matcher), caller values
+        are accepted, and values over 240s are capped: no single call blocks longer
+        than that. Without a matcher the header is `[settled]`,
         `[still busy after <cap>s hard cap]`, or — with `for_change=True` only —
-        `[no change after <cap>s hard cap]`; when capped it instead names the call cap
-        and requested value and tells you to call wait() again to keep watching.
+        `[no change after <cap>s hard cap]`. Whenever the cap fires, whichever
+        not-settled header applies (`not seen` included) names the call cap and the
+        value you asked for and tells you to call wait() again to keep watching —
+        which is how you follow a program for hours without any one call blocking
+        for hours.
         """
+        matcher = _screen_matcher(for_text, pattern, for_change=for_change)
         session = self._require()
+        requested = hard if hard is not None else (
+            DEFAULT_SETTLE_HARD if matcher is None and not for_change
+            else DEFAULT_CHANGE_HARD)
+        capped = min(requested, MAX_CALL_HARD)
+        if matcher is not None:
+            header = self._await_match(session, matcher, idle, capped, requested)
+            return f"{header}\n{self._render_diff(session)}"
         # Stamp the boundary BEFORE waiting: in change mode only output read at or
         # after this instant qualifies, so an already-quiet screen can't settle it.
         since = time.monotonic() if for_change else 0.0
-        requested = hard if hard is not None else (
-            DEFAULT_CHANGE_HARD if for_change else DEFAULT_SETTLE_HARD)
-        capped = min(requested, MAX_CALL_HARD)
         settled = session.wait_idle(idle=idle, hard=capped, since=since)
         if settled:
             header = "[settled]"
@@ -453,12 +640,7 @@ class ImptyDriver:
                 for_change
                 and (session.last_output_at is None or session.last_output_at < since)
             ) else "still busy"
-            if requested > MAX_CALL_HARD:
-                header = (
-                    f"[{kind} after {capped:g}s call cap ({requested:g}s requested)"
-                    " — call wait() again to keep watching]")
-            else:
-                header = f"[{kind} after {capped:g}s hard cap]"
+            header = _capped_header(kind, capped, requested)
         return f"{header}\n{self._render_diff(session)}"
 
     def snapshot(

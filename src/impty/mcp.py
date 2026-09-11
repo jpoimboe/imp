@@ -48,9 +48,10 @@ THIN_DESCRIPTIONS: dict[str, str] = {
         "resynchronizes changed-row responses."
     ),
     "send": (
-        "Send raw keystrokes; `wait=False` returns `[sent]` without rendering, otherwise "
-        "return a changed-row diff, `[no text change]`, or `[full screen]` plus the "
-        "complete screen."
+        'Send text and/or named keys (keys=["ctrl-c"]), optionally waiting for the '
+        "reaction text (for_text=/pattern=); `wait=False` returns `[sent]` without "
+        "rendering, otherwise return a changed-row diff, `[no text change]`, or "
+        "`[full screen]` plus the complete screen."
     ),
     "send_signal": (
         "Send a real signal (default SIGINT) to the terminal's foreground process group."
@@ -64,8 +65,9 @@ THIN_DESCRIPTIONS: dict[str, str] = {
         "Wait until there is an idle window after qualifying output, the process exits, or "
         "`hard` elapses; then return a changed-row diff, `[no text change]`, or `[full "
         "screen]` plus the complete screen. Output already read qualifies by default; "
-        "`for_change=True` requires new output. `hard` defaults to 3s (30s with "
-        "`for_change=True`), and values over 240s are capped; call again to keep watching."
+        "`for_change=True` requires new output; for_text=/pattern= wait for the text to "
+        "appear. `hard` defaults to 3s (30s with `for_change=True` or a matcher), and "
+        "values over 240s are capped; call again to keep watching."
     ),
     "snapshot": (
         "Render the current screen to a PNG (color, bold, box-drawing) and return its path."

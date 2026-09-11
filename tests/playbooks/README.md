@@ -55,6 +55,9 @@ fidelity caveats live here once:
   keystrokes you `send` reach imp's tty. Prefer `send` for Ctrl-C/ESC so you exercise imp's real
   tty paths; `send_signal(sig=…)` (SIGINT=2, SIGTERM=15) is the out-of-band path that signals
   imp's process group directly.
+- **Named keys.** `send(keys=["ctrl-c"])` is the safe way to send a non-printing key: a
+  mistyped escape in `data` is silently typed into the program as text, while a mistyped key
+  NAME is an error that sends nothing. The raw `\x03` / `\x1b[B` form stays valid.
 - **Cooked-mode mid-run caveat.** `send("\x03")` only becomes a SIGINT when the tty line
   discipline has ISIG on (cooked/cbreak); at a prompt_toolkit prompt it is a raw byte. impty
   also degrades prompt_toolkit's CPR handshake, so in **cooked-mode** runs mid-run keystroke
