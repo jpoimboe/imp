@@ -285,25 +285,33 @@ def test_secret_masks_emitted_after_every_bind_even_overlapping_extra_writable()
     assert i_tmpfs > i_writable, "secret --tmpfs must come AFTER extra_writable bind"
 
 
-def test_real_tmp_is_bound_rw_early():
-    argv = _argv("x", cwd="/wt", policy=_policy(), engine_env={})
+def test_quest_scratch_is_bound_rw_early():
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc")
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     flat = " ".join(argv)
-    # Real /tmp is bound rw (identity bind).
-    assert "--bind /tmp /tmp" in flat
-    # Ordering: /tmp bind must appear right after the ro-floor and BEFORE
-    # the worktree bind (bwrap last-wins; /tmp early means worktree/git/remask
-    # still win on their paths even if a repo lives under /tmp).
-    i_ro_floor = argv.index("/")          # first "/" after --ro-bind is the src
-    i_tmp_bind = argv.index("/tmp")       # first "/tmp" after --bind is the src
-    i_wt_bind = argv.index("/state/worktrees/abc")  # worktree src
-    # The load-bearing invariant: /tmp must be bound BEFORE the git RO-remask, so a
-    # repo whose .git lives under /tmp still has hooks/config remasked RO (the late
-    # remask wins over the early /tmp bind). Assert directly against the remask, not
-    # just transitively via the worktree bind.
+    # Host /tmp has NO covering bind: it falls through to the --ro-bind / / floor.
+    assert "--bind /tmp /tmp" not in flat
+    assert ("/tmp", "rw") not in pol.bind_plan()
+    # The per-quest scratch dir is re-exposed rw at its own real path.
+    assert "--bind /tmp/imp-1000/abc /tmp/imp-1000/abc" in flat
+    assert ("/tmp/imp-1000/abc", "rw") in pol.bind_plan()
+    # Ordering: the scratch bind must appear right after the ro-floor and BEFORE
+    # the worktree bind (bwrap last-wins; early means worktree/git/remask still win
+    # on their paths even if a repo lives under the scratch dir).
+    i_ro_floor = argv.index("/")                     # first "/" after --ro-bind is the src
+    i_scratch = argv.index("/tmp/imp-1000/abc")      # the scratch bind src
+    i_wt_bind = argv.index("/state/worktrees/abc")   # worktree src
+    # The load-bearing invariant the old /tmp test protected, carried over: bound
+    # BEFORE the git RO-remask, so a repo whose .git lives under the scratch dir
+    # still has hooks/config remasked RO (the late remask wins over the early bind).
     i_first_remask = argv.index("/ctl/.git/hooks")
-    assert i_tmp_bind > i_ro_floor, "/tmp bind must come after ro-floor"
-    assert i_tmp_bind < i_wt_bind, "/tmp bind must come BEFORE worktree bind"
-    assert i_tmp_bind < i_first_remask, "/tmp bind must come BEFORE the git RO-remask"
+    assert i_scratch > i_ro_floor, "scratch bind must come after ro-floor"
+    assert i_scratch < i_wt_bind, "scratch bind must come BEFORE worktree bind"
+    assert i_scratch < i_first_remask, "scratch bind must come BEFORE the git RO-remask"
+    # The in-process mirrors agree with the argv.
+    assert pol.allows_write(Path("/tmp/x")) is False
+    assert pol.allows_read(Path("/tmp/x")) is True
+    assert pol.allows_write(Path("/tmp/imp-1000/abc/x")) is True
 
 
 def test_child_env_carries_the_allowlist():
@@ -1192,6 +1200,7 @@ def _mirror_policy() -> SandboxPolicy:
     # extra_writable that overlaps a remask (to pin positional last-wins).
     return _policy(
         worktree="/wt",
+        quest_tmp_dir="/tmp/imp-1000/abc",
         git_common_dir="/ctl/.git",
         git_ro_remask=("/ctl/.git/hooks", "/ctl/.git/config", "/elsewhere/ro"),
         writable_caches=("/home/u/.cache",),
@@ -1206,7 +1215,7 @@ def test_allows_write_writable_roots():
     p = _mirror_policy()
     assert p.allows_write(Path("/wt/file")) is True
     assert p.allows_write(Path("/ctl/.git/objects/x")) is True   # git_common_dir
-    assert p.allows_write(Path("/tmp/scratch.txt")) is True
+    assert p.allows_write(Path("/tmp/imp-1000/abc/scratch.txt")) is True  # quest scratch
     assert p.allows_write(Path("/home/u/.cache/x")) is True      # writable cache
     assert p.allows_write(Path("/rw_extra/x")) is True           # extra_writable
 
@@ -1214,6 +1223,8 @@ def test_allows_write_writable_roots():
 def test_allows_write_uncovered_and_masked_denied():
     p = _mirror_policy()
     assert p.allows_write(Path("/usr/lib/x")) is False           # no covering bind
+    assert p.allows_write(Path("/tmp/scratch.txt")) is False     # host /tmp: ro floor
+    assert p.allows_read(Path("/tmp/scratch.txt")) is True       # ...but still readable
     assert p.allows_write(Path("/home/u/.ssh/id_rsa")) is False  # secret dir mask
     assert p.allows_write(Path("/home/u/.netrc")) is False       # secret file mask
 
@@ -2395,23 +2406,24 @@ def test_imp_output_env_passes_through_unrewritten():
 
 def test_var_tmp_bind_source_and_position():
     # Set case: the per-quest source is bound onto /var/tmp, positioned in
-    # bind_plan immediately AFTER the /tmp scratch entry and before the worktree.
-    pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
+    # bind_plan immediately AFTER the scratch entry and before the worktree.
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc",
+                  quest_var_tmp_dir="/vt/imp-1000/abc")
     flat = " ".join(_argv("x", cwd="/wt", policy=pol, engine_env={}))
     assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # per-quest source → /var/tmp
     argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
-    i_tmp = argv.index("/tmp")                    # first "/tmp" is the /tmp bind source
+    i_scratch = argv.index("/tmp/imp-1000/abc")   # the scratch bind source
     i_vt = argv.index("/vt/imp-1000/abc")         # the /var/tmp bind source
     i_wt = argv.index("/state/worktrees/abc")  # worktree src (default _policy worktree)
-    assert i_tmp < i_vt < i_wt
+    assert i_scratch < i_vt < i_wt
     bp = pol.bind_plan()
-    assert bp[bp.index(("/tmp", "rw")) + 1] == ("/var/tmp", "rw")  # right after /tmp
+    assert bp[bp.index(("/tmp/imp-1000/abc", "rw")) + 1] == ("/var/tmp", "rw")
     assert pol.allows_write(Path("/var/tmp/scratch")) is True
 
 
 def test_no_var_tmp_bind_when_unset():
     # Negative: empty quest_var_tmp_dir emits NO /var/tmp bind — host /var/tmp
-    # stays on the read-only floor (no identity fallback). Drift guard still holds.
+    # stays on the read-only floor (no same-path fallback). Drift guard still holds.
     pol = _policy()   # quest_var_tmp_dir defaults to ""
     argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     assert "/var/tmp" not in argv                       # no bind dest emitted at all
@@ -2422,13 +2434,15 @@ def test_no_var_tmp_bind_when_unset():
 
 
 def test_argv_binds_match_bind_plan_with_var_tmp_source():
-    # /tmp is now an identity bind; /var/tmp still binds a per-quest host SOURCE
-    # onto its namespace DEST. Parse-back is dest-keyed, so it equals bind_plan().
-    pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
+    # The scratch dir is bound at its own real path; /var/tmp still binds a
+    # per-quest host SOURCE onto its namespace DEST. Parse-back is dest-keyed, so
+    # it equals bind_plan().
+    pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc",
+                  quest_var_tmp_dir="/vt/imp-1000/abc")
     argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
     flat = " ".join(argv)
-    assert "--bind /tmp /tmp" in flat                   # identity /tmp source
-    assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # non-identity /var/tmp source
+    assert "--bind /tmp/imp-1000/abc /tmp/imp-1000/abc" in flat  # scratch, same src+dest
+    assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # non-identical /var/tmp source
     assert _parse_argv_binds(argv) == pol.bind_plan()
 
 
@@ -2442,7 +2456,38 @@ def test_resolve_policy_tmpdir_is_per_quest_scratch(tmp_path):
     assert ("TMPDIR", expected) in pol.child_env
 
 
-def test_var_tmp_source_not_identity_fallback():
+def test_resolve_policy_binds_the_same_dir_tmpdir_points_at(tmp_path):
+    # One derivation, two uses: the TMPDIR the agent gets and the dir bind_plan
+    # re-exposes rw must never drift apart.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    expected = str(Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / "abc")
+    assert pol.quest_tmp_dir == expected
+    assert ("TMPDIR", expected) in pol.child_env
+    assert (expected, "rw") in pol.bind_plan()
+    assert ("/tmp", "rw") not in pol.bind_plan()
+
+
+def test_prepare_spawn_policy_recreates_the_scratch_dir_0o700(tmp_path):
+    # --bind (not --bind-try) aborts bwrap setup on a missing source, and the
+    # executor empties this dir between steps — so spawn must self-heal it, with
+    # the imp-<uid> PARENT locked down too (mkdir(mode=) only sets the leaf).
+    scratch = tmp_path / f"imp-{os.getuid()}" / "abc"
+    pol = _policy(quest_tmp_dir=str(scratch))
+    old_umask = os.umask(0)          # a permissive umask would leave the parent 0o777
+    try:
+        prepare_spawn_policy(pol)
+    finally:
+        os.umask(old_umask)
+    assert scratch.is_dir()
+    assert scratch.stat().st_mode & 0o777 == 0o700
+    assert scratch.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_var_tmp_source_has_no_same_path_fallback():
     # An empty quest_var_tmp_dir must NEVER degrade to --bind /var/tmp /var/tmp
     # (which would expose the host's real /var/tmp read-write).
     flat = " ".join(_argv(

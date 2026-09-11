@@ -2,9 +2,9 @@
 
 Each test opens a namespace from a real active policy, runs real commands in it
 and asserts the OS-level outcome — cross-call persistence, atomic teardown, and
-the isolation the join argv must not lose. Roots live under the default temp dir
-(/tmp), which build_sandbox_spawn binds by identity, so they are visible inside
-and outside the namespace.
+the isolation the join argv must not lose. Roots live under the default temp dir,
+and each gets its own rw worktree bind, so they are writable inside the namespace
+and visible outside it.
 """
 from __future__ import annotations
 

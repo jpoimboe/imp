@@ -465,7 +465,8 @@ def test_resolve_path_expands_home(tmp_path: Path, monkeypatch) -> None:
     assert ctx.resolve_path("~") == home.resolve()
 
 
-def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = ()) -> SandboxPolicy:
+def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = (),
+                   quest_tmp_dir: str = "/tmp/imp-1000/abc") -> SandboxPolicy:
     home = tmp_path.parent / "changes_abc"
     return SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
@@ -473,6 +474,7 @@ def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = ()) -
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=("/home/u/.ssh",), secret_files=("/home/u/.netrc",),
         child_env=(), network=True, note="", readonly_overlays=readonly_overlays,
+        quest_tmp_dir=quest_tmp_dir,
     )
 
 
@@ -528,8 +530,14 @@ def test_authorize_fs_out_of_worktree_sandboxed_read(tmp_path: Path) -> None:
 
 def test_authorize_fs_out_of_worktree_sandboxed_write(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.base_sandbox_policy = _active_policy(tmp_path)
-    assert ctx.authorize_fs(("write",), "/tmp/scratch.txt") == Path("/tmp/scratch.txt")
+    pol = _active_policy(tmp_path)
+    ctx.base_sandbox_policy = pol
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("write",), "/tmp/scratch.txt")     # host /tmp: read-only floor
+    # ...but the per-quest scratch dir under it is writable, and /tmp stays readable.
+    scratch = Path(pol.quest_tmp_dir) / "scratch.txt"
+    assert ctx.authorize_fs(("write",), str(scratch)) == scratch
+    assert ctx.authorize_fs(("read",), "/tmp/scratch.txt") == Path("/tmp/scratch.txt")
     with pytest.raises(PermissionDenied):
         ctx.authorize_fs(("write",), "/usr/lib/x")          # no writable bind
     with pytest.raises(PermissionDenied):
