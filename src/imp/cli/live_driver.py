@@ -157,35 +157,52 @@ def cost_field(usage: RowUsage | None) -> str | None:
 
 
 def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
-                          now_iso: str,
+                          now_iso: str, width: int,
                           pending_provider: str | None = None) -> str:
     """Activity line: spinner + verb + detail + block-age elapsed (always animated).
     Elapsed is the age of the activity's current live block, derived from its
-    start_ts against `now_iso` (see nv.activity_elapsed)."""
+    start_ts against `now_iso` (see nv.activity_elapsed). The retry-hint pair is a
+    droppable tail: the widest candidate that survives _draw's clip wins, so a row too
+    narrow for both hints sheds hints rather than the countdown."""
     spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=False)
     elapsed = nv.activity_elapsed(activity, now_iso)
-    parts: list[str | None] = []
+    head: list[str] = []
     if activity.verb:
-        parts.append(_paint(activity.verb, "wordmark", color=color, over_bg=False))
+        head.append(_paint(activity.verb, "wordmark", color=color, over_bg=False))
     if activity.detail:
-        parts.append(_paint(activity.detail, "gray", color=color, over_bg=False))
+        head.append(_paint(activity.detail, "gray", color=color, over_bg=False))
     if activity.countdown_total is not None:
         remaining = max(0.0, activity.countdown_total - elapsed)
         tail = (f"{nv._fmt_hm(remaining)} left" if remaining >= 60
                 else f"{rt.fmt_seconds(remaining)} left")
     else:
         tail = rt.fmt_seconds(elapsed)
-    if activity.countdown_total is not None and activity.countdown_total >= 60:
-        parts.append(_paint("press r to retry now", "dim", color=color, over_bg=False))
-        parts.append(_paint("press p to switch provider", "dim", color=color,
-                            over_bg=False))
+    rest: list[str] = []
     if activity.dep_wait:
-        parts.append(_paint("press ctrl-d to pause", "dim", color=color, over_bg=False))
+        rest.append(_paint("press ctrl-d to pause", "dim", color=color, over_bg=False))
     if pending_provider is not None:
-        parts.append(_paint(f"switching to {pending_provider} after this step",
-                            "dim", color=color, over_bg=False))
-    parts.append(_paint(tail, "dim", color=color, over_bg=False))
-    return f"{spin} " + rt.compose_label([p for p in parts if p])
+        rest.append(_paint(f"switching to {pending_provider} after this step",
+                           "dim", color=color, over_bg=False))
+    rest.append(_paint(tail, "dim", color=color, over_bg=False))
+    if activity.countdown_total is not None and activity.countdown_total >= 60:
+        ladder: tuple[tuple[str, ...], ...] = (
+            ("press r to retry now", "press p to switch provider"),
+            ("press r to retry now",),
+            (),
+        )
+    else:
+        ladder = ((),)
+
+    def render(hints: tuple[str, ...]) -> str:
+        painted = [_paint(h, "dim", color=color, over_bg=False) for h in hints]
+        return f"{spin} " + rt.compose_label([*head, *painted, *rest])
+
+    for hints in ladder:
+        candidate = render(hints)
+        # fits when it survives _draw's clip_display(row, width - 1) byte-identical
+        if pal.clip_display(candidate, width - 1) == candidate:
+            return candidate
+    return render(ladder[-1])
 
 
 def _band_wrap(body: str, bg: str, width: int) -> str:
@@ -540,11 +557,11 @@ class LiveDriver:
         if activity is None:
             return None
         now_iso = datetime.now(UTC).isoformat()
+        w = term_width()
         a_line = compose_activity_line(
             activity=activity, frame=frame, color=self._color, now_iso=now_iso,
-            pending_provider=self._pending_provider)
+            width=w, pending_provider=self._pending_provider)
         root = self._builder.tree.root
-        w = term_width()
         p_row = compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
             project=self._project,
@@ -568,7 +585,7 @@ class LiveDriver:
         a_line = compose_activity_line(
             activity=nv.Activity(verb=self._startup_verb,
                                  start_ts=self._startup_start_iso),
-            frame=frame, color=self._color, now_iso=now_iso)
+            frame=frame, color=self._color, now_iso=now_iso, width=term_width())
         root = self._builder.tree.root
         identity_row = compose_identity_toolbar(
             quest_id=root.id, title=root.title, project=self._project,

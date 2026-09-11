@@ -2114,7 +2114,7 @@ def test_compose_activity_line_is_verb_detail_elapsed_with_spinner() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="coding", detail="bash pytest", model="m",
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:14+00:00")
     assert line is not None
     assert "coding" in line and "bash pytest" in line and "14s" in line
@@ -2124,7 +2124,7 @@ def test_compose_activity_line_animates_spinner_and_elapsed_when_verbless() -> N
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(position="implementation phase · plan 1/1", verb=None, detail=None,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:04+00:00")
     assert line == "⠋ 4s"
 
@@ -2135,7 +2135,7 @@ def test_compose_activity_line_spinner_uses_wordmark_and_no_band_bg() -> None:
         for theme in ("dark", "light", "ansi"):
             pal.set_theme(theme)
             act = nv.Activity(verb="thinking", start_ts="2026-01-01T00:00:00+00:00")
-            line = compose_activity_line(activity=act, frame=0, color=True,
+            line = compose_activity_line(activity=act, frame=0, color=True, width=120,
                                          now_iso="2026-01-01T00:00:04+00:00")
             # The activity line uses the wordmark color for the spinner — never cyan.
             # No background prefix on the activity line (background is on the position bar).
@@ -2418,7 +2418,7 @@ def test_compose_activity_line_counts_down_when_countdown_total_set() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:11:00+00:00")
     assert line is not None
     # 2940 - 660 = 2280s remaining -> _fmt_hm -> "38m"
@@ -2437,12 +2437,12 @@ def test_compose_activity_line_countdown_second_granularity_under_a_minute() -> 
     act = nv.Activity(verb="waiting for limit reset", countdown_total=100.0,
                       start_ts="2026-01-01T00:00:00+00:00")
     # 100 - 92 = 8s remaining -> second granularity, not the old "<1m left" collapse
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:01:32+00:00")
     assert "8s left" in line
     assert "<1m left" not in line
     # remaining clamps at zero once the reset moment has passed: "0s left", never negative
-    over = compose_activity_line(activity=act, frame=0, color=False,
+    over = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:08:20+00:00")
     assert "0s left" in over
     assert "-" not in over
@@ -2453,7 +2453,7 @@ def test_compose_activity_line_countdown_at_exact_minute_boundary() -> None:
     # remaining == 60.0 exactly -> >= 60 guard is True -> "1m left", not "<1m left"
     act = nv.Activity(verb="waiting for limit reset", countdown_total=120.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:01:00+00:00")
     assert "1m left" in line
     assert "~" not in line
@@ -2464,7 +2464,7 @@ def test_compose_activity_line_unchanged_when_no_countdown() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="coding", detail="bash pytest",
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:14+00:00")
     # existing count-up render is preserved exactly
     assert "14s" in line
@@ -2997,7 +2997,7 @@ def test_subagent_backoff_wait_surfaces_to_activity_not_rows() -> None:
                                prompt_tokens=None, color=False, width=120)
     assert "left" not in pos
     # The wait surfaces on the activity line instead.
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:10+00:00")
     assert "waiting for re-authentication" in line
     assert "25s left" in line          # 30 - 5 = 25s remaining
@@ -3324,7 +3324,8 @@ def test_activity_line_matches_subagent_row_for_single_subagent() -> None:
              timestamp="2026-01-01T00:00:00+00:00"))
     now = "2026-01-01T00:01:44+00:00"          # 104s later
     act = b.current_activity()
-    line = compose_activity_line(activity=act, frame=0, color=False, now_iso=now)
+    line = compose_activity_line(activity=act, frame=0, color=False, now_iso=now,
+                                 width=120)
     row = compose_subagent_rows(b, color=False, width=120, now_iso=now)[0]
     fold = b.running_subagents()[0]
     from imp.cli import render_text as rt
@@ -3338,7 +3339,7 @@ def test_activity_line_derives_countdown_from_block_start() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:11:00+00:00")   # 660s in
     assert "38m left" in line                  # 2940 - 660 = 2280s -> 38m
     assert "11m 0s" not in line                # no count-up leak
@@ -3534,7 +3535,7 @@ def test_compose_activity_line_shows_retry_hint_when_total_at_least_60() -> None
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:11:00+00:00")
     # the countdown timer is the trailing ` · `-joined segment, after both hints,
     # and `p` sits immediately after `r` — the two keys are offered together
@@ -3547,7 +3548,7 @@ def test_compose_activity_line_retry_hint_survives_final_minute() -> None:
     # total 120s (>= 60) but only 20s remaining -> gated on total, so hint stays
     act = nv.Activity(verb="waiting for limit reset", countdown_total=120.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:01:40+00:00")
     assert line.endswith("20s left")
     assert (line.index("press r to retry now")
@@ -3558,7 +3559,7 @@ def test_compose_activity_line_no_retry_hint_below_60() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="waiting for limit reset", countdown_total=30.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert "press r to retry now" not in line
     assert "press p to switch provider" not in line
@@ -3597,7 +3598,7 @@ def test_compose_activity_line_no_retry_hint_without_countdown() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="coding", detail="bash pytest",
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:14+00:00")
     assert "press r to retry now" not in line
     assert "press p to switch provider" not in line
@@ -3607,7 +3608,7 @@ def test_compose_activity_line_retry_hint_at_exactly_60() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="waiting for limit reset", countdown_total=60.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert line.endswith("55s left")
     assert (line.index("press r to retry now")
@@ -4013,7 +4014,7 @@ def test_activity_countdown_renders_a_multi_day_wait_in_days() -> None:
     # 187260s total, 60s elapsed -> 187200s left = 2d 4h.
     act = nv.Activity(verb="waiting for limit reset", countdown_total=187260.0,
                       start_ts="2026-01-01T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:01:00+00:00")
 
     assert "2d 4h left" in line

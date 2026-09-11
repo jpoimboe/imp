@@ -83,11 +83,11 @@ def test_an_unswitched_run_broadcasts_no_marker_traffic(
 
 def test_the_activity_line_carries_the_verbatim_marker() -> None:
     activity = nv.Activity(kind="agent", verb="thinking")
-    line = compose_activity_line(activity=activity, frame=0, color=False,
+    line = compose_activity_line(activity=activity, frame=0, color=False, width=120,
                                  now_iso="2026-01-01T00:00:00+00:00",
                                  pending_provider="codex")
     assert "switching to codex after this step" in line
-    plain = compose_activity_line(activity=activity, frame=0, color=False,
+    plain = compose_activity_line(activity=activity, frame=0, color=False, width=120,
                                   now_iso="2026-01-01T00:00:00+00:00")
     assert "switching to" not in plain
 
@@ -95,6 +95,6 @@ def test_the_activity_line_carries_the_verbatim_marker() -> None:
 def test_the_marker_renders_dim() -> None:
     line = compose_activity_line(
         activity=nv.Activity(kind="agent", verb="thinking"), frame=0,
-        color=True, now_iso="2026-01-01T00:00:00+00:00",
+        color=True, now_iso="2026-01-01T00:00:00+00:00", width=120,
         pending_provider="codex")
     assert "\x1b[2mswitching to codex after this step" in line

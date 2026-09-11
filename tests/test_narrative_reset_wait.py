@@ -261,14 +261,14 @@ def test_backoff_ended_removes_press_r_hint_from_activity_line() -> None:
     from imp.cli.live_driver import compose_activity_line
 
     b = _build_with_wait()
-    waiting = compose_activity_line(activity=b.current_activity(), frame=0,
+    waiting = compose_activity_line(activity=b.current_activity(), frame=0, width=120,
                                     color=False, now_iso="2026-01-01T00:01:00+00:00")
     assert "press r to retry now" in waiting
 
     b.add(ev("4", "backoff_ended", reason="elapsed"))
     act = b.current_activity()
     assert act is not None
-    resumed = compose_activity_line(activity=act, frame=0, color=False,
+    resumed = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                     now_iso="2026-01-01T00:01:00+00:00")
     assert "press r to retry now" not in resumed
 

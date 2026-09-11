@@ -11,7 +11,7 @@ def test_dependency_wait_line_shows_verb_elapsed_and_pause_hint() -> None:
     now = start + timedelta(minutes=4)
     act = nv.Activity(verb="waiting for tuhe55, koze82 to merge",
                       dep_wait=True, start_ts=start.isoformat())
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso=now.isoformat())
     assert "waiting for tuhe55, koze82 to merge" in line
     assert "4m 0s" in line
@@ -23,6 +23,6 @@ def test_dependency_wait_line_shows_verb_elapsed_and_pause_hint() -> None:
 def test_non_dependency_wait_line_has_no_pause_hint() -> None:
     act = nv.Activity(verb="waiting to merge (2 ahead)", lane_wait=True,
                       start_ts="2026-06-03T00:00:00+00:00")
-    line = compose_activity_line(activity=act, frame=0, color=False,
+    line = compose_activity_line(activity=act, frame=0, color=False, width=120,
                                  now_iso="2026-06-03T00:00:10+00:00")
     assert "press ctrl-d to pause" not in line
