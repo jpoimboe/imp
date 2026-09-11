@@ -636,3 +636,212 @@ async def test_handoff_with_nothing_in_flight_queries_the_bare_instruction(
     cont = [e for e in log.read() if e["type"] == "engine_message"
             and e["payload"].get("subtype") == "continuation"]
     assert len(cont) == 1
+
+
+@pytest.mark.anyio
+async def test_handoff_event_log_carries_imps_real_result_not_the_filler(
+        tmp_path: Path) -> None:
+    """Channel 2: `imp events` is what reincarnation points the reborn session at,
+    so the filler must never reach it. The log carries one call and one result for
+    u1 — imp's own — and the narrative reads them back as that call's outcome."""
+    from imp.cli.narrative import NarrativeBuilder
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    started = asyncio.Event()
+
+    class DispatchingClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            runner = holder["runner"]
+            wrapped = _wrap_one("write_file", _slow_write_tool(started),
+                                runner._ctx, runner._state, _passthrough)
+            holder["call"] = asyncio.create_task(wrapped(dict(SLOW_ARGS)))
+            await started.wait()
+            await super().interrupt()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return DispatchingClient(opts, scripted_messages=_interrupted_script(),
+                                 context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+    await holder["call"]
+
+    events = list(log.read())
+    assert REJECTION not in json.dumps(events)
+    assert not runner._state.withheld
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert [(e["payload"]["id"], e["payload"]["content"], e["payload"]["error"])
+            for e in results] == [("u1", "wrote 1 bytes to scratch", False)]
+    # Same duration source as the streaming append it replaces: imp's own tools
+    # carry none on either path, so the key stays absent.
+    assert "duration_ms" not in results[0]["payload"]
+    # The call it answers is journaled with it, adjacent and in order.
+    types = [e["type"] for e in events]
+    i = types.index("tool_call")
+    assert types[i:i + 2] == ["tool_call", "tool_result"]
+    assert events[i]["payload"] == {
+        "id": "u1", "name": "write_file", "input": SLOW_ARGS}
+    # Read back by the real consumer: one call, correctly named, with its outcome —
+    # not the orphan node an unpaired result renders as.
+    builder = NarrativeBuilder()
+    burst: Any = None
+    for e in events:
+        builder.add(e)
+        if e["type"] == "tool_result":
+            burst = builder.current_burst
+    assert burst is not None
+    assert [(c.call_id, c.name, c.result, c.is_error) for c in burst.calls] == [
+        ("u1", "write_file", "wrote 1 bytes to scratch", False)]
+
+
+@pytest.mark.anyio
+async def test_a_filler_imp_cannot_account_for_stays_in_the_event_log(
+        tmp_path: Path) -> None:
+    """Suppression is narrow. Nothing was dispatched through imp's wrapper here, so
+    imp has no better account of u1 than the SDK's — dropping it would lose the
+    call's only record."""
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=_interrupted_script(),
+                                   context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    results = [e for e in log.read() if e["type"] == "tool_result"]
+    assert [(e["payload"]["id"], e["payload"]["content"]) for e in results] == [
+        ("u1", REJECTION)]
+
+
+@pytest.mark.anyio
+async def test_a_complete_step_after_the_crossing_keeps_the_withheld_result(
+        tmp_path: Path) -> None:
+    """complete_step preemption wins over the handoff close, so no bounded await
+    runs and nothing corrects u1. The withhold must not become a deletion: the spec
+    leaves this site exactly as it is, which means the filler goes back — call and
+    result both present, and nothing left pending on the run state."""
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    started = asyncio.Event()
+    scripted = [
+        assistant(text("working"),
+                  tool_use("u1", "mcp__imp__write_file", SLOW_ARGS)),
+        user(tool_result("u1", REJECTION, is_error=True)),
+        user(text("[Request interrupted by user for tool use]")),
+        assistant(text("done"),
+                  tool_use("c1", "mcp__imp__complete_step",
+                           {"status": "Success"})),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("trailing")),
+        result(),
+    ]
+
+    class DispatchingClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            runner = holder["runner"]
+            wrapped = _wrap_one("write_file", _slow_write_tool(started),
+                                runner._ctx, runner._state, _passthrough)
+            holder.setdefault("calls", []).append(
+                asyncio.create_task(wrapped(dict(SLOW_ARGS))))
+            await started.wait()
+            await super().interrupt()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return DispatchingClient(opts, scripted_messages=scripted,
+                                 context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    [ev async for ev in runner.run(_inv(tmp_path, log))]
+    for task in holder.get("calls", []):
+        await task
+
+    events = list(log.read())
+    results = [(e["payload"]["id"], e["payload"]["content"],
+                e["payload"]["error"]) for e in events
+               if e["type"] == "tool_result"]
+    assert results == [("u1", REJECTION, True)]
+    assert ("u1", "write_file") in [
+        (e["payload"]["id"], e["payload"]["name"]) for e in events
+        if e["type"] == "tool_call"]
+    assert not runner._state.withheld
+    # The transcript keeps the filler here too — this site is unchanged by design.
+    assert REJECTION in (tmp_path / "step" / "transcript.jsonl").read_text()
+
+
+@pytest.mark.anyio
+async def test_a_fatal_tool_error_after_the_crossing_keeps_the_withheld_result(
+        tmp_path: Path) -> None:
+    """A fatal tool error returns from events() BEFORE _is_terminal runs, so neither
+    drain on that method is reached. The run's own teardown is the last point that
+    can honour the deferral; without it the call's only record is deleted."""
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+    started = asyncio.Event()
+
+    class FatalClient(FakeClaudeSDKClient):
+        async def interrupt(self) -> None:
+            runner = holder["runner"]
+            wrapped = _wrap_one("write_file", _slow_write_tool(started),
+                                runner._ctx, runner._state, _passthrough)
+            holder.setdefault("calls", []).append(
+                asyncio.create_task(wrapped(dict(SLOW_ARGS))))
+            await started.wait()
+            await super().interrupt()
+
+        async def receive_response(self) -> Any:
+            seen = 0
+            async for msg in super().receive_response():
+                yield msg
+                seen += 1
+                if seen == 2:
+                    # Resumed once the runner has processed the filler, so it is
+                    # withheld now and the fatal lands before any ResultMessage —
+                    # the window _is_terminal never sees. This is the tuple
+                    # _wrap_one itself writes when a tool raises FatalToolError.
+                    holder["runner"]._state.fatal_tool_error = (
+                        "create_and_enter_worktree", "worktree already exists")
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FatalClient(opts, scripted_messages=_interrupted_script(),
+                           context_usage=cu)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    holder["runner"] = runner
+
+    evs = [ev async for ev in runner.run(_inv(tmp_path, log))]
+    for task in holder.get("calls", []):
+        await task
+
+    assert [e["payload"]["kind"] for e in evs if e["type"] == "error"] == [
+        "fatal_tool_error"]
+    events = list(log.read())
+    assert [(e["payload"]["id"], e["payload"]["content"], e["payload"]["error"])
+            for e in events if e["type"] == "tool_result"] == [
+        ("u1", REJECTION, True)]
+    assert ("u1", "write_file") in [
+        (e["payload"]["id"], e["payload"]["name"]) for e in events
+        if e["type"] == "tool_call"]
+    assert not runner._state.withheld

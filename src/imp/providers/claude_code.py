@@ -1962,7 +1962,17 @@ class ClaudeCodeSession(ObserveSession):
                             continue
                         pend = self._pending_tools.get(b.tool_use_id)
                         is_task = pend is not None and pend.name == "sub_agent"
-                        if not is_task:
+                        # imp executed this tool itself; while a handoff interrupt is
+                        # pending the SDK's is_error filler for a call still running
+                        # is hearsay. Withhold it — the real result is journaled once
+                        # the bounded await resolves.
+                        withheld = (
+                            b.is_error and self.runner._handoff_requested
+                            and state.withhold_inflight(
+                                _tool_use_block(self.messages, b.tool_use_id),
+                                b.content,
+                                journaled=pend is not None))
+                        if not is_task and not withheld:
                             elog.append_tool_result(
                                 agent_id=aid, block=b,
                                 duration_ms=state.tool_durations.pop(
@@ -2036,6 +2046,7 @@ class ClaudeCodeSession(ObserveSession):
                     self.runner._state, INFLIGHT_RESULT_BOUND_S)
                 for s in settled:
                     captured[s.key] = (s.content, s.is_error)
+                _correct_withheld_results(elog, aid, runner._state, captured)
                 # Marker repair first: it collapses the tail the dangling repair then no-ops on.
                 repair_interrupt_marker_on_resume(
                     self.messages, self.transcript, captured=captured)
@@ -2101,6 +2112,10 @@ class ClaudeCodeSession(ObserveSession):
                 self._handoff_phase = None
             runner._steer_requested = False
             runner._complete_requested = False
+
+        # Every other terminal outcome corrects nothing, so anything still withheld
+        # goes back as it came: a withheld result is never dropped.
+        _restore_withheld_results(elog, aid, runner._state)
 
         if self._handoff_phase == "instruction_sent":
             # The handoff-writing turn completed: capture the handoff and stop.
@@ -2390,6 +2405,11 @@ class ClaudeCodeAgentRunner:
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
+            if self._state is not None:
+                # Last chance: a fatal tool error, a cancel and an SDK close with no
+                # ResultMessage all return before _is_terminal, so this is the only
+                # point every run passes through. A no-op once a drain has run.
+                _restore_withheld_results(session.elog, session.aid, self._state)
             if self._ctx is not None:
                 # None guard: _ctx is assigned mid-_run_loop; the finally runs
                 # with None when _run_loop raises BEFORE the assignment (the
