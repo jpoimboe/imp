@@ -99,15 +99,21 @@ quest id (`imp show`, `imp log`, `imp abandon`, `imp edit`, `imp resume`). One l
 on stderr, exit 2, no output:
 
 ```
-imp: archive data is at v12, newer than this imp (knows v11) — this checkout is behind. Fix: update imp, or Ctrl-D and `imp resume` to restart a running quest on the current install. Agents: suggest this to the user.
+imp: archive data is at v12, newer than this imp (knows v11). A running imp keeps the code it started with, so this is usually a stale process, not a stale checkout. Fix: Ctrl-D and `imp resume` to restart this quest on the current install; if it persists, update imp. Agents: suggest this to the user.
 ```
 
 `archive index is at v...` is the same refusal for the index's schema floor.
 
-The usual cause is an agent working in a quest worktree whose branch predates the
-archive's last format change: the worktree's `pythonpath: [src]` resolves `imp` to
-that older source. Remedy: update the checkout — or, for a running quest, Ctrl-D to
-pause it and `imp resume <id>` on the current install.
+The usual cause is a stale process, not a stale checkout. A running imp keeps the
+code it started with: a session daemon warms its module graph at startup, so
+rewriting `src/imp/` under a live process cannot splice newer code into it, and
+the floors that process knows stay frozen at launch. Update the checkout while a
+quest runs, let current code then archive something — a dependency's merge, say —
+and the long-running daemon refuses the archive that write just bumped. Remedy:
+Ctrl-D to pause the quest, then `imp resume <id>` on the current install. A
+genuinely older checkout is the other cause — an agent working in a quest worktree
+whose branch predates the archive's last format change, where `pythonpath: [src]`
+resolves `imp` to that older source; there, update the checkout.
 
 Writes are deliberately unguarded. An older imp may still archive a quest into a
 newer archive; that lowers both floors (the blob `data_version` marker and the

@@ -222,6 +222,16 @@ def test_operator_notes_document_archive_version_skew() -> None:
     assert "index.ingest" in section
 
 
+def test_operator_notes_skew_names_the_stale_process_first() -> None:
+    """A running imp is frozen at its launch-time code, so the usual skew is a
+    long-lived process, not a behind checkout."""
+    text = Path("docs/guide/operator-notes.md").read_text()
+    section = " ".join(text.split("## Archive version skew", 1)[1].split())
+    assert "The usual cause is a stale process, not a stale checkout" in section
+    assert "warms its module graph at startup" in section
+    assert "this checkout is behind" not in section
+
+
 def test_operator_notes_document_the_unguarded_pinned_state_dir() -> None:
     text = Path("docs/guide/operator-notes.md").read_text()
     flat = " ".join(text.split())
