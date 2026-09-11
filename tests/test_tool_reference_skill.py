@@ -128,3 +128,12 @@ def test_write_file_section_says_bash_writes_do_not_update_the_record() -> None:
     assert ("`bash` writes (`cat >`, `tee`, `sed -i`) don't update the read record"
             in section)
     assert "Never use a shell redirect to get around a refusal." in section
+
+
+def test_tool_reference_documents_the_readonly_tmp_rule() -> None:
+    # AC 12(b)/(c): the skill states where scratch goes and that the file tools take
+    # `$TMPDIR` literally. Whitespace-normalized: the sentences are hard-wrapped.
+    body = " ".join(load_internal_skill(_skills_dir(), "imp-tool-reference").split())
+    assert ("Inside the sandbox `/tmp` is readable but read-only; write scratch "
+            "under `$TMPDIR`, a per-quest dir that is wiped when the step ends. "
+            "The file tools don't expand `$TMPDIR`.") in body

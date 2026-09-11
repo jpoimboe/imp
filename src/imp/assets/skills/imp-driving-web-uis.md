@@ -26,20 +26,20 @@ Chromium-family — `--no-sandbox` is required inside imp's sandbox:
 
 ```
 <chrome> --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
-  --screenshot=/tmp/shot.png --window-size=1280,900 <url-or-file://path>
+  --screenshot=${TMPDIR:-/tmp}/shot.png --window-size=1280,900 <url-or-file://path>
 ```
 
 Firefox:
 
 ```
-firefox --headless --screenshot /tmp/shot.png --window-size=1280,900 <url-or-file://path>
+firefox --headless --screenshot ${TMPDIR:-/tmp}/shot.png --window-size=1280,900 <url-or-file://path>
 ```
 
-Then **`read_file` the PNG** — that is how you actually see it. Ignore the dbus and
-GPU errors on stderr; the file is written regardless. The shot captures the
-viewport, so set `--window-size` to the size you're testing and make it taller for a
-long page. Write shots to `/tmp`, never into the worktree, which is read-only at
-review time.
+Then **`read_file` the PNG at its literal path** — `read_file` is not a shell and
+won't expand `$TMPDIR`. That is how you actually see it. Ignore the dbus and GPU
+errors on stderr; the file is written regardless. The shot captures the viewport, so
+set `--window-size` to the size you're testing and make it taller for a long page.
+Write shots to `$TMPDIR`, never into the worktree, which is read-only at review time.
 
 Don't add a dependency to the project just to look at a page. If every probe misses,
 say so plainly and hand the human the HTML file's path to open themselves — never
@@ -48,7 +48,7 @@ fall back to drawing the page in ASCII.
 ## Mockups
 
 A design mockup is **real HTML** — one self-contained file with inline CSS, written
-to `/tmp`, rendered and read back so you have actually seen it, with its path given
+to `$TMPDIR`, rendered and read back so you have actually seen it, with its path given
 to the human so they can open the real thing in their own browser. A mockup that
 survives into a spec goes in as a fenced `html` block, so the implementer builds
 from the markup instead of re-deriving it from a picture.
@@ -60,9 +60,9 @@ project already depends on — discover it from the project's manifest and test 
 rather than assuming. If the project has none and the work needs one, that's a
 dependency the quest should introduce, not something to improvise around.
 
-Write throwaway driver scripts to `/tmp` and run them there. A driver script should
-start the app (or attach to a running one) on an ephemeral port, perform the
-interaction, screenshot to `/tmp`, and print the console errors and failed requests
+Write throwaway driver scripts to `$TMPDIR` and run them there. A driver script
+should start the app (or attach to a running one) on an ephemeral port, perform the
+interaction, screenshot to `$TMPDIR`, and print the console errors and failed requests
 it collected — those are the failures a screenshot hides.
 
 Don't hand-roll the DevTools Protocol against a background browser. It needs a
