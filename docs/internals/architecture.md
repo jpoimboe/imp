@@ -319,7 +319,7 @@ flowchart TD
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN
   FIN -->|merge| CM{{"cleanup-merge"}}
-  CM -->|"fixup conflict"| ASR["autosquash-resolve-merge"]
+  CM -->|"fixup conflict / fold changed the tree"| ASR["autosquash-resolve-merge"]
   ASR --> CM
   CM -. "unfoldable fixup / stamp failure" .-> HUMAN
   CM --> AST{{"assert-stamped"}}
@@ -351,7 +351,7 @@ name:
 | `integration-review` | `integration-reviewer` | high | At-head semantic integration review; classifies findings and routes back to the reconciler. |
 | `summarizer` | `summarizer` | medium | Write the quest's intent-level summary artifact. |
 | `finalize` | `finalize` | high | The human gate: merge / rework / pause. |
-| `autosquash-resolve` | `autosquash-resolve-merge` | high | Resolve a fixup-fold rebase conflict, preserving the pre-squash tree. |
+| `autosquash-resolve` | `autosquash-resolve-merge` | high | Make the fixup fold reproduce the pre-squash tree: resolve a conflict, or repair a fold that changed content. |
 
 Tiers come from `workflow.yaml`, which declares every step `high` except `summarizer`
 (medium).
