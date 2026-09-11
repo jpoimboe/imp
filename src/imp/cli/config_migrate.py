@@ -19,7 +19,7 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
-from imp.paths import _slug, display_path, imp_home, project_state_dir
+from imp.paths import _slug, claimed_state_dir, display_path, imp_home
 
 
 def migrate_global_config(legacy: Path, new: Path) -> None:
@@ -274,7 +274,12 @@ def migrate_spike_artifact_refs(cwd: Path) -> None:
     from imp.engine.worktree import find_control_root, prune_spike_from_artifact_refs
 
     control_root = find_control_root(cwd)
-    marker = project_state_dir(control_root) / "spike-refs-pruned"
+    # No claimed state dir means imp has never run here — nothing to prune, and
+    # resolving one would mint state in a repo imp does not manage.
+    state_dir = claimed_state_dir(control_root)
+    if state_dir is None:
+        return
+    marker = state_dir / "spike-refs-pruned"
     if marker.exists():
         return
     try:

@@ -12,7 +12,7 @@ import pytest
 
 from imp import paths
 from imp.engine.worktree import PreconditionError, find_control_root
-from imp.paths import display_path, imp_home, project_state_dir
+from imp.paths import claimed_state_dir, display_path, imp_home, project_state_dir
 from tests.conftest import _git, _init_repo
 
 
@@ -184,4 +184,30 @@ def test_the_marked_owner_resolves_from_its_checkout_and_from_a_linked_worktree(
     for cwd in (root, linked):
         assert find_control_root(cwd) == root.resolve()
         assert project_state_dir(find_control_root(cwd)) == override
+
+
+def test_claimed_state_dir_returns_none_for_an_unclaimed_root_and_creates_nothing(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path, "widget")
+    assert claimed_state_dir(root) is None
+    assert not (imp_home() / "projects").exists()
+
+
+def test_claimed_state_dir_returns_the_directory_after_project_state_dir_claims_it(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path, "widget")
+    state = project_state_dir(root)
+    assert claimed_state_dir(root) == state
+
+
+def test_claimed_state_dir_returns_the_override_verbatim_when_imp_state_dir_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override = tmp_path / "elsewhere" / "state"
+    monkeypatch.setenv("IMP_STATE_DIR", str(override))
+    root = _repo(tmp_path, "widget")
+    assert claimed_state_dir(root) == override
+    assert not override.exists()
 

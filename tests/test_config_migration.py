@@ -20,7 +20,7 @@ from imp.cli.config_migrate import (
     run_startup_migrations,
 )
 from imp.engine.worktree import RepoGitLock, _git_ok, artifact_commit
-from imp.paths import display_path, project_state_dir
+from imp.paths import display_path, imp_home, project_state_dir
 from tests.conftest import _assert_outside_a_git_work_tree, _init_repo
 
 
@@ -746,6 +746,7 @@ def _spiked_repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _init_repo(root)
+    project_state_dir(root)  # a project imp manages has a claimed state dir
     probe = tmp_path / "files" / "probe.py"
     probe.parent.mkdir(parents=True)
     probe.write_text("print(1)\n")
@@ -801,10 +802,25 @@ def test_a_sweep_that_rewrote_nothing_says_nothing(
     root = tmp_path / "repo"
     root.mkdir()
     _init_repo(root)
+    project_state_dir(root)  # a project imp manages has a claimed state dir
 
     migrate_spike_artifact_refs(root)
 
     assert _marker(root).is_file()
+    assert capsys.readouterr().err == ""
+
+
+def test_a_repo_imp_has_never_managed_is_left_completely_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    _init_repo(root)
+
+    migrate_spike_artifact_refs(root)
+
+    assert not (imp_home() / "projects").exists()
+    assert not (root / ".git" / "imp").exists()
     assert capsys.readouterr().err == ""
 
 
