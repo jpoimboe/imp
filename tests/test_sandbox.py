@@ -2962,7 +2962,8 @@ def test_the_scratch_block_docstrings_describe_the_mask_and_the_re_exposes():
     plan_doc = _flat_doc(sb.SandboxPolicy.bind_plan)
     assert "a tmpfs over the scratch ROOT (quest_tmp_mask) FIRST" in plan_doc
     assert ("the exposed set under the scratch root is EXACTLY this quest's own "
-            "scratch dir plus its own session socket") in plan_doc
+            "scratch dir, its own session socket") in plan_doc
+    assert "plus any path a LATER bind" in plan_doc
     prepare_doc = _flat_doc(sb.prepare_spawn_policy)
     assert "session_socket_ro churns the same way and is pruned with them" in prepare_doc
     assert "only the session daemon can bind it" in prepare_doc
