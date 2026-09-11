@@ -544,8 +544,8 @@ def test_every_route_agent_return_reconciles_before_it_leaves() -> None:
     src = textwrap.dedent(inspect.getsource(executor_mod._route_agent))
     fn = ast.parse(src).body[0]
     returns = sorted(n.lineno for n in ast.walk(fn) if isinstance(n, ast.Return))
-    assert len(returns) == 12, (
-        f"_route_agent has {len(returns)} return paths, not 12 — a path was "
+    assert len(returns) == 13, (
+        f"_route_agent has {len(returns)} return paths, not 13 — a path was "
         "added or removed; every one must reconcile before it returns or re-enters")
     lines = src.splitlines()
     for lineno in returns:
