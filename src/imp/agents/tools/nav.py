@@ -53,11 +53,12 @@ def _iter_files(target: Path, policy: Any = None,
     which are surfaced (passed via `root`, the worktree root, so the carve-out is
     anchored there; `root=None` for external targets keeps the old
     exclude-everything behavior). `os.walk` with in-place `dirnames` pruning means
-    even *enumerate* inside `.imp/`/`.git/` beyond the carve-out. When `policy` is
-    an active SandboxPolicy, additionally prune directories and drop files whose
-    resolved path fails `policy.allows_read` — the in-process mirror of the bwrap
-    secret masks, so the search tool never out-reads `bash`-under-bwrap (a symlink
-    into a masked dir is dropped by resolving before the check)."""
+    the walk does not even *enumerate* inside `.imp/`/`.git/` beyond the carve-out.
+    When `policy` is an active SandboxPolicy, additionally prune directories and
+    drop files whose resolved path fails `policy.allows_read` — the in-process
+    mirror of the bwrap secret masks, so the search tool never out-reads
+    `bash`-under-bwrap (a symlink into a masked dir is dropped by resolving before
+    the check)."""
     if target.is_file():
         yield target
         return
