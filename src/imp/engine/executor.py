@@ -39,7 +39,7 @@ from imp.agents.runner import (
     TextBlock,
 )
 from imp.agents.skills import overlay_global_skills, overlay_project_skills, overlay_shared_partials
-from imp.engine import quest_refs, readfault
+from imp.engine import backlog, quest_refs, readfault
 from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
     AgentRunResult,
@@ -128,6 +128,8 @@ if TYPE_CHECKING:
 EventCallback = Callable[[dict[str, Any]], None]
 
 OUTCOME_HISTORY_K = 4
+
+DEPENDENCY_POLL_INTERVAL_S = 2.0
 
 # Quest homes (keyed by quest_dir) whose snapshot this PROCESS already captured
 # — captured at most once per process to stay version-consistent with this loader.
@@ -1761,6 +1763,28 @@ async def _route_agent(
             memory=memory,
             opening=run_opening, feedback_lead=feedback_lead,
             reincarnation_text=reincarnation_text)
+        if result.dependency_wait:
+            deps = list(result.dependency_wait)
+            dep_agent_id = f"step:{step.phase}/{step.name}"
+            _emit(log, "dependency_waiting", {"depends_on": deps},
+                  agent_id=dep_agent_id)
+            # Persist before the wait so a kill leaves the intent on disk.
+            state.arm_step_resume(should_continue=True, cause="dependency")
+            state.save(quest.state_dir)
+            while True:
+                if coordinator.should_pause:
+                    _reconcile_provider(quest, state, workflow, on_event)
+                    return Pause(), None, {}
+                _, unmerged = backlog.readiness(quest.control_root, deps)
+                if not unmerged:
+                    break
+                await _interruptible_sleep(
+                    DEPENDENCY_POLL_INTERVAL_S, coordinator)
+            _emit(log, "dependency_ready", {}, agent_id=dep_agent_id)
+            # Not a provider retry: `backoff` stays 0, which would otherwise
+            # re-deliver the wrapper to a step that already received it.
+            retry_wrapper = None
+            continue
         if result.delay is None:
             break
         # Per-category wall-clock budget: pause cleanly when cumulative

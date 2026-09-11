@@ -13,15 +13,12 @@ import anyio.to_thread
 from imp.agents.tools import imp_tool
 from imp.agents.tools.errors import FatalToolError
 from imp.engine import backlog
-from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.backoff import interruptible_sleep
 from imp.engine.env import engine_env
 from imp.engine.feedback import truncate_detail
 from imp.engine.gates import ScriptOutputExceeded, run_command
 from imp.engine.sandbox import SandboxOpenFailed
 from imp.engine.shim import imp_shim_dir
 
-_DEP_POLL_INTERVAL = 2.0
 WORKTREE_SETUP_TIMEOUT_S = 600
 
 
@@ -30,30 +27,16 @@ def _declared_deps(quest: Any) -> list[str]:
     return list(meta.get("depends_on", []))
 
 
-def _emit(ctx: Any, type_: str, payload: dict[str, Any]) -> None:
-    if ctx.event_log is not None:
-        ctx.event_log.append(
-            agent_id=ctx.agent_id, type=type_, payload=payload)
-
-
-async def _await_dependencies(ctx: Any, quest: Any) -> None:
+def _check_dependencies(ctx: Any, quest: Any) -> bool:
+    """True when a dep is unmerged: flag the ids and stop the caller."""
     deps = _declared_deps(quest)
     if not deps:
-        return
+        return False
     _, unmerged = backlog.readiness(quest.control_root, deps)
     if not unmerged:
-        return
-    _emit(ctx, "dependency_waiting", {"depends_on": unmerged})
-    coord = ctx.coordinator
-    while True:
-        if coord is not None and getattr(coord, "should_pause", False):
-            # Ctrl-D: pause the step so a later `imp resume` retries the wait.
-            raise AwaitingUserInput(interrupt=True)
-        _, unmerged = backlog.readiness(quest.control_root, deps)
-        if not unmerged:
-            break
-        await interruptible_sleep(_DEP_POLL_INTERVAL, coord)
-    _emit(ctx, "dependency_ready", {})
+        return False
+    ctx.dependency_wait = tuple(unmerged)
+    return True
 
 
 def _setup_output_body(stdout: str | None, stderr: str | None) -> str:
@@ -121,8 +104,10 @@ async def create_and_enter_worktree(ctx: Any) -> str:
         raise RuntimeError(
             "create_and_enter_worktree is only available to top-level quest steps")
     quest = ctx.quest
-    if not quest.materialized:
-        await _await_dependencies(ctx, quest)
+    if not quest.materialized and _check_dependencies(ctx, quest):
+        ids = ", ".join(ctx.dependency_wait)
+        return (f"waiting for {ids} to merge — the run will re-enter this step "
+                "automatically once the dependency lands; take no further action.")
     head_changed = quest.materialize()
     ctx.project_root = quest.project_root
     if ctx.base_sandbox_policy is not None:

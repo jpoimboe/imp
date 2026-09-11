@@ -656,6 +656,68 @@ async def test_claude_code_provider_retry_resume_journals_the_retry_note(
     assert conts[0]["payload"]["content"][0]["text"] == RESUME_RETRY_NUDGE
 
 
+@pytest.mark.anyio
+async def test_anthropic_dependency_resume_injects_the_dependency_note(
+    tmp_path: Path,
+) -> None:
+    """The engine arms cause='dependency' before the wait; push_session's
+    resume-continue site must deliver the dependency copy, not the pause copy."""
+    from imp.agents.transcript import RESUME_DEPENDENCY_NUDGE, RESUME_RETRY_NUDGE
+    texts = await _run_anthropic(
+        tmp_path, resume_should_continue=True, queued=None,
+        resume_cause="dependency")
+    assert texts.count(RESUME_DEPENDENCY_NUDGE) == 1, texts
+    assert RESUME_CONTINUE_NUDGE not in texts, texts
+    assert RESUME_RETRY_NUDGE not in texts, texts
+
+
+@pytest.mark.anyio
+async def test_claude_code_dependency_resume_journals_the_dependency_note(
+    tmp_path: Path,
+) -> None:
+    """claude_code is the provider the dependency wait actually runs under: the
+    re-entered step's single continuation carries the dependency copy."""
+    from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
+    from imp.agents.transcript import RESUME_DEPENDENCY_NUDGE
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result
+    from tests.cc_fakes import text as cc_text
+    from tests.cc_fakes import tool_use as cc_tool_use
+
+    inv_dir = tmp_path / "step"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+    _seed_send_to_llm_transcript(inv_dir)
+    log = InMemoryEventLog()
+    scripted = [
+        assistant(cc_text("done"),
+                  cc_tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(
+            opts, scripted_messages=scripted))
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="claude_code",
+        model_name="claude-sonnet-4-5", system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        quest_context=QuestContext(
+            title="Test", project_root=tmp_path,
+            workflow_dir=project_state_dir(tmp_path) / "quests" / "test-quest" / "workflow"),
+        transcript_dir=inv_dir, events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=log, coordinator=_Coord(),
+        resume_should_continue=True, resume_cause="dependency")
+
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_result"
+    conts = [e for e in log.read()
+             if e["type"] == "engine_message"
+             and e["payload"].get("subtype") == "continuation"]
+    assert len(conts) == 1, log.read()
+    assert conts[0]["payload"]["content"][0]["text"] == RESUME_DEPENDENCY_NUDGE
+
+
 def _seed_between_turns_marker_transcript(inv_dir: Path) -> None:
     """An interrupt that landed BETWEEN turns: the marker sits on an assistant
     turn, with no rejection beneath it to re-frame. Left untouched by design."""

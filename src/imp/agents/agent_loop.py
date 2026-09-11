@@ -10,6 +10,7 @@ from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.loop_guard import ToolOutcome, TurnRecord, _result_preview
 from imp.agents.loop_items import (
     AwaitingToolResults,
+    DependencyWaited,
     EndOfTurn,
     Error,
     Thinking,
@@ -40,6 +41,10 @@ async def run_agent_loop(
         async for item in session.events():
             if isinstance(item, Error):
                 yield {"type": "error", "payload": item.payload}
+                return
+            if isinstance(item, DependencyWaited):
+                yield {"type": "dependency_wait",
+                       "payload": {"depends_on": list(item.deps)}}
                 return
             if isinstance(item, Thinking):
                 session.elog.append(agent_id=session.aid, type="thinking",

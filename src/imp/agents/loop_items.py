@@ -43,7 +43,13 @@ class Error:
     payload: dict[str, Any]
 
 
-Item = Thinking | Warning | ToolRequested | AwaitingToolResults | EndOfTurn | Error
+@dataclass(frozen=True, slots=True)
+class DependencyWaited:
+    deps: tuple[str, ...]
+
+
+Item = (Thinking | Warning | ToolRequested | AwaitingToolResults | EndOfTurn
+        | Error | DependencyWaited)
 
 
 class Session(Protocol):

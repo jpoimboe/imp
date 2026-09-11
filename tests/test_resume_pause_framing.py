@@ -5,6 +5,7 @@ import json
 
 from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
+    RESUME_DEPENDENCY_NUDGE,
     RESUME_DURABILITY_NOTE,
     RESUME_RETRY_NUDGE,
     _synthetic_tool_result_content,
@@ -83,6 +84,19 @@ def test_retry_note_frames_a_provider_failure_not_a_human_pause() -> None:
     assert "nothing failed." not in RESUME_RETRY_NUDGE
 
 
+def test_dependency_note_frames_a_finished_wait_not_a_pause_or_a_failure() -> None:
+    assert RESUME_DEPENDENCY_NUDGE == (
+        "The quest this step was waiting on has finished, so the run is resuming — "
+        "nothing failed. Retry the action that was waiting and continue the step from "
+        "there, then call `complete_step` when it is done. Do not ask the user how to "
+        "proceed unless you genuinely need input you do not already have."
+    )
+    # Cross-framing guards, as on the retry note: nothing was paused, nothing failed.
+    assert "The run was paused" not in RESUME_DEPENDENCY_NUDGE
+    assert "The previous provider call failed" not in RESUME_DEPENDENCY_NUDGE
+
+
 def test_continuation_nudge_selects_the_note_by_cause() -> None:
     assert continuation_nudge("human") == RESUME_CONTINUE_NUDGE
     assert continuation_nudge("provider_retry") == RESUME_RETRY_NUDGE
+    assert continuation_nudge("dependency") == RESUME_DEPENDENCY_NUDGE

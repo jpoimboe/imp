@@ -41,7 +41,11 @@ from imp.agents.timeouts import (
     PROCESS_KILL_GRACE_S,
     PROVIDER_REQUEST_SILENCE_CEILING_S,
 )
-from imp.agents.transcript import RESUME_CONTINUE_NUDGE, RESUME_RETRY_NUDGE
+from imp.agents.transcript import (
+    RESUME_CONTINUE_NUDGE,
+    RESUME_DEPENDENCY_NUDGE,
+    RESUME_RETRY_NUDGE,
+)
 from imp.assets import engine_prompt
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
@@ -161,6 +165,9 @@ class AgentRunResult:
     # seeded from it; dispatch_task hands it back to the parent. None on every
     # other outcome.
     handoff_path: str | None = None
+    # Unmerged dependency ids reported by create_and_enter_worktree through the
+    # terminal dependency_wait event; the executor waits on them and re-enters.
+    dependency_wait: tuple[str, ...] = ()
 
 
 class SubagentSuspended(Exception):
@@ -341,8 +348,12 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
 
 
 def continuation_nudge(cause: ResumeCause) -> str:
-    """The resume-continuation copy for `cause`: a provider retry is not a pause."""
-    return RESUME_RETRY_NUDGE if cause == "provider_retry" else RESUME_CONTINUE_NUDGE
+    """The resume-continuation copy for `cause`: a retry or dependency wait is not a pause."""
+    if cause == "provider_retry":
+        return RESUME_RETRY_NUDGE
+    if cause == "dependency":
+        return RESUME_DEPENDENCY_NUDGE
+    return RESUME_CONTINUE_NUDGE
 
 
 async def _resolve_wait_reply(
@@ -726,6 +737,14 @@ async def drive_invocation(
                             fatal=False, delay=None,
                             handoff_path=(event.get("payload") or {}).get(
                                 "handoff_path"))
+                    if event["type"] == "dependency_wait":
+                        # Control signal like handoff, not a logged event: the
+                        # finally below closes the call before the engine waits.
+                        return AgentRunResult(
+                            output=None, errored=False, paused=False,
+                            fatal=False, delay=None,
+                            dependency_wait=tuple(
+                                (event.get("payload") or {}).get("depends_on", ())))
                     if emit_events and log is not None:
                         log.append(agent_id=invocation.agent_id,
                                    type=event["type"],

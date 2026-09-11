@@ -64,6 +64,13 @@ RESUME_RETRY_NUDGE = (
     "do not already have."
 )
 
+RESUME_DEPENDENCY_NUDGE = (
+    "The quest this step was waiting on has finished, so the run is resuming — "
+    "nothing failed. Retry the action that was waiting and continue the step from "
+    "there, then call `complete_step` when it is done. Do not ask the user how to "
+    "proceed unless you genuinely need input you do not already have."
+)
+
 # Injected once onto every synthesized resume turn. On resume the transcript is
 # replayed to the provider, and reconstructed tool_results can surface to the
 # model as errors ("internal error") even when the original action succeeded —
