@@ -1,16 +1,22 @@
 ---
 name: autosquash-resolve
 label: resolving fixups
-description: Resolve a mid-flight fixup!-fold rebase conflict so the fold preserves the pre-autosquash tree, then drive the rebase to completion.
+description: Make the end-of-quest fixup! fold reproduce the pre-autosquash tree — resolving a conflicted rebase, or repairing a fold that silently changed content.
 output:
   status: {type: enum, values: [Success, Error]}
   summary: {type: string}
 ---
 
-A `git rebase -i --autosquash` is in progress: autosquash was folding a
-`fixup!`/`squash!`/`amend!` commit into its target and hit a conflict. Resolve the
-conflict(s) and drive the rebase to completion. Pure git only — no project build or
-test tooling.
+`cleanup.sh` could not fold this quest's `fixup!`/`squash!`/`amend!` commits without
+changing content. You are in one of two shapes — `git status` tells you which:
+
+- **Conflicted fold** — a `git rebase -i --autosquash` is still in progress. Resolve
+  the conflicts and drive it to completion.
+- **Silent divergence** — no rebase is in progress; the fold finished cleanly, but the
+  tree moved. A `fixup!` is mis-targeted: one of its hunks repairs a line a *later*
+  commit introduced, so hoisting it above that commit applies the change twice.
+
+Pure git only — no project build or test tooling.
 
 {% include "partials/coding-stance.md" %}
 
@@ -26,7 +32,7 @@ the rebase finishes, `git rev-parse HEAD^{tree}` MUST equal the pre-autosquash t
 Re-entry of `cleanup.sh` checks this byte-for-byte. Resolve every conflict toward the
 content the pre-autosquash branch already had.
 
-## Procedure
+## Procedure — conflicted fold
 
 1. Orient: `git status` and `git diff`.
 2. For each conflicted path, resolve the markers to match the pre-autosquash tree. Read
@@ -39,10 +45,33 @@ content the pre-autosquash branch already had.
 5. **Repeat 1–4 until the rebase is fully complete** — `git status` must no longer
    report a rebase in progress.
 
+## Procedure — silent divergence
+
+1. See what moved:
+
+       git diff "$(cat {{ quest.home }}/state/autosquash-before-tree)" 'HEAD^{tree}'
+
+2. Reset to the pre-fold branch:
+
+       git reset --hard "$(cat {{ quest.home }}/state/autosquash-before-head)"
+
+3. Name the culprit: with FORK=$(cat {{ quest.home }}/state/autosquash-fork),
+   `git log -S'<divergent line>' "$FORK"..HEAD` names both the `fixup!` and the commit
+   that actually owns the line.
+4. Re-target it — reword the `fixup!` subject to the owning commit, or split the
+   offending hunk into its own `fixup! <owning subject>` commit.
+5. Re-fold:
+
+       GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$FORK"
+
+6. Repeat until no `fixup!` remains and `HEAD^{tree}` matches the pre-autosquash tree.
+
 ## Do not
 
-- **Do not** `git rebase --abort` and **do not** `git rebase --skip` — both fail
-  verification.
+- **Do not** `git rebase --abort` and **do not** `git rebase --skip` a rebase in
+  progress — both fail verification.
+- **Do not** paper over a divergence with a corrective commit at the tip — fix the
+  commit that is wrong.
 - **Do not** introduce new content or "improve" anything.
 
 ## Before finishing

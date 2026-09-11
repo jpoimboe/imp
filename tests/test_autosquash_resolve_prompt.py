@@ -1,6 +1,7 @@
 """Contract for the autosquash-resolve agent prompt: it must name its terminal
-complete_step, point at the tree oracle, instruct to drive the rebase to completion,
-and forbid aborting/skipping (which would fail the verify gate)."""
+complete_step, point at the tree oracle, carry both entry modes (conflicted fold and
+silent divergence), instruct to drive the rebase to completion, and forbid
+aborting/skipping (which would fail the verify gate)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,6 +23,9 @@ PROMPT = Path("src/imp/assets/workflows/default/agents/autosquash-resolve.md")
     ("autosquash-before-head", False), # names the per-path content oracle
     ("Error", False),                  # honest error reporting: status Error when unable
     ("cannot", True),                  # honest error reporting: names inability
+    ("autosquash-fork", False),        # names the fold-range sentinel
+    ("mis-targeted", False),           # names the silent-divergence cause
+    ("reset --hard", False),           # the divergence repair: back to the pre-fold head
 ])
 def test_autosquash_resolve_prompt_contract(needle: str, case_fold: bool) -> None:
     text = PROMPT.read_text()
