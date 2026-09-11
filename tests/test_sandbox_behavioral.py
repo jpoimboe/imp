@@ -21,9 +21,11 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -3138,4 +3140,123 @@ def test_killing_the_ns_init_under_a_joined_session_ends_it_like_an_eof() -> Non
         screen = _drive_joined(ctx, _drive)
         assert screen.splitlines()[0] == "[stopped: exit=SIGKILL]", screen
     finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# AC5/AC6: read-only floor read-through and session-socket reachability
+# ---------------------------------------------------------------------------
+
+_SOCK_CLIENT = (
+    "import socket, sys\n"
+    "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+    "s.connect(sys.argv[1])\n"
+    "s.sendall(b'ping')\n"
+    "print(s.recv(16).decode())\n"
+)
+
+
+def _echo_once(path: Path, ready: threading.Event) -> None:
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.listen(1)
+    srv.settimeout(60.0)     # generous: only a genuine hang should ever trip it
+    ready.set()
+    try:
+        conn, _ = srv.accept()
+        with conn:
+            conn.recv(64)
+            conn.sendall(b"pong")
+    except OSError:
+        pass
+    finally:
+        srv.close()
+
+
+def test_uncovered_tmp_path_is_readable_but_not_writable() -> None:
+    """AC5: a host file no bind covers — a sibling of the scratch dir, the same
+    shape as any /tmp/<name> — is still readable inside the sandbox through the
+    --ro-bind / / floor, via bash and via the in-process read_file tool, while a
+    write to it is refused."""
+    root = _make_root()
+    parent = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    victim = parent / f"host-{uuid.uuid4().hex[:8]}.txt"
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        victim.write_text("host-side content\n")
+        pol = _active_policy(root, quest_tmp_dir=str(scratch))
+        ctx = _ctx(root, pol)
+
+        r = _bash(ctx, f"cat {shlex.quote(str(victim))}")
+        assert r["returncode"] == 0, r
+        assert "host-side content" in r["stdout"]
+
+        async def _read() -> str:
+            return await get_registry()["read_file"].async_invoke(
+                ctx, {"path": str(victim)})
+        assert "host-side content" in anyio.run(_read)
+
+        w = _bash(ctx, f"echo nope > {shlex.quote(str(victim))}")
+        assert w["returncode"] != 0, w
+        assert "Read-only file system" in str(w["stderr"]), w
+        assert victim.read_text() == "host-side content\n"
+    finally:
+        victim.unlink(missing_ok=True)
+        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_session_socket_shape_round_trips_from_inside_the_namespace() -> None:
+    """AC6(a): the per-quest session socket sits at <tmp>/imp-<uid>/<id>.sock, on the
+    read-only floor inside the namespace. connect() across a read-only mount is
+    permitted, so a round-trip works — including for a socket the host binds AFTER
+    the keeper namespace already exists."""
+    root = _make_root()
+    parent = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    sock = parent / f"{uuid.uuid4().hex[:8]}.sock"
+    ready = threading.Event()
+    thread: threading.Thread | None = None
+    try:
+        pol = _active_policy(root, quest_tmp_dir=str(scratch))
+        ctx = _ctx(root, pol)
+        # Open the keeper namespace FIRST, so the socket is bound after it exists.
+        warm = _bash(ctx, "echo warm")
+        assert warm["returncode"] == 0, warm
+
+        parent.mkdir(parents=True, exist_ok=True)
+        thread = threading.Thread(target=_echo_once, args=(sock, ready), daemon=True)
+        thread.start()
+        assert ready.wait(60.0), "host echo server never bound its socket"
+
+        r = _bash(ctx, f"{shlex.quote(sys.executable)} -c {shlex.quote(_SOCK_CLIENT)} "
+                       f"{shlex.quote(str(sock))}")
+        assert r["returncode"] == 0, r
+        assert "pong" in r["stdout"], r
+    finally:
+        if thread is not None:
+            thread.join(timeout=10.0)
+        sock.unlink(missing_ok=True)
+        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.skipif(
+    not os.access("/tmp", os.W_OK),
+    reason="host /tmp is not writable here (the suite is already running sandboxed)")
+def test_literal_slash_tmp_file_is_readable_inside_the_sandbox() -> None:
+    """AC5, the literal case: a pre-existing file at /tmp/<name> on the host stays
+    readable inside the sandbox even though /tmp is no longer bound rw."""
+    root = _make_root()
+    victim = Path("/tmp") / f"beh-ro-{uuid.uuid4().hex[:8]}.txt"
+    try:
+        victim.write_text("dropped by the user\n")
+        pol = _active_policy(root)
+        ctx = _ctx(root, pol)
+        r = _bash(ctx, f"cat {shlex.quote(str(victim))}")
+        assert r["returncode"] == 0, r
+        assert "dropped by the user" in r["stdout"]
+    finally:
+        victim.unlink(missing_ok=True)
         shutil.rmtree(root, ignore_errors=True)
