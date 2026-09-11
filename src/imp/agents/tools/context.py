@@ -696,8 +696,7 @@ def attach_impty_driver(ctx: ToolContext, *, journal_dir: Path) -> ImptyDriver:
     stderr.log, which is masked from agents, reaped with the quest and never
     harvested into the artifact ref. Snapshots instead go to <quest_dir>/snapshots
     in the quest state dir, since read_file must still reach the PNG path returned
-    — and to the system temp dir on a context with no quest (the detached-agent
-    path)."""
+    — and to the system temp dir on a context with no quest."""
     from impty.driver import ImptyDriver
 
     quest_dir = tool_quest_dir(ctx)

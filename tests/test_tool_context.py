@@ -1231,8 +1231,8 @@ def test_the_attached_driver_journals_into_the_step_dir_and_snapshots_into_the_q
 
 
 def test_a_context_with_no_quest_dir_gets_no_snapshot_dir(tmp_path: Path) -> None:
-    # The detached-agent path builds a QuestContext with neither quest_dir nor
-    # quest_home, so tool_quest_dir yields None. That is the snapshot_dir=None the
+    # A QuestContext with neither quest_dir nor quest_home — a run outside a quest —
+    # makes tool_quest_dir yield None. That is the snapshot_dir=None the
     # driver already models (temp-file snapshots), not a new case — and not a raise.
     from imp.agents.runner import QuestContext
     from imp.agents.tools.context import attach_impty_driver, tool_quest_dir
