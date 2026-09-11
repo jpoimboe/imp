@@ -1115,10 +1115,14 @@ def test_interrupt_marker_repair_prefers_captured_result(tmp_path: Path) -> None
     assert reloaded == msgs
 
 
-def test_interrupt_marker_repair_appends_durability_note_even_all_captured_success(
+def test_interrupt_marker_repair_drops_the_note_when_every_result_is_recovered(
     tmp_path: Path,
 ) -> None:
-    """Note always appended — unlike repair_dangling_tool_use_on_resume's all-success gate."""
+    """Parity with repair_dangling_tool_use_on_resume's all-success gate: the note's
+    "may display as errors even when the original action succeeded" hedge exists to
+    frame reconstructed, error-shaped blocks. When every restated result is a success
+    imp itself recorded, the hedge only teaches the model to distrust the
+    authoritative record."""
     from imp.agents.transcript import captured_result_key
 
     done1 = ToolUseBlock(id="w1", name="mcp__imp__write_file",
@@ -1136,8 +1140,55 @@ def test_interrupt_marker_repair_appends_durability_note_even_all_captured_succe
     repair_interrupt_marker_on_resume(msgs, t, captured=captured)
 
     by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
-    assert by_id["w1"].is_error is False
-    assert by_id["w2"].is_error is False
+    assert by_id["w1"].content == "wrote a.py" and by_id["w1"].is_error is False
+    assert by_id["w2"].content == "wrote b.py" and by_id["w2"].is_error is False
+    assert not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+                   for b in msgs[-1].content)
+    # Survives the rewrite — this is what gets replayed to the model on resume.
+    assert Transcript(tmp_path / "transcript.jsonl").load() == msgs
+
+
+def test_interrupt_marker_repair_keeps_the_note_when_a_result_is_unrecovered(
+    tmp_path: Path,
+) -> None:
+    """One reconstructed block is enough to earn the hedge: the bash result here is
+    the synthetic interrupted body, which really may misrepresent what happened."""
+    from imp.agents.transcript import captured_result_key
+
+    done = ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                        input={"path": "a.py", "content": "X"})
+    killed = ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "x"})
+    msgs, t = _interrupt_tail(tmp_path, done, killed)
+    captured = {
+        captured_result_key("write_file", {"path": "a.py", "content": "X"}):
+            ("wrote 42 bytes to a.py", False),
+    }
+
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+
+    assert msgs[-1].content[-1] == TextBlock(text=RESUME_DURABILITY_NOTE)
+
+
+def test_interrupt_marker_repair_keeps_the_note_when_a_recovered_result_failed(
+    tmp_path: Path,
+) -> None:
+    """The gate is recovered-SUCCESS, not merely recovered — exactly
+    _all_captured_success's rule: a captured failure leaves the turn error-shaped, so
+    the framing stays."""
+    from imp.agents.transcript import captured_result_key
+
+    done = ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                        input={"path": "a.py", "content": "X"})
+    msgs, t = _interrupt_tail(tmp_path, done)
+    captured = {
+        captured_result_key("write_file", {"path": "a.py", "content": "X"}):
+            ("PermissionError: denied", True),
+    }
+
+    repair_interrupt_marker_on_resume(msgs, t, captured=captured)
+
+    by_id = {b.tool_use_id: b for b in msgs[-1].content if isinstance(b, ToolResultBlock)}
+    assert by_id["w1"].is_error is True
     assert msgs[-1].content[-1] == TextBlock(text=RESUME_DURABILITY_NOTE)
 
 

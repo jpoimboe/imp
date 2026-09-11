@@ -349,6 +349,9 @@ def repair_interrupt_marker_on_resume(
     interruption — from `captured` when the call really completed, else the synthetic
     body — then rewrite the transcript. Journals nothing: the pause already recorded
     these results in the event log, so a second entry would falsify it.
+
+    The durability note is appended unless every restated result was recovered from
+    `captured` as a success, matching repair_dangling_tool_use_on_resume.
     """
     if len(messages) < 2 or not _is_interrupt_marker(messages[-1]):
         return
@@ -365,24 +368,32 @@ def repair_interrupt_marker_on_resume(
         for b in m.content if isinstance(b, ToolUseBlock)
     }
     blocks: list[ContentBlock] = []
+    restated_any = False
+    all_recovered = True
     for b in target.content:
         # A real failure's text is lost — only successes are captured; a re-run resurfaces it.
         if isinstance(b, ToolResultBlock) and b.is_error:
+            restated_any = True
             tu = tool_uses.get(b.tool_use_id)
             hit = (captured.get(captured_result_key(tu.name, tu.input))
                    if tu is not None and captured is not None else None)
             if hit is not None:
                 blocks.append(ToolResultBlock(
                     tool_use_id=b.tool_use_id, content=hit[0], is_error=hit[1]))
+                if hit[1]:
+                    all_recovered = False
             else:
+                all_recovered = False
                 blocks.append(ToolResultBlock(
                     tool_use_id=b.tool_use_id,
                     content=_synthetic_tool_result_content(tu.name if tu is not None else ""),
                     is_error=True))
         else:
             blocks.append(b)
-    if not any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
-               for b in blocks):
+    # Same gate as _all_captured_success: hedging a recovered success argues against imp's record.
+    if not (restated_any and all_recovered) and not any(
+            isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+            for b in blocks):
         blocks.append(TextBlock(text=RESUME_DURABILITY_NOTE))
     messages[-2:] = [Message(role="user", content=tuple(blocks))]
     transcript.rewrite(messages)
