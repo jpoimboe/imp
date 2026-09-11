@@ -88,6 +88,16 @@ def _make_root(prefix: str = "imp-test-beh-") -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix))
 
 
+def _scratch_parent() -> Path:
+    """A throwaway `<tmp>/imp-<uid>` scratch parent, unique per test.
+
+    Same shape as the real one, but never the shared `<tmp>/imp-<uid>` — that one
+    holds every live quest's scratch dir and sockets, and sibling tests running
+    concurrently under `-n auto` would collide in it.
+    """
+    return Path(tempfile.mkdtemp(prefix="imp-beh-tmp-")) / f"imp-{os.getuid()}"
+
+
 def _active_policy(worktree: Path, *, home: Path | None = None,
                    secret_dirs: tuple[str, ...] = (),
                    quest_tmp_dir: str = "") -> SandboxPolicy:
@@ -418,8 +428,8 @@ def test_scratch_dir_writable_and_persists_across_calls() -> None:
     is writable, persists between bash invocations on the same ctx/policy, and the
     bytes land on the host at that same path."""
     root = _make_root()
-    scratch = (Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
-               / f"beh{uuid.uuid4().hex[:8]}")
+    parent = _scratch_parent()
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
     try:
         pol = _active_policy(root, quest_tmp_dir=str(scratch))
         ctx = _ctx(root, pol)
@@ -436,7 +446,7 @@ def test_scratch_dir_writable_and_persists_across_calls() -> None:
         # ...and it is the real host path, not a private namespace copy.
         assert (scratch / "x").read_text().strip() == "scratch-marker"
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -1868,11 +1878,11 @@ def test_scratch_dir_selfheals_0o700_from_a_missing_parent() -> None:
     prepare_spawn_policy recreates parent and leaf 0o700 whatever the ambient umask
     (mkdir(mode=) would set only the leaf)."""
     root = _make_root()
-    parent = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
+    parent = _scratch_parent()   # unique root: the imp-<uid> parent does not exist yet
     scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
     old_umask = os.umask(0)
     try:
-        shutil.rmtree(parent, ignore_errors=True)
+        assert not parent.exists()
         pol = _active_policy(root, quest_tmp_dir=str(scratch))
         ctx = _ctx(root, pol)
         r = _bash(ctx, 'echo ok > "$TMPDIR/probe" && echo done')
@@ -1882,7 +1892,7 @@ def test_scratch_dir_selfheals_0o700_from_a_missing_parent() -> None:
         assert parent.stat().st_mode & 0o777 == 0o700
     finally:
         os.umask(old_umask)
-        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -3179,7 +3189,7 @@ def test_uncovered_tmp_path_is_readable_but_not_writable() -> None:
     --ro-bind / / floor, via bash and via the in-process read_file tool, while a
     write to it is refused."""
     root = _make_root()
-    parent = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
+    parent = _scratch_parent()
     scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
     victim = parent / f"host-{uuid.uuid4().hex[:8]}.txt"
     try:
@@ -3202,8 +3212,7 @@ def test_uncovered_tmp_path_is_readable_but_not_writable() -> None:
         assert "Read-only file system" in str(w["stderr"]), w
         assert victim.read_text() == "host-side content\n"
     finally:
-        victim.unlink(missing_ok=True)
-        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -3213,7 +3222,7 @@ def test_session_socket_shape_round_trips_from_inside_the_namespace() -> None:
     permitted, so a round-trip works — including for a socket the host binds AFTER
     the keeper namespace already exists."""
     root = _make_root()
-    parent = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
+    parent = _scratch_parent()
     scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
     sock = parent / f"{uuid.uuid4().hex[:8]}.sock"
     ready = threading.Event()
@@ -3237,8 +3246,7 @@ def test_session_socket_shape_round_trips_from_inside_the_namespace() -> None:
     finally:
         if thread is not None:
             thread.join(timeout=10.0)
-        sock.unlink(missing_ok=True)
-        shutil.rmtree(scratch, ignore_errors=True)
+        shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
 
 
