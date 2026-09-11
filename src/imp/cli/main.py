@@ -1665,6 +1665,8 @@ async def _resume_inert(
     from imp.cli.inert_resume import make_buffered_solicit, render_inert_question, run_inert_resume
     from imp.cli.live_driver import compose_prelaunch_position_row
     from imp.cli.live_status import LiveStatus
+    from imp.cli.narrative import carrier_from_events
+    from imp.cli.render_summary import build_summary, summary_totals
     from imp.cli.session_run import make_interactive_solicit, run_session_client
     from imp.cli.signals import InterruptCoordinator
     from imp.cli.terminal_title import TerminalTitle
@@ -1676,12 +1678,15 @@ async def _resume_inert(
     term_title = TerminalTitle(watched, quest.id, quest.title, initial="idle",
                                project=quest.control_root.name)
     state = State.load(quest.state_dir)
+    events = list(quest.event_log().read())
+    _work, cost = summary_totals(build_summary(events), None)
     phase_head, _sep, plan_tail = (state.phase_label or "").partition(" · ")
     toolbar_row = compose_prelaunch_position_row(
         phase=phase_head or None, plan=plan_tail or None,
         step_label=state.step_label, model=_prelaunch_position_model(quest, state),
         quest_id=quest.id, title=quest.title, project=quest.control_root.name,
-        color=color, width=_term_width(), unsandboxed=state.unsandboxed)
+        color=color, width=_term_width(), unsandboxed=state.unsandboxed,
+        carrier=carrier_from_events(events), cost=cost)
     _print_resume_opening(quest, marker, notice, color=color)
     question = render_inert_question(question, width=_term_width(), color=color)
 

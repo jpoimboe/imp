@@ -306,15 +306,19 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
 def compose_prelaunch_position_row(
     *, phase: str | None, plan: str | None, step_label: str | None,
     model: str | None, quest_id: str | None, title: str,
-    color: bool, width: int, unsandboxed: bool = False, project: str = "",
+    color: bool, width: int, carrier: nv.Carrier | None,
+    cost: RowUsage | None, unsandboxed: bool = False, project: str = "",
 ) -> str:
-    """Pre-launch position row for the inert-resume prompt (no context-usage bar)."""
+    """Pre-launch position row for the inert-resume prompt (no context-usage bar).
+    Its carrier and quest total come from the parked quest's event log, there being
+    no live builder behind this surface."""
     activity = nv.Activity(
         phase=phase, plan=plan, counter=step_label, model=model,
         kind=None, lane_wait=False)
     return compose_position_row(
         activity=activity, quest_id=quest_id, title=title, project=project,
-        prompt_tokens=None, color=color, width=width, unsandboxed=unsandboxed)
+        prompt_tokens=None, color=color, width=width, unsandboxed=unsandboxed,
+        carrier=carrier, cost=cost)
 
 
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,

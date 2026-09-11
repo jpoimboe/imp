@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 import imp.cli.main as m
 import imp.cli.signals as sig
+from imp.cli.render_summary import build_summary, summary_totals
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.providers.quota import QuotaReading, QuotaWindow
+from tests._event_fixtures import ev
 from tests.conftest import _branch_with_commit, _seed_control
 
 
@@ -598,3 +603,116 @@ async def test_inert_resume_hands_quest_base_to_clear_loop(
 
     assert rc == 0
     assert seen["base"] == "topic"          # quest.base_branch, not the checkout
+
+
+_WINDOWS = "session 62% (3h left) · week 7% (5d left)"
+
+
+def _log(ch: Quest, *events: dict[str, Any]) -> list[dict[str, Any]]:
+    """Journal `events` into the quest's real log; return the log as read back."""
+    log = ch.event_log()
+    for e in events:
+        log.append(agent_id=e["agent_id"], type=e["type"], payload=e["payload"])
+    return list(ch.event_log().read())
+
+
+def _future_reading() -> QuotaReading:
+    """Resets 3h and ~5d out, sat mid-bucket: 30 minutes of margin before the
+    session window would coarsen to `2h` and ~11h before the weekly one reads
+    `4d`, so a run stalled under load still renders the same countdown."""
+    now = int(time.time())
+    return QuotaReading(provider="claude_code", plan=None,
+                        windows=(QuotaWindow("5h", 62.0, now + 10_800),
+                                 QuotaWindow("7d", 7.0, now + 430_000)),
+                        raw={})
+
+
+def _cc_turn(**payload: Any) -> dict[str, Any]:
+    """A step-level claude_code turn. Its usage prices nothing, so any dollars on
+    the row could only have come from somewhere else."""
+    return ev("m1", "agent_message", agent_id="step:p/s", provider="claude_code",
+              model="claude-opus-5", stop_reason="end_turn",
+              raw={"content": [{"type": "text", "text": "done"}]}, usage={},
+              **payload)
+
+
+async def _inert_toolbar(monkeypatch: pytest.MonkeyPatch, ch: Quest, *,
+                         width: int = 200) -> str:
+    """Run _resume_inert far enough to capture the prelaunch row it composed."""
+    captured: dict[str, object] = {}
+
+    async def _cap_ask(quest: Quest, *, toolbar: str | None = None) -> None:
+        captured["toolbar"] = toolbar
+        return None
+
+    async def _fake_run_inert(*, question: str, ask_line: Any,
+                              launch: Any) -> int:
+        await ask_line()
+        return 0
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: width)
+    monkeypatch.setattr(m, "_inert_ask_line", _cap_ask)
+    monkeypatch.setattr("imp.cli.inert_resume.run_inert_resume", _fake_run_inert)
+
+    rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming",
+                               notice=None)
+    assert rc == 0
+    row = captured["toolbar"]
+    assert isinstance(row, str)
+    return row
+
+
+# AC 10(a)
+@pytest.mark.anyio
+async def test_the_inert_row_carries_the_logged_providers_quota(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    reading = _future_reading()
+    _log(ch, _cc_turn(auth_mode="subscription"),
+         ev("q1", "quota_reading", agent_id="step:p/s", **reading.to_payload()))
+
+    row = await _inert_toolbar(monkeypatch, ch)
+
+    assert row.startswith(f"{tmp_path.name} · c · C")   # left group unchanged
+    assert row.endswith(f"claude_code · {_WINDOWS}")
+
+
+# AC 10(b)
+@pytest.mark.anyio
+async def test_the_inert_row_carries_the_quests_dollars_when_metered(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    events = _log(
+        ch,
+        ev("s1", "step_started", step="s", kind="agent", phase="p",
+           model="claude-opus-5", provider="anthropic"),
+        ev("m1", "agent_message", agent_id="step:p/s", provider="anthropic",
+           model="claude-opus-5", stop_reason="end_turn",
+           raw={"content": [{"type": "text", "text": "done"}]},
+           usage={"input_tokens": 120000, "output_tokens": 9000}))
+    total = summary_totals(build_summary(events), None)[1]
+    assert total.priced == 1 and total.dollars > 0   # anthropic states no auth_mode
+
+    row = await _inert_toolbar(monkeypatch, ch)
+
+    # The parked row and the summary report one figure, by one computation.
+    assert row.endswith(f" ${total.dollars:.2f}")
+    assert "session" not in row and "anthropic" not in row
+
+
+# AC 10(c), AC 11
+@pytest.mark.anyio
+async def test_the_inert_row_stays_bare_without_a_reading_or_a_priced_turn(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    bare = f"{tmp_path.name} · c · C"
+    # A log holding neither a turn nor a reading: today's row, byte for byte.
+    assert await _inert_toolbar(monkeypatch, ch) == bare
+
+    # A claude_code turn prices nothing and states no reading: a carrier now
+    # exists, and there is still no group and no placeholder standing in for it.
+    _log(ch, _cc_turn(auth_mode="subscription"))
+    row = await _inert_toolbar(monkeypatch, ch)
+    assert row == bare
+    assert "n/a" not in row and "—" not in row
