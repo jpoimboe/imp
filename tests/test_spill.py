@@ -1,6 +1,7 @@
 # tests/test_spill.py
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from imp.agents.tools import limits
@@ -106,3 +107,33 @@ def test_over_cap_preview_never_splits_a_multibyte_char(tmp_path: Path) -> None:
     assert len(preview.encode("utf-8")) <= 2_000
     assert result.encode("utf-8").startswith(preview.encode("utf-8"))
     assert preview == "a" * 1_999                 # the partial char is dropped
+
+
+def _dispatch_task_call_sites() -> dict[str, tuple[list[int], list[int]]]:
+    """src/imp modules calling dispatch_task -> (call linenos, wrap_task_result linenos)."""
+    def _calls(tree: ast.AST, name: str) -> list[int]:
+        return [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Call)
+                and ((isinstance(n.func, ast.Name) and n.func.id == name)
+                     or (isinstance(n.func, ast.Attribute) and n.func.attr == name))]
+
+    src = Path(__file__).resolve().parents[1] / "src" / "imp"
+    out: dict[str, tuple[list[int], list[int]]] = {}
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        sites = _calls(tree, "dispatch_task")
+        if sites:
+            out[str(path.relative_to(src))] = (sites, _calls(tree, "wrap_task_result"))
+    return out
+
+
+def test_every_dispatch_task_call_site_wraps_its_result() -> None:
+    # AC 9: adding a sub_agent dispatch site without routing its result through
+    # wrap_task_result must fail here. Asserted over the DISCOVERED set of sites,
+    # never a hard-coded total; the floor below only proves the scan sees all three
+    # dispatch paths (anthropic/openai, codex, claude_code).
+    sites = _dispatch_task_call_sites()
+    assert set(sites) >= {"agents/dispatch.py", "providers/codex_mcp.py",
+                          "providers/claude_code.py"}
+    for rel, (calls, wraps) in sites.items():
+        assert len(wraps) >= len(calls), (
+            f"{rel}: {len(calls)} dispatch_task call(s), {len(wraps)} wrap(s)")
