@@ -25,6 +25,7 @@ from imp.providers.codex_rollout import (
 
 _LEGACY_METADATA = "codex_thread.json"
 _LEGACY_ROLLOUT_ROOT = "codex_rollout"
+_HANDOFF_SUFFIX = ".handoff.md"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +47,18 @@ def _entry_exists(path: Path) -> bool:
     return True
 
 
-def _regular_bytes(path: Path) -> bytes:
+def _real_regular_file(path: Path) -> None:
     try:
-        if not stat.S_ISREG(path.lstat().st_mode):
-            raise InvalidResumeState()
+        mode = path.lstat().st_mode
+    except OSError:
+        raise InvalidResumeState() from None
+    if not stat.S_ISREG(mode):
+        raise InvalidResumeState()
+
+
+def _regular_bytes(path: Path) -> bytes:
+    _real_regular_file(path)
+    try:
         return path.read_bytes()
     except OSError:
         raise InvalidResumeState() from None
@@ -214,6 +223,10 @@ def _conversion_plans(
                 phase_dir.iterdir(), key=lambda path: path.name)
             for session_dir in sessions:
                 if ".attempt-" in session_dir.name:
+                    continue
+                if (session_dir.name != _HANDOFF_SUFFIX
+                        and session_dir.name.endswith(_HANDOFF_SUFFIX)):
+                    _real_regular_file(session_dir)
                     continue
                 _real_directory(session_dir)
                 if _entry_exists(session_dir / _LEGACY_METADATA):

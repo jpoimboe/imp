@@ -14,6 +14,7 @@ import pytest
 from imp.engine import durable
 from imp.engine import quest as quest_mod
 from imp.engine.quest import LAYOUT_VERSION, Quest, _migrate_v21_to_v22
+from imp.engine.reincarnation import handoff_path_for
 from imp.engine.resume_state import (
     RESUME_STATE_NAME,
     InvalidResumeState,
@@ -174,6 +175,35 @@ def test_load_migrates_active_sessions_and_preserves_native_identity(
     after_first = _snapshot(quest_dir)
     _migrate_v21_to_v22(quest_dir)
     assert _snapshot(quest_dir) == after_first
+
+
+def test_load_preserves_proactive_handoff_sibling(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    quest_dir = _seed_v21(tmp_path, "preserved-handoff")
+    session = _seed_legacy(quest_dir, "step")
+    handoff = handoff_path_for(session)
+    handoff_bytes = b"# handoff\nContinue the migration.\n"
+    handoff.write_bytes(handoff_bytes)
+
+    Quest.load(tmp_path, "preserved-handoff")
+
+    _assert_converted(session)
+    assert handoff.read_bytes() == handoff_bytes
+    assert _layout_version(quest_dir) == 22
+
+
+def test_unknown_phase_file_is_rejected_without_mutation(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    quest_dir = _seed_v21(tmp_path, "unknown-phase-file")
+    _seed_legacy(quest_dir, "step")
+    (quest_dir / "steps" / "phase" / "unexpected.txt").write_text("unsafe")
+    before = _snapshot(quest_dir)
+
+    with pytest.raises(InvalidResumeState):
+        _migrate_v21_to_v22(quest_dir)
+
+    assert _snapshot(quest_dir) == before
+    assert _layout_version(quest_dir) == 21
 
 
 def test_the_hop_is_registered_and_the_constant_moved() -> None:
