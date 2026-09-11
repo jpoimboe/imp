@@ -726,3 +726,39 @@ def test_dispatch_plain_list_still_json_flattens(tmp_path: Path) -> None:
     out = asyncio.run(dispatch_tool(
         tool=_plain_list_tool(), args={}, ctx=_ctx(tmp_path), state=RunState(cap=10)))
     assert out == "[1, 2, 3]"
+
+
+@pytest.mark.anyio
+async def test_task_result_over_cap_is_spilled_and_recorded_wrapped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 9(b)/AC 10: the codex MCP sub_agent arm wraps its success result, so the
+    # model receives a preview + notice and the tool_result recorded in the event
+    # log is byte-identical to it — never the raw result on one side and the
+    # wrapped one on the other. The full result stays recoverable on disk.
+    ctx, elog = _task_ctx(tmp_path)
+    state = RunState(cap=100, agent_id="step:parent")
+    proc_state: dict[str, Any] = {}
+    big = "C" * 60_000
+
+    async def _fake(
+        ctx2: Any, name: str, desc: str, *, tool_call_event_id: str, tier: Any = None,
+    ) -> str:
+        return big
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    with anyio.fail_after(120):
+        request = asyncio.create_task(call_via_mcp(
+            make_task_tool(), ctx=ctx, state=state, arguments=_TASK_ARGS))
+        await wait_until(lambda: state.task_starts.reserved_count == 1)
+        _process_task_sdk_event(
+            "item.started", elog=elog, state=state, proc_state=proc_state)
+        returned = await request
+
+    assert len(returned) < len(big)                        # previewed, not the 60 KB
+    assert "read with read_file offset=1" in returned
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["content"] == returned    # recorded == returned
+    block_id = results[0]["payload"]["id"]
+    assert (tmp_path / "tool-results" / block_id).read_text(encoding="utf-8") == big

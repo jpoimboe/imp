@@ -41,6 +41,7 @@ from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, suspend_inactivity_watchdog
 from imp.agents.tools.errors import FatalToolError
+from imp.agents.tools.spill import wrap_task_result
 
 # Bypass posture for the codex provider. This is the SAME value the ThreadOptions
 # builder feeds to `approval_policy` (codex_runner._build_thread_options); the task
@@ -262,13 +263,14 @@ async def dispatch_tool(
                 kind="interrupted" if isinstance(exc, asyncio.CancelledError) else None,
             )
             raise
+        wrapped = wrap_task_result(ctx, block_id, result)
         ctx.event_log.append_tool_result(
             agent_id=state.agent_id,
             block=ToolResultBlock(
-                tool_use_id=block_id, content=result, is_error=False),
+                tool_use_id=block_id, content=wrapped, is_error=False),
             id_ns="block",
         )
-        return result
+        return wrapped
     try:
         with suspend_inactivity_watchdog(ctx):
             raw = await tool.async_invoke(ctx, args)
