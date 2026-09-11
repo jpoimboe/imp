@@ -3388,3 +3388,46 @@ def test_the_own_session_socket_resists_rm_from_inside_the_namespace() -> None:
     finally:
         shutil.rmtree(parent.parent, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_own_scratch_dir_survives_the_mask_and_the_step_wipe() -> None:
+    """AC7: under the mask the own scratch dir is the one writable thing in the scratch
+    root, and it stays writable across bash calls in the same namespace AND across a step
+    wipe. _wipe_step_scratch empties the dir IN PLACE; the rw bind pinned that inode at
+    namespace creation, so a wipe that recreated the dir would silently drop every live
+    namespace to the read-only floor — under the mask it would vanish outright."""
+    from imp.engine.executor import _wipe_step_scratch
+
+    root = _make_root()
+    parent = _scratch_parent()
+    scratch = parent / f"beh{uuid.uuid4().hex[:8]}"
+    cred = parent / "other" / "imp-codex-9-deadbeef" / "auth.json"
+    try:
+        cred.parent.mkdir(parents=True, exist_ok=True)
+        cred.write_text("SIBLING_PROVIDER_TOKEN\n")
+        pol = _active_policy(root, quest_tmp_dir=str(scratch),
+                             quest_tmp_mask=str(parent))
+        ctx = _ctx(root, pol)
+
+        # The mask is live in THIS namespace, so everything below is a claim about it.
+        assert _bash(ctx, f"cat {shlex.quote(str(cred))}")["returncode"] != 0
+
+        w1 = _bash(ctx, 'echo inside-marker > "$TMPDIR/from-inside.txt" && echo ok')
+        assert w1["returncode"] == 0, w1
+        assert (scratch / "from-inside.txt").read_text().strip() == "inside-marker"
+
+        w2 = _bash(ctx, 'echo second-call > "$TMPDIR/second.txt" && echo ok')
+        assert w2["returncode"] == 0, w2
+        assert (scratch / "second.txt").read_text().strip() == "second-call"
+
+        _wipe_step_scratch(SimpleNamespace(tmp_dir=scratch))
+        assert list(scratch.iterdir()) == []
+        assert _bash(ctx, 'cat "$TMPDIR/from-inside.txt"')["returncode"] != 0
+
+        # Same keeper namespace, post-wipe: the write still lands on the host dir.
+        w3 = _bash(ctx, 'echo post-wipe > "$TMPDIR/after.txt" && echo ok')
+        assert w3["returncode"] == 0, w3
+        assert (scratch / "after.txt").read_text().strip() == "post-wipe"
+    finally:
+        shutil.rmtree(parent.parent, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
