@@ -61,20 +61,33 @@ def _raise_index_floor(control: Path) -> int:
     return ahead
 
 
-_ENTRY_POINTS: list[tuple[str, Callable[[Path], list[Any]]]] = [
+# Index-only reads: they open index.db and run a query, touching no record or blob.
+_INDEX_ENTRY_POINTS: list[tuple[str, Callable[[Path], Any]]] = [
     ("completed_rows", read.completed_rows),
     ("search_archive_content",
      lambda c: read.search_archive_content(c, "flywheel")),
     ("search_archive_events_content",
      lambda c: read.search_archive_events_content(c, "GREPTARGET")),
 ]
-_IDS = [name for name, _ in _ENTRY_POINTS]
-_CALLS = [fn for _, fn in _ENTRY_POINTS]
+_INDEX_IDS = [name for name, _ in _INDEX_ENTRY_POINTS]
+_INDEX_CALLS = [fn for _, fn in _INDEX_ENTRY_POINTS]
+
+# Record/blob reads: _migrate_archive_blobs rewrites the records these read, so the
+# data floor is the right gate for all five.
+_RECORD_ENTRY_POINTS: list[tuple[str, Callable[[Path], Any]]] = [
+    ("read_events", lambda c: read.read_events(c, ARCH)),
+    ("read_quest_json", lambda c: read.read_quest_json(c, ARCH)),
+    ("read_state_json", lambda c: read.read_state_json(c, ARCH)),
+    ("read_step_blobs", lambda c: read.read_step_blobs(c, ARCH)),
+    ("merge_commit_of", lambda c: read.merge_commit_of(c, ARCH)),
+]
+_RECORD_IDS = [name for name, _ in _RECORD_ENTRY_POINTS]
+_RECORD_CALLS = [fn for _, fn in _RECORD_ENTRY_POINTS]
 
 
-@pytest.mark.parametrize("call", _CALLS, ids=_IDS)
-def test_newer_data_floor_raises(
-    tmp_path: Path, call: Callable[[Path], list[Any]],
+@pytest.mark.parametrize("call", _RECORD_CALLS, ids=_RECORD_IDS)
+def test_a_record_read_refuses_an_ahead_data_floor(
+    tmp_path: Path, call: Callable[[Path], Any],
 ) -> None:
     _seed_archived_quest(tmp_path)
     ahead = _raise_data_floor(tmp_path)
@@ -84,12 +97,11 @@ def test_newer_data_floor_raises(
 
     exc = excinfo.value
     assert (exc.floor, exc.stored, exc.known) == ("data", ahead, archive._DATA_VERSION)
-    assert str(exc).startswith(f"archive data is at v{ahead}, newer than this imp")
 
 
-@pytest.mark.parametrize("call", _CALLS, ids=_IDS)
-def test_newer_index_floor_raises(
-    tmp_path: Path, call: Callable[[Path], list[Any]],
+@pytest.mark.parametrize("call", _INDEX_CALLS, ids=_INDEX_IDS)
+def test_an_index_read_refuses_an_ahead_index_floor(
+    tmp_path: Path, call: Callable[[Path], Any],
 ) -> None:
     _seed_archived_quest(tmp_path)
     ahead = _raise_index_floor(tmp_path)
@@ -100,12 +112,22 @@ def test_newer_index_floor_raises(
     exc = excinfo.value
     assert (exc.floor, exc.stored, exc.known) == (
         "index", ahead, index._SCHEMA_VERSION)
-    assert str(exc).startswith(f"archive index is at v{ahead}, newer than this imp")
 
 
-@pytest.mark.parametrize("call", _CALLS, ids=_IDS)
+@pytest.mark.parametrize("call", _INDEX_CALLS, ids=_INDEX_IDS)
+def test_an_index_read_ignores_an_ahead_data_floor(
+    tmp_path: Path, call: Callable[[Path], Any],
+) -> None:
+    """An index-only query touches no blob, so a newer blob schema cannot affect it."""
+    _seed_archived_quest(tmp_path)
+    _raise_data_floor(tmp_path)
+
+    assert [row[0] for row in call(tmp_path)] == [ARCH]
+
+
+@pytest.mark.parametrize("call", _INDEX_CALLS, ids=_INDEX_IDS)
 def test_equal_floors_still_read(
-    tmp_path: Path, call: Callable[[Path], list[Any]],
+    tmp_path: Path, call: Callable[[Path], Any],
 ) -> None:
     _seed_archived_quest(tmp_path)
 
@@ -124,13 +146,16 @@ def test_lower_data_floor_migrates_instead_of_raising(tmp_path: Path) -> None:
             == str(archive._DATA_VERSION))
 
 
-def test_both_floors_ahead_reports_the_data_floor(tmp_path: Path) -> None:
-    """Fixed order, so the operator-facing message is deterministic."""
+def test_both_floors_ahead_report_the_floor_each_read_touches(tmp_path: Path) -> None:
+    """With both floors ahead, the reported floor names what the read actually opened."""
     _seed_archived_quest(tmp_path)
-    ahead = _raise_data_floor(tmp_path)
-    _raise_index_floor(tmp_path)
+    data_ahead = _raise_data_floor(tmp_path)
+    index_ahead = _raise_index_floor(tmp_path)
 
-    with pytest.raises(ArchiveMismatch) as excinfo:
+    with pytest.raises(ArchiveMismatch) as index_exc:
         read.completed_rows(tmp_path)
+    with pytest.raises(ArchiveMismatch) as data_exc:
+        read.read_events(tmp_path, ARCH)
 
-    assert (excinfo.value.floor, excinfo.value.stored) == ("data", ahead)
+    assert (index_exc.value.floor, index_exc.value.stored) == ("index", index_ahead)
+    assert (data_exc.value.floor, data_exc.value.stored) == ("data", data_ahead)

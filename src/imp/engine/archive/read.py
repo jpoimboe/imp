@@ -10,7 +10,8 @@ from pathlib import Path
 
 from imp.engine.archive import (
     blobs_root,
-    check_floors,
+    check_data_floor,
+    check_index_floor,
     ensure_current,
     index,
     index_path,
@@ -50,7 +51,7 @@ def is_archived(control_root: Path, quest_id: str) -> bool:
 def completed_rows(
     control_root: Path,
 ) -> list[tuple[str, str, str, str, str, str, str | None]]:
-    check_floors(control_root)
+    check_index_floor(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
@@ -65,7 +66,7 @@ def completed_rows(
 def search_archive_content(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str, str | None]]:
-    check_floors(control_root)
+    check_index_floor(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
@@ -80,7 +81,7 @@ def search_archive_content(
 def search_archive_events_content(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str | None]]:
-    check_floors(control_root)
+    check_index_floor(control_root)
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
@@ -93,6 +94,7 @@ def search_archive_events_content(
 
 
 def read_events(control_root: Path, quest_id: str) -> bytes | None:
+    check_data_floor(control_root)
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return None
@@ -102,6 +104,7 @@ def read_events(control_root: Path, quest_id: str) -> bytes | None:
 def read_step_blobs(control_root: Path, quest_id: str) -> dict[str, bytes]:
     """Steps-relative path -> blob bytes for an archived resumable quest.
     Empty when the quest is absent or recorded no step blobs."""
+    check_data_floor(control_root)
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return {}
@@ -115,6 +118,7 @@ def read_step_blobs(control_root: Path, quest_id: str) -> dict[str, bytes]:
 
 
 def read_state_json(control_root: Path, quest_id: str) -> bytes | None:
+    check_data_floor(control_root)
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return None
@@ -123,6 +127,7 @@ def read_state_json(control_root: Path, quest_id: str) -> bytes | None:
 
 def merge_commit_of(control_root: Path, quest_id: str) -> str | None:
     """Recorded merge SHA for an archived quest, or None when absent/unrecorded."""
+    check_data_floor(control_root)
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return None
@@ -131,6 +136,7 @@ def merge_commit_of(control_root: Path, quest_id: str) -> str | None:
 
 
 def read_quest_json(control_root: Path, quest_id: str) -> bytes | None:
+    check_data_floor(control_root)
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return None

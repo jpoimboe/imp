@@ -172,6 +172,7 @@ def _read_user_version(control_root: Path) -> int:
 # 5 == quest_meta.workflow rename imp->default;
 # 4 == final_state.resume_target `prompt` split; 3 == final_state.status
 # realigned; 2 == started_at backfilled; 1 == triad; absent == pre-triad
+# A blob migration changing an index-visible value must also bump index._SCHEMA_VERSION.
 _DATA_VERSION = 11
 
 
@@ -290,15 +291,19 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     _write_data_version(control_root, _DATA_VERSION)
 
 
-def check_floors(control_root: Path) -> None:
-    """Refuse a read whose archive floors are newer than this install knows."""
-    stored_data = _read_data_version(control_root)
-    if stored_data > _DATA_VERSION:
-        raise ArchiveMismatch(floor="data", stored=stored_data, known=_DATA_VERSION)
-    stored_index = _read_user_version(control_root)
-    if stored_index > index._SCHEMA_VERSION:
+def check_data_floor(control_root: Path) -> None:
+    """Refuse a record/blob read whose blob-schema floor is newer than this install knows."""
+    stored = _read_data_version(control_root)
+    if stored > _DATA_VERSION:
+        raise ArchiveMismatch(floor="data", stored=stored, known=_DATA_VERSION)
+
+
+def check_index_floor(control_root: Path) -> None:
+    """Refuse an index query whose schema floor is newer than this install knows."""
+    stored = _read_user_version(control_root)
+    if stored > index._SCHEMA_VERSION:
         raise ArchiveMismatch(
-            floor="index", stored=stored_index, known=index._SCHEMA_VERSION)
+            floor="index", stored=stored, known=index._SCHEMA_VERSION)
 
 
 def ensure_current(control_root: Path) -> None:
