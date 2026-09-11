@@ -122,6 +122,8 @@ class SandboxPolicy:
     overlay_root: OverlayRoot | None = None  # per-step root keepers mint layers under
     # per-quest scratch dir, rw at its own real path ("" → no bind; host /tmp fully ro)
     quest_tmp_dir: str = ""
+    quest_tmp_mask: str = ""   # tmpfs over the scratch ROOT (parent of quest_tmp_dir); "" → none
+    session_socket_ro: str = ""  # ro re-expose of THIS quest's own session socket ("" → none)
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -136,9 +138,20 @@ class SandboxPolicy:
         cover — only the secret masks are unconditionally last. Add a new bind here
         and ALL consumers pick it up; the argv-parity test enforces no drift. The
         home_layer rw bind goes FIRST (so caches/worktree/secrets over $HOME win),
-        then the per-quest scratch bind — quest_tmp_dir re-exposed rw at its own real
-        path, the dir TMPDIR points at. Host /tmp gets no covering bind and stays on
-        the read-only floor. Then the per-quest read-write /var/tmp scratch bind
+        then the per-quest scratch block: a tmpfs over the scratch ROOT
+        (quest_tmp_mask) FIRST, then its two re-exposes on top — quest_tmp_dir rw at
+        its own real path (the dir TMPDIR points at) and session_socket_ro, THIS
+        quest's own session socket, ro. The tmpfs must precede both or last-wins
+        buries the quest's own $TMPDIR and its control socket. Scratch-root
+        invariant: after the whole plan applies, the exposed set under the scratch
+        root is EXACTLY this quest's own scratch dir, its own session socket, plus
+        any path a LATER bind (worktree_block, quest_home, the git binds,
+        writable_caches, extra_readable/extra_writable) re-exposes under that root
+        — no policy places one there today. Every sibling quest's scratch dir, its
+        staged provider credentials and its control socket are gone from the
+        namespace, as is the remote-control socket.
+        Host /tmp OUTSIDE that root gets no covering bind and stays on the read-only
+        floor. Then the per-quest read-write /var/tmp scratch bind
         (emitted only when quest_var_tmp_dir is set; empty → no /var/tmp bind, host
         /var/tmp stays on the read-only floor), and the secret masks unconditionally LAST.
 
@@ -183,7 +196,10 @@ class SandboxPolicy:
             else [(self.worktree, "rw"), *state_block])
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
+            *([(self.quest_tmp_mask, "mask_dir")] if self.quest_tmp_mask else []),
+            # Both re-exposes are binds: each pins the inode it resolved at namespace creation.
             *([(self.quest_tmp_dir, "rw")] if self.quest_tmp_dir else []),
+            *([(self.session_socket_ro, "ro")] if self.session_socket_ro else []),
             *([("/var/tmp", "rw")] if self.quest_var_tmp_dir else []),
             *worktree_block,
             (self.git_common_dir, "rw"),
@@ -855,10 +871,14 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
     policy creation; bwrap must still bind each ro path over the read-only floor,
     so a spawn carrying a vanished path dies in sandbox SETUP ("Read-only file
     system") before the command runs. A mask over a gone path protects nothing, so
-    existence-gating at spawn is always safe. Own binds (worktree, quest_home) and stable config
-    (caches, extra_*) never churn and are left untouched. Scoped to the spawn argv only; the
-    in-process allows_read/allows_write mirrors keep the unpruned policy (a gone path is denied
-    either way).
+    existence-gating at spawn is always safe. session_socket_ro churns the same way and is
+    pruned with them: quest_tmp_dir is defended by RE-CREATION at spawn, which is impossible
+    for a socket — only the session daemon can bind it, and the executor unlinks it at quest
+    completion — so a policy whose socket has since gone would abort bwrap SETUP for every
+    remaining spawn instead of degrading to a namespace with no control channel. Own binds
+    (worktree, quest_home) and stable config (caches, extra_*) never churn and are left
+    untouched. Scoped to the spawn argv only; the in-process allows_read/allows_write mirrors
+    keep the unpruned policy (a gone path is denied either way).
 
     The repo marker re-expose (state_repo_ro) is gated on the same terms _checked_override
     reads it on — is_file() — so the bind exists exactly when the guard has something to
@@ -900,6 +920,8 @@ def prepare_spawn_policy(policy: SandboxPolicy) -> SandboxPolicy:
         git_ro_remask=_existing(list(policy.git_ro_remask)),
         secret_dirs=_existing(list(policy.secret_dirs)),
         secret_files=_existing(list(policy.secret_files)),
+        session_socket_ro=(policy.session_socket_ro
+                           if Path(policy.session_socket_ro).exists() else ""),
         state_repo_ro=(policy.state_repo_ro
                        if Path(policy.state_repo_ro).is_file() else ""),
     )
@@ -1194,6 +1216,8 @@ def resolve_policy(
     # temp-redirect fixture and points at the dir the executor creates/wipes. The
     # SAME value is the bind source below — one derivation, two uses.
     quest_tmp = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / quest_id
+    quest_tmp_mask = str(quest_tmp.parent)
+    session_socket_ro = str(session_sock) if session_sock.exists() else ""
     var_tmp_root = quest_var_tmp_root()
     quest_var_tmp_dir = (
         str(var_tmp_root / f"imp-{os.getuid()}" / quest_id)
@@ -1223,6 +1247,8 @@ def resolve_policy(
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
         quest_tmp_dir=str(quest_tmp),
+        quest_tmp_mask=quest_tmp_mask,
+        session_socket_ro=session_socket_ro,
         quest_var_tmp_dir=quest_var_tmp_dir,
         child_env=_build_child_env(
             engine_env_result, environ, cfg.env_passthrough,

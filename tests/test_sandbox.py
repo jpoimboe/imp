@@ -34,6 +34,7 @@ from imp.engine.sandbox import (
 )
 from imp.paths import imp_home, project_state_dir
 from imp.providers.config import parse_config_layer
+from imp.remote.session.discover import session_socket_path
 
 
 def _policy(**over) -> SandboxPolicy:
@@ -2405,9 +2406,12 @@ def test_imp_output_env_passes_through_unrewritten():
 
 
 def test_var_tmp_bind_source_and_position():
-    # Set case: the per-quest source is bound onto /var/tmp, positioned in
-    # bind_plan immediately AFTER the scratch entry and before the worktree.
+    # Set case: the per-quest source is bound onto /var/tmp, positioned in bind_plan
+    # AFTER the whole scratch block and before the worktree. Not adjacency: the own-socket
+    # ro re-expose sits between the scratch bind and /var/tmp on a real resolve_policy
+    # policy, so carry it here and assert order.
     pol = _policy(quest_tmp_dir="/tmp/imp-1000/abc",
+                  session_socket_ro="/tmp/imp-1000/abc.sock",
                   quest_var_tmp_dir="/vt/imp-1000/abc")
     flat = " ".join(_argv("x", cwd="/wt", policy=pol, engine_env={}))
     assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # per-quest source → /var/tmp
@@ -2417,7 +2421,9 @@ def test_var_tmp_bind_source_and_position():
     i_wt = argv.index("/state/worktrees/abc")  # worktree src (default _policy worktree)
     assert i_scratch < i_vt < i_wt
     bp = pol.bind_plan()
-    assert bp[bp.index(("/tmp/imp-1000/abc", "rw")) + 1] == ("/var/tmp", "rw")
+    assert (bp.index(("/tmp/imp-1000/abc", "rw"))
+            < bp.index(("/tmp/imp-1000/abc.sock", "ro"))
+            < bp.index(("/var/tmp", "rw")))
     assert pol.allows_write(Path("/var/tmp/scratch")) is True
 
 
@@ -2605,6 +2611,141 @@ def test_argv_binds_match_bind_plan_with_worktrees_mask():
     assert _parse_argv_binds(argv) == p.bind_plan()
     assert ("/ctl/.git/worktrees", "mask_dir") in p.bind_plan()
     assert ("/ctl/.git/worktrees/abc", "rw") in p.bind_plan()
+
+
+# ── scratch-root mask + own re-exposes (quest_tmp_mask / session_socket_ro) ──
+
+def _scratch_block_policy(**over) -> SandboxPolicy:
+    """Active policy carrying all three scratch-block entries: the tmpfs over the
+    scratch ROOT, the own scratch dir rw, and the own session socket ro."""
+    base = dict(
+        quest_tmp_mask="/tmp/imp-1000",
+        quest_tmp_dir="/tmp/imp-1000/abc",
+        session_socket_ro="/tmp/imp-1000/abc.sock",
+    )
+    base.update(over)
+    return _policy(**base)
+
+
+def test_scratch_block_argv_order_mask_then_own_scratch_then_socket():
+    # AC 1(a)/(b). Within the block the tmpfs MUST precede both re-exposes — reversed,
+    # the mask buries the quest's own $TMPDIR and its control socket — and the whole
+    # block keeps quest_tmp_dir's old slot ahead of the worktree and git binds, so
+    # those keep their current last-wins precedence over it.
+    pol = _scratch_block_policy()
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
+    flat = " ".join(argv)
+    assert "--tmpfs /tmp/imp-1000" in flat
+    assert "--bind /tmp/imp-1000/abc /tmp/imp-1000/abc" in flat
+    assert "--ro-bind /tmp/imp-1000/abc.sock /tmp/imp-1000/abc.sock" in flat
+    i_mask = argv.index("/tmp/imp-1000")               # the --tmpfs dest
+    i_scratch = argv.index("/tmp/imp-1000/abc")        # the own-scratch bind source
+    i_sock = argv.index("/tmp/imp-1000/abc.sock")      # the own-socket ro-bind source
+    i_wt = argv.index("/state/worktrees/abc")          # worktree rw bind source
+    i_git_ro = argv.index("/ctl/.git/hooks")           # first git_ro_remask entry
+    assert i_mask < i_scratch < i_sock < i_wt
+    assert i_sock < i_git_ro
+
+
+def test_scratch_mask_hides_siblings_and_re_exposes_only_own_scratch_and_socket():
+    # AC 2. A sibling quest's staged provider credentials and its control socket are
+    # GONE from the namespace, not merely unwritable; the own scratch stays rw; the own
+    # socket is readable but not writable; the remote-control socket is masked with
+    # everything else; /tmp OUTSIDE the root keeps the read-only floor.
+    pol = _scratch_block_policy()
+    assert pol.allows_read(
+        Path("/tmp/imp-1000/other/imp-codex-9-deadbeef/auth.json")) is False
+    assert pol.allows_read(Path("/tmp/imp-1000/other.sock")) is False
+    assert pol.allows_read(Path("/tmp/imp-1000/rc-0123456789abcdef.sock")) is False
+    assert pol.allows_write(Path("/tmp/imp-1000/abc/scratch.txt")) is True
+    assert pol.allows_read(Path("/tmp/imp-1000/abc.sock")) is True
+    assert pol.allows_write(Path("/tmp/imp-1000/abc.sock")) is False
+    assert pol.allows_read(Path("/tmp/host.txt")) is True
+    assert pol.allows_write(Path("/tmp/host.txt")) is False
+
+
+def test_no_socket_re_expose_when_session_socket_ro_is_empty():
+    # AC 1(c). A policy built with no session daemon running carries no re-expose: the
+    # tmpfs and the own scratch bind still emit, the argv mentions the socket nowhere,
+    # and nothing inside the namespace can reach it.
+    pol = _scratch_block_policy(session_socket_ro="")
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert "/tmp/imp-1000/abc.sock" not in argv
+    assert ("/tmp/imp-1000", "mask_dir") in pol.bind_plan()
+    assert ("/tmp/imp-1000/abc", "rw") in pol.bind_plan()
+    assert pol.allows_read(Path("/tmp/imp-1000/abc.sock")) is False
+    assert _parse_argv_binds(argv) == pol.bind_plan()
+
+
+def test_argv_binds_match_bind_plan_with_scratch_mask():
+    # Drift guard: the new mask_dir + rw + ro entries round-trip through the argv
+    # parser, so build_sandbox_spawn picks them up with no edit of its own.
+    pol = _scratch_block_policy()
+    argv = _argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert _parse_argv_binds(argv) == pol.bind_plan()
+
+
+def test_resolve_policy_masks_the_resolved_scratch_root_not_literal_tmp(tmp_path):
+    # AC 3(a). The mask is the parent of the RESOLVED scratch dir. The suite redirects
+    # tempfile.tempdir per test, so a literal /tmp/imp-<uid> would mask the wrong
+    # directory here — and would break the inner sandboxes the suite spawns, whose
+    # scratch nests under the outer quest's own $TMPDIR.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True)
+    assert pol.quest_tmp_mask == str(Path(pol.quest_tmp_dir).parent)
+    assert Path(pol.quest_tmp_mask).is_relative_to(Path(tempfile.gettempdir()))
+    assert pol.quest_tmp_mask != f"/tmp/imp-{os.getuid()}"
+    assert (pol.quest_tmp_mask, "mask_dir") in pol.bind_plan()
+    assert pol.allows_write(Path(pol.quest_tmp_dir) / "scratch.txt") is True
+    assert pol.allows_read(
+        Path(pol.quest_tmp_mask) / "other" / "imp-codex-9-dead" / "auth.json") is False
+
+
+def test_resolve_policy_re_exposes_the_own_socket_only_when_it_exists(tmp_path):
+    # AC 3(b). Existence-gated like the other churn-prone bind sources: no daemon
+    # running → no re-expose (a script gate, most unit tests). When one IS running the
+    # re-exposed path is exactly the IMP_SESSION_SOCKET the child env bakes in.
+    control, wt = _layout(tmp_path)
+    sock = session_socket_path("abc")
+    assert not sock.exists()
+    bare = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True)
+    assert bare.session_socket_ro == ""
+    assert bare.allows_read(sock) is False        # masked, no re-expose
+
+    sock.parent.mkdir(parents=True, exist_ok=True)
+    sock.touch()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True)
+    assert pol.session_socket_ro == str(sock)
+    assert ("IMP_SESSION_SOCKET", str(sock)) in pol.child_env
+    assert (str(sock), "ro") in pol.bind_plan()
+    assert pol.allows_read(sock) is True
+    assert pol.allows_write(sock) is False
+
+
+def test_prepare_spawn_policy_drops_a_vanished_session_socket(tmp_path):
+    # AC 4. quest_tmp_dir is defended by RE-CREATION at spawn; that is impossible for a
+    # socket — only the daemon can bind it. Without the prune, a policy whose socket has
+    # since been unlinked would abort bwrap SETUP ("Read-only file system") for every
+    # remaining spawn instead of degrading to a namespace with no control channel.
+    scratch = tmp_path / f"imp-{os.getuid()}" / "abc"
+    sock = scratch.parent / "abc.sock"
+    pol = _policy(quest_tmp_mask=str(scratch.parent), quest_tmp_dir=str(scratch),
+                  session_socket_ro=str(sock))
+
+    gone = prepare_spawn_policy(pol)
+    assert gone.session_socket_ro == ""
+    assert str(sock) not in _argv("x", cwd="/wt", policy=gone, engine_env={})
+
+    sock.touch()                      # prepare_spawn_policy created the parent above
+    kept = prepare_spawn_policy(pol)
+    assert kept.session_socket_ro == str(sock)
+    assert str(sock) in _argv("x", cwd="/wt", policy=kept, engine_env={})
 
 
 def _cross_project_policy(**over) -> SandboxPolicy:
@@ -2809,6 +2950,26 @@ def test_the_overlay_and_keeper_docstrings_drop_their_retired_rationale():
         doc = _flat_doc(fn)
         assert "each spawn mints its own layer" not in doc
         assert "keeper namespace mints one layer" in doc
+
+
+def test_the_scratch_block_docstrings_describe_the_mask_and_the_re_exposes():
+    # AC 10. Three docstrings described the pre-mask world. A reader who trusts the old
+    # session_socket_path text — the read-only floor is what makes the socket reachable —
+    # would delete the re-expose and cut every sandboxed `imp` off from its daemon.
+    # Flattened, because every asserted sentence is hard-wrapped where it lives.
+    import imp.engine.sandbox as sb
+    from imp.remote.session.discover import session_socket_path as ssp
+    plan_doc = _flat_doc(sb.SandboxPolicy.bind_plan)
+    assert "a tmpfs over the scratch ROOT (quest_tmp_mask) FIRST" in plan_doc
+    assert ("the exposed set under the scratch root is EXACTLY this quest's own "
+            "scratch dir, its own session socket") in plan_doc
+    assert "plus any path a LATER bind" in plan_doc
+    prepare_doc = _flat_doc(sb.prepare_spawn_policy)
+    assert "session_socket_ro churns the same way and is pruned with them" in prepare_doc
+    assert "only the session daemon can bind it" in prepare_doc
+    sock_doc = _flat_doc(ssp)
+    assert "read-only floor" not in sock_doc
+    assert "re-exposes THIS quest's own socket read-only" in sock_doc
 
 
 def test_normalize_returncode_separates_imps_kills_from_the_commands_own():
