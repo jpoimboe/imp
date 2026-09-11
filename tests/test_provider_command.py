@@ -33,18 +33,12 @@ Available:
 Switch with  /provider <name> — the rest of this quest runs on it."""
 
 
+# AC 8
 def test_the_picker_block_is_verbatim() -> None:
+    # Line 2 of the head must stay true for every backoff category the gate
+    # admits — auth, network, rate_limit and stalled — so it names none of them.
     assert "\n".join(
         render_picker("claude_code", ["claude_code", "codex"])) == _PICKER
-
-
-# AC 8
-def test_the_picker_head_names_no_backoff_category() -> None:
-    from imp.cli.provider_command import PICKER_HEAD
-
-    # The gate admits auth, network, rate_limit and stalled waits alike, so the
-    # copy must not claim any one of them.
-    assert PICKER_HEAD[1] == "takes effect right away — this step is waiting to retry"
 
 
 def test_the_roster_block_is_verbatim() -> None:
