@@ -2754,10 +2754,10 @@ def test_position_row_anchors_the_quota_flush_to_the_band_edge() -> None:
     left = ("imp · nota40 · Context and quota gauges in the live footer · "
             "implementation · plan-1 · step 3/7 · claude-opus-5 · ████░░░░░░ 44%")
     row = _wide_row(200)
-    # 128 + 39 + 31 = 198: both groups at their edges, spaces in between.
-    assert row == left + " " * 39 + "session 62% (3h left) · week 7%"
+    # 128 + 25 + 45 = 198: both groups at their edges, spaces in between.
+    assert row == left + " " * 25 + "claude_code · session 62% (3h left) · week 7%"
     assert pal.display_width(row) == 198
-    assert " · session" not in row          # reached across the gap, never ` · `-joined
+    assert " · claude_code" not in row      # reached across the gap, never ` · `-joined
 
 
 def test_position_row_fit_ladder_drops_the_quota_then_the_gauge_then_clips() -> None:

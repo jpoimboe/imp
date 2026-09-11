@@ -37,14 +37,14 @@ def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
     left = "implement phase · claude-opus-5 · ████░░░░░░ 44%"
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
     row = _row(auth_mode="subscription", quota=calm)
-    # 48 + 129 + 21 = 198 = width - 2: the field is reached across the gap.
-    assert row == left + " " * 129 + "session 34% · week 7%"
+    # 48 + 115 + 35 = 198 = width - 2: the field is reached across the gap.
+    assert row == left + " " * 115 + "claude_code · session 34% · week 7%"
     assert pal.display_width(row) == 198
 
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
                       QuotaWindow("7d", 7.0, int(_NOW) + 600000))
     assert _row(auth_mode="subscription", quota=one_up).endswith(
-        "session 62% (40m left) · week 7% (7d left)")
+        "claude_code · session 62% (40m left) · week 7% (7d left)")
 
     both = _reading(QuotaWindow("5h", 92.0, int(_NOW) + 2400),
                     QuotaWindow("7d", 96.0, int(_NOW) + 187200))
@@ -58,7 +58,7 @@ def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
 def test_the_bands_are_evaluated_on_the_displayed_integer() -> None:
     def field(pct: float) -> str:
         return quota_field(_reading(QuotaWindow("5h", pct, int(_NOW) + 2400)),
-                           now_epoch=_NOW, color=True, over_bg=False)
+                           now_epoch=_NOW, color=True, over_bg=False)[1]
 
     assert "\x1b[32m49%" in field(49.0)      # green below 50
     assert "\x1b[33m50%" in field(50.0)      # gold from 50
@@ -99,6 +99,10 @@ def test_a_metered_backend_renders_the_bare_quest_total() -> None:
                                                   priced=1)).endswith(" <$0.01")
     # An API-keyed provider carries no auth_mode and is metered all the same.
     assert _row(activity=_act(provider="anthropic"), cost=priced).endswith(" $4.21")
+    # A recorded reading never stamps a provider segment onto the metered field.
+    metered = _row(auth_mode="apikey", cost=priced,
+                   quota=_reading(QuotaWindow("5h", 34.0, None)))
+    assert metered.endswith(" $4.21") and "claude_code" not in metered
 
 
 # AC 10
@@ -125,7 +129,7 @@ def test_an_unrecognized_window_label_renders_verbatim() -> None:
 def test_the_countdown_rounds_to_one_nearest_unit() -> None:
     def left(seconds: int) -> str:
         return quota_field(_reading(QuotaWindow("5h", 92.0, int(_NOW) + seconds)),
-                           now_epoch=_NOW, color=False, over_bg=False)
+                           now_epoch=_NOW, color=False, over_bg=False)[1]
 
     assert left(9960) == "session 92% (3h left)"       # 2h46m -> nearest hour
     assert left(253800) == "session 92% (3d left)"     # 2d23h -> nearest day
@@ -135,17 +139,65 @@ def test_the_countdown_rounds_to_one_nearest_unit() -> None:
     assert left(86340) == "session 92% (1d left)"      # 23h59m promotes, not 24h
 
 
+# AC 1, AC 2
 def test_a_calm_window_with_a_known_reset_still_shows_its_countdown() -> None:
     calm_future = _reading(QuotaWindow("5h", 34.0, int(_NOW) + 9960),
                            QuotaWindow("7d", 7.0, int(_NOW) + 430000))
-    assert quota_field(calm_future, now_epoch=_NOW, color=False, over_bg=False) == (
-        "session 34% (3h left) · week 7% (5d left)")
-    # The label carries no SGR sequence of its own, not even a reset.
-    assert quota_field(calm_future, now_epoch=_NOW, color=True, over_bg=False) == (
-        "session \x1b[32m34%\x1b[0m \x1b[90m(3h left)\x1b[0m"
+    full, windows = quota_field(calm_future, now_epoch=_NOW, color=False,
+                                over_bg=False)
+    assert windows == "session 34% (3h left) · week 7% (5d left)"
+    assert full == "claude_code · " + windows
+    # The provider name, the separator after it, and the labels carry no SGR
+    # sequence of their own, not even a reset.
+    colored = quota_field(calm_future, now_epoch=_NOW, color=True,
+                          over_bg=False)[0]
+    assert colored == (
+        "claude_code · session \x1b[32m34%\x1b[0m \x1b[90m(3h left)\x1b[0m"
         " · week \x1b[32m7%\x1b[0m \x1b[90m(5d left)\x1b[0m")
 
 
+# AC 1
+def test_the_field_names_the_readings_own_provider() -> None:
+    codex = QuotaReading(provider="codex", plan=None, raw={},
+                         windows=(QuotaWindow("5h", 62.0, int(_NOW) + 10800),
+                                  QuotaWindow("7d", 91.0, int(_NOW) + 432000)))
+    full, windows = quota_field(codex, now_epoch=_NOW, color=False, over_bg=False)
+    assert full == "codex · session 62% (3h left) · week 91% (5d left)"
+    assert windows == "session 62% (3h left) · week 91% (5d left)"
+    # The name is the reading's, never the activity's: a claude_code step whose
+    # recorded reading came from codex still says codex.
+    row = _row(activity=_act(provider="claude_code"), auth_mode="subscription",
+               quota=codex)
+    assert row.endswith("codex · session 62% (3h left) · week 91% (5d left)")
+
+
+# AC 3
+def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
+    reading = _reading(QuotaWindow("5h", 34.0, int(_NOW) + 2400),
+                       QuotaWindow("7d", 7.0, int(_NOW) + 518400))
+
+    def at(width: int) -> str:
+        return compose_position_row(
+            activity=_act(), quest_id=None, title="", prompt_tokens=None,
+            color=False, width=width, context_pct=44.0, now_epoch=_NOW,
+            auth_mode="subscription", quota=reading)
+
+    # (a) target 198: left group 48 + full right group 56, gap to spare.
+    assert at(200).endswith(
+        "claude_code · session 34% (40m left) · week 7% (6d left)")
+    # (b) target 98 fits the windows (42) but not the provider segment — and the
+    # countdowns come with them, there being no third candidate to shed.
+    windows_only = at(100)
+    assert windows_only.endswith("session 34% (40m left) · week 7% (6d left)")
+    assert "claude_code" not in windows_only
+    assert pal.display_width(windows_only) == 98
+    # (c) target 78 fits neither candidate: the quota goes whole, the gauge stays.
+    bare = at(80)
+    assert bare.endswith("claude-opus-5 · ████░░░░░░ 44%")
+    assert "session" not in bare
+
+
+# AC 5
 def test_the_position_row_carries_no_switch_hint_at_any_level() -> None:
     import imp.cli.live_driver as ld
 

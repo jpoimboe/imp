@@ -127,10 +127,13 @@ def _reset_countdown(resets_at: int | None, now_epoch: float | None) -> str | No
 
 
 def quota_field(reading: QuotaReading, *, now_epoch: float | None,
-                color: bool, over_bg: bool) -> str:
-    """`session 62% (3h left) · week 7% (5d left)` — the account-wide levels, ordered by window
-    duration. The label is uncolored and the countdown gray; only the percentage is hued,
-    banded on the displayed integer so a number can never disagree with its own hue."""
+                color: bool, over_bg: bool) -> tuple[str, str]:
+    """The position row's two right-group candidates, widest first:
+    `claude_code · session 62% (3h left) · week 7% (5d left)`, and the same
+    windows without the provider segment for a row too narrow to carry it. The
+    provider name and the window labels are uncolored and the countdown gray;
+    only the percentage is hued, banded on the displayed integer so a number can
+    never disagree with its own hue."""
     windows: list[str] = []
     for w in reading.windows:
         pct = pal.quota_pct(w.used_pct)
@@ -141,7 +144,8 @@ def quota_field(reading: QuotaReading, *, now_epoch: float | None,
         if left is not None:
             seg += " " + _paint(f"({left} left)", "gray", color=color, over_bg=over_bg)
         windows.append(seg)
-    return " · ".join(windows)
+    joined = " · ".join(windows)
+    return f"{reading.provider} · {joined}", joined
 
 
 def cost_field(usage: RowUsage | None) -> str | None:
@@ -274,8 +278,8 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         dollars = cost_field(cost)
         rights = [dollars] if dollars else []
     elif quota is not None:
-        rights = [quota_field(quota, now_epoch=now_epoch, color=color,
-                              over_bg=over)]
+        rights = list(quota_field(quota, now_epoch=now_epoch, color=color,
+                                  over_bg=over))
     else:
         rights = []
     left_segs = [project_seg, id_seg, title_seg, unsandboxed_seg,
