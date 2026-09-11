@@ -3424,17 +3424,21 @@ def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]
 def _matched_events(
     events: list[dict[str, Any]], query: str, *,
     types: set[str] | None, agents: set[str] | None,
-) -> tuple[list[tuple[int, dict[str, Any]]], dict[str, str]]:
-    """Matched (ordinal, event) pairs after type/agent filters, plus the handle map."""
+) -> tuple[list[tuple[int, dict[str, Any]]], dict[str, str], dict[int, dict[str, Any]]]:
+    """Matched (ordinal, event) pairs after type/agent filters, plus the handle map and overlays."""
     from imp.cli.render_helpers import event_text
     from imp.engine import events_index as ei
     indexed = list(enumerate(events, start=1))
     handle_map = ei.subagent_handle_map(indexed)
+    # overlays must be computed over full indexed list; patch row may not be in matched subset
+    all_overlays = ei.usage_patch_overlays(indexed)
     candidates = ei.select_event_lines(
         indexed, types=types, agents=agents, handle_map=handle_map)
     q = query.lower()
     matched = [(o, ev) for o, ev in candidates if q in event_text(ev).lower()]
-    return matched, handle_map
+    matched_ordinals = {o for o, _ in matched}
+    overlays = {o: v for o, v in all_overlays.items() if o in matched_ordinals}
+    return matched, handle_map, overlays
 
 
 class EventSearchHit(NamedTuple):
@@ -3445,6 +3449,7 @@ class EventSearchHit(NamedTuple):
     events: list[tuple[int, dict[str, Any]]]
     handle_map: dict[str, str]
     match_count: int
+    overlays: dict[int, dict[str, Any]]
 
 
 def _events_search_active(
@@ -3457,10 +3462,10 @@ def _events_search_active(
     hits: list[EventSearchHit] = []
     for r in _status_rows(control, scanned):
         events = store.get_events(r[0]) or []
-        matched, handle_map = _matched_events(events, query, types=types, agents=agents)
+        matched, handle_map, overlays = _matched_events(events, query, types=types, agents=agents)
         if matched:
             hits.append(EventSearchHit(
-                r[0], r[4], "active", r[3], matched, handle_map, len(matched)))
+                r[0], r[4], "active", r[3], matched, handle_map, len(matched), overlays))
     return hits
 
 
@@ -3471,7 +3476,7 @@ def _events_search_backlog(
     if types is not None or agents is not None:
         return []
     from imp.cli.store import _backlog_matches
-    return [EventSearchHit(m.quest_id, m.title, "backlog", m.last_activity, [], {}, 1)
+    return [EventSearchHit(m.quest_id, m.title, "backlog", m.last_activity, [], {}, 1, {})
             for m in _backlog_matches(control, query)]
 
 
@@ -3484,10 +3489,10 @@ def _events_search_archived(
     hits: list[EventSearchHit] = []
     for cid, title, _status, last in store.search_event_candidates(query):
         events = store.get_events(cid) or []
-        matched, handle_map = _matched_events(events, query, types=types, agents=agents)
+        matched, handle_map, overlays = _matched_events(events, query, types=types, agents=agents)
         if matched:
             hits.append(EventSearchHit(
-                cid, title, "archive", last, matched, handle_map, len(matched)))
+                cid, title, "archive", last, matched, handle_map, len(matched), overlays))
     return hits
 
 
@@ -3640,7 +3645,8 @@ def _render_events_search_hit(
     lines = [spine]
     events = hit.events if limit is None else hit.events[:limit]
     for ordinal, event in events:
-        digest = ei.digest_line(ordinal, event, hit.handle_map, width=width)
+        digest = ei.digest_line(ordinal, event, hit.handle_map, width=width,
+                                overlay=hit.overlays.get(ordinal))
         lines.append("  " + _highlight(digest, query, color=color))
     extra = len(hit.events) - len(events)
     if limit is not None and extra > 0:

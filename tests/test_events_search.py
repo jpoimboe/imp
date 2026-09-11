@@ -46,9 +46,10 @@ def test_matched_events_returns_only_query_matches() -> None:
             input={"cmd": "GREPTARGET"}),
         _ev("e1", "tool_result", "step:impl/coder", id="t1", content="unrelated"),
     ]
-    matched, handle_map = m._matched_events(events, "greptarget", types=None, agents=None)
+    matched, handle_map, overlays = m._matched_events(events, "greptarget", types=None, agents=None)
     assert [o for o, _ in matched] == [1]
     assert isinstance(handle_map, dict)
+    assert isinstance(overlays, dict)
 
 
 def test_matched_events_applies_type_filter() -> None:
@@ -57,7 +58,7 @@ def test_matched_events_applies_type_filter() -> None:
             input={"cmd": "GREPTARGET"}),
         _ev("e1", "tool_result", "step:impl/coder", id="t1", content="GREPTARGET too"),
     ]
-    matched, _ = m._matched_events(
+    matched, _, _overlays = m._matched_events(
         events, "greptarget", types={"tool_result"}, agents=None)
     assert [o for o, _ in matched] == [2]
 
@@ -69,14 +70,14 @@ def test_matched_events_applies_agent_filter() -> None:
         _ev("e1", "tool_call", "step:review/reviewer", name="bash",
             input={"cmd": "GREPTARGET"}),
     ]
-    matched, _ = m._matched_events(
+    matched, _, _overlays = m._matched_events(
         events, "greptarget", types=None, agents={"coder"})
     assert [o for o, _ in matched] == [1]
 
 
 def test_matched_events_empty_when_no_match() -> None:
     events = [_ev("e0", "tool_call", "step:impl/coder", name="bash", input={"cmd": "x"})]
-    matched, _ = m._matched_events(events, "nomatch-zzz", types=None, agents=None)
+    matched, _, _overlays = m._matched_events(events, "nomatch-zzz", types=None, agents=None)
     assert matched == []
 
 
@@ -93,7 +94,7 @@ def test_matched_events_resolves_handle_from_filtered_out_dispatch() -> None:
         _ev("e1", "tool_result", "sub:D1", id="t1", content="GREPTARGET body"),
         _ev(None, "step_completed", step="task-lead"),
     ]
-    matched, handle_map = m._matched_events(
+    matched, handle_map, _overlays = m._matched_events(
         events, "greptarget", types={"tool_result"}, agents=None)
     assert [o for o, _ in matched] == [3]
     assert handle_map["sub:D1"] == "coder-1"
@@ -251,7 +252,7 @@ def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path
 
 def _hit(cid: str, title: str, zone: str, events: list[tuple[int, dict[str, Any]]],
          match_count: int, last: str = "2026-06-11T00:00:00+00:00") -> m.EventSearchHit:
-    return m.EventSearchHit(cid, title, zone, last, events, {}, match_count)
+    return m.EventSearchHit(cid, title, zone, last, events, {}, match_count, {})
 
 
 def _bounded_hits() -> list[m.EventSearchHit]:
@@ -604,3 +605,26 @@ def test_events_search_help_exits_zero_with_bounded_contract(
     assert ("One terse line per matched quest (id, title, zone); combine with --limit to cap."
             in out)
     assert "Structured output, bounded like the default view unless --all." in out
+
+
+def test_search_hit_digest_applies_codex_usage_patch_overlay(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    agent_id = "step:impl/coder"
+    events = [
+        _ev("msg1", "agent_message", agent_id,
+            provider="codex", model="gpt-6-astra",
+            stop_reason="end_turn", usage={"input_tokens": 100, "output_tokens": 50},
+            content=[{"type": "text", "text": "GREPTARGET work done"}]),
+        _ev("pat1", "agent_message_usage_patch", agent_id,
+            context_tokens=8000, context_window=200000),
+    ]
+    matched, handle_map, overlays = m._matched_events(
+        events, "greptarget", types=None, agents=None)
+    assert overlays, "patch must produce an overlay for the preceding agent_message"
+    hit = m.EventSearchHit("q1", "T1", "active", "2026-06-11T00:00:00+00:00",
+                           matched, handle_map, len(matched), overlays)
+    monkeypatch.setattr(m, "_events_search", lambda *a, **k: [hit])
+
+    assert m._cmd_events_search(_search_ns("greptarget"), tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "ctx=8000/200000" in out
