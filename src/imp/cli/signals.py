@@ -982,7 +982,8 @@ class CtrlDReader:
     def __init__(self, coord: InterruptCoordinator, *,
                  provider_picker: Any = None) -> None:
         self._coord = coord
-        # () -> context manager yielding the name each digit dispatches.
+        # () -> context manager yielding the name each digit dispatches, or None
+        # while the gate is shut (no retry backoff in flight).
         self._provider_picker = provider_picker
         self._fd: int | None = None
         self._orig_attrs: Any = None
@@ -1061,11 +1062,15 @@ class CtrlDReader:
         """Render the picker and read the following digit or esc from this same
         one-byte loop. False when the picker consumed a Ctrl-D, so the reader
         still leaves rather than swallowing it. Inert before the client's
-        forwarding hook is bound: until then there is no arming position at all."""
+        forwarding hook is bound, and while the seam is shut: in both cases the
+        byte is refused, never swallowed, and nothing is emitted."""
         import anyio
         if self._provider_picker is None or not self._coord.provider_hook_bound:
             return True
-        with self._provider_picker() as choices:
+        picker = self._provider_picker()
+        if picker is None:
+            return True
+        with picker as choices:
             while True:
                 if self._quiesce_depth > 0:
                     return True          # a prompt took the tty; close the picker

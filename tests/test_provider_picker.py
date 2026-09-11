@@ -3,7 +3,9 @@ renders it (Scope 3; AC 8a, 8b, 8c, 8d, 8f)."""
 from __future__ import annotations
 
 import contextlib
+import io
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,7 @@ import anyio
 import pytest
 
 from imp.cli.signals import CtrlDReader, InterruptCoordinator
+from tests._event_fixtures import ev
 from tests.async_wait import wait_until
 from tests.test_signals import _can_pty, _patch_dev_tty
 
@@ -26,16 +29,22 @@ def anyio_backend() -> str:
 _needs_pty = pytest.mark.skipif(not _can_pty(), reason="pty not available")
 
 
-def _picker(choices: list[str | None], opened: list[int]) -> Any:
+def _picker(choices: list[str | None], opened: list[int],
+            *, gate: Callable[[], bool] = lambda: True) -> Any:
     @contextlib.contextmanager
-    def _open():
+    def _block():
         opened.append(1)
         yield choices
+
+    def _open():
+        return _block() if gate() else None
+
     return _open
 
 
 async def _drive(monkeypatch, keys: bytes, *, bind_hook: bool,
-                 choices: list[str | None]):
+                 choices: list[str | None],
+                 gate: Callable[[], bool] = lambda: True):
     """Feed KEYS to a live reader; return (dispatched names, picker-open count)."""
     import pty
     sent: list[str] = []
@@ -49,7 +58,7 @@ async def _drive(monkeypatch, keys: bytes, *, bind_hook: bool,
             async def _fwd(name: str) -> None:
                 sent.append(name)
             coord.set_provider_hook(_fwd)
-        reader = CtrlDReader(coord, provider_picker=_picker(choices, opened))
+        reader = CtrlDReader(coord, provider_picker=_picker(choices, opened, gate=gate))
         async with anyio.create_task_group() as tg:
             await tg.start(reader.run)
             os.write(master, keys)
@@ -162,6 +171,9 @@ def test_the_seam_renders_the_block_inside_a_suspend_bracket(
             trace.append("emit")
             trace.extend(lines)
 
+        def retry_countdown_in_flight(self) -> bool:
+            return True
+
     class _Status:
         @contextlib.contextmanager
         def suspend(self):
@@ -171,7 +183,7 @@ def test_the_seam_renders_the_block_inside_a_suspend_bracket(
             finally:
                 trace.append("exit")
 
-    with build_provider_picker(quest, _Driver(), _Status())() as choices:
+    with build_provider_picker(quest, _Driver(), _Status())() as choices:  # type: ignore[union-attr]
         trace.append("read")
 
     assert choices == [None, "codex"]        # the resolved vendor arms nothing
@@ -207,3 +219,153 @@ async def test_the_bound_hook_sends_a_set_provider_frame() -> None:
     assert coord.provider_hook_bound is True
     await coord.dispatch_set_provider("codex")
     assert frames == [(CONTROL_SET_PROVIDER, "codex")]
+
+
+class _RecordingStatus:
+    """Counts suspend brackets: a refused `p` must enter none at all."""
+
+    def __init__(self) -> None:
+        self.entered = 0
+
+    @contextlib.contextmanager
+    def suspend(self):
+        self.entered += 1
+        yield
+
+
+def _gate_driver(retry: str | None) -> tuple[Any, io.StringIO]:
+    """A real LiveDriver mid-step, its activity carrying a retry countdown when
+    `retry` names a backoff category — the signal the gate reads."""
+    from imp.cli.live_driver import LiveDriver
+    from imp.cli.live_status import LiveStatus
+
+    out = io.StringIO()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="deferred-sweep", kind="agent",
+                    phase="convergence", phase_label="convergence phase",
+                    label="sweeping deferred tasks", model="claude"))
+    if retry is not None:
+        drv.on_event(ev("3", "agent_retry", category=retry, attempt=1,
+                        backoff_seconds=300.0))
+    return drv, out
+
+
+def _quest(tmp_path: Path, floor_availability: Any,
+           available: set[str] | None = None) -> Any:
+    from tests.test_provider_reconcile import _seed
+
+    quest, _state, _wf = _seed(tmp_path)
+    floor_availability({"claude_code", "codex"} if available is None
+                       else available)
+    return quest
+
+
+_PICKER_TOP = "switch provider — the rest of this quest runs on your pick"
+
+
+# AC 7a, AC 7c
+def test_the_seam_is_consulted_per_keypress_not_captured_at_construction(
+    tmp_path: Path, floor_availability,
+) -> None:
+    # Production builds the seam ONCE, where the CtrlDReader starts — at session
+    # start, when no backoff can be in flight. A gate read at construction and
+    # closed over would leave `p` dead for the entire run, so one seam is built
+    # up front here and consulted across the whole life of the wait.
+    from imp.cli.session_run import build_provider_picker
+
+    quest = _quest(tmp_path, floor_availability)
+    drv, out = _gate_driver(None)
+    status = _RecordingStatus()
+    picker = build_provider_picker(quest, drv, status)
+
+    assert picker() is None                 # before the wait
+    assert status.entered == 0
+    assert "switch provider" not in out.getvalue()
+
+    drv.on_event(ev("3", "agent_retry", category="rate_limit", attempt=1,
+                    backoff_seconds=300.0))
+    opened = picker()                       # same seam object, now open
+    assert opened is not None
+    with opened as choices:
+        assert choices == [None, "codex"]
+    assert status.entered == 1
+    assert _PICKER_TOP in out.getvalue()
+
+    drv.on_event(ev("4", "backoff_ended", reason="elapsed"))
+    assert picker() is None                 # the window closes with the wait
+    assert status.entered == 1
+
+
+# AC 7c, AC 7d
+@pytest.mark.parametrize("category", ["rate_limit", "auth", "network", "stalled"])
+def test_the_seam_opens_for_any_retry_backoff(
+    tmp_path: Path, floor_availability, category: str,
+) -> None:
+    # Every is_retry_with_backoff category sets the countdown, so an auth or
+    # network wait opens the picker exactly as a rate limit does.
+    from imp.cli.session_run import build_provider_picker
+
+    quest = _quest(tmp_path, floor_availability)
+    drv, out = _gate_driver(None)
+    status = _RecordingStatus()
+    picker = build_provider_picker(quest, drv, status)
+    assert picker() is None
+
+    drv.on_event(ev("3", "agent_retry", category=category, attempt=1,
+                    backoff_seconds=300.0))
+    opened = picker()
+    assert opened is not None
+    with opened as choices:
+        assert choices == [None, "codex"]
+    assert status.entered == 1
+    assert _PICKER_TOP in out.getvalue()
+
+
+# AC 7e
+def test_an_empty_roster_is_not_read_as_a_shut_gate(
+    tmp_path: Path, floor_availability,
+) -> None:
+    # The conflation this guards against can only arise inside the seam, where
+    # the roster is read: no selectable provider is still an OPEN picker that
+    # renders and yields an empty choice list — never the gate's None.
+    from imp.cli.session_run import build_provider_picker
+
+    quest = _quest(tmp_path, floor_availability, available=set())
+    drv, out = _gate_driver("rate_limit")
+    status = _RecordingStatus()
+    opened = build_provider_picker(quest, drv, status)()
+    assert opened is not None
+    with opened as choices:
+        assert choices == []
+    assert status.entered == 1
+    assert _PICKER_TOP in out.getvalue()
+    assert "press a number, or esc to cancel" in out.getvalue()
+
+
+@_needs_pty
+@pytest.mark.anyio
+async def test_p_outside_a_retry_backoff_opens_nothing(monkeypatch) -> None:
+    # AC 7a: the seam hands back None, so the picker never opens and the digit
+    # behind the p arms nothing.
+    sent, opened = await _drive(monkeypatch, b"p2", bind_hook=True,
+                                choices=[None, "codex"], gate=lambda: False)
+    assert (sent, opened) == ([], 0)
+
+
+@_needs_pty
+@pytest.mark.anyio
+async def test_the_key_after_a_refused_p_is_read_as_a_fresh_keypress(
+    monkeypatch,
+) -> None:
+    # AC 7b: the shut gate consumes no byte — the second p (gate now open) opens
+    # the picker and the digit behind it arms, which a swallowed byte could not.
+    consults: list[int] = []
+
+    def gate() -> bool:
+        consults.append(1)
+        return len(consults) > 1
+
+    sent, opened = await _drive(monkeypatch, b"pp2", bind_hook=True,
+                                choices=[None, "codex"], gate=gate)
+    assert (sent, opened) == (["codex"], 1)

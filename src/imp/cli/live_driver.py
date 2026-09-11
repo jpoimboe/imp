@@ -509,6 +509,12 @@ class LiveDriver:
         """Commit plain lines straight to scrollback, outside the narrative tree."""
         self._print_lines(lines)
 
+    def retry_countdown_in_flight(self) -> bool:
+        """True while the activity carries a retry countdown — the window in which
+        `r` is honored, and the only one in which the `p` picker opens."""
+        activity = self._builder.current_activity()
+        return activity is not None and activity.countdown_total is not None
+
     def seed_opening_intent(self, text: str) -> None:
         # Optimistic local echo at submit time; mirrors seed_pending_reply (emits via _walk).
         self._builder.seed_opening_intent(text)
