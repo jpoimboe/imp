@@ -1284,70 +1284,42 @@ def test_dispatch_task_missing_handoff_note_degrades_to_recovery_command(
     assert "It wrote this handoff before stopping:" not in body
 
 
-def test_dispatch_task_failed_handback_carries_transcript_pointer(
+def test_dispatch_task_failed_handback_carries_recovery_command(
         tmp_path: Path) -> None:
     # PRODUCER: the failed/fatal handback (result.errored, delay=None so no budget
-    # ceiling, not paused, no handoff -> not context-ceiling) now hands back a body
-    # that carries the transcript pointer + re-dispatch prose so the task-lead can
-    # point a fresh subagent at the prior transcript, while preserving the
+    # ceiling, not paused, no handoff -> not context-ceiling) hands back a body
+    # that carries the bounded imp events command so the task-lead can read the
+    # child's recent activity, while preserving the
     # "failed (<cat>) [<kind>]" marker line the _close_subagent_fold scan reads.
-    import anyio
-
     from imp.engine.agent_run import AgentRunResult, ErrorInfo
 
-    ctx = _dispatch_ctx(tmp_path)
-
-    async def _fake_drive(*_a, **_k):
-        return AgentRunResult(output=None, errored=True, paused=False,
-                              fatal=False, delay=None,
-                              error=ErrorInfo("network", "network"))
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=True, paused=False,
+                                    fatal=False, delay=None,
+                                    error=ErrorInfo("network", "network")))
     # Marker line preserved (name, category, [kind]).
     assert "subagent 'reviewer' failed (network) [network]" in body
-    # New: the work-preserving transcript pointer + re-dispatch prose.
-    assert "Full prior transcript: " in body
-    assert "transcript.jsonl" in body
-    assert "re-dispatch a fresh subagent" in body
-    assert "carry on from what you have" in body
+    # The work-preserving recovery command + re-dispatch prose.
+    assert "Recent activity:" in body
+    assert "imp events change-42 --agent sub:" in body
+    assert "Re-dispatch a fresh subagent or continue from the activity above." in body
+    assert "transcript.jsonl" not in body
 
 
 def test_dispatch_task_failed_handback_omits_kind_suffix_when_kind_none(
         tmp_path: Path) -> None:
     # When result.error.kind is None the marker suffix is empty ("failed (network)"
-    # with no bracket), but the transcript pointer + re-dispatch prose are still
+    # with no bracket), but the recovery command + re-dispatch prose are still
     # present — the work-preserving lines are unconditional, the [kind] marker is not.
-    import anyio
-
     from imp.engine.agent_run import AgentRunResult, ErrorInfo
 
-    ctx = _dispatch_ctx(tmp_path)
-
-    async def _fake_drive(*_a, **_k):
-        return AgentRunResult(output=None, errored=True, paused=False,
-                              fatal=False, delay=None,
-                              error=ErrorInfo("network", None))
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=True, paused=False,
+                                    fatal=False, delay=None,
+                                    error=ErrorInfo("network", None)))
     assert "subagent 'reviewer' failed (network)" in body
     assert "failed (network) [" not in body   # no kind bracket
-    assert "Full prior transcript: " in body
+    assert "imp events change-42 --agent sub:" in body
 
 
 def test_dispatch_task_midloop_pause_emits_no_audit_error(tmp_path: Path) -> None:
@@ -1533,3 +1505,80 @@ def test_context_exhausted_without_handoff_body_is_verbatim(tmp_path: Path) -> N
         "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
         "Re-dispatch a fresh subagent with a narrower task, or continue from "
         "the activity above.")
+
+
+def test_failed_handback_body_is_verbatim(tmp_path: Path) -> None:
+    # The ordinary-failure body keeps its "failed (<cat>) [<kind>]" marker line
+    # and gains the bounded command in place of the transcript pointer.
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=True, paused=False,
+                                    fatal=False, delay=None,
+                                    error=ErrorInfo("network", "network")))
+    assert body == (
+        "subagent 'reviewer' failed (network) [network]\n\n"
+        "Recent activity:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Re-dispatch a fresh subagent or continue from the activity above.")
+
+
+def _all_handback_bodies(tmp_path: Path) -> dict[str, str]:
+    """Every parent-handback body dispatch_task can raise, keyed by branch."""
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    note_path = tmp_path / "handoff.md"
+    note_path.write_text("# handoff\nnext: wire up Y.")
+    paused = AgentRunResult(output=None, errored=False, paused=True,
+                            fatal=False, delay=None)
+    interrupted_ctx = _dispatch_ctx(tmp_path)
+    interrupted_ctx.coordinator._should_pause = True
+    return {
+        "interrupted": _handback(interrupted_ctx, paused),
+        "suspended": _handback(_dispatch_ctx(tmp_path), paused),
+        "context_exhausted_handoff": _handback(
+            _dispatch_ctx(tmp_path),
+            AgentRunResult(output=None, errored=False, paused=False, fatal=False,
+                           delay=None, handoff_path=str(note_path))),
+        "context_exhausted_bare": _handback(
+            _dispatch_ctx(tmp_path),
+            AgentRunResult(output=None, errored=False, paused=False, fatal=True,
+                           delay=None,
+                           error=ErrorInfo("context_window", "prompt_too_long"))),
+        "failed": _handback(
+            _dispatch_ctx(tmp_path),
+            AgentRunResult(output=None, errored=True, paused=False, fatal=False,
+                           delay=None, error=ErrorInfo("config", "stalled"))),
+    }
+
+
+def test_no_handback_body_hands_the_parent_a_masked_path(tmp_path: Path) -> None:
+    # INVARIANT: never hand an agent a path its sandbox masks. <quest_dir>/steps/
+    # is masked for every agent, so no branch may name a transcript or handoff
+    # file — each one routes recovery through the bounded imp events command.
+    for branch, body in _all_handback_bodies(tmp_path).items():
+        assert "steps/" not in body, branch
+        assert "transcript.jsonl" not in body, branch
+        assert "handoff.md" not in body, branch
+        assert "imp events change-42 --agent sub:ev-77 --limit 50" in body, branch
+
+
+def test_close_subagent_fold_derives_state_from_every_handback(tmp_path: Path) -> None:
+    # PRODUCER -> CONSUMER: feed each real handback body through the provider's
+    # f"{type(e).__name__}: {e}" formatting into the narrative fold, which derives
+    # the terminal glyph from the bracketed marker.
+    from imp.cli import narrative as nv
+
+    expected = {
+        "interrupted": "interrupted",
+        "suspended": "suspended",
+        "context_exhausted_handoff": "context_exhausted",
+        "context_exhausted_bare": "context_exhausted",
+        "failed": "stalled",
+    }
+    for branch, body in _all_handback_bodies(tmp_path).items():
+        fold = nv.SubagentFold(subagent_name="reviewer", event_id="e",
+                               block_id="b", nested=nv.NarrativeBuilder())
+        nv._close_subagent_fold(fold, {"content": f"RuntimeError: {body}",
+                                       "error": True})
+        assert fold.terminal_state == expected[branch], branch
