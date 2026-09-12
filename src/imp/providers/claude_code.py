@@ -84,6 +84,7 @@ from imp.agents.tools.context import (
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.image import BASE64_TARGET_BYTES
 from imp.agents.tools.load_skill import make_load_skill_tool
+from imp.agents.tools.spill import wrap_task_result
 from imp.agents.transcript import (
     RESUME_CONTINUE_NUDGE,
     RESUME_REDO_NUDGE,
@@ -864,6 +865,7 @@ def _wrap_one(
                             block=ToolResultBlock(minted, err_text, is_error=True),
                             id_ns="block", kind=kind)
                     raise
+                wrapped = wrap_task_result(ctx, minted, result)
                 if ctx.event_log is not None:
                     # Success close: the canonical, outcome-carrying tool_result for
                     # this task, keyed on the SAME minted block id as the call. The
@@ -871,9 +873,9 @@ def _wrap_one(
                     # result so this minted one stays canonical.
                     ctx.event_log.append_tool_result(
                         agent_id=state.agent_id,
-                        block=ToolResultBlock(minted, result, is_error=False),
+                        block=ToolResultBlock(minted, wrapped, is_error=False),
                         id_ns="block")
-                return _tool_response(result, is_error=False)
+                return _tool_response(wrapped, is_error=False)
             if name == "complete_step":
                 # Capture the args; return a "success" body so claude proceeds
                 # to ResultMessage cleanly. The runner sees the captured args

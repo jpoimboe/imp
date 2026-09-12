@@ -44,6 +44,10 @@ OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 # full output still spills to a recoverable file. NOT an alias of the shared cap.
 BASH_OUTPUT_CAP_BYTES = 30_000
 
+# Subagent-RESULT spill trigger. NOT an alias of the equal-valued
+# BASH_OUTPUT_CAP_BYTES: one bounds a child agent's report, the other shell output.
+TASK_RESULT_CAP_BYTES = 30_000
+
 # grep ONLY: an external-target walk halts after this many files SCANNED (not
 # matched) and discloses a truncation notice. A performance brake (bounds work),
 # not a security one — applies whenever the target is external, sandbox or not.

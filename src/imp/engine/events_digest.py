@@ -14,6 +14,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from imp.providers.catalog import limits_for
+
 
 def _collapse(text: str) -> str:
     """Collapse whitespace to keep the digest one logical line; length is clipped in digest_line."""
@@ -79,12 +81,36 @@ def _h_engine_message(payload: dict[str, Any]) -> str:
     return f"{subtype} {_collapse(_message_text(payload))}".strip()
 
 
+def _num(value: Any) -> int | float | None:
+    """A numeric payload field, or None when it is missing or not a real number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
+def _ctx_field(payload: dict[str, Any]) -> str:
+    """`ctx=` occupancy, or empty when nothing resolves — a window is never guessed."""
+    tokens = _num(payload.get("context_tokens"))
+    window = _num(payload.get("context_window"))
+    if window is None and tokens is not None:
+        info = limits_for(payload.get("provider"), payload.get("model"))
+        window = info.window if info is not None else None
+    pct = _num(payload.get("context_pct"))
+    if tokens is not None and window:
+        if pct is None:
+            pct = tokens / window * 100
+        return f"ctx={int(tokens)}/{int(window)} ({pct:.1f}%) "
+    if pct is not None:
+        return f"ctx={pct:.1f}% "
+    return ""
+
+
 def _h_agent_message(payload: dict[str, Any]) -> str:
     texts, n_tools = _parse_llm(payload)
     usage = payload.get("usage") or {}
     return (f"stop={payload.get('stop_reason')} tools={n_tools} "
             f"in={usage.get('input_tokens')} out={usage.get('output_tokens')} "
-            f"{_collapse(texts)}")
+            f"{_ctx_field(payload)}{_collapse(texts)}")
 
 
 def _h_tool_call(payload: dict[str, Any]) -> str:

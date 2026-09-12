@@ -897,8 +897,26 @@ def test_no_wait_for_user_in_workflow_prompts() -> None:
     assert offenders == []
 
 
+def test_explorer_bounds_searches_in_both_shipped_copies() -> None:
+    bullet = (
+        "- Broad means broad *within the relevant paths*: scope searches to "
+        "plausible directories and patterns, use `head_limit` where available, "
+        "and never run unrestricted recursive filesystem or git-history searches.\n"
+    )
+    texts = []
+    for wf in ("default", "minimal"):
+        text = Path(f"src/imp/assets/workflows/{wf}/agents/explorer.md").read_text()
+        lines = text.splitlines(keepends=True)
+        i = next(n for n, ln in enumerate(lines)
+                 if ln.startswith("- Start broad with `glob`/`grep`"))
+        # It qualifies the "start broad" bullet, so it must sit right after it.
+        assert lines[i + 1] == bullet, wf
+        texts.append(text)
+    assert texts[0] == texts[1]      # the two shipped copies stay byte-identical
+
+
 def test_explorer_nudges_symbol_outline_in_both_copies() -> None:
-    for wf in ("default",):
+    for wf in ("default", "minimal"):
         text = Path(f"src/imp/assets/workflows/{wf}/agents/explorer.md").read_text()
         assert "symbol_outline" in text
         assert "before reading full bodies" in text

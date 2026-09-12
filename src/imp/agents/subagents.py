@@ -94,7 +94,9 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
         name="sub_agent",
         description=(
             "Dispatch a subtask to a named subagent. "
-            "Returns the subagent's final message as a plain string. "
+            "Returns the subagent's final message as a plain string; an "
+            "over-long one is returned as a head preview plus a path to the "
+            "full text. "
             "Independent subtasks issued as multiple sub_agent calls in ONE "
             "assistant message run concurrently; issue dependent subtasks "
             "sequentially across turns. A non-sub_agent tool issued in the "
@@ -218,24 +220,28 @@ def _attach_isolated_home(
         policy, home_layer=layer, overlay_root=overlay_root), cleanup
 
 
+def _recovery_command(quest_id: str, call_event_id: str) -> str:
+    return f"imp events {quest_id} --agent sub:{call_event_id} --limit 50"
+
+
 def _suspend_handback_body(
-    subagent_name: str, target_dir: Path, *, interrupted: bool
+    subagent_name: str, quest_id: str, call_event_id: str, *, interrupted: bool
 ) -> str:
     """Parent-handback body for a suspended/interrupted subagent."""
     # _close_subagent_fold scans is_error content for the [suspended]/[interrupted] marker.
-    tx = target_dir / "transcript.jsonl"
     if interrupted:
         header = (f"subagent {subagent_name!r} was interrupted before finishing — "
                   f"the run was paused. [interrupted]")
+        footer = "Re-dispatch a fresh subagent or continue from the activity above."
     else:
         header = (f"subagent {subagent_name!r} was suspended before finishing — "
                   f"its provider or retry budget ran out. [suspended]")
+        footer = ("Use the activity above to decide whether to retry the subagent "
+                  "or continue yourself.")
     return (
         f"{header}\n\n"
-        f"Full prior transcript: {tx}\n\n"
-        f"You decide what happens next — re-dispatch a fresh subagent "
-        f"(pointed at the transcript above to continue), or carry on from what "
-        f"you have.")
+        f"Recent activity:\n{_recovery_command(quest_id, call_event_id)}\n\n"
+        f"{footer}")
 
 
 async def dispatch_task(
@@ -476,7 +482,7 @@ async def dispatch_task(
                         # turn: a RuntimeError body the dispatch layer appends as an
                         # is_error tool_result. Marker keyed off should_pause.
                         raise RuntimeError(_suspend_handback_body(
-                            subagent_name, target_dir,
+                            subagent_name, cc.id, tool_call_event_id,
                             interrupted=(ctx.coordinator is not None
                                          and ctx.coordinator.should_pause)))
                 backoff += 1
@@ -514,13 +520,13 @@ async def dispatch_task(
                     cumulative_backoff += result.delay
                 if coord is not None and coord.should_pause:
                     raise RuntimeError(_suspend_handback_body(
-                        subagent_name, target_dir, interrupted=True))
+                        subagent_name, cc.id, tool_call_event_id, interrupted=True))
 
             if result.paused:
                 # Hand back through the same seam as context-exhaustion; the marker
                 # is keyed off should_pause (a human stop -> [interrupted]).
                 raise RuntimeError(_suspend_handback_body(
-                    subagent_name, target_dir,
+                    subagent_name, cc.id, tool_call_event_id,
                     interrupted=(ctx.coordinator is not None
                                  and ctx.coordinator.should_pause)))
 
@@ -528,8 +534,8 @@ async def dispatch_task(
             # handoff as it approached, or hit the hard context_window error. Instead
             # of reincarnating in place, hand its progress back to the parent as an
             # is_error tool_result (the raise below reuses that path) so the parent
-            # adjudicates: re-dispatch narrower/higher-tier, point a fresh subagent at
-            # the handoff/transcript, or carry on itself.
+            # adjudicates: re-dispatch narrower, hand the fresh subagent this
+            # handoff, or carry on itself.
             # CONSUMER CONTRACT: narrative._close_subagent_fold scans this is_error
             # content for the literal "[context_exhausted]" marker to derive the
             # subagent's terminal state — keep that bracketed marker in the body.
@@ -538,12 +544,12 @@ async def dispatch_task(
                 or (result.fatal and result.error is not None
                     and result.error.category == "context_window"))
             if context_ceiling:
-                tx = target_dir / "transcript.jsonl"
                 note = None
                 if result.handoff_path is not None:
                     hp = Path(result.handoff_path)
                     if hp.exists():
                         note = hp.read_text()
+                cmd = _recovery_command(cc.id, tool_call_event_id)
                 header = (f"subagent {subagent_name!r} reached its context limit and "
                           f"stopped before finishing. [context_exhausted]")
                 if note is not None:
@@ -551,19 +557,16 @@ async def dispatch_task(
                         f"{header}\n\n"
                         f"It wrote this handoff before stopping:\n\n"
                         f"{note}\n\n"
-                        f"Full prior transcript: {tx}\n\n"
-                        f"You decide what happens next — re-dispatch a fresh subagent "
-                        f"(narrower, at a higher tier, or pointed at the "
-                        f"handoff/transcript above to continue), or carry on from this "
-                        f"handoff yourself.")
+                        f"For more detail:\n{cmd}\n\n"
+                        f"Re-dispatch a fresh subagent with a narrower task, or "
+                        f"continue from this handoff.")
                 else:
                     body = (
                         f"{header}\n\n"
-                        f"It hit the hard context limit without writing a handoff. "
-                        f"Full prior transcript: {tx}\n\n"
-                        f"You decide what happens next — re-dispatch a fresh subagent "
-                        f"(narrower, at a higher tier, or pointed at the transcript "
-                        f"above to continue), or carry on from what you have.")
+                        f"It hit the hard context limit without writing a handoff.\n\n"
+                        f"Recent activity:\n{cmd}\n\n"
+                        f"Re-dispatch a fresh subagent with a narrower task, or "
+                        f"continue from the activity above.")
                 raise RuntimeError(body)
 
             if result.fatal or result.errored or result.output is None:
@@ -591,16 +594,12 @@ async def dispatch_task(
                             "category": cat, "kind": kind,
                             "message": f"subagent {subagent_name!r} failed ({cat})",
                             "audit": True})
-                # Point the parent at the prior transcript so it can re-dispatch a
-                # fresh subagent that continues the child's work instead of starting
-                # empty (mirrors _suspend_handback_body / the context-ceiling path).
-                tx = target_dir / "transcript.jsonl"
                 raise RuntimeError(
                     f"subagent {subagent_name!r} failed ({cat}){suffix}\n\n"
-                    f"Full prior transcript: {tx}\n\n"
-                    f"You decide what happens next — re-dispatch a fresh subagent "
-                    f"(pointed at the transcript above to continue), or carry on "
-                    f"from what you have.")
+                    f"Recent activity:\n"
+                    f"{_recovery_command(cc.id, tool_call_event_id)}\n\n"
+                    f"Re-dispatch a fresh subagent or continue from the activity "
+                    f"above.")
             return cast(str, result.output["text"])
     finally:
         if home_cleanup is not None:

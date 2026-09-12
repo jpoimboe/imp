@@ -212,3 +212,57 @@ def test_events_full_widens_past_the_width_clip(tmp_path, monkeypatch) -> None:
     assert "TAILMARK" not in clipped                # the tail was clipped off
     assert "TAILMARK" in full                       # --full lifts the clip
     assert "…" not in full
+
+
+def test_events_compact_renders_context_occupancy_per_provider_shape(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events = [
+        {"type": "agent_message", "agent_id": "step:build/coder",
+         "payload": {"provider": "anthropic", "model": "claude-opus-5",
+                     "stop_reason": "end_turn",
+                     "usage": {"input_tokens": 10, "output_tokens": 2},
+                     "context_tokens": 159_842,
+                     "raw": {"content": [{"type": "text", "text": "one"}]}}},
+        {"type": "agent_message", "agent_id": "step:build/coder",
+         "payload": {"provider": "claude_code", "model": "claude-opus-5",
+                     "stop_reason": "end_turn",
+                     "usage": {"input_tokens": 10, "output_tokens": 2},
+                     "context_tokens": 137_000, "context_window": 1_000_000,
+                     "context_pct": 79.85263,
+                     "raw": {"content": [{"type": "text", "text": "two"}]}}},
+    ]
+    _make_live_quest(tmp_path, "ccc333", events)
+    out = _run(monkeypatch, tmp_path, "events", "ccc333", "--all", "--full")
+    assert "ctx=159842/200000 (79.9%)" in out      # catalog window, computed pct
+    assert "ctx=137000/1000000 (79.9%)" in out     # provider-reported window+pct
+
+
+_CODEX_EVENTS = [
+    {"type": "agent_message", "agent_id": "step:build/coder",
+     "payload": {"provider": "codex", "model": "gpt-5.6",
+                 "stop_reason": "end_turn",
+                 "usage": {"input_tokens": 10, "output_tokens": 2},
+                 "raw": {"content": [{"type": "text", "text": "done"}]}}},
+    {"type": "agent_message_usage_patch", "agent_id": "step:build/coder",
+     "payload": {"usage": {"input_tokens": 10}, "context_tokens": 22_389,
+                 "context_window": 500_000}},
+]
+
+
+def test_events_compact_folds_the_codex_usage_patch_onto_the_message(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_live_quest(tmp_path, "ddd444", _CODEX_EVENTS)
+    out = _run(monkeypatch, tmp_path, "events", "ddd444", "--all", "--full")
+    assert "ctx=22389/500000 (4.5%)" in out        # patch-row window, not catalog
+    assert "agent_message_usage_patch" not in out  # the row itself stays suppressed
+
+
+def test_events_json_is_unchanged_by_the_occupancy_fold(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_live_quest(tmp_path, "eee555", _CODEX_EVENTS)
+    out = _run(monkeypatch, tmp_path, "events", "eee555", "--all", "--json")
+    payloads = [obj["payload"] for obj in json.loads(out)
+                if obj["type"] == "agent_message"]
+    assert len(payloads) == 1
+    assert "context_tokens" not in payloads[0]
+    assert "context_window" not in payloads[0]

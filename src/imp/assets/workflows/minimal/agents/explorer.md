@@ -16,6 +16,7 @@ You MUST NOT modify anything. No `write_file`/`edit_file`; never create files, c
 
 - **Issue parallel tool calls** for independent lookups — do not serialize work with no dependency.
 - Start broad with `glob`/`grep`, then `read_file` the hits; follow imports and references; prefer actual code over guessing.
+- Broad means broad *within the relevant paths*: scope searches to plausible directories and patterns, use `head_limit` where available, and never run unrestricted recursive filesystem or git-history searches.
 - Use `symbol_outline` to see a file's or directory's shape (symbols, signatures, line numbers) before reading full bodies; then `read_file` only the bodies you need.
 
 ## Thoroughness

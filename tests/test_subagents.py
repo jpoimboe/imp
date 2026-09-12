@@ -100,6 +100,29 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     return ctx
 
 
+def _handback(ctx: ToolContext, result, *, call_event_id: str = "ev-77") -> str:
+    """Drive dispatch_task to its parent-handback raise; return the body text."""
+    import anyio
+
+    import imp.agents.subagents as sub_mod
+
+    async def _fake_drive(*_a, **_k):
+        return result
+
+    async def _call() -> str:
+        return await dispatch_task(ctx, "reviewer", "do x",
+                                   tool_call_event_id=call_event_id)
+
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(_call)
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+    return str(ei.value)
+
+
 def test_dispatch_task_surfaces_stalled_kind(tmp_path: Path) -> None:
     # PRODUCER: when drive_invocation returns ErrorInfo(category='config',
     # kind='stalled') (the B.2 watchdog outcome), dispatch_task must surface the
@@ -131,61 +154,37 @@ def test_dispatch_task_suspend_handback_on_budget_ceiling(tmp_path: Path) -> Non
     # PRODUCER: when the retry-budget ceiling is hit during subagent backoff and no
     # human pause is pending (coordinator.should_pause is False), dispatch_task hands
     # the child back as a RuntimeError whose body carries the literal [suspended]
-    # marker and the transcript pointer — it no longer raises SubagentSuspended.
-    import anyio
-
+    # marker and the bounded recovery command — it no longer raises SubagentSuspended.
     from imp.engine.agent_run import AgentRunResult, ErrorInfo
 
     ctx = _dispatch_ctx(tmp_path)
     assert ctx.coordinator.should_pause is False
 
-    async def _fake_drive(*_a, **_k):
-        # delay far exceeds budget_for("auth") (1800s) -> ceiling on the first pass.
-        return AgentRunResult(output=None, errored=True, paused=False,
-                              fatal=False, delay=1e9,
-                              error=ErrorInfo("auth", None))
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    # delay far exceeds budget_for("auth") (1800s) -> ceiling on the first pass.
+    body = _handback(ctx, AgentRunResult(output=None, errored=True, paused=False,
+                                         fatal=False, delay=1e9,
+                                         error=ErrorInfo("auth", None)))
     assert "[suspended]" in body
     assert "[interrupted]" not in body
-    assert "transcript.jsonl" in body
+    assert "imp events change-42 --agent sub:ev-77 --limit 50" in body
+    assert "transcript.jsonl" not in body
 
 
 def test_dispatch_task_interrupt_handback_on_pause(tmp_path: Path) -> None:
     # PRODUCER: with a human pause pending (coordinator.should_pause True) and the
     # child's drive returning paused, dispatch_task hands back a RuntimeError whose
-    # body carries the [interrupted] marker and the transcript pointer.
-    import anyio
-
+    # body carries the [interrupted] marker and the bounded recovery command.
     from imp.engine.agent_run import AgentRunResult
 
     ctx = _dispatch_ctx(tmp_path)
     ctx.coordinator._should_pause = True
 
-    async def _fake_drive(*_a, **_k):
-        return AgentRunResult(output=None, errored=False, paused=True,
-                              fatal=False, delay=None, error=None)
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    body = _handback(ctx, AgentRunResult(output=None, errored=False, paused=True,
+                                         fatal=False, delay=None, error=None))
     assert "[interrupted]" in body
     assert "[suspended]" not in body
-    assert "transcript.jsonl" in body
+    assert "imp events change-42 --agent sub:ev-77 --limit 50" in body
+    assert "transcript.jsonl" not in body
 
 
 def test_task_tool_invoke_raises_sentinel(tmp_path: Path) -> None:
@@ -1020,6 +1019,18 @@ def test_make_task_tool_description_has_parallel_guidance() -> None:
     assert make_task_tool(("low", "high")).description == desc
 
 
+def test_make_task_tool_description_states_the_spill_shape() -> None:
+    """AC 12: spilling falsifies the unconditional "returns the final message as a
+    plain string" promise, so the description names the preview-plus-path shape an
+    over-long result actually takes."""
+    desc = make_task_tool().description
+    assert ("Returns the subagent's final message as a plain string; an over-long "
+            "one is returned as a head preview plus a path to the full text.") in desc
+    assert "plain string. " not in desc          # the unconditional promise is gone
+    # The tier-bearing variant shares the same description.
+    assert make_task_tool(("low", "high")).description == desc
+
+
 @pytest.mark.anyio
 async def test_subagent_auth_budget_hands_back_suspended(tmp_path: Path,
                                                          monkeypatch) -> None:
@@ -1176,7 +1187,7 @@ def test_task_tool_tier_description_omit_uses_default_not_inherit() -> None:
 def test_dispatch_task_hands_back_handoff_note_inline(tmp_path: Path) -> None:
     # Tier A: subagent wrote a handoff as it neared its window. dispatch_task must
     # NOT reincarnate — it hands the note back to the parent as an is_error
-    # tool_result inlining the note text, a transcript pointer, the guidance
+    # tool_result inlining the note text, the recovery command, the guidance
     # footer, and the [context_exhausted] marker.
     import anyio
 
@@ -1213,9 +1224,9 @@ def test_dispatch_task_hands_back_handoff_note_inline(tmp_path: Path) -> None:
     assert "[context_exhausted]" in body
     assert "It wrote this handoff before stopping:" in body
     assert "Explored module X; next wire up Y." in body
-    assert "Full prior transcript: " in body
-    assert "transcript.jsonl" in body
-    assert "You decide what happens next" in body
+    assert "For more detail:" in body
+    assert "imp events change-42 --agent sub:" in body
+    assert "transcript.jsonl" not in body
     assert spawns["n"] == 1  # no reincarnation respawn
 
 
@@ -1247,15 +1258,16 @@ def test_dispatch_task_hands_back_hard_context_window(tmp_path: Path) -> None:
     assert "reached its context limit and stopped before finishing." in body
     assert "[context_exhausted]" in body
     assert "It hit the hard context limit without writing a handoff." in body
-    assert "Full prior transcript: " in body
-    assert "transcript.jsonl" in body
+    assert "Recent activity:" in body
+    assert "imp events change-42 --agent sub:" in body
+    assert "transcript.jsonl" not in body
     assert "It wrote this handoff before stopping:" not in body
 
 
-def test_dispatch_task_missing_handoff_note_degrades_to_transcript(
+def test_dispatch_task_missing_handoff_note_degrades_to_recovery_command(
         tmp_path: Path) -> None:
     # A handoff_path is set but the note file is absent on disk. dispatch_task
-    # must NOT crash — it degrades to the transcript-only body, same as Tier B.
+    # must NOT crash — it degrades to the bounded-command body, same as Tier B.
     import anyio
 
     from imp.engine.agent_run import AgentRunResult
@@ -1279,73 +1291,47 @@ def test_dispatch_task_missing_handoff_note_degrades_to_transcript(
     body = str(ei.value)
     assert "[context_exhausted]" in body
     assert "It hit the hard context limit without writing a handoff." in body
+    assert "Recent activity:" in body
+    assert "imp events change-42 --agent sub:" in body
     assert "It wrote this handoff before stopping:" not in body
 
 
-def test_dispatch_task_failed_handback_carries_transcript_pointer(
+def test_dispatch_task_failed_handback_carries_recovery_command(
         tmp_path: Path) -> None:
     # PRODUCER: the failed/fatal handback (result.errored, delay=None so no budget
-    # ceiling, not paused, no handoff -> not context-ceiling) now hands back a body
-    # that carries the transcript pointer + re-dispatch prose so the task-lead can
-    # point a fresh subagent at the prior transcript, while preserving the
+    # ceiling, not paused, no handoff -> not context-ceiling) hands back a body
+    # that carries the bounded imp events command so the task-lead can read the
+    # child's recent activity, while preserving the
     # "failed (<cat>) [<kind>]" marker line the _close_subagent_fold scan reads.
-    import anyio
-
     from imp.engine.agent_run import AgentRunResult, ErrorInfo
 
-    ctx = _dispatch_ctx(tmp_path)
-
-    async def _fake_drive(*_a, **_k):
-        return AgentRunResult(output=None, errored=True, paused=False,
-                              fatal=False, delay=None,
-                              error=ErrorInfo("network", "network"))
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=True, paused=False,
+                                    fatal=False, delay=None,
+                                    error=ErrorInfo("network", "network")))
     # Marker line preserved (name, category, [kind]).
     assert "subagent 'reviewer' failed (network) [network]" in body
-    # New: the work-preserving transcript pointer + re-dispatch prose.
-    assert "Full prior transcript: " in body
-    assert "transcript.jsonl" in body
-    assert "re-dispatch a fresh subagent" in body
-    assert "carry on from what you have" in body
+    # The work-preserving recovery command + re-dispatch prose.
+    assert "Recent activity:" in body
+    assert "imp events change-42 --agent sub:" in body
+    assert "Re-dispatch a fresh subagent or continue from the activity above." in body
+    assert "transcript.jsonl" not in body
 
 
 def test_dispatch_task_failed_handback_omits_kind_suffix_when_kind_none(
         tmp_path: Path) -> None:
     # When result.error.kind is None the marker suffix is empty ("failed (network)"
-    # with no bracket), but the transcript pointer + re-dispatch prose are still
+    # with no bracket), but the recovery command + re-dispatch prose are still
     # present — the work-preserving lines are unconditional, the [kind] marker is not.
-    import anyio
-
     from imp.engine.agent_run import AgentRunResult, ErrorInfo
 
-    ctx = _dispatch_ctx(tmp_path)
-
-    async def _fake_drive(*_a, **_k):
-        return AgentRunResult(output=None, errored=True, paused=False,
-                              fatal=False, delay=None,
-                              error=ErrorInfo("network", None))
-
-    import imp.agents.subagents as sub_mod
-    orig = sub_mod.drive_invocation
-    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError) as ei:
-            anyio.run(dispatch_task, ctx, "reviewer", "do x")
-    finally:
-        sub_mod.drive_invocation = orig  # type: ignore[assignment]
-    body = str(ei.value)
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=True, paused=False,
+                                    fatal=False, delay=None,
+                                    error=ErrorInfo("network", None)))
     assert "subagent 'reviewer' failed (network)" in body
     assert "failed (network) [" not in body   # no kind bracket
-    assert "Full prior transcript: " in body
+    assert "imp events change-42 --agent sub:" in body
 
 
 def test_dispatch_task_midloop_pause_emits_no_audit_error(tmp_path: Path) -> None:
@@ -1420,3 +1406,191 @@ def test_every_provider_copies_undecided_onto_the_child_context() -> None:
     for module in ("claude_code", "codex_runner", "push_session", "scripted"):
         src = Path(f"src/imp/providers/{module}.py").read_text()
         assert "ctx.undecided = invocation.undecided" in src, module
+
+
+def test_interrupted_handback_body_is_verbatim(tmp_path: Path) -> None:
+    # A human pause during the child's run: the body must be the pinned text,
+    # with the runnable recovery command carrying real values.
+    from imp.engine.agent_run import AgentRunResult
+
+    ctx = _dispatch_ctx(tmp_path)
+    ctx.coordinator._should_pause = True
+    body = _handback(ctx, AgentRunResult(output=None, errored=False, paused=True,
+                                         fatal=False, delay=None))
+    assert body == (
+        "subagent 'reviewer' was interrupted before finishing — the run was "
+        "paused. [interrupted]\n\n"
+        "Recent activity:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Re-dispatch a fresh subagent or continue from the activity above.")
+
+
+def test_suspended_handback_body_is_verbatim(tmp_path: Path) -> None:
+    # Same seam with no human pause -> [suspended], and the neutral retry footer
+    # (a spent provider/retry budget says nothing about task size).
+    from imp.engine.agent_run import AgentRunResult
+
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=False, paused=True,
+                                    fatal=False, delay=None))
+    assert body == (
+        "subagent 'reviewer' was suspended before finishing — its provider or "
+        "retry budget ran out. [suspended]\n\n"
+        "Recent activity:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Use the activity above to decide whether to retry the subagent or "
+        "continue yourself.")
+
+
+def test_nested_dispatch_handback_carries_the_live_quest_id(tmp_path: Path) -> None:
+    # A subagent that itself dispatches a subagent (depth 1 dispatching a depth-2
+    # child). ToolContext.quest is None at that depth, so reading the quest id
+    # from ctx.quest would raise AttributeError — which _handback's
+    # pytest.raises(RuntimeError) does NOT swallow. The distinct id pins that the
+    # value comes from the propagated quest_context snapshot.
+    import dataclasses
+
+    from imp.engine.agent_run import AgentRunResult
+
+    ctx = _dispatch_ctx(tmp_path)
+    ctx.subagent_depth = 1          # this ctx belongs to a subagent, not a step
+    ctx.quest_context = dataclasses.replace(ctx.quest_context, id="nested-9")
+    assert ctx.quest is None        # ToolContext.quest is None inside a subagent
+    body = _handback(ctx, AgentRunResult(output=None, errored=False, paused=True,
+                                         fatal=False, delay=None),
+                     call_event_id="ev-deep")
+    assert "imp events nested-9 --agent sub:ev-deep --limit 50" in body
+    assert "sub: " not in body      # never an empty child id
+
+
+def test_context_exhausted_with_handoff_body_is_verbatim(tmp_path: Path) -> None:
+    # The handoff note stays fully inlined; the bounded command is extra detail.
+    from imp.engine.agent_run import AgentRunResult
+
+    note_path = tmp_path / "handoff.md"
+    note_path.write_text("# handoff\nExplored module X; next wire up Y.")
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=False, paused=False,
+                                    fatal=False, delay=None,
+                                    handoff_path=str(note_path)))
+    assert body == (
+        "subagent 'reviewer' reached its context limit and stopped before "
+        "finishing. [context_exhausted]\n\n"
+        "It wrote this handoff before stopping:\n\n"
+        "# handoff\nExplored module X; next wire up Y.\n\n"
+        "For more detail:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Re-dispatch a fresh subagent with a narrower task, or continue from "
+        "this handoff.")
+
+
+def test_context_exhausted_handoff_note_is_never_truncated(tmp_path: Path) -> None:
+    # A long note is inlined whole — the handback must not clip the one artifact
+    # that carries the child's actual progress.
+    from imp.engine.agent_run import AgentRunResult
+
+    note = "\n".join(f"line {i}: findings about module {i}" for i in range(400))
+    note_path = tmp_path / "handoff.md"
+    note_path.write_text(note)
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=False, paused=False,
+                                    fatal=False, delay=None,
+                                    handoff_path=str(note_path)))
+    assert note in body
+    assert body.count("line 399: findings about module 399") == 1
+
+
+def test_context_exhausted_without_handoff_body_is_verbatim(tmp_path: Path) -> None:
+    # Hard context_window fatal, no note: the bounded command is the sole route.
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=False, paused=False,
+                                    fatal=True, delay=None,
+                                    error=ErrorInfo("context_window",
+                                                    "prompt_too_long")))
+    assert body == (
+        "subagent 'reviewer' reached its context limit and stopped before "
+        "finishing. [context_exhausted]\n\n"
+        "It hit the hard context limit without writing a handoff.\n\n"
+        "Recent activity:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Re-dispatch a fresh subagent with a narrower task, or continue from "
+        "the activity above.")
+
+
+def test_failed_handback_body_is_verbatim(tmp_path: Path) -> None:
+    # The ordinary-failure body keeps its "failed (<cat>) [<kind>]" marker line
+    # and gains the bounded command in place of the transcript pointer.
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    body = _handback(_dispatch_ctx(tmp_path),
+                     AgentRunResult(output=None, errored=True, paused=False,
+                                    fatal=False, delay=None,
+                                    error=ErrorInfo("network", "network")))
+    assert body == (
+        "subagent 'reviewer' failed (network) [network]\n\n"
+        "Recent activity:\n"
+        "imp events change-42 --agent sub:ev-77 --limit 50\n\n"
+        "Re-dispatch a fresh subagent or continue from the activity above.")
+
+
+def _all_handback_bodies(tmp_path: Path) -> dict[str, str]:
+    """Every parent-handback body dispatch_task can raise, keyed by branch."""
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    note_path = tmp_path / "handoff.md"
+    note_path.write_text("# handoff\nnext: wire up Y.")
+    paused = AgentRunResult(output=None, errored=False, paused=True,
+                            fatal=False, delay=None)
+    interrupted_ctx = _dispatch_ctx(tmp_path)
+    interrupted_ctx.coordinator._should_pause = True
+    return {
+        "interrupted": _handback(interrupted_ctx, paused),
+        "suspended": _handback(_dispatch_ctx(tmp_path), paused),
+        "context_exhausted_handoff": _handback(
+            _dispatch_ctx(tmp_path),
+            AgentRunResult(output=None, errored=False, paused=False, fatal=False,
+                           delay=None, handoff_path=str(note_path))),
+        "context_exhausted_bare": _handback(
+            _dispatch_ctx(tmp_path),
+            AgentRunResult(output=None, errored=False, paused=False, fatal=True,
+                           delay=None,
+                           error=ErrorInfo("context_window", "prompt_too_long"))),
+        "failed": _handback(
+            _dispatch_ctx(tmp_path),
+            AgentRunResult(output=None, errored=True, paused=False, fatal=False,
+                           delay=None, error=ErrorInfo("config", "stalled"))),
+    }
+
+
+def test_no_handback_body_hands_the_parent_a_masked_path(tmp_path: Path) -> None:
+    # INVARIANT: never hand an agent a path its sandbox masks. <quest_dir>/steps/
+    # is masked for every agent, so no branch may name a transcript or handoff
+    # file — each one routes recovery through the bounded imp events command.
+    for branch, body in _all_handback_bodies(tmp_path).items():
+        assert "steps/" not in body, branch
+        assert "transcript.jsonl" not in body, branch
+        assert "handoff.md" not in body, branch
+        assert "imp events change-42 --agent sub:ev-77 --limit 50" in body, branch
+
+
+def test_close_subagent_fold_derives_state_from_every_handback(tmp_path: Path) -> None:
+    # PRODUCER -> CONSUMER: feed each real handback body through the provider's
+    # f"{type(e).__name__}: {e}" formatting into the narrative fold, which derives
+    # the terminal glyph from the bracketed marker.
+    from imp.cli import narrative as nv
+
+    expected = {
+        "interrupted": "interrupted",
+        "suspended": "suspended",
+        "context_exhausted_handoff": "context_exhausted",
+        "context_exhausted_bare": "context_exhausted",
+        "failed": "stalled",
+    }
+    for branch, body in _all_handback_bodies(tmp_path).items():
+        fold = nv.SubagentFold(subagent_name="reviewer", event_id="e",
+                               block_id="b", nested=nv.NarrativeBuilder())
+        nv._close_subagent_fold(fold, {"content": f"RuntimeError: {body}",
+                                       "error": True})
+        assert fold.terminal_state == expected[branch], branch

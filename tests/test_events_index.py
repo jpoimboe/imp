@@ -552,3 +552,38 @@ def test_step_index_json_carries_windows_agents_and_types() -> None:
     assert isinstance(obj["types"], list)
     assert obj["types"][0]["type"]
     assert isinstance(obj["types"][0]["count"], int)
+
+
+def test_usage_patch_overlays_key_the_preceding_same_agent_message() -> None:
+    events = [
+        _ev("m1", "agent_message", agent_id="sub:D1"),                   # 1
+        _ev("m2", "agent_message", agent_id="step:build/coder"),         # 2
+        # Persisted raw, exactly as state.update_last_agent_message_usage
+        # writes it: no id, no timestamp.
+        {"type": "agent_message_usage_patch", "agent_id": "sub:D1",
+         "payload": {"usage": {"input_tokens": 7}, "context_tokens": 22_389,
+                     "context_window": 500_000}},                        # 3
+    ]
+    assert ei.usage_patch_overlays(_indexed(events)) == {
+        1: {"context_tokens": 22_389, "context_window": 500_000}}
+
+
+def test_usage_patch_overlays_ignore_a_patch_with_no_preceding_message() -> None:
+    events = [
+        {"type": "agent_message_usage_patch", "agent_id": "sub:D1",
+         "payload": {"usage": {}, "context_tokens": 10, "context_window": 20}},
+    ]
+    assert ei.usage_patch_overlays(_indexed(events)) == {}
+
+
+def test_digest_line_overlay_renders_ctx_without_mutating_the_event() -> None:
+    ev = _ev("m1", "agent_message", agent_id="step:build/coder",
+             provider="codex", model="gpt-5.6", stop_reason="end_turn",
+             usage={"input_tokens": 10, "output_tokens": 2},
+             raw={"content": [{"type": "text", "text": "done"}]})
+    line = ei.digest_line(
+        5, ev, {}, overlay={"context_tokens": 136_000,
+                            "context_window": 272_000})
+    assert "ctx=136000/272000 (50.0%)" in line
+    assert "context_tokens" not in ev["payload"]
+    assert "ctx=" not in ei.digest_line(5, ev, {})

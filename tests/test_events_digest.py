@@ -344,3 +344,119 @@ def test_agent_message_digest_reports_tools_and_stop():
     line = digest_event(ev)
     assert "stop=end_turn" in line
     assert "hi" in line
+
+
+def test_agent_message_ctx_resolves_window_from_the_catalog() -> None:
+    # anthropic/openai report context_tokens alone: the window comes from the
+    # model catalog and the percentage is computed.
+    ev = {
+        "id": "c1", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "anthropic", "model": "claude-opus-5",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 2},
+            "context_tokens": 159_842,
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    assert "ctx=159842/200000 (79.9%)" in digest_event(ev)
+
+
+def test_agent_message_ctx_prefers_the_reported_window_and_pct() -> None:
+    # claude_code reports all three inline; its own window and percentage win
+    # over the catalog window (200000) and over a computed percentage (13.7).
+    ev = {
+        "id": "c2", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "claude_code", "model": "claude-opus-5",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 2},
+            "context_tokens": 137_000, "context_window": 1_000_000,
+            "context_pct": 79.85263,
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    line = digest_event(ev)
+    assert "ctx=137000/1000000 (79.9%)" in line
+    assert "200000" not in line
+    assert "13.7" not in line
+
+
+def test_agent_message_ctx_falls_back_to_pct_when_tokens_are_absent() -> None:
+    ev = {
+        "id": "c3", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "claude_code", "model": "claude-opus-5",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 2},
+            "context_pct": 79.85263,
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    line = digest_event(ev)
+    assert "ctx=79.9%" in line
+    assert "79.85263" not in line
+
+
+def test_agent_message_ctx_falls_back_to_pct_when_the_window_is_unknown() -> None:
+    ev = {
+        "id": "c3b", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "no_such_provider", "model": "m",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 2},
+            "context_tokens": 5000,
+            "context_pct": 79.85263,
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    line = digest_event(ev)
+    assert "ctx=79.9%" in line
+    assert "79.85263" not in line
+    assert "5000" not in line
+
+
+def test_agent_message_ctx_omitted_when_the_window_cannot_be_resolved() -> None:
+    # Unknown provider/model, no reported window, no percentage: never guess.
+    ev = {
+        "id": "c4", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "no_such_provider", "model": "m",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 3, "output_tokens": 1},
+            "context_tokens": 5000,
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    line = digest_event(ev)
+    assert "ctx=" not in line
+    assert "5000" not in line
+
+
+def test_agent_message_without_occupancy_fields_renders_no_ctx() -> None:
+    ev = {
+        "id": "c5", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "anthropic", "model": "claude-opus-5",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 3, "output_tokens": 1},
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    assert "ctx=" not in digest_event(ev)
+
+
+def test_agent_message_ctx_ignores_non_numeric_occupancy_fields() -> None:
+    ev = {
+        "id": "c6", "type": "agent_message", "agent_id": "step:build/coder",
+        "payload": {
+            "provider": "anthropic", "model": "claude-opus-5",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 3, "output_tokens": 1},
+            "context_tokens": "lots", "context_pct": "high",
+            "raw": {"content": [{"type": "text", "text": "done"}]},
+        },
+    }
+    line = digest_event(ev)
+    assert "ctx=" not in line
+    assert "stop=end_turn" in line

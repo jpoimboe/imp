@@ -572,7 +572,7 @@ def test_spawn_tool_offered_as_sub_agent() -> None:
 
 @pytest.mark.anyio
 async def test_batch_over_cap_result_spilled_and_previewed(tmp_path: Path) -> None:
-    """AC: a >50 KB subagent result on the concurrent batch path is wrapped as a
+    """AC: a >30 KB subagent result on the concurrent batch path is wrapped as a
     preview + notice, and the FULL result is spilled to tool-results/<tu.id>."""
     reset_parallelism_cache()
     big = "A" * 60_000
@@ -606,7 +606,7 @@ async def test_batch_over_cap_result_spilled_and_previewed(tmp_path: Path) -> No
 
 @pytest.mark.anyio
 async def test_inline_over_cap_result_spilled_and_previewed(tmp_path: Path) -> None:
-    """AC: the parallelism=1 inline kill-switch path spills + previews a >50 KB
+    """AC: the parallelism=1 inline kill-switch path spills + previews a >30 KB
     result identically to the batch path (the two sites cannot drift)."""
     reset_parallelism_cache()
     big = "B" * 60_000
@@ -637,7 +637,7 @@ async def test_inline_over_cap_result_spilled_and_previewed(tmp_path: Path) -> N
 
 @pytest.mark.anyio
 async def test_batch_under_cap_result_unchanged(tmp_path: Path) -> None:
-    """AC: a <=50 KB result is byte-for-byte unchanged and never spills."""
+    """AC: a <=30 KB result is byte-for-byte unchanged and never spills."""
     reset_parallelism_cache()
     small = json.dumps({"status": "Success", "echo": "hi"})
 

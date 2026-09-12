@@ -274,3 +274,25 @@ def test_bash_output_cap_below_shared_display_cap() -> None:
     m = re.search(r"^BASH_OUTPUT_CAP_BYTES = ([^#\n]+)", src, re.M)
     assert m is not None
     assert m.group(1).strip() == "30_000"     # a literal, not an alias
+
+
+def test_task_result_cap_is_its_own_literal_below_the_display_cap() -> None:
+    """The subagent-result spill trigger (30 KB) is its OWN literal — not an alias
+    of the equal-valued bash cap, nor of the 50 KB shared display cap, whose global
+    siblings and prose notice this quest leaves untouched (spec AC 18)."""
+    import inspect
+    import re
+
+    from imp.agents.tools import limits
+    assert limits.TASK_RESULT_CAP_BYTES == 30_000
+    assert limits.TASK_RESULT_CAP_BYTES < limits.TOOL_OUTPUT_CAP_BYTES
+    src = inspect.getsource(limits)
+    m = re.search(r"^TASK_RESULT_CAP_BYTES = ([^#\n]+)", src, re.M)
+    assert m is not None
+    assert m.group(1).strip() == "30_000"      # a literal, not an alias
+    # The global caps this quest must not move, and the notice prose bound to them.
+    assert limits.TOOL_OUTPUT_CAP_BYTES == 50_000
+    assert limits.FILE_READ_CAP_BYTES == 5_000_000
+    assert limits.MATCH_LINE_CAP_BYTES == 2_000
+    assert limits.BASH_OUTPUT_CAP_BYTES == 30_000
+    assert limits.OUTPUT_TRUNCATION_MARKER == "\n... [output truncated at 50 KB] ..."

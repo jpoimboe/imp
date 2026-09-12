@@ -1729,6 +1729,25 @@ def test_resolve_policy_allows_read_reflects_steps_mask(tmp_path):
     assert pol.allows_read(quest_dir / "events.jsonl") is False
 
 
+def test_resolve_policy_leaves_tool_results_readable(tmp_path):
+    # AC 11: a spill notice names <quest_dir>/tool-results/<block-id>. That path
+    # sits inside the rw quest_home bind and is never remasked, so a sandboxed
+    # parent (or a replacement child) can open it with read_file — unlike steps/,
+    # whose mask is exactly what made the old transcript pointer unusable.
+    control, wt = _layout(tmp_path)
+    quest_dir = project_state_dir(control) / "quests" / "abc"
+    (quest_dir / "tool-results").mkdir(parents=True)
+    (quest_dir / "steps").mkdir()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert pol.allows_read(quest_dir / "tool-results" / "t1") is True
+    assert pol.allows_read(quest_dir / "steps" / "p" / "s") is False
+    assert str(quest_dir / "tool-results") not in pol.secret_dirs
+
+
 def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
     control, wt = _layout(tmp_path)
     quest_dir = project_state_dir(control) / "quests" / "abc"
