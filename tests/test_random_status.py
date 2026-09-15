@@ -4,13 +4,14 @@ from imp.agents import prompts
 from imp.agents.random_status import RANDOM_STATUS_PHRASES, random_status_phrase
 
 
-def test_pool_is_108_unique_in_character_phrases() -> None:
-    assert len(RANDOM_STATUS_PHRASES) == 108
-    assert len(set(RANDOM_STATUS_PHRASES)) == 108
+def test_pool_is_92_unique_in_character_phrases() -> None:
+    assert len(RANDOM_STATUS_PHRASES) == 92
+    assert len(set(RANDOM_STATUS_PHRASES)) == 92
     assert RANDOM_STATUS_PHRASES[0] == "scheming"
     assert RANDOM_STATUS_PHRASES[-1] == "circling problem"
     assert "consulting runes" in RANDOM_STATUS_PHRASES
     assert "ideating" not in RANDOM_STATUS_PHRASES
+    assert "recalibrating" not in RANDOM_STATUS_PHRASES
 
 
 def test_picker_draws_only_pool_members() -> None:
