@@ -10,8 +10,8 @@ from imp.providers.catalog import (
     OPENAI,
     ModelInfo,
     catalog_aliases,
-    checkpoint_cutoff,
     context_tokens_from_usage,
+    handoff_limit,
     limits_for,
     model_info,
     model_supports_vision,
@@ -57,23 +57,26 @@ def test_other_providers_seed_their_windows() -> None:
     assert model_info(OPENAI, "gpt-5.5").window == 1_050_000
 
 
-def test_context_threshold_crossed_fires_at_the_default_fraction() -> None:
+def test_context_threshold_crossed_fires_at_the_handoff_limit() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # 170000/200000 = 0.85 >= 0.8 -> crossed.
+    # sonnet's 200k window -> a 160k limit (80% binds below the 200k ceiling).
+    assert context_threshold_crossed(
+        {"input_tokens": 160_000}, "anthropic", "sonnet") is True
     assert context_threshold_crossed(
         {"input_tokens": 170_000}, "anthropic", "sonnet") is True
 
 
-def test_context_threshold_crossed_not_before_the_fraction() -> None:
+def test_context_threshold_crossed_not_below_the_limit() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # 150000/200000 = 0.75 < 0.8 -> not crossed.
+    assert context_threshold_crossed(
+        {"input_tokens": 159_999}, "anthropic", "sonnet") is False
     assert context_threshold_crossed(
         {"input_tokens": 150_000}, "anthropic", "sonnet") is False
 
 
 def test_context_threshold_crossed_sums_cache_tokens() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # 100000 + 60000 + 5000 = 165000 / 200000 = 0.825 >= 0.8.
+    # 100000 + 60000 + 5000 = 165000 >= the 160k limit.
     assert context_threshold_crossed(
         {"input_tokens": 100_000, "cache_read_input_tokens": 60_000,
          "cache_creation_input_tokens": 5_000}, "anthropic", "sonnet") is True
@@ -95,79 +98,49 @@ def test_context_threshold_crossed_without_usage_never_fires() -> None:
 
 def test_gpt_5_6_crosses_at_the_ceiling_on_both_providers() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # With no explicit soft cap, legacy models cross at the 160k default ceiling.
+    # A 1.05M window is clamped by the 200k ceiling, not by 80%.
     for provider in ("openai", "codex"):
         for model in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6"):
             assert context_threshold_crossed(
-                {"input_tokens": 159_999}, provider, model) is False
+                {"input_tokens": 199_999}, provider, model) is False
             assert context_threshold_crossed(
-                {"input_tokens": 160_000}, provider, model) is True
+                {"input_tokens": 200_000}, provider, model) is True
 
 
 def test_claude_opus_5_1m_crosses_at_the_ceiling_not_at_800k() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # 160k of the 1M window: the crossing the 0.8 fraction put at 800k now
-    # fires five times earlier, and the OpenAI cap still must not leak across.
+    # 200k of the 1M window: the 0.8 fraction would put this at 800k.
     for provider in ("anthropic", "claude_code"):
         assert context_threshold_crossed(
-            {"input_tokens": 160_000}, provider, "claude-opus-5[1m]") is True
+            {"input_tokens": 200_000}, provider, "claude-opus-5[1m]") is True
         assert context_threshold_crossed(
             {"input_tokens": 300_000}, provider, "claude-opus-5[1m]") is True
         assert context_threshold_crossed(
-            {"input_tokens": 159_000}, provider, "claude-opus-5[1m]") is False
+            {"input_tokens": 199_999}, provider, "claude-opus-5[1m]") is False
 
 
-def test_sdk_crossed_uses_the_default_ceiling_without_a_soft_cap() -> None:
+def test_sdk_crossed_fires_at_the_200k_ceiling_on_a_big_window() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    # The SDK live window is compared against the model's 160k default ceiling.
-    models = (
-        "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
-        "gpt-5.6", "gpt-5.5", "gpt-5.4",
-    )
-    for provider in ("openai", "codex"):
-        for model in models:
-            assert sdk_context_threshold_crossed(
-                159_999, 1_050_000, provider, model) is False
-            assert sdk_context_threshold_crossed(
-                160_000, 1_050_000, provider, model) is True
+    assert sdk_context_threshold_crossed(199_999, 1_050_000) is False
+    assert sdk_context_threshold_crossed(200_000, 1_050_000) is True
     # The claude_code path on a live 1M window.
-    assert sdk_context_threshold_crossed(
-        160_000, 1_000_000, "claude_code", "claude-opus-5[1m]") is True
-    assert sdk_context_threshold_crossed(
-        159_000, 1_000_000, "claude_code", "claude-opus-5[1m]") is False
+    assert sdk_context_threshold_crossed(200_000, 1_000_000) is True
+    assert sdk_context_threshold_crossed(199_999, 1_000_000) is False
 
 
-def test_sdk_crossed_uncapped_model_uses_the_default_fraction() -> None:
+def test_sdk_crossed_on_a_200k_window_fires_at_eighty_percent() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    # 170000/200000 = 0.85 >= 0.8; 150000/200000 = 0.75 < 0.8.
-    assert sdk_context_threshold_crossed(
-        170_000, 200_000, "claude_code", "opus") is True
-    assert sdk_context_threshold_crossed(
-        150_000, 200_000, "claude_code", "opus") is False
-
-
-def test_sdk_crossed_unknown_model_trusts_the_live_window() -> None:
-    from imp.providers.catalog import sdk_context_threshold_crossed
-    # The SDK's window is authoritative, so an unknown model still fires at 0.8
-    # rather than never firing.
-    assert sdk_context_threshold_crossed(
-        170_000, 200_000, "claude_code", "claude-sonnet-4-5") is True
-    assert sdk_context_threshold_crossed(
-        150_000, 200_000, "mystery", "nope") is False
-    assert sdk_context_threshold_crossed(
-        170_000, 200_000, "mystery", "nope") is True
+    assert sdk_context_threshold_crossed(160_000, 200_000) is True
+    assert sdk_context_threshold_crossed(170_000, 200_000) is True
+    assert sdk_context_threshold_crossed(159_999, 200_000) is False
 
 
 def test_sdk_crossed_without_live_numbers_never_fires() -> None:
     from imp.providers.catalog import sdk_context_threshold_crossed
-    assert sdk_context_threshold_crossed(
-        170_000, None, "claude_code", "opus") is False
-    assert sdk_context_threshold_crossed(
-        None, 200_000, "claude_code", "opus") is False
-    assert sdk_context_threshold_crossed(
-        0, 200_000, "claude_code", "opus") is False
-    assert sdk_context_threshold_crossed(
-        170_000, 0, "claude_code", "opus") is False
+    assert sdk_context_threshold_crossed(170_000, None) is False
+    assert sdk_context_threshold_crossed(None, 200_000) is False
+    assert sdk_context_threshold_crossed(0, 200_000) is False
+    assert sdk_context_threshold_crossed(170_000, 0) is False
 
 
 def test_context_tokens_from_usage_anthropic_cache_split() -> None:
@@ -329,16 +302,11 @@ def test_legacy_openai_models_use_the_default_ceiling() -> None:
         info = OPENAI[alias]
         assert info.window == 1_050_000
         assert info.max_output_tokens == 128_000
-        assert info.soft_cap is None
-        assert checkpoint_cutoff(info, info.window) == 160_000 / 1_050_000
+        assert handoff_limit(info.window) == 200_000
 
 
 def test_astra_catalog_and_dated_limits_are_shared_by_openai_and_codex() -> None:
-    expected = ModelInfo(
-        window=1_050_000,
-        max_output_tokens=128_000,
-        soft_cap=260_000,
-    )
+    expected = ModelInfo(window=1_050_000, max_output_tokens=128_000)
     assert OPENAI["gpt-6-astra"] == expected
     for provider in ("openai", "codex"):
         assert limits_for(provider, "gpt-6-astra") == expected
@@ -346,40 +314,31 @@ def test_astra_catalog_and_dated_limits_are_shared_by_openai_and_codex() -> None
         assert "gpt-6-astra" in catalog_aliases(provider)
 
 
-def test_astra_push_handoff_boundary_is_260k() -> None:
+def test_astra_hands_off_at_200k_like_every_other_big_window() -> None:
     from imp.providers.catalog import context_threshold_crossed
 
     info = OPENAI["gpt-6-astra"]
-    assert checkpoint_cutoff(info, info.window) == 260_000 / 1_050_000
+    assert handoff_limit(info.window) == 200_000
     assert context_threshold_crossed(
-        {"input_tokens": 259_999}, "openai", "gpt-6-astra") is False
+        {"input_tokens": 199_999}, "openai", "gpt-6-astra") is False
     assert context_threshold_crossed(
-        {"input_tokens": 260_000}, "openai", "gpt-6-astra") is True
+        {"input_tokens": 200_000}, "openai", "gpt-6-astra") is True
 
 
-def test_astra_sdk_handoff_boundary_is_260k() -> None:
-    from imp.providers.catalog import sdk_context_threshold_crossed
-
-    assert sdk_context_threshold_crossed(
-        259_999, 1_050_000, "codex", "gpt-6-astra") is False
-    assert sdk_context_threshold_crossed(
-        260_000, 1_050_000, "codex", "gpt-6-astra") is True
-
-
-def test_soft_cap_defaults_to_none_for_anthropic_models() -> None:
-    assert ModelInfo().soft_cap is None
-    assert all(info.soft_cap is None for info in ANTHROPIC.values())
-    assert all(info.soft_cap is None for info in CLAUDE_CODE.values())
+def test_the_soft_cap_field_and_checkpoint_cutoff_are_gone() -> None:
+    import imp.providers.catalog as cat
+    assert "soft_cap" not in ModelInfo.__dataclass_fields__
+    assert not hasattr(cat, "checkpoint_cutoff")
 
 
 def test_limits_for_resolves_exact_aliases_per_provider() -> None:
     assert limits_for("openai", "gpt-5.6-sol") == OPENAI["gpt-5.6-sol"]
     codex_sol = limits_for("codex", "gpt-5.6-sol")
     assert codex_sol is not None
-    assert codex_sol.soft_cap is None
+    assert codex_sol.window == 1_050_000
     bare = limits_for("openai", "gpt-5.6")
     assert bare is not None
-    assert (bare.window, bare.soft_cap) == (1_050_000, None)
+    assert bare.window == 1_050_000
     anthropic_1m = limits_for("anthropic", "claude-opus-5[1m]")
     assert anthropic_1m is not None
     assert anthropic_1m.window == 1_000_000
@@ -405,7 +364,7 @@ def test_limits_for_longest_prefix_beats_a_shorter_key() -> None:
     # Both "gpt-5.6-sol" and "gpt-5" are prefixes; the longest wins.
     info = limits_for("openai", "gpt-5.6-sol-2026-03")
     assert info is not None
-    assert (info.window, info.soft_cap) == (1_050_000, None)
+    assert info.window == 1_050_000
 
 
 def test_limits_for_unknown_provider_or_model_is_none() -> None:
@@ -422,39 +381,25 @@ def test_limits_for_is_case_sensitive() -> None:
     assert limits_for("anthropic", "Opus") is None
 
 
-def test_default_checkpoint_ceiling_is_160000() -> None:
-    assert DEFAULT_CHECKPOINT_CEILING == 160_000
+def test_default_checkpoint_ceiling_is_200000() -> None:
+    assert DEFAULT_CHECKPOINT_CEILING == 200_000
 
 
-def test_checkpoint_cutoff_uses_an_explicit_model_cap() -> None:
-    assert checkpoint_cutoff(
-        ModelInfo(window=1_050_000, soft_cap=260_000), 1_050_000,
-    ) == 260_000 / 1_050_000
-    assert checkpoint_cutoff(
-        ModelInfo(window=200_000, soft_cap=100_000), 200_000,
-    ) == 0.5
-    assert checkpoint_cutoff(
-        ModelInfo(window=200_000, soft_cap=190_000), 200_000,
-    ) == DEFAULT_CHECKPOINT_FRACTION
-
-
-def test_checkpoint_cutoff_without_a_soft_cap_is_the_ceiling_or_the_fraction() -> None:
+def test_handoff_limit_is_the_ceiling_or_eighty_percent_of_the_window() -> None:
     assert DEFAULT_CHECKPOINT_FRACTION == 0.8
-    # The fraction binds only while it is the lower of the two — at or below a
-    # 200k window; above that the absolute ceiling takes over.
-    assert checkpoint_cutoff(None, 200_000) == 0.8
-    assert checkpoint_cutoff(ModelInfo(window=100_000), 100_000) == 0.8
-    assert checkpoint_cutoff(ANTHROPIC["claude-opus-5[1m]"], 1_000_000) == 0.16
-    assert checkpoint_cutoff(ModelInfo(window=400_000), 400_000) == 0.4
-    assert checkpoint_cutoff(ModelInfo(), 0) is None
-    assert checkpoint_cutoff(ModelInfo(), None) is None
+    # The fraction binds while it is the lower of the two — at or below a 250k
+    # window; above that the absolute ceiling takes over.
+    assert handoff_limit(200_000) == 160_000
+    assert handoff_limit(220_000) == 176_000
+    assert handoff_limit(400_000) == 200_000
+    assert handoff_limit(1_000_000) == 200_000
+    assert handoff_limit(1_050_000) == 200_000
 
 
-def test_checkpoint_cutoff_without_a_window_is_none() -> None:
-    assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], None) is None
-    assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], 0) is None
-    assert checkpoint_cutoff(OPENAI["gpt-5.6-sol"], -1) is None
-    assert checkpoint_cutoff(None, None) is None
+def test_handoff_limit_without_a_usable_window_is_none() -> None:
+    assert handoff_limit(None) is None
+    assert handoff_limit(0) is None
+    assert handoff_limit(-1) is None
 
 
 def test_context_tokens_from_usage_docstring_disclaims_live_occupancy() -> None:
@@ -471,17 +416,16 @@ def test_context_tokens_from_usage_docstring_disclaims_live_occupancy() -> None:
 
 def test_gpt_5_5_and_5_4_cross_the_threshold_at_the_ceiling() -> None:
     from imp.providers.catalog import context_threshold_crossed
-    # With no explicit soft cap, legacy models cross at the 160k default ceiling.
     for provider in ("openai", "codex"):
         for model in ("gpt-5.5", "gpt-5.4"):
             assert context_threshold_crossed(
-                {"input_tokens": 159_999}, provider, model) is False
+                {"input_tokens": 199_999}, provider, model) is False
             assert context_threshold_crossed(
-                {"input_tokens": 160_000}, provider, model) is True
+                {"input_tokens": 200_000}, provider, model) is True
 
 
-def test_the_uncapped_openai_models_keep_the_400k_window() -> None:
+def test_the_400k_window_models_hand_off_at_the_ceiling() -> None:
     for alias in ("gpt-5", "gpt-5.4-mini", "gpt-5.3-codex"):
         info = OPENAI[alias]
         assert info.window == 400_000
-        assert info.soft_cap is None
+        assert handoff_limit(info.window) == 200_000

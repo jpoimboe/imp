@@ -524,7 +524,7 @@ class NarrativeBuilder:
     """Per-agent_id state machine. add(event) routes one event into the tree.
 
     Routing order in add() (design §5.3):
-      0. update latest_prompt_tokens (the context-bar value) for THIS builder's
+      0. update latest_context_tokens (the context-bar value) for THIS builder's
          own agent: the top-level builder (own_agent_id None) records its non-sub:
          turns, a nested builder records the sub: turns of the subagent it
          represents; a turn that belongs to a registered descendant does not move this
@@ -547,13 +547,12 @@ class NarrativeBuilder:
         self._warnings: list[str] = []
         self._warnings_flushed: bool = False
         self._pause_outcome_shown: bool = False
-        self._latest_prompt_tokens: int | None = None
-        self._latest_context_pct: float | None = None
+        self._latest_context_tokens: int | None = None
         self._latest_context_window: int | None = None
-        # Occupancy (tokens, window) of the most recent agent_message from ANY
+        # Occupancy (tokens, handoff limit) of the most recent agent_message from ANY
         # agent — subagents included, unlike the gauge fields above. Feeds the
         # reincarnating line so it can report the context that actually crossed
-        # the checkpoint, which is frequently a subagent's turn (see loko19).
+        # the limit, which is frequently a subagent's turn (see loko19).
         self._last_agent_context: tuple[int, int] | None = None
         # The "sub:<event_id>" this builder represents (a dispatched subagent's own
         # turns); None on the top-level builder. Gates which agent_message readings move
@@ -632,17 +631,12 @@ class NarrativeBuilder:
         return NarrativeTree(root=self._root)
 
     @property
-    def latest_prompt_tokens(self) -> int | None:
-        """Prompt-token count of the most recent agent_message turn: the billing sum on
-        anthropic/openai paths, codex's true occupancy from agent_message_usage_patch rows.
-        NOT cumulative. None before any has arrived."""
-        return self._latest_prompt_tokens
-
-    @property
-    def latest_context_pct(self) -> float | None:
-        """SDK-reported context-usage percentage (0-100) of the most recent
-        agent_message turn, or None before any has arrived."""
-        return self._latest_context_pct
+    def latest_context_tokens(self) -> int | None:
+        """Live context occupancy of the most recent agent_message turn: the provider's
+        own reading when it reported one, else the turn's billing prompt sum, which
+        equals occupancy on the single-request anthropic/openai push paths. NOT a
+        cumulative total. None before any has arrived."""
+        return self._latest_context_tokens
 
     @property
     def latest_context_window(self) -> int | None:
@@ -943,8 +937,7 @@ class NarrativeBuilder:
         etype = event["type"]
         agent_id = event.get("agent_id")
 
-        # 0. context-bar update: latest_prompt_tokens tracks THIS builder's own agent.
-        #    Token and cost totals are the accounting path's job (imp.cli.accounting).
+        # 0. context-bar update: latest_context_tokens tracks THIS builder's own agent.
         if etype == "agent_message":
             prov = payload.get("provider")
             auth = payload.get("auth_mode")
@@ -957,39 +950,45 @@ class NarrativeBuilder:
                 self._last_step_provider = step_prov
             usage = payload.get("usage")
             pt = usage_prompt_tokens(usage)
+            ctoks = payload.get("context_tokens")
+            cwin_any = payload.get("context_window")
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
             # pt==0 is an all-zero "empty reply" (e.g. freshly-resumed
             # claude_code) — no gauge signal, hold last good values. pt is None
-            # (usage absent) is distinct: context_pct/window may still update.
+            # (usage absent) is distinct: a provider reading still updates.
             if pt != 0 and (not is_subagent or agent_id == self._own_agent_id):
-                if pt is not None:
-                    self._latest_prompt_tokens = pt
-                cpct = payload.get("context_pct")
-                if cpct is not None:
-                    self._latest_context_pct = cpct
-                cwin = payload.get("context_window")
-                if cwin is not None:
-                    self._latest_context_window = cwin
+                # The provider's own reading is true occupancy; the billing sum only
+                # equals it on the single-request anthropic/openai push paths. With
+                # neither, the slot holds rather than blanking the gauge.
+                occupancy = ctoks if ctoks is not None else pt
+                if occupancy is not None:
+                    self._latest_context_tokens = occupancy
+                if cwin_any is not None:
+                    self._latest_context_window = cwin_any
             # Separate from the top-level gauge above (which drops subagents):
-            # remember this turn's occupancy regardless of agent, so a following
-            # reincarnating event can name the context that crossed the checkpoint.
-            ctoks = payload.get("context_tokens")
-            cwin_any = payload.get("context_window")
-            if ctoks is not None and cwin_any:
-                self._last_agent_context = (ctoks, cwin_any)
+            # remember this turn's occupancy against the handoff limit, regardless
+            # of agent, so a following reincarnating event can name the context
+            # that crossed it.
+            if ctoks is not None:
+                from imp.providers.catalog import handoff_limit
+                limit = handoff_limit(cwin_any)
+                if limit is not None:
+                    self._last_agent_context = (ctoks, limit)
         elif etype == "agent_message_usage_patch":
             # codex attaches occupancy AFTER the turn, on this bookkeeping row —
             # its agent_message carries usage={}, so the branch above sees nothing.
-            # Same three assignments, same own-agent routing rule; pre-routing so a
+            # Same assignments, same own-agent routing rule; pre-routing so a
             # registered subagent's crossing still reaches the reincarnating line.
+            from imp.providers.catalog import handoff_limit
             ctoks = payload.get("context_tokens")
             cwin = payload.get("context_window")
-            if ctoks is not None and cwin:
+            limit = handoff_limit(cwin)
+            if ctoks is not None and limit is not None:
                 is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
                 if not is_subagent or agent_id == self._own_agent_id:
-                    self._latest_prompt_tokens = ctoks
+                    self._latest_context_tokens = ctoks
                     self._latest_context_window = cwin
-                self._last_agent_context = (ctoks, cwin)
+                self._last_agent_context = (ctoks, limit)
         elif etype == "quota_reading":
             # Account-wide, so it is retained whichever agent read it — which is why
             # this sits above the subagent delegation that would otherwise hide it.
@@ -1349,8 +1348,9 @@ def _h_test_lane_acquired(
 NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired
 
 
-def _fmt_ctx_tokens(n: int) -> str:
-    """Compact token count for the reincarnating line: '167k' at/above 1k, else bare."""
+def fmt_ctx_tokens(n: int) -> str:
+    """Compact token count for the gauge tail and the reincarnating line: '167k'
+    at/above 1k, else bare."""
     return f"{round(n / 1000)}k" if n >= 1000 else str(n)
 
 
@@ -1358,12 +1358,12 @@ def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     self._flush_burst()
     reason = p.get("reason")
     text = f"reincarnating — {reason}" if reason else "reincarnating"
-    # Name the occupancy that crossed the checkpoint (tokens/window), so the line
-    # is self-explaining and the window is unambiguous — no re-deriving it from
-    # cumulative token counters, which read far larger than the live context.
+    # Name the occupancy that crossed the handoff limit (tokens/limit), so the
+    # line is self-explaining and the denominator is unambiguous — no re-deriving
+    # it from cumulative token counters, which read far larger than live context.
     ctx = self._last_agent_context
-    if ctx is not None and ctx[1]:
-        text += f" ({_fmt_ctx_tokens(ctx[0])}/{_fmt_ctx_tokens(ctx[1])})"
+    if ctx is not None:
+        text += f" ({fmt_ctx_tokens(ctx[0])}/{fmt_ctx_tokens(ctx[1])})"
     self._append(LiteralTextNode(text=text, color_role="lifecycle"))
 
 
@@ -1443,8 +1443,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._stretch_backoff_base = self.backoff_wait_seconds(None)
     self._segment_had_work = False
     # New step = fresh agent conversation; prior step's window must not scale this bar.
-    self._latest_prompt_tokens = None
-    self._latest_context_pct = None
+    self._latest_context_tokens = None
     self._latest_context_window = None
     name = p.get("step", "?")
     kind = p.get("kind")

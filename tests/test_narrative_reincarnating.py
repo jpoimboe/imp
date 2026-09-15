@@ -23,8 +23,8 @@ def test_reincarnating_renders_bare_when_no_reason() -> None:
 
 def test_reincarnating_reports_crossing_context_from_subagent_turn() -> None:
     # The live gauge deliberately ignores subagent turns, but the reincarnating
-    # line must report the occupancy that actually crossed the checkpoint — which
-    # (as in change loko19) was a subagent's. Sourced from the last llm_response.
+    # line must report the occupancy that actually crossed the limit — which
+    # (as in change loko19) was a subagent's. Sourced from the last agent_message.
     b = NarrativeBuilder()
     b.add({"type": "agent_message", "agent_id": "sub:abc",
            "payload": {"provider": "claude_code", "context_tokens": 166941,
@@ -35,8 +35,22 @@ def test_reincarnating_reports_crossing_context_from_subagent_turn() -> None:
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
     assert "reincarnating — context threshold crossed" in out
-    # window shown (dispels "was it a 1M window?"), occupancy shown as tokens.
-    assert "167k/200k" in out
+    # the denominator is the handoff limit (80% of this 200k window), not the window
+    assert "167k/160k" in out
+
+
+def test_reincarnating_reports_the_handoff_limit_not_the_window() -> None:
+    # 1M-window model: the limit is the 200k ceiling, so the line explains the
+    # crossing instead of reading as a fifth of a huge window.
+    b = NarrativeBuilder()
+    b.add({"type": "agent_message", "agent_id": "step:p/s",
+           "payload": {"provider": "claude_code", "model": "claude-opus-5[1m]",
+                       "context_tokens": 203_000, "context_window": 1_000_000,
+                       "usage": {}}})
+    b.add({"type": "reincarnating", "agent_id": None,
+           "payload": {"reason": "context threshold crossed"}})
+    out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
+    assert "reincarnating — context threshold crossed (203k/200k)" in out
 
 
 def test_reincarnating_omits_context_when_no_prior_llm_turn() -> None:
@@ -45,7 +59,20 @@ def test_reincarnating_omits_context_when_no_prior_llm_turn() -> None:
            "payload": {"reason": "context threshold crossed"}})
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
     assert "reincarnating — context threshold crossed" in out
-    assert "/200k" not in out and "(" not in out
+    assert "/160k" not in out and "(" not in out
+
+
+def test_reincarnating_omits_context_when_the_turn_reported_no_window() -> None:
+    # No window means no resolvable limit, so nothing is recorded — never guessed.
+    b = NarrativeBuilder()
+    b.add({"type": "agent_message", "agent_id": "step:p/s",
+           "payload": {"provider": "anthropic", "context_tokens": 203_000,
+                       "usage": {}}})
+    b.add({"type": "reincarnating", "agent_id": None,
+           "payload": {"reason": "context threshold crossed"}})
+    out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
+    assert "reincarnating — context threshold crossed" in out
+    assert "203k" not in out and "(" not in out
 
 
 def test_reincarnating_uses_lifecycle_color() -> None:
@@ -63,7 +90,7 @@ def _reincarnation_events(*, handoff: bool) -> list[dict]:
     # The real threshold-crossing shape: ordinary prose, the injected handoff
     # instruction, the note turn, the lifecycle line, then the reborn step. The
     # note turn carries the crossing occupancy, as the real one does — it is the
-    # sole source of the reincarnating line's (167k/200k) annotation.
+    # sole source of the reincarnating line's (167k/160k) annotation.
     note: dict = {"provider": "anthropic", "model": "m", "usage": {},
                   "context_tokens": 166941, "context_window": 200000,
                   "raw": {"content": [{"type": "text", "text": _SENTINEL}]}}
@@ -96,7 +123,7 @@ def test_flagged_handoff_note_renders_in_neither_lean_nor_full() -> None:
     assert "ordinary prose" in lean
     # the dropped turn is still the source of the crossing occupancy: the drop is
     # at node-build time, downstream of the intake that reads it.
-    assert "(167k/200k)" in lean
+    assert "(167k/160k)" in lean
 
 
 def test_unflagged_note_still_renders_so_the_drop_keys_on_the_flag() -> None:

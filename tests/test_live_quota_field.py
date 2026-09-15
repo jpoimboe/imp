@@ -33,17 +33,17 @@ def _row(**kw: Any) -> str:
     activity = kw.pop("activity", _act())
     color = kw.pop("color", False)
     return compose_position_row(
-        activity=activity, quest_id=None, title="", prompt_tokens=None,
-        color=color, width=200, context_pct=44.0, now_epoch=_NOW, **kw)
+        activity=activity, quest_id=None, title="", context_tokens=70_400,
+        color=color, width=200, now_epoch=_NOW, **kw)
 
 
 # AC 8
 def test_the_row_renders_the_windows_after_the_context_gauge() -> None:
-    left = "implement phase · claude-opus-5 · ████░░░░░░ 44%"
+    left = "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
     calm = _reading(QuotaWindow("5h", 34.0, None), QuotaWindow("7d", 7.0, None))
     row = _row(carrier=_carrier(calm, auth_mode="subscription"))
-    # 48 + 115 + 35 = 198 = width - 2: the field is reached across the gap.
-    assert row == left + " " * 115 + "claude_code · session 34% · week 7%"
+    # 53 + 110 + 35 = 198 = width - 2: the field is reached across the gap.
+    assert row == left + " " * 110 + "claude_code · session 34% · week 7%"
     assert pal.display_width(row) == 198
 
     one_up = _reading(QuotaWindow("5h", 62.0, int(_NOW) + 2400),
@@ -94,7 +94,7 @@ def test_an_unknown_or_past_reset_renders_the_percentage_alone() -> None:
 def test_a_metered_backend_renders_the_bare_quest_total() -> None:
     priced = RowUsage(dollars=4.21, priced=1)
     row = _row(carrier=_carrier(auth_mode="apikey"), cost=priced)
-    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 44%" + " " * 145 + "$4.21"
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k" + " " * 140 + "$4.21"
     assert " · $4.21" not in row                 # flush right, no label, no color, no ~
     assert pal.display_width(row) == 198
     # A step on a model the price table lacks still renders the figure, no ≥.
@@ -115,7 +115,7 @@ def test_a_metered_backend_renders_the_bare_quest_total() -> None:
 def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None:
     row = _row(carrier=_carrier(_reading(QuotaWindow("5h", 34.0, None)),
                                 auth_mode="apikey"), cost=RowUsage())
-    assert row.endswith("claude-opus-5 · ████░░░░░░ 44%")
+    assert row.endswith("claude-opus-5 · ████░░░░░░ 70k/160k")
     assert "n/a" not in row and "—" not in row
     # The metered choice is exclusive: a stale reading never leaks onto this row.
     assert "session" not in row and "week" not in row
@@ -124,7 +124,7 @@ def test_nothing_priced_yet_renders_no_field_rather_than_a_placeholder() -> None
 # AC 11
 def test_a_subscription_backend_with_no_reading_renders_no_field() -> None:
     row = _row(carrier=_carrier(auth_mode="subscription"))
-    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 44%"
+    assert row == "implement phase · claude-opus-5 · ████░░░░░░ 70k/160k"
 
 
 def test_an_unrecognized_window_label_renders_verbatim() -> None:
@@ -184,11 +184,11 @@ def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
 
     def at(width: int) -> str:
         return compose_position_row(
-            activity=_act(), quest_id=None, title="", prompt_tokens=None,
-            color=False, width=width, context_pct=44.0, now_epoch=_NOW,
+            activity=_act(), quest_id=None, title="", context_tokens=70_400,
+            color=False, width=width, now_epoch=_NOW,
             carrier=_carrier(reading, auth_mode="subscription"))
 
-    # (a) target 198: left group 48 + full right group 56, gap to spare.
+    # (a) target 198: left group 53 + full right group 56, gap to spare.
     assert at(200).endswith(
         "claude_code · session 34% (40m left) · week 7% (6d left)")
     # (b) target 98 fits the windows (42) but not the provider segment — and the
@@ -199,7 +199,7 @@ def test_the_provider_segment_is_the_first_rung_the_row_sheds() -> None:
     assert pal.display_width(windows_only) == 98
     # (c) target 78 fits neither candidate: the quota goes whole, the gauge stays.
     bare = at(80)
-    assert bare.endswith("claude-opus-5 · ████░░░░░░ 44%")
+    assert bare.endswith("claude-opus-5 · ████░░░░░░ 70k/160k")
     assert "session" not in bare
 
 

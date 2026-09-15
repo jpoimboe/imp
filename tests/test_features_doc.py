@@ -37,3 +37,10 @@ def test_features_catalogues_the_embedding_api_and_links_to_its_guide() -> None:
     body = DOC.read_text()
     assert "imp.api" in body
     assert "](embedding.md)" in body, "the catalog entry must link to the guide"
+
+
+def test_features_documents_the_context_handoff_and_its_cap() -> None:
+    body = DOC.read_text()
+    assert "## Context handoff" in body
+    assert "at 200k tokens, or at 80% of" in body
+    assert "`context.max_reincarnations` (default 2)" in body

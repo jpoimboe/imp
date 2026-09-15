@@ -21,8 +21,8 @@ from typing import Any
 DEFAULT_WINDOW = 200_000
 DEFAULT_MAX_OUTPUT_TOKENS = 32_000
 DEFAULT_CHECKPOINT_FRACTION = 0.8
-# Default handoff ceiling for models without a model-specific soft cap.
-DEFAULT_CHECKPOINT_CEILING = 160_000
+# No model hands off later than this, however large its window.
+DEFAULT_CHECKPOINT_CEILING = 200_000
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,6 @@ class ModelInfo:
     cli_model: str | None = None
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     supports_vision: bool = True
-    # Model-specific prompt-token handoff ceiling. None uses the default ceiling.
-    soft_cap: int | None = None
 
 
 CLAUDE_CODE: dict[str, ModelInfo] = {
@@ -100,13 +98,7 @@ ANTHROPIC: dict[str, ModelInfo] = {
 }
 
 OPENAI: dict[str, ModelInfo] = {
-    # OpenAI and Codex share this catalog. Astra's explicit handoff cap retains
-    # headroom below the 272k billing breakpoint.
-    "gpt-6-astra": ModelInfo(
-        window=1_050_000,
-        max_output_tokens=128_000,
-        soft_cap=260_000,
-    ),
+    "gpt-6-astra": ModelInfo(window=1_050_000, max_output_tokens=128_000),
     # 5.6 flavors: one generation, three sizes — luna < terra < sol.
     # All four share a 1.05M window and a 128k output cap.
     # The bare `gpt-5.6` alias routes to Sol; it is here only so limits
@@ -178,13 +170,12 @@ def limits_for(provider: str | None, model: str | None) -> ModelInfo | None:
     return catalog[max(prefixes, key=len)]
 
 
-def checkpoint_cutoff(info: ModelInfo | None, window: int | None) -> float | None:
-    """The handoff cutoff as a fraction of `window`; None without a usable window."""
+def handoff_limit(window: int | None) -> int | None:
+    """Prompt-token occupancy at which a session hands off; None without a
+    usable window."""
     if not window or window <= 0:
         return None
-    cap = (info.soft_cap if info is not None and info.soft_cap is not None
-           else DEFAULT_CHECKPOINT_CEILING)
-    return min(DEFAULT_CHECKPOINT_FRACTION, cap / window)
+    return min(int(DEFAULT_CHECKPOINT_FRACTION * window), DEFAULT_CHECKPOINT_CEILING)
 
 
 def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
@@ -210,39 +201,36 @@ def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
 def context_threshold_crossed(
     usage: dict[str, Any] | None, provider: str | None, model: str | None,
 ) -> bool:
-    """True when a turn's prompt-token occupancy has reached the model's cutoff.
+    """True when a turn's prompt-token occupancy has reached the model's handoff
+    limit: 200k tokens, or 80% of the catalog window when that is smaller.
 
     Occupancy is `input + cache_read + cache_creation` (the prompt side of the
-    window, matching the context gauge's `usage_prompt_tokens`), divided by the
-    catalog window. Returns False when the provider/model pair is unknown or
-    usage is absent — the watch never fires rather than guessing.
+    window). Returns False when the provider/model pair is unknown or usage is
+    absent — the watch never fires rather than guessing.
     """
     info = limits_for(provider, model)
     if info is None or not usage:
         return False
-    frac = checkpoint_cutoff(info, info.window)
-    if frac is None:
+    limit = handoff_limit(info.window)
+    if limit is None:
         return False
-    return context_tokens_from_usage(usage) / info.window >= frac
+    return context_tokens_from_usage(usage) >= limit
 
 
 def sdk_context_threshold_crossed(
     context_tokens: int | None, context_window: int | None,
-    provider: str | None, model: str | None,
 ) -> bool:
-    """True when a provider's own reported LIVE context occupancy has reached
-    the checkpoint cutoff — claude_code's `get_context_usage()`, or codex's
-    rollout `token_count` record. Unlike context_threshold_crossed (which sums
-    prompt tokens against the static catalog window), this divides the
-    provider's live context_tokens / context_window against `checkpoint_cutoff`:
-    a model-specific cap when present, otherwise `DEFAULT_CHECKPOINT_CEILING`,
-    always bounded by the default 80%. Returns False without a live number.
+    """True when a provider's own reported LIVE context occupancy has reached the
+    handoff limit — claude_code's `get_context_usage()`, or codex's rollout
+    `token_count` record. Unlike context_threshold_crossed (which sums prompt
+    tokens against the static catalog window), this compares the provider's live
+    occupancy against `handoff_limit(context_window)`, the live window being
+    authoritative. Returns False without a live positive pair.
     """
-    frac = checkpoint_cutoff(limits_for(provider, model), context_window)
-    if (frac is None or not context_window or context_window <= 0
-            or not context_tokens or context_tokens <= 0):
+    limit = handoff_limit(context_window)
+    if limit is None or not context_tokens or context_tokens <= 0:
         return False
-    return context_tokens / context_window >= frac
+    return context_tokens >= limit
 
 
 LONG_CONTEXT_BREAKPOINT = 272_000

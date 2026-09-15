@@ -1365,7 +1365,6 @@ async def _context_usage_fields(client: Any) -> dict[str, Any]:
 
     return {
         "context_window": _field(cu, "rawMaxTokens"),
-        "context_pct": _field(cu, "percentage"),
         "context_tokens": _field(cu, "totalTokens"),
     }
 
@@ -1728,7 +1727,6 @@ class ClaudeCodeSession(ObserveSession):
                 handoff=self._handoff_phase == "instruction_sent",
                 message_id=self._llm_group_key,
                 context_window=cu_fields.get("context_window"),
-                context_pct=cu_fields.get("context_pct"),
                 context_tokens=cu_fields.get("context_tokens"))
             self._llm_group_open = False
             self._llm_group_key = None
@@ -1793,7 +1791,6 @@ class ClaudeCodeSession(ObserveSession):
         aid = self.aid
         state = self.runner._state
         client = self.runner._client
-        invocation = self.invocation
         cls_name = type(raw).__name__
         if cls_name == "StreamEvent":
             ev = getattr(raw, "event", None)
@@ -1871,7 +1868,7 @@ class ClaudeCodeSession(ObserveSession):
                     if frag.get("usage"):
                         self._llm_usage = frag["usage"]
                     # Tier A proactive handoff (Mechanism 3): on the model's
-                    # context-cutoff crossing, route through the cooperative-
+                    # handoff-limit crossing, route through the cooperative-
                     # interrupt path — signal the running query and let the SDK
                     # close this turn balanced, then continue with a plain
                     # handoff-instruction increment (handled in _is_terminal).
@@ -1888,8 +1885,7 @@ class ClaudeCodeSession(ObserveSession):
                         cu_fields = await _context_usage_fields(client)
                         if sdk_context_threshold_crossed(
                                 cu_fields.get("context_tokens"),
-                                cu_fields.get("context_window"),
-                                invocation.provider_name, self.runner.model):
+                                cu_fields.get("context_window")):
                             await self._flush_llm_group()
                             self.runner._handoff_requested = True
                             self._handoff_phase = "interrupt_requested"

@@ -2597,33 +2597,35 @@ def test_error_node_falls_back_to_stderr_tail_when_no_full_summary() -> None:
     assert err3.detail == "the full summary"
 
 
-def test_latest_prompt_tokens_tracks_most_recent_turn_not_cumulative() -> None:
+def test_latest_context_tokens_tracks_most_recent_turn_not_cumulative() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "quest_created", id="z9gixx", title="streaming toolbar"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p", model="sonnet"))
-    assert b.latest_prompt_tokens is None          # no llm_response yet
+    assert b.latest_context_tokens is None          # no agent_message yet
     b.add(ev("3", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="sonnet",
              usage={"input_tokens": 100, "cache_read_input_tokens": 20,
                     "cache_creation_input_tokens": 5, "output_tokens": 9},
              raw={"content": []}))
-    assert b.latest_prompt_tokens == 125           # input + both caches, this turn only
+    assert b.latest_context_tokens == 125          # input + both caches, this turn only
     b.add(ev("4", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="sonnet",
              usage={"input_tokens": 200, "output_tokens": 4}, raw={"content": []}))
-    assert b.latest_prompt_tokens == 200           # latest turn REPLACES, does not sum
+    assert b.latest_context_tokens == 200          # latest turn REPLACES, does not sum
 
 
-def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
+def test_latest_context_tokens_keeps_last_value_when_neither_key_is_present() -> None:
+    # Neither context_tokens nor usage: nothing resolves, so the merged slot holds
+    # the last good occupancy instead of blanking the gauge.
     b = nv.NarrativeBuilder()
     b.add(ev("1", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
              usage={"input_tokens": 42}, raw={"content": []}))
     b.add(ev("2", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
              raw={"content": []}))                 # no usage key at all
-    assert b.latest_prompt_tokens == 42            # untouched by a usage-less turn
+    assert b.latest_context_tokens == 42           # untouched by a usage-less turn
 
 
-def test_subagent_agent_message_does_not_move_latest_prompt_tokens() -> None:
+def test_subagent_agent_message_does_not_move_latest_context_tokens() -> None:
     # A subagent turn must NOT flip the context bar to its own prompt count, but
     # its tokens must still fold into the cumulative change total (F2).
     b = nv.NarrativeBuilder()
@@ -2633,7 +2635,7 @@ def test_subagent_agent_message_does_not_move_latest_prompt_tokens() -> None:
     b.add(ev("p1", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="m", stop_reason="end_turn",
              usage={"input_tokens": 100, "output_tokens": 5}, raw={"content": []}))
-    assert b.latest_prompt_tokens == 100
+    assert b.latest_context_tokens == 100
     # Open a subagent fold so the sub: turn routes through a registered child.
     b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"}))
@@ -2641,7 +2643,7 @@ def test_subagent_agent_message_does_not_move_latest_prompt_tokens() -> None:
     b.add(ev("s1", "agent_message", agent_id="sub:tk1", provider="anthropic",
              model="m", stop_reason="end_turn",
              usage={"input_tokens": 999, "output_tokens": 7}, raw={"content": []}))
-    assert b.latest_prompt_tokens == 100        # frozen at the parent's last value
+    assert b.latest_context_tokens == 100       # frozen at the parent's last value
 
 
 def test_current_activity_carries_current_step_model() -> None:
@@ -2806,15 +2808,16 @@ def test_unseeded_reply_appends_as_today() -> None:
     assert replies[0].interactive is True
 
 
-def test_builder_captures_context_pct_and_window() -> None:
+def test_builder_prefers_the_reported_context_tokens_over_the_billing_sum() -> None:
     from imp.cli import narrative as nv
 
     b = nv.NarrativeBuilder()
-    assert b.latest_context_pct is None
+    assert b.latest_context_tokens is None
     assert b.latest_context_window is None
 
     # A lone tool_use carrier (no prose) — exercises the add() step-0 capture
-    # without needing an open container.
+    # without needing an open container. The billing sum (82628) runs well above
+    # the live occupancy the provider reported, so the slot must take the latter.
     b.add({
         "type": "agent_message", "agent_id": None,
         "payload": {
@@ -2823,33 +2826,34 @@ def test_builder_captures_context_pct_and_window() -> None:
             "raw": {"content": [{"type": "tool_use", "id": "t1",
                                  "name": "bash", "input": {}}],
                     "stop_reason": "tool_use", "usage": {}},
-            "usage": {},
-            "context_pct": 37.5, "context_window": 1_000_000,
+            "usage": {"input_tokens": 82_628},
+            "context_tokens": 137_000, "context_window": 1_000_000,
         },
     })
 
-    assert b.latest_context_pct == 37.5
+    assert b.latest_context_tokens == 137_000
     assert b.latest_context_window == 1_000_000
 
 
-def test_subagent_agent_message_does_not_move_context_pct_or_window() -> None:
-    # A subagent turn carries its own session context usage; like prompt tokens,
-    # it must NOT flip the top-level context bar to the subagent's values.
+def test_subagent_agent_message_does_not_move_context_tokens_or_window() -> None:
+    # A subagent turn carries its own session occupancy and window; like the
+    # billing sum, they must NOT flip the top-level context bar.
     b = nv.NarrativeBuilder()
     b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
     b.add(ev("p1", "agent_message", agent_id="step:p/s", provider="claude_code",
              model="opus-1m", stop_reason="end_turn", usage={},
-             raw={"content": []}, context_pct=20.0, context_window=1_000_000))
-    assert b.latest_context_pct == 20.0
+             raw={"content": []}, context_tokens=125_000,
+             context_window=1_000_000))
+    assert b.latest_context_tokens == 125_000
     assert b.latest_context_window == 1_000_000
     # Open a subagent fold so the sub: turn routes through a registered child.
     b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(ev("s1", "agent_message", agent_id="sub:tk1", provider="claude_code",
              model="opus-1m", stop_reason="end_turn", usage={},
-             raw={"content": []}, context_pct=88.0, context_window=200_000))
-    assert b.latest_context_pct == 20.0          # frozen at the parent's value
+             raw={"content": []}, context_tokens=190_000, context_window=200_000))
+    assert b.latest_context_tokens == 125_000    # frozen at the parent's value
     assert b.latest_context_window == 1_000_000
 
 
@@ -2983,6 +2987,15 @@ def test_usage_prompt_tokens_sums_input_and_both_cache_buckets() -> None:
 def test_usage_prompt_tokens_none_when_empty() -> None:
     assert nv.usage_prompt_tokens(None) is None
     assert nv.usage_prompt_tokens({}) is None
+
+
+def test_fmt_ctx_tokens_rounds_to_the_nearest_thousand() -> None:
+    assert nv.fmt_ctx_tokens(0) == "0"
+    assert nv.fmt_ctx_tokens(999) == "999"
+    assert nv.fmt_ctx_tokens(1000) == "1k"
+    assert nv.fmt_ctx_tokens(12_000) == "12k"
+    assert nv.fmt_ctx_tokens(108_528) == "109k"     # rounds, never truncates
+    assert nv.fmt_ctx_tokens(200_000) == "200k"
 
 
 def test_resume_continuation_preserves_pre_interrupt_children() -> None:
