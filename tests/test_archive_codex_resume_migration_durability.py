@@ -279,10 +279,10 @@ def test_archive_codex_migration_is_rerunnable_at_every_crash_boundary(
             with pytest.raises(OSError, match="injected archive migration crash"):
                 archive.ensure_current(crashed)
         marker = archive.data_version_path(crashed).read_text().strip()
-        assert marker in {"11", "12"}
+        assert marker in {"11", "13"}
         if marker == "11":
             archive.ensure_current(crashed)
-        assert archive.data_version_path(crashed).read_bytes() == b"12"
+        assert archive.data_version_path(crashed).read_bytes() == b"13"
         assert _archive_snapshot(crashed) == expected_archive
         assert _index_snapshot(crashed) == expected_index
         migrated = record.read_record(archive.records_root(crashed), cid)

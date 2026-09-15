@@ -100,7 +100,7 @@ def test_migrates_exact_legacy_provenance_and_reruns_stably(
         expected_owner,
         False,
         False,
-        b"12",
+        b"13",
     )
     assert all(_blob_snapshot(tmp_path)[path] == raw for path, raw in source_blobs.items())
 

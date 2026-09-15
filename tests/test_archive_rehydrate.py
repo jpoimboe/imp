@@ -154,7 +154,7 @@ def test_rehydrate_migrates_indexless_v11_before_archive_reads(
     loaded = Quest.load(tmp_path, "legacy")
     session_dir = quest_dir / "steps" / "build" / "coder"
     assert loaded.id == "legacy"
-    assert observed == [b"12"] * 4
+    assert observed == [b"13"] * 4
     assert not (session_dir / "codex_thread.json").exists()
     assert not (session_dir / "codex_rollout").exists()
     native = parse_native_resume_state((session_dir / "resume-state.json").read_bytes())
