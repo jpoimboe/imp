@@ -1868,7 +1868,7 @@ class ClaudeCodeSession(ObserveSession):
                     if frag.get("usage"):
                         self._llm_usage = frag["usage"]
                     # Tier A proactive handoff (Mechanism 3): on the model's
-                    # context-cutoff crossing, route through the cooperative-
+                    # handoff-limit crossing, route through the cooperative-
                     # interrupt path — signal the running query and let the SDK
                     # close this turn balanced, then continue with a plain
                     # handoff-instruction increment (handled in _is_terminal).

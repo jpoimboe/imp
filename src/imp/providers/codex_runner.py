@@ -706,7 +706,7 @@ class CodexSession(ObserveSession):
             return False
         from imp.engine.reincarnation import handoff_instruction, write_handoff_note
         from imp.providers.catalog import sdk_context_threshold_crossed
-        # Tier A watch: codex's own reading crossed the checkpoint threshold
+        # Tier A watch: codex's own reading crossed the handoff limit
         # while still working (no complete_step). Inject the handoff instruction
         # as the next turn prompt and capture the note on the following turn
         # (re-query). Completion wins over a mere crossing (old ordering: the
