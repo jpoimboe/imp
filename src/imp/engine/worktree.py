@@ -21,6 +21,17 @@ import filelock
 
 from imp.paths import project_state_dir
 
+_GITIGNORE_COMMIT_MSG = """\
+gitignore: exclude imp's internal state directory
+
+imp stores its per-quest state under .imp/ at the repository root,
+and nothing ignores that path. Every `git status` in the project
+reports the directory as untracked, and a broad `git add` can sweep
+machine-generated state into a commit. Ignore `.imp/` in the
+repository's own .gitignore, so the rule travels into every worktree
+checkout and is shared with collaborators.\
+"""
+
 
 class PreconditionError(Exception):
     """imp new ran in a repo that can't host a worktree (spec §5.1)."""
@@ -584,7 +595,7 @@ def ensure_imp_ignored(control_root: Path, base: str) -> None:
                 sep = "" if text.endswith("\n") or not text else "\n"
                 gi.write_text(text + sep + "# imp internal state\n.imp/\n")
             _git(control_root, "add", "--", ".gitignore")
-            _git(control_root, "commit", "-m", "chore: gitignore .imp/",
+            _git(control_root, "commit", "-m", _GITIGNORE_COMMIT_MSG,
                  "--", ".gitignore")
             if _imp_in_committed_gitignore(control_root, base):
                 return

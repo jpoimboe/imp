@@ -30,6 +30,9 @@ complete immediately without soliciting, finishing with `complete_step(status="S
 The run then runs off the end into the no-merge `done` completion, leaving the commits on
 `imp/{{ quest.id }}`.
 {% else %}
+
+{% include "partials/commit-style.md" %}
+
 ## Compose the summary
 
 There is no summarizer step and no summary artifact — compose your own intent-level
@@ -51,7 +54,7 @@ invite the user to review.
 ## Make requested changes directly
 
 When the user asks for a tweak, make it yourself with `edit_file` / `write_file`, keep it
-focused, and **commit** it on the branch (`git add` + `git commit`; a fresh commit is
+focused, and **commit** it on the branch (`git add` + `git commit -F`; a fresh commit is
 fine). Then continue the conversation, showing what changed. Loop with the user, applying
 further tweaks, until they are satisfied. There is **no** re-review by the reviewer of
 these human-directed edits — you and the user are directly reviewing them. When a

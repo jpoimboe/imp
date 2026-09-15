@@ -63,10 +63,13 @@ imperative standing instructions.
 ## Validate and commit
 
 Commit your edit with a scoped `git add` of only the `imp/memory/` paths you
-touched, and a `memory:`-prefixed message summarizing the change:
+touched. Write the message to a file — never `-m`, whose quoting cannot carry a
+body. The subject is `memory: <imperative summary, no trailing period>`; the body
+is one paragraph saying which standing instruction changed and why it was asked
+for:
 
 ```
-git add imp/memory/<path>… && git commit -m "memory: <one-line summary of the change>"
+git add imp/memory/<path>… && git commit -F "${TMPDIR:-/tmp}/msg"
 ```
 
 Committing is required — an uncommitted worktree bounces this step. Never use a
