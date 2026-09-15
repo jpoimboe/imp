@@ -1964,7 +1964,7 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     model = rt.subagent_model(f)
     provider = rt.subagent_provider(f)
     assert (provider, model) == ("anthropic", "sonnet")   # sanity: pair resolvable
-    bar = context_bar(provider, model, f.nested.latest_prompt_tokens,
+    bar = context_bar(provider, model, f.nested.latest_context_tokens,
                       context_window=f.nested.latest_context_window,
                       color=False, over_bg=False)
     assert bar == "█████░░░░░ 80k/160k"     # 60k + 20k cache against the 160k limit

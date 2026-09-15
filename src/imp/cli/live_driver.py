@@ -337,7 +337,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         model = rt.subagent_model(f)
         provider = rt.subagent_provider(f)
         model_seg = _paint(model, "gray", color=color, over_bg=over) if model else None
-        bar = context_bar(provider, model, f.nested.latest_prompt_tokens,
+        bar = context_bar(provider, model, f.nested.latest_context_tokens,
                           context_window=f.nested.latest_context_window,
                           color=color, over_bg=over)
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
@@ -553,7 +553,7 @@ class LiveDriver:
         p_row = compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
             project=self._project,
-            context_tokens=self._builder.latest_prompt_tokens,
+            context_tokens=self._builder.latest_context_tokens,
             color=self._color, width=w,
             context_window=self._builder.latest_context_window,
             carrier=self._builder.carrier_for(activity.provider),
@@ -600,7 +600,7 @@ class LiveDriver:
         return compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
             project=self._project,
-            context_tokens=self._builder.latest_prompt_tokens,
+            context_tokens=self._builder.latest_context_tokens,
             color=self._color, width=term_width(),
             context_window=self._builder.latest_context_window,
             carrier=self._builder.carrier_for(activity.provider),
