@@ -1174,7 +1174,7 @@ def _join_text(content: tuple[Any, ...]) -> str:
     return "".join(b.text for b in content if isinstance(b, TextBlock))
 
 
-def _serialize_claude_code_message(sdk_msg: Any) -> dict[str, Any]:
+def _serialize_claude_message(sdk_msg: Any) -> dict[str, Any]:
     """Serialize an SDK AssistantMessage to agent_message.raw. claude_code has
     no interceptable per-turn API call, so this is a normalized view: canonical
     tool names, thinking preserved, best-effort usage/stop_reason."""
@@ -1851,7 +1851,7 @@ class ClaudeSession(ObserveSession):
                     # Split at the classifying boundary so error prose gets its own node.
                     if matches_error_prose(_text_of(imp_msg)) and self._llm_blocks:
                         await self._flush_llm_group()
-                    frag = _serialize_claude_code_message(raw)
+                    frag = _serialize_claude_message(raw)
                     if not self._llm_group_open:
                         self._llm_group_open = True
                         self._llm_group_key = mid

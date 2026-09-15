@@ -123,7 +123,7 @@ def test_the_relocated_parsers_leave_no_re_export_shim() -> None:
     import imp.providers.codex_runner as cr
     from imp.providers import message_parsers
 
-    assert not hasattr(cc, "_parse_claude_code_message")
+    assert not hasattr(cc, "_parse_claude_message")
     assert not hasattr(cr, "_parse_codex_message")
-    assert callable(message_parsers._parse_claude_code_message)
+    assert callable(message_parsers._parse_claude_message)
     assert callable(message_parsers._parse_codex_message)
