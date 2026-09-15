@@ -277,7 +277,7 @@ def test_build_prompt_folds_first_user_message_on_fresh_entry(
     assert built.startswith("ROLE_HEADER_SENTINEL")   # role header first
     assert "callable directly by name" in built       # tool policy retained
     assert "RENDER_BODY_SENTINEL_9f3a" in built       # rendered body folded in
-    assert "complete_step" in built                   # completion contract folded in
+    assert "`status` (ok|bad)" in built               # completion contract folded in
     # Fold is appended after the policy, not before it.
     assert (built.index("callable directly by name")
             < built.index("RENDER_BODY_SENTINEL_9f3a"))
