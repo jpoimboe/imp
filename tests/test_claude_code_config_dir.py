@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
+from imp.providers.claude_config_dir import materialize_fresh_config_dir
 
 
 def test_creates_isolated_projects_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

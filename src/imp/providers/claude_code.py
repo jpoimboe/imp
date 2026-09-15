@@ -111,13 +111,13 @@ from imp.engine.drivers import driver_allowed_tools
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
-from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
     message_to_session_records,
     resume_session_id,
     session_key,
     session_store_for,
 )
+from imp.providers.claude_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_token_refresh import (
     FAILED_INVALID_GRANT,
     SKIPPED_ROTATED,
