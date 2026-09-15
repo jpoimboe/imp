@@ -22,14 +22,14 @@ from imp.providers.openai import OpenAIAgentRunner
 from tests._events import control_events
 
 PUSH = ("anthropic", "openai")
-OBSERVE = ("claude_code", "codex")
+OBSERVE = ("claude", "codex")
 PAIRS = PUSH + OBSERVE
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 _MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o-mini",
-    "claude_code": "claude-sonnet-4-5",
+    "claude": "claude-sonnet-4-5",
     "codex": "gpt-5.5",
 }
 
@@ -107,7 +107,7 @@ def build(pair: str, tmp_path: Path, scripted: Any, *,
         runner = OpenAIAgentRunner(
             model_name=_MODELS[pair],
             client_factory=lambda: FakeResponsesClient(scripted))
-    elif pair == "claude_code":
+    elif pair == "claude":
         runner = ClaudeAgentRunner(
             model_name=_MODELS[pair],
             client_factory=lambda opts: FakeClaudeSDKClient(

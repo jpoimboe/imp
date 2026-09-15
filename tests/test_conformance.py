@@ -61,7 +61,7 @@ def _happy_script(pair: str):
             resp_message("calling complete_step"),
             resp_function_call("c1", "complete_step",
                                '{"status": "Success", "note": "ok"}'))]
-    if pair == "claude_code":
+    if pair == "claude":
         return [cc_assistant(cc_text("calling complete_step"),
                              cc_tool_use("c1", "complete_step", _OK)),
                 cc_result()]
@@ -92,7 +92,7 @@ def _multiround_script(pair: str):
                     "u1", "read_file", '{"path": "/project/data.txt"}')),
                 resp_response(resp_function_call(
                     "c1", "complete_step", '{"status": "Success", "note": "ok"}'))]
-    if pair == "claude_code":
+    if pair == "claude":
         # Both tool calls are in one SDK session (one receive_response() call):
         # read_file observed first, then complete_step terminates the session.
         return [cc_assistant(cc_tool_use("u1", "read_file", {"path": "/project/data.txt"})),
@@ -128,7 +128,7 @@ def _nudge_script(pair: str):
         return [resp_response(resp_message("prose, no tool call")),
                 resp_response(resp_function_call(
                     "c1", "complete_step", '{"status": "Success", "note": "ok"}'))]
-    if pair == "claude_code":
+    if pair == "claude":
         return [cc_assistant(cc_text("prose, no tool")), cc_result(),
                 cc_assistant(cc_tool_use("c1", "complete_step", _OK)), cc_result()]
     return [[cx_start("thr-1"), cx_msg("prose, no tool"), cx_done()],
@@ -158,7 +158,7 @@ def _invalid_script(pair: str):
                     "c1", "complete_step", '{"note": "no status"}')),
                 resp_response(resp_function_call(
                     "c2", "complete_step", '{"status": "Success", "note": "ok"}'))]
-    if pair == "claude_code":
+    if pair == "claude":
         return [cc_assistant(cc_tool_use("c1", "complete_step", {"note": "no status"})),
                 cc_result(),
                 cc_assistant(cc_tool_use("c2", "complete_step", _OK)), cc_result()]
@@ -190,7 +190,7 @@ def _park_script(pair: str):
     if pair == "openai":
         return [resp_response(resp_message("prose")),
                 resp_response(resp_message("prose"))]
-    if pair == "claude_code":
+    if pair == "claude":
         return [cc_assistant(cc_text("prose")), cc_result(),
                 cc_assistant(cc_text("prose")), cc_result()]
     return [[cx_start("thr-1"), cx_msg("prose"), cx_done()],
@@ -239,7 +239,7 @@ async def test_ceiling_trip(pair: str, tmp_path: Path) -> None:
 
 
 def _classify_script(pair: str):
-    if pair == "claude_code":
+    if pair == "claude":
         return [cc_chrome("Invalid API key — got 401. Cannot continue."),
                 cc_result()]
     return [[cx_start("thr-1"),
@@ -325,7 +325,7 @@ async def test_fatal_tool_error_codex(tmp_path: Path, monkeypatch) -> None:
 
 
 @pytest.mark.anyio
-async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
+async def test_dangling_tool_use_repair_claude(tmp_path: Path) -> None:
     from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.engine.state import InMemoryEventLog
@@ -336,7 +336,7 @@ async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir(exist_ok=True)
     log = InMemoryEventLog()
     # Build inv via the adapter but supply our own capturing factory below.
-    _runner_unused, inv = build("claude_code", tmp_path, [], event_log=log,
+    _runner_unused, inv = build("claude", tmp_path, [], event_log=log,
                                 agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
@@ -372,7 +372,7 @@ async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
     streamed = created[0].queries[0]
     assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
     assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
-    check_golden("dangling__claude_code", record(driven))
+    check_golden("dangling__claude", record(driven))
 
 
 @pytest.mark.anyio
@@ -431,7 +431,7 @@ def _repeated_invalid_script(pair: str):
     if pair == "openai":
         return [resp_response(resp_function_call(
                     f"c{i}", "complete_step", '{"note": "no status"}')) for i in range(n)]
-    if pair == "claude_code":
+    if pair == "claude":
         out = []
         for i in range(n):
             out += [cc_assistant(cc_tool_use(f"c{i}", "complete_step", {"note": "no status"})),
