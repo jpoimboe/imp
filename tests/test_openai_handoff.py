@@ -51,11 +51,11 @@ def _invocation(tmp_path: Path,
 async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) -> None:
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 reaches the 160k default-ceiling cutoff.
+        # Turn 1 reaches the 200k handoff limit.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
-            usage={"input_tokens": 160_000}),
+            usage={"input_tokens": 200_000}),
         # Turn 2: agent replies with text + a write to a different file. The
         # provider captures the text and writes hp itself.
         resp_response(
@@ -79,11 +79,11 @@ async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) ->
 @pytest.mark.anyio
 async def test_below_threshold_does_not_elicit_handoff(tmp_path: Path) -> None:
     fake = FakeResponsesClient([
-        # One token below the 160k default-ceiling cutoff; no handoff.
+        # One token below the 200k handoff limit; no handoff.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
-            usage={"input_tokens": 159_999}),
+            usage={"input_tokens": 199_999}),
         resp_response(
             resp_function_call("c1", "complete_step", '{"status": "Success"}')),
     ])
@@ -104,13 +104,13 @@ async def test_empty_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
     # fires so the engine can reincarnate.
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 reaches the 160k default-ceiling cutoff and carries prose so a
+        # Turn 1 reaches the 200k handoff limit and carries prose so a
         # walk-back helper would have stale text to pick up.
         resp_response(
             resp_message("I will write the files"),
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
-            usage={"input_tokens": 160_000}),
+            usage={"input_tokens": 200_000}),
         # Turn 2: agent replies with empty text and no tool (tool-less site 1).
         resp_response(resp_message("")),
     ])
@@ -130,11 +130,11 @@ async def test_handoff_fires_on_tool_less_writing_turn(tmp_path: Path) -> None:
     # the runner still emits exactly one terminal `handoff` and stops.
     hp = handoff_path_for(tmp_path / "step")
     fake = FakeResponsesClient([
-        # Turn 1 reaches the 160k default-ceiling cutoff.
+        # Turn 1 reaches the 200k handoff limit.
         resp_response(
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
-            usage={"input_tokens": 160_000}),
+            usage={"input_tokens": 200_000}),
         # Turn 2: agent responds to the handoff instruction with TEXT and no tool.
         resp_response(resp_message("Understood, stopping here.")),
     ])
@@ -156,12 +156,12 @@ async def test_handoff_note_turn_is_flagged_in_the_event_log(tmp_path: Path) -> 
     # Only the note turn is flagged; ordinary turns carry no handoff key.
     log = InMemoryEventLog()
     fake = FakeResponsesClient([
-        # Turn 1 reaches the 160k default-ceiling cutoff.
+        # Turn 1 reaches the 200k handoff limit.
         resp_response(
             resp_message("still working"),
             resp_function_call("u1", "write_file",
                                '{"path": "scratch.txt", "content": "x"}'),
-            usage={"input_tokens": 160_000}),
+            usage={"input_tokens": 200_000}),
         # Turn 2 is the handoff note itself.
         resp_response(resp_message("HANDOFF-SENTINEL: where I left off")),
     ])

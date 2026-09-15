@@ -45,7 +45,8 @@ if TYPE_CHECKING:
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
-_AMBER_AT = 0.75          # of the cutoff
+_AMBER_AT = 0.75          # of the handoff limit
+_RED_AT = 0.90            # of the handoff limit
 _GAUGE_CELLS = 10
 
 # The events that can move the quest-total dollars; everything else leaves it.
@@ -66,33 +67,22 @@ def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
 
 def context_bar(provider: str | None, model: str | None,
                 context_tokens: int | None, *,
-                context_pct: float | None = None,
                 context_window: int | None = None,
                 color: bool, over_bg: bool) -> str | None:
     # Lazy import keeps `import live_driver` free of the providers package.
-    from imp.providers.catalog import (
-        DEFAULT_CHECKPOINT_FRACTION,
-        checkpoint_cutoff,
-        limits_for,
-    )
+    from imp.providers.catalog import handoff_limit, limits_for
     info = limits_for(provider, model)
     # A window the provider reported for this run beats the catalog constant:
     # codex derates its own window per-config, so only the live value is right.
     window = context_window or (info.window if info else None)
-    if context_pct is not None:
-        frac = context_pct / 100
-    else:
-        if window is None or context_tokens is None:
-            return None
-        frac = context_tokens / window
-    # Red begins exactly at the handoff cutoff, so the bar always marks the real
-    # point; the live context_pct path has no window to cap against.
-    warn = checkpoint_cutoff(info, window)
-    if warn is None:
-        warn = DEFAULT_CHECKPOINT_FRACTION
-    pct = round(frac * 100)
-    hue = ("red" if frac >= warn
-           else "wordmark" if frac >= _AMBER_AT * warn
+    limit = handoff_limit(window)
+    if limit is None or context_tokens is None:
+        return None
+    # Occupancy toward the handoff, not toward the window: a full bar means the
+    # agent is about to hand off, on every provider and model.
+    frac = context_tokens / limit
+    hue = ("red" if frac >= _RED_AT
+           else "wordmark" if frac >= _AMBER_AT
            else "green")
     filled = max(0, min(_GAUGE_CELLS, round(frac * _GAUGE_CELLS)))
     gauge = ""
@@ -101,7 +91,8 @@ def context_bar(provider: str | None, model: str | None,
     if filled < _GAUGE_CELLS:
         gauge += _paint("░" * (_GAUGE_CELLS - filled), "gray",
                         color=color, over_bg=over_bg)
-    return f"{gauge} {_paint(f'{pct}%', hue, color=color, over_bg=over_bg)}"
+    tail = f"{nv.fmt_ctx_tokens(context_tokens)}/{nv.fmt_ctx_tokens(limit)}"
+    return f"{gauge} {_paint(tail, hue, color=color, over_bg=over_bg)}"
 
 
 def _coarse_left(seconds: float) -> str:
@@ -237,8 +228,7 @@ def _split_pad(left: str, gauged: str, rights: Sequence[str], *,
 
 def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, context_tokens: int | None, color: bool,
-                         width: int, context_pct: float | None = None,
-                         context_window: int | None = None,
+                         width: int, context_window: int | None = None,
                          carrier: nv.Carrier | None = None,
                          cost: RowUsage | None = None,
                          now_epoch: float | None = None,
@@ -268,7 +258,7 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
     bar = None
     if activity.kind == "agent" and not activity.lane_wait:
         bar = context_bar(activity.provider, activity.model, context_tokens,
-                          context_pct=context_pct, context_window=context_window,
+                          context_window=context_window,
                           color=color, over_bg=over)
     rights: list[str]
     if carrier is None:
@@ -348,7 +338,6 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         provider = rt.subagent_provider(f)
         model_seg = _paint(model, "gray", color=color, over_bg=over) if model else None
         bar = context_bar(provider, model, f.nested.latest_prompt_tokens,
-                          context_pct=f.nested.latest_context_pct,
                           context_window=f.nested.latest_context_window,
                           color=color, over_bg=over)
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
@@ -566,7 +555,6 @@ class LiveDriver:
             project=self._project,
             context_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
-            context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
             carrier=self._builder.carrier_for(activity.provider),
             cost=self._quest_cost(),
@@ -614,7 +602,6 @@ class LiveDriver:
             project=self._project,
             context_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
-            context_pct=self._builder.latest_context_pct,
             context_window=self._builder.latest_context_window,
             carrier=self._builder.carrier_for(activity.provider),
             cost=self._quest_cost(),

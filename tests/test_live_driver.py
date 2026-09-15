@@ -1800,106 +1800,83 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
     assert out2.getvalue().split("\n")[0] == "> do the thing"
 
 
-def test_context_bar_renders_a_ten_cell_block_gauge_and_the_percentage() -> None:
+def test_context_bar_renders_a_ten_cell_block_gauge_and_the_token_tail() -> None:
     from imp.cli.live_driver import context_bar
+    # sonnet: 200k window -> a 160k limit; 26000/160000 = 0.1625 -> two cells.
     bar = context_bar("anthropic", "sonnet", 26000, color=False, over_bg=False)
-    assert bar == "█░░░░░░░░░ 13%"      # 26000/200000 = 0.13 -> one filled cell
+    assert bar == "██░░░░░░░░ 26k/160k"
 
 
 def test_context_bar_gauge_spans_empty_to_full() -> None:
     from imp.cli.live_driver import context_bar
 
-    def gauge(pct: float) -> str | None:
-        return context_bar("anthropic", "sonnet", None, context_pct=pct,
+    def bar(tokens: int) -> str | None:
+        return context_bar("claude_code", "claude-opus-5[1m]", tokens,
                            color=False, over_bg=False)
 
-    assert gauge(0.0) == "░░░░░░░░░░ 0%"
-    assert gauge(44.0) == "████░░░░░░ 44%"
-    assert gauge(100.0) == "██████████ 100%"   # full: no track cells at all
+    assert bar(0) == "░░░░░░░░░░ 0/200k"
+    assert bar(12_000) == "█░░░░░░░░░ 12k/200k"
+    assert bar(60_000) == "███░░░░░░░ 60k/200k"
+    assert bar(120_000) == "██████░░░░ 120k/200k"
+    assert bar(150_000) == "████████░░ 150k/200k"
+    assert bar(182_000) == "█████████░ 182k/200k"
+    assert bar(200_000) == "██████████ 200k/200k"      # full: no track cells at all
+    assert bar(203_000) == "██████████ 203k/200k"      # past the limit: clamped
 
 
-def test_context_gauge_fill_and_percentage_share_one_hue_over_a_gray_track() -> None:
+def test_context_gauge_fill_and_tail_share_one_hue_over_a_gray_track() -> None:
     from imp.cli import palette as pal
     from imp.cli.live_driver import context_bar
-    # sonnet: 200k window, 0.8 cutoff -> wordmark from 0.60, red from 0.80. Both
-    # 119000 and 121000 label "60%" and differ only in hue, straddling the amber
-    # boundary; 160000 sits exactly on the red one.
+    # claude-opus-5[1m]: a 200k limit, so 120k is 60% (green), 150k is exactly
+    # 75% (amber) and 182k is 91% (red). The track is gray at every level and
+    # disappears when the bar is full.
+    def bar(tokens: int) -> str | None:
+        return context_bar("claude_code", "claude-opus-5[1m]", tokens,
+                           color=True, over_bg=False)
+
     try:
         pal.set_theme("ansi")
-        green = context_bar("anthropic", "sonnet", 119000, color=True, over_bg=False)
-        amber = context_bar("anthropic", "sonnet", 121000, color=True, over_bg=False)
-        red = context_bar("anthropic", "sonnet", 160000, color=True, over_bg=False)
+        green, amber, red, full = (bar(120_000), bar(150_000), bar(182_000),
+                                   bar(200_000))
     finally:
         pal.set_theme("ansi")
-    assert green == "\x1b[32m██████\x1b[0m\x1b[90m░░░░\x1b[0m \x1b[32m60%\x1b[0m"
-    assert amber == "\x1b[33m██████\x1b[0m\x1b[90m░░░░\x1b[0m \x1b[33m60%\x1b[0m"
-    assert red == "\x1b[31m████████\x1b[0m\x1b[90m░░\x1b[0m \x1b[31m80%\x1b[0m"
+    assert green == ("\x1b[32m██████\x1b[0m\x1b[90m░░░░\x1b[0m"
+                     " \x1b[32m120k/200k\x1b[0m")
+    assert amber == ("\x1b[33m████████\x1b[0m\x1b[90m░░\x1b[0m"
+                     " \x1b[33m150k/200k\x1b[0m")
+    assert red == ("\x1b[31m█████████\x1b[0m\x1b[90m░\x1b[0m"
+                   " \x1b[31m182k/200k\x1b[0m")
+    assert full == "\x1b[31m██████████\x1b[0m \x1b[31m200k/200k\x1b[0m"
 
 
-def test_context_bar_bands_are_relative_to_the_cutoff() -> None:
+def test_context_bar_bands_are_relative_to_the_handoff_limit() -> None:
     from imp.cli.live_driver import context_bar
-    # sonnet has no soft_cap: the cutoff is the 0.8 default, so amber starts at
-    # 0.75 * 0.8 = 0.60 (today's green boundary) and red at the 0.8 handoff.
-    green = context_bar("anthropic", "sonnet", 100000, color=True, over_bg=False)
-    amber = context_bar("anthropic", "sonnet", 140000, color=True, over_bg=False)
-    red = context_bar("anthropic", "sonnet", 180000, color=True, over_bg=False)
-    assert green is not None and amber is not None and red is not None
-    assert "\x1b[32m" in green                     # 50% -> green fill
-    assert "\x1b[33m" in amber                     # 70% -> wordmark fill
-    assert "\x1b[31m" in red                       # 90% -> red fill
-    # Boundaries: 0.595 is green, 0.605 is amber, 0.80 (the cutoff itself) is
-    # red. Both boundary bars LABEL "60%" and differ only in hue — the amber
-    # edge is asserted off the exact 0.6 ratio on purpose, since `0.75 * 0.8` is
-    # 0.6000000000000001 in doubles, so a bar at precisely 0.6 falls green by
-    # one ulp. Behaviourally invisible, and only at that one exact ratio.
-    just_green = context_bar("anthropic", "sonnet", 119000, color=True, over_bg=False)
-    boundary_amber = context_bar("anthropic", "sonnet", 121000, color=True, over_bg=False)
-    boundary_red = context_bar("anthropic", "sonnet", 160000, color=True, over_bg=False)
-    assert just_green is not None and boundary_amber is not None
-    assert boundary_red is not None
-    assert "\x1b[32m" in just_green and "\x1b[33m" not in just_green
-    assert "\x1b[33m" in boundary_amber and "\x1b[32m" not in boundary_amber
-    assert "\x1b[31m" in boundary_red and "\x1b[33m" not in boundary_red
+
+    def bar(tokens: int) -> str:
+        painted = context_bar("claude_code", "claude-opus-5[1m]", tokens,
+                              color=True, over_bg=False)
+        assert painted is not None
+        return painted
+
+    # A 200k limit: green below 150k (75%), amber to 179_999, red from 180k (90%).
+    assert "\x1b[32m" in bar(149_999) and "\x1b[33m" not in bar(149_999)
+    assert "\x1b[33m" in bar(150_000) and "\x1b[31m" not in bar(150_000)
+    assert "\x1b[33m" in bar(179_999) and "\x1b[31m" not in bar(179_999)
+    assert "\x1b[31m" in bar(180_000) and "\x1b[33m" not in bar(180_000)
 
 
-# AC 9(a)
-def test_context_bar_bands_follow_the_default_ceiling() -> None:
+def test_the_gauge_means_the_same_thing_across_models() -> None:
     from imp.cli.live_driver import context_bar
-    # gpt-5.6-sol hands off at the preserved 160k default ceiling of its 1.05M window
-    # (~15.2%), so 19%, 30% and 50% are all RED and amber starts at
-    # 0.75 * 160k = 120k. Fill and percentage stay occupancy-of-window.
-    at_50 = context_bar("openai", "gpt-5.6-sol", 525_000, color=True, over_bg=False)
-    at_30 = context_bar("openai", "gpt-5.6-sol", 315_000, color=True, over_bg=False)
-    at_19 = context_bar("openai", "gpt-5.6-sol", 199_500, color=True, over_bg=False)
-    at_cutoff = context_bar("openai", "gpt-5.6-sol", 160_000, color=True, over_bg=False)
-    amber = context_bar("openai", "gpt-5.6-sol", 130_000, color=True, over_bg=False)
-    green = context_bar("openai", "gpt-5.6-sol", 105_000, color=True, over_bg=False)
-    assert at_50 is not None and at_30 is not None and at_19 is not None
-    assert at_cutoff is not None and amber is not None and green is not None
-    assert "\x1b[31m" in at_50
-    assert "\x1b[31m" in at_30 and at_30.endswith("30%\x1b[0m")
-    assert "\x1b[31m" in at_19                              # was amber at 24.8%
-    assert "\x1b[31m" in at_cutoff                          # the cutoff itself
-    assert "\x1b[33m" in amber and "\x1b[31m" not in amber  # 12.4% of the window
-    assert "\x1b[32m" in green                              # 10%
-
-
-# AC 9(b)
-def test_context_bar_1m_model_bands_follow_the_ceiling() -> None:
-    from imp.cli.live_driver import context_bar
-    # claude-opus-5[1m] carries no soft cap, so its cutoff is the 160k ceiling
-    # — 16% of its 1M window — and amber starts at 0.75 * 160k = 120k. Red
-    # therefore reads at a low percentage; the bar marks the real handoff point.
-    green = context_bar("anthropic", "claude-opus-5[1m]", 100_000,
-                        color=True, over_bg=False)
-    amber = context_bar("anthropic", "claude-opus-5[1m]", 130_000,
-                        color=True, over_bg=False)
-    red = context_bar("anthropic", "claude-opus-5[1m]", 160_000,
-                      color=True, over_bg=False)
-    assert green is not None and amber is not None and red is not None
-    assert "\x1b[32m" in green                              # 10%
-    assert "\x1b[33m" in amber and "\x1b[31m" not in amber  # 13%
-    assert "\x1b[31m" in red and red.endswith("16%\x1b[0m")
+    # The same 150k of occupancy: eight cells of a 200k limit wherever the
+    # ceiling binds, nine of claude-opus-5's 80%-of-200k limit.
+    for provider, model in (("claude_code", "claude-opus-5[1m]"),
+                            ("openai", "gpt-5"),
+                            ("openai", "gpt-5.6-terra"),
+                            ("codex", "gpt-6-astra")):
+        assert context_bar(provider, model, 150_000, color=False,
+                           over_bg=False) == "████████░░ 150k/200k", model
+    assert context_bar("claude_code", "claude-opus-5", 150_000, color=False,
+                       over_bg=False) == "█████████░ 150k/160k"
 
 
 def test_context_bar_midrange_fill_is_wordmark_under_dark_theme() -> None:
@@ -1907,7 +1884,8 @@ def test_context_bar_midrange_fill_is_wordmark_under_dark_theme() -> None:
     from imp.cli.live_driver import context_bar
     try:
         pal.set_theme("dark")
-        bar = context_bar("anthropic", "sonnet", 140000, color=True, over_bg=False)
+        bar = context_bar("claude_code", "claude-opus-5[1m]", 150_000,
+                          color=True, over_bg=False)
         assert bar is not None
         assert pal.sgr("wordmark", enabled=True) in bar   # \x1b[38;2;255;154;60m
         assert pal.sgr("yellow", enabled=True) not in bar  # not the muted yellow role
@@ -1921,17 +1899,8 @@ def test_context_bar_resolves_a_dated_id_through_limits_for() -> None:
     dated = limits_for("anthropic", "claude-opus-5-20260315")
     assert dated is not None
     assert dated.window == 200_000                 # longest-prefix, not substring
-    assert context_bar("anthropic", "claude-opus-5-20260315", 40000,
-                       color=False, over_bg=False) == "██░░░░░░░░ 20%"
-
-
-def test_context_bar_prefers_sdk_percentage_over_tokens() -> None:
-    from imp.cli.live_driver import context_bar
-    # context_pct is rendered directly: a huge prompt_tokens that would imply
-    # ~100% is ignored when the SDK percentage is present.
-    bar = context_bar("claude_code", "claude-opus-4-8[1m]", 999_999,
-                      context_pct=42.0, color=False, over_bg=False)
-    assert bar == "████░░░░░░ 42%"
+    assert context_bar("anthropic", "claude-opus-5-20260315", 48_000,
+                       color=False, over_bg=False) == "███░░░░░░░ 48k/160k"
 
 
 def test_live_driver_has_no_context_windows_symbol() -> None:
@@ -1948,21 +1917,16 @@ def test_context_bar_omitted_for_unknown_pair_or_missing_usage() -> None:
     assert context_bar("anthropic", "sonnet", None, color=False, over_bg=False) is None
 
 
-# AC 9(c)
-def test_context_bar_unresolvable_provider_draws_nothing_on_the_tokens_path() -> None:
+def test_context_bar_needs_a_window_from_the_catalog_or_the_provider() -> None:
     from imp.cli.live_driver import context_bar
-    # No provider -> no window -> no bar, rather than a bar whose mark comes
-    # from a guessed window. The live context_pct path needs no window and
-    # still draws, at the 60/80 default bands.
-    assert context_bar(None, "sonnet", 100000, color=False, over_bg=False) is None
-    assert context_bar("mystery", "sonnet", 100000, color=False, over_bg=False) is None
-    amber = context_bar(None, "sonnet", None, context_pct=70.0,
-                        color=True, over_bg=False)
-    red = context_bar(None, "sonnet", None, context_pct=80.0,
-                      color=True, over_bg=False)
-    assert amber is not None and red is not None
-    assert "\x1b[33m" in amber
-    assert "\x1b[31m" in red
+    # No resolvable pair and no reported window -> no bar, rather than a bar
+    # whose denominator comes from a guessed window.
+    assert context_bar(None, "sonnet", 100_000, color=False, over_bg=False) is None
+    assert context_bar("mystery", "sonnet", 100_000,
+                       color=False, over_bg=False) is None
+    # A reported window is enough on its own: the pair need not resolve.
+    assert context_bar("mystery", "nope", 120_000, context_window=200_000,
+                       color=False, over_bg=False) == "████████░░ 120k/160k"
 
 
 def test_position_row_separates_model_from_the_gauge_with_a_middle_dot() -> None:
@@ -1995,15 +1959,15 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
              usage={"input_tokens": 60000, "output_tokens": 5,
                     "cache_read_input_tokens": 20000,
                     "cache_creation_input_tokens": 0},
-             context_pct=42.0, context_window=200_000))
+             context_window=200_000))
     f = b.running_subagents()[0]
     model = rt.subagent_model(f)
     provider = rt.subagent_provider(f)
     assert (provider, model) == ("anthropic", "sonnet")   # sanity: pair resolvable
     bar = context_bar(provider, model, f.nested.latest_prompt_tokens,
-                      context_pct=f.nested.latest_context_pct,
+                      context_window=f.nested.latest_context_window,
                       color=False, over_bg=False)
-    assert bar is not None
+    assert bar == "█████░░░░░ 80k/160k"     # 60k + 20k cache against the 160k limit
     rows = compose_subagent_rows(b, color=False, width=200,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert f"sonnet · {bar}" in rows[0]     # · separates model from gauge
@@ -2257,9 +2221,9 @@ def test_verb_step_label_push_emits_no_header() -> None:
 # AC 9(d): the step-row surface
 def test_position_row_bands_the_bar_from_the_activity_provider() -> None:
     from imp.cli.live_driver import compose_position_row
-    # Same model, same occupancy (30% of the 1.05M window): with the provider
-    # the 160k default cutoff resolves and the bar is red; without it nothing resolves and the
-    # tokens path draws no bar at all.
+    # Same model, same occupancy: with the provider gpt-5.6-sol's 200k limit
+    # resolves and 315k overflows it (red, clamped full); without it nothing
+    # resolves and no bar is drawn.
     banded = compose_position_row(
         activity=nv.Activity(kind="agent", model="gpt-5.6-sol", provider="openai",
                              phase="implementation phase"),
@@ -2267,8 +2231,8 @@ def test_position_row_bands_the_bar_from_the_activity_provider() -> None:
     unresolved = compose_position_row(
         activity=nv.Activity(kind="agent", model="gpt-5.6-sol", phase="implementation phase"),
         quest_id="abc", title="t", context_tokens=315_000, color=True, width=200)
-    assert "\x1b[31m" in banded and "30%" in banded
-    assert "%" not in unresolved
+    assert "\x1b[31m" in banded and "315k/200k" in banded
+    assert "█" not in unresolved and "░" not in unresolved
 
 
 # AC 9(d): the subagent-row surface
@@ -2290,8 +2254,8 @@ def test_subagent_row_bands_identically_to_its_step_row() -> None:
              usage={"input_tokens": 315_000, "output_tokens": 5}))
     rows = compose_subagent_rows(b, color=True, width=200,
                                  now_iso="2026-01-01T00:00:05+00:00")
-    # 315000 / 1.05M = 30%, past the 160k default ceiling -> red on the subagent row too.
-    assert "30%" in rows[0]
+    # 315k past the 200k limit -> clamped full and red on the subagent row too.
+    assert "315k/200k" in rows[0]
     assert "\x1b[31m" in rows[0]
 
 
@@ -2559,27 +2523,28 @@ def test_compose_position_row_starts_with_title_when_quest_id_is_none() -> None:
 
 def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
     from imp.cli.live_driver import compose_position_row
-    agent = compose_position_row(activity=_pos_activity(kind="agent"), quest_id="z",
-                                 title="t", context_tokens=None, color=False, width=80,
-                                 context_pct=42.0)
-    script = compose_position_row(activity=_pos_activity(kind="script"), quest_id="z",
-                                  title="t", context_tokens=None, color=False, width=80,
-                                  context_pct=42.0)
-    none_kind = compose_position_row(activity=_pos_activity(kind=None), quest_id="z",
-                                     title="t", context_tokens=None, color=False, width=80,
-                                     context_pct=42.0)
-    assert "42%" in agent
-    assert "%" not in script
-    assert "%" not in none_kind   # prelaunch kind=None suppresses the bar even with usage present
-    assert "implementation phase" in script
+
+    def row(kind: str | None) -> str:
+        return compose_position_row(
+            activity=_pos_activity(kind=kind, model="claude-opus-5",
+                                   provider="claude_code"),
+            quest_id="z", title="t", context_tokens=120_000, color=False,
+            width=120)
+
+    assert "120k/160k" in row("agent")
+    assert "█" not in row("script") and "120k/160k" not in row("script")
+    # prelaunch kind=None suppresses the bar even with usage present
+    assert "█" not in row(None)
+    assert "implementation phase" in row("script")
 
 
 def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
     from imp.cli.live_driver import compose_position_row
-    row = compose_position_row(activity=_pos_activity(kind="agent", lane_wait=True),
-                               quest_id="z", title="t", context_tokens=None,
-                               color=False, width=80, context_pct=42.0)
-    assert "%" not in row
+    row = compose_position_row(
+        activity=_pos_activity(kind="agent", lane_wait=True,
+                               model="claude-opus-5", provider="claude_code"),
+        quest_id="z", title="t", context_tokens=120_000, color=False, width=120)
+    assert "█" not in row and "120k/160k" not in row
     assert "implementation phase" in row
 
 
@@ -2589,9 +2554,10 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
         pal.set_theme("ansi")
         row = compose_position_row(
             activity=_pos_activity(phase="planning phase", plan="plan 3/6",
-                                   counter="task 2/3", model="m", kind="agent"),
-            quest_id="z9gixx", title="t", context_tokens=None, color=True,
-            width=120, context_pct=42.0)
+                                   counter="task 2/3", model="claude-opus-5",
+                                   provider="claude_code", kind="agent"),
+            quest_id="z9gixx", title="t", context_tokens=120_000, color=True,
+            width=120)
     finally:
         pal.set_theme("ansi")
     parts = row.split(" · ")
@@ -2745,8 +2711,8 @@ def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> s
         activity=nv.Activity(kind="agent", model="claude-opus-5",
                              provider="claude_code", phase="implementation",
                              plan="plan-1", counter="step 3/7"),
-        quest_id="nota40", title=title, project="imp", context_tokens=None,
-        color=color, width=width, context_pct=44.0,
+        quest_id="nota40", title=title, project="imp", context_tokens=70_400,
+        color=color, width=width,
         carrier=nv.Carrier(provider="claude_code", auth_mode="subscription",
                            quota=reading),
         now_epoch=_ROW_NOW)
@@ -2754,10 +2720,10 @@ def _wide_row(width: int, *, color: bool = False, title: str = _LONG_TITLE) -> s
 
 def test_position_row_anchors_the_quota_flush_to_the_band_edge() -> None:
     left = ("imp · nota40 · Context and quota gauges in the live footer · "
-            "implementation · plan-1 · step 3/7 · claude-opus-5 · ████░░░░░░ 44%")
+            "implementation · plan-1 · step 3/7 · claude-opus-5 · ████░░░░░░ 70k/160k")
     row = _wide_row(200)
-    # 128 + 25 + 45 = 198: both groups at their edges, spaces in between.
-    assert row == left + " " * 25 + "claude_code · session 62% (3h left) · week 7%"
+    # 133 + 20 + 45 = 198: both groups at their edges, spaces in between.
+    assert row == left + " " * 20 + "claude_code · session 62% (3h left) · week 7%"
     assert pal.display_width(row) == 198
     assert " · claude_code" not in row      # reached across the gap, never ` · `-joined
 
@@ -2769,14 +2735,14 @@ def test_position_row_fit_ladder_drops_the_quota_then_the_gauge_then_clips() -> 
     # 150: the quota goes whole and the gauge survives, ending at a segment
     # boundary — where the blind clip used to sever the 160-column row mid-field.
     at150 = _wide_row(150)
-    assert at150.endswith("claude-opus-5 · ████░░░░░░ 44%")
+    assert at150.endswith("claude-opus-5 · ████░░░░░░ 70k/160k")
     assert "session" not in at150 and "…" not in at150
-    assert pal.display_width(at150) == 128
+    assert pal.display_width(at150) == 133
     # 120: the gauge goes next; every structural segment is still there.
     at120 = _wide_row(120)
     assert at120.startswith(f"imp · nota40 · {_LONG_TITLE} · implementation")
     assert at120.endswith("plan-1 · step 3/7 · claude-opus-5")
-    assert "44%" not in at120 and "…" not in at120
+    assert "70k/160k" not in at120 and "…" not in at120
     # 100: nothing left to drop, so the title itself is truncated — and only then.
     at100 = _wide_row(100)
     assert at100.endswith("…")
@@ -2877,13 +2843,13 @@ def test_compose_subagent_rows_carry_own_context_and_elapsed() -> None:
                  stop_reason="end_turn",
                  usage={"input_tokens": 60000, "output_tokens": 5,
                         "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 0},
-                 context_pct=42.0, context_window=200_000)
+                 context_window=200_000)
     b = _sub_builder(("t1", "coder"), readings=[reading],
                      start_ts="2026-01-01T00:00:00+00:00")
     rows = compose_subagent_rows(b, color=False, width=120,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert len(rows) == 1
-    assert "42%" in rows[0]     # the subagent's OWN context gauge (Part 2)
+    assert "80k/160k" in rows[0]   # the subagent's OWN context gauge (Part 2)
     assert "5s" in rows[0]      # its own elapsed (start_ts .. now_iso)
 
 
@@ -2916,7 +2882,7 @@ def test_compose_subagent_rows_pad_to_the_band_width_with_a_gauge() -> None:
     reading = ev("r1", "agent_message", agent_id="sub:t1", provider="anthropic",
                  model="m", stop_reason="end_turn",
                  usage={"input_tokens": 60000, "output_tokens": 5},
-                 context_pct=42.0, context_window=200_000)
+                 context_window=200_000)
     b = _sub_builder(("t1", "coder"), readings=[reading],
                      start_ts="2026-01-01T00:00:00+00:00")
     try:
@@ -2931,7 +2897,7 @@ def test_compose_subagent_rows_pad_to_the_band_width_with_a_gauge() -> None:
     assert pal.display_width(banded[0]) == 118           # still padded to width - 2
     plain = compose_subagent_rows(b, color=False, width=120,
                                   now_iso="2026-01-01T00:00:05+00:00")
-    assert plain[0].endswith("████░░░░░░ 42%")           # gauge replaces "context 42%"
+    assert plain[0].endswith("████░░░░░░ 60k/160k")   # gauge replaces "context 42%"
 
 
 def test_compose_subagent_rows_prefix_child_arrow() -> None:
@@ -3484,7 +3450,7 @@ def test_compose_prelaunch_position_row_renders_state_segments_no_context_bar() 
         model="sonnet", quest_id="feat", title="demo",
         color=False, width=200, carrier=None, cost=None)
     assert row == "feat · demo · planning phase · plan 2/4 · reviewing spec · sonnet"
-    assert "%" not in row      # context-usage bar omitted pre-launch
+    assert "█" not in row and "░" not in row   # context-usage bar omitted pre-launch
 
 
 def test_compose_prelaunch_position_row_omits_absent_segments() -> None:
@@ -3968,24 +3934,20 @@ def test_driver_without_project_renders_todays_bands_unchanged() -> None:
 # AC 5(a)
 def test_context_bar_prefers_a_provider_reported_window() -> None:
     from imp.cli.live_driver import context_bar
-    # Codex reports 258400 for gpt-5.6-*; 160k reaches the preserved default cutoff.
-    bar = context_bar("codex", "gpt-5.6-sol", 160_000, context_window=258_400,
-                      color=True, over_bg=False)
-    assert bar is not None
-    assert bar.endswith("62%\x1b[0m")
-    assert "\x1b[31m" in bar
-
-
-# AC 5(b)
-def test_context_bar_without_a_reported_window_falls_back_to_the_catalog() -> None:
-    from imp.cli.live_driver import context_bar
-    # Without a live window, the preserved 160k cutoff uses the catalog window.
-    assert context_bar("codex", "gpt-5.6-sol", 160_000,
-                       color=False, over_bg=False) == "██░░░░░░░░ 15%"
+    # A derated live window wins: 150k -> a 120k limit, against the catalog
+    # 1.05M window's 200k. A reported 258400 still clamps to the 200k ceiling.
+    assert context_bar("codex", "gpt-5.6-sol", 100_000, context_window=150_000,
+                       color=False, over_bg=False) == "████████░░ 100k/120k"
+    assert context_bar("codex", "gpt-5.6-sol", 100_000,
+                       color=False, over_bg=False) == "█████░░░░░ 100k/200k"
+    assert context_bar("codex", "gpt-5.6-sol", 100_000, context_window=258_400,
+                       color=False, over_bg=False) == "█████░░░░░ 100k/200k"
 
 
 # AC 8
-def test_compose_status_bar_uses_the_window_from_the_usage_patch() -> None:
+def test_compose_status_bar_uses_the_window_from_the_usage_patch(
+        monkeypatch) -> None:
+    monkeypatch.setenv("COLUMNS", "200")     # compose_status reads term_width()
     drv, _ = _driver()
     drv.on_event(ev("1", "quest_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
@@ -3995,12 +3957,12 @@ def test_compose_status_bar_uses_the_window_from_the_usage_patch() -> None:
                     raw={"content": [{"type": "text", "text": "done"}]}, usage={}))
     drv.on_event({"type": "agent_message_usage_patch", "agent_id": "step:p/s",
                   "payload": {"usage": {"input_tokens": 82628},
-                              "context_tokens": 22389, "context_window": 258400}})
+                              "context_tokens": 22389, "context_window": 150000}})
     block = drv.compose_status(0)
     assert block is not None
-    # 22389/258400 -> 9%. Against the catalog's 1.05M window it would read 2%.
-    assert "9%" in block[2]
-    assert "2%" not in block[2]
+    # The live 150k window gives a 120k limit; the catalog's 1.05M would give 200k.
+    assert "22k/120k" in block[2]
+    assert "22k/200k" not in block[2]
 
 
 def test_compose_subagent_rows_take_the_window_from_a_usage_patch() -> None:
@@ -4012,13 +3974,13 @@ def test_compose_subagent_rows_take_the_window_from_a_usage_patch() -> None:
              raw={"content": [{"type": "text", "text": "hi"}]}, usage={})
     patch = {"type": "agent_message_usage_patch", "agent_id": "sub:t1",
              "payload": {"usage": {"input_tokens": 82628},
-                         "context_tokens": 22389, "context_window": 258400}}
+                         "context_tokens": 22389, "context_window": 150000}}
     b = _sub_builder(("t1", "coder"), readings=[ctx, msg, patch],
                      start_ts="2026-01-01T00:00:00+00:00")
     rows = compose_subagent_rows(b, color=False, width=120,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert len(rows) == 1
-    assert "9%" in rows[0]      # the sub's own reading, against 258400 not 1.05M
+    assert "22k/120k" in rows[0]   # the sub's own reading, against 150000 not 1.05M
 
 
 def test_activity_countdown_renders_a_multi_day_wait_in_days() -> None:

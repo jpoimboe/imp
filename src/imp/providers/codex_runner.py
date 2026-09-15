@@ -706,7 +706,6 @@ class CodexSession(ObserveSession):
             return False
         from imp.engine.reincarnation import handoff_instruction, write_handoff_note
         from imp.providers.catalog import sdk_context_threshold_crossed
-        invocation = self.invocation
         # Tier A watch: codex's own reading crossed the checkpoint threshold
         # while still working (no complete_step). Inject the handoff instruction
         # as the next turn prompt and capture the note on the following turn
@@ -716,9 +715,7 @@ class CodexSession(ObserveSession):
         tokens, window = self._proc_state.get("context_reading") or (None, None)
         if (self._handoff_phase is None
                 and not self._complete_step_called
-                and sdk_context_threshold_crossed(
-                    tokens, window,
-                    invocation.provider_name, self.runner.model)):
+                and sdk_context_threshold_crossed(tokens, window)):
             instr = handoff_instruction()
             self.elog.append_engine_message(
                 agent_id=self.aid,

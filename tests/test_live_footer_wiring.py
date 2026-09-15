@@ -155,8 +155,8 @@ def _usage_patch(
 def test_the_cost_field_reaches_the_row_from_the_streamed_events() -> None:
     events = _cc_events(_query_result("r1", "sess-1", 4.21, 9000))
     row = _position_row(events)
-    # 34 + 159 + 5 = 198 = width - 2: the dollars sit at the band's right edge.
-    assert row == "t · claude-opus-5 · ██████░░░░ 60%" + " " * 159 + "$4.21"
+    # 40 + 153 + 5 = 198 = width - 2: the dollars sit at the band's right edge.
+    assert row == "t · claude-opus-5 · ████████░░ 120k/160k" + " " * 153 + "$4.21"
     assert pal.display_width(row) == 198
 
 
@@ -170,7 +170,7 @@ def test_the_quota_field_reaches_the_row_from_the_streamed_events() -> None:
                         auth_mode="subscription")
     row = _position_row(events)
     # The same priced sequence: the auth mode alone decides which field shows.
-    assert row == ("t · claude-opus-5 · ██████░░░░ 60%" + " " * 129
+    assert row == ("t · claude-opus-5 · ████████░░ 120k/160k" + " " * 123
                    + "claude_code · session 34% · week 7%")
     assert "$" not in row
 
@@ -228,7 +228,7 @@ def test_a_contribution_for_an_unrelated_agent_leaves_the_field_absent() -> None
     assert total.priced == 0                  # attributed to nothing, priced as nothing
     row = _position_row(events)
     assert "$" not in row and "n/a" not in row
-    assert row.endswith("claude-opus-5 · ██████░░░░ 60%")
+    assert row.endswith("claude-opus-5 · ████████░░ 120k/160k")
 
 
 # AC 4, AC 14
@@ -271,14 +271,14 @@ def test_codex_usage_patches_drive_parent_and_subagent_footer_rows() -> None:
 
     assert rows is not None and len(rows) == 4
     expected_parent = (
-        "t · gpt-5.6-terra · █░░░░░░░░░ 9%"
-        + " " * 136
+        "t · gpt-5.6-terra · █░░░░░░░░░ 22k/200k"
+        + " " * 130
         + "codex · session 12% · week 7%"
     )
     assert rows[2] == expected_parent
     assert pal.display_width(rows[2]) == 198
     assert "$" not in rows[2]
-    assert "████░░░░░░ 42%" in rows[3]
+    assert "█████░░░░░ 109k/200k" in rows[3]
     assert "session" not in rows[3]
     assert "week" not in rows[3]
     assert "$" not in rows[3]
@@ -292,7 +292,7 @@ def test_a_subagent_row_carries_no_cost_field_on_a_metered_backend() -> None:
     assert rows is not None and len(rows) == 4
     # The position row takes the metered branch; the recorded reading stays off it.
     assert "$" in rows[2] and "session" not in rows[2]
-    assert "████░░░░░░ 42%" in rows[3]                 # same gauge, same grammar
+    assert "█████░░░░░ 109k/200k" in rows[3]                 # same gauge, same grammar
     assert "session" not in rows[3] and "$" not in rows[3]
 
 
