@@ -18,12 +18,33 @@ def _set_stored_version(quest_dir: Path, version: int) -> None:
     meta_path.write_text(json.dumps(meta))
 
 
+def _home_bytes(quest_dir: Path) -> dict[str, bytes]:
+    return {str(p.relative_to(quest_dir)): p.read_bytes()
+            for p in sorted(quest_dir.rglob("*")) if p.is_file()}
+
+
 def test_load_refuses_lower_stored_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="X", quest_id="lo", base_branch="main")
-    _set_stored_version(ch.quest_dir, 0)        # no (0, 2) migration -> refuse
+    _set_stored_version(ch.quest_dir, 0)        # any stored version that is not
+    before = _home_bytes(ch.quest_dir)          # LAYOUT_VERSION refuses
     with pytest.raises(LayoutMismatch):
         Quest.load(tmp_path, "lo")
+    assert _home_bytes(ch.quest_dir) == before  # nothing attempted a repair
+
+
+def test_load_refuses_a_stored_version_the_chain_used_to_repair(tmp_path: Path) -> None:
+    """LAYOUT_VERSION - 1 is the one hop the deleted chain always repaired: it must
+    now refuse, and refuse without touching a single byte of the home."""
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="X", quest_id="prev", base_branch="main")
+    _set_stored_version(ch.quest_dir, LAYOUT_VERSION - 1)
+    before = _home_bytes(ch.quest_dir)
+    with pytest.raises(LayoutMismatch) as ei:
+        Quest.load(tmp_path, "prev")
+    assert ei.value.stored == LAYOUT_VERSION - 1
+    assert ei.value.engine == LAYOUT_VERSION
+    assert _home_bytes(ch.quest_dir) == before
 
 
 def test_load_refuses_higher_stored_version(tmp_path: Path) -> None:
