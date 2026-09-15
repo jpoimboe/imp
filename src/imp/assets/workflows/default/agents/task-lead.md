@@ -82,10 +82,10 @@ unimplemented task, or the re-opened task from injected feedback):
    - **Marked `**Tier:** high`:**
      `sub_agent(subagent_name="coder", tier="high", task_description=…)`
    - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
-     `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
-     trailer, no `Quest:` trailer — the workflow stamps `Quest:` later." Record the
-     task's commit **subject** in `progress.md` so you can re-find it if it is later
-     re-opened.
+     `git add <files>` then `git commit -F` with a message in the house style. No
+     `Task:` trailer, no `Quest:` trailer — the workflow stamps `Quest:` later."
+     Record the task's commit **subject** in `progress.md` so you can re-find it if
+     it is later re-opened.
    - **Re-opened buried task (Step 0):** its commit is no longer `HEAD`, so
      `--fixup=HEAD` would target the wrong commit. Resolve the buried commit's
      **current SHA** yourself — `git log --oneline <base>..HEAD` and match the
@@ -98,6 +98,11 @@ unimplemented task, or the re-opened task from injected feedback):
      end-of-quest cleanup folds the fixup into its target, so the final branch stays
      **one clean commit per task**. Do **not** make a second new commit for a
      re-opened task.
+   - **Message gone stale:** when a within-loop fix changes what the commit message
+     says — a different approach, or a consequence that no longer holds — tell the
+     coder to record an `amend!` reword (its REWORDING mode) in the same dispatch as
+     the fixup, targeting the commit **subject** you recorded in `progress.md`. The
+     cleanup fold applies it, so the surviving commit describes what actually landed.
 
    **Never `--fixup`/`--squash` a commit your quest does not own.** A
    `fixup!`/`squash!` may only target a commit your quest created (above its fork),

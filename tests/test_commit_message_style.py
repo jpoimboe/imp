@@ -45,3 +45,14 @@ def test_coder_documents_the_amend_reword_mode() -> None:
     assert "first line is `amend! ` plus the target commit's subject" in flat
     assert 'git commit --allow-empty -F "$TMPDIR/msg"' in flat
     assert "Every `fixup!` and `amend!` commit is transient" in flat
+
+
+def test_task_lead_dispatches_message_file_commits_and_amend_rewords() -> None:
+    flat = " ".join((DEFAULT_AGENTS / "task-lead.md").read_text().split())
+    assert "`git add <files>` then `git commit -F` with a message in the house style" in flat
+    assert "git commit -m" not in flat
+    # The staleness escape hatch is dispatched, not left to the coder to notice.
+    assert "**Message gone stale:**" in flat
+    assert "record an `amend!` reword" in flat
+    # The trailer contract is untouched.
+    assert "No `Task:` trailer, no `Quest:` trailer" in flat
