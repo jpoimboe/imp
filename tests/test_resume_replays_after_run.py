@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from imp.cli import main as m
+from imp.engine import archive
 from imp.engine.archive import read as archive_read
 from imp.engine.archive import record, records_root
 from imp.engine.quest import Quest
@@ -33,6 +34,7 @@ def test_resume_replays_conversed_draft_after_archive_roundtrip(
     record.write_record(records_root(tmp_path), record.build_record(
         {"id": "c", "title": "t", "base_branch": "main"},
         final_state, events_hash="", resumable=True))
+    archive._write_data_version(tmp_path, archive._DATA_VERSION)
     # Rehydrate: restore state.json from the archived final_state verbatim.
     (quest.state_dir / "state.json").write_bytes(
         archive_read.read_state_json(tmp_path, "c"))

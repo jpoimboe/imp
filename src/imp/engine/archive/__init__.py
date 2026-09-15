@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import contextlib
-import errno
 import json
 import os
 import sqlite3
@@ -20,19 +19,7 @@ import filelock
 from imp.engine import durable
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
-from imp.engine.archive.codex_resume_migration import (
-    ArchiveCodexResumePlan,
-    plan_archive_codex_resume_state,
-)
 from imp.engine.errors import ArchiveMismatch
-from imp.engine.event_migrations import (
-    backfill_query_result_session_ids,
-    backfill_step_round,
-    migrate_events,
-    migrate_id_ns_event_to_block,
-    rename_claude_code_provider,
-)
-from imp.engine.state import derive_started_at
 from imp.paths import project_state_dir
 
 
@@ -76,13 +63,12 @@ def archive_quest(
     resumable: bool = False,
 ) -> None:
     """Finalize one completed/abandoned/shelved quest into the archive. Idempotent."""
+    check_data_floor(control_root)
     ensure_current(control_root)
     marker = data_version_path(control_root)
     archive_root(control_root).mkdir(parents=True, exist_ok=True)
     with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
-        if _read_data_version(control_root) < _DATA_VERSION:
-            _migrate_archive_blobs(control_root)
-        elif not marker.exists():
+        if not marker.exists():
             _write_data_version(control_root, _DATA_VERSION)
 
     events_bytes = events_path.read_bytes() if events_path.exists() else b""
@@ -209,16 +195,6 @@ def _index_is_complete(control_root: Path) -> bool:
     return all(cid in indexed_ids for cid in record_ids)
 
 
-# blob schema versions: 13 == claude_code provider id renamed claude;
-# 12 == archived Codex native resume converted;
-# 11 == quest_meta.provider backfilled; 10 == final_state.outcome_history head stripped;
-# 9 == step_started round stamped;
-# 8 == query_result session_id backfilled;
-# 7 == "event" id_ns restamped "block";
-# 6 == final_state.project_facts stripped;
-# 5 == quest_meta.workflow rename imp->default;
-# 4 == final_state.resume_target `prompt` split; 3 == final_state.status
-# realigned; 2 == started_at backfilled; 1 == triad; absent == pre-triad
 # A blob migration changing an index-visible value must also bump index._SCHEMA_VERSION.
 _DATA_VERSION = 13
 
@@ -243,125 +219,10 @@ def _write_data_version(control_root: Path, version: int) -> None:
         data_version_path(control_root), str(version).encode("ascii"))
 
 
-def _serialize_events(events: list[dict[str, Any]]) -> bytes:
-    """Compact one-JSON-object-per-line bytes — the on-disk events.jsonl shape."""
-    return "".join(json.dumps(ev) + "\n" for ev in events).encode("utf-8")
-
-
-def _migrate_archive_blobs(control_root: Path) -> None:
-    """One-time pass: rewrite each archived pre-triad events blob to the triad schema,
-    repoint each record's events_hash to the new blob; also backfill `started_at` into
-    each record's `final_state` when absent (first user_message ts → else first event
-    ts → else created_at). Also remap each record's final_state.status to the realigned
-    vocabulary (completed->merged, paused->shelved), and remap each record's
-    final_state.resume_target `prompt` -> `prompt-paused` (the pre-split tell).
-    Also strips the removed `project_facts` key from each record's final_state, and
-    the removed `head` sha from every entry of its final_state.outcome_history.
-    Also rewrite each record's quest_meta.workflow "imp"->"default".
-    Also restamp each blob's "event" id_ns task folds as "block", backfill a
-    session id onto each query_result row written before that field existed, and
-    stamp `round: 1` on each step_started row written before that field existed.
-    Also backfill a null `provider` pin into each record's quest_meta, so a
-    rehydrated home carries the same key set as a live one.
-    Also rewrite every `provider` field naming the retired `claude_code` id as
-    `claude`, at any depth, in the events blob and in each record's `final_state`
-    and `quest_meta` — but never `quest_meta["layout_version"]`, so a rehydrated
-    home still runs the v22->v23 hop over its restored step blobs.
-    Rebuilds the index once so its derived columns match, then stamps the data-version
-    marker. A triad blob with no "event" id_ns folds is left untouched (both transforms
-    are no-ops on it); old blobs orphan harmlessly (nothing GCs blobs)."""
-    store = LocalBlobStore(blobs_root(control_root))
-    records_dir = records_root(control_root)
-    cids = list(record.list_record_ids(records_dir))
-    plans: dict[str, ArchiveCodexResumePlan | None] = {}
-    for cid in cids:
-        rec = record.read_record(records_dir, cid)
-        if rec is None:
-            continue
-        plans[cid] = plan_archive_codex_resume_state(
-            rec.get("step_blobs", {}), store.get)
-
-    total = len(cids)
-    with _progress("Migrating archive...") as emit:
-        for i, cid in enumerate(cids, start=1):
-            emit(i, total)
-            rec = record.read_record(records_dir, cid)
-            if rec is None:
-                continue
-            blob = store.get(rec["events_hash"])
-            events = _parse_events(blob) if blob is not None else []
-            migrated: list[dict[str, Any]] = rename_claude_code_provider(
-                backfill_step_round(backfill_query_result_session_ids(
-                    migrate_id_ns_event_to_block(migrate_events(events)))))
-            dirty = False
-            plan = plans.get(cid)
-            if plan is not None:
-                for dependency in plan.blob_bytes:
-                    digest = store.put(dependency)
-                    if not store.has(digest):
-                        raise OSError(digest)
-                rec["step_blobs"] = plan.step_blobs
-                dirty = True
-            if blob is not None and migrated != events:
-                rec["events_hash"] = store.put(_serialize_events(migrated))
-                dirty = True
-            final_state = rec.get("final_state") or {}
-            renamed_state = rename_claude_code_provider(final_state)
-            if renamed_state != final_state:
-                final_state = renamed_state
-                rec["final_state"] = final_state
-                dirty = True
-            if final_state.get("started_at") is None:
-                final_state["started_at"] = derive_started_at(
-                    migrated, rec.get("created_at", ""))
-                rec["final_state"] = final_state
-                dirty = True
-            old_status = final_state.get("status")
-            remapped = ({"completed": "merged", "paused": "shelved"}.get(old_status)
-                        if isinstance(old_status, str) else None)
-            if remapped is not None:
-                final_state["status"] = remapped
-                rec["final_state"] = final_state
-                dirty = True
-            if final_state.get("resume_target") == "prompt":
-                final_state["resume_target"] = "prompt-paused"
-                rec["final_state"] = final_state
-                dirty = True
-            if "project_facts" in final_state:
-                del final_state["project_facts"]
-                rec["final_state"] = final_state
-                dirty = True
-            history = final_state.get("outcome_history") or {}
-            entries = [e for laps in history.values() for e in laps]
-            if any("head" in e for e in entries):
-                for entry in entries:
-                    entry.pop("head", None)
-                rec["final_state"] = final_state
-                dirty = True
-            quest_meta = rec.get("quest_meta") or {}
-            renamed_meta = rename_claude_code_provider(quest_meta)
-            if renamed_meta != quest_meta:
-                quest_meta = renamed_meta
-                rec["quest_meta"] = quest_meta
-                dirty = True
-            if quest_meta.get("workflow") == "imp":
-                quest_meta["workflow"] = "default"
-                rec["quest_meta"] = quest_meta
-                dirty = True
-            if quest_meta and "provider" not in quest_meta:
-                quest_meta["provider"] = None
-                rec["quest_meta"] = quest_meta
-                dirty = True
-            if dirty:
-                record.write_record(records_dir, rec)
-    rebuild_index(control_root)
-    _write_data_version(control_root, _DATA_VERSION)
-
-
 def check_data_floor(control_root: Path) -> None:
-    """Refuse a record/blob read whose blob-schema floor is newer than this install knows."""
+    """Refuse a record/blob read whose blob-schema floor is not this install's."""
     stored = _read_data_version(control_root)
-    if stored > _DATA_VERSION:
+    if stored != _DATA_VERSION:
         raise ArchiveMismatch(floor="data", stored=stored, known=_DATA_VERSION)
 
 
@@ -374,28 +235,25 @@ def check_index_floor(control_root: Path) -> None:
 
 
 def ensure_current(control_root: Path) -> None:
-    """Bring the archive up to date: migrate pre-triad event blobs to the triad
-    schema (once, gated by the data-version marker) and rebuild the index if its
-    schema version is stale or it is missing a durable record.
+    """Rebuild the index if its schema version is stale or it is missing a durable
+    record.
 
     Double-checked locking: lock-free version reads fast-path the steady state;
     the one-time work runs under the writer lock with a re-check so two processes
     never do it twice.
 
-    A read-only archive root is left exactly as it is: a cross-project read cannot
-    migrate, and the stale index still answers every query.
+    A read-only archive root is left exactly as it is: the stale index still
+    answers every query.
     """
     root = archive_root(control_root)
     if root.exists() and not os.access(root, os.W_OK):
         return
-    if (_read_data_version(control_root) >= _DATA_VERSION
-            and _read_user_version(control_root) >= index._SCHEMA_VERSION
+    if _read_data_version(control_root) != _DATA_VERSION:
+        return          # blobs this imp cannot vouch for: leave the archive as-is
+    if (_read_user_version(control_root) >= index._SCHEMA_VERSION
             and _index_is_complete(control_root)):
         return
     with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
-        if _read_data_version(control_root) < _DATA_VERSION:
-            _migrate_archive_blobs(control_root)
-            return
         if (_read_user_version(control_root) >= index._SCHEMA_VERSION
                 and _index_is_complete(control_root)):
             return
@@ -404,13 +262,4 @@ def ensure_current(control_root: Path) -> None:
 
 def require_current(control_root: Path) -> None:
     check_data_floor(control_root)
-    if _read_data_version(control_root) < _DATA_VERSION:
-        check_index_floor(control_root)
     ensure_current(control_root)
-    check_data_floor(control_root)
-    if _read_data_version(control_root) < _DATA_VERSION:
-        raise PermissionError(
-            errno.EACCES,
-            os.strerror(errno.EACCES),
-            str(archive_root(control_root)),
-        )

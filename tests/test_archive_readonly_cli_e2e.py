@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,23 @@ _READ_COMMANDS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
     (("search", "sprockets"), (LIVE, LIVE_MARK)),
     (("events", ARCH), (ARCH, "2 events")),
     (("events", "search", "flywheel"), (ARCH, ARCH_MARK)),
+)
+
+# Below the blob floor the uniform expectation splits: index-only and live-only
+# reads still answer, while every read of the archived record refuses.
+_BELOW_FLOOR_OK: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("list",), (ARCH, "Archived Quest")),
+    (("list", "--all"), (ARCH, LIVE)),
+    (("show", LIVE, "spec"), (SPEC_MARK,)),
+    (("search", "sprockets"), (LIVE, LIVE_MARK)),
+)
+
+_BELOW_FLOOR_REFUSED: tuple[tuple[str, ...], ...] = (
+    ("show", ARCH),
+    ("log", ARCH),
+    ("events", ARCH),
+    ("events", "search", "flywheel"),
+    ("resume", ARCH),
 )
 
 
@@ -182,10 +200,35 @@ def test_read_commands_work_when_the_index_schema_stamp_is_stale(
     _assert_every_read_command_is_clean(tmp_path, repo, home, state)
 
 
-def test_read_commands_work_when_the_data_version_marker_is_missing(
+def _assert_below_floor_split(
+    run: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Index-only and live-only reads answer; every archived-record read refuses
+    with one `imp:` line, exit 2, no traceback."""
+    for args, expected in _BELOW_FLOOR_OK:
+        proc = run(*args)
+        label = "imp " + " ".join(args)
+        assert proc.returncode == 0, f"{label} rc={proc.returncode}\n{proc.stderr}"
+        for needle in expected:
+            assert needle in proc.stdout, f"{label} missing {needle!r}\n{proc.stdout}"
+    for args in _BELOW_FLOOR_REFUSED:
+        proc = run(*args)
+        label = "imp " + " ".join(args)
+        assert proc.returncode == 2, f"{label} rc={proc.returncode}\n{proc.stderr}"
+        lines = [ln for ln in proc.stderr.splitlines() if ln.strip()]
+        assert len(lines) == 1, f"{label} stderr not one line\n{proc.stderr}"
+        assert lines[0].startswith("imp: "), f"{label} stderr {lines[0]!r}"
+        assert "Traceback" not in proc.stderr, f"{label} traceback\n{proc.stderr}"
+
+
+def test_below_floor_reads_split_on_a_read_only_archive(
     tmp_path: Path, project: tuple[Path, Path, Path],
 ) -> None:
     repo, home, state = project
     archive.data_version_path(repo).unlink()
+    before = _snapshot(state)
 
-    _assert_every_read_command_is_clean(tmp_path, repo, home, state)
+    _assert_below_floor_split(lambda *args: _run_readonly(tmp_path, repo, home, *args))
+
+    # Harness guard: the ro bind makes writes impossible; this fails only if that bind is dropped.
+    assert _snapshot(state) == before

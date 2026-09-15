@@ -2783,7 +2783,7 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     try:
         require_current(control)
         check_index_floor(control)
-    except (ArchiveMismatch, PermissionError):
+    except ArchiveMismatch:
         return rows
     for cid in archive_read.archived_ids(control):
         if token not in cid or cid in live:
