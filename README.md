@@ -8,40 +8,30 @@
 
 ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-pre--release-orange)
 
-imp is a declarative agent workflow engine for software development.  Each
+**imp is a declarative agent workflow engine for software development.**  Each
 change (feature or bug) for a given project gets built as part of an isolated,
 resumable **quest**, which tracks the change's history from inception through
 design, planning, coding, review, testing, and integration.
-
-Each step is performed with fresh agent context, to avoid entering the dreaded
-LLM "dumb zone", and to enable focused work and adversarial review.  Files are
-used to communicate between steps.  Work can be split across different models
-or providers as needed.
 
 **Human effort is concentrated up front**, at the beginning of the quest, during
 the interview with the "threshold" agent.  Once it has picked your brain
 sufficiently, the workflow typically runs unattended all the way through merge,
 so you're free to step away.  Or, kick off another quest in parallel!
 
-Detailed specs, implementation plans, and progress files carry your decisions
-between steps.  Tests are written first (TDD), every artifact is independently
-reviewed, and the final code is checked against acceptance criteria before
-merge.
+imp front-loads deliberation, so expect hours of machine time, millions of
+tokens, and real subscription spend for anything non-trivial.  Most of it goes
+to thinking rather than typing: writing the spec, reviewing it, planning each
+chunk of work, reviewing those plans.  A spec is rewritten until a fresh
+reviewer clears it -- often several rounds -- and so is every plan.
 
-Every conversation is archived, so you can easily trace any line of code back
-to the full conversation which produced it.
-
-Imp ships with an opinionated default workflow which follows best practices for
-producing high quality, TDD, fully AI-written code in a fast-moving greenfield
-solo or small team project, but it can be easily customized or replaced to
-match your project's needs.  The engine is flexible enough that it can also be
-used for non-coding projects or even business processes.
+That is the design, not overhead.  A reviewer who never saw the author's
+reasoning catches mistakes while they are still an unbuilt paragraph, and
+planning a chunk of work often takes longer than building it.  Rewriting a plan
+is cheap; rewriting a merged feature is not.
 
 Since its early bootstrap phase, imp has written all of its own code, with
 **no human code review**.  That has worked out much better than I expected,
 both in code quality and maintainability.
-I think it works because imp front-loads the design, uses fresh agents to review
-the work, and leans heavily on TDD and integration testing.
 
 Humans still need to be heavily involved in the up-front interview/design
 phase, and in judging whether the result actually works.  The resulting code
@@ -82,43 +72,6 @@ Brownfield development works too.  Run `imp init` and `imp new` from an
 existing checkout; imp reads the code before asking questions and fits the
 feature to the existing code.
 
-## What a quest costs
-
-imp front-loads deliberation, so expect hours of machine time and real
-subscription spend for anything non-trivial.  Most of it goes to thinking rather
-than typing: writing the spec, reviewing it, planning each chunk of work,
-reviewing those plans.  A spec is rewritten until a fresh reviewer clears it --
-often several rounds -- and so is every plan.
-
-That is the design, not overhead.  A reviewer who never saw the author's
-reasoning catches mistakes while they are still an unbuilt paragraph, and
-planning a chunk of work often takes longer than building it.  Rewriting a plan
-is cheap; rewriting a merged feature is not.
-
-One measured run, from a one-sentence intent to a merge commit: a greenfield
-FastAPI + HTMX + SQLite task tracker, on Claude Max with imp's default ladder --
-Opus 5 leading each step, Sonnet 4.6 coding -- September 2026.
-
-| | |
-|---|---|
-| imp working time | 6 h 16 m |
-| spec review rounds | 6 |
-| plans / tasks | 3 / 25 |
-| plan review rounds | 6 |
-| questions asked of the human | 1 |
-| merged result | 41 files, +3,278 lines, 136 tests |
-| tokens | 85.7 M -- 93% of them cache reads |
-| list-rate cost | $91, and zero marginal cost on a subscription |
-
-Ninety-three percent cache reads is the economic signature of a fresh-context
-workflow: every step re-reads a prompt prefix it did not write, and cache pricing
-is what makes that affordable.  Genuine new output was 0.13% of the total.
-
-The same intent on the codex backend took 7 h 24 m and 115 M tokens, with 2 spec
-rounds and 17 plan rounds across 6 plans.  The number of rounds swings; the shape
-does not.  Both are single runs -- read them as an order of magnitude, not a
-benchmark.
-
 ## Features
 
 ### Default workflow
@@ -127,7 +80,7 @@ benchmark.
 flowchart LR
   intent([intent]) --> interview[interview]
   interview --> spec[spec]
-  interview -. express .-> plan
+  interview -. small change .-> plan
   spec --> plan[plan]
   plan --> implement[implement]
   implement --> converge[converge]
@@ -141,7 +94,9 @@ flowchart LR
   integrate -. rework .-> plan
 ```
 
-The default workflow is deliberately opinionated and built around these rules:
+The default workflow is deliberately opinionated -- it follows best practices
+for producing high quality, TDD, fully AI-written code in a fast-moving
+greenfield solo or small team project -- and built around these rules:
 
 - **Put human judgment up front.** imp asks about decisions it cannot make from
   the code, while changing the design is still cheap.  Once the design is
@@ -151,8 +106,9 @@ The default workflow is deliberately opinionated and built around these rules:
   The merge gate presents the remaining decisions together before anything
   lands.
 - **Start every step fresh.** Each step is a separate model invocation with only
-  the context it needs.  Specs, plans, and progress files carry decisions
-  forward; reviewers do not inherit the author's reasoning or assumptions.
+  the context it needs, to avoid entering the dreaded LLM "dumb zone".  Specs,
+  plans, and progress files carry decisions forward; reviewers do not inherit
+  the author's reasoning or assumptions.
 - **Spec-driven development.** A spec defines the result and its acceptance
   criteria.  An implementation plan names the code and tests needed to get there.
   On the full path, both are reviewed before implementation starts.
@@ -180,7 +136,7 @@ The default workflow is deliberately opinionated and built around these rules:
   design did not ask for.
 - **Work through big changes one plan at a time.** imp implements and fast-tests
   each plan before starting the next, then reviews the whole quest as one change.
-- **Use the express path for small changes.** The full path writes and reviews a
+- **Take the short path for small changes.** The full path writes and reviews a
   spec and each implementation plan.  Small corrective quests can skip the spec
   and plan review while keeping implementation, convergence, and integration
   intact.
