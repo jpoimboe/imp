@@ -21,7 +21,7 @@ Pin: claude-agent-sdk>=0.2.152,<1.0
 from __future__ import annotations
 
 # Sorted alphabetically for easy diffing on SDK bumps.
-ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
+ALL_CLAUDE_BUILTIN_TOOLS: tuple[str, ...] = (
     "AskUserQuestion",
     "Bash",
     "CronCreate",
@@ -59,4 +59,4 @@ ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
     "Write",
 )
 
-__all__ = ["ALL_CLAUDE_CODE_BUILTIN_TOOLS"]
+__all__ = ["ALL_CLAUDE_BUILTIN_TOOLS"]

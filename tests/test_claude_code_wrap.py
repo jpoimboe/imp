@@ -425,14 +425,14 @@ def test_cc_task_annotation_derived_from_allowlist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC23: the annotation is DERIVED from the allowlist-mode flag, not hardcoded —
-    flip CLAUDE_CODE_ALLOWLIST_MODE off and the hint disappears even at width > 1."""
+    flip CLAUDE_ALLOWLIST_MODE off and the hint disappears even at width > 1."""
     from claude_agent_sdk import tool as sdk_tool
 
     from imp.agents.subagents import make_task_tool
     monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
     reset_parallelism_cache()
     monkeypatch.setattr(
-        "imp.providers.claude.CLAUDE_CODE_ALLOWLIST_MODE", False)
+        "imp.providers.claude.CLAUDE_ALLOWLIST_MODE", False)
     try:
         wrapped = _wrap_one(
             "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)

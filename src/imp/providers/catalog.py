@@ -34,7 +34,7 @@ class ModelInfo:
     supports_vision: bool = True
 
 
-CLAUDE_CODE: dict[str, ModelInfo] = {
+CLAUDE: dict[str, ModelInfo] = {
     # Undated major.minor ids used by imp.providers.BUILTIN_FLOOR; the bare aliases below
     # remain resolvable for operator config layers that still use them.
     "claude-haiku-4-5": ModelInfo(window=200_000),
@@ -129,7 +129,7 @@ def model_info(catalog: dict[str, ModelInfo], alias: str) -> ModelInfo:
 # `codex` runs OpenAI models, so it shares OPENAI.
 _CATALOGS: dict[str, dict[str, ModelInfo]] = {
     "anthropic": ANTHROPIC,
-    "claude_code": CLAUDE_CODE,
+    "claude_code": CLAUDE,
     "openai": OPENAI,
     "codex": OPENAI,
 }

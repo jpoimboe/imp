@@ -109,7 +109,7 @@ from imp.engine.agent_run import (
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.drivers import driver_allowed_tools
 from imp.providers import errors as perr
-from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
+from imp.providers._cc_builtins import ALL_CLAUDE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_session_store import (
@@ -703,7 +703,7 @@ def _python_schema_for_tool(t: Tool) -> dict[str, Any]:
 # beyond imp's own permission layer. The hint below is DERIVED from this flag so a
 # future interactive/approval mode that flips it drops the hint automatically
 # (design §2 honesty note); a test pins the derivation.
-CLAUDE_CODE_ALLOWLIST_MODE = True
+CLAUDE_ALLOWLIST_MODE = True
 
 
 def _task_annotations() -> Any | None:
@@ -713,7 +713,7 @@ def _task_annotations() -> Any | None:
     parallel scheduling. Width gate: IMP_MAX_PARALLEL_TASKS=1 drops the hint
     (Decision 5 kill switch)."""
     from mcp.types import ToolAnnotations
-    if CLAUDE_CODE_ALLOWLIST_MODE and max_parallel_tasks() > 1:
+    if CLAUDE_ALLOWLIST_MODE and max_parallel_tasks() > 1:
         return ToolAnnotations(readOnlyHint=True)
     return None
 
@@ -2279,8 +2279,8 @@ class ClaudeAgentRunner:
                        config_dir: Path | None = None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions, SdkBeta
 
-        from imp.providers.catalog import CLAUDE_CODE, model_info
-        info = model_info(CLAUDE_CODE, self.model)
+        from imp.providers.catalog import CLAUDE, model_info
+        info = model_info(CLAUDE, self.model)
         # ToolSearch is claude-p's internal schema-loader for deferred MCP
         # tools (default mode for any mcp_server). It only returns schemas;
         # it can't read/write/exec, so allowing it doesn't break the
@@ -2292,7 +2292,7 @@ class ClaudeAgentRunner:
         # list while keeping every other built-in denied.
         enabled_web = cc_enabled_web_builtins(invocation.agent_def)
         exempt = {"ToolSearch", *enabled_web}
-        disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t not in exempt]
+        disallowed = [t for t in ALL_CLAUDE_BUILTIN_TOOLS if t not in exempt]
         drivers = invocation.agent_def.drivers
         mcp_servers: dict[str, Any] = {"imp": mcp_server}
         if impty_server is not None:

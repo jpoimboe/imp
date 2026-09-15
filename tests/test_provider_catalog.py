@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from imp.providers.catalog import (
     ANTHROPIC,
-    CLAUDE_CODE,
+    CLAUDE,
     DEFAULT_CHECKPOINT_CEILING,
     DEFAULT_CHECKPOINT_FRACTION,
     DEFAULT_MAX_OUTPUT_TOKENS,
@@ -19,7 +19,7 @@ from imp.providers.catalog import (
 
 
 def test_claude_code_catalog_opus_1m_entry() -> None:
-    info = model_info(CLAUDE_CODE, "claude-opus-4-8[1m]")
+    info = model_info(CLAUDE, "claude-opus-4-8[1m]")
     assert info.window == 1_000_000
     # The bracketed alias IS the CLI model id: it requests 1M under both
     # subscription and API-key auth; no custom beta (which subscription auth
@@ -39,14 +39,14 @@ def test_anthropic_catalog_opus_1m_entry() -> None:
 
 
 def test_claude_code_catalog_opus_entry_is_plain_200k() -> None:
-    info = model_info(CLAUDE_CODE, "opus")
+    info = model_info(CLAUDE, "opus")
     assert info.window == 200_000
     assert info.betas == ()
     assert info.cli_model is None
 
 
 def test_unknown_alias_yields_conservative_default() -> None:
-    info = model_info(CLAUDE_CODE, "claude-sonnet-4-5")
+    info = model_info(CLAUDE, "claude-sonnet-4-5")
     assert info == ModelInfo(window=DEFAULT_WINDOW)
     assert info.betas == ()
     assert info.cli_model is None
@@ -215,10 +215,10 @@ def test_text_only_flag_forces_no_vision(monkeypatch) -> None:
 def test_claude_code_catalog_has_fable_entries() -> None:
     # Both aliases are present in the table (not merely resolved via the
     # conservative default), window-only like the existing opus entries.
-    assert "claude-fable-5" in CLAUDE_CODE
-    assert "claude-fable-5[1m]" in CLAUDE_CODE
-    assert CLAUDE_CODE["claude-fable-5"] == ModelInfo(window=200_000)
-    assert CLAUDE_CODE["claude-fable-5[1m]"] == ModelInfo(window=1_000_000)
+    assert "claude-fable-5" in CLAUDE
+    assert "claude-fable-5[1m]" in CLAUDE
+    assert CLAUDE["claude-fable-5"] == ModelInfo(window=200_000)
+    assert CLAUDE["claude-fable-5[1m]"] == ModelInfo(window=1_000_000)
 
 
 def test_anthropic_catalog_has_fable_entries() -> None:
@@ -241,10 +241,10 @@ def test_anthropic_catalog_has_fable_entries() -> None:
 def test_claude_code_catalog_has_opus_5_entries() -> None:
     # Both aliases present in the table (not merely resolved via the
     # conservative default), window-only like the existing opus/fable entries.
-    assert "claude-opus-5" in CLAUDE_CODE
-    assert "claude-opus-5[1m]" in CLAUDE_CODE
-    assert CLAUDE_CODE["claude-opus-5"] == ModelInfo(window=200_000)
-    assert CLAUDE_CODE["claude-opus-5[1m]"] == ModelInfo(window=1_000_000)
+    assert "claude-opus-5" in CLAUDE
+    assert "claude-opus-5[1m]" in CLAUDE
+    assert CLAUDE["claude-opus-5"] == ModelInfo(window=200_000)
+    assert CLAUDE["claude-opus-5[1m]"] == ModelInfo(window=1_000_000)
 
 
 def test_anthropic_catalog_has_opus_5_entries() -> None:

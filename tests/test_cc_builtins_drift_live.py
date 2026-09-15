@@ -25,7 +25,7 @@ def test_no_builtin_escapes_imp_deny_posture(tmp_path: Path) -> None:
     assert not escapees, (
         f"Built-ins reachable under imp's deny posture: {sorted(escapees)}. "
         "The agent can call these from every claude_code step. Add them to "
-        "ALL_CLAUDE_CODE_BUILTIN_TOOLS in _cc_builtins.py."
+        "ALL_CLAUDE_BUILTIN_TOOLS in _cc_builtins.py."
     )
 
 

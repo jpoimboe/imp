@@ -6,7 +6,7 @@ machinery is tests/cc_probe.py. What stays here needs no CLI, so the
 no-green-from-a-dead-probe property is checked on every fast-gate lap.
 
 WebSearch / WebFetch note (§5.2):
-  These two tools ARE included in ALL_CLAUDE_CODE_BUILTIN_TOOLS so that the
+  These two tools ARE included in ALL_CLAUDE_BUILTIN_TOOLS so that the
   drift guard still catches them if the CLI removes or renames them. However,
   they are *intentionally enabled* by _build_options when an agent declares
   web_search/web_fetch — they are NOT part of the "imp-tools-only" deny
