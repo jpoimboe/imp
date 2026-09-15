@@ -99,3 +99,12 @@ def test_memory_editor_keeps_its_own_rule_without_the_partial() -> None:
     assert "git commit -m" not in text
     assert "`memory: <imperative summary, no trailing period>`" in flat
     assert "one paragraph saying which standing instruction changed and why" in flat
+
+
+def test_summarizer_pins_the_leading_paragraph_contract() -> None:
+    flat = " ".join((DEFAULT_AGENTS / "summarizer.md").read_text().split())
+    assert "Lead the file with this paragraph — no heading above it" in flat
+    assert "hard-wrapped at 75 columns" in flat
+    assert "Everything before the first blank line becomes the merge commit's body." in flat
+    # The existing headline framing survives the addition.
+    assert "one tight paragraph: what this quest accomplishes and why" in flat
