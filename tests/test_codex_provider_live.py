@@ -8,6 +8,9 @@ Assertions:
     round-trip works under the read-only sandbox -- M-1 / m-2).
   - Zero `web_search` items appear (confirms the config.toml disable holds).
   - Cap-abort: forcing a cap trip terminates within the bounded retry budget.
+  - Tool exposure: codex's rollout carries direct `function_call`s rather than
+    the code-mode `exec` indirection, and an image returned by an imp tool
+    still reaches the model under `[features] view_image = false`.
 
 Skipped unless `--run-live` selects codex and its `codex` CLI is detected on
 this machine (capability detection at collection).
@@ -17,17 +20,20 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import io
 import json
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from PIL import Image, ImageDraw
 
 from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import build_continuation_fn
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+from imp.providers.codex_rollout import CODEX_ROLLOUT_SLOTS
 from imp.providers.codex_runner import CodexAgentRunner
 from tests._live import native_denial_miss, stale_codex_oauth_skip_reason
 
@@ -491,3 +497,154 @@ async def test_codex_live_omitted_optional_arg_reaches_python_default(
         f"codex never called read_file with `offset` omitted in "
         f"{_ROUND_TRIP_ATTEMPTS} attempts (external codex/LLM "
         f"nondeterminism). Last events: {last_events}")
+
+
+# The digits drawn into the probe image. Nothing in the prompt names them, so a
+# model that never received the image cannot report them.
+_IMAGE_CODE = "742"
+_IMAGE_ATTEMPTS = 3
+
+
+def _marker_png() -> bytes:
+    im = Image.new("RGB", (60, 20), "white")
+    ImageDraw.Draw(im).text((6, 5), _IMAGE_CODE, fill="black")
+    # PIL's default bitmap font is ~11px; upscale so the digits are legible.
+    im = im.resize((480, 160), Image.NEAREST)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _viewer_inv(root: Path) -> AgentInvocation:
+    inv = _inv(root)
+    agent_def = dataclasses.replace(
+        inv.agent_def,
+        name="viewer",
+        description="look at one image",
+        tools=frozenset({"complete_step", "read_file"}),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="code", type="string", required=True),),
+            source=_SRC,
+        ),
+    )
+    return dataclasses.replace(
+        inv,
+        agent_def=agent_def,
+        # read_file's vision branch stores the image as a blob under the quest
+        # home; without quest_dir it raises instead of returning the image.
+        quest_context=QuestContext(
+            title="t", project_root=root, workflow_dir=root, id="c1",
+            quest_dir=root / "quest"),
+        system_prompt=(
+            "Call the `read_file` tool with `path` set to `marker.png`. That "
+            "file is a picture of three digits. Then, in a plain message, "
+            "write the sentence `The digits are <D>.` with <D> replaced by the "
+            "three digits shown in the picture. Then call complete_step with "
+            "`code` set to those same three digits and nothing else. Do not "
+            "call any other tools and do not write any files."
+        ),
+        continuation_fn=build_continuation_fn(headless=True),
+    )
+
+
+def _records(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+
+
+def _response_items(rollout: Path) -> list[dict[str, Any]]:
+    """codex's rollout records the model wire, one JSON object per line; tool calls
+    sit in `response_item` payloads, which the `--json` stream flattens away."""
+    return [
+        rec["payload"] for rec in _records(rollout)
+        if rec.get("type") == "response_item" and isinstance(rec.get("payload"), dict)
+    ]
+
+
+def _agent_prose(events_path: Path) -> str:
+    return "\n".join(
+        block.get("text", "")
+        for rec in _records(events_path) if rec.get("type") == "agent_message"
+        for block in rec["payload"]["raw"]["content"]
+    )
+
+
+@pytest.mark.anyio
+async def test_codex_live_exposes_imp_tools_directly_and_passes_images(
+    tmp_path: Path,
+) -> None:
+    """AC 8: one real codex turn proves the exposure flip took effect (rollout
+    `function_call`s, no `exec` custom_tool_call), that imp logged the call and
+    its result, that complete_step's structured args were captured, and that an
+    image returned by an imp tool still reaches the MODEL under `[features]
+    view_image = false`."""
+    notes: list[str] = []
+    last_events: list[Any] = []
+    for attempt in range(_IMAGE_ATTEMPTS):
+        root = tmp_path / f"attempt{attempt}"
+        root.mkdir()
+        _git_init(root)
+        (root / "marker.png").write_bytes(_marker_png())
+        (root / "tx").mkdir()
+
+        events: list[Any] = []
+        try:
+            async with contextlib.aclosing(
+                    CodexAgentRunner(model_name="gpt-5.6-luna").run(
+                        _viewer_inv(root))) as run:
+                async for ev in run:
+                    events.append(ev)
+                    if ev.get("type") == "agent_result":
+                        break
+        except AwaitingUserInput:
+            last_events = events
+            reason = stale_codex_oauth_skip_reason(events)
+            if reason is not None:
+                pytest.skip(reason)
+            notes.append(f"#{attempt + 1} parked awaiting input")
+            continue
+        last_events = events
+        reason = stale_codex_oauth_skip_reason(events)
+        if reason is not None:
+            pytest.skip(reason)
+        result = next((e for e in events if e.get("type") == "agent_result"), None)
+        if result is None:
+            notes.append(f"#{attempt + 1} no agent_result")
+            continue
+        recs = _records(root / "events.jsonl")
+        read = next((r["payload"] for r in recs if r.get("type") == "tool_call"
+                     and r["payload"].get("name") == "read_file"), None)
+        if read is None:
+            # The model never looked at the image, so there is nothing to assert.
+            notes.append(f"#{attempt + 1} never called read_file")
+            continue
+
+        # (a) The exposure flip took effect. Only the rollout shows it: the
+        # `--json` stream emits the same mcp_tool_call items either way. Reading
+        # it here is safe because the `async with` above closed the generator,
+        # running the teardown that persists the rollout.
+        items = _response_items(root / "tx" / CODEX_ROLLOUT_SLOTS[0])
+        named = {p.get("name"): p for p in items if p.get("type") == "function_call"}
+        assert named.keys() >= {"read_file", "complete_step"}, [
+            (p.get("type"), p.get("name")) for p in items]
+        assert named["read_file"].get("namespace") == "mcp__imp", named["read_file"]
+        assert not [p for p in items if p.get("type") == "custom_tool_call"
+                    and p.get("name") == "exec"], items
+        # (b) imp logged the call and its result off the --json stream.
+        results = {r["payload"]["id"]: r["payload"]
+                   for r in recs if r.get("type") == "tool_result"}
+        assert results[read["id"]]["error"] is False, results[read["id"]]
+        # (c) complete_step was captured with its structured arguments.
+        assert set(result["payload"]) == {"code"}, result
+        assert _IMAGE_CODE in str(result["payload"]["code"]), result
+        # (d) The image reached the MODEL, not merely the tool result: the digits
+        # appear nowhere in the prompt, so the model can only have read them off
+        # the picture.
+        assert _IMAGE_CODE in _agent_prose(root / "events.jsonl"), events
+        return
+
+    raise AssertionError(
+        f"codex never completed an image round-trip in {_IMAGE_ATTEMPTS} "
+        f"attempts (external codex/LLM nondeterminism). Attempts: "
+        f"{'; '.join(notes)}. Last events: {last_events}")
