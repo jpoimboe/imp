@@ -47,6 +47,21 @@ def test_coder_documents_the_amend_reword_mode() -> None:
     assert "Every `fixup!` and `amend!` commit is transient" in flat
 
 
+def test_sweep_and_plan_skeleton_commit_with_a_message_file() -> None:
+    sweep = (DEFAULT_AGENTS / "deferred-sweep.md").read_text()
+    plan_writer = (DEFAULT_AGENTS / "plan-writer.md").read_text()
+    # The sweep does not include the partial, so each dispatch string must itself
+    # point at the rule — the same clause the task-lead bullet carries.
+    assert sweep.count(
+        "`git add <files> && git commit -F` with a message in the house style") == 2
+    # Both sites converted; a lower bound so a future third mention is not a failure.
+    assert sweep.count("git commit -F") >= 2        # the item commit and the sweep fix
+    assert "git commit -m" not in sweep
+    # The skeleton stops modelling the old shape in every plan written from it.
+    assert 'git commit -F "$TMPDIR/msg"' in plan_writer
+    assert "git commit -m" not in plan_writer
+
+
 def test_task_lead_dispatches_message_file_commits_and_amend_rewords() -> None:
     flat = " ".join((DEFAULT_AGENTS / "task-lead.md").read_text().split())
     assert "`git add <files>` then `git commit -F` with a message in the house style" in flat
