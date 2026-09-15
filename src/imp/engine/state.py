@@ -404,7 +404,6 @@ class EventLog(Protocol):
                              provider_error: bool = False,
                              handoff: bool = False,
                              context_window: int | None = None,
-                             context_pct: float | None = None,
                              context_tokens: int | None = None,
                              message_id: str | None = None,
                              request_id: str | None = None,
@@ -565,7 +564,6 @@ class _BaseEventLog:
                              provider_error: bool = False,
                              handoff: bool = False,
                              context_window: int | None = None,
-                             context_pct: float | None = None,
                              context_tokens: int | None = None,
                              message_id: str | None = None,
                              request_id: str | None = None,
@@ -582,8 +580,6 @@ class _BaseEventLog:
             payload["handoff"] = True
         if context_window is not None:
             payload["context_window"] = context_window
-        if context_pct is not None:
-            payload["context_pct"] = context_pct
         if context_tokens is not None:
             payload["context_tokens"] = context_tokens
         if message_id is not None:

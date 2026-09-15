@@ -1365,7 +1365,6 @@ async def _context_usage_fields(client: Any) -> dict[str, Any]:
 
     return {
         "context_window": _field(cu, "rawMaxTokens"),
-        "context_pct": _field(cu, "percentage"),
         "context_tokens": _field(cu, "totalTokens"),
     }
 
@@ -1728,7 +1727,6 @@ class ClaudeCodeSession(ObserveSession):
                 handoff=self._handoff_phase == "instruction_sent",
                 message_id=self._llm_group_key,
                 context_window=cu_fields.get("context_window"),
-                context_pct=cu_fields.get("context_pct"),
                 context_tokens=cu_fields.get("context_tokens"))
             self._llm_group_open = False
             self._llm_group_key = None

@@ -2912,7 +2912,7 @@ async def test_llm_response_enriched_with_context_usage(tmp_path: Path) -> None:
 
     resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert resp["payload"]["context_window"] == 1_000_000
-    assert resp["payload"]["context_pct"] == 4.2
+    assert "context_pct" not in resp["payload"]
     assert resp["payload"]["context_tokens"] == 42_000
 
 
