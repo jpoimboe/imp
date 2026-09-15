@@ -98,6 +98,17 @@ def _scratch_parent() -> Path:
     return Path(tempfile.mkdtemp(prefix="imp-beh-tmp-")) / f"imp-{os.getuid()}"
 
 
+def _var_tmp_parent() -> Path:
+    """A throwaway `/var/tmp/<unique>/imp-<uid>` scratch parent, unique per test.
+
+    The /var/tmp twin of _scratch_parent: ensure_quest_tmp_dir chmods a leaf's parent
+    unconditionally, so the leaf must sit under imp's own dir — never directly under
+    the system /var/tmp, a shape production never produces.
+    """
+    return Path(
+        tempfile.mkdtemp(prefix="imp-qvtmp-", dir="/var/tmp")) / f"imp-{os.getuid()}"
+
+
 def _active_policy(worktree: Path, *, home: Path | None = None,
                    secret_dirs: tuple[str, ...] = (),
                    quest_tmp_dir: str = "",
@@ -1912,7 +1923,8 @@ def test_var_tmp_writable_and_per_quest_isolated() -> None:
     the host's real /var/tmp root is not visible, and in-sandbox writes land in the
     per-quest source dir, not the host root."""
     root = _make_root()
-    qvtmp = Path(tempfile.mkdtemp(prefix="imp-qvtmp-", dir="/var/tmp"))
+    qvtmp_parent = _var_tmp_parent()
+    qvtmp = qvtmp_parent / "qvt"
     host_marker = Path("/var/tmp") / f"host-{uuid.uuid4().hex}"
     in_marker = f"beh-{uuid.uuid4().hex}"
     try:
@@ -1932,7 +1944,7 @@ def test_var_tmp_writable_and_per_quest_isolated() -> None:
         assert not (Path("/var/tmp") / in_marker).exists()
     finally:
         shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(qvtmp, ignore_errors=True)
+        shutil.rmtree(qvtmp_parent.parent, ignore_errors=True)
         host_marker.unlink(missing_ok=True)
 
 
@@ -1942,7 +1954,8 @@ def test_var_tmp_supports_overlay_upperdir() -> None:
     the sandbox — the reason /var/tmp (a real disk fs) is bound rather than tmpfs
     /tmp, which many kernels reject as an overlay upperdir."""
     root = _make_root()
-    qvtmp = Path(tempfile.mkdtemp(prefix="imp-qvtmp-ovl-", dir="/var/tmp"))
+    qvtmp_parent = _var_tmp_parent()
+    qvtmp = qvtmp_parent / "qvt-ovl"
     try:
         pol = dataclasses.replace(_active_policy(root), quest_var_tmp_dir=str(qvtmp))
         ctx = _ctx(root, pol)
@@ -1957,7 +1970,7 @@ def test_var_tmp_supports_overlay_upperdir() -> None:
         assert "OVL_OK" in r["stdout"], r        # upperdir under /var/tmp mounted
     finally:
         shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(qvtmp, ignore_errors=True)
+        shutil.rmtree(qvtmp_parent.parent, ignore_errors=True)
 
 
 def test_worktrees_mask_sibling_survives_in_sandbox_prune() -> None:
