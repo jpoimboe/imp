@@ -10,8 +10,8 @@ read-only sandbox, the [features] toggles, the top-level `web_search` control,
 the `model_auto_compact_token_limit` pin that stops codex compacting its own
 history, and the auth.json seed. `web_search` lives here because codex >=0.137
 deprecated the `features.web_search_request` flag and it no longer disables (see
-`render_config_toml`). The rest (model, sandbox_mode, approval_policy,
-network_access_enabled) still goes through `codex_exec.ThreadOptions`.
+`render_config_toml`). The rest (model, sandbox_mode, approval_policy) still
+goes through `codex_exec.ThreadOptions`.
 
 Filesystem invariants:
   - CODEX_HOME dir is mode 0700 under TMPDIR, with the owner pid encoded in

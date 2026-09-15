@@ -12,4 +12,3 @@ def test_thread_options_pin_read_only_sandbox() -> None:
     assert isinstance(opts, ThreadOptions)
     assert opts.sandbox_mode == "read-only"
     assert opts.approval_policy == "never"
-    assert opts.network_access_enabled is False

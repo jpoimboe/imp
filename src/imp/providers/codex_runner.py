@@ -967,14 +967,11 @@ class CodexAgentRunner:
         `features.web_search_request` flag (it no longer disables and emits a
         noisy `error` item every turn), so web_search is controlled via
         config.toml's top-level `web_search` key instead (see
-        `render_config_toml`). web_search is model-hosted, so
-        `network_access_enabled` stays False regardless (the command sandbox
-        cannot reach the network)."""
+        `render_config_toml`)."""
         return ThreadOptions(
             model=self.model,
             sandbox_mode="read-only",
             approval_policy=CODEX_APPROVAL_POLICY,
-            network_access_enabled=False,
             model_reasoning_effort="high" if tier in ("medium", "high") else None,
         )
 

@@ -60,7 +60,6 @@ class ThreadOptions:
     model: str
     sandbox_mode: SandboxMode
     approval_policy: ApprovalMode
-    network_access_enabled: bool
     model_reasoning_effort: ModelReasoningEffort | None = None
 
 
@@ -70,11 +69,7 @@ def build_command_args(options: ThreadOptions, thread_id: str | None) -> list[st
     args = ["exec", "--json", "--model", options.model, "--sandbox", options.sandbox_mode]
     if options.model_reasoning_effort is not None:
         args += ["--config", f'model_reasoning_effort="{options.model_reasoning_effort}"']
-    network = "true" if options.network_access_enabled else "false"
-    args += [
-        "--config", f"sandbox_workspace_write.network_access={network}",
-        "--config", f'approval_policy="{options.approval_policy}"',
-    ]
+    args += ["--config", f'approval_policy="{options.approval_policy}"']
     if thread_id is not None:
         args += ["resume", thread_id]
     return args

@@ -1,12 +1,11 @@
 """Live e2e for the codex provider, gated behind `--run-live` (codex).
-Runs codex under the EXACT production flags:
-`sandbox_mode="read-only" + network_access_enabled=False`, with imp's own MCP
-servers auto-approved via config.toml's `default_tools_approval_mode` — the
-combination the unit tests can't validate.
+Runs codex under the EXACT production flags: `sandbox_mode="read-only"`, with
+imp's own MCP servers auto-approved via config.toml's
+`default_tools_approval_mode` — the combination the unit tests can't validate.
 
 Assertions:
-  - >= 1 `mcp_tool_call` (server=imp) item completes (proves codex->server
-    round-trip works with the flag explicitly False -- M-1 / m-2).
+  - >= 1 `mcp_tool_call` (server=imp) item completes (proves the codex->server
+    round-trip works under the read-only sandbox -- M-1 / m-2).
   - Zero `web_search` items appear (confirms the config.toml disable holds).
   - Cap-abort: forcing a cap trip terminates within the bounded retry budget.
 
@@ -153,8 +152,8 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
             if ln and json.loads(ln).get("type") == "tool_call"
         ]
         # Success = the round-trip completed: agent_result yielded AND at least
-        # one tool_call recorded (proves the codex->server round-trip works with
-        # `network_access_enabled=False`).
+        # one tool_call recorded (proves the codex->server round-trip works
+        # under the read-only sandbox).
         if any(e.get("type") == "agent_result" for e in events) and tool_calls:
             break
     else:
