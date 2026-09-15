@@ -57,8 +57,7 @@ def classify_pause_halt(
         reason: str, interrupt_reason: str | None) -> Literal["error"] | None:
     """Map a workflow_paused (reason, interrupt_reason) to the durable
     halt-condition. A human interrupt (interrupt_reason set) or a clean
-    yield/turn-wait reads clean (None); every other reason is a failure (error).
-    Shared by the runtime pause write and the migration backfill so both agree."""
+    yield/turn-wait reads clean (None); every other reason is a failure (error)."""
     if interrupt_reason is not None:
         return None
     if reason in _CLEAN_PAUSE_REASONS:
@@ -710,20 +709,6 @@ def parse_events_jsonl(raw: bytes) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             out.append({"_malformed": True, "raw": line})
     return out
-
-
-def derive_started_at(events: list[dict[str, Any]], created_at: str) -> str:
-    """First user_message timestamp, else first event, else created_at."""
-    first_event_ts: str | None = None
-    for e in events:
-        ts: str | None = e.get("timestamp")
-        if not ts:
-            continue
-        if e.get("type") == "user_message":
-            return ts
-        if first_event_ts is None:
-            first_event_ts = ts
-    return first_event_ts or created_at
 
 
 class JsonlEventLog(_BaseEventLog):
