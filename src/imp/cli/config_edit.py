@@ -261,38 +261,3 @@ def apply_set(text: str, path: tuple[str, ...], value: Any) -> SetResult:
         return SetResult(reclaimed, SetOutcome.UNCOMMENTED)
     return SetResult(_insert(text, path, value), SetOutcome.NEW)
 
-
-def _rename_key(mapping: Any, old: str, new: str) -> bool:
-    """Rename one mapping key in place. ruamel has no rename primitive: insert at
-    the old key's index, carry its comment entry across, then drop it."""
-    if not isinstance(mapping, CommentedMap) or old not in mapping:
-        return False
-    mapping.insert(list(mapping).index(old), new, mapping[old])
-    comment = mapping.ca.items.pop(old, None)
-    if comment is not None:
-        mapping.ca.items[new] = comment
-    del mapping[old]
-    return True
-
-
-def apply_provider_rename(text: str, old: str, new: str) -> str | None:
-    """`text` with provider id `old` renamed to `new` at the three places a config
-    layer names one — the `providers:` items and the per-provider keys under
-    `tiers.<tier>` and `provider_envs:` — or None when no provider slot names it,
-    so a caller never lands a round-trip that only reformats."""
-    doc = _rt().load(text)
-    if not isinstance(doc, CommentedMap):
-        return None
-    renamed = False
-    providers = doc.get("providers")
-    if isinstance(providers, CommentedSeq):
-        for index, item in enumerate(providers):
-            if item == old:
-                providers[index] = new
-                renamed = True
-    tiers = doc.get("tiers")
-    if isinstance(tiers, CommentedMap):
-        for models in tiers.values():
-            renamed = _rename_key(models, old, new) or renamed
-    renamed = _rename_key(doc.get("provider_envs"), old, new) or renamed
-    return _dump(doc) if renamed else None

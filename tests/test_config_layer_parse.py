@@ -383,11 +383,9 @@ def test_the_retired_checkpoint_threshold_is_a_load_error(tmp_path: Path) -> Non
 
 def test_the_retired_setting_is_gone_from_the_sources() -> None:
     # AC 8: comments included, so the stale advice and the field comments went
-    # with the fields. config_migrate.py is the one module spec §6 requires to
-    # name the retired key; tests name it deliberately and are out of scope.
+    # with the fields. Tests name the retired key deliberately, out of scope.
     root = Path(__file__).resolve().parents[1]
-    targets = [p for p in sorted((root / "src").rglob("*.py"))
-               if p.name != "config_migrate.py"]
+    targets = sorted((root / "src").rglob("*.py"))
     targets.append(root / "imp" / "config.yaml")
     offenders = [str(p.relative_to(root)) for p in targets
                  if "checkpoint_threshold" in p.read_text()]
