@@ -14,7 +14,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from imp.providers.catalog import limits_for
+from imp.providers.catalog import handoff_limit, limits_for
 
 
 def _collapse(text: str) -> str:
@@ -89,20 +89,17 @@ def _num(value: Any) -> int | float | None:
 
 
 def _ctx_field(payload: dict[str, Any]) -> str:
-    """`ctx=` occupancy, or empty when nothing resolves — a window is never guessed."""
+    """`ctx=` occupancy against the handoff limit, or empty when nothing resolves —
+    a window is never guessed."""
     tokens = _num(payload.get("context_tokens"))
     window = _num(payload.get("context_window"))
     if window is None and tokens is not None:
         info = limits_for(payload.get("provider"), payload.get("model"))
         window = info.window if info is not None else None
-    pct = _num(payload.get("context_pct"))
-    if tokens is not None and window:
-        if pct is None:
-            pct = tokens / window * 100
-        return f"ctx={int(tokens)}/{int(window)} ({pct:.1f}%) "
-    if pct is not None:
-        return f"ctx={pct:.1f}% "
-    return ""
+    limit = handoff_limit(int(window)) if window else None
+    if tokens is None or limit is None:
+        return ""
+    return f"ctx={int(tokens)}/{limit} ({tokens / limit * 100:.1f}%) "
 
 
 def _h_agent_message(payload: dict[str, Any]) -> str:

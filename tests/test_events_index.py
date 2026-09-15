@@ -584,6 +584,6 @@ def test_digest_line_overlay_renders_ctx_without_mutating_the_event() -> None:
     line = ei.digest_line(
         5, ev, {}, overlay={"context_tokens": 136_000,
                             "context_window": 272_000})
-    assert "ctx=136000/272000 (50.0%)" in line
+    assert "ctx=136000/200000 (68.0%)" in line
     assert "context_tokens" not in ev["payload"]
     assert "ctx=" not in ei.digest_line(5, ev, {})

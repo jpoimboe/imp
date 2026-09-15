@@ -627,4 +627,4 @@ def test_search_hit_digest_applies_codex_usage_patch_overlay(
 
     assert m._cmd_events_search(_search_ns("greptarget"), tmp_path) == 0
     out = capsys.readouterr().out
-    assert "ctx=8000/200000" in out
+    assert "ctx=8000/160000 (5.0%)" in out

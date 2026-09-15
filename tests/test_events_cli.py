@@ -233,8 +233,8 @@ def test_events_compact_renders_context_occupancy_per_provider_shape(
     ]
     _make_live_quest(tmp_path, "ccc333", events)
     out = _run(monkeypatch, tmp_path, "events", "ccc333", "--all", "--full")
-    assert "ctx=159842/200000 (79.9%)" in out      # catalog window, computed pct
-    assert "ctx=137000/1000000 (79.9%)" in out     # provider-reported window+pct
+    assert "ctx=159842/160000 (99.9%)" in out    # catalog window, its handoff limit
+    assert "ctx=137000/200000 (68.5%)" in out    # reported window, its handoff limit
 
 
 _CODEX_EVENTS = [
@@ -245,7 +245,7 @@ _CODEX_EVENTS = [
                  "raw": {"content": [{"type": "text", "text": "done"}]}}},
     {"type": "agent_message_usage_patch", "agent_id": "step:build/coder",
      "payload": {"usage": {"input_tokens": 10}, "context_tokens": 22_389,
-                 "context_window": 500_000}},
+                 "context_window": 150_000}},
 ]
 
 
@@ -253,7 +253,7 @@ def test_events_compact_folds_the_codex_usage_patch_onto_the_message(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_live_quest(tmp_path, "ddd444", _CODEX_EVENTS)
     out = _run(monkeypatch, tmp_path, "events", "ddd444", "--all", "--full")
-    assert "ctx=22389/500000 (4.5%)" in out        # patch-row window, not catalog
+    assert "ctx=22389/120000 (18.7%)" in out       # patch-row window, not catalog
     assert "agent_message_usage_patch" not in out  # the row itself stays suppressed
 
 
